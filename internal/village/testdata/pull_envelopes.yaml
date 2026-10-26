@@ -1,0 +1,159 @@
+# Pull envelope fixtures: how this CLI negotiates the pull window and reads a
+# person on the pull surface. The CLI reads pull contracts 0.2.0 (account
+# strings) and 0.3.0 (a public owner resolved per viewer).
+#
+# requiredNames is the deletion-protection manifest: every listed case must be
+# present below.
+requiredNames:
+  - negotiate-released-village-0.2.0
+  - negotiate-public-owner-village-0.3.0
+  - negotiate-transitional-window
+  - negotiate-newer-envelope-refused
+  - negotiate-floor-above-current-refused
+  - negotiate-floor-only-refused
+  - negotiate-breaking-future-window
+  - negotiate-pre-collectives-village
+  - negotiate-unadvertised-window
+  - read-current-profile-owner
+  - read-current-anonymous-owner
+  - read-anonymous-owner-drops-stray-identity
+  - read-unknown-kind-as-anonymous
+  - read-legacy-owner-as-profile
+  - read-current-owner-wins-over-legacy
+  - read-legacy-owner-without-canonical-id-as-anonymous
+  - refuse-row-without-owner
+  - refuse-null-owner
+  - read-current-anonymous-author
+  - read-legacy-author-as-profile
+  - read-listing-with-both-kinds
+  - read-legacy-listing
+  - refuse-legacy-owner-under-0.3.0
+  - refuse-legacy-author-under-0.3.0
+  - read-legacy-owner-under-0.2.0
+
+negotiate:
+  - name: negotiate-released-village-0.2.0
+    min: "0.1.0"
+    current: "0.2.0"
+    wantEnvelope: "0.2.0"
+  - name: negotiate-public-owner-village-0.3.0
+    min: "0.3.0"
+    current: "0.3.0"
+    wantEnvelope: "0.3.0"
+  - name: negotiate-transitional-window
+    min: "0.2.0"
+    current: "0.3.0"
+    wantEnvelope: "0.3.0"
+  # A 0.x minor bump is not additive, so a village serving 0.4.0 is refused
+  # even though its window reaches back to 0.3.0.
+  - name: negotiate-newer-envelope-refused
+    min: "0.3.0"
+    current: "0.4.0"
+    wantError: incompatible
+  # Only the advertised current envelope is served; a floor above it is a
+  # malformed window.
+  - name: negotiate-floor-above-current-refused
+    min: "0.3.0"
+    current: "0.2.0"
+    wantError: incompatible
+  - name: negotiate-floor-only-refused
+    min: "0.3.0"
+    wantError: incompatible
+  - name: negotiate-breaking-future-window
+    min: "0.4.0"
+    current: "0.4.0"
+    wantError: incompatible
+  - name: negotiate-pre-collectives-village
+    min: "0.1.0"
+    current: "0.1.0"
+    wantError: incompatible
+  - name: negotiate-unadvertised-window
+    wantError: too-old
+
+# surface selects the pull GET that serves body: metadata
+# (/pull/transcripts/{id}), annotations (/pull/transcripts/{id}/annotations), or
+# list (/pull/transcripts). want lists the person read from each row in order.
+read:
+  - name: read-current-profile-owner
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","owner":{"kind":"profile","id":"0a000000-0000-4000-8000-000000000001","username":"alice","display_name":"Alice","avatar_url":null},"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+  - name: read-current-anonymous-owner
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","owner":{"kind":"anonymous"},"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: anonymous}
+  - name: read-anonymous-owner-drops-stray-identity
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","owner":{"kind":"anonymous","id":"0a000000-0000-4000-8000-000000000001","username":"alice"},"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: anonymous}
+  - name: read-unknown-kind-as-anonymous
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","owner":{"kind":"organization","id":"0a000000-0000-4000-8000-000000000001","username":"acme"},"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: anonymous}
+  - name: read-legacy-owner-as-profile
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","ownerUserId":"0a000000-0000-4000-8000-000000000001","ownerUsername":"alice","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+  - name: read-current-owner-wins-over-legacy
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","owner":{"kind":"anonymous"},"ownerUserId":"0a000000-0000-4000-8000-000000000001","ownerUsername":"alice","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: anonymous}
+  - name: read-legacy-owner-without-canonical-id-as-anonymous
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","ownerUserId":"user-owner-001","ownerUsername":"alice","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: anonymous}
+  - name: refuse-row-without-owner
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    wantError: neither owner
+  - name: refuse-null-owner
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","owner":null,"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    wantError: the value is null
+  - name: read-current-anonymous-author
+    surface: annotations
+    body: '[{"id":"a1","targetKind":"session","isPrimary":false,"annotatorKind":"human","annotatorName":"anonymous","typeId":"t","typeName":"t","value":"v","createdAt":0,"author":{"kind":"anonymous"}},{"id":"a2","targetKind":"session","isPrimary":false,"annotatorKind":"human","annotatorName":"bob","typeId":"t","typeName":"t","value":"v","createdAt":0,"author":{"kind":"profile","id":"0a000000-0000-4000-8000-000000000002","username":"bob","display_name":null,"avatar_url":null}}]'
+    want:
+      - {kind: anonymous}
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+  - name: read-legacy-author-as-profile
+    surface: annotations
+    body: '[{"id":"a1","targetKind":"session","isPrimary":false,"annotatorKind":"human","annotatorName":"bob","typeId":"t","typeName":"t","value":"v","createdAt":0,"authorUserId":"0a000000-0000-4000-8000-000000000002","authorUsername":"bob"}]'
+    want:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+  - name: read-listing-with-both-kinds
+    surface: list
+    body: '{"transcripts":[{"transcriptId":"TRANSCRIPT","owner":{"kind":"anonymous"},"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0},{"transcriptId":"TRANSCRIPT","owner":{"kind":"profile","id":"0a000000-0000-4000-8000-000000000001","username":"alice","display_name":null,"avatar_url":null},"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}],"page":1,"limit":50,"total":2}'
+    want:
+      - {kind: anonymous}
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+  - name: read-legacy-listing
+    surface: list
+    body: '{"transcripts":[{"transcriptId":"TRANSCRIPT","ownerUserId":"0a000000-0000-4000-8000-000000000001","ownerUsername":"alice","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}],"page":1,"limit":50,"total":1}'
+    want:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+  # Under a negotiated envelope the GETs decode exactly that envelope: at 0.3.0
+  # the 0.2.0 account strings are never read as a profile.
+  - name: refuse-legacy-owner-under-0.3.0
+    envelope: "0.3.0"
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","ownerUserId":"0a000000-0000-4000-8000-000000000001","ownerUsername":"alice","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    wantError: refusing to read an account string as a profile
+  - name: refuse-legacy-author-under-0.3.0
+    envelope: "0.3.0"
+    surface: annotations
+    body: '[{"id":"a1","targetKind":"session","isPrimary":false,"annotatorKind":"human","annotatorName":"bob","typeId":"t","typeName":"t","value":"v","createdAt":0,"authorUserId":"0a000000-0000-4000-8000-000000000002","authorUsername":"bob"}]'
+    wantError: refusing to read an account string as a profile
+  - name: read-legacy-owner-under-0.2.0
+    envelope: "0.2.0"
+    surface: list
+    body: '{"transcripts":[{"transcriptId":"TRANSCRIPT","ownerUserId":"0a000000-0000-4000-8000-000000000001","ownerUsername":"alice","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}],"page":1,"limit":50,"total":1}'
+    want:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}

@@ -19,7 +19,7 @@ import (
 // can do: the next page resumes after the last identity of this one.
 const contentBackfillPageSize = 100
 
-// ContentCaptureResult is one retained-content capture, as the adapter that
+// ContentCaptureResult is one stored-content capture, as the adapter that
 // parsed it reports it. The adapter declares its own completeness: Complete is
 // false whenever the adapter knows that rows were filtered or omitted, so a
 // partial recovery can never be stored as a verified complete capture.
@@ -28,7 +28,7 @@ type ContentCaptureResult struct {
 	Authority ContentSourceAuthority
 	// Complete reports that the entries are the whole session, as parsed.
 	Complete bool
-	// InputHash is the index input digest over the retained bytes actually
+	// InputHash is the index input digest over the stored bytes actually
 	// parsed, so a later run can tell whether the same input was consumed.
 	InputHash string
 	// InputBytes is how many source bytes this capture read. The one-time
@@ -37,13 +37,13 @@ type ContentCaptureResult struct {
 	InputBytes int64
 }
 
-// RetainedContentCapturer is implemented by an indexer whose retained capture
+// StoredContentCapturer is implemented by an indexer whose stored capture
 // can tell that rows were filtered or omitted before it parsed them. It is the
 // producer of ContentCaptureResult: the adapter, not the store, declares
 // completeness. Indexers without it are captured through the strict parser,
 // which refuses anything it cannot certify, so their result is complete.
-type RetainedContentCapturer interface {
-	CaptureRetainedContent(context.Context, DiscoveredSession) (ContentCaptureResult, error)
+type StoredContentCapturer interface {
+	CaptureStoredContent(context.Context, DiscoveredSession) (ContentCaptureResult, error)
 }
 
 // UnrepresentedRecordError means a well-formed source record of a kind this
@@ -60,19 +60,19 @@ func (e *UnrepresentedRecordError) Error() string {
 	return fmt.Sprintf("unrepresented %s record %q; this build does not represent it, so the transcript cannot be certified complete", e.Harness, e.Kind)
 }
 
-// RetainedContentIncompleteError means the retained input is insufficient for
+// StoredContentIncompleteError means the stored input is insufficient for
 // a verified complete capture. No row was written: the stored capture stays
 // incomplete and the session stays eligible for a native refresh.
-type RetainedContentIncompleteError struct {
+type StoredContentIncompleteError struct {
 	SessionID SessionID
 	Harness   Harness
 }
 
-func (e *RetainedContentIncompleteError) Error() string {
-	return fmt.Sprintf("content recovery %s: the retained %s input omits rows the adapter filtered or could not read, so it cannot certify a complete capture; nothing was written and the stored capture stays incomplete; regenerate harvest from the complete native source", e.SessionID, e.Harness)
+func (e *StoredContentIncompleteError) Error() string {
+	return fmt.Sprintf("content recovery %s: the stored %s input omits rows the adapter filtered or could not read, so it cannot certify a complete capture; nothing was written and the stored capture stays incomplete; regenerate harvest from the complete native source", e.SessionID, e.Harness)
 }
 
-// ContentShapeMismatchError means the retained content parsed to a different
+// ContentShapeMismatchError means the stored content parsed to a different
 // canonical shape than the stored projection. Content-only recovery never
 // replaces projection rows; a forced index run replaces them through the
 // ordinary captured-input parse and conditional write.
@@ -81,12 +81,12 @@ type ContentShapeMismatchError struct {
 }
 
 func (e *ContentShapeMismatchError) Error() string {
-	return fmt.Sprintf("content recovery %s: retained content does not match the stored projection shape; content-only recovery changed nothing; the ordinary index run replaces the entries with annotation remapping once the session is selected, and harvest index --force selects it explicitly", e.SessionID)
+	return fmt.Sprintf("content recovery %s: stored content does not match the stored projection shape; content-only recovery changed nothing; the ordinary index run replaces the entries with annotation remapping once the session is selected, and harvest index --force selects it explicitly", e.SessionID)
 }
 
 func (e *ContentShapeMismatchError) Unwrap() error { return ContentBackfillShapeMismatch }
 
-// TornRetainedPairError means a retained pair's bytes no longer hash to the
+// TornRetainedPairError means a stored pair's bytes no longer hash to the
 // identity the row recorded: a torn or mixed pair left by a power loss between
 // the file write and a later change, or a hand edit. The content stage reports
 // it as damaged and preserves the database copy instead of re-capturing corrupt
@@ -97,19 +97,6 @@ type TornRetainedPairError struct {
 
 func (e *TornRetainedPairError) Error() string {
 	return fmt.Sprintf("content recovery %s: the saved pair no longer matches its stored identity; the database copy is preserved and the saved copy is reported as damaged", e.SessionID)
-}
-
-// contentRecovery is one completed retained-content repair. Recovering content
-// repairs the stored capture only; it does not complete the session, so the
-// pipeline still evaluates the same session for independent adapter and
-// indexer work afterwards.
-type contentRecovery struct {
-	session     DiscoveredSession
-	entries     int
-	recoveredAt int64
-	// charged is the source bytes this recovery read, counted against the run's
-	// content budget.
-	charged int64
 }
 
 // backfillIncompleteContent traverses by key, not by offset or a repeated first
@@ -129,8 +116,8 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
 	if !ok {
 		p.reportDiagnostic(DiagnosticEntry{
-			ErrorType: "content_recovery_unavailable", Location: "retained-content recovery",
-			Message:     "the configured store cannot read stored producer state, so retained-content recovery was not attempted; stored entries and producer evidence were preserved",
+			ErrorType: "content_recovery_unavailable", Location: "stored-content recovery",
+			Message:     "the configured store cannot read stored producer state, so stored-content recovery was not attempted; stored entries and producer evidence were preserved",
 			Remediation: "Use a store that reports index state (SessionIndexStateReader) and retry harvest.",
 		})
 		return recovered, false, 0, nil
@@ -185,7 +172,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 			// per row (an unreadable project identifier, say) refuses this
 			// session here and again at selection, and the two entries collapse
 			// to one only because both are built by the funnel. The session is
-			// refused before any retained read, store write or index-log entry.
+			// refused before any stored read, store write or index-log entry.
 			if err := p.checkStoredMetadataVersion(ctx, id); err != nil {
 				p.reportMetadataRefusal(string(id), err)
 				continue
@@ -201,9 +188,9 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 				if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 					return recovered, stoppedOnBudget, remaining, cancelErr
 				}
-				p.reportDiagnostic(DiagnosticEntry{
-					ErrorType: "content_recovery_refused", Location: fmt.Sprintf("session %s retained-content recovery", id),
-					Message:     err.Error() + "; recovery was refused before any retained read or store write, so the stored entries and producer evidence were preserved",
+				p.reportSessionDiagnostic(id, DiagnosticEntry{
+					ErrorType: "content_recovery_refused", Location: fmt.Sprintf("session %s stored-content recovery", id),
+					Message:     err.Error() + "; recovery was refused before any stored read or store write, so the stored entries and producer evidence were preserved",
 					Remediation: "Use a Peasant build whose indexer is at least the stored producer revision and supports the stored index format, then retry harvest.",
 				})
 				continue
@@ -241,11 +228,19 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					p.reportMetadataRefusal(string(id), fmt.Errorf("%s", damagedPairText(id)))
 					continue
 				}
+				if sourceRecordUnusable(err) && p.sourceUnavailableRecorded(ctx, id) {
+					// The pair-repair lane already reported this session's
+					// acquisition failure with its cause, and the stored copy
+					// still serves. Repeating it here on every later run adds no
+					// fact the user can act on. The recovery itself still runs,
+					// so a source that returns is still recovered.
+					continue
+				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
-				p.reportDiagnostic(DiagnosticEntry{
-					ErrorType: "content_recovery_unavailable", Location: fmt.Sprintf("session %s retained-content recovery", id),
+				p.reportSessionDiagnostic(id, DiagnosticEntry{
+					ErrorType: "content_recovery_unavailable", Location: fmt.Sprintf("session %s stored-content recovery", id),
 					Message:     err.Error() + "; the prior content and producer evidence were preserved; ordinary supported indexing remains eligible",
-					Remediation: "Restore the retained transcript or native source and retry harvest; inspect the recovery error before forcing replacement.",
+					Remediation: "Restore the stored transcript or native source and retry harvest; inspect the recovery error before forcing replacement.",
 				})
 				continue
 			}
@@ -308,7 +303,7 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 			return contentRecovery{}, readErr
 		}
 		if retained == nil {
-			return contentRecovery{}, fmt.Errorf("content backfill %s: retained metadata or transcript unreadable; restore the retained artifact or regenerate harvest; no provider substitution attempted", id)
+			return contentRecovery{}, fmt.Errorf("content backfill %s: stored metadata or transcript unreadable; restore the stored artifact or regenerate harvest; no provider substitution attempted", id)
 		}
 		session = retained.session
 		if session.Harness == HarnessOpenCode && session.TranscriptOrigin == TranscriptOriginFile {
@@ -317,17 +312,17 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 			// exists, and label the different authority explicitly.
 			path, err := NewResolvedPath(retained.originalSourcePath)
 			if err != nil {
-				return contentRecovery{}, fmt.Errorf("content backfill %s: retained OpenCode header lacks its directory corpus; restore the original provider directory before retrying: %w", id, err)
+				return contentRecovery{}, fmt.Errorf("content backfill %s: stored OpenCode header lacks its directory corpus; restore the original provider directory before retrying: %w", id, err)
 			}
 			if _, err := p.fs.Stat(path.String()); err != nil {
-				return contentRecovery{}, fmt.Errorf("content backfill %s: retained OpenCode header lacks its directory corpus and provider source is inaccessible; restore the original directory before retrying: %w", id, err)
+				return contentRecovery{}, fmt.Errorf("content backfill %s: stored OpenCode header lacks its directory corpus and provider source is inaccessible; restore the original directory before retrying: %w", id, err)
 			}
 			session.SourcePath = path
 			authority = ContentSourceProviderSource
 		}
 	} else {
 		if !os.IsNotExist(statErr) {
-			return contentRecovery{}, fmt.Errorf("content backfill %s: retained metadata access failed: %w; restore access before retrying", id, statErr)
+			return contentRecovery{}, fmt.Errorf("content backfill %s: stored metadata access failed: %w; restore access before retrying", id, statErr)
 		}
 		path, format, provider, lookupErr := store.LookupSourceInfo(ctx, id)
 		if lookupErr != nil {
@@ -337,7 +332,7 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 		if err != nil {
 			return contentRecovery{}, err
 		}
-		// Without a retained artifact the only content input is the native
+		// Without a stored artifact the only content input is the native
 		// source. Substituting native data under a stored producer needs the
 		// compatibility this build demands before any rewrite: a stored
 		// adapter revision newer than this build refuses the read here, so the
@@ -348,7 +343,7 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 			return contentRecovery{}, err
 		}
 		if path == "" {
-			return contentRecovery{}, fmt.Errorf("content backfill %s: neither retained artifact nor original source is available; restore harvest data before retrying", id)
+			return contentRecovery{}, fmt.Errorf("content backfill %s: neither stored artifact nor original source is available; restore harvest data before retrying", id)
 		}
 		resolved, err := NewResolvedPath(path)
 		if err != nil {
@@ -357,12 +352,12 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 		session = DiscoveredSession{SessionID: id, Harness: harness, SourcePath: resolved, SourceFormat: format}
 		authority = ContentSourceProviderSource
 	}
-	// A retained pair is the content source only while its bytes still hash to
+	// A stored pair is the content source only while its bytes still hash to
 	// the row that names it. Read the pair once and compare its identity to the
 	// recorded hash: a torn or mixed pair, or a hand edit, is reported as damaged
 	// and left for an explicit re-save rather than re-captured from corrupt
 	// bytes. The database still serves the session. The provider-source path has
-	// no retained-pair identity to check, so this guard is scoped to the snapshot
+	// no stored-pair identity to check, so this guard is scoped to the snapshot
 	// authority.
 	if authority == ContentSourcePeasantSnapshot && state.ArtifactHash != nil {
 		pair, pairErr := ReadManagedPair(p.fs, p.config.OutputDir.String(), metaPath, id)
@@ -374,12 +369,12 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	if !ok {
 		return contentRecovery{}, fmt.Errorf("content backfill %s: harness lacks authoritative parser; upgrade Peasant before retrying", id)
 	}
-	capture, err := p.captureRetainedContent(ctx, indexer, session, authority)
+	capture, err := p.captureStoredContent(ctx, indexer, session, authority)
 	if err != nil {
 		return contentRecovery{}, err
 	}
 	if !capture.Complete {
-		return contentRecovery{}, &RetainedContentIncompleteError{SessionID: id, Harness: session.Harness}
+		return contentRecovery{}, &StoredContentIncompleteError{SessionID: id, Harness: session.Harness}
 	}
 	now := time.Now().UnixMilli()
 	write := SessionEntryWrite{
@@ -425,19 +420,19 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	return contentRecovery{session: session, entries: len(capture.Entries), recoveredAt: now, charged: capture.InputBytes}, nil
 }
 
-// captureRetainedContent produces the ContentCaptureResult for one retained
+// captureStoredContent produces the ContentCaptureResult for one stored
 // session. An indexer that knows about filtered or omitted rows reports its
-// own completeness; every other strict parser either certifies the retained
+// own completeness; every other strict parser either certifies the stored
 // bytes or refuses them. InputHash is the index input digest over the bytes
 // actually parsed, so an ordinary index run later recognizes the same input.
 //
-// The retained-batch route uses the same capture assessment as the ordinary
-// path: validated omission stand-ins in the immutable retained stream are the
+// The stored-batch route uses the same capture assessment as the ordinary
+// path: validated omission stand-ins in the immutable stored stream are the
 // omission evidence, not guessed original bytes. An invalid or unaccounted
 // candidate refuses before any counting or persistence.
-func (p *Pipeline) captureRetainedContent(ctx context.Context, indexer AuthoritativeTranscriptIndexer, session DiscoveredSession, authority ContentSourceAuthority) (ContentCaptureResult, error) {
-	if capturer, ok := indexer.(RetainedContentCapturer); ok {
-		capture, err := capturer.CaptureRetainedContent(ctx, session)
+func (p *Pipeline) captureStoredContent(ctx context.Context, indexer AuthoritativeTranscriptIndexer, session DiscoveredSession, authority ContentSourceAuthority) (ContentCaptureResult, error) {
+	if capturer, ok := indexer.(StoredContentCapturer); ok {
+		capture, err := capturer.CaptureStoredContent(ctx, session)
 		if err != nil {
 			return ContentCaptureResult{}, err
 		}

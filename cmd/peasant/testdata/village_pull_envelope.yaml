@@ -1,0 +1,35 @@
+# One CLI, two villages: the released village serves pull contract 0.2.0
+# (account strings) and the public-owner village serves 0.3.0. The same
+# commands pull from both, and the manifest records the envelope each transfer
+# used. A 0.2.0 village showed every person, so its cases carry profiles only.
+#
+# Each case pulls one transcript by reference (the pipeline negotiates) and one
+# collective (the command negotiates once and the pipeline skips it).
+requiredNames:
+  - released village serves pull contract 0.2.0
+  - public owner village serves pull contract 0.3.0
+  - public owner village shows an owner anonymously
+  - owner hidden between two pulls
+
+cases:
+  - name: released village serves pull contract 0.2.0
+    legacyEnvelope: true
+    owner: alice
+    wantEnvelope: "0.2.0"
+    wantContextOwner: "owner:   @alice"
+  - name: public owner village serves pull contract 0.3.0
+    owner: alice
+    wantEnvelope: "0.3.0"
+    wantContextOwner: "owner:   @alice"
+  - name: public owner village shows an owner anonymously
+    anonymous: true
+    wantEnvelope: "0.3.0"
+    wantContextOwner: "owner:   anon"
+  # Pulled while alice was shown, re-pulled after she became anonymous to this
+  # viewer: the bulk pull's skip-gate compares hashes only, so the stored copy
+  # must still go through the pipeline and lose her identity.
+  - name: owner hidden between two pulls
+    owner: alice
+    thenAnonymous: true
+    wantEnvelope: "0.3.0"
+    wantContextOwner: "owner:   anon"

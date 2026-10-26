@@ -42,14 +42,13 @@ func (p *Pipeline) processRetainedSession(ctx context.Context, session Discovere
 		return fail(err)
 	}
 	if metadata == nil || metadata.SessionID != original.Metadata.SessionID || metadata.ModelHarness != original.Metadata.ModelHarness || metadata.HostSlug != original.Metadata.HostSlug || metadata.Source != original.Metadata.Source {
-		return fail(fmt.Errorf("extract metadata for retained session %s: adapter changed the original identity or source locator; no artifact was published; correct the adapter's retained-input implementation and retry", session.SessionID))
+		return fail(fmt.Errorf("extract metadata for stored session %s: adapter changed the original identity or source locator; no artifact was published; correct the adapter's stored-input implementation and retry", session.SessionID))
 	}
 	version := p.versionTargets()[session.Harness].AdapterVersion
 	metadata.AdapterVersion = &version
 	metadata.SchemaVersion = CurrentSchemaVersion
 	metadata.Timestamp.Ingested = original.Metadata.Timestamp.Ingested
 	metadata.DerivedAt = nil
-	metadata.ContentHash = schema.ComputeTranscriptHash(original.Transcript)
 	metadata.MetadataHash = schema.ComputeMetadataHash(metadata)
 	before, err := json.Marshal(&original.Metadata)
 	if err != nil {
@@ -68,7 +67,7 @@ func (p *Pipeline) processRetainedSession(ctx context.Context, session Discovere
 		return fail(err)
 	}
 	// Re-install the same transcript with the refreshed metadata by rename,
-	// metadata last. Extracting from retained bytes acquires no native cursor
+	// metadata last. Extracting from stored bytes acquires no native cursor
 	// or origin evidence, so the mirror preserves the previously acquired
 	// evidence; the drain records the pair.
 	sessionDir := filepath.Dir(metadataPath)

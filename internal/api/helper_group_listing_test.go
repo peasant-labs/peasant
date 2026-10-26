@@ -22,10 +22,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/schema/testcase"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/helper_group_listing.yaml
@@ -102,7 +102,7 @@ type helperGroupListingItem struct {
 	NestedMemberGroups []helperGroupListingNestedGroup `yaml:"nestedMemberGroups"`
 	// SyncStatus is asserted on the sync route only: the grouped sync row must
 	// carry the same status the flat sync route computes for that session.
-	SyncStatus string `yaml:"syncStatus"`
+	SyncStatus schema.SyncStatus `yaml:"syncStatus"`
 }
 
 // helperGroupListingNestedGroup asserts a helper that itself owns saved helpers:
@@ -672,7 +672,7 @@ func seedHelperGroupingEvidence(t *testing.T, db *store.Store, spec helperGroupL
 		target = spec.Owner
 	}
 	if err := sqlitex.ExecuteTransient(conn,
-		`INSERT INTO session_relationship_evidence (session_id, generation_id, kind, target_state, target_local_id) VALUES (?, ?, 'started_by', ?, ?)`,
+		`INSERT INTO session_relationship_evidence (session_id, generation_id, ordinal, kind, target_state, target_local_id) VALUES (?, ?, 0, 'started_by', ?, ?)`,
 		&sqlitex.ExecOptions{Args: []any{spec.ID, generationID, state, target}}); err != nil {
 		t.Fatalf("seed started_by evidence for %q: %v", spec.ID, err)
 	}

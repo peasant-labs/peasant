@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -93,7 +94,7 @@ func TestKickstartPreview_UningestedSQLiteSessionYieldsTurnsOrAnError(t *testing
 			}}
 			cmd := mountTestCmd(t, t.TempDir())
 
-			db, closeStore := openKickstartStore(cmd)
+			db, closeStore := openKickstartStore(cmd, filepath.Join(t.TempDir(), "peasant-sync"))
 			if db != nil {
 				t.Fatal("openKickstartStore opened a store for a data directory with no database")
 			}

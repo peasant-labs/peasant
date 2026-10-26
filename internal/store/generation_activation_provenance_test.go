@@ -12,10 +12,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/generation_activation_provenance.yaml
@@ -234,7 +234,7 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 			// user entry whose full text it captures, so the activation's
 			// derived title mirror replaces the stale one.
 			complete.Generation.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(generationRefs[0])}
-			activation := ingest.NativeGenerationActivation{
+			activation := ingest.GenerationActivation{
 				Generation:      complete,
 				Blobs:           blobs,
 				IndexerVersion:  77,
@@ -261,7 +261,7 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 				activation.Capture = &ingest.PublicationCaptureWrite{Metadata: meta, CWDProvenance: kind}
 			}
 
-			_, activateErr := s.ActivateNativeGeneration(context.Background(), activation)
+			_, activateErr := s.ActivateGenerationCandidate(context.Background(), activation)
 			if tc.WantRefused {
 				if activateErr == nil {
 					t.Fatal("activation with a publication capture that disagrees with the stored session was accepted; want refusal")
@@ -333,9 +333,9 @@ func TestGenerationActivationPreservesPublicationCapture(t *testing.T) {
 }
 
 // TestGenerationActivationRecoveryRecordsPublicationCapture proves a crash
-// between staging and the commit replays the certified capture: the durable
-// intent carries it, and recovery records it with the same guarded
-// transaction, so a repaired session is publishable after recovery too.
+// between staging and the commit leaves the certified capture unstamped,
+// and the retry records it with the same guarded transaction, so a
+// retried session is publishable too.
 func TestGenerationActivationRecoveryRecordsPublicationCapture(t *testing.T) {
 	fixture := loadGenerationProvenanceFixture(t)
 	sid := schema.SessionID(fixture.Session.ID)
@@ -346,7 +346,7 @@ func TestGenerationActivationRecoveryRecordsPublicationCapture(t *testing.T) {
 	complete, blobs := buildTestGeneration(t, sid, fixture.Generation.ID, "recovered full text", "recovered tool input", "recovered tool output")
 	complete.Generation.TitleRefs = []schema.SourceEntryRef{schema.SourceEntryRef(generationRefs[0])}
 	kind := ingest.CWDSourceExact
-	activation := ingest.NativeGenerationActivation{
+	activation := ingest.GenerationActivation{
 		Generation:     complete,
 		Blobs:          blobs,
 		IndexerVersion: 77,
@@ -361,13 +361,13 @@ func TestGenerationActivationRecoveryRecordsPublicationCapture(t *testing.T) {
 		Capture: &ingest.PublicationCaptureWrite{Metadata: provenanceCaptureMetadata(fixture, sid, kind), CWDProvenance: kind},
 	}
 
-	installRecoveryFault(t, s, "after-rename-before-db")
-	if _, err := s.ActivateNativeGeneration(context.Background(), activation); err == nil {
+	installHarmonizedFault(t, harmonizedSeamBeforeCommit)
+	if _, err := s.ActivateGenerationCandidate(context.Background(), activation); err == nil {
 		t.Fatal("activation across the staging seam succeeded; the crash must interrupt it")
 	}
-	clearRecoveryFault(t, s, "after-rename-before-db")
-	if _, err := s.RecoverGenerationActivation(context.Background(), sid); err != nil {
-		t.Fatalf("recover interrupted activation: %v", err)
+	clearHarmonizedFault()
+	if _, err := s.ActivateGenerationCandidate(context.Background(), activation); err != nil {
+		t.Fatalf("retry interrupted activation: %v", err)
 	}
 
 	state, err := s.ReadIndexState(context.Background(), sid)

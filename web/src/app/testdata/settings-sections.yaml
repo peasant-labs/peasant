@@ -1,0 +1,31 @@
+# The sections of the settings page (/settings?section=<id>), in navigation
+# order, and the groups each one shows, in page order. A required-name
+# manifest: the mounted page must link exactly these sections, in this order,
+# and each section must show exactly these groups. Adding, removing, renaming,
+# or moving a section or a group changes this file on purpose.
+requiredNames:
+  - account
+  - automatic publishing
+  - redaction
+  - projects
+  - sources
+  - advanced
+sections:
+  - name: account
+    id: account
+    groups: [village]
+  - name: automatic publishing
+    id: automatic-publishing
+    groups: [auto-publish]
+  - name: redaction
+    id: redaction
+    groups: [redaction]
+  - name: projects
+    id: projects
+    groups: [projects]
+  - name: sources
+    id: sources
+    groups: [sources]
+  - name: advanced
+    id: advanced
+    groups: [fields-sent, advanced, files]

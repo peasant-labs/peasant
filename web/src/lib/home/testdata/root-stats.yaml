@@ -1,0 +1,79 @@
+# The root page's stats strip computations (web/src/lib/home/rootStats.ts).
+#
+# Each case gives the trends topic's days and the quality topic's session
+# durations at a fixed `now`, and the values the strip must show. Weeks start on
+# Monday, in UTC. In the window, 2026-08-10 is the Monday of the oldest of the
+# eight weeks that end with the week of `now`.
+requiredNames:
+  - weeks-start-on-monday
+  - no-sessions-this-week
+  - empty-topics
+  - rounds-to-whole-minutes
+  - malformed-date-skipped
+cases:
+  - name: weeks-start-on-monday
+    now: 2026-09-30T12:00:00Z
+    days:
+      - { date: "2026-09-30", sessions: 2 }
+      - { date: "2026-09-28", sessions: 3 }
+      - { date: "2026-09-27", sessions: 5 }
+      - { date: "2026-09-21", sessions: 1 }
+      - { date: "2026-09-14", sessions: 4 }
+      - { date: "2026-08-31", sessions: 1 }
+      - { date: "2026-08-03", sessions: 7 }
+    durations: [12, 40, 34]
+    expected:
+      thisWeek: 5
+      weekly: [0, 0, 0, 1, 0, 4, 6, 5]
+      streak: 3
+      median: 34
+      medianLabel: 34m
+
+  - name: no-sessions-this-week
+    now: 2026-09-30T12:00:00Z
+    days:
+      - { date: "2026-09-27", sessions: 2 }
+      - { date: "2026-09-20", sessions: 1 }
+    durations: [30, 90, 60, 120]
+    expected:
+      thisWeek: 0
+      weekly: [0, 0, 0, 0, 0, 1, 2, 0]
+      streak: 2
+      median: 75
+      medianLabel: 1h 15m
+
+  - name: empty-topics
+    now: 2026-09-30T12:00:00Z
+    days: []
+    durations: []
+    expected:
+      thisWeek: 0
+      weekly: [0, 0, 0, 0, 0, 0, 0, 0]
+      streak: 0
+      median: null
+      medianLabel: null
+
+  - name: rounds-to-whole-minutes
+    now: 2026-09-30T12:00:00Z
+    days:
+      - { date: "2026-09-29", sessions: 1 }
+    durations: [59.6]
+    expected:
+      thisWeek: 1
+      weekly: [0, 0, 0, 0, 0, 0, 0, 1]
+      streak: 1
+      median: 60
+      medianLabel: 1h 00m
+
+  - name: malformed-date-skipped
+    now: 2026-09-30T12:00:00Z
+    days:
+      - { date: "2026-9-29", sessions: 4 }
+      - { date: "2026-09-29", sessions: 1 }
+    durations: [8]
+    expected:
+      thisWeek: 1
+      weekly: [0, 0, 0, 0, 0, 0, 0, 1]
+      streak: 1
+      median: 8
+      medianLabel: 8m

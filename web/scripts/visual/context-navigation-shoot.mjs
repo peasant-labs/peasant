@@ -1,6 +1,6 @@
 /* MOUNTED CURRENT-PARENT / CONTEXT NAVIGATION — real-binary evidence capture.
  *
- * Boots the exact worktree's `bin/peasant` (assets embedded from this branch's
+ * Boots the exact worktree's `peasant` (assets embedded from this branch's
  * `web/out`) with the mock data store, so the child transcript, its stored
  * context_from source and started_by parent, and its retained earlier-history
  * partition all arrive over the REAL WebSocket `session_detail` payload through
@@ -13,6 +13,10 @@
  *                      sessions, the retained earlier history starts collapsed,
  *                      the disclosure toggle does not re-position the stream,
  *                      and expanding it writes the section to the route.
+ *   context-teammate-prelude
+ *                      the child prelude carries the recorded teammate identity
+ *                      line beside the parent-transcript link, in the mono type
+ *                      it declares, and the link opens the exact stored parent.
  *   context-child-scrolled
  *                      the child with a real reading position: the stream
  *                      scrolled, a selected turn, and a typed search query.
@@ -36,7 +40,7 @@
  * invalidate the evidence.
  *
  * Run:  CHROME_PATH=$(command -v google-chrome) node web/scripts/visual/context-navigation-shoot.mjs
- * Env:  PEASANT_CONTEXT_NAV_SKIP_BUILD=1   reuse the existing bin/peasant
+ * Env:  PEASANT_CONTEXT_NAV_SKIP_BUILD=1   reuse the existing peasant
  *       PEASANT_CONTEXT_NAV_PORT            server port (default 8793)
  *       PEASANT_CONTEXT_NAV_CAPTURE_DIR     output root (default /tmp/opencode/context-navigation-captures)
  *       PUPPETEER_CORE                      explicit puppeteer-core module path
@@ -53,7 +57,7 @@ import { SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
 const WEB = join(REPO, 'web')
-const BIN = join(REPO, 'bin/peasant')
+const BIN = join(REPO, 'peasant')
 const OUT = process.env.PEASANT_CONTEXT_NAV_CAPTURE_DIR || '/tmp/opencode/context-navigation-captures'
 const PORT = process.env.PEASANT_CONTEXT_NAV_PORT || '8793'
 const ORIGIN = `http://localhost:${PORT}`
@@ -100,7 +104,7 @@ function assertBuildProvenance() {
   const javascript = filesBelow(chunks).filter((path) => path.endsWith('.js')).map((path) => ({ path, content: readFileSync(path, 'utf8') }))
   const binary = readFileSync(BIN)
   const missingBinaryBytes = FEATURE_BYTES.filter((signature) => !binary.includes(Buffer.from(signature)))
-  if (missingBinaryBytes.length) throw fail('verifying build provenance', `the embedded binary contains no ${missingBinaryBytes.join(', ')} feature bytes; rebuild this exact worktree so bin/peasant matches web/out`)
+  if (missingBinaryBytes.length) throw fail('verifying build provenance', `the embedded binary contains no ${missingBinaryBytes.join(', ')} feature bytes; rebuild this exact worktree so peasant matches web/out`)
   const match = javascript.find(({ content }) => FEATURE_BYTES.every((signature) => content.includes(signature)))
   if (!match) throw fail('verifying build provenance', `the built export contains no chunk with the feature bytes ${FEATURE_BYTES.join(', ')}; rebuild this exact worktree`)
   return match.path
@@ -164,6 +168,55 @@ async function contextRows(page) {
     link: row.querySelector('.txn-context-link')?.textContent ?? null,
     status: row.querySelector('.txn-context-status')?.textContent ?? null,
   })))
+}
+
+/**
+ * The child's prelude as the reader sees it: the recorded teammate identity line
+ * and the parent-transcript link beside it, with the computed type and paint
+ * that make the line readable rather than merely present.
+ */
+async function teammatePrelude(page) {
+  return page.evaluate(() => {
+    const line = document.querySelector('[data-transcript-teammate="true"]')
+    if (!line) return null
+    const paragraph = line.closest('p')
+    const link = paragraph?.querySelector('a[href]') ?? null
+    const style = getComputedStyle(line)
+    const box = line.getBoundingClientRect()
+    const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim()
+    return {
+      text: normalize(line.textContent),
+      paragraphText: normalize(paragraph?.textContent),
+      fontFamily: style.fontFamily,
+      color: style.color,
+      opacity: style.opacity,
+      display: style.display,
+      width: Math.round(box.width * 100) / 100,
+      height: Math.round(box.height * 100) / 100,
+      visible: box.width > 0 && box.height > 0,
+      parentLinkText: link ? normalize(link.textContent) : null,
+      parentHref: link?.getAttribute('href') ?? null,
+    }
+  })
+}
+
+/** The paint alpha a computed CSS colour carries; 1 when it states none. */
+function paintAlpha(value) {
+  const modern = value.match(/\/\s*([0-9.]+)(%?)\s*\)$/)
+  if (modern) return modern[2] ? Number(modern[1]) / 100 : Number(modern[1])
+  if (/^rgba\(/i.test(value)) return Number(value.slice(5, -1).split(',')[3])
+  return 1
+}
+
+/** Capture one mounted element the selectors cannot name on their own. */
+async function captureHandle(page, gate, handle, theme, id, sel, evidence) {
+  const directory = join(OUT, theme)
+  mkdirSync(directory, { recursive: true })
+  const file = join(directory, `${id}.png`)
+  await handle.screenshot({ path: file, captureBeyondViewport: false })
+  await gate.assert(`${id}-${theme}`, file, { sel, where: 'context-navigation-shoot.mjs' })
+  evidence.captures.push(file)
+  return file
 }
 
 /**
@@ -253,6 +306,26 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
       throw fail('rendering the child context rows', `labels ${JSON.stringify(rows.map((row) => row.label))} are not ${JSON.stringify([FIXTURE.contextLabel, FIXTURE.starterLabel])}`)
     }
     if (rows.some((row) => row.link !== LINK_ACTION)) throw fail('rendering the child context rows', `link controls ${JSON.stringify(rows.map((row) => row.link))} are not ${JSON.stringify(LINK_ACTION)}`)
+
+    // The recorded teammate identity leads the prelude, and the parent link
+    // beside it opens the exact stored parent. Both are local read evidence the
+    // durable payload never carries, so their presence here proves the served
+    // read carried them.
+    const teammateText = `teammate ${FIXTURE.childTeammate.name} on ${FIXTURE.childTeammate.team}`
+    const prelude = await teammatePrelude(page)
+    if (!prelude) throw fail('rendering the recorded teammate identity', 'the child prelude carried no [data-transcript-teammate] line, so the served read did not reach the mounted identity surface: confirm the session_detail frame carries the recorded teammate (the Go mock read projection) AND that the browser keeps it, because @peasant-labs/schema parseServerMessageRaw rebuilds the read payload from the durable fields and relationshipNavigation only, so a teammate it omits never mounts')
+    if (prelude.text !== teammateText) throw fail('rendering the recorded teammate identity', `the identity line reads ${JSON.stringify(prelude.text)}, expected ${JSON.stringify(teammateText)}`)
+    if (!prelude.visible) throw fail('rendering the recorded teammate identity', `the identity line rendered no measurable box (${prelude.width}x${prelude.height})`)
+    if (!/mono/i.test(prelude.fontFamily)) throw fail('rendering the recorded teammate identity', `the identity line rendered font-family ${JSON.stringify(prelude.fontFamily)}, which is not the mono family the prelude declares`)
+    if (prelude.color === 'transparent' || !(paintAlpha(prelude.color) > 0) || Number(prelude.opacity) === 0) {
+      throw fail('rendering the recorded teammate identity', `the identity line painted ${JSON.stringify({ color: prelude.color, opacity: prelude.opacity })}, so it is invisible`)
+    }
+    if (prelude.parentLinkText !== 'parent transcript') throw fail('rendering the parent transcript link', `the prelude link reads ${JSON.stringify(prelude.parentLinkText)}, expected "parent transcript" beside a recorded teammate identity`)
+    if (!prelude.parentHref?.includes(FIXTURE.childParentSessionId)) throw fail('rendering the parent transcript link', `the prelude link targets ${JSON.stringify(prelude.parentHref)}, which is not the child's stored parent ${FIXTURE.childParentSessionId}`)
+    const preludeHandle = await page.evaluateHandle(() => document.querySelector('[data-transcript-teammate="true"]')?.closest('p'))
+    if (!preludeHandle.asElement()) throw fail('capturing the recorded teammate identity', 'the prelude paragraph the identity line belongs to disappeared before the capture')
+    const preludeCapture = await captureHandle(page, gate, preludeHandle.asElement(), theme, 'context-teammate-prelude', '[data-transcript-teammate="true"] (closest p)', evidence)
+    evidence.teammatePreludes = [...(evidence.teammatePreludes ?? []), { theme, ...prelude, capture: preludeCapture }]
 
     const collapsed = await page.$eval('.txn-earlier-toggle', (node) => node.getAttribute('aria-expanded'))
     if (collapsed !== 'false') throw fail('capturing the child context links', `retained history was disclosed without a reader action (aria-expanded=${collapsed})`)
@@ -391,10 +464,12 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
       pathname: window.location.pathname,
       theme: document.documentElement.getAttribute('data-theme'),
       contextLinks: document.querySelectorAll('.txn-context-link').length,
+      teammateLines: document.querySelectorAll('[data-transcript-teammate="true"]').length,
     }), FIXTURE.parentId)
     if (!parentProbe.pathname.includes(FIXTURE.parentId)) throw fail('following the current-parent link', `the route ${JSON.stringify(parentProbe.pathname)} is not the authorized target ${FIXTURE.parentId}`)
     if (parentProbe.theme !== theme) throw fail('mounting the exact stored parent session', `the parent rendered theme ${parentProbe.theme}`)
     if (parentProbe.contextLinks !== 0) throw fail('mounting the exact stored parent session', "the child's context controls leaked onto the parent session")
+    if (parentProbe.teammateLines !== 0) throw fail('mounting the exact stored parent session', "the parent session rendered the child's recorded teammate identity, which its own read does not carry")
     await capture(page, gate, theme, 'parent-session', '.txn-app', evidence)
     evidence.follow = { theme, parentProbe, before }
 
@@ -536,7 +611,7 @@ if (!process.env.PEASANT_CONTEXT_NAV_SKIP_BUILD) {
   console.log('[context-navigation-shoot] make build (user canonical path) …')
   execSync('make build', { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 } else {
-  console.log('[context-navigation-shoot] PEASANT_CONTEXT_NAV_SKIP_BUILD=1 — reusing existing bin/peasant')
+  console.log('[context-navigation-shoot] PEASANT_CONTEXT_NAV_SKIP_BUILD=1 — reusing existing ./peasant')
 }
 if (!existsSync(BIN)) { console.error(`ERROR [context-navigation-shoot] ${BIN} not found — run \`make build\` first.`); process.exit(1) }
 

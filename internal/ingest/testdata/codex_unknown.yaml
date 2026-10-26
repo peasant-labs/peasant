@@ -1,4 +1,5 @@
 required_names:
+  - scalar_delivery
   - envelope
   - event
   - response
@@ -15,6 +16,13 @@ required_names:
   - missing_discriminator
   - namespace_collision_message_text
 cases:
+  - name: scalar_delivery
+    native_only: true
+    native_position: 8
+    record: '{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"delivery-item","delivery":"final","content":[{"type":"output_text","text":"known answer"}]}}}'
+    namespace: item_delivery
+    kind: native_discriminator
+    pointer: /payload/item/delivery
   - name: namespace_collision_message_text
     position: 5
     native_position: 6

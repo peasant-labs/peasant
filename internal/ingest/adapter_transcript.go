@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/schema"
 )
 
 // TranscriptMetadataExtractor extracts the adapter-owned fields represented in
 // transcript bytes, preserving the original metadata's native-only context.
-// Implementations refuse input that cannot support their current behavior.
+// Implementations refuse input that cannot support their current behavior and
+// record the supplied bytes' ContentHash for identity checks and publication.
 type TranscriptMetadataExtractor interface {
 	ExtractMetadataFromTranscript(context.Context, []byte, *UnifiedMetadata) (*UnifiedMetadata, error)
 }
@@ -26,7 +28,7 @@ type InsufficientRetainedInputError struct {
 }
 
 func (e *InsufficientRetainedInputError) Error() string {
-	return fmt.Sprintf("extract metadata from retained %s session %s during adapter refresh: %s; previous artifacts and adapter provenance were preserved; restore the native source and retry harvest", e.Harness, e.SessionID, e.Reason)
+	return fmt.Sprintf("extract metadata from stored %s session %s during adapter refresh: %s; previous artifacts and adapter provenance were preserved; restore the native source and retry harvest", e.Harness, e.SessionID, e.Reason)
 }
 
 var _ TranscriptMetadataExtractor = (*ClaudeAdapter)(nil)
@@ -44,13 +46,15 @@ func (a *PiAdapter) ExtractMetadataFromTranscript(ctx context.Context, data []by
 		return nil, err
 	}
 	if doc.header.ID != original.SessionID.String() {
-		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessPi, Reason: "retained header identifies another session"}
+		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessPi, Reason: "stored header identifies another session"}
 	}
 	parsed, err := piTranscriptMetadata(doc, DiscoveredSession{SessionID: original.SessionID, CreatedAt: time.UnixMilli(original.Timestamp.Start), ModTime: time.UnixMilli(original.Timestamp.End)})
 	if err != nil {
 		return nil, err
 	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
+	metadata.ThinkingLevel, metadata.ThinkingLevelRaw = parsed.ThinkingLevel, parsed.ThinkingLevelRaw
+	metadata.ThinkingLevelHistory = parsed.ThinkingLevelHistory
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
 	parsed.Stats.SubagentCount = metadata.Stats.SubagentCount
 	metadata.Stats = parsed.Stats
@@ -69,7 +73,7 @@ func metadataForTranscriptExtraction(ctx context.Context, harness Harness, data 
 		return &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: harness, Reason: reason}
 	}
 	if original.ModelHarness != harness || original.Source.Format != SourceFormatJSONL || metadataNeedsNativeRefresh(original.SchemaVersion) || original.SchemaVersion > CurrentSchemaVersion {
-		return nil, insufficient("the retained harness, format or metadata schema does not support JSONL metadata extraction")
+		return nil, insufficient("the stored harness, format or metadata schema does not support JSONL metadata extraction")
 	}
 	if _, err := NewHostSlug(string(original.HostSlug)); err != nil {
 		return nil, insufficient("the original managed project locator is missing or invalid")
@@ -88,6 +92,9 @@ func metadataForTranscriptExtraction(ctx context.Context, harness Harness, data 
 	if err := json.Unmarshal(encoded, &metadata); err != nil {
 		return nil, insufficient("original metadata could not be decoded: " + err.Error())
 	}
+	// Hash once at the stored extraction boundary. Identity verification and
+	// the publisher reuse this digest of the supplied bytes, not the prior claim.
+	metadata.ContentHash = schema.ComputeTranscriptHash(data)
 	return &metadata, nil
 }
 
@@ -101,11 +108,11 @@ func validateRetainedJSONL(ctx context.Context, data []byte) error {
 		}
 		raw := bytes.TrimSpace(scanner.Bytes())
 		if len(raw) != 0 && (!json.Valid(raw) || raw[0] != '{') {
-			return fmt.Errorf("a retained JSONL record is malformed or is not an object")
+			return fmt.Errorf("a stored JSONL record is malformed or is not an object")
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("retained JSONL could not be completely scanned: %w", err)
+		return fmt.Errorf("stored JSONL could not be completely scanned: %w", err)
 	}
 	return ctx.Err()
 }
@@ -118,17 +125,24 @@ func (a *ClaudeAdapter) ExtractMetadataFromTranscript(ctx context.Context, data 
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = original.SessionID
 	parsed.ParentUUID = original.ParentUUID
-	first, parseErr := parseClaudeTranscriptMetadata(data, &parsed)
+	allowed, relationships, identityErr := a.verifyRetainedClaudeIdentity(data, original, metadata.ContentHash)
+	if identityErr != nil {
+		return nil, identityErr
+	}
+	first, parseErr := parseClaudeTranscriptMetadataWithIdentity(data, &parsed, allowed)
 	if parseErr != nil {
 		return nil, parseErr
 	}
 	if first == nil || first.Type == "" {
-		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessClaudeCode, Reason: "retained input has no identifiable Claude record"}
+		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessClaudeCode, Reason: "stored input has no identifiable Claude record"}
 	}
 	if err := transcriptMetadataParsingError(HarnessClaudeCode, &parsed); err != nil {
 		return nil, err
 	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
+	metadata.Relationships = relationships
+	metadata.ThinkingLevel, metadata.ThinkingLevelRaw = parsed.ThinkingLevel, parsed.ThinkingLevelRaw
+	metadata.ThinkingLevelHistory = parsed.ThinkingLevelHistory
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
 	metadata.Stats.DurationMs = parsed.Stats.DurationMs
 	metadata.Stats.TurnCount, metadata.Stats.ToolCallCount = parsed.Stats.TurnCount, parsed.Stats.ToolCallCount
@@ -149,12 +163,14 @@ func (a *CodexAdapter) ExtractMetadataFromTranscript(ctx context.Context, data [
 		return nil, err
 	}
 	if sessionMeta == nil {
-		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessCodex, Reason: "retained input has no usable session_meta record"}
+		return nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessCodex, Reason: "stored input has no usable session_meta record"}
 	}
 	if err := transcriptMetadataParsingError(HarnessCodex, &parsed); err != nil {
 		return nil, err
 	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
+	metadata.ThinkingLevel, metadata.ThinkingLevelRaw = parsed.ThinkingLevel, parsed.ThinkingLevelRaw
+	metadata.ThinkingLevelHistory = parsed.ThinkingLevelHistory
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
 	metadata.Stats.DurationMs = parsed.Stats.DurationMs
 	metadata.Stats.TurnCount, metadata.Stats.ToolCallCount = parsed.Stats.TurnCount, parsed.Stats.ToolCallCount

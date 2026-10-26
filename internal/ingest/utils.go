@@ -9,54 +9,142 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// decodeProjectSlug is the shared core for greedy filesystem path decoding.
+// splitSlugRoot returns the filesystem root a slug decodes from and the
+// remaining dash-joined segments. ok is false if encoded matches neither
+// shape decodeProjectSlug understands.
 //
-// encoded must start with "-". segmentVariants returns all candidate directory
-// names to try for a given dash-separated segment (or merged segment).
+// A unix slug leads with a dash and decodes from the filesystem root ("/"),
+// e.g. -home-user-dev-project for /home/user/dev/project.
+//
+// A Windows slug leads with a drive letter and two dashes, e.g.
+// C--Users-alice-project for C:\Users\alice\project, because the colon and
+// the separator each encode as a dash.
+//
+// The Windows root is built as the drive letter, a colon, and a trailing
+// native separator (e.g. "C:\" on windows), not the bare two-character "C:"
+// form. filepath.Join special-cases a first element that is exactly two
+// characters ending in ':' as a drive-relative reference and does not insert
+// a separator after it — Join("C:", "Users") yields "C:Users", a
+// drive-relative path, not the absolute "C:\Users" — so appending the
+// separator ourselves is required for every joined segment to stay rooted at
+// the drive.
+func splitSlugRoot(encoded string) (root, rest string, ok bool) {
+	if strings.HasPrefix(encoded, "-") {
+		return "/", strings.TrimPrefix(encoded, "-"), true
+	}
+	if len(encoded) >= 3 && isASCIIDriveLetter(encoded[0]) && encoded[1] == '-' && encoded[2] == '-' {
+		return string(encoded[0]) + ":" + string(filepath.Separator), encoded[3:], true
+	}
+	return "", "", false
+}
+
+// hasAbsolutePathForm reports whether p is an absolute path in either the POSIX
+// or the Windows form, judged by p's own shape rather than by the host OS.
+//
+// filepath.IsAbs cannot answer this question: it answers for the RUNNING
+// platform, and a recording is routinely read on a different OS than the one
+// that produced it. filepath.IsAbs("C:\\work") is false on unix and
+// filepath.IsAbs("/work") is false on Windows, so either host would reject the
+// other's absolute paths as relative.
+//
+// A bare "C:work" is drive-RELATIVE on Windows and is refused, for the same
+// reason splitSlugRoot keeps a separator on the root it returns: a drive letter
+// alone does not anchor a path.
+func hasAbsolutePathForm(p string) bool {
+	// POSIX absolute, and also the forward-slash spelling of a Windows UNC path
+	// ("//server/share").
+	if strings.HasPrefix(p, "/") {
+		return true
+	}
+	// Windows UNC ("\\server\share").
+	if strings.HasPrefix(p, `\\`) {
+		return true
+	}
+	return len(p) >= 3 && isASCIIDriveLetter(p[0]) && p[1] == ':' && (p[2] == '/' || p[2] == '\\')
+}
+
+// isASCIIDriveLetter reports whether b is a single-letter Windows drive
+// designator (A-Z or a-z).
+func isASCIIDriveLetter(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
+}
+
+// decodeProjectSlug is the shared core for filesystem path decoding.
+//
+// encoded must be a slug shape splitSlugRoot recognizes (unix, leading with
+// "-", or Windows, leading with a drive letter and "--"). segmentVariants
+// returns all candidate directory names to try for a given dash-separated
+// segment (or merged segment).
 //
 // Returns (matchedPath, unmatched) where unmatched holds the remaining
 // dash-joined segments that could not be resolved to an existing directory.
 func decodeProjectSlug(encoded string, dirExists func(string) bool, segmentVariants func(string) []string) (matchedPath, unmatched string) {
-	if encoded == "" || !strings.HasPrefix(encoded, "-") {
+	root, s, ok := splitSlugRoot(encoded)
+	if !ok {
 		return "", encoded
 	}
-	s := strings.TrimPrefix(encoded, "-")
 	segments := strings.Split(s, "-")
 
-	path := "/"
-	i := 0
-	for i < len(segments) {
-		// Try single segment (all variants).
-		if found := firstExisting(path, segmentVariants(segments[i]), dirExists); found != "" {
-			path = found
-			i++
-			continue
-		}
-
-		// Try merging with subsequent segments (dash was a literal in the dir
-		// name, or an underscore/space encoded as dash by Cursor).
-		merged := segments[i]
-		foundMerge := false
-		for j := i + 1; j < len(segments); j++ {
-			merged += "-" + segments[j]
-			if found := firstExisting(path, segmentVariants(merged), dirExists); found != "" {
-				path = found
-				i = j + 1
-				foundMerge = true
-				break
-			}
-		}
-		if !foundMerge {
-			// Remaining segments don't match — likely a branch or worktree name
-			// appended to the slug. Return longest prefix matched so far.
-			break
-		}
-	}
-
-	if path == "/" {
+	path, consumed := decodeSlugSegments(root, segments, 0, dirExists, segmentVariants, map[slugState]slugDecode{})
+	if path == root {
 		return "", strings.Join(segments, "-")
 	}
-	return path, strings.Join(segments[i:], "-")
+	return path, strings.Join(segments[consumed:], "-")
+}
+
+type slugState struct {
+	path string
+	at   int
+}
+
+type slugDecode struct {
+	path     string
+	consumed int
+}
+
+// decodeSlugSegments finds the deepest directory segments[at:] resolve to
+// under path. A directory name is one segment or several joined by "-"
+// (a dash in the name, or an underscore or space Cursor wrote as one); the
+// shortest name that exists is tried first, and a choice that leads to a dead
+// end is undone for a longer one, so a sibling "-Users-x" cannot hide the
+// "-Users-x-project" the slug names. An empty segment is not a directory: it
+// comes from "--", a separator followed by a component that itself starts
+// with "-" ("/tmp/-Users-x" encodes as "-tmp--Users-x"), so it only ever
+// starts a longer name. When nothing resolves the rest, the deepest prefix
+// wins: trailing segments are often a branch or worktree name.
+func decodeSlugSegments(path string, segments []string, at int, dirExists func(string) bool, segmentVariants func(string) []string, seen map[slugState]slugDecode) (string, int) {
+	if at == len(segments) {
+		return path, at
+	}
+	state := slugState{path: path, at: at}
+	if done, ok := seen[state]; ok {
+		return done.path, done.consumed
+	}
+	best := slugDecode{path: path, consumed: at}
+	name := ""
+	for end := at; end < len(segments); end++ {
+		if end > at {
+			name += "-"
+		}
+		name += segments[end]
+		if name == "" {
+			continue
+		}
+		found := firstExisting(path, segmentVariants(name), dirExists)
+		if found == "" {
+			continue
+		}
+		deeper, consumed := decodeSlugSegments(found, segments, end+1, dirExists, segmentVariants, seen)
+		if consumed == len(segments) {
+			best = slugDecode{path: deeper, consumed: consumed}
+			break
+		}
+		if consumed > best.consumed {
+			best = slugDecode{path: deeper, consumed: consumed}
+		}
+	}
+	seen[state] = best
+	return best.path, best.consumed
 }
 
 // firstExisting returns filepath.Join(base, v) for the first v in variants

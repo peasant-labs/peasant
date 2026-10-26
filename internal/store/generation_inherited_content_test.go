@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/generation_inherited_content.yaml
@@ -123,10 +123,10 @@ func TestGenerationInheritedContentSnapshot(t *testing.T) {
 			seedGenerationSession(t, s, fixture.Session.ID)
 
 			candidate, blobs := buildInheritedContentGeneration(t, sid, fixture, tc.WithAlias)
-			if err := activateTestGeneration(t, s, candidate, blobs); err != nil {
-				t.Fatalf("activate a generation with retained inherited content: %v", err)
-			}
-			// The staged manifest is the self-contained durable projection:
+			// The snapshot reader serves the file-backed representation;
+			// the readers change wires the harmonized catalog rows to it.
+			seedFileBackedGeneration(t, s, filepath.Join(dir, "artifacts"), sid, candidate, blobs, false)
+			// The seeded manifest is the self-contained durable projection:
 			// the generation validator must accept retained inherited content,
 			// and the installed manifest must keep that evidence.
 			manifest, err := s.generationArtifacts.ReadManifest(context.Background(), sid, fixture.Generation.ID)

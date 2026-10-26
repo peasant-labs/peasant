@@ -1,0 +1,12 @@
+requiredNames: [complete-root-projects, selection-scoped-projects, empty-selection-projects]
+sessions:
+  - {id: sess_a, project: a, name: zeta}
+  - {id: sess_a2, project: a, name: zeta}
+  - {id: sess_b, project: b, name: alpha}
+  - {id: sess_child, project: c, name: child-only, parent: sess_a}
+  - {id: sess_unresolved, project: d, name: unresolved-only, unresolved: true}
+  - {id: sess_hidden, project: e, name: hidden}
+cases:
+  - {name: complete-root-projects, projects: [b, e, a]}
+  - {name: selection-scoped-projects, narrow: true, selected: [sess_a, sess_b, sess_child, sess_unresolved], projects: [b, a]}
+  - {name: empty-selection-projects, narrow: true, selected: [sess_absent], projects: []}

@@ -1,0 +1,133 @@
+# Claude Code thinking-level extraction corpus. Each case is a retained JSONL
+# transcript run through the real retained metadata extraction (session seed)
+# and the real indexer (per-turn evidence on each assistant entry, in order).
+# An omitted seed or an empty turn means "absent" (unknown), never off.
+# The ultracode session mode is recorded as persisted attachment records
+# (ultra_effort_enter carries reminderType; ultra_effort_exit does not); the
+# shape is pinned from Claude Code 2.1.289 and the transcripts are synthetic.
+cases:
+  - name: off_and_minimal_are_canonical_identity
+    transcript: |
+      {"type":"assistant","effort":"off","message":{"role":"assistant","content":"first"}}
+      {"type":"assistant","effort":"minimal","message":{"role":"assistant","content":"second"}}
+    seed: {level: "off"}
+    history:
+      - {level: minimal}
+    turns:
+      - {level: "off"}
+      - {level: minimal}
+  - name: effort_medium_identity
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"medium","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"hi"}]}}
+    seed: {level: medium}
+    turns:
+      - {level: medium}
+  - name: two_efforts_seed_is_earliest
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"medium","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:02Z","effort":"high","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}]}}
+    seed: {level: medium}
+    history:
+      - {level: high}
+    turns:
+      - {level: medium}
+      - {level: high}
+  - name: two_efforts_xhigh_then_medium_records_history
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"xhigh","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:02Z","effort":"medium","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}]}}
+    seed: {level: xhigh}
+    history:
+      - {level: medium}
+    turns:
+      - {level: xhigh}
+      - {level: medium}
+  - name: consecutive_duplicate_efforts_collapse_in_history
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"medium","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:02Z","effort":"medium","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}]}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:03Z","effort":"high","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"third"}]}}
+    seed: {level: medium}
+    history:
+      - {level: high}
+    turns:
+      - {level: medium}
+      - {level: medium}
+      - {level: high}
+  - name: ultracode_enter_before_first_assistant_seeds_ultracode
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+      {"type":"attachment","timestamp":"2026-01-01T00:00:00Z","attachment":{"type":"ultra_effort_enter","reminderType":"full"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"xhigh","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:02Z","effort":"xhigh","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}]}}
+    seed: {level: ultracode}
+    turns:
+      - {level: ultracode}
+      - {level: ultracode}
+  - name: ultracode_mid_session_enter_marks_later_turns_only
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"high","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"attachment","timestamp":"2026-01-01T00:00:02Z","attachment":{"type":"ultra_effort_enter","reminderType":"sparse"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:03Z","effort":"xhigh","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}]}}
+    seed: {level: high}
+    history:
+      - {level: ultracode}
+    turns:
+      - {level: high}
+      - {level: ultracode}
+  - name: ultracode_exit_reverts_to_recorded_effort
+    transcript: |
+      {"type":"attachment","timestamp":"2026-01-01T00:00:00Z","attachment":{"type":"ultra_effort_enter","reminderType":"full"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"xhigh","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"attachment","timestamp":"2026-01-01T00:00:02Z","attachment":{"type":"ultra_effort_exit"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:03Z","effort":"xhigh","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}]}}
+    seed: {level: ultracode}
+    history:
+      - {level: xhigh}
+    turns:
+      - {level: ultracode}
+      - {level: xhigh}
+  - name: no_level_evidence_stays_absent
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"hi"}]}}
+    turns:
+      - {}
+  - name: budget_only_stays_absent
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","thinkingMetadata":{"maxThinkingTokens":31999},"message":{"role":"user","content":"hello"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"hi"}]}}
+    turns:
+      - {}
+  - name: legacy_level_none_is_seed_only_off_fallback
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","thinkingMetadata":{"level":"none","disabled":true},"message":{"role":"user","content":"hello"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"hi"}]}}
+    seed: {level: "off", raw: none}
+    turns:
+      - {}
+  - name: legacy_level_ignored_when_any_modern_effort_exists
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","thinkingMetadata":{"level":"high","disabled":false},"message":{"role":"user","content":"hello"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:02Z","effort":"low","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}]}}
+    seed: {level: low}
+    turns:
+      - {}
+      - {level: low}
+  - name: unrecognized_efforts_are_absent_with_raw
+    transcript: |
+      {"type":"user","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"trivial","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}]}}
+      {"type":"assistant","timestamp":"2026-01-01T00:00:02Z","effort":"small","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}]}}
+    seed: {raw: trivial}
+    history:
+      - {raw: small}
+    turns:
+      - {raw: trivial}
+      - {raw: small}

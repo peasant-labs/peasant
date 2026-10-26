@@ -50,27 +50,77 @@ func (p *Pipeline) repairSessions(ctx context.Context) []SessionID {
 func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 	target := p.sessionVersionTarget(input.session)
 	expected := input.expected
+	// A latest attempt that settled against this session's current pair, the
+	// stored producer revision, and its generation's adapter revision owes no
+	// parser work: the attempt already consumed the current pair under this
+	// build. The pair facet is bound to the work selector's own evidence here,
+	// so an input captured from a different pair is never treated as settled.
+	// A deliberate reindex disables the short-circuit (settled stays false), so
+	// a pending term re-attempts the session once; Force selects outright. The
+	// nil guard is local, so the dereference never depends on the helper's own
+	// nil check.
+	settled := false
+	if pair := expected.LatestAttemptArtifactHash; pair != nil && !p.config.Reindex {
+		settled = latestAttemptPreviewSettles(expected, target) && input.artifactHash == *pair
+	}
 	return p.config.Force ||
-		expected.IndexerVersion < target.IndexerVersion ||
-		expected.IndexedInputHash == nil || *expected.IndexedInputHash != input.inputHash ||
+		(expected.IndexerVersion < target.IndexerVersion && !settled) ||
+		(expected.IndexedInputHash == nil || *expected.IndexedInputHash != input.inputHash) && !settled ||
 		// A current metadata capture exists (revision > 0) but the index is not
 		// bound to it: bytes match, publication proof does not. Only an input
 		// the capture can vouch for is pending on that account.
-		expected.PublicationCaptureRevision > 0 && !expected.PublicationBound && input.bindsPublication() ||
+		(expected.PublicationCaptureRevision > 0 && !expected.PublicationBound && input.bindsPublication()) && !settled ||
 		// The capture is incomplete and this build can certify it: the strict
 		// format-1 parser is the only path that produces complete content, so
 		// a harness on another declared format is at its steady state instead.
 		// A refusal this build already recorded for this producer is a steady
 		// state too, and is excluded below.
-		expected.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness) &&
-			!permanentRefusalIsSettled(expected, target)
+		(expected.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness) &&
+			!permanentRefusalIsSettled(expected, target)) && !settled
+}
+
+// latestAttemptPreviewSettles reports whether a stored latest attempt has
+// settled against this session's current facts and this build's targets. A
+// settled attempt owes no parser work: re-reading it would reproduce the same
+// bytes under the same producer and adapter revisions.
+//
+// Every facet is required:
+//
+//   - pair: the recorded attempt identity and the session's current artifact
+//     hash are BOTH non-null and equal (a NULL is never claimed as equality);
+//   - producer: the recorded attempt producer revision meets the target;
+//   - adapter: the attempt generation's recorded adapter revision is non-null
+//     and meets the target.
+//
+// A session with no latest attempt has nil facets and is never settled, so the
+// ordinary selection predicate is unchanged for it. A facet that moved keeps
+// the session selected: the next run re-attempts once and settles.
+func latestAttemptPreviewSettles(state *SessionIndexState, target HarvesterVersions) bool {
+	// A target that cannot express a settle decision never settles, mirroring
+	// the store surfaces' own guard.
+	if target.IndexerVersion < 1 || target.AdapterVersion < 1 {
+		return false
+	}
+	if state == nil || state.LatestAttemptArtifactHash == nil || state.ArtifactHash == nil {
+		return false
+	}
+	if *state.LatestAttemptArtifactHash != *state.ArtifactHash {
+		return false
+	}
+	if state.LatestAttemptIndexerVersion == nil || *state.LatestAttemptIndexerVersion < target.IndexerVersion {
+		return false
+	}
+	if state.LatestAttemptAdapterVersion == nil || *state.LatestAttemptAdapterVersion < target.AdapterVersion {
+		return false
+	}
+	return true
 }
 
 // bindsPublication reports whether an index written from this input may be
 // bound to the current publication metadata capture. A managed transcript's
 // bytes are what the capture hashed, so a file input binds. A directory tree
 // is read beside a header the capture hashed without the tree, so a tree read
-// from retained input has no byte proof against the capture and its index is
+// from stored input has no byte proof against the capture and its index is
 // held unbound; the tree this run captured with the artifact is the tree the
 // capture saw, and binds.
 func (input *CapturedIndexInput) bindsPublication() bool {
@@ -173,7 +223,7 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 // refusal once. A session with no stored pair identity is selected so the
 // index path can establish it. The caller supplies the session's effective
 // target, so a session with no readable native snapshot compares against the
-// retained baseline instead of being selected forever against the native
+// stored baseline instead of being selected forever against the native
 // override.
 func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState, target HarvesterVersions) bool {
 	if state == nil || state.ArtifactHash == nil {
@@ -182,16 +232,24 @@ func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState, target Harveste
 	if p.checkIndexProducer(state) != nil {
 		return true
 	}
+	// A settled latest attempt short-circuits every pending-work term except an
+	// explicit rebuild: the attempt already consumed the current pair under this
+	// build, so re-parsing it would be pure churn. Force selects outright; the
+	// deliberate reindex disables the short-circuit (settled stays false), so
+	// the ordinary terms decide and a pending fact re-attempts the session
+	// once. A reindex is not a full bypass: a session with no pending term
+	// still settles.
+	settled := !p.config.Reindex && latestAttemptPreviewSettles(state, target)
 	return p.config.Force ||
-		state.IndexerVersion < target.IndexerVersion ||
-		state.IndexedInputHash == nil ||
-		(state.PublicationCaptureRevision > 0 && !state.PublicationBound) ||
+		(state.IndexerVersion < target.IndexerVersion && !settled) ||
+		(state.IndexedInputHash == nil && !settled) ||
+		(state.PublicationCaptureRevision > 0 && !state.PublicationBound && !settled) ||
 		(state.ContentStatus != ContentCaptureComplete &&
 			p.certifiesContent(state.Harness) &&
-			!permanentRefusalIsSettled(state, target))
+			!permanentRefusalIsSettled(state, target) && !settled)
 }
 
-// scanPeasantSyncSessions walks the retained tree and returns one target per
+// scanPeasantSyncSessions walks the stored tree and returns one target per
 // session it holds. It is the whole-tree reader, and only `harvest index`
 // runs it: the ordinary harvest selects its work from the database. It opens
 // no transcript and takes no lock; the pair is read only when a chosen target

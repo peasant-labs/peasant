@@ -9,7 +9,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
-	"path/filepath"
+	stdpath "path"
 	"sort"
 	"strings"
 	"sync"
@@ -67,16 +67,18 @@ var (
 )
 
 const (
-	TestVillageHost2     = "other-village.example.com"
-	TestTranscriptUUID2  = "66666666-7777-8888-9999-aaaaaaaaaaaa"
-	TestContentHash      = "a3f5c9e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
-	TestContentHash2     = "b4e6dac2c3e5f7b9d1f3c5e7f9b1d3f5c7e9f1b3d5f7b9d1f3c5e7f9b1d3f5c7"
-	TestContentHash3     = "c5f7ecd3d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8"
-	TestOwnerUserID      = "user-owner-001"
+	TestVillageHost2    = "other-village.example.com"
+	TestTranscriptUUID2 = "66666666-7777-8888-9999-aaaaaaaaaaaa"
+	TestContentHash     = "a3f5c9e1b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
+	TestContentHash2    = "b4e6dac2c3e5f7b9d1f3c5e7f9b1d3f5c7e9f1b3d5f7b9d1f3c5e7f9b1d3f5c7"
+	TestContentHash3    = "c5f7ecd3d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8"
+	// The pull surface carries people as schema.VillagePublicOwner, whose
+	// profile id is a canonical Village UUID, so the test accounts are UUIDs.
+	TestOwnerUserID      = "0a000000-0000-4000-8000-000000000001"
 	TestOwnerUsername    = "alice"
-	TestAuthorUserID     = "user-author-002"
+	TestAuthorUserID     = "0a000000-0000-4000-8000-000000000002"
 	TestAuthorUsername   = "bob"
-	TestPullAuthorUserID = "user-self-003" // requester's own ID — used for own-author exclusion tests
+	TestPullAuthorUserID = "0a000000-0000-4000-8000-000000000003" // requester's own ID — used for own-author exclusion tests
 )
 
 // Typed village-pull fixtures. Pull-surface consumers key off schema.TranscriptID
@@ -138,6 +140,17 @@ var (
 
 // MemFS is an in-memory filesystem for testing.
 // All methods are safe for concurrent use (protected by mu).
+//
+// MemFS is a SLASH-BASED virtual filesystem, by contract, on every host OS:
+// every key in Files/Dirs uses "/" as its separator, never the native
+// os.PathSeparator. NewMemFS seeds the root as "/", and every method that
+// derives one key from another (parent-of, base-name-of, prefix matching for
+// WalkDir/ReadDir/RemoveAll) must do so with the "path" package, not
+// "path/filepath" — filepath rewrites separators to the native form (e.g.
+// filepath.Clean("/a/b") is "\a\b" on Windows), which silently breaks every
+// lookup against these slash-only keys on that platform. Never import
+// "path/filepath" into this file for a MemFS key; it belongs only where a
+// genuine host path is involved (see StubGitResolver et al.).
 type MemFS struct {
 	mu            sync.RWMutex
 	artifactLocks map[string]chan struct{}
@@ -176,7 +189,7 @@ func (m *MemFS) WriteFile(path string, data []byte, perm os.FileMode) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// auto-create parent dirs (inline, lock already held)
-	m.mkdirAllLocked(filepath.Dir(path), defaults.PublicDirPerm)
+	m.mkdirAllLocked(stdpath.Dir(path), defaults.PublicDirPerm)
 	cp := make([]byte, len(data))
 	copy(cp, data)
 	m.Files[path] = cp
@@ -187,8 +200,8 @@ func (m *MemFS) WriteFile(path string, data []byte, perm os.FileMode) error {
 // mkdirAllLocked is the lock-free inner implementation of MkdirAll.
 // Must be called with m.mu held (write lock).
 func (m *MemFS) mkdirAllLocked(path string, _ os.FileMode) {
-	clean := filepath.Clean(path)
-	parts := strings.Split(clean, string(os.PathSeparator))
+	clean := stdpath.Clean(path)
+	parts := strings.Split(clean, "/")
 	cur := ""
 	for _, p := range parts {
 		if p == "" {
@@ -231,7 +244,7 @@ func (fi *memFileInfo) Sys() any           { return nil }
 func (m *MemFS) statLocked(path string) (os.FileInfo, error) {
 	if m.Dirs[path] {
 		return &memFileInfo{
-			name:    filepath.Base(path),
+			name:    stdpath.Base(path),
 			mode:    os.ModeDir | defaults.PublicDirPerm,
 			modTime: m.ModTimes[path],
 			isDir:   true,
@@ -242,7 +255,7 @@ func (m *MemFS) statLocked(path string) (os.FileInfo, error) {
 		return nil, &os.PathError{Op: defaults.FSOpStat, Path: path, Err: os.ErrNotExist}
 	}
 	return &memFileInfo{
-		name:    filepath.Base(path),
+		name:    stdpath.Base(path),
 		size:    int64(len(data)),
 		mode:    defaults.PublicFilePerm,
 		modTime: m.ModTimes[path],
@@ -271,7 +284,7 @@ func (e *memDirEntry) Type() fs.FileMode          { return e.info.Mode().Type() 
 func (e *memDirEntry) Info() (os.FileInfo, error) { return e.info, nil }
 
 func (m *MemFS) WalkDir(root string, fn fs.WalkDirFunc) error {
-	root = filepath.Clean(root)
+	root = stdpath.Clean(root)
 
 	// Take a snapshot of paths and their FileInfo under the lock, then
 	// release before calling the user-supplied fn (which may call back
@@ -335,7 +348,7 @@ func (m *MemFS) WalkDir(root string, fn fs.WalkDirFunc) error {
 				if de.IsDir() {
 					skipPrefix = p + "/"
 				} else {
-					skipPrefix = filepath.Dir(p) + "/"
+					skipPrefix = stdpath.Dir(p) + "/"
 				}
 				continue
 			}
@@ -377,7 +390,7 @@ func (m *MemFS) Rename(oldpath, newpath string) error {
 func (m *MemFS) ReadDir(path string) ([]os.DirEntry, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	path = filepath.Clean(path)
+	path = stdpath.Clean(path)
 	if !m.Dirs[path] {
 		return nil, &os.PathError{Op: defaults.FSOpReadDir, Path: path, Err: os.ErrNotExist}
 	}
@@ -451,7 +464,7 @@ func (m *MemFS) Remove(path string) error {
 func (m *MemFS) RemoveAll(path string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	path = filepath.Clean(path)
+	path = stdpath.Clean(path)
 	prefix := path + "/"
 	for p := range m.Files {
 		if p == path || strings.HasPrefix(p, prefix) {
@@ -1174,6 +1187,7 @@ type StubPushStore struct {
 
 	Sessions            []ingest.PushSessionRow
 	AllSessions         []ingest.PushSessionRow
+	ParentIdentities    []store.ParentIdentityRow
 	HeldSessions        []ingest.HeldSession
 	SavedPublicationIDs []ingest.SessionID
 	// SavedPublicationLicense captures the applied license from the most recent
@@ -1302,6 +1316,12 @@ func (s *StubPushStore) UnpushedSessionsByProvider(_ context.Context, provider s
 		}
 	}
 	return filtered, nil
+}
+
+func (s *StubPushStore) SyncParentIdentities(_ context.Context, _ []ingest.PushSessionRow) ([]store.ParentIdentityRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ParentIdentities, nil
 }
 
 func (s *StubPushStore) AllPushableSessions(_ context.Context) ([]ingest.PushSessionRow, error) {
@@ -1888,4 +1908,10 @@ func (s *StubGitRepository) CommitsInRange(_ context.Context, base, head string)
 		return nil, s.CommitsInRangeErr
 	}
 	return s.RangeHashes[base+".."+head], nil
+}
+
+// PublicProfile returns the pull surface's profile shape of a test account, as
+// the village shows a person whose profile the viewer may see.
+func PublicProfile(id, username string) schema.VillagePublicOwner {
+	return schema.NewVillagePublicProfile(schema.VillageUUID(id), username, nil, nil)
 }

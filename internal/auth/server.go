@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/htmlpage"
 )
 
 // LoginResult holds the outcome of a login callback.
@@ -67,7 +68,7 @@ func (s *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 	if q.Get("state") != s.state {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, renderErrorPage("Invalid state parameter", "The authentication state could not be verified. Please try logging in again."))
+		w.Write(renderErrorPage("the login could not be verified", "the login state that came back does not match the one this computer sent."))
 		s.resultCh <- LoginResult{Err: fmt.Errorf("state mismatch")}
 		return
 	}
@@ -76,7 +77,7 @@ func (s *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 	if code == "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, renderErrorPage("Missing parameters", "The server response was incomplete. Please try logging in again."))
+		w.Write(renderErrorPage("the login came back incomplete", "peasant online sent this computer no login code."))
 		s.resultCh <- LoginResult{Err: fmt.Errorf("missing code parameter")}
 		return
 	}
@@ -85,14 +86,14 @@ func (s *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprint(w, renderErrorPage("Exchange failed", "Failed to exchange the authorization code. Please try logging in again."))
+		w.Write(renderErrorPage("the login could not finish", "peasant online did not accept the login code from this computer."))
 		s.resultCh <- LoginResult{Err: fmt.Errorf("exchange code: %w", err)}
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, renderSuccessPage(creds.Username, s.villageURL))
+	w.Write(renderSuccessPage(creds.Username, s.villageURL))
 	s.resultCh <- LoginResult{Credentials: creds}
 }
 
@@ -163,219 +164,41 @@ func exchangeCode(villageURL, code, state string) (*Credentials, error) {
 	}, nil
 }
 
-const pageFontLink = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">`
+// The pages a browser lands on when the login comes back to this terminal.
+// They name the hosted app "peasant online" and leave the account handle in
+// its own case; html/template escapes it.
+const (
+	loginPageTitleOK     = "logged in | peasant"
+	loginPageTitleFailed = "login failed | peasant"
+	loginPageHintOK      = "you can close this tab and go back to peasant."
+	loginPageHintFailed  = "close this tab and log in again from peasant."
+)
 
-const pageStyles = `
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: "DM Sans", system-ui, sans-serif;
-  color: #2a2521;
-  background-color: #faf9f7;
-  background-image:
-    linear-gradient(rgba(0,51,48,0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0,51,48,0.035) 1px, transparent 1px);
-  background-size: 48px 48px;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  -webkit-font-smoothing: antialiased;
-}
-::selection { background: #90ffe6; color: #003330; }
-.card {
-  background: white;
-  border: 1px solid #e8e4dd;
-  border-radius: 12px;
-  padding: 52px 56px;
-  max-width: 480px;
-  width: 100%;
-  margin: 24px;
-  text-align: center;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px rgba(4,200,165,0.06);
-  animation: fade-up 0.5s ease-out both;
-}
-.logo {
-  position: relative;
-  width: 48px;
-  height: 48px;
-  margin: 0 auto 28px;
-}
-.logo-circle {
-  position: absolute;
-  border-radius: 50%;
-}
-.logo-c1 { width: 28px; height: 28px; top: 0; left: 0; background: rgba(29,228,190,0.6); }
-.logo-c2 { width: 24px; height: 24px; top: 10px; left: 10px; background: rgba(0,162,136,0.5); }
-.logo-c3 { width: 22px; height: 22px; top: 4px; left: 20px; background: rgba(80,245,212,0.45); }
-.icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 24px;
-}
-.icon svg { width: 28px; height: 28px; }
-.icon-success { background: #effefa; border: 1px solid #c7fff2; color: #00a288; }
-.icon-error { background: #fff5f3; border: 1px solid #fb7f6a; color: #df3f27; }
-h1 {
-  font-family: "Instrument Serif", Georgia, serif;
-  font-size: 1.875rem;
-  line-height: 1.25;
-  font-weight: normal;
-  font-style: normal;
-  color: #2a2521;
-  margin-bottom: 10px;
-}
-.username {
-  color: #00a288;
-  font-weight: 500;
-}
-.subtitle {
-  color: #857a6b;
-  font-size: 15px;
-  line-height: 1.5;
-  margin-bottom: 24px;
-}
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: #effefa;
-  color: #00816e;
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 5px 12px;
-  border-radius: 6px;
-  border: 1px solid #c7fff2;
-}
-.badge-error {
-  background: #fff5f3;
-  color: #df3f27;
-  border-color: #fb7f6a;
-}
-.badge-test {
-  background: #fffbeb;
-  color: #92400e;
-  border-color: #fcd34d;
-}
-.badge-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
-.hint {
-  color: #b8b0a1;
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-top: 24px;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 36px;
-  animation: fade-up 0.5s ease-out 0.15s both;
-}
-.brand-text {
-  color: #d5cfc4;
-  font-size: 16px;
-  font-family: "Instrument Serif", Georgia, serif;
-  letter-spacing: 0.5px;
-}
-.brand-logo {
-  position: relative;
-  width: 22px;
-  height: 22px;
-}
-.brand-logo .logo-circle { opacity: 0.4; }
-.brand-logo .logo-c1 { width: 13px; height: 13px; top: 0; left: 0; }
-.brand-logo .logo-c2 { width: 11px; height: 11px; top: 5px; left: 5px; }
-.brand-logo .logo-c3 { width: 10px; height: 10px; top: 2px; left: 10px; }
-@keyframes fade-up {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-`
-
-func renderSuccessPage(username, villageURL string) string {
-	badge := `<span class="badge"><span class="badge-dot"></span>CLI linked to village</span>`
+func renderSuccessPage(username, villageURL string) []byte {
+	page := htmlpage.Page{
+		Title:   loginPageTitleOK,
+		Heading: "welcome to peasant",
+		Lines:   []htmlpage.Line{{htmlpage.Text("logged in as "), htmlpage.Value(username)}},
+		Status:  &htmlpage.Status{Tone: htmlpage.ToneSuccess, Text: "linked to peasant online"},
+		Hint:    loginPageHintOK,
+	}
 	if u, err := url.Parse(villageURL); err == nil {
 		h := u.Hostname()
 		if h == "localhost" || h == "127.0.0.1" {
-			badge = fmt.Sprintf(`<span class="badge badge-test"><span class="badge-dot"></span>Test env &middot; %s</span>`, u.Host)
+			page.Note = "test server · " + u.Host
 		}
 	}
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Logged in — Peasant</title>
-%s<style>%s</style>
-</head><body>
-<div class="card">
-  <div class="icon icon-success">
-    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
-    </svg>
-  </div>
-  <h1>Welcome to Peasant</h1>
-  <p class="subtitle">Logged in as <span class="username">%s</span></p>
-  %s
-  <p class="hint">You can close this tab and return to your terminal</p>
-  <div class="brand">
-    <div class="brand-logo">
-      <div class="logo-circle logo-c1"></div>
-      <div class="logo-circle logo-c2"></div>
-      <div class="logo-circle logo-c3"></div>
-    </div>
-    <span class="brand-text">peasant</span>
-  </div>
-</div>
-</body></html>`, pageFontLink, pageStyles, username, badge)
+	return htmlpage.MustRender(page)
 }
 
-func renderErrorPage(title, detail string) string {
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Login failed — Peasant</title>
-%s<style>%s</style>
-</head><body>
-<div class="card">
-  <div class="icon icon-error">
-    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
-    </svg>
-  </div>
-  <h1>%s</h1>
-  <p class="subtitle">%s</p>
-  <span class="badge badge-error"><span class="badge-dot"></span>Authentication failed</span>
-  <p class="hint">Close this tab and try again from your terminal</p>
-  <div class="brand">
-    <div class="brand-logo">
-      <div class="logo-circle logo-c1"></div>
-      <div class="logo-circle logo-c2"></div>
-      <div class="logo-circle logo-c3"></div>
-    </div>
-    <span class="brand-text">peasant</span>
-  </div>
-</div>
-</body></html>`, pageFontLink, pageStyles, title, detail)
+func renderErrorPage(heading, detail string) []byte {
+	return htmlpage.MustRender(htmlpage.Page{
+		Title:   loginPageTitleFailed,
+		Heading: heading,
+		Lines:   []htmlpage.Line{{htmlpage.Text(detail)}},
+		Status:  &htmlpage.Status{Tone: htmlpage.ToneDanger, Text: "not logged in"},
+		Hint:    loginPageHintFailed,
+	})
 }
 
 // startListener creates a TCP listener on the loopback interface.

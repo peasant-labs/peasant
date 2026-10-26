@@ -217,7 +217,7 @@ func TestManualSnippet_ComposesWithoutChangingTheHooksStatus(t *testing.T) {
 			if recorded, want := recordedArgs(t, log), wantRepositoryArgv(repo); !slices.Equal(recorded, want) {
 				t.Errorf("the by-hand section did not run the upload: peasant saw %#v, want %#v", recorded, want)
 			}
-			warned := strings.Contains(stderr, "village upload failed for")
+			warned := strings.Contains(stderr, "peasant online upload failed for")
 			if warned != testCase.ExpectWarning {
 				t.Errorf("upload warning printed = %v, want %v; stderr:\n%s", warned, testCase.ExpectWarning, stderr)
 			}

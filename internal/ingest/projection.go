@@ -84,15 +84,16 @@ type ClassifiedBlock struct {
 	// UncertainSubtree moves the whole tool subtree rooted at this carrier into
 	// the first earlier-history section when the parent/child split is unknown.
 	UncertainSubtree bool
-	// Retained marks inherited evidence that is preserved locally without
-	// becoming a main or earlier conversational entry. A retained block keeps
-	// its full content in the generation catalog, receives a stable ref and
+	// Inherited marks an inherited block: evidence the source proved came from
+	// inherited context, preserved locally without becoming a main or earlier
+	// conversational entry. An inherited block keeps its full content in the
+	// generation catalog, receives a stable ref and
 	// alias, and is attached to the captured context segment named by
 	// SegmentOrdinal, so the copied bytes stay recoverable while they never
 	// inflate the main stream, the turn count, or a prose title.
-	Retained bool
-	// SegmentOrdinal names the captured context segment a retained block's ref
-	// is attached to. It is required when Retained is set and must match one of
+	Inherited bool
+	// SegmentOrdinal names the captured context segment an inherited block's ref
+	// is attached to. It is required when Inherited is set and must match one of
 	// the capture's declared segments.
 	SegmentOrdinal int
 	Role           schema.Role
@@ -126,11 +127,42 @@ type ClassifiedBlock struct {
 	// producing this block. Nil means no observation. When present it must
 	// name an assistant block and survive layout on the owning entry.
 	ObservedModel *string
+	// ThinkingLevel / ThinkingLevelRaw are the mapped thinking-level evidence
+	// governing this block. Both empty means no observation. They are legal on
+	// assistant blocks only and are encoded under the entry Extra keys
+	// thinking_level / thinking_level_raw.
+	ThinkingLevel    schema.ThinkingLevel
+	ThinkingLevelRaw schema.ThinkingLevelRaw
 	// NativeAttachments carries optional typed native-metadata enrichment
 	// owned by this block. Each record is remapped to the allocated block ref
 	// in the owner's final partition; a tool attachment is remapped from its
 	// native call key to the allocated tool-use ref in the same partition.
 	NativeAttachments []ClassifiedNativeAttachment
+	// Extra is a private extension JSON object the adapter attaches to the
+	// stored entry. It must decode to a JSON object. The projection owns the
+	// reserved keys retainedUnknown, model_id and omittedRecord: the adapter
+	// never supplies them, and any other key is preserved verbatim.
+	Extra string
+	// RawByteLength is the producer-measured source size of this block's
+	// content. Nil means the producer measured no size. When set it is written
+	// straight to the stored entry.
+	RawByteLength *int
+	// Omitted is the source record this block stands in for: a record left out
+	// before redaction. It is valid only at depth 0 in the main partition,
+	// without Extra, RetainedUnknown, CarrierNativeKey or ToolCallKey, and
+	// bypasses tool pairing. The projection writes it as the placeholder the
+	// V1 omission path writes: role tool, entry type tool_result, the typed
+	// omission record under Extra, the reader-facing note in ContentPreview,
+	// the source tool id and the record's byte size. It carries none of the
+	// omitted record's bytes.
+	Omitted *OmittedRecordAt
+	// ToolCallID is the raw source tool identity an unpaired depth-0
+	// tool_result itself names, for the harness that never paired it. It is
+	// not a pairing substitute: ToolCallKey remains the pairing channel. It is
+	// never set on a depth-1, carrier or keyed block, and it is mutually
+	// exclusive with Omitted. The entry stays stored evidence; served
+	// suppression is unchanged.
+	ToolCallID *string
 }
 
 // ClassifiedCapture is one classified adapter capture plus the prior alias
@@ -150,6 +182,11 @@ type ClassifiedCapture struct {
 	Blocks        []ClassifiedBlock
 	Segments      []indexformat.ContextSegment
 	Prior         ProjectionPriorState
+	// Diagnostics carries the capture builder's own settled-state notes, such
+	// as the unfinished native message and sequence that left the capture
+	// incomplete, so the refusal that follows can name them without re-reading
+	// the source. It never carries raw content.
+	Diagnostics []string
 }
 
 // resolvedBlock is one classified block with its effective partition and its
@@ -157,9 +194,9 @@ type ClassifiedCapture struct {
 type resolvedBlock struct {
 	block   ClassifiedBlock
 	section int
-	// retained marks a block captured as inherited evidence: allocated and
+	// inherited marks a block captured as inherited evidence: allocated and
 	// aliased, but never emitted into a partition.
-	retained   bool
+	inherited  bool
 	ref        schema.SourceEntryRef
 	dropped    bool
 	dropTo     *resolvedBlock
@@ -233,7 +270,7 @@ func buildGenerationAndContent(capture ClassifiedCapture, allocator RefAllocator
 	if err := validateProjectionProvenance(partitions); err != nil {
 		return indexformat.Generation{}, nil, err
 	}
-	if err := validateRetainedProvenance(resolved); err != nil {
+	if err := validateInheritedProvenance(resolved); err != nil {
 		return indexformat.Generation{}, nil, err
 	}
 	if err := validateUniqueProjectionRefs(partitions); err != nil {
@@ -247,7 +284,7 @@ func buildGenerationAndContent(capture ClassifiedCapture, allocator RefAllocator
 	if err != nil {
 		return indexformat.Generation{}, nil, err
 	}
-	segments, err := attachRetainedSegmentRefs(capture.Segments, resolved)
+	segments, err := attachInheritedSegmentRefs(capture.Segments, resolved)
 	if err != nil {
 		return indexformat.Generation{}, nil, err
 	}
@@ -270,26 +307,26 @@ func buildGenerationAndContent(capture ClassifiedCapture, allocator RefAllocator
 	return generation, contentBytes, nil
 }
 
-// validateRetainedProvenance validates each retained inherited block's
-// provenance against the schema closed sets. Retained blocks are not entries,
+// validateInheritedProvenance validates each inherited block's
+// provenance against the schema closed sets. Inherited blocks are not entries,
 // so the partition check cannot see them.
-func validateRetainedProvenance(resolved []*resolvedBlock) error {
+func validateInheritedProvenance(resolved []*resolvedBlock) error {
 	for _, rb := range resolved {
-		if rb.dropped || !rb.retained || rb.block.Provenance == nil {
+		if rb.dropped || !rb.inherited || rb.block.Provenance == nil {
 			continue
 		}
 		if err := rb.block.Provenance.Validate(); err != nil {
-			return fmt.Errorf("ingest.BuildGeneration retained block %q: %w; the inherited provenance is invalid; correct the classified block", rb.block.NativeKey, err)
+			return fmt.Errorf("ingest.BuildGeneration inherited block %q: %w; the inherited provenance is invalid; correct the classified block", rb.block.NativeKey, err)
 		}
 	}
 	return nil
 }
 
-// attachRetainedSegmentRefs attaches every retained block's allocated ref to
+// attachInheritedSegmentRefs attaches every inherited block's allocated ref to
 // the captured context segment its native node belongs to. The segment already
 // carries the capture's own refs; this adds the classified identity so the
-// retained content record and alias resolve through the durable generation.
-func attachRetainedSegmentRefs(segments []indexformat.ContextSegment, resolved []*resolvedBlock) ([]indexformat.ContextSegment, error) {
+// stored content record and alias resolve through the durable generation.
+func attachInheritedSegmentRefs(segments []indexformat.ContextSegment, resolved []*resolvedBlock) ([]indexformat.ContextSegment, error) {
 	if len(resolved) == 0 {
 		return segments, nil
 	}
@@ -300,15 +337,15 @@ func attachRetainedSegmentRefs(segments []indexformat.ContextSegment, resolved [
 	}
 	seen := make(map[int]map[schema.SourceEntryRef]struct{}, len(out))
 	for _, rb := range resolved {
-		if rb.dropped || !rb.retained {
+		if rb.dropped || !rb.inherited {
 			continue
 		}
 		index, ok := byOrdinal[rb.block.SegmentOrdinal]
 		if !ok {
-			return nil, fmt.Errorf("ingest.BuildGeneration: retained block %q names captured segment %d, which the capture does not declare; the inherited evidence has no segment; capture the owning segment or drop the block", rb.block.NativeKey, rb.block.SegmentOrdinal)
+			return nil, fmt.Errorf("ingest.BuildGeneration: inherited block %q names captured segment %d, which the capture does not declare; the inherited evidence has no segment; capture the owning segment or drop the block", rb.block.NativeKey, rb.block.SegmentOrdinal)
 		}
 		if rb.ref == "" {
-			return nil, fmt.Errorf("ingest.BuildGeneration: retained block %q has no allocated ref; the inherited evidence cannot be persisted; allocate its identity before validating the generation", rb.block.NativeKey)
+			return nil, fmt.Errorf("ingest.BuildGeneration: inherited block %q has no allocated ref; the inherited evidence cannot be persisted; allocate its identity before validating the generation", rb.block.NativeKey)
 		}
 		if seen[index] == nil {
 			seen[index] = make(map[schema.SourceEntryRef]struct{}, len(out[index].CapturedRefs))
@@ -355,7 +392,7 @@ func validateCapture(capture ClassifiedCapture, allocator RefAllocator) error {
 	}
 	for i, state := range capture.EarlierStates {
 		if !state.IsValid() {
-			return fmt.Errorf("ingest.BuildGeneration: earlier[%d] state %q is outside the closed set; retained history cannot be explained; use a published state", i+1, state)
+			return fmt.Errorf("ingest.BuildGeneration: earlier[%d] state %q is outside the closed set; stored history cannot be explained; use a published state", i+1, state)
 		}
 	}
 	for i := range capture.Blocks {
@@ -365,19 +402,22 @@ func validateCapture(capture ClassifiedCapture, allocator RefAllocator) error {
 				return fmt.Errorf("ingest.BuildGeneration: block[%d] opaque evidence belongs to another harness; no candidate was produced; retain evidence only on its source owner", i)
 			}
 		}
-		if block.Retained {
+		if err := validateClassifiedChannels(i, block); err != nil {
+			return err
+		}
+		if block.Inherited {
 			if len(block.RetainedUnknown) > 0 {
-				return fmt.Errorf("ingest.BuildGeneration: retained block[%d] carries opaque evidence without an entry; export could lose it; use an evidence-only entry carrier with explicit ownership", i)
+				return fmt.Errorf("ingest.BuildGeneration: inherited block[%d] carries opaque evidence without an entry; export could lose it; use an evidence-only entry carrier with explicit ownership", i)
 			}
-			// Retained inherited evidence never enters a conversational
+			// Inherited evidence never enters a conversational
 			// partition, so its section is ignored. Uncertainty belongs to the
 			// earlier-history path instead, and a partition-bound native
 			// attachment cannot be placed without an emitted entry.
 			if block.Uncertain || block.UncertainSubtree || block.AmbiguousPairKey != "" {
-				return fmt.Errorf("ingest.BuildGeneration: retained block[%d] native key %q also carries uncertain evidence; inherited context and uncertain earlier history cannot share one block; retain it as inherited or move it to an earlier section", i, block.NativeKey)
+				return fmt.Errorf("ingest.BuildGeneration: inherited block[%d] native key %q also carries uncertain evidence; inherited context and uncertain earlier history cannot share one block; keep it inherited or move it to an earlier section", i, block.NativeKey)
 			}
 			if len(block.NativeAttachments) != 0 {
-				return fmt.Errorf("ingest.BuildGeneration: retained block[%d] native key %q carries a native attachment that cannot attach without an emitted entry; keep partition-bound enrichment with an emitted block", i, block.NativeKey)
+				return fmt.Errorf("ingest.BuildGeneration: inherited block[%d] native key %q carries a native attachment that cannot attach without an emitted entry; keep partition-bound enrichment with an emitted block", i, block.NativeKey)
 			}
 			if err := validateClassifiedUsage(i, block); err != nil {
 				return err
@@ -439,6 +479,101 @@ func validateClassifiedObservedModel(index int, block ClassifiedBlock) error {
 	return nil
 }
 
+// validateClassifiedChannels checks the projection-owned block channels before
+// any identity is allocated: the private extension document, the omission
+// placeholder, and the unpaired result's source tool id. Each channel has one
+// legal shape, so an incoherent one is refused here instead of being silently
+// dropped or stored under a shape a reader cannot account for.
+func validateClassifiedChannels(index int, block ClassifiedBlock) error {
+	if err := validateClassifiedExtra(index, block); err != nil {
+		return err
+	}
+	if block.Omitted != nil {
+		if block.Inherited {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q is both inherited and an omission placeholder; an inherited block never becomes an entry, so the placeholder would be lost; emit it or drop the omission", index, block.NativeKey)
+		}
+		if block.Depth != 0 {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder at depth %d; a placeholder stands at the omitted record's own position and never nests; record depth 0", index, block.NativeKey, block.Depth)
+		}
+		if block.Section.Index != 0 || block.Section.Earlier {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder outside the main partition; an omission belongs to the main turn stream; place it at section index 0", index, block.NativeKey)
+		}
+		if block.Extra != "" {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries both an extension document and an omission placeholder; the projection owns the placeholder's extra field; drop the extension", index, block.NativeKey)
+		}
+		if len(block.RetainedUnknown) > 0 {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries both retained unknown evidence and an omission placeholder; one block stands for one gap; split them", index, block.NativeKey)
+		}
+		if block.CarrierNativeKey != "" {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder with a carrier; a placeholder is never part of a tool subtree; drop the carrier", index, block.NativeKey)
+		}
+		if block.ToolCallKey != "" {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder with a native call key; a placeholder is never paired; drop the call key", index, block.NativeKey)
+		}
+		if block.ToolCallID != nil {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder and a direct source tool id; the placeholder carries the id from its own omission record; drop the direct id", index, block.NativeKey)
+		}
+		if block.Omitted.Record.Bytes < 0 || block.Omitted.Record.LimitBytes < 0 {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q omission record carries negative sizes (bytes %d, limitBytes %d); a placeholder stands for a real source record that exceeded a real limit, and negative sizes cannot describe one, so the stored note and extra would misreport why the record is missing; supply the measured size and the limit it exceeded", index, block.NativeKey, block.Omitted.Record.Bytes, block.Omitted.Record.LimitBytes)
+		}
+		if _, err := NewOmittedRecord(block.Omitted.Record.Reason, block.Omitted.Record.Line, block.Omitted.Record.Bytes, block.Omitted.Record.LimitBytes); err != nil {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q omission record is not coherent; the placeholder would not be recognised as an accounted omission and the session would lose the reason it is partial; supply a record built from the omitted source record: %w", index, block.NativeKey, err)
+		}
+		if block.UncertainSubtree || block.AmbiguousPairKey != "" {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder with uncertain-subtree or ambiguous-pair evidence; the resolver would move the placeholder out of the main stream and it would lose the omitted record's own position; drop the uncertainty flag or drop the omission", index, block.NativeKey)
+		}
+		if block.NativeCorrelationKey != "" {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an omission placeholder with a native correlation key; the resolver would collapse the placeholder into a mirror group and the omitted record could lose its own position; drop the correlation key or drop the omission", index, block.NativeKey)
+		}
+		return nil
+	}
+	if block.ToolCallID != nil {
+		if block.Inherited {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries a direct source tool id on an inherited block; an inherited block never becomes an entry, so the id would be lost; emit it or drop the id", index, block.NativeKey)
+		}
+		if block.Depth != 0 {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries a direct source tool id at depth %d; only an unpaired depth-0 tool_result names its own id, and a nested result pairs through its carrier's call key; drop the direct id or pair it", index, block.NativeKey, block.Depth)
+		}
+		if block.CarrierNativeKey != "" || block.ToolCallKey != "" {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries a direct source tool id on a carrier or keyed block; the native call key is the pairing channel and the direct id would be a second, unproven identity; drop the direct id", index, block.NativeKey)
+		}
+		if block.Role != schema.RoleTool || block.EntryType != schema.EntryTypeToolResult {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries a direct source tool id on role %q entry type %q; only an unpaired tool_result names its own id; drop the direct id", index, block.NativeKey, block.Role, block.EntryType)
+		}
+		if *block.ToolCallID == "" {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an empty direct source tool id; an empty id identifies nothing; supply the source id or drop the channel", index, block.NativeKey)
+		}
+	}
+	return nil
+}
+
+// validateClassifiedExtra refuses an extension document the projection cannot
+// store as a private object, and any key the projection owns. The reserved keys
+// retainedUnknown, model_id and omittedRecord are written by the projection
+// itself, so an adapter-supplied value would be overwritten or would break the
+// read-side evidence boundary.
+func validateClassifiedExtra(index int, block ClassifiedBlock) error {
+	if block.Extra == "" {
+		return nil
+	}
+	if block.Inherited {
+		return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q carries an extension document on an inherited block; an inherited block never becomes an entry, so the extension would be lost; emit it or drop the extension", index, block.NativeKey)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(block.Extra), &object); err != nil {
+		return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q extra is not a JSON object; the extension would not reach the stored entry as a private field; supply a JSON object: %w", index, block.NativeKey, err)
+	}
+	if object == nil {
+		return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q extra is not a JSON object; a null document carries no extension keys; supply a JSON object or drop it", index, block.NativeKey)
+	}
+	for _, reserved := range []string{retainedUnknownKey, "model_id", OmittedRecordExtraKey} {
+		if _, present := object[reserved]; present {
+			return fmt.Errorf("ingest.BuildGeneration: block[%d] native key %q extra carries the reserved key %q; the projection owns that key and would overwrite it; drop it from the extension", index, block.NativeKey, reserved)
+		}
+	}
+	return nil
+}
+
 func validateClassifiedAttachments(index int, block ClassifiedBlock) error {
 	if len(block.NativeAttachments) == 0 {
 		return nil
@@ -490,7 +625,7 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 		if _, duplicate := byKey[block.NativeKey]; duplicate {
 			return nil, fmt.Errorf("ingest.BuildGeneration: native key %q repeats in one capture; a later capture could not tell the blocks apart; keep one block per native key", block.NativeKey)
 		}
-		rb := &resolvedBlock{block: block, section: block.Section.Index, retained: block.Retained}
+		rb := &resolvedBlock{block: block, section: block.Section.Index, inherited: block.Inherited}
 		resolved[i] = rb
 		byKey[block.NativeKey] = rb
 	}
@@ -499,7 +634,7 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 	hasEarlier := len(capture.EarlierStates) > 0
 
 	for _, rb := range resolved {
-		if rb.retained {
+		if rb.inherited {
 			continue
 		}
 		if rb.block.AmbiguousPairKey != "" {
@@ -532,6 +667,20 @@ func resolveProjectionBlocks(capture ClassifiedCapture) ([]*resolvedBlock, error
 	// collapses representations to one entry; byte or evidence equality never
 	// does, and an ambiguous first-wins selection never discards content.
 	collapseProvedMirrors(resolved)
+	// An omission placeholder stands at the omitted record's own position in
+	// the main stream. The per-block channel checks refuse the placeholder's
+	// own relocation flags, but another block can still pull it out of main by
+	// naming it as a carrier or by sharing a call identity or a proved
+	// correlation inside an uncertain component. Fail closed on the resolved
+	// result so no route can serve the omission notice inside earlier history.
+	for _, rb := range resolved {
+		if rb.block.Omitted == nil {
+			continue
+		}
+		if rb.section != 0 || rb.block.Uncertain {
+			return nil, fmt.Errorf("ingest.BuildGeneration: native key %q omission placeholder resolved to partition %d; uncertainty elsewhere in its connected carrier/call component moved the placeholder out of the omitted record's own position, where a reader would no longer see it; drop the carrier edge or drop the omission", rb.block.NativeKey, rb.section)
+		}
+	}
 	return resolved, nil
 }
 
@@ -564,10 +713,10 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 			parent[rb] = ra
 		}
 	}
-	// Carrier edges. Retained inherited blocks never enter a partition, so
+	// Carrier edges. Inherited blocks never enter a partition, so
 	// their carrier/call edges do not originate a partition-closed subtree.
 	for i, rb := range resolved {
-		if rb.retained || rb.block.Depth == 0 {
+		if rb.inherited || rb.block.Depth == 0 {
 			continue
 		}
 		carrier, ok := byKey[rb.block.CarrierNativeKey]
@@ -582,7 +731,7 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 	// Shared native call identities.
 	byCall := make(map[string][]int)
 	for i, rb := range resolved {
-		if rb.retained {
+		if rb.inherited {
 			continue
 		}
 		if rb.block.ToolCallKey != "" {
@@ -599,7 +748,7 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 	// group into earlier history before the collapse keeps the owner's entry.
 	byCorrelation := make(map[string][]int)
 	for i, rb := range resolved {
-		if rb.retained {
+		if rb.inherited {
 			continue
 		}
 		if rb.block.NativeCorrelationKey != "" {
@@ -613,7 +762,7 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 	}
 	components := make(map[int][]*resolvedBlock)
 	for i, rb := range resolved {
-		if rb.retained {
+		if rb.inherited {
 			continue
 		}
 		root := find(i)
@@ -654,11 +803,11 @@ func resolveUncertainSubtrees(resolved []*resolvedBlock, byKey map[string]*resol
 // NativeCorrelationKey. The proof is explicit native correlation; the
 // projection never infers it from equal bytes, equal evidence or first-wins
 // order. Every unproved representation keeps its own ref, and the mirror's
-// native key aliases the retained owner so a later capture cannot reallocate.
+// native key aliases the kept owner so a later capture cannot reallocate.
 func collapseProvedMirrors(resolved []*resolvedBlock) {
 	groups := make(map[string][]*resolvedBlock)
 	for _, rb := range resolved {
-		if rb.retained {
+		if rb.inherited {
 			continue
 		}
 		if rb.block.NativeCorrelationKey != "" {
@@ -675,11 +824,11 @@ func collapseProvedMirrors(resolved []*resolvedBlock) {
 	}
 }
 
-// allocateBlockRefs assigns one opaque block ref per retained block, reusing a
+// allocateBlockRefs assigns one opaque block ref per non-dropped block, reusing a
 // prior alias when one exists. When two distinct native keys inherited the same
 // prior ref because an earlier generation merged them (an unproved pair since
 // proven distinct, or a proved mirror whose proof was withdrawn), the first
-// retained owner keeps the ref and the newly distinct representation gets a
+// owner keeps the ref and the newly distinct representation gets a
 // fresh one. A persisted alias is never silently cleared or re-merged.
 func allocateBlockRefs(resolved []*resolvedBlock, prior ProjectionPriorState, allocator RefAllocator) error {
 	used := make(map[schema.SourceEntryRef]string, len(resolved))
@@ -773,7 +922,7 @@ func layoutProjectionPartitions(capture ClassifiedCapture, resolved []*resolvedB
 		out.earlier[i] = indexformat.EarlierPartition{State: state}
 	}
 	for _, rb := range resolved {
-		if rb.dropped || rb.retained {
+		if rb.dropped || rb.inherited {
 			continue
 		}
 		entry, err := projectionEntry(capture, rb)
@@ -797,6 +946,12 @@ func layoutProjectionPartitions(capture ClassifiedCapture, resolved []*resolvedB
 // projectionEntry builds one durable entry row from a resolved block.
 func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.SessionEntry, error) {
 	block := rb.block
+	if block.Omitted != nil {
+		// The omission channel owns the placeholder's whole shape, so the
+		// block's own role and entry type are not consulted: the projection
+		// writes exactly what the V1 omission path writes.
+		return omissionChannelEntry(capture, rb)
+	}
 	if !block.Role.IsValid() {
 		return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q role %q is outside the closed role set; the entry cannot be rendered; classify the block with a published role", block.NativeKey, block.Role)
 	}
@@ -828,13 +983,58 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 			entry.TokensOut = &value
 		}
 	}
+	// Merge order is Extra, then the projection-owned model observation, then
+	// the projection-owned thinking-level evidence, then the projection-owned
+	// retained-unknown evidence: each later step keeps every unrelated key the
+	// earlier one carried. The reserved keys were refused at capture
+	// validation, so nothing here overwrites adapter data.
+	if block.Extra != "" {
+		value := block.Extra
+		entry.Extra = &value
+	}
 	if block.ObservedModel != nil {
-		encoded, err := json.Marshal(map[string]string{"model_id": *block.ObservedModel})
+		// addModelObservation keeps the existing extension fields and sets the
+		// projection-owned model_id; the identifier is already validated, so a
+		// valid observation always lands.
+		entry.Extra = addModelObservation(entry.Extra, *block.ObservedModel)
+	}
+	if block.ThinkingLevel != "" || block.ThinkingLevelRaw != "" {
+		if err := schema.ValidateThinkingLevelEvidence(block.Role, block.ThinkingLevel, block.ThinkingLevelRaw); err != nil {
+			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q carries thinking-level evidence the contract refuses; the entry cannot be emitted; stamp only mapped levels on assistant blocks: %w", block.NativeKey, err)
+		}
+		extra := map[string]json.RawMessage{}
+		if entry.Extra != nil {
+			if err := json.Unmarshal([]byte(*entry.Extra), &extra); err != nil {
+				return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q extension evidence cannot be decoded to attach thinking-level evidence; the entry cannot be emitted; fix the adapter's Extra encoding: %w", block.NativeKey, err)
+			}
+		}
+		if block.ThinkingLevel != "" {
+			value, err := json.Marshal(string(block.ThinkingLevel))
+			if err != nil {
+				return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q thinking-level evidence cannot be encoded; the observation cannot be preserved; stamp only mapped levels on assistant blocks: %w", block.NativeKey, err)
+			}
+			extra[ThinkingLevelExtraKey] = value
+		}
+		if block.ThinkingLevelRaw != "" {
+			value, err := json.Marshal(string(block.ThinkingLevelRaw))
+			if err != nil {
+				return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q thinking-level raw evidence cannot be encoded; the observation cannot be preserved; stamp only mapped levels on assistant blocks: %w", block.NativeKey, err)
+			}
+			extra[ThinkingLevelRawExtraKey] = value
+		}
+		encoded, err := json.Marshal(extra)
 		if err != nil {
-			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q observedModel cannot be encoded; the observation cannot be preserved; supply the exact source identifier: %w", block.NativeKey, err)
+			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q thinking-level evidence cannot be merged into the entry's extension fields; the observation cannot be preserved; stamp only mapped levels on assistant blocks: %w", block.NativeKey, err)
 		}
 		value := string(encoded)
 		entry.Extra = &value
+	}
+	if block.RawByteLength != nil {
+		if *block.RawByteLength < 0 {
+			return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q rawByteLength %d is negative; a source record's byte size cannot be negative, and the stored entry would carry a false measurement; record the measured nonnegative size or omit the field", block.NativeKey, *block.RawByteLength)
+		}
+		value := *block.RawByteLength
+		entry.RawByteLength = &value
 	}
 	if err := AttachRetainedUnknown(&entry, block.RetainedUnknown); err != nil {
 		return schema.SessionEntry{}, err
@@ -850,6 +1050,14 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 	default:
 		entry.ContentPreview = nonEmptyString(block.Content)
 	}
+	if block.ToolCallID != nil {
+		// The unpaired depth-0 channel: the result names its own source tool
+		// id, and there is no tool_use in this partition to pair it with.
+		// Depth 0 skips remapToolParents, so the value is written directly and
+		// survives layout.
+		value := *block.ToolCallID
+		entry.ToolCallID = &value
+	}
 	if block.ToolName != "" {
 		name := block.ToolName
 		entry.ToolNamesCSV = &name
@@ -857,6 +1065,38 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 	if block.ToolKind != "" {
 		kind := block.ToolKind
 		entry.ToolKind = &kind
+	}
+	return entry, nil
+}
+
+// omissionChannelEntry builds the stored placeholder an Omitted block stands
+// for. It is element-for-element the V1 placeholder (omissionPlaceholderEntry):
+// role tool, entry type tool_result, the typed omission record under Extra, the
+// reader-facing note in ContentPreview, the raw source tool id, and the omitted
+// record's byte size with the same int guard. None of the omitted record's
+// bytes are stored, so the machine-readable reason and the human-readable note
+// ride existing SessionEntry fields and reach every transcript UI.
+func omissionChannelEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.SessionEntry, error) {
+	omitted := rb.block.Omitted
+	extra, err := omitted.Record.Extra()
+	if err != nil {
+		return schema.SessionEntry{}, fmt.Errorf("ingest.BuildGeneration: native key %q omission record cannot be encoded; the placeholder would lose the reason the record is missing; supply a coherent omission record: %w", rb.block.NativeKey, err)
+	}
+	note := OmissionPlaceholderNote(omitted.Record)
+	entry := schema.SessionEntry{
+		SessionID:      capture.SessionID,
+		Harness:        schema.Harness(capture.Harness),
+		Role:           schema.RoleTool,
+		EntryType:      schema.EntryTypeToolResult,
+		Depth:          0,
+		SourceEntryRef: rb.ref,
+		ContentPreview: &note,
+		Extra:          &extra,
+		ToolCallID:     omitted.ToolCallID,
+	}
+	rawByteLength := int(omitted.Record.Bytes)
+	if int64(rawByteLength) == omitted.Record.Bytes && rawByteLength > 0 {
+		entry.RawByteLength = &rawByteLength
 	}
 	return entry, nil
 }
@@ -950,7 +1190,7 @@ func attachProjectionNativeMetadata(partitions *projectionPartitions, resolved [
 		toolIDs[callKey{partition: rb.section, native: rb.block.ToolCallKey}] = string(rb.ref)
 	}
 	for _, rb := range resolved {
-		if rb.dropped || rb.retained || len(rb.block.NativeAttachments) == 0 {
+		if rb.dropped || rb.inherited || len(rb.block.NativeAttachments) == 0 {
 			continue
 		}
 		for j := range rb.block.NativeAttachments {
@@ -1037,7 +1277,7 @@ func validateUniqueProjectionRefs(partitions projectionPartitions) error {
 }
 
 // buildProjectionContent records the full bytes once per emitted ref and once
-// per retained inherited ref. The relative blob path is a validated
+// per inherited ref. The relative blob path is a validated
 // owned-generation path; the digest is local integrity evidence only. The
 // returned byte map is keyed by ref so an activation can stage every record the
 // generation names without reopening the native source.
@@ -1083,10 +1323,10 @@ func buildProjectionContent(partitions projectionPartitions, resolved []*resolve
 		}
 	}
 	for _, rb := range resolved {
-		if rb.dropped || !rb.retained {
+		if rb.dropped || !rb.inherited {
 			continue
 		}
-		if err := add(rb.ref, retainedBlockContent(rb.block)); err != nil {
+		if err := add(rb.ref, inheritedBlockContent(rb.block)); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -1094,10 +1334,10 @@ func buildProjectionContent(partitions projectionPartitions, resolved []*resolve
 	return records, content, nil
 }
 
-// retainedBlockContent returns the full canonical content bytes one retained
-// inherited block owns, matching the same field selection the emitted-entry
+// inheritedBlockContent returns the full canonical content bytes one inherited
+// block owns, matching the same field selection the emitted-entry
 // path uses.
-func retainedBlockContent(block ClassifiedBlock) string {
+func inheritedBlockContent(block ClassifiedBlock) string {
 	switch block.EntryType {
 	case schema.EntryTypeToolUse:
 		return block.ToolArguments
@@ -1207,6 +1447,12 @@ func applyStrictCounts(generation *indexformat.Generation, completeness indexfor
 		if IsRetainedUnknownCarrier(entry) {
 			continue
 		}
+		if isOmissionPlaceholder(entry) {
+			// A placeholder stands in for a record the source omitted. It is
+			// stored evidence, not a conversational turn, so it is excluded
+			// from the count the same way an evidence-only carrier is.
+			continue
+		}
 		if entry.Depth == 0 {
 			turnCount++
 		}
@@ -1226,6 +1472,17 @@ func applyStrictCounts(generation *indexformat.Generation, completeness indexfor
 	} else {
 		generation.Metadata.Stats.InputSubmissionCount = nil
 	}
+}
+
+// isOmissionPlaceholder reports whether an entry stands in for an omitted
+// source record. It checks the cheap stored shape first so an ordinary
+// tool_result never pays for the typed extra read.
+func isOmissionPlaceholder(entry schema.SessionEntry) bool {
+	if entry.Role != schema.RoleTool || entry.EntryType != schema.EntryTypeToolResult || entry.Extra == nil {
+		return false
+	}
+	_, omitted := OmittedRecordOf(entry)
+	return omitted
 }
 
 // eligibleInputProvenance is the strict admitted-submission predicate. Actor

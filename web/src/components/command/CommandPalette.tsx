@@ -5,25 +5,26 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { SearchIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
-import { visibleNavSections, isSectionVisible } from '@/lib/nav/sections';
+import { visibleNavSections } from '@/lib/nav/sections';
 import { useServerCapabilities } from '@/contexts/ServerCapabilitiesContext';
-import { fetchProjectSummaries } from '@/lib/api/map';
 import { fetchGroupedSearchMatches } from '@/lib/api/grouped';
 import { fetchDiscovery, requireDiscoveryItem, type DiscoveryItem } from '@/lib/api/discovery';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { displayProject } from '@/lib/quality/utils';
-import { mapHref, parseProjectHash, reviewHref, transcriptHref } from '@/lib/navigation/projectRoutes';
-import type { ProjectSummary, SearchResult } from '@peasant-labs/schema';
+import { parseProjectHash, transcriptHref } from '@/lib/navigation/projectRoutes';
+import type { SearchResult } from '@peasant-labs/schema';
 
 /**
- * Cmd/Ctrl-K command palette: jump to a project (its changes or its
- * map), a nav section, or run a quick action (toggle theme). Self-contained,
- * mounted once globally in the layout shell. Strict-monochrome, radius-0.
+ * Cmd/Ctrl-K command palette: search recorded transcripts, jump to a nav
+ * section, or run a quick action (toggle theme). Self-contained, mounted once
+ * globally in the layout shell. Strict-monochrome, radius-0.
  *
- * The IA nav module (NAV_SECTIONS) and the project-summary endpoint already
- * exist; this surfaces them behind one keystroke.
+ * The "go to" commands are the header's nav sections (lib/nav/sections.ts), so
+ * the palette links to exactly what the header does: the route-only sections
+ * (analytics, changes, code map) have no command, and there are no per-project
+ * jumps into them.
  *
- * The server-side "Messages" group debounces queries of at least two characters,
+ * The server-side "messages" group debounces queries of at least two characters,
  * full-text-searches recorded transcripts via /api/v1/search, and deep-links each
  * hit to its task turn. These results are server-ranked, so —
  * unlike the local commands — they are NOT run through filterCommands; they are
@@ -33,7 +34,7 @@ import type { ProjectSummary, SearchResult } from '@peasant-labs/schema';
 export interface Command {
   id: string;
   label: string;
-  /** Right-aligned group label (e.g. "Project", "Go to", "Action"). */
+  /** Right-aligned group label (e.g. "messages", "go to", "action"). */
   group: string;
   /** Extra text folded into the match (e.g. the raw project path). */
   keywords?: string;
@@ -79,6 +80,34 @@ export function messageLabel(snippet: string): string {
   return snippet.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * A direct-lookup hit carries no FTS5 content snippet: the backend (#350)
+ * short-circuits a well-formed session id or project hash to the session
+ * itself, shaped as a SearchResult with an empty snippet. Whitespace-only
+ * counts as empty so a blank row can never render as a content match.
+ */
+export function isDirectLookupResult(result: Pick<SearchResult, 'snippet'>): boolean {
+  return result.snippet.trim() === '';
+}
+
+/**
+ * Identity label for a direct-lookup hit: the matched session in its project
+ * (`session <id> in <project>`). Chrome stays lowercase; the session id and
+ * the project display name keep their own casing. A project-hash query
+ * resolves to that project's newest session, so the same label identifies the
+ * project as well as the session.
+ *
+ * The wire `project` is empty when the store has no recorded working
+ * directory, so fall back to the validated project hash rather than render a
+ * dangling preposition.
+ */
+export function directLookupLabel(
+  result: Pick<SearchResult, 'sessionId' | 'project'>,
+  projectHash: string,
+): string {
+  return `session ${result.sessionId} in ${displayProject(result.project) || projectHash}`;
+}
+
 /** Event name a visible affordance (e.g. the nav ⌘K pill) dispatches to open
  *  the palette without synthesizing a keyboard event. */
 export const OPEN_COMMAND_PALETTE_EVENT = 'peasant:open-command-palette';
@@ -111,17 +140,11 @@ export function CommandPalette() {
   const { open, setOpen } = useCommandPaletteHotkey();
   const router = useRouter();
   const { toggle: toggleTheme } = useTheme();
-  // The code map section is gated on the server-advertised capability set;
-  // without its token, neither the "go to" section nor per-project map jumps
-  // appear. Visibility policy lives in sections.ts — this reads the predicate.
+  // Visibility policy lives in sections.ts — this reads the nav sections.
   const { capabilities } = useServerCapabilities();
-  const mapVisible = isSectionVisible('map', capabilities);
 
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
-  const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
-  const [projectError, setProjectError] = useState<unknown>(null);
-  const [projectReload, setProjectReload] = useState(0);
   const [messages, setMessages] = useState<AnnotatedSearchResult[]>([]);
   const [searchError, setSearchError] = useState<unknown>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -142,19 +165,6 @@ export function CommandPalette() {
     },
     [close, router],
   );
-
-  // Fetch projects on first open (cheap, cached for the session).
-  useEffect(() => {
-    if (open && projects === null && projectError === null) {
-      setProjectError(null);
-      fetchProjectSummaries()
-        .then((payload) => setProjects(payload.projects))
-        .catch((error: unknown) => {
-          setProjects(null);
-          setProjectError(error);
-        });
-    }
-  }, [open, projects, projectError, projectReload]);
 
   // Debounced transcript search. A cancelled flag drops late responses so a
   // slow request for a stale query can't overwrite a newer result set.
@@ -198,14 +208,14 @@ export function CommandPalette() {
     const navCmds: Command[] = visibleNavSections(capabilities).map((s) => ({
       id: `nav:${s.href}`,
       label: `go to ${s.label}`,
-      group: 'Go to',
+      group: 'go to',
       run: go(s.href),
     }));
     const actionCmds: Command[] = [
       {
         id: 'action:theme',
         label: 'toggle light / dark theme',
-        group: 'Action',
+        group: 'action',
         keywords: 'dark light mode appearance',
         run: () => {
           close();
@@ -213,46 +223,24 @@ export function CommandPalette() {
         },
       },
     ];
-    const projectCmds: Command[] = (projects ?? []).flatMap((p) => {
-      const projectHash = parseProjectHash(p.projectHash);
-      if (!projectHash) return [];
-      const name = displayProject(p.project);
-      return [
-        {
-          id: `proj-changes:${p.projectHash}`,
-          label: `${name} · changes`,
-          group: 'Project',
-          keywords: p.project,
-          run: go(reviewHref(projectHash)),
-        },
-        ...(mapVisible
-          ? [
-              {
-                id: `proj-map:${p.projectHash}`,
-                label: `${name} · map`,
-                group: 'Project',
-                keywords: p.project,
-                run: go(mapHref(projectHash)),
-              },
-            ]
-          : []),
-      ];
-    });
-    return [...projectCmds, ...navCmds, ...actionCmds];
-  }, [projects, go, toggleTheme, close, capabilities, mapVisible]);
+    return [...navCmds, ...actionCmds];
+  }, [go, toggleTheme, close, capabilities]);
 
   // Server-ranked transcript hits — deep-link each to its task turn. Kept OUT
   // of filterCommands (the snippet may not contain the literal query) and
-  // appended after the filtered local commands.
+  // appended after the filtered local commands. A direct-lookup hit (empty
+  // snippet, from #350) renders its session/project identity instead of a
+  // content excerpt, and opens the same transcript turn as a content match.
   const messageCmds = useMemo<Command[]>(
     () =>
       messages.flatMap((r) => {
         const projectHash = parseProjectHash(r.projectHash);
         if (!projectHash) return [];
+        const direct = isDirectLookupResult(r);
         return [{
-          id: `msg:${r.sessionId}:${r.entryIndex}`,
-          label: messageLabel(r.snippet),
-          group: 'Messages',
+          id: `${direct ? 'id' : 'msg'}:${r.sessionId}:${r.entryIndex}`,
+          label: direct ? directLookupLabel(r, projectHash) : messageLabel(r.snippet),
+          group: 'messages',
           keywords: r.project,
           searchAnnotation: { discovery: r.discovery },
           run: go(transcriptHref(projectHash, r.sessionId, { turn: r.entryIndex })),
@@ -316,7 +304,7 @@ export function CommandPalette() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="jump to a project, page, or action…"
+            placeholder="search transcripts, or jump to a page or action…"
             className="w-full bg-transparent py-3 text-sm text-ink placeholder:text-ink-4 focus:outline-none"
           />
           <kbd className="shrink-0 border border-rule px-1.5 py-0.5 font-mono text-[10px] text-ink-4">
@@ -325,37 +313,33 @@ export function CommandPalette() {
         </div>
 
         <ul id={listId} role="listbox" className="max-h-[50vh] overflow-y-auto py-1">
-           {(projectError !== null || searchError !== null) && (
+           {searchError !== null && (
              <li role="alert" className="px-3 py-3 text-base leading-relaxed text-danger">
-               <p>{discoveryErrorMessage(projectError ?? searchError)}</p>
+               <p>{discoveryErrorMessage(searchError)}</p>
                <button
                 type="button"
                 className="mt-3 border border-rule px-3 py-2 font-mono text-sm text-ink focus-mono"
                  onClick={() => {
-                   if (projectError !== null) {
-                     setProjectError(null);
-                     setProjectReload((value) => value + 1);
-                   } else {
-                     setSearchError(null);
-                     setQuery((value) => `${value} `);
-                   }
+                   setSearchError(null);
+                   setQuery((value) => `${value} `);
                  }}
                >
-                 {projectError !== null ? 'retry project discovery' : 'retry search discovery'}
+                 retry search discovery
               </button>
             </li>
           )}
-           {!projectError && !searchError && results.length === 0 ? (
+           {!searchError && results.length === 0 ? (
             <li className="px-3 py-6 text-center text-[13px] text-ink-3">
-              no matches{projects === null ? ' · loading…' : '.'}
+              no matches.
             </li>
-           ) : !projectError && !searchError ? (
+           ) : !searchError ? (
             results.map((c, i) => (
               <li
                 key={c.id}
                 id={`${listId}-${i}`}
                 role="option"
                 aria-selected={i === activeIndex}
+                data-command-id={c.id}
               >
                  <button
                   type="button"
@@ -371,7 +355,7 @@ export function CommandPalette() {
                      i === activeIndex ? 'bg-surface-hover text-ink' : 'text-ink-2'
                    }`}
                  >
-                    <span className="min-w-0 break-words">
+                    <span data-testid="command-label" className="min-w-0 break-words">
                       {c.label}
                     </span>
                    <span className="flex shrink-0 items-center justify-between gap-3 sm:ml-auto sm:justify-end">

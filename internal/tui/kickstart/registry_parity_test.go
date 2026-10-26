@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	expectedParitySections          = 7
+	expectedParitySections          = 8
 	expectedParityRows              = 6
 	expectedForbiddenRegistryFields = 5
 )

@@ -1,0 +1,16 @@
+requiredNames: [catalog-state, catalog-reason, catalog-acceptance, catalog-access, receipt-operation, receipt-outcome, diagnostic-operation, diagnostic-outcome, diagnostic-issue, scope-attempt-coverage, scope-receipt-coverage, scope-diagnostic-coverage, source-menu, domain-menu]
+cases:
+  - {name: catalog-state, table: collective_observation_versions, column: state, menu: observation-state}
+  - {name: catalog-reason, table: collective_relevance_observations, column: reason, menu: observation-reason}
+  - {name: catalog-acceptance, table: collective_observation_versions, column: acceptance_mode, menu: acceptance}
+  - {name: catalog-access, table: collective_observation_versions, column: data_access, menu: access}
+  - {name: receipt-operation, table: local_contribution_receipts, column: operation, menu: receipt-operation}
+  - {name: receipt-outcome, table: local_contribution_receipts, column: outcome, menu: receipt-outcome}
+  - {name: diagnostic-operation, table: local_operation_diagnostics, column: operation, menu: operation}
+  - {name: diagnostic-outcome, table: local_operation_diagnostics, column: outcome, menu: diagnostic-outcome}
+  - {name: diagnostic-issue, table: local_operation_diagnostics, column: issue_code, menu: issue}
+  - {name: scope-attempt-coverage, table: collective_observation_scopes, column: attempt_coverage, menu: coverage}
+  - {name: scope-receipt-coverage, table: collective_observation_scopes, column: receipt_coverage, menu: coverage}
+  - {name: scope-diagnostic-coverage, table: collective_observation_scopes, column: diagnostic_coverage, menu: coverage}
+  - {name: source-menu, table: collective_source_installs, column: source, menu: source}
+  - {name: domain-menu, table: collective_domain_observations, column: domain, menu: domain}

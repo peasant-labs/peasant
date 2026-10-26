@@ -7,13 +7,13 @@ import {
   useHasCapability,
 } from './ServerCapabilitiesContext';
 import { UI_CAPABILITY } from '@/lib/capabilities/tokens';
+import { capabilitiesResponse, UI_CAPABILITY_CASES } from '@/test/fixtures/uiCapabilities';
 
 // The combinatorial fail-closed matrix (loading / thrown / non-OK / malformed /
-// null / empty / unknown-token) is exercised end-to-end against the REAL shell
-// in LayoutShell.capabilities.test.tsx via the ui_capabilities.yaml fixture.
-// This suite pins the direct provider guarantees that integration cannot see:
-// the fetch shape (endpoint + fetch-once), the loading→ready transition, and
-// the no-provider default that makes an unwrapped read fail closed.
+// null / empty / unknown-token) runs against the provider from the
+// ui_capabilities.yaml fixture. The suite also pins the fetch shape (endpoint +
+// fetch-once), the loading→ready transition, and the no-provider default that
+// makes an unwrapped read fail closed.
 describe('ServerCapabilitiesContext', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -74,6 +74,23 @@ describe('ServerCapabilitiesContext', () => {
     expect(result.current.hasCodeMap).toBe(true);
     expect(result.current.state.capabilities.has(UI_CAPABILITY.codeMapNavigationV1)).toBe(true);
   });
+
+  it.each(UI_CAPABILITY_CASES.map((row) => [row.name, row] as const))(
+    'reports the code-map token only for a valid advertisement: %s',
+    async (_name, row) => {
+      fetchMock.mockImplementation(() => capabilitiesResponse(row));
+      const { result } = renderHook(
+        () => ({ state: useServerCapabilities(), hasCodeMap: useHasCapability(UI_CAPABILITY.codeMapNavigationV1) }),
+        { wrapper },
+      );
+      if (row.pending) {
+        expect(result.current.state.status).toBe('loading');
+      } else {
+        await waitFor(() => expect(result.current.state.status).toBe('ready'));
+      }
+      expect(result.current.hasCodeMap).toBe(row.expectAdvertised);
+    },
+  );
 
   it('fails closed for a read outside any provider (default state)', () => {
     const { result } = renderHook(() => ({

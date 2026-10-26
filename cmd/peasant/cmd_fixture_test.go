@@ -77,6 +77,7 @@ var builderByName = map[string]func() *cobra.Command{
 	"Annotate":  BuildAnnotateCommand,
 	"Export":    BuildExportCommand,
 	"Layout":    BuildLayoutCommand,
+	"Migrate":   BuildMigrateCommand,
 }
 
 func loadFixture(t *testing.T) fixtureFile {

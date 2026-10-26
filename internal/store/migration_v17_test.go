@@ -3,8 +3,8 @@ package store_test
 import (
 	"testing"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // v17 migration adds the scale_kinds lookup table with 3 rows (nominal, ordinal, continuous)

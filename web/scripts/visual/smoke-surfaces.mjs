@@ -64,60 +64,12 @@ export function makeSmokeSurfaces({ project, session, branch }) {
   }))
 }
 
-// Default project used to drill the shell gate's map/changes captures past the
-// cross-project picker into a representative, project-scoped surface — the
-// SAME underlying mock-generator project full-app-smoke.mjs's SMOKE_PROJECT
-// default resolves to ('fortuna'), but given here as its canonical
-// ProjectHash rather than the plain label: this gate's exact-path assertion
-// (shell-nav-gate.mjs's waitForSection) checks the URL is UNCHANGED after
-// navigation, and a label route legitimately canonicalizes/redirects to its
-// hash (the soft-retained legacy-label behavior), which a label identifier
-// would trip here even though it's correct app behavior (verified against a
-// live --mock-data-store=...,map,review server).
+// Default project the shell gates open project-scoped route-only pages under (`/review/<hash>/`,
+// `/map/<hash>/`): the SAME underlying mock-generator project full-app-smoke.mjs's SMOKE_PROJECT
+// default resolves to ('fortuna'), given as its canonical ProjectHash rather than the plain label
+// so an exact-path check is not tripped by the legitimate label-to-hash canonicalization.
 export const SHELL_DEFAULT_PROJECT = 'eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b'
 
-export const GRAPH_SHELL_NAV_DEFS = Object.freeze([
-  {
-    id: 'shell-analytics',
-    label: 'analytics',
-    href: '/analytics',
-    mount: '.gan-root',
-    body: '.gan-root',
-    heading: 'project overview',
-    // Analytics is a cross-project surface by design — no picker to drill past.
-  },
-  {
-    id: 'shell-changes',
-    label: 'changes',
-    href: '/',
-    mount: '[data-tour="home"]',
-    body: '[data-tour="project-picker"], [data-tour="changes-list"]',
-    heading: 'Your projects',
-    // `/` is the changes-first project picker by design. The shell SxS must show
-    // a real review surface, so after confirming the nav lands on `/` correctly,
-    // the gate drills into a real project's changes list (`.gmp-changes-root`,
-    // the same selector `smoke-surfaces`'s `review-changes` surface mounts).
-    representativePath: (project) => `/review/${encodeURIComponent(project)}/`,
-    representativeBody: '.gmp-changes-root',
-  },
-  {
-    id: 'shell-map',
-    label: 'code map',
-    href: '/map',
-    mount: 'main',
-    body: '[data-tour="project-picker"], .gmp-navigator',
-    heading: 'Map',
-    // The bare /map route is the cross-project picker. The shell SxS must show
-    // representative MOUNTED body content, so after confirming the nav lands on
-    // /map correctly, the gate drills into a real project's navigator-first map
-    // composition, matching the same surface the full-app smoke mounts.
-    representativePath: (project) => `/map/${encodeURIComponent(project)}/`,
-    representativeBody: '.gmp-root',
-  },
-])
-
-export const GRAPH_SHELL_SURFACE_SET = Object.freeze(GRAPH_SHELL_NAV_DEFS.map((s) => [s.id, null]))
-
-export const GRAPH_SHELL_SURFACE_LABELS = Object.freeze(
-  Object.fromEntries(GRAPH_SHELL_NAV_DEFS.map((s) => [s.id, s.label])),
-)
+// A mock session of that project: the transcript page the offline arm keeps open while it stops
+// the server (the same session boot-peasant.mjs opens).
+export const SHELL_DEFAULT_SESSION = 'sess-c3d4e5f6-a7b8-9012-cdef-123456789012'

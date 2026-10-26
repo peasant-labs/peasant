@@ -2,24 +2,16 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// generationIndexFormat persists the immutable V2 managed generation. It runs on
-// the caller's connection and savepoint: the activation transaction is owned by
-// the common Store writer, not by this handler. It writes every
-// session_projection_* row for one generation_id, mirrors the main partition
-// into the canonical session_entries table (through the entries the handler
-// returns), points the session at the new generation, and derives the one
-// session_metrics.turn_count mirror from Metadata.Stats.
 type generationIndexFormat struct{}
 
 var _ IndexFormat = generationIndexFormat{}
@@ -46,19 +38,29 @@ func (generationIndexFormat) Validate(result indexformat.Result) error {
 	return nil
 }
 
-// Write installs one generation in the caller's transaction. The returned main
-// entries are the canonical search projection the common writer persists; the
-// generation rows are the V2 read authority. It enforces the completeness
-// transition transactionally: an incomplete_new candidate is refused when a
-// complete generation already exists for the session, so a last-good complete
-// generation is never replaced by an incomplete capture. The same guard runs
-// for activation, recovery and direct format writes because all three commit
-// through this handler on the activation connection.
-func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID, result indexformat.Result) ([]schema.SessionEntry, error) {
+// Write installs one harmonized generation in the caller's transaction
+// (design §4.1 C1–C6, minus the lock, the batching, and the C4 stamps the
+// common writer owns). The generation's objects are already staged — the
+// foreign keys prove it, so an unstaged candidate refuses here instead of
+// writing partial rows. It enforces the completeness transition
+// transactionally over both catalog tables: an incomplete_new candidate is
+// refused when a complete generation already exists for the session, so a
+// last-good complete generation is never replaced by an incomplete capture.
+// Then it inserts the catalog row with its flattened metadata, the
+// stats-excluded capture anchor, the activation binding, and the prior
+// evidence, plus every child, mapping, descriptor, alias, section, segment,
+// and evidence row; points the session at the new generation; merges the
+// captured stats with the mirror in the same transaction; and remaps the
+// carried annotations against the new main entries. A generation identifier
+// that already names a harmonized row commits only when the stored binding
+// matches (AlreadyCommitted); any other reuse refuses, as does an
+// identifier present in the file-backed table, which only the migration
+// moves.
+func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID, result indexformat.Result) (entries []schema.SessionEntry, retErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	value, ok := result.(indexformat.V2)
+	value, ok := asV2Value(result)
 	if !ok {
 		return nil, generationIndexFormat{}.Validate(result)
 	}
@@ -71,239 +73,122 @@ func (generationIndexFormat) Write(ctx context.Context, conn *sqlite.Conn, sessi
 			return nil, err
 		}
 	}
-	metadataJSON, err := json.Marshal(generation.Metadata)
+	prepared, err := prepareHarmonizedCandidate(sessionID, generation, nil)
 	if err != nil {
-		return nil, fmt.Errorf("store: encode managed generation metadata for session %s: %w; no generation was activated; repair the captured metadata", sessionID, err)
+		return nil, err
 	}
-	titleRefsJSON, err := json.Marshal(generation.TitleRefs)
+	if err := refuseReusedGenerationIdentity(conn, sessionID, generation.ID, prepared.binding); err != nil {
+		return nil, err
+	}
+	previous, err := readActiveGenerationOnConn(conn, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("store: encode managed generation title refs for session %s: %w; no generation was activated", sessionID, err)
+		return nil, err
 	}
 	now := time.Now().UnixMilli()
-	if err := deleteGenerationRowsOnConn(conn, sessionID, generation.ID); err != nil {
+	if err := insertHarmonizedGenerationOnConn(conn, prepared, value.PriorEvidence, now, &now); err != nil {
 		return nil, err
 	}
-	if err := insertGenerationRowOnConn(conn, sessionID, generation, metadataJSON, titleRefsJSON, now); err != nil {
-		return nil, err
-	}
-	if err := insertGenerationPartitionsOnConn(conn, sessionID, generation); err != nil {
-		return nil, err
-	}
-	if err := insertGenerationSegmentsOnConn(conn, sessionID, generation); err != nil {
-		return nil, err
-	}
-	if err := insertGenerationContentOnConn(conn, sessionID, generation); err != nil {
-		return nil, err
-	}
-	if err := insertGenerationAliasesOnConn(conn, sessionID, generation); err != nil {
-		return nil, err
-	}
-	if err := insertRelationshipEvidenceOnConn(conn, sessionID, generation); err != nil {
-		return nil, err
+	var previousHarmonized *string
+	if previous != nil {
+		if generationIsHarmonized(conn, sessionID, *previous) {
+			previousHarmonized = previous
+		}
 	}
 	if err := pointSessionAtGenerationOnConn(conn, sessionID, generation); err != nil {
+		return nil, err
+	}
+	if err := remapHarmonizedAnnotations(conn, sessionID, generation.Main.Entries, previousHarmonized, nil); err != nil {
 		return nil, err
 	}
 	return generation.Main.Entries, nil
 }
 
-// Delete removes every generation-scoped row for a session when the session's
-// representation is replaced by a different format. It deliberately does not
-// touch content blobs: the owned-artifact store removes inactive generation
-// directories under its exclusive lock, after this activation commits.
+// Delete removes every generation-scoped row for a session when the
+// session's representation is replaced by a different format. It sets the
+// sweep flag before removing anything, so a crash leaves the leftovers
+// flagged for the per-session sweep; it removes no objects itself — the
+// unreferenced entry rows and blobs go through the verified sweep (§4.5).
+// The table list is the shared reclaim inventory (reclaimTableNames): the
+// same closed set the reclaim and the sweep delete per generation, so the
+// two hand-maintained lists stay in step by construction.
 func (generationIndexFormat) Delete(ctx context.Context, conn *sqlite.Conn, sessionID schema.SessionID) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	for _, statement := range []string{
-		`DELETE FROM session_relationship_evidence WHERE session_id = ?`,
-		`DELETE FROM session_projection_entries WHERE session_id = ?`,
-		`DELETE FROM session_projection_sections WHERE session_id = ?`,
-		`DELETE FROM session_context_segments WHERE session_id = ?`,
-		`DELETE FROM session_projection_content WHERE session_id = ?`,
-		`DELETE FROM session_projection_aliases WHERE session_id = ?`,
-		`DELETE FROM session_projection_generations WHERE session_id = ?`,
-		`UPDATE sessions SET active_generation_id = NULL WHERE session_id = ?`,
-	} {
-		if err := sqlitex.ExecuteTransient(conn, statement, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
+		return fmt.Errorf("store: flag session %s for sweep before representation replacement: %w; the prior representation is preserved", sessionID, err)
+	}
+	for _, table := range reclaimTableNames {
+		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM `+table+` WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
 			return fmt.Errorf("store: clear managed generations for session %s before representation replacement: %w; the transaction was refused and the prior representation is preserved", sessionID, err)
 		}
 	}
-	return nil
-}
-
-func deleteGenerationRowsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) error {
-	for _, statement := range []string{
-		`DELETE FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_projection_entries WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_projection_sections WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_context_segments WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_projection_content WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_projection_aliases WHERE session_id = ? AND generation_id = ?`,
-		`DELETE FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`,
-	} {
-		if err := sqlitex.ExecuteTransient(conn, statement, &sqlitex.ExecOptions{Args: []any{string(sessionID), generationID}}); err != nil {
-			return fmt.Errorf("store: clear prior rows for generation %s of session %s before activation: %w; the transaction was refused", generationID, sessionID, err)
-		}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = NULL, `+clearLatestAttemptPointer+` WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
+		return fmt.Errorf("store: clear the active generation for session %s before representation replacement: %w; the transaction was refused and the prior representation is preserved", sessionID, err)
 	}
 	return nil
 }
 
-func insertGenerationRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation, metadataJSON, titleRefsJSON []byte, now int64) error {
-	var inputCount any
-	if generation.Metadata.Stats.InputSubmissionCount != nil {
-		inputCount = *generation.Metadata.Stats.InputSubmissionCount
+// generationIsHarmonized reports whether the named generation of the
+// session lives in the harmonized catalog (as opposed to the file-backed
+// one Release N still reads).
+func generationIsHarmonized(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) bool {
+	harmonized := false
+	_ = sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args:       []any{string(sessionID), generationID},
+		ResultFunc: func(*sqlite.Stmt) error { harmonized = true; return nil },
+	})
+	return harmonized
+}
+
+// refuseReusedGenerationIdentity enforces the immutable identity (design
+// §4.1): a generation identifier that already has a harmonized row commits
+// only if the stored candidate digest equals the candidate's (the retry is
+// idempotent); any other reuse refuses, because immutable identifiers
+// cannot name two candidates. An identifier present in the file-backed
+// table is always refused, because only the migration moves it.
+// candidate_digest is NOT NULL, so a binding is never unknown.
+func refuseReusedGenerationIdentity(conn *sqlite.Conn, sessionID schema.SessionID, generationID, binding string) error {
+	stored := ""
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT candidate_digest FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			stored = stmt.ColumnText(0)
+			return nil
+		},
+	}); err != nil {
+		return fmt.Errorf("store: check generation identity for session %s: %w; no generation was activated", sessionID, err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_generations
- (session_id, generation_id, metadata_json, title_refs_json, input_submission_count, source_evidence_digest, completeness, index_format_version, installed_at_ms, activated_at_ms)
- VALUES (?, ?, ?, ?, ?, ?, ?, 2, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-		string(sessionID), generation.ID, string(metadataJSON), string(titleRefsJSON), inputCount, generation.SourceEvidenceDigest,
-		string(generation.Completeness), now, now,
-	}}); err != nil {
-		return fmt.Errorf("store: install generation %s for session %s: %w; no generation was activated", generation.ID, sessionID, err)
+	if found {
+		if stored != binding {
+			return fmt.Errorf("store: refuse to activate generation %s for session %s: the identifier is already installed with a different candidate binding; immutable identifiers cannot be reused; the installed generation is unchanged", generationID, sessionID)
+		}
+		return nil
+	}
+	fileBacked := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_projection_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args:       []any{string(sessionID), generationID},
+		ResultFunc: func(*sqlite.Stmt) error { fileBacked = true; return nil },
+	}); err != nil {
+		return fmt.Errorf("store: check the file-backed catalog for session %s: %w; no generation was activated", sessionID, err)
+	}
+	if fileBacked {
+		return fmt.Errorf("store: refuse to activate generation %s for session %s: the identifier is installed in the file-backed catalog, which only the migration moves; the installed generation is unchanged", generationID, sessionID)
 	}
 	return nil
 }
 
-func insertGenerationPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
-	// partition_id 0 is the main stream; earlier sections are 1..N in order.
-	mainMetadata, err := json.Marshal(generation.Main.NativeMetadata)
-	if err != nil {
-		return fmt.Errorf("store: encode main native metadata for generation %s: %w; no generation was activated", generation.ID, err)
+// bindNullableInt64Value binds a nullable *int64 parameter. A nil bound value
+// stays NULL, matching the value sqlitex.ExecuteTransient wrote before the
+// statements were reused.
+func bindNullableInt64Value(stmt *sqlite.Stmt, param int, value *int64) {
+	if value == nil {
+		stmt.BindNull(param)
+		return
 	}
-	if err := insertSectionOnConn(conn, sessionID, generation.ID, 0, "", mainMetadata); err != nil {
-		return err
-	}
-	if err := insertEntriesOnConn(conn, sessionID, generation.ID, 0, generation.Main.Entries); err != nil {
-		return err
-	}
-	for i := range generation.Earlier {
-		partitionID := i + 1
-		section := generation.Earlier[i]
-		nativeMetadata, err := json.Marshal(section.Content.NativeMetadata)
-		if err != nil {
-			return fmt.Errorf("store: encode earlier[%d] native metadata for generation %s: %w; no generation was activated", i, generation.ID, err)
-		}
-		if err := insertSectionOnConn(conn, sessionID, generation.ID, partitionID, string(section.State), nativeMetadata); err != nil {
-			return err
-		}
-		if err := insertEntriesOnConn(conn, sessionID, generation.ID, partitionID, section.Content.Entries); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func insertSectionOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, partitionID int, earlierState string, nativeMetadata []byte) error {
-	var state any
-	if earlierState != "" {
-		state = earlierState
-	}
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_sections (session_id, generation_id, partition_id, earlier_state, native_metadata) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-		string(sessionID), generationID, partitionID, state, string(nativeMetadata),
-	}}); err != nil {
-		return fmt.Errorf("store: install partition %d for generation %s of session %s: %w; no generation was activated", partitionID, generationID, sessionID, err)
-	}
-	return nil
-}
-
-func insertEntriesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, partitionID int, entries []schema.SessionEntry) error {
-	for i := range entries {
-		entry := entries[i]
-		if entry.SessionID != sessionID {
-			return fmt.Errorf("store: generation %s partition %d entry %d names session %s; no generation was activated; build entries for the owning session", generationID, partitionID, entry.EntryIndex, entry.SessionID)
-		}
-		encoded, err := json.Marshal(entry)
-		if err != nil {
-			return fmt.Errorf("store: encode entry %d of partition %d for generation %s: %w; no generation was activated", entry.EntryIndex, partitionID, generationID, err)
-		}
-		var ref any
-		if entry.SourceEntryRef != "" {
-			ref = string(entry.SourceEntryRef)
-		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_entries (session_id, generation_id, partition_id, entry_index, source_entry_ref, entry_json) VALUES (?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generationID, partitionID, entry.EntryIndex, ref, string(encoded),
-		}}); err != nil {
-			return fmt.Errorf("store: install entry %d of partition %d for generation %s: %w; no generation was activated", entry.EntryIndex, partitionID, generationID, err)
-		}
-	}
-	return nil
-}
-
-func insertGenerationSegmentsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
-	for i := range generation.Segments {
-		segment := generation.Segments[i]
-		refs, err := json.Marshal(segment.CapturedRefs)
-		if err != nil {
-			return fmt.Errorf("store: encode captured refs for segment %d of generation %s: %w; no generation was activated", segment.Ordinal, generation.ID, err)
-		}
-		var logical any
-		if segment.LogicalSessionID != nil {
-			logical = string(*segment.LogicalSessionID)
-		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_context_segments
- (session_id, generation_id, segment_ordinal, logical_session_id, physical_source_id, coordinate_kind,
-  start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion, captured_refs_json)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generation.ID, segment.Ordinal, logical, segment.PhysicalSourceID,
-			string(segment.Coordinates.Kind), nullableInt64Value(segment.Coordinates.Start), nullableInt64Value(segment.Coordinates.EndExclusive),
-			nullableInt64Value(segment.Coordinates.DecodedByteStart), nullableInt64Value(segment.Coordinates.DecodedByteEndExclusive),
-			string(segment.Inclusion), string(refs),
-		}}); err != nil {
-			return fmt.Errorf("store: install context segment %d for generation %s: %w; no generation was activated", segment.Ordinal, generation.ID, err)
-		}
-	}
-	return nil
-}
-
-func insertGenerationContentOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
-	for i := range generation.Content {
-		record := generation.Content[i]
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_content (session_id, generation_id, source_entry_ref, relative_blob, byte_length, integrity_digest) VALUES (?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generation.ID, string(record.Ref), record.RelativeBlob, record.ByteLength, record.Digest,
-		}}); err != nil {
-			return fmt.Errorf("store: install content record %s for generation %s: %w; no generation was activated", record.Ref, generation.ID, err)
-		}
-	}
-	return nil
-}
-
-func insertGenerationAliasesOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
-	for i := range generation.Aliases {
-		alias := generation.Aliases[i]
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_projection_aliases (session_id, generation_id, native_key, source_entry_ref) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generation.ID, alias.NativeKey, string(alias.Ref),
-		}}); err != nil {
-			return fmt.Errorf("store: install native alias %q for generation %s: %w; no generation was activated", alias.NativeKey, generation.ID, err)
-		}
-	}
-	return nil
-}
-
-func insertRelationshipEvidenceOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
-	for i := range generation.Metadata.Relationships {
-		relationship := generation.Metadata.Relationships[i]
-		var target, evidence, anchor any
-		if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
-			target = string(*relationship.TargetLocalID)
-		}
-		if relationship.Evidence != "" {
-			evidence = string(relationship.Evidence)
-		}
-		if relationship.Anchor != nil {
-			encoded, err := json.Marshal(relationship.Anchor)
-			if err != nil {
-				return fmt.Errorf("store: encode anchor for %s relationship of generation %s: %w; no generation was activated", relationship.Kind, generation.ID, err)
-			}
-			anchor = string(encoded)
-		}
-		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence (session_id, generation_id, kind, target_state, target_local_id, evidence, anchor) VALUES (?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generation.ID, string(relationship.Kind), string(relationship.TargetState), target, evidence, anchor,
-		}}); err != nil {
-			return fmt.Errorf("store: install %s relationship evidence for generation %s: %w; no generation was activated", relationship.Kind, generation.ID, err)
-		}
-	}
-	return nil
+	stmt.BindInt64(param, *value)
 }
 
 func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
@@ -329,10 +214,33 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	// The logical parent is durable relationship evidence, not the
 	// availability cache. sessions.parent_id is the FK-safe cache: the durable
 	// started_by target when it names a stored session, else NULL so an
-	// admitted child survives an absent, unselected or cyclic parent.
-	logicalParent := durableParentTarget(generation.Metadata.Relationships)
+	// admitted child survives an absent, unselected or cyclic parent. The
+	// value computation is the shared one (startedByTarget + DesiredParentCacheID)
+	// and the FK-existence check is its availability input, so activation and
+	// the standalone cache writer cannot disagree about the same edge.
+	//
+	// The write is three-way (hasRelationshipAuthority, shared with the V1
+	// writer's parentAuthoritative in writer.go so the two writers cannot
+	// drift):
+	//
+	//   - The generation carries ANY relationship: the write is authoritative.
+	//     parent_id becomes the durable started_by target when it names a
+	//     stored session, else NULL, so an admitted child survives an absent,
+	//     unselected or cyclic parent, and explicit_none, unknown, conflicting
+	//     and context_from-only evidence clear the cache exactly as the V1
+	//     writer clears it. The same UPDATE resets origin_version to 0: a
+	//     parent link may be repaired after insert (this authoritative
+	//     activation write, the reconcile heal, the bounded invalidation), and
+	//     every repair re-queues the row so the next resolve pass re-judges it
+	//     against its current parent.
+	//   - The generation carries no relationships at all: the write has no
+	//     parent evidence, so parent_id and origin_version are both omitted and
+	//     keep their stored values. A generation that predates relationship
+	//     emission must not clear a healed cache or the verdict judged on it.
+	logicalParent := startedByTarget(generation.Metadata.Relationships)
+	authoritative := hasRelationshipAuthority(generation.Metadata.Relationships)
 	var parent any
-	if logicalParent != nil {
+	if authoritative && logicalParent != nil {
 		exists := false
 		if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM sessions WHERE session_id = ? LIMIT 1`, &sqlitex.ExecOptions{
 			Args:       []any{string(*logicalParent)},
@@ -340,8 +248,8 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 		}); err != nil {
 			return fmt.Errorf("store: resolve logical parent for session %s generation %s: %w; no generation was activated", sessionID, generation.ID, err)
 		}
-		if exists {
-			parent = string(*logicalParent)
+		if cache := DesiredParentCacheID(sessionID, logicalParent, exists); cache != nil {
+			parent = string(*cache)
 		}
 	}
 	// The pointing UPDATE names session facts the row-version trigger watches
@@ -361,9 +269,13 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	}); err != nil {
 		return fmt.Errorf("store: read recorded publication provenance before pointing session %s at generation %s: %w; no generation was activated; restore database access and retry activation", sessionID, generation.ID, err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ?, input_submission_count = ?, adapter_version = ?, start_ms = ?, end_ms = ?, model_harness = ?, parent_id = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{
-		generation.ID, root, purpose, inputCount, adapter, generation.Metadata.Timestamp.Start, generation.Metadata.Timestamp.End, string(generation.Metadata.ModelHarness), parent, string(sessionID),
-	}}); err != nil {
+	pointSQL := `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ?, input_submission_count = ?, adapter_version = ?, start_ms = ?, end_ms = ?, model_harness = ?, ` + clearLatestAttemptPointer + ` WHERE session_id = ?`
+	pointArgs := []any{generation.ID, root, purpose, inputCount, adapter, generation.Metadata.Timestamp.Start, generation.Metadata.Timestamp.End, string(generation.Metadata.ModelHarness), string(sessionID)}
+	if authoritative {
+		pointSQL = `UPDATE sessions SET active_generation_id = ?, root_session_id = ?, session_purpose = ?, input_submission_count = ?, adapter_version = ?, start_ms = ?, end_ms = ?, model_harness = ?, parent_id = ?, origin_version = 0, ` + clearLatestAttemptPointer + ` WHERE session_id = ?`
+		pointArgs = []any{generation.ID, root, purpose, inputCount, adapter, generation.Metadata.Timestamp.Start, generation.Metadata.Timestamp.End, string(generation.Metadata.ModelHarness), parent, string(sessionID)}
+	}
+	if err := sqlitex.ExecuteTransient(conn, pointSQL, &sqlitex.ExecOptions{Args: pointArgs}); err != nil {
 		return fmt.Errorf("store: point session %s at generation %s: %w; no generation was activated", sessionID, generation.ID, err)
 	}
 	if provenance != "" {
@@ -393,19 +305,28 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 
 // refuseIncompleteWhenCompleteExists implements the completeness transition:
 // incomplete_new is the one first-discovery exception and is allowed only when
-// no complete generation exists for the session. Retrying the same incomplete
-// identifier is idempotent and allowed; replacing any other generation while a
-// complete last-good exists is refused transactionally.
+// no complete generation exists for the session, in either catalog. Retrying
+// the same incomplete identifier is idempotent and allowed; replacing any
+// other generation while a complete last-good exists is refused
+// transactionally.
 func refuseIncompleteWhenCompleteExists(conn *sqlite.Conn, sessionID schema.SessionID, candidateID string) error {
 	completeID := ""
-	if err := sqlitex.ExecuteTransient(conn, `SELECT generation_id FROM session_projection_generations WHERE session_id = ? AND completeness = 'complete' LIMIT 1`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID)},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			completeID = stmt.ColumnText(0)
-			return nil
-		},
-	}); err != nil {
+	collect := func(statement string) error {
+		return sqlitex.ExecuteTransient(conn, statement, &sqlitex.ExecOptions{
+			Args: []any{string(sessionID)},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				completeID = stmt.ColumnText(0)
+				return nil
+			},
+		})
+	}
+	if err := collect(`SELECT generation_id FROM session_generations WHERE session_id = ? AND completeness = 'complete' LIMIT 1`); err != nil {
 		return fmt.Errorf("store: check completeness transition for session %s: %w; no generation was activated", sessionID, err)
+	}
+	if completeID == "" {
+		if err := collect(`SELECT generation_id FROM session_projection_generations WHERE session_id = ? AND completeness = 'complete' LIMIT 1`); err != nil {
+			return fmt.Errorf("store: check completeness transition for session %s: %w; no generation was activated", sessionID, err)
+		}
 	}
 	if completeID != "" && completeID != candidateID {
 		return fmt.Errorf("store: refuse incomplete generation %s for session %s: a complete generation %s is the last-good read authority; incomplete_new is the first-discovery exception only and never replaces it", candidateID, sessionID, completeID)
@@ -413,23 +334,17 @@ func refuseIncompleteWhenCompleteExists(conn *sqlite.Conn, sessionID schema.Sess
 	return nil
 }
 
-// durableParentTarget returns the durable started_by target when the
-// relationship evidence names a known retained session. It mirrors the
-// snapshot's logical-parent derivation so activation and reads agree.
-func durableParentTarget(relationships []schema.SessionRelationship) *schema.SessionID {
-	for i := range relationships {
-		relationship := relationships[i]
-		if relationship.Kind != schema.SessionRelationshipStartedBy {
-			continue
-		}
-		if relationship.TargetState == schema.RelationshipTargetKnown || relationship.TargetState == schema.RelationshipTargetKnownRetained {
-			if relationship.TargetLocalID != nil && *relationship.TargetLocalID != "" {
-				target := *relationship.TargetLocalID
-				return &target
-			}
-		}
-	}
-	return nil
+// hasRelationshipAuthority reports whether a write's relationship evidence is
+// authoritative for the stored parent cache: any relationship at all, including
+// explicit_none, unknown, conflicting and context_from-only evidence, speaks
+// about the session's parent, so the write sets or clears the cache instead of
+// preserving it. It is the single predicate both parent-cache writers share:
+// the V1 session writer (parentAuthoritative in writer.go, which adds its
+// write-time-only scheduling and legacy ParentUUID disjuncts) and the V2
+// activation write (pointSessionAtGenerationOnConn, which is deliberately
+// relationships-only). Changing it changes both writers together.
+func hasRelationshipAuthority(relationships []schema.SessionRelationship) bool {
+	return len(relationships) > 0
 }
 
 // deriveGenerationTitle derives the display title from the generation's
@@ -465,22 +380,38 @@ func deriveGenerationTitle(generation indexformat.Generation) string {
 	return ""
 }
 
+// firstTitleLine is the first non-empty line of a turn, at most 80 code
+// points. A line over the cap is cut at a word where one is near the cap. A
+// cut line, or a line the turn goes on past without finishing a sentence, ends
+// in an ellipsis, so a list never shows a cut prompt as the whole request.
 func firstTitleLine(text string) string {
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	for index, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			if runes := []rune(trimmed); len(runes) > 80 {
-				return string(runes[:77]) + "..."
-			}
-			return trimmed
+		if trimmed == "" {
+			continue
 		}
+		if runes := []rune(trimmed); len(runes) > 80 {
+			cut := string(runes[:79])
+			if space := strings.LastIndexByte(cut, ' '); space >= len(cut)-20 && space > 0 {
+				cut = cut[:space]
+			}
+			return strings.TrimRight(cut, " :;,.") + "…"
+		}
+		if continues(lines[index+1:]) && !strings.ContainsAny(trimmed[len(trimmed)-1:], ".?!") {
+			return strings.TrimRight(trimmed, ":;,") + "…"
+		}
+		return trimmed
 	}
 	return ""
 }
 
-func nullableInt64Value(value *int64) any {
-	if value == nil {
-		return nil
+// continues reports whether any of the remaining lines carries text.
+func continues(rest []string) bool {
+	for _, line := range rest {
+		if strings.TrimSpace(line) != "" {
+			return true
+		}
 	}
-	return *value
+	return false
 }

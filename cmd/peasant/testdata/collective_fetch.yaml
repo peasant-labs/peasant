@@ -1,0 +1,6 @@
+requiredNames: [explicit-fetch-partial-nonzero]
+cases:
+  - name: explicit-fetch-partial-nonzero
+    wantStatus: 502
+    wantName: Partial catalog survives
+    states: {catalog: complete, history: failed, associations: complete}

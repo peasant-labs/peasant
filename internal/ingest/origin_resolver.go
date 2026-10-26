@@ -15,7 +15,7 @@ import (
 // corrected ordering. Every stored row is then reclassified automatically, and
 // no separate migration and no separate command is needed. That is why the
 // backfill is a version watermark rather than a one-shot flag.
-const OriginRuleVersion = 2
+const OriginRuleVersion = 3
 
 // The audit baseline has a leading run of one record; eight leaves headroom
 // while bounding each session's stored evidence. Exhaustion refuses to guess.
@@ -30,9 +30,17 @@ const storedOriginLeadingUserRecordCap = 8
 // write nothing at all.
 type StoredOriginRow struct {
 	SessionID SessionID
-	// ParentID is the session this row is a child of, or empty when it is a
-	// root. It is set at insert time and never updated afterwards, which is
-	// what lets the resolver treat it as settled evidence.
+	// ParentID is the session-level parent ANSWER for this row, or empty when
+	// the rule answers no parent. It is resolved through the same logical-parent
+	// rule every other parent answer uses — the durable relationship evidence
+	// first, the availability cache as the fallback — so a cache heal or a
+	// generation activation is visible here on the next pass. A stored NULL
+	// cache is therefore not proof of rootness: a row whose evidence names a
+	// parent is judged as a child even while its cache is empty. Every
+	// parent-link repair — an authoritative activation write, the reconcile
+	// heal, the bounded invalidation — resets origin_version to 0 in the same
+	// write, so a row whose parent changes after a verdict is listed again and
+	// re-judged.
 	ParentID string
 	// Harness names which producer recorded the transcript, and therefore which
 	// miner - if any - can read origin evidence back out of it.
@@ -154,9 +162,13 @@ func NewOriginResolver(store OriginResolverStore, cache ClaudeEvidenceCache, min
 //
 // Ordering matters and is the caller's to keep. The pass must run BEFORE this
 // run writes its own sessions, so that it sees only rows an EARLIER run
-// persisted. That is what makes it safe against re-parenting: a parent
-// identifier is written at insert time and never updated afterwards, so a row
-// this pass finalises cannot acquire a parent later.
+// persisted. That is what keeps the pass from judging a row mid-write: the
+// parent answer is resolved through the session-level rule at read time, so a
+// row this pass finalises is judged on the answer as of this pass. A parent
+// link repaired after insert — an authoritative activation write, the
+// reconcile heal, the bounded invalidation — resets origin_version to 0 in the
+// same write, so a later repair re-queues the row and the next pass re-judges
+// it.
 func (r *OriginResolver) ResolveStoredOrigins(ctx context.Context, ruleVersion int) (ResolveReport, error) {
 	var report ResolveReport
 	if ruleVersion < 1 {

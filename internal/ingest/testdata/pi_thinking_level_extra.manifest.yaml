@@ -1,0 +1,20 @@
+requiredNames:
+  - canonical
+  - raw-only
+  - alias-pair
+  - absent
+  - invalid-canonical
+  - edge-whitespace
+  - invalid-utf8
+  - null-level-cleared
+  - null-raw-cleared
+  - null-pair-cleared
+  - null-level-valid-raw-keeps-raw
+  - valid-level-null-raw-keeps-level
+  - null-other-field-refused
+  - unknown-field
+  - stored-canonical-cleared
+  - stored-edge-whitespace-cleared
+  - stored-non-string-level-cleared
+  - stored-non-string-level-valid-raw-cleared
+  - stored-pair-non-string-cleared

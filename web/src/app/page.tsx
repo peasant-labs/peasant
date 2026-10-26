@@ -1,498 +1,188 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useChannel } from "@/contexts/WebSocketContext";
-import { discoveryErrorMessage } from "@/lib/selectionGuidance";
-import { DiscoveryErrorCode, discoveryErrorCode } from "@/lib/api/errors";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import {
-  ProjectPicker,
-  PickerExplainer,
-  rowsFromSummaries,
-  rowsFromSessions,
-  type PickerRow,
-} from "@/components/picker/ProjectPicker";
-import {
-  ProjectListState,
-  SelectionRecoveryPanel,
-  projectListState,
-} from "@/components/picker/SelectionRecoveryPanel";
-import { ExplainerToggle, useExplainer } from "@/components/Explainer";
-import { Skeleton } from "@/lib/skeleton";
-import type { SessionsPayload, SessionSummary } from "@/types/messages";
-import { cachedProjectSummaries, fetchProjectSummaries, type DecodedProjectSummariesPayload } from "@/lib/api/map";
-import { displayProject } from "@/lib/quality/utils";
-import { formatRelative } from "@/app/review/[[...segments]]/format";
-import {
-  StatGrid,
-  DataState,
-  FeedbackPanel,
-  TeachingEmptyState,
-  type TileSpec,
-} from "@/lib/ft-ui";
-import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronDown, ChevronUp, List } from "lucide-react";
-import { AllSessions } from "@/components/sessions/AllSessions";
-import { GroupedSessionsSection } from "@/components/sessions/GroupedSessionsSection";
-import { useSessionTitles } from "@/hooks/useSessionTitles";
+import { lazy, Suspense, useMemo, useState, useEffect } from 'react';
+import { Layers, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Button, FeedbackPanel, PublishStateLabel } from '@/lib/ft-ui';
+import { SkeletonList } from '@/lib/skeleton';
+import { RootSessionList } from '@/components/home/RootSessionList';
+import { NotFoundState } from '@/components/NotFoundState';
+import { AutoPublishTip } from '@/components/home/AutoPublishTip';
+import { ChoiceMenu, type ChoiceGroup, type ChoiceItem } from '@/components/ChoiceMenu';
+import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
+import { useHomeSessions } from '@/hooks/useHomeSessions';
+import { usePublishState } from '@/contexts/PublishContext';
+import { fetchPublications } from '@/lib/api/publications';
+import type { LocalSessionRow } from '@/lib/api/grouped';
+import { PUBLISH_FILTERS, PUBLISH_FILTER_LABELS, isPublishFilter, type PublishFilter } from '@/lib/home/publishState';
+import { discoveryErrorMessage } from '@/lib/selectionGuidance';
+import { displayProject } from '@/lib/quality/utils';
+import type { LocalSyncProjectOption } from '@/lib/api/home';
+import './home.css';
 
-const CHANNELS: ["sessions"] = ["sessions"];
+const LegacyHomeBrowse = lazy(() => import('@/components/home/LegacyHomeBrowse'));
 
-// ---------------------------------------------------------------------------
-// Projects home: `/` is the PROJECT PICKER, with every ingested session listed
-// beneath it.
-// The ledger line stays on top; one row per project (sessions · recorded
-// coverage · last work · open changes) from GET /api/v1/projects/summary,
-// falling back to sessions-channel grouping (stats unavailable) while the
-// fetch loads or fails. A row click lands on /sessions/{projectHash} — that
-// project's session list (the shared ProjectPicker, destination="sessions").
-// Every install renders this one shape — including a single-project install.
-// ---------------------------------------------------------------------------
+/**
+ * What Home lists. `sessions` is the session table; the others are the
+ * retained browse flows (the project picker, sessions with their helper
+ * threads, the flat filterable list), reached from the same `browse by` menu.
+ */
+type BrowseView = 'sessions' | 'projects' | 'grouped' | 'flat';
+const BROWSE_VIEWS: readonly BrowseView[] = ['sessions', 'projects', 'grouped', 'flat'];
+const BROWSE_LABELS: Record<BrowseView, string> = {
+  sessions: 'sessions', projects: 'project', grouped: 'helper threads', flat: 'every session',
+};
+const isBrowseView = (value: string): value is BrowseView => (BROWSE_VIEWS as readonly string[]).includes(value);
+const ALL_PROJECTS = '';
 
-// ---------------------------------------------------------------------------
-// Summary stats (E1) — aggregate across all projects, built from picker rows.
-// ---------------------------------------------------------------------------
-interface SummaryStats {
-  projects: number;
-  sessions: number;
-  recorded: number;
-  total: number;
-  hasCoverage: boolean;
-  open: number;
-  hasOpen: boolean;
-  lastWorkMs: number | null;
+/** Search rows can be off-page. Enrich only the mounted results, not the library. */
+function SearchDetail({ row }: { row: LocalSessionRow }) {
+  const [publication, setPublication] = useState<Awaited<ReturnType<typeof fetchPublications>>[number]>();
+  useEffect(() => {
+    let active = true;
+    setPublication(undefined);
+    void fetchPublications([row.session.id]).then(items => { if (active) setPublication(items[0]); }).catch(() => {});
+    return () => { active = false; };
+  }, [row.session.id]);
+  const snippet = row.matches?.[0]?.snippet;
+  return <div className="mt-1 flex flex-col gap-1">
+    {snippet && <p className="m-0 text-base text-ink-2 [overflow-wrap:anywhere]"><span className="font-mono text-sm text-ink-3">{row.matches?.[0]?.role === 'user' ? 'you' : row.matches?.[0]?.role}: </span>{snippet}</p>}
+    {publication && <PublishStateLabel state={publication.state === 'published' ? 'published' : publication.autoPublish ? 'auto-publish' : 'not-published'} />}
+  </div>;
 }
 
-function summaryStats(rows: PickerRow[], totalSessions: number): SummaryStats {
-  let recorded = 0;
-  let total = 0;
-  let open = 0;
-  let hasCoverage = false;
-  let hasOpen = false;
-  let lastWorkMs: number | null = null;
-  for (const r of rows) {
-    if (r.recordedFiles !== null && r.totalFiles !== null) {
-      recorded += r.recordedFiles;
-      total += r.totalFiles;
-      hasCoverage = true;
-    }
-    if (r.openChanges !== null) {
-      open += r.openChanges;
-      hasOpen = true;
-    }
-    if (r.lastWorkMs !== null && (lastWorkMs === null || r.lastWorkMs > lastWorkMs)) {
-      lastWorkMs = r.lastWorkMs;
-    }
-  }
-  return { projects: rows.length, sessions: totalSessions, recorded, total, hasCoverage, open, hasOpen, lastWorkMs };
+/**
+ * The local server answers an address it has no page for with this page (its
+ * nearest index.html), so Home checks the address it was opened at: anything
+ * but the root shows the not-found state rather than a session list that
+ * hides the mistake. Read after mount, so the exported HTML and hydration
+ * agree; nothing renders, and nothing is read, until the address is known.
+ */
+// A project choice reads as the table does: its short name, with the folder
+// it stands for as a quieter line under it when the two differ.
+function projectChoice(value: string, projectName: string): ChoiceItem {
+  const name = displayProject(projectName);
+  return {
+    value,
+    name,
+    keepCase: true,
+    label: name === projectName ? name : <span className="choice-menu-project"><span>{name}</span><span className="choice-menu-path" title={projectName}>{projectName}</span></span>,
+  };
 }
-
-// ---------------------------------------------------------------------------
-// Saved-selection notice — a quiet, expandable disclosure.
-//
-// This is genuinely useful (a sparse picker otherwise reads as broken) but it
-// is NOT urgent: the selection is working as configured. It used to occupy a
-// full-width banner above the stats, which gave a working feature the visual
-// weight of a problem. It now collapses to a single quiet line that expands on
-// click, so the counts and the remedy are one interaction away instead of
-// permanently on screen.
-//
-// Still role="status", never "alert" — and the summary carries the counts, so
-// the fact that something is hidden survives without expanding. It never names
-// which projects or sessions are hidden; counts only.
-// ---------------------------------------------------------------------------
-
-function SelectionNotice({
-  notice,
-}: {
-  notice: { hiddenProjects: number; hiddenSessions: number };
-}) {
-  const [open, setOpen] = useState(false);
-  const parts: string[] = [];
-  if (notice.hiddenProjects > 0) {
-    parts.push(`${notice.hiddenProjects.toLocaleString()} project${notice.hiddenProjects !== 1 ? "s" : ""}`);
-  }
-  if (notice.hiddenSessions > 0) {
-    parts.push(`${notice.hiddenSessions.toLocaleString()} session${notice.hiddenSessions !== 1 ? "s" : ""}`);
-  }
-  const summary = `${parts.join(" and ")} hidden by a saved selection`;
-
-  return (
-    <div role="status" className="flex flex-col items-start gap-2">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="inline-flex items-center gap-2 border border-rule px-3 py-1.5 font-mono text-xs text-ink-3 hover:text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
-      >
-        <EyeOff size={13} aria-hidden />
-        <span className="tabular-nums">{summary}</span>
-        {open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
-      </button>
-
-      {open && (
-        <div className="flex flex-col gap-1 border border-rule bg-surface-hover px-4 py-3 text-sm text-ink-2">
-          <p>
-            A saved project selection is limiting what&rsquo;s shown here.
-            The data stays ingested and indexed — it is only hidden from this list.
-          </p>
-          <p className="text-xs text-ink-3">
-            Run <code className="font-mono">peasant kickstart</code> to review or widen the selection.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Flat all-sessions disclosure.
-//
-// The grouped list replaced the old flat table on Home, and with it the filter
-// over session identity fields (short id, harness, project) and the 25-row
-// top-level pager. Those are real flows, so they stay REACHABLE: a collapsed
-// disclosure mounts the unchanged AllSessions table over the same session set,
-// beside the grouped list rather than instead of it. The grouped list keeps its
-// own per-group disclosure/paging state; this table keeps the flat filter and
-// pager exactly as they were, and it is never widened by a helper membership.
-// ---------------------------------------------------------------------------
-
-function AllSessionsDisclosure({
-  sessions,
-  titles,
-}: {
-  sessions: SessionSummary[];
-  titles?: ReadonlyMap<string, string>;
-}) {
-  const [open, setOpen] = useState(false);
-  if (sessions.length === 0) return null;
-  return (
-    <div className="flex flex-col gap-2" data-flat-sessions-disclosure="true">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="inline-flex w-fit items-center gap-2 border border-rule px-3 py-1.5 font-mono text-xs text-ink-3 hover:text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
-      >
-        <List size={13} aria-hidden />
-        <span className="tabular-nums">filter and page through every session</span>
-        {open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
-      </button>
-      {open && (
-        <AllSessions
-          sessions={sessions}
-          titles={titles}
-          title="every session"
-          subtitle="every ingested session across projects, filterable and paged."
-        />
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
 
 export default function HomePage() {
-  const { data: sessionsData, connected, error: sessionsError, errorCode: sessionsErrorCode } = useChannel<SessionsPayload>(CHANNELS);
-  const explainer = useExplainer("home");
-  // Titles come from the quality channel (see the hook) — the sessions channel
-  // carries no title field.
-  const sessionTitles = useSessionTitles();
-
-  const sessions: SessionSummary[] = useMemo(
-    () => sessionsData?.sessions ?? [],
-    [sessionsData],
-  );
-
-  // Per-project stats from the summary endpoint; sessions-channel fallback
-  // (stats unavailable) until it resolves — or for good if it fails.
-  // Seed from the module cache so returning home renders the last-known
-  // columns instantly; the effect below refreshes in the background.
-  const [summaries, setSummaries] = useState<DecodedProjectSummariesPayload | null>(
-    () => cachedProjectSummaries(),
-  );
-  // Tracks whether the summary fetch has settled (resolved OR failed), so we
-  // can tell "still loading" from "loaded and genuinely empty".
-  const [summariesSettled, setSummariesSettled] = useState(false);
-  // Distinct from "settled empty": the fetch actually failed, so the per-project
-  // coverage / open-changes columns fall back to "—".
-  const [summariesFailed, setSummariesFailed] = useState(false);
-  const [summariesError, setSummariesError] = useState<unknown>(null);
-  // Once REST reports that saved-selection visibility could not be applied,
-  // keep the surface fail-closed until a later REST request succeeds. A retry
-  // being in flight (or failing for a different reason) must never reopen the
-  // stale WebSocket fallback.
-  const [selectionFailureLatched, setSelectionFailureLatched] = useState(false);
-  const [summariesReload, setSummariesReload] = useState(0);
+  const [address, setAddress] = useState<'unread' | 'home' | 'unknown'>('unread');
   useEffect(() => {
-    if (sessionsError) {
-      setSummaries(null);
-      setSummariesSettled(true);
-      setSummariesFailed(true);
-      setSummariesError(null);
-      return;
-    }
-    let cancelled = false;
-    setSummariesSettled(false);
-    setSummariesFailed(false);
-    fetchProjectSummaries()
-      .then((p) => {
-        if (!cancelled) {
-          setSummaries(p);
-          setSummariesError(null);
-          setSelectionFailureLatched(false);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setSummaries(null);
-          setSummariesFailed(true);
-          setSummariesError(error);
-          if (discoveryErrorCode(error) === DiscoveryErrorCode.SelectionVisibility) {
-            setSelectionFailureLatched(true);
-          }
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setSummariesSettled(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionsError, summariesReload]);
+    const path = window.location.pathname.replace(/\/index\.html$/, '/').replace(/\/+$/, '');
+    setAddress(path === '' ? 'home' : 'unknown');
+  }, []);
+  if (address === 'unread') return null;
+  return address === 'unknown' ? <NotFoundState /> : <HomeView />;
+}
 
-  const summariesSelectionFailed =
-    selectionFailureLatched ||
-    discoveryErrorCode(summariesError) === DiscoveryErrorCode.SelectionVisibility;
+function HomeView() {
+  const [filter, setFilter] = useState<PublishFilter>('all');
+  const [project, setProject] = useState<LocalSyncProjectOption | null>(null);
+  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
+  const [browse, setBrowse] = useState<BrowseView>('sessions');
+  const { settled } = usePublishState();
+  const home = useHomeSessions({ publication: filter, projectHash: project?.projectHash }, settled);
+  useEffect(() => {
+    if (project && home.projects !== null && !home.projects.some(option => option.projectHash === project.projectHash)) setProject(null);
+  }, [home.projects, project]);
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), query ? 250 : 0);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const roots = home.groups.get('');
+  const selectionFailed = home.selectionError !== null;
+  const discoveryError = home.selectionError ?? roots?.error;
+  const rootPages = roots?.pages;
+  const rows = useMemo(() => [...new Map((rootPages ?? []).flatMap(page => page.items).map(row => [row.sync.id, row])).values()], [rootPages]);
+  const children = new Map([...home.groups].filter(([id]) => id !== '').map(([id, group]) => [id, [...new Map(group.pages.flatMap(page => page.items).map(row => [row.sync.id, row])).values()]]));
+  const allRows = [...rows, ...[...children.values()].flat()];
+  const titles = new Map(allRows.map(row => [row.sync.id, row.title]));
+  const previews = new Map(allRows.map(row => [row.sync.id, row.preview]));
 
-  const summaryListState = summaries === null ? null : projectListState(summaries);
-  const selectionRecovery =
-    summaryListState === ProjectListState.SelectionRecovery ? summaries?.selection ?? null : null;
-
-  // A persisted kickstart selection is narrowing this list AND actually
-  // hiding something right now — distinct from summariesSelectionFailed
-  // (a broken selection that errors outright). This is a working selection
-  // doing its job; a sparse/near-empty picker must say so instead of
-  // reading as broken. Never names which
-  // projects/sessions are hidden — counts only.
-  const activeSelectionNotice =
-    !summariesSelectionFailed && !selectionRecovery && summaries && summaries.selection.active
-      && (summaries.selection.hiddenProjects > 0 || summaries.selection.hiddenSessions > 0)
-      ? summaries.selection
-      : null;
-  const rows = useMemo(
-    () =>
-      sessionsError || summariesSelectionFailed
-        ? []
-        : selectionRecovery
-        ? []
-        : summaries && summaries.projects.length > 0
-        ? rowsFromSummaries(summaries)
-        : rowsFromSessions(sessions),
-    [summaries, sessions, sessionsError, summariesSelectionFailed, selectionRecovery],
-  );
-
-  // Sessions the grouped REST list may render.
-  //
-  // VISIBILITY IS DERIVED FROM THE SERVER ROUTE, never from the sessions
-  // channel directly. `/api/v1/sessions?view=grouped` applies the SAME
-  // discovery/selection predicate the flat route applies, so the list can never
-  // surface a project or session identity the picker is withholding. A
-  // saved-selection failure stops the grouped section entirely (fail closed),
-  // and a selection-recovery state keeps the recovery panel as the only body.
-  const totalSessions =
-    sessionsError || summariesSelectionFailed || selectionRecovery
-      ? 0
-      : sessions.length > 0
-      ? sessions.length
-      : rows.reduce((n, r) => n + r.sessions, 0);
-  const stats = useMemo(() => summaryStats(rows, totalSessions), [rows, totalSessions]);
-
-  // Nothing has resolved yet: summary fetch still in flight AND no sessions
-  // message has arrived. Show a skeleton, not a teach/empty state.
-  const loading = !summariesSettled && sessionsData === undefined;
-
-  const groupedSectionVisible =
-    !loading && !sessionsError && !summariesSelectionFailed && !selectionRecovery;
-
-  // Pre-format coverage percentage for the KPI tile.
-  const coveragePct =
-    stats.hasCoverage && stats.total > 0 ? Math.round((stats.recorded / stats.total) * 100) : null;
-  const statsPending = !summariesSettled;
-
-  // Shimmer pill sized for a stat tile number — shown while per-project stats
-  // are still loading so "—" never has to mean "loading".
-  const tileShimmer = <Skeleton as="span" className="inline-block h-5 w-12 align-middle" />;
-
-  // KPI tiles — pre-formatted values handed to StatGrid.
-  const kpiTiles: TileSpec[] = [
+  // The filters: the server-owned publish-state filter and the project the
+  // list is scoped to. Each set filter counts once on the trigger.
+  const filterCount = (filter !== 'all' ? 1 : 0) + (project ? 1 : 0);
+  const projectOptions = [
+    ...(project && !home.projects?.some(option => option.projectHash === project.projectHash) ? [project] : []),
+    ...(home.projects ?? []),
+  ];
+  const filterGroups: ChoiceGroup[] = [
     {
-      key: "projects",
-      label: "projects",
-      value: stats.projects.toLocaleString(),
-      icon: FolderOpen,
+      id: 'status',
+      caption: 'status',
+      value: filter,
+      items: PUBLISH_FILTERS.map(option => ({ value: option, label: PUBLISH_FILTER_LABELS[option] })),
+      onChoose: next => { if (isPublishFilter(next)) setFilter(next); },
     },
     {
-      key: "sessions",
-      label: "ai conversations",
-      value: stats.sessions.toLocaleString(),
-      icon: MessageSquare,
-    },
-    {
-      key: "files",
-      label: "files built with ai",
-      value: coveragePct !== null ? `${coveragePct}%` : statsPending ? tileShimmer : "—",
-      sub: stats.hasCoverage
-        ? `${stats.recorded.toLocaleString()} of ${stats.total.toLocaleString()} files`
-        : undefined,
-      icon: Sparkles,
-    },
-    {
-      key: "open",
-      label: "unmerged branches",
-      value: stats.hasOpen ? stats.open.toLocaleString() : statsPending ? tileShimmer : "—",
-      sub: stats.lastWorkMs !== null ? `last worked ${formatRelative(stats.lastWorkMs)}` : undefined,
-      icon: GitBranch,
+      id: 'project',
+      caption: 'project',
+      value: project?.projectHash ?? ALL_PROJECTS,
+      items: [
+        { value: ALL_PROJECTS, label: 'all projects' },
+        ...projectOptions.map(option => projectChoice(option.projectHash, option.projectName)),
+      ],
+      onChoose: hash => setProject(hash === ALL_PROJECTS ? null : projectOptions.find(option => option.projectHash === hash) ?? null),
+      note: home.projectsLoading ? 'loading project choices…' : home.projectError != null ? discoveryErrorMessage(home.projectError) : undefined,
+      retry: home.projectError != null ? { label: 'retry project choices', onSelect: () => { void home.loadProjects(); } } : undefined,
     },
   ];
 
-  // DataState status: 'disconnected' only when the body would be empty AND no
-  // local data source is reachable (WS down, REST not yet resolved). When data
-  // is present, a dropped socket shows stale content — not a lost-connection
-  // panel — matching the "connection ≠ content" principle from the demo.
-  const wsStatus: "live" | "disconnected" =
-    rows.length === 0 && !connected && summaries === null ? "disconnected" : "live";
-  const isEmpty =
-    !loading &&
-    !sessionsError &&
-    !summariesError &&
-    rows.length === 0 &&
-    (connected || summaries !== null);
+  // The table's controls sit on its header: search, then the filters and the
+  // browse menu. Search and filters act on the session table only.
+  const browseMenu = <ChoiceMenu
+    ariaLabel="browse by"
+    align="end"
+    trigger={<><Layers aria-hidden="true" />browse by: {BROWSE_LABELS[browse]}</>}
+    groups={[{
+      id: 'browse',
+      value: browse,
+      items: BROWSE_VIEWS.map(view => ({ value: view, label: BROWSE_LABELS[view] })),
+      onChoose: next => { if (isBrowseView(next)) setBrowse(next); },
+    }]}
+  />;
 
-  return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
-      <Breadcrumbs items={[{ label: "projects" }]} />
-
-      {/* Hero — title + the local-first ledger line. */}
-      <div data-tour="home">
-        <div className="flex items-start gap-2">
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-ink">
-            Your projects
-          </h1>
-          <ExplainerToggle explainer={explainer} />
+  return <div className="asb-page home-page" data-home-bounded="true">
+    <header className="home-head" data-tour="home">
+      <h1 className="iu-page-title page-title">sessions</h1>
+    </header>
+    <AutoPublishTip />
+    {discoveryError != null && <div className="flex flex-col items-start gap-3">
+      <FeedbackPanel variant="error">{discoveryErrorMessage(discoveryError)}</FeedbackPanel>
+      <Button variant="secondary" size="sm" onClick={() => home.retry()}>retry the session list</Button>
+    </div>}
+    <div className="home-board">
+      <div className="home-toolbar" data-home-toolbar="true">
+        {browse === 'sessions' && !selectionFailed && <label className="home-search">
+          <Search className="home-search-icon" aria-hidden="true" />
+          <input type="search" aria-label="search your sessions" placeholder="search titles, prompts, tool output" value={query} onChange={event => setQuery(event.target.value)} />
+          {query && <button type="button" className="btn btn-ghost btn-sm btn-icon home-search-clear" aria-label="clear search" onClick={() => setQuery('')}><X aria-hidden="true" /></button>}
+        </label>}
+        <div className="home-toolbar-menus">
+          {browse === 'sessions' && !selectionFailed && !search && <ChoiceMenu
+            ariaLabel="filters"
+            align="end"
+            closeOnChoose={false}
+            onOpen={() => { if (home.projectError == null) void home.loadProjects(); }}
+            trigger={<><SlidersHorizontal aria-hidden="true" />filters{filterCount > 0 && <><span className="home-filter-count" aria-hidden="true">{filterCount}</span><span className="sr-only">, {filterCount} set</span></>}</>}
+            groups={filterGroups}
+            actions={[{ label: 'clear filters', disabled: filterCount === 0, onSelect: () => { setFilter('all'); setProject(null); } }]}
+          />}
+          {browseMenu}
         </div>
-        {/* Bridges the nav label ("Changes") to this picker: you pick a project
-            to see its changes. */}
-        <p className="text-sm text-ink-3 mt-1">
-          Pick a project to see what&rsquo;s changed.
-          {totalSessions > 0 && (
-            <>
-              {" "}
-              <span className="font-mono tabular-nums">{totalSessions.toLocaleString()}</span>{" "}
-              AI conversation{totalSessions !== 1 ? "s" : ""}, on your machine. Nothing has left it.
-            </>
-          )}
-        </p>
       </div>
-
-      {/* The "?" help box opens HERE — directly under the toggle that controls
-          it, as a full-width row (returns null while collapsed). */}
-      <PickerExplainer explainer={explainer} destination="sessions" />
-
-      {/* A saved selection is narrowing this list and something is actually
-          hidden right now. See SelectionNotice above for the presentation
-          rationale. */}
-      {activeSelectionNotice && (
-        <SelectionNotice notice={activeSelectionNotice} />
-      )}
-
-      {sessionsError && <p role="alert" className="text-base leading-relaxed text-danger">{discoveryErrorMessage(sessionsError, sessionsErrorCode)}</p>}
-      {summariesSelectionFailed && (
-        <div className="flex flex-col items-start gap-3">
-          <FeedbackPanel variant="error">
-            {discoveryErrorMessage(summariesError)}
-          </FeedbackPanel>
-          <button
-            type="button"
-            className="border border-rule px-3 py-2 font-mono text-sm text-ink focus-mono"
-            onClick={() => {
-              setSummaries(null);
-              setSummariesReload((value) => value + 1);
-            }}
-          >
-            retry project discovery
-          </button>
-        </div>
-      )}
-      {summariesError !== null && !summariesSelectionFailed && (
-        <p role="alert" className="text-base leading-relaxed text-danger">
-          {discoveryErrorMessage(summariesError)}
-        </p>
-      )}
-
-      {/* KPI grid — aggregate stats across all projects.
-          StatGrid replaces the hand-rolled SummaryCard grid: responsive auto-fit
-          columns, mono eyebrow labels, tabular display numbers, optional sub lines. */}
-      {!loading && rows.length > 0 && (
-        <StatGrid tiles={kpiTiles} />
-      )}
-
-      {/* Explain a screen of "—": the per-project stats couldn't load. */}
-      {summariesFailed && rows.length > 0 && (
-        <p className="text-xs text-ink-3">
-          Per-project stats couldn&rsquo;t load, so coverage and unmerged-branch
-          counts show &ldquo;—&rdquo;. Session counts and last-work are still accurate.
-        </p>
-      )}
-
-      {/* Body state machine via DataState (connection ≠ content principle):
-          loading       → skeleton rows (DataState's built-in shimmer)
-          disconnected  → calm lost-connection panel (not an empty state)
-          empty         → TeachingEmptyState — what to run and why
-          data present  → the project picker */}
-      <DataState
-        loading={loading}
-        status={wsStatus}
-        empty={isEmpty}
-        emptyState={
-          selectionRecovery ? (
-            <SelectionRecoveryPanel {...selectionRecovery} />
-          ) : (
-            <TeachingEmptyState
-              title="no ai work recorded yet"
-              body="run the command below in your terminal. it scans this computer for your ai coding conversations (claude code, codex, and others) and shows what it finds here."
-              command="peasant ingest"
-            />
-          )
-        }
-        skeletonRows={4}
-      >
-        {/* statsPending until the summary fetch settles → the coverage +
-            unmerged cells shimmer instead of popping empty→value. */}
-        <ProjectPicker rows={rows} destination="sessions" statsPending={!summariesSettled} />
-      </DataState>
-
-      {/* Every ingested session, grouped by its saved helper threads, beneath
-          the picker. The list and its counts come from the SAME authorized,
-          selected route set, so grouping is server-driven rather than a
-          client-side cosmetic fold. Rendered outside DataState because it has
-          its own empty rule and must not replace the picker's teach/empty
-          state. */}
-      {groupedSectionVisible && (
-        <GroupedSessionsSection
-          variant="sessions"
-          invalidationKey={sessionsData}
-          titles={sessionTitles}
-          heading="all sessions"
-        />
-      )}
-
-      {/* The pre-existing cross-project filter and 25-row pager stay reachable
-          here, beside the grouped list. See AllSessionsDisclosure above. */}
-      {groupedSectionVisible && (
-        <AllSessionsDisclosure sessions={sessions} titles={sessionTitles} />
-      )}
+      {browse === 'sessions' ? <>
+        {!selectionFailed && (search ? <GroupedSessionsSection key={`${search}-${home.revision}`} variant="search" query={search} heading="search results" rowDetail={row => <SearchDetail row={row} />} />
+          : !roots?.pages.length && roots?.error != null ? null
+          : <RootSessionList rows={rows} childGroups={children} titles={titles} previews={previews} home={home} filter={filter} scope={`${filter}:${project?.projectHash ?? ''}`} loading={!roots?.pages.length && roots?.error == null} />)}
+      </> : <section aria-label={`browse by ${BROWSE_LABELS[browse]}`} id={`home-browse-${browse}`} className="home-browse">
+        {!selectionFailed && <Suspense fallback={<SkeletonList rows={4} />}><LegacyHomeBrowse view={browse} /></Suspense>}
+      </section>}
     </div>
-  );
+  </div>;
 }

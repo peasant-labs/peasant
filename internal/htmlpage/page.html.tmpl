@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>{{.Title}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Atkinson+Hyperlegible+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>{{.Stylesheet}}</style>
+</head>
+<body>
+<main class="pg-card" aria-labelledby="pg-heading">
+<header>
+<span class="pg-brand"><svg viewBox="0 0 18 22" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square"><path d="M9 21V3"/><path d="M9 7 5 4"/><path d="M9 7l4-3"/><path d="M9 11 5 8"/><path d="M9 11l4-3"/><path d="M9 15l-4-3"/><path d="M9 15l4-3"/></svg>peasant</span>
+<h1 id="pg-heading">{{.Heading}}</h1>
+</header>
+<div class="pg-body">
+{{- range .Lines}}
+<p class="pg-line">{{range .}}{{if eq .Kind "value"}}<strong class="pg-value">{{.Text}}</strong>{{else if eq .Kind "code"}}<code>{{.Text}}</code>{{else}}{{.Text}}{{end}}{{end}}</p>
+{{- end}}
+{{- with .Status}}
+<p class="pg-status" data-tone="{{.Tone}}"><span class="pg-dot" aria-hidden="true"></span>{{.Text}}</p>
+{{- end}}
+{{- with .Note}}
+<p class="pg-note">{{.}}</p>
+{{- end}}
+</div>
+<footer><p class="pg-hint">{{.Hint}}</p></footer>
+</main>
+</body>
+</html>

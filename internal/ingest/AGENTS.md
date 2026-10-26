@@ -94,6 +94,10 @@ multi-file readers retain their existing consistency limitations.
 Slot state machine (monotonic): `empty(0) ──Add──▶ ready(1) ──Drain──▶ claimed(2) ──AckBatch──▶ acked(3)`
 `Drain()` returns a `DrainBatch` (Results + Claimed indices). `AckBatch(DrainBatch)` frees arena space.
 Multiple `DrainBatch` values may be outstanding simultaneously; each owns its own `Claimed` slice. The drain loop now attaches one completion token to the streamed INDEX work for that batch, so arena bytes are released only after all parser workers that can read that batch finish.
+Released allocation spans (including wrap gaps) are tracked by linear arena coordinates.
+Only a contiguous released prefix advances the tail: slot publication, parent gates, and
+batch completion may reorder allocations, but no release may skip an older live span.
+Exhausted-slot rollbacks use the same ordered release path.
 
 **SessionEntryQueue** — Vyukov MPMC. Each slot has a `sequence` atomic (sole sync point).
 Push: CAS `head`, write, store `seq = pos+1`. Pop: CAS `tail`, read, store `seq = pos+cap`.
@@ -133,6 +137,36 @@ When adding or changing a kind, update the adapter declaration beside its dispat
 production-owned census when the dispatch shape changes, regenerate the artifacts, and bump the
 relevant indexer version when settled sessions must be re-indexed.
 
+## Managed generations and the latest attempt
+
+A store that can persist and read a managed generation replaces the relational
+format-1 projection with one immutable format-2 generation per session. The
+generation owns its metadata, content records and completeness; the session row
+records the generation identity, the producer revision and the verified pair
+identity that produced it.
+
+A managed write is RETAINED as the session's latest attempt instead of installed
+only when all of these hold: the result is a managed V2 generation; its
+completeness is complete (`incomplete_new` is excluded); the assessed capture is
+the unaccounted source omission (`preview_only` with failure code
+`source_records_omitted`, derived from `SourceOmitted && Unaccounted &&
+!hasOmissions`); the write is an ordinary replace, never an explicit rebuild, a
+format conversion or a content backfill; the stored certificate still holds full
+authority; and a verified pair identity is available — the stored artifact hash
+or the identity the write carries. When neither is present the store refuses
+before any mutation.
+
+Retention leaves the active authority byte-identical and reports through the
+existing durable vocabulary: the `skipped` outcome with the held reason and a
+literal zero entry count, so the pipeline counts no indexed session. The mounted
+reads and the preview-snapshot detail serve the latest attempt with partial
+diagnostics; the full read and export refuse with the latest-attempt sentinel;
+the explicit last-good selection serves the active full authority. The latest-attempt
+pointer clears with the active authority's own finalization — the active move, a
+representation replacement, or the shared bookkeeping a skip or repair runs —
+and never with an identical-candidate retry. Retention consumes the capture the
+run already made; it does not reacquire the source.
+
 ## Constraints
 
 | ID | Name | Rule |
@@ -140,7 +174,7 @@ relevant indexer version when settled sessions must be re-indexed.
 | C1 | Root-Owns-Subtree | One goroutine processes a root + its entire BFS subtree. Prevents directory races on `{hostSlug}/{parentID}/`. |
 | C2 | Parent-Before-Child DB | FK ordering via `StagingBuffer.Commit()`: children invisible to `Drain()` until parent committed. |
 | C3 | Atomic File Writes | The pair is installed by writing both files to a temp directory and renaming them into place, transcript first and metadata last, with no file sync and no lock. Never delete a session subtree; children and unrelated files are not owned. Ownership is decided by NAME, never by location: inside the session `debug/` directory only names whose extension is in the closed set `defaults.DebugArtifactSuffixes()` are peasant's own, so a user file with any other extension survives a write. The database commit, not the file write, is the durability point. |
-| C4 | Metadata Compatibility | Versions below 9 require native refresh. Reading metadata 9/10 alone causes no adapter call or metadata rewrite. An omitted adapter version uses baseline 1 for refresh eligibility but stays unknown in provenance until actual extraction succeeds. Future schemas refuse refresh/index without modifying their artifacts; future adapter revisions refuse older-adapter replacement but allow supported retained reads. |
+| C4 | Metadata Compatibility | Versions below 9 require native refresh. Reading metadata 9/10 alone causes no adapter call or metadata rewrite. An omitted adapter version uses baseline 1 for refresh eligibility but stays unknown in provenance until actual extraction succeeds. Future schemas refuse refresh/index without modifying their artifacts; future adapter revisions refuse older-adapter replacement but allow supported retained reads. The managed-generation candidate is the one exception: it re-gates a sidecar the declared refresh predicate marks for native refresh at the current schema because the verified capture supplies the content hash and the candidate recomputes the content hash and the counts the projection derives; the sidecar still supplies project, git, host, parent and redaction context. |
 | C5 | Arena Concurrent Drain | `Add(ctx, r)` waits on the arena-freed broadcast, the bounded backoff fallback (1ms→16ms), or ctx when the arena is full; on ctx it stages the result outside the arena (`arenaLen` 0) and still returns true, so a cancelled run drops no session. drainLoop goroutine runs concurrently with workers and wakes on the ready signal, `workersDone`, the INDEX ack, or ctx; arena only recycles via `AckBatch`. |
 | C6 | Non-Blocking Progress | `ProgressState` pull model — `Update()` writes (pipeline goroutines), `Snapshot()` reads (renderer at its own tick rate). Never drops events. A `KindAdvance` carries a `Delta` that the store adds to a stage-owned cumulative `Done`, so workers that finish out of order cannot move the count backwards. |
 

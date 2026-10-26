@@ -1,4 +1,16 @@
 requiredNames:
+  - turn-context-replaced-item-effort
+  - turn-context-effort-high
+  - turn-context-effort-absent-invalid
+  - turn-context-effort-edge-whitespace-dropped
+  - inherited-function-call-local-result
+  - inherited-custom-call-local-result
+  - local-function-pair
+  - local-custom-pair
+  - inherited-function-pair
+  - inherited-custom-pair
+  - result-without-call
+  - inherited-call-result-before-later-local-call
   - aligned-user-context-media-unknown
   - typed-context-kinds
   - context-kind-modality-conflict
@@ -10,8 +22,8 @@ requiredNames:
   - generic-child-user-text-unknown
   - media-only-action-answer-framing
   - native-section4-count
-  - inherited-copied-prefix-retained
-  - inherited-multi-segment-retained
+  - inherited-copied-prefix
+  - inherited-multi-segment
   - candidate-refusal-keeps-private-location-safe
   - metadata-mutation-barrier
   - graph-current-parent-supersedes-projection

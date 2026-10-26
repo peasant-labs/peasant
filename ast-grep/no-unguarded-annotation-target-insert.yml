@@ -1,0 +1,41 @@
+id: no-unguarded-annotation-target-insert
+language: Go
+severity: error
+message: >
+  Direct insert into annotation_target_entries. Route every entry-target
+  insert through insertAnnotationTargetEntryOnConn (the guarded
+  sqlInsertTargetEntry statement with its affected-row existence check).
+note: >
+  The insert-time existence check replaced the session_entries foreign key.
+  Any other INSERT silently bypasses it. The only valid definition site is
+  the sqlInsertTargetEntry constant in internal/store/annotation_store.go,
+  and the only valid execution site is insertAnnotationTargetEntryOnConn.
+  Shipped migrations and test seeds are ignored; anything else needs an
+  ast-grep-ignore suppression with a reason.
+rule:
+  any:
+    # A second definition site carrying its own copy of the insert.
+    - all:
+        - kind: const_spec
+        - regex: 'INSERT INTO annotation_target_entries'
+        - not:
+            regex: sqlInsertTargetEntry
+    # A direct execution of an entry-target insert outside the helper,
+    # whether through the constant or an inline statement.
+    - all:
+        - pattern:
+            context: func _() { sqlitex.ExecuteTransient($CONN, $SQL, $OPTS) }
+            selector: call_expression
+        - not:
+            inside:
+              pattern: func insertAnnotationTargetEntryOnConn($$$) { $$$ }
+constraints:
+  SQL:
+    regex: 'INSERT INTO annotation_target_entries'
+ignores:
+  - "vendor/**"
+  - "third_party/**"
+  - "**/*_test.go"
+  - "internal/store/schema.go"
+  - "internal/store/schema_v*.go"
+  - "internal/store/migrations.go"

@@ -28,6 +28,15 @@ import (
 //go:embed testdata/unknown_local_budget.yaml
 var unknownLocalBudgetYAML []byte
 
+// retainedTransferRefusalPhrase is the transfer-limit phrase the published
+// refusal renders for the retained-unknown per-payload cap. It is rendered from
+// the production cap through the shared formatter, so this production-path
+// assertion tracks the enforced limit; the independent literal tripwire lives in
+// TestRetainedUnknownTransferLimitMatchesPublishedLabel.
+func retainedTransferRefusalPhrase() string {
+	return defaults.HumanByteSize(int64(defaults.RetainedUnknownPayloadCapBytes)) + " transfer limit"
+}
+
 func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 	t.Parallel()
 	var fixture struct {
@@ -60,7 +69,7 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			// identifier. The fixture tests byte budgets, not identifier matching.
 			padding := strings.Repeat("x ", c.PaddingBytes/2) + strings.Repeat("x", c.PaddingBytes%2)
 			payload := strings.ReplaceAll(fixture.Payload, "BODY", padding)
-			if len(payload) <= 8<<20 || len(payload) >= defaults.MaxJSONLRecordBytes {
+			if len(payload) <= defaults.RetainedUnknownPayloadCapBytes || len(payload) >= defaults.MaxJSONLRecordBytes {
 				t.Fatal("fixture does not straddle transfer/source boundary")
 			}
 			sid := schema.SessionID(testutil.TestSessionUUID)
@@ -154,7 +163,7 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			if !bytes.Contains(encoded, []byte("opening")) || !bytes.Contains(encoded, []byte("closing")) {
 				t.Fatal("known siblings lost")
 			}
-			if _, err := export.ExportSession(t.Context(), db, fs, string(sid)); err == nil || !strings.Contains(err.Error(), "8 MiB transfer limit") {
+			if _, err := export.ExportSession(t.Context(), db, fs, string(sid)); err == nil || !strings.Contains(err.Error(), retainedTransferRefusalPhrase()) {
 				t.Fatalf("export must explicitly refuse transfer size, not local retention: %v", err)
 			}
 			publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.0.1", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: schema.AllContentCapabilities}}
@@ -171,7 +180,7 @@ func TestUnknownLocalRetentionBeyondTransferBudget(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(publisher.Calls) != 0 || len(published.Sessions) != 1 || published.Sessions[0].Error == nil || !strings.Contains(published.Sessions[0].Error.Error(), "8 MiB transfer limit") {
+			if len(publisher.Calls) != 0 || len(published.Sessions) != 1 || published.Sessions[0].Error == nil || !strings.Contains(published.Sessions[0].Error.Error(), retainedTransferRefusalPhrase()) {
 				t.Fatalf("wrong transfer refusal: %+v", published)
 			}
 		})

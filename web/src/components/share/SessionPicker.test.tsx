@@ -101,7 +101,7 @@ describe('SessionPicker large-history interactions', () => {
     await waitFor(() => expect(branch).toBeChecked());
     expect(project).toHaveAttribute('aria-checked', 'mixed');
     expect(location).toHaveAttribute('aria-checked', 'mixed');
-    expect(screen.getByText(`${fixture.interactions.leaf.expectedBranchSelectable} selected · ${fixture.interactions.leaf.expectedBranchTokens} tokens`)).toBeInTheDocument();
+    expect(document.querySelector('.gms-tally')?.textContent).toBe(`${fixture.interactions.leaf.expectedBranchSelectable} selected · ${fixture.interactions.leaf.expectedBranchTokens} tokens`);
     expect(rectSpy).toHaveBeenCalledTimes(measuredBeforeToggle);
     expect(observerConstructions).toBe(observersBeforeToggle);
   });

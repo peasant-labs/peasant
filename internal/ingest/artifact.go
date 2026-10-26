@@ -25,7 +25,7 @@ const managedArtifactStateDir = ".peasant-state"
 // retained semantic input, not an indexer's input or proof of computation.
 //
 // The database is the source of truth for everything derived from the pair;
-// the pair itself is the retained input the parsers read. A pair read back
+// the pair itself is the stored input the parsers read. A pair read back
 // from disk is validated by NewManagedArtifact, which hashes it once. A pair
 // the worker just produced is built by newIngestArtifact from the bytes it is
 // about to write, without a second hash and without a copy.
@@ -49,7 +49,7 @@ func NewManagedArtifact(metadataJSON, transcript []byte) (*ManagedArtifact, erro
 	}
 	contentHash := schema.ComputeTranscriptHash(transcript)
 	if meta.ContentHash != "" && meta.ContentHash != contentHash {
-		return nil, fmt.Errorf("capture managed artifact for session %s: transcript checksum does not match committed metadata; the pair cannot be used safely; run harvest to recover or restore matching retained files", meta.SessionID)
+		return nil, fmt.Errorf("capture managed artifact for session %s: transcript checksum does not match committed metadata; the pair cannot be used safely; run harvest to recover or restore matching stored files", meta.SessionID)
 	}
 	if meta.MetadataHash != "" && meta.MetadataHash != schema.ComputeMetadataHash(meta) {
 		return nil, fmt.Errorf("capture managed artifact for session %s: metadata checksum is inconsistent; no producer evidence was changed; restore valid committed metadata before retrying", meta.SessionID)
@@ -249,7 +249,7 @@ type ArtifactMirrorStore interface {
 // covers many sessions and no page grows past what the store accepts.
 const MirrorPageSize = 256
 
-// readArtifactPair reads and validates the retained pair whose metadata is at
+// readArtifactPair reads and validates the stored pair whose metadata is at
 // metadataPath under output. It is the only way a pair reaches a parser
 // after ingest: the reader hashes the pair once and refuses a torn, mixed or
 // stale one. Every path is absolute.
@@ -289,7 +289,7 @@ func readArtifactPair(filesystem FileSystem, output, metadataPath string, sid Se
 	return NewManagedArtifact(data, transcript)
 }
 
-// ReadManagedPair reads and validates the retained pair whose metadata is at
+// ReadManagedPair reads and validates the stored pair whose metadata is at
 // metadataPath under output. It is the exported reader tests and rebuild
 // callers use to open a saved session's pair, refusing a torn, mixed or stale
 // one by its hash.

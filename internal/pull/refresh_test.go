@@ -25,8 +25,7 @@ func ownAnnotation(hash string) schema.PullAnnotation {
 			Value:       "deny",
 			ContentHash: &h,
 		},
-		AuthorUserID:   testutil.TestPullAuthorUserID, // the requester's own id
-		AuthorUsername: "self",
+		Author: testutil.PublicProfile(testutil.TestPullAuthorUserID, "self"), // the requester's own id
 	}
 }
 
@@ -39,11 +38,11 @@ func ownTranscriptListing() *schema.PullListResponse {
 			{
 				TranscriptID: testutil.TestTranscriptID,
 				LocalID:      testutil.TestSessionUUID,
-				OwnerUserID:  testutil.TestPullAuthorUserID, // OWN
+				Owner:        testutil.PublicProfile(testutil.TestPullAuthorUserID, "self"), // OWN
 			},
 			{
 				TranscriptID: testutil.TestTranscriptID2,
-				OwnerUserID:  testutil.TestAuthorUserID, // someone else — must be skipped
+				Owner:        testutil.PublicProfile(testutil.TestAuthorUserID, testutil.TestAuthorUsername), // someone else — must be skipped
 			},
 		},
 		Page:  1,
@@ -146,8 +145,8 @@ func TestRefreshOwnAnnotations_BySession(t *testing.T) {
 	// Two own transcripts; --session narrows to the one whose LocalID matches.
 	listing := &schema.PullListResponse{
 		Transcripts: []schema.PullTranscriptInfo{
-			{TranscriptID: testutil.TestTranscriptID, LocalID: testutil.TestSessionUUID, OwnerUserID: testutil.TestPullAuthorUserID},
-			{TranscriptID: testutil.TestTranscriptID2, LocalID: testutil.TestSessionUUID2, OwnerUserID: testutil.TestPullAuthorUserID},
+			{TranscriptID: testutil.TestTranscriptID, LocalID: testutil.TestSessionUUID, Owner: testutil.PublicProfile(testutil.TestPullAuthorUserID, "self")},
+			{TranscriptID: testutil.TestTranscriptID2, LocalID: testutil.TestSessionUUID2, Owner: testutil.PublicProfile(testutil.TestPullAuthorUserID, "self")},
 		},
 		Page: 1, Limit: 100, Total: 2,
 	}
@@ -258,11 +257,11 @@ func TestRefreshOwnAnnotations_MultiPage(t *testing.T) {
 		page1[i] = schema.PullTranscriptInfo{
 			TranscriptID: testutil.TestTranscriptID,
 			LocalID:      testutil.TestSessionUUID,
-			OwnerUserID:  testutil.TestPullAuthorUserID,
+			Owner:        testutil.PublicProfile(testutil.TestPullAuthorUserID, "self"),
 		}
 	}
 	page2 := []schema.PullTranscriptInfo{
-		{TranscriptID: testutil.TestTranscriptID2, LocalID: testutil.TestSessionUUID2, OwnerUserID: testutil.TestPullAuthorUserID},
+		{TranscriptID: testutil.TestTranscriptID2, LocalID: testutil.TestSessionUUID2, Owner: testutil.PublicProfile(testutil.TestPullAuthorUserID, "self")},
 	}
 	reader := &testutil.StubVillageReader{
 		ListResponses: []*schema.PullListResponse{
@@ -303,7 +302,7 @@ func TestRefreshOwnAnnotations_ShortPageTermination(t *testing.T) {
 		ListResponses: []*schema.PullListResponse{
 			{
 				Transcripts: []schema.PullTranscriptInfo{
-					{TranscriptID: testutil.TestTranscriptID, LocalID: testutil.TestSessionUUID, OwnerUserID: testutil.TestPullAuthorUserID},
+					{TranscriptID: testutil.TestTranscriptID, LocalID: testutil.TestSessionUUID, Owner: testutil.PublicProfile(testutil.TestPullAuthorUserID, "self")},
 				},
 				Page: 1, Limit: 100, Total: 0, // Total unknown ⇒ rely on short-page break
 			},

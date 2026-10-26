@@ -7,6 +7,331 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-24
+
+### Changed
+- Pulling reads pull contract 0.3.0, where peasant online shows each
+  transcript owner and annotation author as you may see them: their public
+  profile, or `anon` when they are not discoverable to you. Lists, tables and
+  the `context` header print `anon` for such a person, `--user` never matches
+  one, and the pull manifest and local index store none of their identity,
+  nor the project name or repository targets beside an anonymous owner. A
+  transcript pulled before its owner or an annotation author became anonymous
+  to you, or before its owner was renamed, is re-pulled in full on the next
+  pull, so the stored copy drops the identity too.
+- **JSON output:** `village transcripts list --json` (remote) prints each
+  `owner` as an object, `{"kind":"profile","id","username","display_name",
+  "avatar_url"}` or `{"kind":"anonymous"}`; the `ownerUserId` and
+  `ownerUsername` fields are gone. `list --local --json` keeps `owner`, and
+  `context --json` keeps `ownerUsername`, as the stored username, or `null`
+  for an anonymous owner.
+- This CLI pulls from peasant online on pull contract 0.2.0 or 0.3.0: it
+  accepts the envelope peasant online serves when that version is one it
+  reads, decodes exactly that envelope, and records it in the pull manifest.
+  Older CLIs read only 0.2.0, so once peasant online moves to 0.3.0 they stop
+  pulling with the "pull-contract incompatible" error and must upgrade.
+  Publishing and every other command keep working on older CLIs.
+
+## [0.11.1] - 2026-10-23
+
+### Changed
+- The local web finishes its redesign on Fairtrade 0.0.40. The sidebar puts
+  search, the docs, community (soon) and the collectives link that opens online
+  on top, the app's pages under them, and the account, a settings gear and the
+  theme toggle in its footer, at the same width as online. Online leaves the
+  section nav and the app switcher; the online page stays at `/village`,
+  reached by its address like analytics, changes and the code map.
+- Every local page sits in one page frame with one title size. Settings carry
+  one "settings" title above their section bar, and each section's name heads
+  its column. Nothing on the map, its rail or the project lists is smaller than
+  14px, and every control is 44px tall on a touch screen.
+- How-to lives in the docs: each task links to its docs section instead of
+  being taught in the app, and pages and settings drop their explainer
+  sentences and provenance chips.
+- Plainer copy: the link to the hosted app reads "dashboard", the account row
+  reads "signed in to peasant online with github" and names the server only
+  when it is not the default one, the CLI and terminal UI call the hosted app
+  "peasant online", and a publication reads "published to N collectives",
+  "needs update" or "published".
+- The publish popup re-indexes a session whose local index is stale, only when
+  asked and only that session, names each check step, and says in one line
+  what stopped a re-index, with the reason behind details.
+- Re-pin Fairtrade to 0.0.40.
+
+### Fixed
+- A project link that cannot be opened shows a designed "project not found" or
+  "couldn't open" page instead of the failed request, and `/review` lists the
+  projects instead of one line of text.
+- A recorded session with no indexed turns says so and offers a re-index, and
+  the page reads a session again after a re-index instead of keeping an empty
+  transcript.
+- A session's local detail carries its stored token and duration totals, so
+  the transcript header no longer shows "0 tokens".
+- Session titles on Home, in the session heading and in the map rail drop
+  Cursor's `<user_query>` wrapper, and the transcript shows Cursor prompts
+  without it.
+- Home's filters name projects by their short name, its status cell sits on
+  the row's baseline, and an empty analytics page shows the nothing-recorded
+  state instead of empty charts.
+- One Claude Code record with an unreadable payload (a lone surrogate escape,
+  a duplicate key or invalid UTF-8) no longer fails the share scan, export and
+  publication of the whole session: the payload is kept only when the strict
+  evidence reader accepts it. Claude Code sessions re-index once, on the first
+  harvest after upgrading.
+- A Cursor session whose project path has a component starting with "-" is
+  filed under its own project, not a parent folder.
+
+## [0.11.0] - 2026-10-23
+
+### Added
+- Scoped collective observations: `peasant village collectives fetch`, `list`,
+  `track` and `untrack`, and `peasant village contributions list`, record the
+  metadata of the collectives a signed-in account can see and dated evidence of
+  its contributions, guarded against a credential change mid-command. The local
+  web shows the saved observations offline on its online page (`/village`)
+  (#637).
+
+### Changed
+- The local web is redesigned on Fairtrade 0.0.32. Fairtrade's sidebar replaces
+  the one-row header: the registry's sections, a collectives link that opens
+  online, search (still on ⌘K), the theme toggle, an app switcher that opens
+  online and the docs and, when signed in, the account; on a phone it is a top
+  bar with a drawer. Home is a session table with search, a filters menu (status
+  and project) and a browse-by menu that keeps the project, helper-thread and
+  every-session views. Settings open one section at a time (account, automatic
+  publishing, redaction, projects, sources, advanced), and redaction leads with
+  the four categories and the label each one prints. Pages and settings sections
+  ease into view, and nothing moves for a reader who asks for reduced motion.
+- The local web calls the hosted app "peasant online" (or "online") in its own
+  copy, and the publish wizard says "publish" where it said "contribute" and
+  "submit". CLI commands, routes and API paths keep their names.
+- The offline notice sits at the top of the page column, pinned there on a
+  roomy screen, and the page keeps the reader's place when it appears.
+- Home loads its sessions through shared forward pages.
+- Re-pin Fairtrade to 0.0.32.
+
+### Fixed
+- Home stays available when a recorded project directory is not a Git
+  checkout (#640).
+
+## [0.10.0] - 2026-10-16
+
+### Added
+- `peasant migrate` converts file-backed sessions to the harmonized content
+  model in place, with a dry-run, resumable batches, and per-session verification
+  before old data is removed. `peasant harvest verify --content` checks content
+  and search integrity; `--repair` marks damaged content for repair (#586).
+- Village transcript listing and bulk pull accept repeatable `--collective`
+  selections, page through the union, and de-duplicate transcripts. Bulk pull
+  shows live progress and supports cancellation while retaining completed pulls.
+  `--user <username>` filters listing and bulk pull by contributor, including
+  offline `list --local --user` over stored owner names (#631).
+- Session thinking level and its changes are captured from Claude Code, Codex,
+  OpenCode, and Pi evidence and carried through storage, session detail, export,
+  and publication (#620).
+- Harvest audits retain best-effort per-session outcomes and validated reason
+  codes for the latest 100 runs, without copying transcript content, raw error
+  messages, or filesystem locations. `docs/harvest-audit.md` explains their
+  limits and read-only inspection; a harvest-audit skill documents the workflow
+  (#601, #607, #610).
+
+### Changed
+- The harmonized content model gives each content string one storage home,
+  unifies search, and bounds write batches by bytes and session count through
+  `write.*` configuration. Session detail, publication transcript, and
+  authoritative publication metadata documents share a 128 MiB limit; retained
+  unknown payloads keep their separate 8 MiB limit (#586).
+- Managed generations use one builder contract, including Claude Code format 2.
+  A newer capture with unaccounted missing content is kept beside the last-good
+  full copy: previews show the newer partial attempt, while normal full export
+  and publication refuse rather than silently sending the older copy. Explicit
+  `peasant export sessions --last-good` and hand-run
+  `peasant village push --last-good` remain available; automatic publishing never
+  substitutes the last-good copy (#627).
+- The first harvest after the indexer and origin-rule updates may take longer
+  while affected sessions are refreshed (#604, #620, #627).
+- Re-pin Fairtrade to 0.0.29 and the browser Schema package to 0.29.1, using
+  canonical typed redaction category bindings in both publication review paths.
+
+### Fixed
+- Home preserves parent relationships and groups subagents. Expanded children
+  now occupy their own rows with their own project, turns, duration, time, and
+  publication state (#619).
+- Command-palette session-ID and project-hash matches display session/project
+  identities instead of empty snippet rows (#544).
+- Claude fork, agent-file, and continuation transcripts are accepted on verified
+  structural ownership evidence; corrupt cached identities are re-mined rather
+  than trusted (#604, #608, #609).
+- Harvest recovers inherited-pair Codex results, retains native Codex delivery
+  records, accepts successful Cursor turn endings, and preserves OpenCode's
+  last-good authority during incomplete refreshes (#591, #595).
+- Unavailable native sources no longer repeat repair warnings on every run;
+  locator failures do not incorrectly mark a source unavailable (#600, #606).
+- The retained kickstart publication path opens managed-session readers using
+  the configured output location, so consented publication can read imported
+  managed sessions without changing onboarding defaults.
+- Invalid redaction review data blocks continuation and publication, while
+  prerequisite recovery stays separate from publication retries (#634).
+- Home keeps its existing search and load-more controls, with all supplied
+  parent and child rows visible without an extra table pager or height cap.
+
+### Documentation
+- The experimental feature register clarifies that file familiarity /
+  understanding coverage is incomplete, not a shipped end-to-end app feature;
+  completion and an opt-in flag remain deferred (#630).
+
+## [0.9.0] - 2026-10-07
+
+### Added
+- Native **Windows amd64** support: Peasant builds, passes CI, discovers and ingests
+  Claude Code desktop sessions, serves the dashboard, and self-upgrades on Windows.
+  Each release publishes a `peasant_<version>_windows_amd64.zip` (carrying
+  `peasant.exe`, `LICENSE`, `README.md`, and `THIRD_PARTY_NOTICES`) and the bare
+  `peasant_<version>_windows_amd64.exe` that `peasant upgrade` replaces in place;
+  Windows arm64 is not published. Linux and macOS behavior is unchanged. The install
+  guide is `docs/install/windows.md`; the maintainer guide is `docs/cross-platform.md`
+  (#480, #563).
+- `peasant reclaim`: a maintenance command that deletes superseded managed
+  generations. It offers a dry-run that lists the sessions, generations, rows, and
+  bytes it would reclaim and a resumable `--limit` batch mode; the destructive path
+  requires consent or `--confirm` and prints the offline `VACUUM` step (#559).
+
+### Performance
+- The durable full-content writer prepares its manifest and chunk inserts once per
+  transaction and re-binds them per row instead of preparing a statement for every
+  row. A large full-content write dropped 24–28% in time and about half its
+  allocations (#556).
+- The managed-generation install prepares its per-row inserts once per install and
+  re-binds them per row. A fresh-session install dropped 12–14% in time and about 38%
+  of its allocations (#558).
+
+### Fixed
+- Publication repair selects only recoverable captures, and the pair-repair pass now
+  owns pair-damaged maintenance candidates, settling missing-pair churn (#557).
+- The IPv6-loopback refusal test verifies its bind-exclusivity premise and retries the
+  rebind, so a parallel test that grabs the same port number no longer fails it
+  spuriously while a genuinely leaked listener still does (#561).
+
+### CI
+- The local↔CI podman parity floor moved to 5.8.x, tracking the runner image.
+
+## [0.8.2] - 2026-10-04
+
+### Changed
+- Managed-generation staging writes content blobs without a per-file sync and
+  verifies every blob when a binding re-reads it, while the manifest and the
+  directory stay durable. Staging a 1000-blob generation dropped from 1.40 s to
+  0.067 s at 16 writers (19.09 s to 0.078 s at one writer), and a blob torn by
+  a power loss refuses recovery instead of activating unservable content (#554).
+
+### Fixed
+- `peasant harvest index --dry-run` resolves the same managed-generation
+  harness targets a real run uses. On a store upgraded to managed generations
+  the forecast previously reported the retained baseline, planned a different
+  set of sessions than the real run, and emitted false "stored producer
+  revision is newer than this indexer's revision" refusals (#551).
+- The stale-index pass at the end of a harvest reports the stored sessions the
+  run's session selection left at an older index, or with an unfinished repair,
+  with the remedy. A selected-mode kickstart run previously left thousands of
+  stored sessions behind while the report showed only an "unchanged" total
+  (#552).
+- Publication readiness compares a stored capture's metadata schema version
+  against the declared refresh-free set instead of exact equality, so a schema
+  bump that adds no required field no longer marks every bound capture as
+  needing a re-ingest. An ordinary harvest previously re-extracted and
+  re-indexed thousands of unchanged sessions after the 10→11 bump (#555).
+
+## [0.8.1] - 2026-10-04
+
+### Changed
+- Managed-generation staging and commits: candidates prepare their content
+  files in parallel with bounded blob writers, each candidate commits through
+  the serialized writer lane as its own staging completes, and the INDEX
+  progress advances per committed session instead of per batch. A large
+  OpenCode re-index no longer stalls behind one session's file writes (#546).
+- FILTER maintenance passes run their per-session work through the bounded
+  worker pool, read session locations in one bulk query per pass, and no longer
+  rescan the whole output tree when the database already records a location.
+  The stale-adapter and pair-repair inventories no longer take minutes on a
+  large store (#547).
+
+### Fixed
+- OpenCode sessions refused with "transcript checksum does not match committed
+  metadata": the staging arena released byte spans out of allocation order, so
+  a later batch could recycle bytes a parser was still reading. Arena releases
+  now advance the tail only over the contiguous released prefix (#548).
+- Codex subagent sessions refused with "captured metadata is not
+  self-consistent with the captured identity": a subagent rollout embeds the
+  parent thread's envelope in a later `session_meta` record, and the parser
+  re-checked every record. The first decodable metadata envelope now owns
+  identity and context (#549).
+
+## [0.8.0] - 2026-10-03
+
+### Added
+- Publishing from the transcript page: a publish bar and one popup replace the
+  trip through the multi-session wizard. The popup mounts every state (not
+  published, publishing, up to date, new turns, auto-publish on, outside the
+  saved lists, connect, waiting, scanning, scan failed, not in a collective,
+  stopped, waits for approval), counts new turns from the stored `publishedAt`,
+  keeps the redaction scan cache across navigation, and opens from
+  `/share?sessionId=<id>` on that transcript (#498, #536).
+- Collective targets in the local API: list collectives and their linked
+  repositories, add and remove shares, and serve publication state from the
+  stored receipt with `outsideSelection` for sessions the saved selection
+  leaves out. `/sync/push` accepts typed `collectives {add, remove}` and reports
+  one result per step. A collective publish opens private and sends no license;
+  removing a collective revokes its access (#497, #521).
+- Automatic publishing: `hooks.yaml` binds a folder glob or a git remote to
+  collectives, and a managed hook applies the binding on push. `peasant village
+  auto` adds a rule for the repository and installs the hook; a bound push
+  publishes private and shares only with the rule's collectives; a transcript
+  that is public on Village is not updated. Installs are explicit, refuse
+  unrecorded repositories, and keep foreign hooks intact with their remedy
+  (#503, #530).
+- Kickstart's one auto-publish question: "publish automatically?" records
+  `push.autoPublishIntent` (with `push.sharePreference: share-later`), installs
+  nothing, and lets the first publish popup offer automatic setup later (#9,
+  #539).
+- The local settings API: `GET /settings` returns every yaml-backed key with
+  per-key metadata (`inPeasantConfig` derived from the terminal editor's
+  registry); `PATCH /settings` accepts one key, validates the whole
+  configuration, saves atomically, and applies the change live. Credentials are
+  never returned (#501, #532).
+- The local settings page: grouped rows with pending and settled feedback, a
+  failed write restored with the API reason, the "not in peasant config" tag,
+  explicit hook installation with per-repository disclosure, and rule editing
+  that keeps every event (#502, #538).
+- Home as a sessions-first page: a stats strip computed from the existing
+  topics, search with turn-level matches, and one session list with a
+  publish-state column, the all / not published / published / auto filters, a
+  load-more control, and a link from every row into its project's review view.
+  Selection notices and recovery are retained (#500, #537).
+- A quiet local shell: a one-row header (`peasant`, search, settings, theme),
+  fairtrade's offline notice with the start command and retry when the local
+  server stops, route-only sections reachable by URL, and the tour unmounted
+  (#499, #523).
+- `peasant open` records one session and opens its transcript in the local web
+  (#509).
+- C4 architecture diagrams and call sequences in the documentation (#475), and
+  the home-first local section registry documented (#511).
+
+### Changed
+- A web update keeps the audience of a published transcript: a collective-only
+  transcript stays collective-only (#510).
+- The local dashboard is served on loopback only and refuses requests that do
+  not come from it (#508).
+- Test-gate and CI performance work: a two-pass race-on budget gate, waits on
+  signals and deadlines instead of fixed sleeps, a golden-template cache and
+  store-open seam, the arm64 subset lane on releases only, and the GitHub Go
+  cache skipped on the self-hosted pool (#522, #528, #534, #535).
+
+### Fixed
+- SQLite callback ownership is preserved across connection reuse (#541).
+- Claude Code workflow subagent transcripts are ingested (#529).
+- The staging arena wrap gap is released with its copy (#527).
+- Code-map search short-circuits on a raw session id or project hash (#476).
+
 ## [0.7.0] - 2026-09-27
 
 ### Added
@@ -511,6 +836,13 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.11.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.11.1
+[0.11.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.11.0
+[0.10.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.10.0
+[0.9.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.9.0
+[0.8.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.2
+[0.8.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.1
+[0.8.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.8.0
 [0.7.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.7.0-rc1
 [0.6.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.6.0
 [0.5.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0

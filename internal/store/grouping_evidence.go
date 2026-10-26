@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // GroupingEvidenceRow is the durable per-session evidence a grouped helper list
@@ -23,15 +23,29 @@ type GroupingEvidenceRow struct {
 	// InputSubmissionCount is the durable measured input count for the active
 	// generation. Nil means unknown, which is distinct from a measured zero.
 	InputSubmissionCount *int64
-	// OwnerState is the started_by relationship target state on the active
-	// generation. Empty means no started_by evidence exists at all, which the
-	// caller treats as an unresolved owner rather than a missing one.
+	// OwnerState is the started_by relationship target state on the session's
+	// generation (the active generation, or the latest attempt when no active
+	// generation exists). Empty means no started_by evidence exists at all,
+	// which the caller treats as an unresolved owner rather than a missing one.
 	OwnerState schema.RelationshipTargetState
 	// OwnerTargetLocalID is the immediate started_by target local identifier.
 	// It is present only for a known or retained target; it is nil otherwise,
 	// including a known-missing owner that never named a local identifier.
 	OwnerTargetLocalID *string
 }
+
+// groupingEvidenceQuery joins the started_by evidence of the session's
+// GENERATION — the active generation, or the latest attempt when no active
+// generation exists — through the one generation-scope spelling, so a
+// latest-attempt-only session reports its owner state instead of looking
+// unresolved. It is a var, not a const, because the scope is spliced in.
+var groupingEvidenceQuery = `SELECT s.session_id, s.session_purpose, s.input_submission_count, r.target_state, r.target_local_id
+FROM sessions s
+LEFT JOIN session_relationship_evidence r
+  ON r.session_id = s.session_id
+ AND r.kind = 'started_by'
+ AND r.generation_id = ` + parentGenerationScopeSQL("s") + `
+WHERE s.session_id IN (`
 
 // GroupingEvidenceForSessions reads the active-generation grouping evidence for
 // exactly the named sessions, in bounded IN(...) batches. Sessions that name no
@@ -59,13 +73,7 @@ func (s *Store) GroupingEvidenceForSessions(ctx context.Context, sessionIDs []st
 			placeholders[i] = "?"
 			args[i] = id
 		}
-		query := `SELECT s.session_id, s.session_purpose, s.input_submission_count, r.target_state, r.target_local_id
-FROM sessions s
-LEFT JOIN session_relationship_evidence r
-  ON r.session_id = s.session_id
- AND r.kind = 'started_by'
- AND r.generation_id = s.active_generation_id
-WHERE s.session_id IN (` + strings.Join(placeholders, ", ") + `)`
+		query := groupingEvidenceQuery + strings.Join(placeholders, ", ") + `)`
 		if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 			Args: args,
 			ResultFunc: func(stmt *sqlite.Stmt) error {

@@ -28,10 +28,6 @@ const COPY_FIELDS = [
   'outcomeHelpName',
   'outcomeSource',
   'outcomeLimit',
-  'explainerIntro',
-  'explainerRecordedFile',
-  'explainerDestinationHome',
-  'explainerDestinationMap',
 ] as const;
 
 const PICKER_FIELDS = [

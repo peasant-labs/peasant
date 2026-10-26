@@ -1,0 +1,56 @@
+requiredNames:
+  - relevant-membership
+  - relevant-pending-nonmember
+  - relevant-org-visible
+  - relevant-explicit
+  - duplicate-reasons
+  - catalog-complete-history-timeout
+  - catalog-failed-history-complete
+  - incomplete-contribution-source-no-relevance-prune
+  - catalog-committed-before-cancel-reported
+  - association-one-complete-one-timeout
+  - account-switch-between-domain-commits
+  - account-switch-before-auth-no-reselection
+  - history-rejected-only
+  - history-owner-withdrawn
+  - history-collective-removed
+  - relevance-retained-by-membership
+  - deleted-source-history-unknown
+  - catalog-organization-timeout-history-complete
+  - incomplete-null-contribution-counter-no-relevance-prune
+  - owner-history-lookup-error-retains-good-domain
+  - collective-detail-lookup-error-retains-good-domain
+  - forbidden-owner-history-stays-known-unavailable
+  - missing-collective-detail-stays-known-unavailable
+cases:
+  - {name: relevant-membership, contributionEmpty: true, wantStatus: 200, wantName: New, wantEvent: pending, wantReasons: [membership]}
+  - {name: relevant-pending-nonmember, membershipEmpty: true, wantStatus: 200, wantName: New, wantEvent: approved, wantReasons: [contribution]}
+  - {name: relevant-org-visible, contributionEmpty: true, membershipEmpty: true, org: true, wantStatus: 200, wantName: New, wantEvent: pending, wantReasons: [organization]}
+  - {name: relevant-explicit, contributionEmpty: true, membershipEmpty: true, track: true, wantStatus: 200, wantName: New, wantEvent: pending, wantReasons: [explicit]}
+  - {name: duplicate-reasons, org: true, track: true, wantStatus: 200, wantName: New, wantEvent: approved, wantReasons: [membership, contribution, organization, explicit]}
+  - {name: catalog-complete-history-timeout, failPath: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events, cancel: true, wantStatus: 504, wantName: New, wantEvent: pending}
+  - {name: catalog-failed-history-complete, org: true, failPath: /api/v1/orgs/example, failStatus: 503, wantStatus: 502, wantName: Old, wantEvent: approved}
+  - {name: owner-history-lookup-error-retains-good-domain, failPath: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events, failStatus: 500, wantStatus: 502, wantName: New, wantEvent: pending, wantCoverage: available, retainedDomain: history, wantObservationState: observed}
+  - {name: collective-detail-lookup-error-retains-good-domain, failPath: /api/v1/collectives/33333333-3333-4333-8333-333333333333, failStatus: 500, wantStatus: 502, wantName: Old, wantEvent: approved, wantCoverage: available, retainedDomain: catalog, wantObservationState: observed}
+  - {name: forbidden-owner-history-stays-known-unavailable, failPath: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events, failStatus: 403, wantStatus: 200, wantName: New, wantEvent: pending, wantCoverage: unknown, wantObservationState: observed}
+  - {name: missing-collective-detail-stays-known-unavailable, failPath: /api/v1/collectives/33333333-3333-4333-8333-333333333333, failStatus: 404, wantStatus: 200, wantName: New, wantEvent: approved, wantCoverage: available, wantObservationState: unavailable}
+  - name: incomplete-contribution-source-no-relevance-prune
+    discoveryBody: '{"collectives":[{"id":"33333333-3333-4333-8333-333333333333","name":"New","description":null,"linked_github_org":null,"approved_count":0,"rejected_attempt_count":0,"withdrawn_attempt_count":0}]}'
+    wantStatus: 502
+    wantName: Old
+    wantEvent: pending
+  - {name: catalog-committed-before-cancel-reported, failPath: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events, cancel: true, wantStatus: 504, wantName: New, wantEvent: pending}
+  - {name: association-one-complete-one-timeout, associationFailure: true, wantStatus: 504, wantName: New, wantEvent: approved}
+  - {name: account-switch-between-domain-commits, rotateDuringHistory: true, wantStatus: 401, wantName: New, wantEvent: pending}
+  - {name: account-switch-before-auth-no-reselection, rotateBeforeAuth: true, wantStatus: 401, wantName: Old, wantEvent: pending}
+  - {name: history-rejected-only, historyOnly: true, historyStatus: rejected, membershipEmpty: true, wantStatus: 200, wantName: '', wantEvent: rejected, wantReasons: []}
+  - {name: history-owner-withdrawn, historyOnly: true, historyStatus: retracted, membershipEmpty: true, wantStatus: 200, wantName: '', wantEvent: retracted, wantReasons: []}
+  - {name: history-collective-removed, historyOnly: true, historyStatus: revoked, membershipEmpty: true, wantStatus: 200, wantName: '', wantEvent: revoked, wantReasons: []}
+  - {name: relevance-retained-by-membership, historyOnly: true, historyStatus: rejected, wantStatus: 200, wantName: New, wantEvent: rejected, wantReasons: [membership]}
+  - {name: deleted-source-history-unknown, failPath: /api/v1/users/me/collectives/33333333-3333-4333-8333-333333333333/transcripts/22222222-2222-4222-8222-222222222222/events, failStatus: 404, wantStatus: 200, wantName: New, wantEvent: pending, wantCoverage: unknown}
+  - {name: catalog-organization-timeout-history-complete, org: true, failPath: /api/v1/orgs/example, cancel: true, awaitHistory: true, wantStatus: 504, wantName: Old, wantEvent: approved}
+  - name: incomplete-null-contribution-counter-no-relevance-prune
+    discoveryBody: '{"collectives":[{"id":"33333333-3333-4333-8333-333333333333","name":"New","description":null,"linked_github_org":null,"approved_count":0,"pending_count":null,"rejected_attempt_count":0,"withdrawn_attempt_count":0}]}'
+    wantStatus: 502
+    wantName: Old
+    wantEvent: pending

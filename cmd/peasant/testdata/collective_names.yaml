@@ -1,0 +1,16 @@
+requiredNames:
+  - a share history name survives a conflicting membership name
+  - membership names fill missing share history names
+  - an unavailable membership list leaves an explicit identifier
+cases:
+  - name: a share history name survives a conflicting membership name
+    known: platform from sharing
+    membership: platform from membership
+    expected: platform from sharing
+  - name: membership names fill missing share history names
+    membership: platform from membership
+    expected: platform from membership
+  - name: an unavailable membership list leaves an explicit identifier
+    membership: platform from membership
+    status: 500
+    expected: 11111111-1111-4111-8111-111111111111

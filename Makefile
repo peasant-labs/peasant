@@ -10,7 +10,7 @@ set -e; \
 	if [ -z "$$version" ]; then \
 		version="$$(sh ./scripts/dev-version.sh)"; \
 	fi; \
-	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o bin/peasant ./cmd/peasant
+	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o peasant ./cmd/peasant
 endef
 
 # The race detector for `make check`. Off by default, everywhere (CI and
@@ -58,26 +58,24 @@ web:
 	@# surface. A stale/stub export (failed web build or placeholder out/) would otherwise silently ship a binary
 	@# WITHOUT the surface — the user's "changes/change-detail unavailable" failure. Fail loud.
 	@if ! grep -rqE 'gmp-changes-root' web/out 2>/dev/null; then \
-		echo 'ERROR [make web] web/out does NOT contain the lifted /review Changes surface (marker "gmp-changes-root" absent) — refusing to embed a stale/stub export into bin/peasant.'; \
+		echo 'ERROR [make web] web/out does NOT contain the lifted /review Changes surface (marker "gmp-changes-root" absent) — refusing to embed a stale/stub export into peasant.'; \
 		echo '  Cause: a failed pnpm build, an unavailable published package, or a stale/stub web/out.'; \
 		echo '  Fix: ensure pnpm can install the locked dependency graph, then rebuild.'; \
 		exit 1; \
 	fi
 
-# web-stub writes a minimal placeholder into web/out so the
-# `//go:embed all:web/out` directive compiles when the real Next.js dashboard
-# has not been built. Compile-only checks use this target; artifact-producing
-# workflows run `make web` and explicitly reject the stub.
+# web-stub makes the `//go:embed all:web/out` directive compile when the real
+# Next.js app has not been built. Compile-only checks use this target;
+# artifact-producing workflows run `make web` and explicitly reject the stub.
 #
-# It is idempotent and NON-destructive: it writes web/out/index.html only when
-# absent (a real `make web` output or a prior stub is left untouched). It also
-# (re)creates the TRACKED placeholder web/out/.gitkeep so the //go:embed
-# all:web/out invariant holds and the working tree stays clean even if a prior
-# `next build` deleted it.
+# It only (re)creates the TRACKED placeholder web/out/.gitkeep, so the embed
+# holds and the working tree stays clean even if a prior `next build` deleted
+# it. A real `make web` output is left untouched. A binary built on the
+# placeholder alone serves internal/htmlpage's not-bundled notice in place of
+# the local app, styled from the fairtrade palette.
 web-stub:
 	@mkdir -p web/out
 	@touch web/out/.gitkeep
-	@[ -s web/out/index.html ] || printf '<!doctype html><meta charset="utf-8"><title>peasant</title><p>The peasant web dashboard is not bundled in this build. Run a full `make build` (or use the release binaries) for the dashboard.</p>\n' > web/out/index.html
 
 fmt:
 	@formatted=$$(go fmt ./...); \
@@ -90,13 +88,15 @@ lint: web-stub
 	# Running golangci-lint is deferred until its existing findings are resolved.
 	# Use go vet for now
 	# golangci-lint run ./...
-	go vet ./...
+	./scripts/vet-go.sh
 
-check: fmt lint
+check: fmt lint sqlite-source-audit
 	@set -e; \
 	export CHECK_START_NS="$(CHECK_START_NS)"; \
 	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
 	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...; \
+	go test -tags=projection_negative_seed -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
+	go test -tags=projection_negative_scope -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
 	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml; \
 	go run ./cmd/testgate run -race=$(RACE)
 	# The gate above replaces the single `go test` pass. It computes the run
@@ -125,6 +125,18 @@ check: fmt lint
 .PHONY: check-harvester-versions
 check-harvester-versions:
 	go run ./scripts/harvester-version-guard -base "$(BASE)" -candidate "$(or $(CANDIDATE),HEAD)"
+
+# The audited SQLite driver is part of the main module and its normal test plan.
+.PHONY: sqlite-source-audit sqlite-connection-test module-install-check
+sqlite-source-audit:
+	python3 scripts/check-sqlite-fork.py
+
+sqlite-connection-test: sqlite-source-audit
+	go test -race -count=1 ./third_party/zombiezen-sqlite/...
+
+# Real module ZIP distribution gate; deliberately separate from the unit plan.
+module-install-check: sqlite-source-audit
+	go run ./scripts/check-module-install
 
 # Local end-to-end skip-gate harness. Requires podman + a village
 # checkout (VILLAGE_REPO, default sibling) or VILLAGE_BIN+SETUP_DEMO_BIN.
@@ -242,18 +254,18 @@ dev:
 		wait
 
 restart: build
-	-./bin/peasant web stop
-	./bin/peasant web start
+	-./peasant web stop
+	./peasant web start
 
 docs: docs-cli
 	@echo "Docs generated (CLI reference; API specs now live in the schema module)"
 
 docs-cli: go
-	./bin/peasant docgen docs/cli
+	./peasant docgen docs/cli
 	@echo "CLI docs generated in docs/cli/"
 
 docs-open: docs
 	xdg-open docs/api/index.html
 
 clean:
-	rm -rf bin/ web/out/ web/.next/
+	rm -rf bin/ peasant peasant.exe web/out/* web/.next/

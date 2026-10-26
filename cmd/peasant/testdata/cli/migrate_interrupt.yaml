@@ -1,0 +1,8 @@
+cases:
+  - name: canceled-context-partial-json
+    mode: context
+    json: true
+    textContains: ['"converted":1', '"search_consolidated":false']
+  - name: sigint-partial-text
+    mode: sigint
+    textContains: ['converted 1 session(s)', 'search index']

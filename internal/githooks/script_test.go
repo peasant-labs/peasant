@@ -255,7 +255,7 @@ func TestScript_RunsUploadAndNeverBlocksGit(t *testing.T) {
 		t.Fatalf("hook must exit successfully when the upload fails, got: %v", err)
 	}
 	for _, want := range []string{
-		"village upload did not complete",
+		"peasant online upload did not complete",
 		"exited 9",
 		repo,
 		hook,
@@ -270,7 +270,7 @@ func TestScript_RunsUploadAndNeverBlocksGit(t *testing.T) {
 	// A non-zero exit does NOT mean nothing was published: an upload can succeed
 	// and the run still fail afterwards, and the budget message peasant prints
 	// says exactly that. Claiming otherwise contradicts peasant's own output.
-	if strings.Contains(stderr, "nothing reached the village") {
+	if strings.Contains(stderr, "nothing reached peasant online") {
 		t.Errorf("a failed upload must not assert that nothing was published; got:\n%s", stderr)
 	}
 }

@@ -15,6 +15,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/peasant-labs/peasant/internal/proc"
 )
 
 // Open launches url in the user's default web browser.
@@ -51,7 +53,9 @@ var defaultOpener = &opener{
 	lookPath: exec.LookPath,
 	start: func(name string, args ...string) error {
 		// Fire-and-forget: the browser process is detached from peasant.
-		return exec.Command(name, args...).Start()
+		cmd := exec.Command(name, args...)
+		proc.HideConsoleWindow(cmd)
+		return cmd.Start()
 	},
 }
 

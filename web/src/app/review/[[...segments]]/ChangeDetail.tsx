@@ -29,7 +29,6 @@ import { displayProject } from '@/lib/quality/utils';
 import { formatTokens } from '@/lib/sessions/columns';
 import { Term } from '@/components/Term';
 import { Tooltip, Skeleton } from '@/lib/ft-ui';
-import { Explainer, type ExplainerState } from '@/components/Explainer';
 import { buildCaption, topModules, type CaptionAnchor } from './caption';
 import { MINUS, plural, shortHash, shortSessionId } from './format';
 import { groupChangedFiles, summarizeChange, type FileWithConversations } from './signals';
@@ -125,7 +124,6 @@ export function ChangeDetail({
   branch,
   payload,
   navBranches = [],
-  explainer,
 }: {
   projectName: string;
   /** Opaque project hash for the lazy per-file diff fetch. */
@@ -134,8 +132,6 @@ export function ChangeDetail({
   payload: DecodedChangeDetailPayload;
   /** Open-branch order for the branch switcher. */
   navBranches?: string[];
-  /** Shared explainer state — the "?" toggle lives in the page title. */
-  explainer: ExplainerState;
 }) {
   const [structureOpen, setStructureOpen] = useState(false);
   // Work ↔ slice linkage: the files a hovered/focused session (or task row)
@@ -212,24 +208,11 @@ export function ChangeDetail({
         />
       )}
 
-      {/* Header cluster (one tight group): the numbers caption, the on-demand
-          explainer box (its "?" toggle lives in the page title), then any
-          friction signals. The Explainer renders full-width so the open box
-          spans the column. */}
+      {/* Header cluster (one tight group): the numbers caption, then any
+          friction signals. How to read this view lives in the docs, linked
+          from the page title. */}
       <div className="flex flex-col gap-3">
         <Caption payload={payload} onDrill={scrollToAnchor} />
-        <Explainer explainer={explainer} title="What am I looking at?">
-          <p>
-            One <Term k="change">line of work</Term>. The picture below is the
-            part of the codebase it rewired; the list under it is the recorded{' '}
-            <Term k="session">AI conversations</Term> that did the work.
-          </p>
-          <p>
-            Hover a conversation to light up the files it changed in the list
-            above (and on the structure picture, when you open it); click a
-            request to read that part of the transcript.
-          </p>
-        </Explainer>
         <SignalBand payload={payload} />
       </div>
 

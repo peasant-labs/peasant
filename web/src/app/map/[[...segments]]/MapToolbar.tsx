@@ -54,7 +54,7 @@ function GrainControl({
               title={step.hint}
               onClick={() => onLevelChange(step.level)}
               className={cn(
-                'px-2.5 py-1.5 font-mono text-xs transition-colors focus-mono cursor-pointer',
+                'px-2.5 py-1.5 font-mono text-[length:var(--fs-label)] transition-colors focus-mono cursor-pointer',
                 i > 0 && 'border-l border-rule',
                 active
                   ? 'bg-surface-hover text-ink'
@@ -145,7 +145,7 @@ function NodeSearch({
             setActiveIndex(0);
           }}
           onKeyDown={handleKeyDown}
-          className="w-52 border border-rule bg-surface py-1.5 pl-7 pr-2 font-mono text-xs text-ink placeholder:text-ink-4 focus-mono"
+          className="w-52 border border-rule bg-surface py-1.5 pl-7 pr-2 font-mono text-[length:var(--fs-label)] text-ink placeholder:text-ink-4 focus-mono"
         />
         {open && (
           <div
@@ -161,7 +161,7 @@ function NodeSearch({
                     role="option"
                     aria-selected={i === activeIndex}
                     className={cn(
-                      'flex cursor-pointer items-baseline gap-2 px-2 py-1.5 text-xs',
+                      'flex cursor-pointer items-baseline gap-2 px-2 py-1.5 text-[length:var(--fs-label)]',
                       i === activeIndex ? 'bg-surface-hover' : 'hover:bg-surface-hover',
                     )}
                     onMouseEnter={() => setActiveIndex(i)}
@@ -175,7 +175,7 @@ function NodeSearch({
                 ))}
               </ul>
             ) : (
-              <p className="px-2 py-1.5 text-xs text-ink-3">No nodes match.</p>
+              <p className="px-2 py-1.5 text-[length:var(--fs-label)] text-ink-3">No nodes match.</p>
             )}
           </div>
         )}

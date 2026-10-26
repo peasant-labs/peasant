@@ -14,9 +14,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/native_coverage.yaml
@@ -31,6 +31,10 @@ type nativeCoverageCarrier struct {
 	Position    int64  `yaml:"position"`
 	Pointer     string `yaml:"pointer"`
 	Payload     string `yaml:"payload"`
+	// Omitted marks a positional omission placeholder: the block stands in for
+	// a source record ingest left out, rather than carrying retained unknown
+	// evidence.
+	Omitted bool `yaml:"omitted"`
 }
 
 type nativeCoverageCase struct {
@@ -38,6 +42,7 @@ type nativeCoverageCase struct {
 	Completeness    string                  `yaml:"completeness"`
 	Carriers        []nativeCoverageCarrier `yaml:"carriers"`
 	Prior           string                  `yaml:"prior"`
+	Authoritative   bool                    `yaml:"authoritative"`
 	ForgedFull      bool                    `yaml:"forged_full"`
 	SourceOmitted   bool                    `yaml:"source_omitted"`
 	Unaccounted     bool                    `yaml:"unaccounted"`
@@ -134,6 +139,24 @@ func buildCoverageV2(t *testing.T, sid schema.SessionID, genID, completeness str
 	nextIndex := 3
 	var mainCarriers, earlierCarriers []schema.SessionEntry
 	for _, carrier := range carriers {
+		if carrier.Omitted {
+			entry, err := coveragePlaceholderEntry(t, sid, nextIndex)
+			if err != nil {
+				t.Fatalf("omitted carrier: %v", err)
+			}
+			nextIndex++
+			content = append(content, indexformat.ContentRecord{Ref: entry.SourceEntryRef})
+			// The omitted record's bytes are gone: the placeholder owns no full
+			// content, so its record stages a zero-length blob exactly as the
+			// projection writes one.
+			blobs[entry.SourceEntryRef] = []byte("")
+			if carrier.Partition == "earlier" {
+				earlierCarriers = append(earlierCarriers, entry)
+			} else {
+				mainCarriers = append(mainCarriers, entry)
+			}
+			continue
+		}
 		position := ingest.UnknownSourcePosition{
 			Public:   &ingest.UnknownPublicPosition{SourceRef: carrier.SourceRef, RecordIndex: carrier.RecordIndex, Position: carrier.Position},
 			SourceID: carrier.SourceRef,
@@ -189,6 +212,51 @@ func buildCoverageV2(t *testing.T, sid schema.SessionID, genID, completeness str
 	return indexformat.V2{Generation: generation}, blobs
 }
 
+// coveragePlaceholderEntry builds one positional omission placeholder, the same
+// shape the projection writes for a source record ingest omitted: role tool,
+// entry type tool_result, the typed omission record in Extra, the reader-facing
+// note in ContentPreview, the source tool id and the record's byte size.
+func coveragePlaceholderEntry(t *testing.T, sid schema.SessionID, entryIndex int) (schema.SessionEntry, error) {
+	t.Helper()
+	record, err := ingest.NewOmittedRecord(ingest.OmittedRecordTooLarge, 42, 9000, 8000)
+	if err != nil {
+		return schema.SessionEntry{}, err
+	}
+	extra, err := record.Extra()
+	if err != nil {
+		return schema.SessionEntry{}, err
+	}
+	note := ingest.OmissionPlaceholderNote(record)
+	rawByteLength := int(record.Bytes)
+	toolCallID := "toolu_omitted_placeholder"
+	return schema.SessionEntry{
+		SessionID:      sid,
+		EntryIndex:     entryIndex,
+		Harness:        schema.Harness("claude-code"),
+		Role:           ingest.RoleTool,
+		EntryType:      ingest.EntryTypeToolResult,
+		Depth:          0,
+		SourceEntryRef: "e_cov_placeholder",
+		ContentPreview: &note,
+		Extra:          &extra,
+		ToolCallID:     &toolCallID,
+		RawByteLength:  &rawByteLength,
+	}, nil
+}
+
+// retainedCarrierCount counts the carriers that carry retained unknown
+// evidence. A positional omission placeholder is stored evidence of a different
+// kind and never appears in the export's retained-unknown set.
+func retainedCarrierCount(carriers []nativeCoverageCarrier) int {
+	count := 0
+	for _, carrier := range carriers {
+		if !carrier.Omitted {
+			count++
+		}
+	}
+	return count
+}
+
 func TestNativeCoverageMatrix(t *testing.T) {
 	t.Parallel()
 	doc := loadNativeCoverage(t)
@@ -230,7 +298,7 @@ func TestNativeCoverageMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("prior capture: %v", err)
 				}
-				outcome, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{
+				outcome, err := db.ActivateGenerationCandidate(t.Context(), ingest.GenerationActivation{
 					Generation: priorV2, Blobs: priorBlobs,
 					IndexerVersion: 1, IndexedAtMs: 1, ContentCapture: priorCapture,
 				})
@@ -247,7 +315,7 @@ func TestNativeCoverageMatrix(t *testing.T) {
 			v2, blobs := buildCoverageV2(t, sid, genID, c.Completeness, c.Carriers)
 			assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
 				Harness: ingest.Harness("claude-code"), Result: v2,
-				Policy: ingest.CaptureFreshCandidate, Authoritative: true,
+				Policy: ingest.CaptureFreshCandidate, Authoritative: c.Authoritative,
 				SourceOmitted: c.SourceOmitted, Unaccounted: c.Unaccounted,
 			})
 			if err != nil {
@@ -300,7 +368,7 @@ func TestNativeCoverageMatrix(t *testing.T) {
 					TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: 2,
 				}
 			}
-			outcome, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{
+			outcome, err := db.ActivateGenerationCandidate(t.Context(), ingest.GenerationActivation{
 				Generation: v2, Blobs: blobs,
 				IndexerVersion: 1, IndexedAtMs: 2, ContentCapture: capture,
 			})
@@ -345,8 +413,8 @@ func TestNativeCoverageMatrix(t *testing.T) {
 				if exportErr != nil {
 					t.Fatalf("export refused complete control: %v", exportErr)
 				}
-				if len(exported.RetainedUnknown) != len(c.Carriers) {
-					t.Fatalf("export retained = %d, want %d", len(exported.RetainedUnknown), len(c.Carriers))
+				if len(exported.RetainedUnknown) != retainedCarrierCount(c.Carriers) {
+					t.Fatalf("export retained = %d, want %d", len(exported.RetainedUnknown), retainedCarrierCount(c.Carriers))
 				}
 			case "refused":
 				if exportErr == nil {

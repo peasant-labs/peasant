@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { DOCS } from '@/lib/docs';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseSessionsRoute, SessionsRouter } from './SessionsRouter';
@@ -130,7 +131,9 @@ describe('SessionsRouter', () => {
     render(<SessionsRouter />);
 
     expect(await screen.findByText('no sessions recorded for this project yet')).toBeInTheDocument();
-    expect(screen.getByText('peasant ingest')).toBeInTheDocument();
+    // How to record lives in the docs; the empty state links there and teaches no command.
+    expect(screen.getByRole('link', { name: /^how to record sessions/ })).toHaveAttribute('href', DOCS.record);
+    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
   });
 
   it('falls back to the flat project list when the server does not apply the grouped project filter', async () => {
@@ -155,7 +158,7 @@ describe('SessionsRouter', () => {
     // The cross-project grouped response is never rendered; the route falls
     // back to the flat project list from the sessions channel instead.
     expect(await screen.findByText('agent-a1')).toBeInTheDocument();
-    expect(screen.getByText('ingested session transcripts for this project.')).toBeInTheDocument();
+    expect(screen.queryByText(/ingested session transcripts/)).not.toBeInTheDocument();
     expect(screen.queryByText('agent-other')).not.toBeInTheDocument();
   });
 

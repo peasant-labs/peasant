@@ -1,0 +1,103 @@
+requiredNames: [claude_level, claude_absent, claude_invalid_raw, codex_level, codex_absent, pi_level, pi_absent, opencode_level, opencode_absent]
+cases:
+  - name: claude_level
+    harness: claude-code
+    root: /claude
+    seed: {level: ultracode}
+    history: [{level: medium}]
+    turns: [{level: ultracode}, {level: medium}]
+    files:
+      - path: /claude/-workspace/99d59925-36bc-424c-a789-8be54d9702ba.jsonl
+        content: |
+          {"type":"user","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+          {"type":"attachment","attachment":{"type":"ultra_effort_enter","reminderType":"full"}}
+          {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":"xhigh","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+          {"type":"attachment","attachment":{"type":"ultra_effort_exit"}}
+          {"type":"assistant","timestamp":"2026-01-01T00:00:02Z","effort":"medium","message":{"role":"assistant","content":[{"type":"text","text":"later answer"}]}}
+  - name: claude_absent
+    harness: claude-code
+    root: /claude
+    turns: [{}]
+    files:
+      - path: /claude/-workspace/99d59925-36bc-424c-a789-8be54d9702ba.jsonl
+        content: |
+          {"type":"user","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+          {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+  - name: claude_invalid_raw
+    harness: claude-code
+    root: /claude
+    diagnostic: thinking_level_raw_dropped
+    turns: [{}]
+    files:
+      - path: /claude/-workspace/99d59925-36bc-424c-a789-8be54d9702ba.jsonl
+        content: |
+          {"type":"user","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello"}}
+          {"type":"assistant","timestamp":"2026-01-01T00:00:01Z","effort":" high","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+  - name: codex_level
+    harness: codex
+    root: /codex
+    seed: {level: off, raw: none}
+    history: [{level: ultra}]
+    turns: [{level: off, raw: none}, {level: ultra}]
+    files:
+      - path: /codex/2026/01/01/rollout-2026-01-01T00-00-00-99d59925-36bc-424c-a789-8be54d9702ba.jsonl
+        content: |
+          {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","cli_version":"0.100.0"}}
+          {"type":"turn_context","payload":{"effort":"none"}}
+          {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}}
+          {"type":"turn_context","payload":{"effort":"ultra"}}
+          {"type":"response_item","timestamp":"2026-01-01T00:00:02Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"later answer"}]}}
+  - name: codex_absent
+    harness: codex
+    root: /codex
+    turns: [{}]
+    files:
+      - path: /codex/2026/01/01/rollout-2026-01-01T00-00-00-99d59925-36bc-424c-a789-8be54d9702ba.jsonl
+        content: |
+          {"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","cli_version":"0.100.0"}}
+          {"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}}
+  - name: pi_level
+    harness: pi
+    root: /pi
+    seed: {level: high}
+    history: [{level: off}]
+    turns: [{level: high}, {level: off}]
+    files:
+      - path: /pi/session.jsonl
+        content: |
+          {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-01T00:00:00Z"}
+          {"type":"thinking_level_change","id":"t1","parentId":null,"thinkingLevel":"high"}
+          {"type":"message","id":"a1","parentId":"t1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+          {"type":"thinking_level_change","id":"t2","parentId":"a1","thinkingLevel":"off"}
+          {"type":"message","id":"a2","parentId":"t2","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"later answer"}]}}
+  - name: pi_absent
+    harness: pi
+    root: /pi
+    turns: [{}]
+    files:
+      - path: /pi/session.jsonl
+        content: |
+          {"type":"session","version":3,"id":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/workspace","timestamp":"2026-01-01T00:00:00Z"}
+          {"type":"message","id":"a1","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+  - name: opencode_level
+    harness: opencode
+    root: /opencode
+    seed: {raw: default}
+    history: [{level: medium}]
+    turns: [{raw: default}, {level: medium}]
+    files:
+      - path: /opencode/storage/session/project/ses_99d59925-36bc-424c-a789-8be54d9702ba.json
+        content: '{"id":"99d59925-36bc-424c-a789-8be54d9702ba","version":"0.1.0","projectID":"project","directory":"/workspace","time":{"created":1700000000000,"updated":1700000060000}}'
+      - path: /opencode/storage/message/99d59925-36bc-424c-a789-8be54d9702ba/msg_one.json
+        content: '{"id":"msg_one","sessionID":"99d59925-36bc-424c-a789-8be54d9702ba","role":"assistant","model":{"variant":"default"},"time":{"created":1700000001000,"completed":1700000002000},"content":"answer"}'
+      - path: /opencode/storage/message/99d59925-36bc-424c-a789-8be54d9702ba/msg_two.json
+        content: '{"id":"msg_two","sessionID":"99d59925-36bc-424c-a789-8be54d9702ba","role":"assistant","model":{"variant":"medium"},"time":{"created":1700000003000,"completed":1700000004000},"content":"later answer"}'
+  - name: opencode_absent
+    harness: opencode
+    root: /opencode
+    turns: [{}]
+    files:
+      - path: /opencode/storage/session/project/ses_99d59925-36bc-424c-a789-8be54d9702ba.json
+        content: '{"id":"99d59925-36bc-424c-a789-8be54d9702ba","version":"0.1.0","projectID":"project","directory":"/workspace","time":{"created":1700000000000,"updated":1700000060000}}'
+      - path: /opencode/storage/message/99d59925-36bc-424c-a789-8be54d9702ba/msg_one.json
+        content: '{"id":"msg_one","sessionID":"99d59925-36bc-424c-a789-8be54d9702ba","role":"assistant","time":{"created":1700000001000,"completed":1700000002000},"content":"answer"}'

@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/store"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 func TestOpenPreparedPreparesMissingPath(t *testing.T) {

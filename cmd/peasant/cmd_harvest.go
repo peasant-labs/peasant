@@ -138,16 +138,18 @@ func buildHarvestCommand(filesystem ingest.FileSystem) *cobra.Command {
 	cmd.AddCommand(indexCmd)
 
 	// Subcommand: harvest verify — checks database schema integrity.
-	var verifyVerbose bool
+	var verifyVerbose, verifyContent, verifyRepair bool
 	verifyCmd := &cobra.Command{
 		Use:   "verify",
 		Short: "Verify database schema integrity",
 		Long:  "Checks that the SQLite database has the expected schema (all tables and key columns).",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVerify(cmd, verifyVerbose)
+			return runVerify(cmd, verifyVerbose, verifyContent, verifyRepair)
 		},
 	}
 	verifyCmd.Flags().BoolVar(&verifyVerbose, "verbose", false, "Show sample data from each table")
+	verifyCmd.Flags().BoolVar(&verifyContent, "content", false, "Verify session content objects and the search index")
+	verifyCmd.Flags().BoolVar(&verifyRepair, "repair", false, "Mark content corruptions found by --content for the repair activation (requires --content)")
 	cmd.AddCommand(verifyCmd)
 
 	return cmd
@@ -182,7 +184,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 
 	// Detect-commits flag (relevant for index and all modes).
 	if mode != harvestLogsOnly {
-		cmd.Flags().BoolVar(&flags.detectCommits, "detect-commits", false, "Detect and store git commits linked to each session")
+		cmd.Flags().BoolVar(&flags.detectCommits, "detect-commits", true, "Detect and store git commits linked to each session")
 		cmd.Flags().BoolVar(&flags.profileIndex, "profile-index", false, "Print INDEX parse/write timing diagnostics")
 	}
 }
@@ -358,6 +360,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		RebuildAll:         reindex && flags.all,
 		Harness:            indexHarness,
 		Parallelism:        0, // 0 = auto (runtime.NumCPU())
+		Write:              cfg.Write,
 		IndexProfiler:      indexProfiler,
 		Progress:           progState,
 	}
@@ -386,7 +389,8 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 
 	// 6d. Saved selection scopes native discovery, not stored maintenance.
 	var selectionConflicts *selectionConflictRecorder
-	if mode != harvestIndexOnly && !flags.all && len(flags.sessionIDs) == 0 && cfg.Selection.Mode == config.SelectionModeSelected {
+	implicitSelection := mode != harvestIndexOnly && !flags.all && len(flags.sessionIDs) == 0
+	if implicitSelection && cfg.Selection.Mode == config.SelectionModeSelected {
 		selectionFilter, recorder := buildSelectionFilterWithRecorder(cfg, git)
 		pipelineCfg.PrepareSessionFilter = selectionFilter.Prepare
 		pipelineCfg.SessionFilter = selectionFilter.Match
@@ -423,11 +427,11 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 			skipDB = true
 			// The notice says HOW the forecast decides, not what it will
 			// decide. With no stored row each session is classified from the
-			// retained artifacts under the output tree, so on a tree that still
+			// stored artifacts under the output tree, so on a tree that still
 			// holds an earlier harvest the report says unchanged or updated, and
 			// a notice that promised "new" would contradict the report printed
 			// under it.
-			fmt.Fprintf(cmd.ErrOrStderr(), "notice: no analytics database exists yet at %s. This dry run creates none; each discovered session is compared against the retained artifacts on disk, and is reported as new when there are none. Run 'peasant harvest' to create it.\n", dbPath)
+			fmt.Fprintf(cmd.ErrOrStderr(), "notice: no analytics database exists yet at %s. This dry run creates none; each discovered session is compared against the stored artifacts on disk, and is reported as new when there are none. Run 'peasant harvest' to create it.\n", dbPath)
 		}
 	}
 
@@ -467,11 +471,20 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	}
 
 	if !skipDB {
-		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput))
+		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write)
 		if err != nil {
 			return fmt.Errorf("open analytics store: %w", err)
 		}
 		defer db.Close()
+		// Index-health gate at harvest start: when a prior untrusted delete
+		// set the rebuild flag, rebuild before any harvest work so the flag
+		// keeps the state crash-safe. Skipped on dry runs, which must not
+		// write.
+		if !flags.dryRun {
+			if _, err := db.EnsureSearchIndexHealthy(ctx); err != nil {
+				return fmt.Errorf("heal the flagged search index: %w", err)
+			}
+		}
 		pipelineOpts = append(pipelineOpts,
 			ingest.WithStore(db),
 			ingest.WithMetricsStore(db),
@@ -595,7 +608,7 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 			}
 			skipped = fmt.Sprintf("%d saved copies were damaged or stale and skipped: %s.", len(ids), strings.Join(ids, ", "))
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Rebuilt %d sessions from peasant-sync/. %s A rebuild restores transcripts and metadata only. It does not restore annotations, Village publication records, session origin attribution, or a session's readiness to be shared: a rebuilt session cannot be shared until the next harvest reads it from its source. Metrics are computed again.\n", result.Summary.RebuiltFromFiles, skipped)
+		fmt.Fprintf(cmd.OutOrStdout(), "Rebuilt %d sessions from peasant-sync/. %s A rebuild restores transcripts and metadata only. It does not restore annotations, peasant online publication records, session origin attribution, or a session's readiness to be shared: a rebuilt session cannot be shared until the next harvest reads it from its source. Metrics are computed again.\n", result.Summary.RebuiltFromFiles, skipped)
 	}
 
 	// 11. Exit code: 1 if any errors occurred during ingestion.
@@ -610,6 +623,18 @@ func harvestCancellationError(err error) error {
 }
 
 func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
+	fmt.Fprintf(w, "  partial-batch flush waits: count=%d p50=%s max=%s\n", profile.FlushWaitCount, profile.FlushWaitP50, profile.FlushWaitMax)
+	fmt.Fprintf(w, "  staged-memory peak: %d bytes\n", profile.StagedPeakBytes)
+	activationSizes := make([]int, 0, len(profile.ActivationSizes))
+	for size := range profile.ActivationSizes {
+		activationSizes = append(activationSizes, size)
+	}
+	sort.Ints(activationSizes)
+	var activationHistogram []string
+	for _, size := range activationSizes {
+		activationHistogram = append(activationHistogram, fmt.Sprintf("%dx%d", size, profile.ActivationSizes[size]))
+	}
+	fmt.Fprintf(w, "  activation batch sizes: %s\n", strings.Join(activationHistogram, ", "))
 	if len(profile.Batches) == 0 {
 		fmt.Fprintln(w, "INDEX profile: no INDEX batches ran")
 		printIndexProfileStages(w, profile.Stages)
@@ -782,7 +807,9 @@ func printIndexProfileWriteStats(w io.Writer, stats ingest.SessionEntryWriteStat
 	fmt.Fprintf(w, "    annotation targets unresolved: %d\n", stats.AnnotationTargetsUnresolved)
 	fmt.Fprintf(w, "    annotation targets superseded: %d\n", stats.AnnotationTargetsSuperseded)
 	fmt.Fprintf(w, "    annotation target repair errors: %d\n", stats.AnnotationTargetRepairErrors)
-	if stats.AnnotationTargetReadTime != 0 || stats.AnnotationTargetMatchTime != 0 || stats.AnnotationTargetRestoreTime != 0 || stats.AnnotationTargetAnchorUpsertTime != 0 {
+	hasTargetTiming := stats.AnnotationTargetReadTime != 0 || stats.AnnotationTargetMatchTime != 0 ||
+		stats.AnnotationTargetRestoreTime != 0 || stats.AnnotationTargetAnchorUpsertTime != 0
+	if hasTargetTiming {
 		fmt.Fprintln(w, "  annotation target repair timing:")
 		fmt.Fprintf(w, "    read targets: %s\n", stats.AnnotationTargetReadTime)
 		fmt.Fprintf(w, "    match anchors: %s\n", stats.AnnotationTargetMatchTime)
@@ -836,7 +863,13 @@ func printIndexProfileStage(w io.Writer, stage ingest.IndexProfileStage) {
 }
 
 // runVerify checks database schema integrity.
-func runVerify(cmd *cobra.Command, verbose bool) error {
+func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
+	if repair && !content {
+		return fmt.Errorf("harvest verify: --repair requires --content; nothing was checked and nothing changed; re-run with `peasant harvest verify --content --repair`")
+	}
+	if content {
+		return runVerifyContent(cmd, repair)
+	}
 	ctx := cmd.Context()
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 

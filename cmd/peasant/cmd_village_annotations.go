@@ -18,7 +18,7 @@ func BuildVillageAnnotationsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "annotations",
 		Short: "Sync foreign annotations on your pushed transcripts",
-		Long: "Refresh the annotations other village users authored on the transcripts you " +
+		Long: "Refresh the annotations other peasant online users authored on the transcripts you " +
 			"pushed. Requires login (run 'peasant village login').",
 	}
 
@@ -45,7 +45,7 @@ func buildVillageAnnotationsSyncCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Refresh foreign annotations on your pushed transcripts (login required)",
-		Long: `Refresh the foreign annotations (authored by other village users) on the
+		Long: `Refresh the foreign annotations (authored by other peasant online users) on the
 transcripts you have pushed. Your own authored annotations are excluded. Pulled
 annotation data is foreign and one-way: it never re-enters your annotate-push
 candidate set.
@@ -102,7 +102,7 @@ ID is refreshed.`,
 
 	cmd.Flags().StringVar(&sessionID, "session", "", "Refresh only the pushed transcript correlated to this local session ID (default: all)")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
-	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show extra detail (village host, transcripts scanned, excluded own-authored count)")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show extra detail (peasant online host, transcripts scanned, excluded own-authored count)")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary; print only errors and a final result line")
 
 	return cmd

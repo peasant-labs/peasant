@@ -58,6 +58,27 @@ type fixtureSection struct {
 	Index   int  `yaml:"index"`
 }
 
+// fixtureOmitted is one omission record a block stands for, or the omission
+// record a placeholder entry is expected to carry. The input side reads
+// toolCallId from it; the expectation side compares the typed record.
+type fixtureOmitted struct {
+	Reason     string  `yaml:"reason"`
+	Line       int     `yaml:"line"`
+	Bytes      int64   `yaml:"bytes"`
+	LimitBytes int64   `yaml:"limitBytes"`
+	ToolCallID *string `yaml:"toolCallId"`
+}
+
+// fixtureRetainedUnknown is one retained opaque evidence record a block
+// carries; the projection merges it into the entry's extra document after the
+// adapter's own keys.
+type fixtureRetainedUnknown struct {
+	Namespace string `yaml:"namespace"`
+	Kind      string `yaml:"kind"`
+	SourceID  string `yaml:"sourceId"`
+	Payload   string `yaml:"payload"`
+}
+
 type fixtureBlock struct {
 	NativeKey            string                    `yaml:"nativeKey"`
 	SubmissionKey        string                    `yaml:"submissionKey"`
@@ -82,6 +103,11 @@ type fixtureBlock struct {
 	Usage                *fixtureUsage             `yaml:"usage"`
 	ObservedModel        *string                   `yaml:"observedModel"`
 	NativeAttachments    []fixtureNativeAttachment `yaml:"nativeAttachments"`
+	Extra                string                    `yaml:"extra"`
+	RawByteLength        *int                      `yaml:"rawByteLength"`
+	Omitted              *fixtureOmitted           `yaml:"omitted"`
+	ToolCallID           *string                   `yaml:"toolCallId"`
+	RetainedUnknown      []fixtureRetainedUnknown  `yaml:"retainedUnknown"`
 }
 
 type fixtureMetadata struct {
@@ -124,6 +150,14 @@ type fixtureEntryExpect struct {
 	TokensIn         *int           `yaml:"tokensIn"`
 	TokensOut        *int           `yaml:"tokensOut"`
 	ObservedModel    string         `yaml:"observedModel"`
+	// RawByteLength is the producer-measured source size the entry must carry.
+	RawByteLength *int `yaml:"rawByteLength"`
+	// Extra is the exact decoded value each named key of the stored extension
+	// document must hold. It pins merge order: an unrelated adapter key and the
+	// projection-owned model_id must both survive.
+	Extra map[string]any `yaml:"extra"`
+	// Omitted pins the typed omission record a placeholder entry carries.
+	Omitted *fixtureOmitted `yaml:"omitted"`
 }
 
 type fixtureNativeExpect struct {
@@ -296,6 +330,33 @@ func buildProjectionCapture(in fixtureCapture) ingest.ClassifiedCapture {
 			value := *row.ObservedModel
 			block.ObservedModel = &value
 		}
+		block.Extra = row.Extra
+		block.RawByteLength = row.RawByteLength
+		for _, record := range row.RetainedUnknown {
+			block.RetainedUnknown = append(block.RetainedUnknown, ingest.RetainedUnknown{
+				Harness:   ingest.Harness(in.Harness),
+				Namespace: record.Namespace,
+				Kind:      record.Kind,
+				Position:  ingest.UnknownSourcePosition{SourceID: record.SourceID},
+				Payload:   json.RawMessage(record.Payload),
+			})
+		}
+		if row.ToolCallID != nil {
+			value := *row.ToolCallID
+			block.ToolCallID = &value
+		}
+		if row.Omitted != nil {
+			block.Omitted = &ingest.OmittedRecordAt{
+				Record: ingest.OmittedRecord{
+					Reason:     ingest.OmittedRecordReason(row.Omitted.Reason),
+					Line:       row.Omitted.Line,
+					Bytes:      row.Omitted.Bytes,
+					LimitBytes: row.Omitted.LimitBytes,
+				},
+				Line:       row.Omitted.Line,
+				ToolCallID: row.Omitted.ToolCallID,
+			}
+		}
 		for _, attachment := range row.NativeAttachments {
 			block.NativeAttachments = append(block.NativeAttachments, ingest.ClassifiedNativeAttachment{
 				ID:                    attachment.ID,
@@ -351,7 +412,21 @@ func gotEntryContent(entry schema.SessionEntry) string {
 	return ""
 }
 
+func wantOmittedRecord(omitted *fixtureOmitted) ingest.OmittedRecord {
+	return ingest.OmittedRecord{
+		Reason:     ingest.OmittedRecordReason(omitted.Reason),
+		Line:       omitted.Line,
+		Bytes:      omitted.Bytes,
+		LimitBytes: omitted.LimitBytes,
+	}
+}
+
 func wantEntryContent(want fixtureEntryExpect) string {
+	if want.Omitted != nil {
+		// The placeholder's preview is the one reader-facing sentence the
+		// production note builder renders, never a second copy of the wording.
+		return ingest.OmissionPlaceholderNote(wantOmittedRecord(want.Omitted))
+	}
 	if want.ToolInputRepeat != nil {
 		return strings.Repeat(want.ToolInputRepeat.Text, want.ToolInputRepeat.Times)
 	}
@@ -416,6 +491,43 @@ func assertProjectionEntry(t *testing.T, label string, want fixtureEntryExpect, 
 	} else if got.ToolCallID != nil {
 		t.Fatalf("%s ref %q toolCallId = %q, want none", label, want.Ref, *got.ToolCallID)
 	}
+	if want.RawByteLength != nil {
+		if got.RawByteLength == nil || *got.RawByteLength != *want.RawByteLength {
+			t.Fatalf("%s ref %q rawByteLength = %v, want %d", label, want.Ref, got.RawByteLength, *want.RawByteLength)
+		}
+	} else if got.RawByteLength != nil {
+		t.Fatalf("%s ref %q rawByteLength = %d, want none", label, want.Ref, *got.RawByteLength)
+	}
+	if want.Extra != nil {
+		if got.Extra == nil {
+			t.Fatalf("%s ref %q has no extra field, want keys %v", label, want.Ref, want.Extra)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(*got.Extra), &fields); err != nil {
+			t.Fatalf("%s ref %q extra is not a JSON object: %v", label, want.Ref, err)
+		}
+		for key, wantValue := range want.Extra {
+			gotValue, present := fields[key]
+			if !present {
+				t.Fatalf("%s ref %q extra is missing key %q; got %v", label, want.Ref, key, fields)
+			}
+			if !reflect.DeepEqual(gotValue, wantValue) {
+				t.Fatalf("%s ref %q extra[%q] = %v, want %v", label, want.Ref, key, gotValue, wantValue)
+			}
+		}
+	}
+	if want.Omitted != nil {
+		if got.Extra == nil {
+			t.Fatalf("%s ref %q omission placeholder carries no extra field", label, want.Ref)
+		}
+		record, err := ingest.ParseOmittedRecord(*got.Extra)
+		if err != nil {
+			t.Fatalf("%s ref %q omission extra is not the typed record: %v", label, want.Ref, err)
+		}
+		if record != wantOmittedRecord(want.Omitted) {
+			t.Fatalf("%s ref %q omission record = %+v, want %+v", label, want.Ref, record, wantOmittedRecord(want.Omitted))
+		}
+	}
 	content := gotEntryContent(got)
 	expectedContent := wantEntryContent(want)
 	if want.ByteLength > 0 {
@@ -461,7 +573,27 @@ func assertProjectionEntry(t *testing.T, label string, want fixtureEntryExpect, 
 	if gotObserved := observedModelOf(got); gotObserved != want.ObservedModel {
 		t.Fatalf("%s ref %q observedModel = %q, want %q", label, want.Ref, gotObserved, want.ObservedModel)
 	}
-	if content != "" {
+	// A placeholder's content record is a zero-length blob: the note lives in
+	// ContentPreview and the typed record in Extra, never in the full-content
+	// bytes of a record that was omitted; the record must still exist so the
+	// snapshot hydrates the ref. Every other entry owns its content record and
+	// digest.
+	if want.Omitted != nil {
+		record, ok := records[want.Ref]
+		if !ok {
+			t.Fatalf("%s ref %q omission placeholder has no content record", label, want.Ref)
+		}
+		empty := sha256.Sum256([]byte(""))
+		if record.ByteLength != 0 {
+			t.Fatalf("%s ref %q omission placeholder content record byteLength = %d, want 0", label, want.Ref, record.ByteLength)
+		}
+		if record.Digest != hex.EncodeToString(empty[:]) {
+			t.Fatalf("%s ref %q omission placeholder content digest = %q, want the empty-string digest", label, want.Ref, record.Digest)
+		}
+		if record.RelativeBlob != "content/"+want.Ref {
+			t.Fatalf("%s ref %q omission placeholder relativeBlob = %q, want %q", label, want.Ref, record.RelativeBlob, "content/"+want.Ref)
+		}
+	} else if content != "" {
 		record, ok := records[want.Ref]
 		if !ok {
 			t.Fatalf("%s ref %q has no content record", label, want.Ref)

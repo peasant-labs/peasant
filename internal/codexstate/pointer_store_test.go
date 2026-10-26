@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/codexstate"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // materializeNativeStateDB writes a real temporary native Codex state database

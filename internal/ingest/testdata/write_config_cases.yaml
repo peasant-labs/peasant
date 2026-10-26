@@ -1,0 +1,150 @@
+# Write-budget configuration cases: each names a write.* section fragment and
+# whether it must validate. Fragments state milliseconds, minutes, sessions,
+# rows, and bytes outright (never fractions): validation is about the bounds
+# themselves, so a case pins the exact values under test. The zero-value and
+# omitted-key paths resolve to the shipped defaults before validation.
+required_names: [
+  wrong-case-key-is-refused,
+  unknown-key-is-refused,
+  omitted-section-takes-all-defaults,
+  documented-shape-is-valid,
+  derived-staged-memory-is-valid,
+  custom-caps-are-valid,
+  hold-at-busy-timeout-is-valid,
+  hold-zero-takes-default,
+  hold-over-busy-timeout-is-refused,
+  hold-negative-is-refused,
+  activation-negative-is-refused,
+  batch-bytes-negative-is-refused,
+  batch-sessions-negative-is-refused,
+  buffer-negative-is-refused,
+  staged-negative-is-refused,
+  flush-negative-is-refused,
+  sweep-negative-is-refused,
+  harvest-negative-is-refused,
+  activation-zero-takes-default,
+  batch-bytes-zero-takes-default,
+  batch-sessions-zero-takes-default,
+  buffer-zero-takes-default,
+  staged-below-minimum-is-refused,
+  flush-zero-takes-default,
+  sweep-zero-takes-default,
+  harvest-zero-takes-default,
+]
+cases:
+  - name: wrong-case-key-is-refused
+    write: {hold_target_ms: 4000}
+    decode_error: 'unknown write.hold_target_ms'
+  - name: unknown-key-is-refused
+    write: {surprise: 64}
+    decode_error: 'unknown write.surprise'
+  # No keys at all: every knob defaults and the staged-memory cap derives.
+  - name: omitted-section-takes-all-defaults
+    write: {}
+    valid: true
+  # The documented YAML shape, verbatim: every default derivation at 8 workers
+  # (2×32 MiB in-flight batches + 8×16 MiB buffers = 192 MiB staged).
+  - name: documented-shape-is-valid
+    write:
+      holdTargetMs: 4000
+      activationSessions: 64
+      batchBytes: 33554432
+      batchSessions: 64
+      bufferBytes: 16777216
+      stagedMemoryBytes: 201326592
+      flushIntervalMs: 500
+      sweepRows: 5000
+      harvestTargetMinutes: 20
+    valid: true
+  # No stagedMemoryBytes: it derives from the worker count instead of pinning
+  # another machine's count into the file.
+  - name: derived-staged-memory-is-valid
+    write:
+      holdTargetMs: 4000
+      batchBytes: 33554432
+      bufferBytes: 4194304
+    valid: true
+  # Smaller but consistent caps: data-driven means the floor moves with the
+  # knobs (2×1024 + 512 = 2560 staged minimum here).
+  - name: custom-caps-are-valid
+    write:
+      holdTargetMs: 1000
+      activationSessions: 4
+      batchBytes: 1024
+      batchSessions: 4
+      bufferBytes: 512
+      stagedMemoryBytes: 2560
+      flushIntervalMs: 50
+      sweepRows: 100
+      harvestTargetMinutes: 5
+    valid: true
+  # Exactly the open path's busy_timeout: the hold may equal the wait, never
+  # exceed it.
+  - name: hold-at-busy-timeout-is-valid
+    write: {holdTargetMs: 5000}
+    valid: true
+  # An explicit zero reads as unset and takes the default: zero can never
+  # mean "unbounded" on the write path.
+  - name: hold-zero-takes-default
+    write: {holdTargetMs: 0}
+    valid: true
+  # One millisecond past the open path's wait: a transaction holding longer
+  # stalls every other process past its wait.
+  - name: hold-over-busy-timeout-is-refused
+    write: {holdTargetMs: 5001}
+    valid: false
+  - name: hold-negative-is-refused
+    write: {holdTargetMs: -100}
+    valid: false
+  # Negatives are kept (never defaulted) so validation refuses them: a bound
+  # below zero is a typo, not an instruction.
+  - name: activation-negative-is-refused
+    write: {activationSessions: -1}
+    valid: false
+  - name: batch-bytes-negative-is-refused
+    write: {batchBytes: -1}
+    valid: false
+  - name: batch-sessions-negative-is-refused
+    write: {batchSessions: -1}
+    valid: false
+  - name: buffer-negative-is-refused
+    write: {bufferBytes: -1}
+    valid: false
+  - name: staged-negative-is-refused
+    write: {stagedMemoryBytes: -1}
+    valid: false
+  - name: flush-negative-is-refused
+    write: {flushIntervalMs: -1}
+    valid: false
+  - name: sweep-negative-is-refused
+    write: {sweepRows: -1}
+    valid: false
+  - name: harvest-negative-is-refused
+    write: {harvestTargetMinutes: -1}
+    valid: false
+  - name: activation-zero-takes-default
+    write: {activationSessions: 0}
+    valid: true
+  - name: batch-bytes-zero-takes-default
+    write: {batchBytes: 0}
+    valid: true
+  - name: batch-sessions-zero-takes-default
+    write: {batchSessions: 0}
+    valid: true
+  - name: buffer-zero-takes-default
+    write: {bufferBytes: 0}
+    valid: true
+  # 2×1024 + 512 = 2560 is the structural minimum at these caps; one byte
+  # under leaves no room for the in-flight batches plus a worker buffer.
+  - name: staged-below-minimum-is-refused
+    write: {batchBytes: 1024, bufferBytes: 512, stagedMemoryBytes: 2559}
+    valid: false
+  - name: flush-zero-takes-default
+    write: {flushIntervalMs: 0}
+    valid: true
+  - name: sweep-zero-takes-default
+    write: {sweepRows: 0}
+    valid: true
+  - name: harvest-zero-takes-default
+    write: {harvestTargetMinutes: 0}
+    valid: true

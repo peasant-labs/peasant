@@ -9,16 +9,16 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var _ ingest.PublicationInputReader = (*Store)(nil)
 var _ ingest.PublicationCaptureStore = (*Store)(nil)
 
 func publicationRepairError(reason string) error {
-	return fmt.Errorf("store: %s during publication metadata capture/read; publication is held to avoid mixing source evidence; run peasant ingest with retained sources and retry", reason)
+	return fmt.Errorf("store: %s during publication metadata capture/read; publication is held to avoid mixing source evidence; run peasant ingest with stored sources and retry", reason)
 }
 
 // Bulk discovery uses the same integrity rules without acquiring a connection
@@ -310,12 +310,12 @@ func (s *Store) LoadPublicationInput(ctx context.Context, id ingest.SessionID) (
 	defer s.pool.Put(conn)
 	end := sqlitex.Transaction(conn)
 	defer end(&err)
-	return s.loadPublicationInputOnConn(ctx, conn, id)
+	return s.loadPublicationInputOnConn(ctx, conn, id, ingest.SessionReadSelection{})
 }
 
 // loadPublicationInputOnConn reads capture evidence and content on the caller's
 // transaction, so the committed-generation reader can include them in its read.
-func (s *Store) loadPublicationInputOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID) (bundle ingest.PublicationInputBundle, err error) {
+func (s *Store) loadPublicationInputOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, selection ingest.SessionReadSelection) (bundle ingest.PublicationInputBundle, err error) {
 	bundle.Readiness = ingest.PublicationNeedsIngest
 	defer func() {
 		if err != nil {
@@ -328,7 +328,7 @@ func (s *Store) loadPublicationInputOnConn(ctx context.Context, conn *sqlite.Con
 		Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true
 			var scanErr error
-			bundle, scanErr = scanPublicationMetadata(stmt, id)
+			bundle, scanErr = scanPublicationMetadata(stmt, id, selection.LastGood)
 			return scanErr
 		},
 	})
@@ -344,7 +344,7 @@ func (s *Store) loadPublicationInputOnConn(ctx context.Context, conn *sqlite.Con
 	if err = s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{id}); err != nil {
 		return bundle, err
 	}
-	if err = sqlitex.ExecuteTransient(conn, `SELECT COALESCE(NULLIF(s.git_worktree,''),p.canonical_cwd,'') FROM sessions s JOIN projects p ON p.project_hash=s.project_hash WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error { bundle.ProjectPath = stmt.ColumnText(0); return nil }}); err != nil {
+	if err = sqlitex.ExecuteTransient(conn, `SELECT `+sqlRecordedDirectory+` FROM sessions s JOIN projects p ON p.project_hash=s.project_hash WHERE s.session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error { bundle.ProjectPath = stmt.ColumnText(0); return nil }}); err != nil {
 		return bundle, err
 	}
 	bundle.Entries, bundle.ContentCapture, err = loadFullSessionEntriesOnConn(ctx, conn, id, 0)
@@ -380,23 +380,50 @@ const publicationMetadataSelect = `SELECT s.project_hash,s.session_origin,s.publ
  s.indexed_publication_capture_revision,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,
  COALESCE(s.parent_id,''),h.host_slug,COALESCE(h.git_remote,''),
  p.capture_revision,p.schema_version,p.metadata_json,p.metadata_hash,p.content_hash,s.session_id,
- c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,'')
+ c.status,c.full_capture_sha256,c.publication_capture_revision,COALESCE(c.failure_code,''),COALESCE(c.capture_format,''),
+ s.latest_attempt_generation_id
  FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id
  LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
  LEFT JOIN session_content_captures c ON c.session_id=s.session_id`
 
 // Both the full bundle and list projection validate exactly the same evidence.
-func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ingest.PublicationInputBundle, err error) {
+//
+// A session with a latest attempt is refused while the attempt is
+// pending: publishing would certify the newer incomplete preview as the
+// session. allowLatestAttempt is set only by an explicit last-good read, which
+// answers for the last-good authority instead and therefore clears the flag.
+func scanPublicationMetadata(stmt *sqlite.Stmt, id ingest.SessionID, allowLatestAttempt bool) (bundle ingest.PublicationInputBundle, err error) {
 	bundle, err = scanPublicationMetadataProof(stmt, id)
 	eligible, captureErr := publicationContentEligible(stmt, 15, bundle.CaptureRevision)
 	if err != nil || captureErr != nil || !eligible {
 		bundle.Readiness = ingest.PublicationNeedsIngest
+	}
+	if bundle.LatestAttemptPending {
+		if allowLatestAttempt {
+			bundle.LatestAttemptPending = false
+		} else {
+			bundle.Readiness = ingest.PublicationNeedsIngest
+		}
 	}
 	if err == nil {
 		err = captureErr
 	}
 	return bundle, err
 }
+
+// readableMetadataSchemaVersions is the set form of the versions this build
+// reads as current. Publication readiness compares a stored capture's version
+// against this set, not against the current version exactly, so a declared
+// refresh-free schema bump does not make every stored capture read as needing a
+// re-ingest.
+var readableMetadataSchemaVersions = func() map[int]bool {
+	versions := ingest.ReadableMetadataSchemaVersions()
+	set := make(map[int]bool, len(versions))
+	for _, version := range versions {
+		set[version] = true
+	}
+	return set
+}()
 
 // Capture-state columns only: eligibility deliberately does not verify payload.
 //
@@ -447,6 +474,11 @@ func publicationContentEligible(stmt *sqlite.Stmt, offset int, revision int64) (
 // It does not require a previous full capture: that is the state being repaired.
 func scanPublicationMetadataProof(stmt *sqlite.Stmt, id ingest.SessionID) (bundle ingest.PublicationInputBundle, err error) {
 	bundle.Readiness = ingest.PublicationNeedsIngest
+	// A non-null latest-attempt pointer means a newer incomplete preview stands beside
+	// the last-good full generation: publication must refuse while it is
+	// pending. The flag is read in the same snapshot as every other evidence
+	// column, so readiness cannot observe a half-changed state.
+	bundle.LatestAttemptPending = stmt.ColumnType(20) != sqlite.TypeNull
 	err = func() error {
 		var parseErr error
 		bundle.ReceiptProjectHash, parseErr = schema.NewProjectHash(stmt.ColumnText(0))
@@ -458,7 +490,7 @@ func scanPublicationMetadataProof(stmt *sqlite.Stmt, id ingest.SessionID) (bundl
 			return publicationRepairError("invalid stored session origin")
 		}
 		bundle.CaptureRevision = stmt.ColumnInt64(2)
-		if stmt.ColumnType(9) == sqlite.TypeNull || stmt.ColumnInt(10) != ingest.CurrentSchemaVersion {
+		if stmt.ColumnType(9) == sqlite.TypeNull || !readableMetadataSchemaVersions[stmt.ColumnInt(10)] {
 			return nil
 		}
 		kind, parseErr := ingest.NewCWDProvenanceKind(stmt.ColumnText(5))
@@ -528,7 +560,7 @@ func (s *Store) LoadPublicationMetadata(ctx context.Context, ids []ingest.Sessio
 			if parseErr != nil {
 				return parseErr
 			}
-			bundle, scanErr := scanPublicationMetadata(stmt, id)
+			bundle, scanErr := scanPublicationMetadata(stmt, id, false)
 			result[id] = ingest.PublicationMetadata{Metadata: bundle.Metadata, Readiness: bundle.Readiness, CaptureRevision: bundle.CaptureRevision, Error: scanErr}
 			return nil
 		},

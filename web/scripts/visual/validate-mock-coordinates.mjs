@@ -38,7 +38,7 @@ async function fetchKnownProjects(origin, { where = 'validate-mock-coordinates.m
       `  Where: validate-mock-coordinates.mjs fetchKnownProjects(), called from ${where}.\n` +
       `  When: before booting Puppeteer, as the coordinate-resolution pre-check.\n` +
       `  Means: this script cannot know whether its configured project coordinate is valid, so it refuses to proceed and risk a misleading 12s+ downstream timeout.\n` +
-      `  Fix: start a backend at "${base}" (e.g. \`./bin/peasant web start --port <port> --mock-data-store=...\`) before running this script, or point the origin env var at a running one.`
+      `  Fix: start a backend at "${base}" (e.g. \`./peasant web start --port <port> --mock-data-store=...\`) before running this script, or point the origin env var at a running one.`
     )
   }
   if (!res.ok) {

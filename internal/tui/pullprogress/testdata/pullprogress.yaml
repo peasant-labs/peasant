@@ -1,0 +1,53 @@
+# Bulk collective-pull progress surface: the mounted states the bar must keep.
+#
+# Each case names one surface behaviour. The test mounts the production
+# pullprogress.Model over synthetic done/total counts and a synthetic elapsed
+# run time, renders it in both themes at 80x24 and 120x40, and asserts the
+# observable outcome (the done/total count, the elapsed readout, the bar
+# cells, and the header/footer copy). No case carries inline expectations
+# beyond its name, counts, and elapsed seconds; the test proves each
+# behaviour against the mounted model.
+requiredNames:
+  - progress starts empty before the cohort is known
+  - progress advances with done over total
+  - progress completes with a full bar
+  - progress retains counts while canceling
+  - progress retains counts once canceled
+  - progress fits both terminal sizes in both themes
+cases:
+  - name: progress starts empty before the cohort is known
+    done: 0
+    total: 0
+    elapsedSec: 0
+    canceling: false
+    canceled: false
+  - name: progress advances with done over total
+    done: 1
+    total: 4
+    elapsedSec: 2
+    canceling: false
+    canceled: false
+  - name: progress completes with a full bar
+    done: 4
+    total: 4
+    elapsedSec: 5
+    canceling: false
+    canceled: false
+  - name: progress retains counts while canceling
+    done: 2
+    total: 4
+    elapsedSec: 9
+    canceling: true
+    canceled: false
+  - name: progress retains counts once canceled
+    done: 2
+    total: 4
+    elapsedSec: 12
+    canceling: false
+    canceled: true
+  - name: progress fits both terminal sizes in both themes
+    done: 102
+    total: 300
+    elapsedSec: 30
+    canceling: false
+    canceled: false

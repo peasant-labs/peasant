@@ -1,0 +1,20 @@
+errorFragments:
+  - "thinking-level producer validation failed"
+  - "  what:"
+  - "  why:"
+  - "  where: transcript.ValidateThinkingLevelTurnEvidence"
+  - "  when: during SessionDetailPayload construction"
+  - "  meaning:"
+  - "  fix:"
+  - retry
+cases:
+  - {name: assistant_accepted, role: assistant, level: "off", raw: none, accepted: true}
+  - {name: assistant_ultracode_accepted, role: assistant, level: ultracode, accepted: true}
+  - {name: user_refused, role: user, level: high, accepted: false}
+  - {name: system_refused, role: system, raw: deep, accepted: false}
+  - {name: tool_refused, role: tool, level: high, accepted: false}
+  - {name: absent_accepted, role: user, accepted: true}
+  - {name: edge_whitespace_refused, role: assistant, raw: " deep", accepted: false}
+  - {name: unknown_canonical_refused, role: assistant, level: deep, accepted: false}
+  - {name: raw_only_accepted, role: assistant, raw: deep, accepted: true}
+  - {name: earlier_history_refused, role: user, raw: deep, earlier: true, accepted: false}

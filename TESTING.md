@@ -15,6 +15,16 @@ test layer to its entry point.
 
 ## Test gate
 
+The Linux container-pool gate may have UID 0. Its command uses the image's
+`setpriv` to remove `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH` from bounding,
+inheritable and ambient sets, with `no_new_privs`, before `make check` starts.
+This only reduces the gate child process's privileges; it changes no runner user,
+image, service or global directory. Non-root runners execute the same gate directly.
+Permission fixtures still require a real `os.Open` permission denial on the
+search-only ancestor before exercising production code. A root invocation that
+retains DAC bypass capabilities fails that assertion rather than skipping or
+claiming permission evidence. Test selection, race policy and budgets are unchanged.
+
 `make check` runs the Go suite through `cmd/testgate`. The gate exists to move
 the suite's expensive non-race work out of the race pass **without dropping it**,
 and to prove that every test still runs exactly once across the passes.
@@ -34,6 +44,24 @@ and to prove that every test still runs exactly once across the passes.
   test, but still
   computes the plan and applies the screen. The gate computes the plan from
   `go test -list`, so `cmd/testgate plan` prints the plan and runs nothing.
+
+### Pre-test steps
+
+`make check` runs a fixed set of steps before the test passes: fmt, lint, the
+ast-grep scan, the ast-grep key gate, the two tagged projection mutation proofs,
+and the release-workflow guard. Each is measured as its own unit so the pre-test
+wall stays separate from the test wall. The frozen step set lives in
+`internal/testkit/testgate/class.go` and is mirrored by
+`internal/testkit/testgate/testdata/pretest_steps.yaml`, which a test resolves
+against the Makefile so a dropped or reordered recipe line fails loudly.
+
+The two `projection-negative-*` steps run the build-tagged negative builds in
+`internal/transcript` with a scoped `-run`. Each build replaces the production
+seed policy with a deliberately wrong one and asserts that exactly the designated
+fixture cases fail, so a regression in the seed policy is caught. The scoped
+`-run` matters: a plain `go test -tags=projection_negative_seed
+./internal/transcript/` also runs the default production-path tests, which the
+wrong policy fails by design.
 
 ### Subset runs (`-pkgs`)
 
@@ -827,7 +855,7 @@ Freeze invocation, or PNG dimension check fails.
 
 ### Contact sheets and evidence review
 
-The harness publishes six contact sheets under the commit-derived directory
+The harness publishes seven contact sheets under the commit-derived directory
 `out/test/screenshots/peasant-guided-final-<commit>/`:
 
 | File | PNG dimensions | Contents |
@@ -835,9 +863,10 @@ The harness publishes six contact sheets under the commit-derived directory
 | `guided-dark.png` | `1800x3420` | The six guided sections in the dark theme: auto-ingest, publication, privacy, license, destination, and retention. Each section includes `80x24` and `120x40` terminal renders. |
 | `guided-light.png` | `1800x3420` | The same guided sections and terminal sizes in the light theme. |
 | `selection.png` | `1800x6750` | The mounted selection view, including search, project/branch/session previews, and origin filtering. |
-| `push.png` | `1800x6000` | The mounted publication wizard: start, selection, transcript preview, consent, and receipt. |
+| `push.png` | `1800x7840` | The mounted publication wizard: start, selection, transcript preview, consent, receipt, and the keyboard help card. |
 | `ingest-progress.png` | `1800x1200` | Local import progress after the guided configuration is saved. |
 | `ingest-completion.png` | `1800x3420` | Local import completion with multiple actionable warnings at the top and bottom of the scrollable result, plus a no-warning control. Every state includes both themes and both terminal sizes. |
+| `pull-progress.png` | `1800x3600` | The bulk collective-pull progress bar: running, canceling, and canceled. Every state includes both themes and both terminal sizes. |
 
 The selection fixture contains six synthetic sessions across two harnesses. One session is marked as
 already ingested. One carries scrubbed transcript turns in the store. One carries a scrubbed harness
@@ -845,7 +874,9 @@ transcript that the harness wrote and the store does not hold. Its states exerci
 hierarchy, global search, grouped repository and branch context, the stored session transcript
 preview, and the preview of a session that Peasant has not imported yet, without depending on a
 developer's repository or session history. The guided matrix contains 24 captures: six sections x
-two themes x two terminal sizes.
+two themes x two terminal sizes. The pull-progress matrix contains 12 captures: three states
+(running, canceling, canceled) x two themes x two terminal sizes, mounted from the real
+`pullprogress.Model` over scrubbed synthetic counts.
 
 The generated directory is local evidence and is ignored by git at `/out/test/screenshots/`; do not
 commit the PNGs. Manually inspect every sheet after generation. Review both themes, both
@@ -900,7 +931,7 @@ Prerequisites: `pnpm dlx playwright install` (or equivalent). No `web/e2e/` dire
 
 ```bash
 # Start server
-./bin/peasant web start --port 9999 --foreground --no-browser &
+./peasant web start --port 9999 --foreground --no-browser &
 sleep 2
 
 # Run Playwright tests (assumes web/e2e/ test directory)
@@ -911,7 +942,7 @@ pnpm dlx playwright screenshot http://localhost:9999/ screenshots/dashboard.png
 pnpm dlx playwright screenshot http://localhost:9999/sessions screenshots/sessions.png
 pnpm dlx playwright screenshot "http://localhost:9999/sessions/detail?id=SOME_ID" screenshots/detail.png
 
-./bin/peasant web stop --port 9999
+./peasant web stop --port 9999
 ```
 
 ### Example test patterns

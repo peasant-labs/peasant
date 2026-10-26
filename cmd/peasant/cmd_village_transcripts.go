@@ -23,10 +23,10 @@ import (
 func BuildVillageTranscriptsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "transcripts",
-		Short: "Pull, list, and view transcripts from the Peasant village",
-		Long: "Pull a transcript (and its annotations) from the Peasant village, list pullable or " +
+		Short: "Pull, list, and view transcripts from peasant online",
+		Long: "Pull a transcript (and its annotations) from peasant online, list pullable or " +
 			"already-pulled transcripts, and render a pulled transcript in the terminal.\n\n" +
-			"Auth: `pull` and remote `list` contact the village and require login " +
+			"Auth: `pull` and remote `list` contact peasant online and require login " +
 			"(run 'peasant village login'). `list --local` and `context` read only " +
 			"local data and work offline.",
 	}
@@ -72,9 +72,9 @@ func buildVillageTranscriptsContextCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "context <uuid|url>",
 		Short: "Render a pulled transcript in the terminal (offline)",
-		Long: `Render a previously pulled village transcript in the terminal.
+		Long: `Render a previously pulled peasant online transcript in the terminal.
 
-The reference is the transcript UUID or a pasted village web URL — the same form
+The reference is the transcript UUID or a pasted peasant online web URL — the same form
 'village transcripts pull' accepts. The transcript must already be pulled
 locally; this command reads only local data and works offline.
 
@@ -286,7 +286,7 @@ func unsupportedBlobContractErr(id schema.TranscriptID, detail string) error {
 type pulledContextJSON struct {
 	TranscriptID  string                `json:"transcriptId"`
 	VillageHost   string                `json:"villageHost"`
-	OwnerUsername string                `json:"ownerUsername"`
+	OwnerUsername *string               `json:"ownerUsername"` // null when the owner was anonymous to this viewer
 	LocalID       string                `json:"localSessionId,omitempty"`
 	License       string                `json:"license,omitempty"`
 	Entries       []schema.SessionEntry `json:"entries"`
@@ -297,7 +297,7 @@ func renderPulledContextJSON(cmd *cobra.Command, id schema.TranscriptID, row *st
 	out := pulledContextJSON{
 		TranscriptID:  id.String(),
 		VillageHost:   row.VillageHost,
-		OwnerUsername: row.OwnerUsername,
+		OwnerUsername: storedOwnerJSON(row.OwnerUsername),
 		LocalID:       row.LocalSessionID,
 		License:       string(row.License),
 		Entries:       entries,
@@ -314,9 +314,7 @@ func renderPulledContextJSON(cmd *cobra.Command, id schema.TranscriptID, row *st
 func printPulledProvenanceHeader(cmd *cobra.Command, id schema.TranscriptID, row *store.PulledTranscriptRow) {
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "pulled transcript %s\n", id)
-	if row.OwnerUsername != "" {
-		fmt.Fprintf(w, "  owner:   @%s\n", row.OwnerUsername)
-	}
+	fmt.Fprintf(w, "  owner:   %s\n", ownerLabel(row.OwnerUsername))
 	if row.VillageHost != "" {
 		fmt.Fprintf(w, "  village: %s\n", row.VillageHost)
 	}

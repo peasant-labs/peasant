@@ -1,0 +1,10 @@
+requiredNames:
+  - child-with-unstored-parent
+  - unresolved-child
+  - root-omits-both-markers
+cases:
+  - name: child-with-unstored-parent
+    parent: sess_unstoredparent
+  - name: unresolved-child
+    unresolved: true
+  - name: root-omits-both-markers

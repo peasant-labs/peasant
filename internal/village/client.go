@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
+	"sync/atomic"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -63,7 +64,7 @@ type PublicationError struct {
 }
 
 func (e *PublicationError) Error() string {
-	return fmt.Sprintf("publication failed at %s after HTTP %d; no local applied state was changed and retry remains targeted to this session; fix the Village deployment or response contract, then retry: %v", e.Stage, e.StatusCode, e.Err)
+	return fmt.Sprintf("publication failed at %s after HTTP %d; no local applied state was changed and retry remains targeted to this session; fix the peasant online deployment or response contract, then retry: %v", e.Stage, e.StatusCode, e.Err)
 }
 func (e *PublicationError) Unwrap() error { return e.Err }
 
@@ -92,6 +93,10 @@ type VillageClient struct {
 	// before every push-side HTTP attempt. The push CLI uses it to distinguish
 	// failures that happened wholly locally from runs that may have reached the village.
 	beforeRequest func()
+	// pullEnvelope is the pull envelope version NegotiatePull (or the caller
+	// through SetPullEnvelope) settled for this client; the pull GETs decode
+	// exactly that envelope. Nil means not negotiated.
+	pullEnvelope atomic.Pointer[schema.PushContractVersion]
 }
 
 // NewVillageClient creates a VillageClient targeting the given base URL with the
@@ -228,7 +233,7 @@ func (c *VillageClient) Publish(
 
 	if statusCode != http.StatusOK && statusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, statusCode, fmt.Errorf("village returned %d: %s", statusCode, string(respBody))
+		return nil, statusCode, fmt.Errorf("peasant online returned %d: %s", statusCode, string(respBody))
 	}
 
 	var result ingest.PublishResult
@@ -289,12 +294,12 @@ func (c *VillageClient) PublishAuthoritative(ctx context.Context, request schema
 		return schema.AuthoritativePublishResponse{}, resp.StatusCode, fmt.Errorf("authoritative publish: read terminal response: %w", readErr)
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return schema.AuthoritativePublishResponse{}, resp.StatusCode, fmt.Errorf("authoritative publish: village returned %d: %s", resp.StatusCode, string(raw))
+		return schema.AuthoritativePublishResponse{}, resp.StatusCode, fmt.Errorf("authoritative publish: peasant online returned %d: %s", resp.StatusCode, string(raw))
 	}
 	receipt, err := schema.DecodePublishResponse(raw)
 	if err != nil {
 		profileResponseFailure(ctx, operationPublish)
-		return schema.AuthoritativePublishResponse{}, resp.StatusCode, &PublicationError{Stage: PublicationStagePublishDecode, StatusCode: resp.StatusCode, Err: fmt.Errorf("authoritative publish: village returned malformed 2xx receipt: %w", err)}
+		return schema.AuthoritativePublishResponse{}, resp.StatusCode, &PublicationError{Stage: PublicationStagePublishDecode, StatusCode: resp.StatusCode, Err: fmt.Errorf("authoritative publish: peasant online returned malformed 2xx receipt: %w", err)}
 	}
 	return receipt, resp.StatusCode, nil
 }
@@ -322,12 +327,12 @@ func (c *VillageClient) UpdateOwner(ctx context.Context, id schema.TranscriptID,
 		return schema.OwnerTranscriptUpdateResponse{}, resp.StatusCode, fmt.Errorf("owner update: read terminal response: %w", readErr)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return schema.OwnerTranscriptUpdateResponse{}, resp.StatusCode, fmt.Errorf("owner update: village returned %d: %s", resp.StatusCode, string(raw))
+		return schema.OwnerTranscriptUpdateResponse{}, resp.StatusCode, fmt.Errorf("owner update: peasant online returned %d: %s", resp.StatusCode, string(raw))
 	}
 	var result schema.OwnerTranscriptUpdateResponse
 	if err = json.Unmarshal(raw, &result); err != nil {
 		profileResponseFailure(ctx, operationVisibility)
-		return schema.OwnerTranscriptUpdateResponse{}, resp.StatusCode, &PublicationError{Stage: PublicationStageOwnerDecode, StatusCode: resp.StatusCode, Err: fmt.Errorf("owner update: village returned malformed 2xx response: %w", err)}
+		return schema.OwnerTranscriptUpdateResponse{}, resp.StatusCode, &PublicationError{Stage: PublicationStageOwnerDecode, StatusCode: resp.StatusCode, Err: fmt.Errorf("owner update: peasant online returned malformed 2xx response: %w", err)}
 	}
 	return result, resp.StatusCode, nil
 }
@@ -365,7 +370,7 @@ func (c *VillageClient) UploadAnnotations(
 
 	if statusCode != http.StatusOK && statusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, statusCode, fmt.Errorf("village returned %d: %s", statusCode, string(respBody))
+		return nil, statusCode, fmt.Errorf("peasant online returned %d: %s", statusCode, string(respBody))
 	}
 
 	var result schema.AnnotationPushResponse
@@ -398,7 +403,7 @@ func (c *VillageClient) GetSchemaVersion(ctx context.Context) (*schema.SchemaVer
 
 	if statusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, statusCode, fmt.Errorf("village returned %d: %s", statusCode, string(respBody))
+		return nil, statusCode, fmt.Errorf("peasant online returned %d: %s", statusCode, string(respBody))
 	}
 
 	var result schema.SchemaVersionResponse
@@ -436,7 +441,7 @@ func (c *VillageClient) GetAnnotationManifest(ctx context.Context) (*schema.Anno
 
 	if statusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, statusCode, fmt.Errorf("village returned %d: %s", statusCode, string(respBody))
+		return nil, statusCode, fmt.Errorf("peasant online returned %d: %s", statusCode, string(respBody))
 	}
 
 	var result schema.AnnotationManifestResponse
@@ -481,7 +486,7 @@ func (c *VillageClient) GetPromptRequests(ctx context.Context) (*schema.VillageP
 
 	if statusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, statusCode, fmt.Errorf("village returned %d: %s", statusCode, string(respBody))
+		return nil, statusCode, fmt.Errorf("peasant online returned %d: %s", statusCode, string(respBody))
 	}
 
 	var result schema.VillagePromptRequestsResponse

@@ -11,11 +11,14 @@ const defaultIndexProfileSlowLimit = 10
 // IndexProfiler collects opt-in INDEX timing data for one pipeline run.
 // It is intentionally in memory only: callers decide how to print or discard it.
 type IndexProfiler struct {
-	mu       sync.Mutex
-	batches  []IndexProfileBatch
-	sessions []IndexProfileSession
-	stages   []IndexProfileStage
-	annotate AnnotationProfileStats
+	mu              sync.Mutex
+	batches         []IndexProfileBatch
+	sessions        []IndexProfileSession
+	stages          []IndexProfileStage
+	annotate        AnnotationProfileStats
+	flushWaits      []time.Duration
+	activationSizes map[int]int
+	stagedPeak      int64
 }
 
 const (
@@ -441,10 +444,46 @@ func (s IndexProfileSession) TotalDuration() time.Duration {
 
 // IndexProfileSnapshot is a stable copy of profiler data.
 type IndexProfileSnapshot struct {
-	Batches      []IndexProfileBatch
-	SlowSessions []IndexProfileSession
-	Stages       []IndexProfileStage
-	Annotation   AnnotationProfileStats
+	Batches         []IndexProfileBatch
+	SlowSessions    []IndexProfileSession
+	Stages          []IndexProfileStage
+	Annotation      AnnotationProfileStats
+	FlushWaitCount  int
+	FlushWaitP50    time.Duration
+	FlushWaitMax    time.Duration
+	ActivationSizes map[int]int
+	StagedPeakBytes int64
+}
+
+// RecordFlushWait records time actually spent waiting on a partial drain batch.
+func (p *IndexProfiler) RecordFlushWait(wait time.Duration) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.flushWaits = append(p.flushWaits, wait)
+}
+
+func (p *IndexProfiler) RecordActivationSize(size int) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.activationSizes == nil {
+		p.activationSizes = make(map[int]int)
+	}
+	p.activationSizes[size]++
+}
+
+func (p *IndexProfiler) RecordStagedPeak(peak int64) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stagedPeak = max(p.stagedPeak, peak)
 }
 
 // Record appends one batch and its per-session observations.
@@ -502,5 +541,18 @@ func (p *IndexProfiler) Snapshot() IndexProfileSnapshot {
 	if len(sessions) > defaultIndexProfileSlowLimit {
 		sessions = sessions[:defaultIndexProfileSlowLimit]
 	}
-	return IndexProfileSnapshot{Batches: batches, SlowSessions: sessions, Stages: stages, Annotation: annotate}
+	waits := append([]time.Duration(nil), p.flushWaits...)
+	sort.Slice(waits, func(i, j int) bool {
+		return waits[i] < waits[j]
+	})
+	result := IndexProfileSnapshot{Batches: batches, SlowSessions: sessions, Stages: stages, Annotation: annotate,
+		FlushWaitCount: len(waits), StagedPeakBytes: p.stagedPeak, ActivationSizes: make(map[int]int, len(p.activationSizes))}
+	if len(waits) > 0 {
+		result.FlushWaitP50 = waits[(len(waits)-1)/2]
+		result.FlushWaitMax = waits[len(waits)-1]
+	}
+	for size, count := range p.activationSizes {
+		result.ActivationSizes[size] = count
+	}
+	return result
 }

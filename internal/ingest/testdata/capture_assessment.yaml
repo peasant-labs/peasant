@@ -1,4 +1,4 @@
-# Capture assessment pins (PROPOSAL-3 section 5.2 V1 scope).
+# Capture assessment pins for the V1 capture-scope facts (parser facts, coverage tuple, checked conversion, forged-tuple refusal).
 #
 # Each case independently specifies parser facts and the expected capture
 # tuple. The test builds real V1 entries (known carriers plus retained
@@ -10,6 +10,7 @@ required_names:
   - known-only
   - unknown-only
   - omitted-only
+  - pointer-v1-omitted
   - mixed-accounted
   - mixed-unaccounted
   - legacy-only
@@ -59,6 +60,19 @@ cases:
     unaccounted: false
     unknown_records: []
     omitted: true
+    want_coverage: full
+    want_failure: source_records_omitted
+    want_partial: true
+    want_occurrences: 0
+  - name: pointer-v1-omitted
+    harness: claude-code
+    policy: fresh
+    authoritative: true
+    source_omitted: true
+    unaccounted: false
+    unknown_records: []
+    omitted: true
+    pointer_result: true
     want_coverage: full
     want_failure: source_records_omitted
     want_partial: true

@@ -1,0 +1,5 @@
+requiredNames:
+  - fresh-first-body-id
+  - migrated-first-body-id
+  - golden-template-body-insert
+  - fresh-equals-migrated-schema

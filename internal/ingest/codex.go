@@ -487,11 +487,17 @@ func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *Unifie
 		case codexTypeSessionMeta:
 			var sm codexSessionMeta
 			if err := json.Unmarshal(env.Payload, &sm); err == nil {
-				if sm.ID != "" && sm.ID != meta.SessionID.String() {
-					return nil, fmt.Errorf("Codex metadata capture for %s: session_meta.id disagrees with the discovered filename identity; no capture was written; restore the matching rollout and rerun peasant ingest", meta.SessionID)
+				// Subagent rollouts can include a later parent envelope. Like
+				// DecodeCodexThreadEvidence, only the first metadata envelope
+				// owns this session's identity and context. Still decode every
+				// later payload so malformed records keep their diagnostics.
+				if !gotSessionMeta {
+					if sm.ID != "" && sm.ID != meta.SessionID.String() {
+						return nil, fmt.Errorf("Codex metadata capture for %s: session_meta.id disagrees with the discovered filename identity; no capture was written; restore the matching rollout and rerun peasant ingest", meta.SessionID)
+					}
+					sessionMeta = &sm
+					gotSessionMeta = true
 				}
-				sessionMeta = &sm
-				gotSessionMeta = true
 			} else {
 				meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 					ErrorType:   "parse_error",
@@ -507,6 +513,13 @@ func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *Unifie
 				if mid, mErr := NewModelID(tc.Model); mErr == nil {
 					meta.Model = mid
 				}
+			}
+			// The first non-empty effort seeds the session thinking level;
+			// later turn_context values are recorded as in-session changes.
+			if tc.Effort != "" {
+				mapping, diagnostic := mapCodexEffort(tc.Effort)
+				appendThinkingLevelDiagnostic(meta, diagnostic, 0)
+				applyThinkingLevelObservation(meta, mapping)
 			}
 
 		case codexTypeResponse:

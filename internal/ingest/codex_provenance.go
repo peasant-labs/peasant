@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/peasant-labs/schema"
@@ -392,7 +393,7 @@ type codexItemPayload struct {
 	Arguments    json.RawMessage
 	Input        json.RawMessage
 	Output       json.RawMessage
-	Delivery     codexDeliveryCorrelation
+	Delivery     codexDelivery
 	KindsUsable  bool
 	KindsPresent bool
 }
@@ -424,10 +425,10 @@ func decodeCodexItemPayload(raw json.RawMessage) codexItemPayload {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"summary"`
-		Arguments   json.RawMessage           `json:"arguments"`
-		Input       json.RawMessage           `json:"input"`
-		Output      json.RawMessage           `json:"output"`
-		Delivery    *codexDeliveryCorrelation `json:"delivery"`
+		Arguments   json.RawMessage `json:"arguments"`
+		Input       json.RawMessage `json:"input"`
+		Output      json.RawMessage `json:"output"`
+		Delivery    codexDelivery   `json:"delivery"`
 		Passthrough *struct {
 			Kinds json.RawMessage `json:"content_item_kinds"`
 		} `json:"internal_chat_message_metadata_passthrough"`
@@ -445,9 +446,7 @@ func decodeCodexItemPayload(raw json.RawMessage) codexItemPayload {
 	payload.Arguments = wire.Arguments
 	payload.Input = wire.Input
 	payload.Output = wire.Output
-	if wire.Delivery != nil {
-		payload.Delivery = *wire.Delivery
-	}
+	payload.Delivery = wire.Delivery
 	for _, element := range wire.Content {
 		payload.Content = append(payload.Content, codexMessageBlock{ContentType: element.Type, Text: element.Text})
 	}
@@ -536,7 +535,10 @@ func codexMediaDisplayContent(contentType string) string {
 // history no longer contains them. Uncertain earlier nodes move to the first
 // declared earlier section with uncertain ownership. The returned earlier
 // states are empty when no uncertain block exists.
-func ClassifyCodexBlocks(stableThreadID string, nodes []CodexCapturedNode, thread CodexThreadEvidence, correlations []CodexCapturedCorrelation) ([]ClassifiedBlock, []schema.EarlierHistoryState, error) {
+//
+// Controls are applied at native coordinates, so replaced items use the
+// governing turn_context at their final source position, not their old slot.
+func ClassifyCodexBlocks(stableThreadID string, nodes []CodexCapturedNode, controls []CodexCapturedControl, thread CodexThreadEvidence, correlations []CodexCapturedCorrelation) ([]ClassifiedBlock, []schema.EarlierHistoryState, error) {
 	registry := codexContentKindRegistry()
 	classifier := codexBlockClassifier{
 		stableThreadID: stableThreadID,
@@ -545,6 +547,17 @@ func ClassifyCodexBlocks(stableThreadID string, nodes []CodexCapturedNode, threa
 		correlated:     codexCorrelatedItems(correlations),
 	}
 	for _, node := range nodes {
+		classifier.thinkingLevel = thinkingLevelMapping{}
+		// Repeated native items can replace a node in place. Its final source
+		// coordinates, not its retained display slot, determine the effort.
+		next := sort.Search(len(controls), func(i int) bool {
+			control := controls[i]
+			return control.SegmentOrdinal > node.SegmentOrdinal ||
+				(control.SegmentOrdinal == node.SegmentOrdinal && control.Ordinal > node.Ordinal)
+		})
+		if next > 0 {
+			classifier.thinkingLevel = controls[next-1].ThinkingLevel
+		}
 		if err := classifier.classifyNode(node); err != nil {
 			return nil, nil, err
 		}
@@ -575,13 +588,14 @@ type codexBlockClassifier struct {
 	registry       map[string]codexKindAttribution
 	correlated     map[string]bool
 	blocks         []ClassifiedBlock
-	// retained holds inherited blocks whose bytes are preserved locally without
-	// becoming main or earlier conversational entries. They carry Retained and
-	// the captured segment ordinal instead of a projection section.
-	retained        []ClassifiedBlock
-	retaining       bool
-	retainedSegment int
-	useKeys         map[string]bool
+	// inherited holds the blocks the source proved came from inherited context:
+	// their bytes are preserved locally without becoming main or earlier
+	// conversational entries. They carry Inherited and the captured segment
+	// ordinal instead of a projection section.
+	inherited        []ClassifiedBlock
+	inheriting       bool
+	inheritedSegment int
+	useKeys          map[string]bool
 	// callCarriers maps one native call identity to the depth-0 assistant
 	// carrier its tool_use created. A matching tool_result attaches to that
 	// SAME carrier instead of inventing a second empty carrier, so one folded
@@ -594,33 +608,40 @@ type codexBlockClassifier struct {
 	// attach to an unrelated earlier assistant message.
 	carrierKey string
 	uncertain  bool
+	// thinkingLevel is the governing turn_context effort for the node being
+	// classified. It is stamped on assistant blocks only.
+	thinkingLevel thinkingLevelMapping
 }
 
 // emit appends one classified block to the active stream. While the current
-// node is proven inherited, the block is held as retained local evidence
+// node is proven inherited, the block is held as inherited local evidence
 // instead: it keeps its content, native key and provenance, is attached to the
 // captured segment it came from, and never enters a main or earlier
 // conversational partition.
 func (c *codexBlockClassifier) emit(block ClassifiedBlock) {
-	if !c.retaining {
+	if block.Role == schema.RoleAssistant {
+		block.ThinkingLevel = c.thinkingLevel.Level
+		block.ThinkingLevelRaw = c.thinkingLevel.Raw
+	}
+	if !c.inheriting {
 		c.blocks = append(c.blocks, block)
 		return
 	}
-	block.Retained = true
-	block.SegmentOrdinal = c.retainedSegment
+	block.Inherited = true
+	block.SegmentOrdinal = c.inheritedSegment
 	block.Section = ProjectionSection{}
 	block.Uncertain = false
 	block.UncertainSubtree = false
 	block.AmbiguousPairKey = ""
 	block.SubmissionKey = ""
-	c.retained = append(c.retained, block)
+	c.inherited = append(c.inherited, block)
 }
 
 // finish demotes orphan tool results to depth-0 entries and reports whether
 // an uncertain earlier section is declared. A result without its call block
 // in this capture keeps its content and identity at depth 0 instead of
 // failing the candidate: the pairing evidence is absent, not the content.
-// Retained inherited blocks are appended after the emitted blocks; they carry
+// Inherited blocks are appended after the emitted blocks; they carry
 // no partition and need no orphan demotion.
 func (c *codexBlockClassifier) finish() ([]ClassifiedBlock, []schema.EarlierHistoryState, error) {
 	for i := range c.blocks {
@@ -638,7 +659,7 @@ func (c *codexBlockClassifier) finish() ([]ClassifiedBlock, []schema.EarlierHist
 	if c.uncertain {
 		earlier = append(earlier, schema.EarlierHistoryUncertainMigrated)
 	}
-	return append(append([]ClassifiedBlock(nil), c.blocks...), c.retained...), earlier, nil
+	return append(append([]ClassifiedBlock(nil), c.blocks...), c.inherited...), earlier, nil
 }
 
 // classifyNode converts one captured node into zero or more classified
@@ -653,15 +674,15 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 	}
 	metadata := decodeCodexEnvelopeMetadata(node.Metadata)
 	// A node whose captured ownership or per-record envelope proves it inherited
-	// is retained as local evidence, never emitted as a main or earlier
+	// is held as inherited local evidence, never emitted as a main or earlier
 	// conversational entry.
 	if ownershipOf(node, metadata) == schema.ContentOwnershipInherited {
-		c.retaining = true
-		c.retainedSegment = node.SegmentOrdinal
+		c.inheriting = true
+		c.inheritedSegment = node.SegmentOrdinal
 	}
 	defer func() {
-		c.retaining = false
-		c.retainedSegment = 0
+		c.inheriting = false
+		c.inheritedSegment = 0
 	}()
 	if len(node.RetainedUnknown) > 0 {
 		ownership := ownershipOf(node, metadata)
@@ -671,7 +692,7 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 		// Evidence-only carriers use the common entry metadata channel even
 		// for inherited sources. They carry no conversational content, count,
 		// title, or display; provenance and the source segment retain ownership.
-		c.retaining = false
+		c.inheriting = false
 		block := ClassifiedBlock{NativeKey: node.NativeKey + "/retained-unknown", Section: sectionOf(ownership), Uncertain: ownership == schema.ContentOwnershipUncertain, Role: RoleSystem, EntryType: EntryTypeSystem, RetainedUnknown: node.RetainedUnknown,
 			Provenance: &schema.ContentProvenance{Origin: schema.ContentOriginUnknown, Actor: schema.ActorOriginUnknown, Delivery: schema.DeliveryOriginUnknown, Ownership: ownership, Evidence: schema.EvidenceNativeTyped, InputModality: schema.InputModalityNone}}
 		c.emit(block)
@@ -688,7 +709,7 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 		if event.Type == "item_completed" && len(event.Item) > 0 {
 			payload = decodeCodexItemPayload(event.Item)
 			if !payload.Delivery.isCorrelated() && event.Delivery.isCorrelated() {
-				payload.Delivery = *event.Delivery
+				payload.Delivery = event.Delivery
 			}
 		}
 	}
@@ -1325,10 +1346,13 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 		delivery = schema.DeliveryOriginInheritedContext
 	}
 	partType := payload.Type
-	if c.callCarriers == nil {
-		c.callCarriers = map[string]string{}
+	// Inherited calls are evidence, not emitted parents.
+	if !c.inheriting {
+		if c.callCarriers == nil {
+			c.callCarriers = map[string]string{}
+		}
+		c.callCarriers[callKey] = carrierKey
 	}
-	c.callCarriers[callKey] = carrierKey
 	toolInput := codexToolBytes(payload.Arguments, payload.Input)
 	c.emit(ClassifiedBlock{
 		NativeKey:        node.NativeKey + "/call",
@@ -1351,10 +1375,12 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 			InputModality: schema.InputModalityNone,
 		},
 	})
-	if c.useKeys == nil {
-		c.useKeys = map[string]bool{}
+	if !c.inheriting {
+		if c.useKeys == nil {
+			c.useKeys = map[string]bool{}
+		}
+		c.useKeys[callKey] = true
 	}
-	c.useKeys[callKey] = true
 }
 
 // classifyToolResult emits the depth-1 tool_result block under the carrier its

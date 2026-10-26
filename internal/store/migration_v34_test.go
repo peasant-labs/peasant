@@ -3,8 +3,8 @@ package store_test
 import (
 	"testing"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // V34 creates pulled_transcripts (PK village_host, transcript_id) and

@@ -21,9 +21,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/metadata_read_policy.yaml
@@ -242,6 +242,8 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			meta := makeReindexMeta(t, string(sid), nativePath)
+			// This corpus also injects invalid producer claims into raw JSON.
+			meta.AdapterVersion = nil
 			meta.SchemaVersion = fixture.SchemaVersion
 			// The transcript the pair carries is the fixture transcript, so
 			// the metadata records its checksum exactly as every production

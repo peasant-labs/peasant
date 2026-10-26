@@ -81,9 +81,13 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 	var calls atomic.Int32
 	captured := &syncCapturedPublish{parts: map[string]string{}}
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/auth/me" {
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if !strings.Contains(r.URL.Path, "/transcripts/publish") {
-			_ = json.NewEncoder(w).Encode(schema.SchemaVersionResponse{ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1}})
+			_ = json.NewEncoder(w).Encode(schema.SchemaVersionResponse{ContentCapabilities: schema.AllContentCapabilities})
 			return
 		}
 		captured.record(r)
@@ -105,7 +109,13 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 		t.Fatal(err)
 	}
 	storetest.CopyGoldenTo(t, hs.dbPath())
-	db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
+	// Read as the web server reads: through the managed-generation store the
+	// web ingest writes.
+	storeOptions, err := store.ManagedGenerationOptions(filepath.Join(home, "output"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithSkipMigrations())...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,14 +158,14 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 	if calls.Load() != 0 {
 		t.Fatal("ingest published without explicit action")
 	}
-	publish := func() pushResponse {
+	publish := func() schema.SyncPushResponse {
 		t.Helper()
 		restoreSource := prepareSourceFreePublication(t, db, cfg.Output.BasePath, filepath.Join(source, selectedID+".jsonl"), selectedID, repo)
 		defer restoreSource()
-		body, _ := json.Marshal(pushRequest{SessionIDs: []string{selectedID}, Visibility: "private"})
+		body, _ := json.Marshal(schema.SyncPushRequest{SessionIDs: []string{selectedID}})
 		response := httptest.NewRecorder()
 		handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", bytes.NewReader(body)))
-		var result pushResponse
+		var result schema.SyncPushResponse
 		if response.Code != http.StatusOK {
 			t.Fatalf("share status=%d body=%s", response.Code, response.Body.String())
 		}
@@ -176,7 +186,7 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 	}
 	readReceipt := func() *store.PublicationRecord {
 		t.Helper()
-		record, err := db.Publication(t.Context(), village.URL, "user-1", project, selectedID)
+		record, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), project, selectedID)
 		if err != nil || record == nil {
 			t.Fatalf("retained receipt=%+v err=%v", record, err)
 		}

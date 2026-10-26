@@ -1,0 +1,20 @@
+requiredNames:
+  - no-arguments
+  - grep-space
+  - grep-equals
+  - separator
+  - missing-pattern
+  - foreign-argument
+  - extra-argument
+  - counterfactual
+  - counterfactual-ignores-arguments
+cases:
+  - {name: no-arguments, args: [], forwarded: [], fullCatalog: true}
+  - {name: grep-space, args: ['--grep', 'web-other-account|village-route-only-from-home'], forwarded: ['--grep', 'web-other-account|village-route-only-from-home'], fullCatalog: false}
+  - {name: grep-equals, args: ['--grep=web-other-account'], forwarded: ['--grep', 'web-other-account'], fullCatalog: false}
+  - {name: separator, args: ['--', '--grep', 'village-route-only-from-home'], forwarded: ['--grep', 'village-route-only-from-home'], fullCatalog: false}
+  - {name: missing-pattern, args: ['--grep'], error: 'accepts only --grep'}
+  - {name: foreign-argument, args: ['--project', 'dark-desktop'], error: 'accepts only --grep'}
+  - {name: extra-argument, args: ['--grep', 'web-other-account', '--project', 'dark-desktop'], error: 'accepts only --grep'}
+  - {name: counterfactual, args: [], counterfactual: true, forwarded: ['--project', 'dark-desktop'], fullCatalog: false}
+  - {name: counterfactual-ignores-arguments, args: ['--project', 'light-desktop'], counterfactual: true, forwarded: ['--project', 'dark-desktop'], fullCatalog: false}

@@ -12,11 +12,12 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"go.uber.org/goleak"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/schema_catalog.yaml
@@ -199,7 +200,7 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	// + lessons from V28 + memory_injection_log from V30 + lesson_sources from
 	// V32 + pulled_transcripts/pulled_annotations from V34 + session_entries_fts
 	// and its FTS5 shadow tables from V35, plus the later projection, publication,
-	// annotation and V60 managed-generation tables. The required NAME set lives
+	// annotation, V60 managed-generation and V62 harmonized-content tables. The required NAME set lives
 	// in testdata/schema_catalog.yaml, so a rename, drop or undeclared addition
 	// fails loudly instead of being absorbed by a count.
 	catalog := loadSchemaCatalog(t)
@@ -216,8 +217,9 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	requireExactNameSet(t, "final schema tables", catalog.Tables, tables)
 
 	// Verify the index catalog by exact name as well (v1-v24 base + the later
-	// lesson/injection/annotation/association indexes + the V60 generation entry
-	// partition index + the V61 reverse logical-target lookup indexes).
+	// lesson/injection/annotation/association indexes + the V61 reverse
+	// logical-target lookup indexes + the V62 generation body/content and
+	// sweep-pending indexes; the V60 duplicate partition index is dropped).
 	indexes := map[string]struct{}{}
 	err = sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -300,7 +302,7 @@ func makeStoreEntry(t *testing.T, sessionID, projectHash, hostSlug string, harne
 	if err != nil {
 		t.Fatalf("NewModelID: %v", err)
 	}
-	srcPath, err := ingest.NewResolvedPath("/test/path/session.jsonl")
+	srcPath, err := ingest.NewResolvedPath(testutil.PlatformAbsPath("/test/path/session.jsonl"))
 	if err != nil {
 		t.Fatalf("NewResolvedPath: %v", err)
 	}
@@ -657,7 +659,7 @@ func TestStore_InsertSessions_PreservesSessionEntriesHashOnUpsert(t *testing.T) 
 	entry.Metadata.Stats.TokensIn = 2000
 	entry.Metadata.Stats.TokensOut = 900
 	entry.Metadata.Timestamp.End = 1700000123456
-	entry.Metadata.Source.FilePath = "/test/path/session-updated.jsonl"
+	entry.Metadata.Source.FilePath = testutil.PlatformAbsPath("/test/path/session-updated.jsonl")
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("second InsertSessions: %v", err)
 	}

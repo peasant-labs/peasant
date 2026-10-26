@@ -1,4 +1,4 @@
-# Native coverage matrix (PROPOSAL-3 sections 5.2 native + 5.3 + 5.5 read split).
+# Native coverage matrix for managed native input: native-input facts, omission accounting, and the read split.
 #
 # Each case independently specifies completeness, retained carriers, prior
 # authority, and Main/Earlier distribution. The test builds a real V2
@@ -19,12 +19,15 @@ required_names:
   - forged-full-refused
   - complete-source-omitted-accounted
   - complete-source-omitted-unaccounted
+  - complete-source-omitted-placeholder
+  - complete-source-omitted-nonauthoritative
 cases:
   - name: complete-zero-carriers
     completeness: complete
     carriers:
       []
     prior: none
+    authoritative: true
     want_disposition: committed_now
     want_occurrences: 0
     want_export: success
@@ -42,6 +45,7 @@ cases:
         pointer: /payload/content/1
         payload: '{"type":"future","value":1}'
     prior: none
+    authoritative: true
     want_disposition: committed_now
     want_occurrences: 1
     want_export: success
@@ -52,6 +56,7 @@ cases:
     carriers:
       []
     prior: none
+    authoritative: true
     want_disposition: committed_now
     want_occurrences: 0
     want_export: refused
@@ -69,6 +74,7 @@ cases:
         pointer: /payload/content/1
         payload: '{"type":"future","value":2}'
     prior: none
+    authoritative: true
     want_disposition: committed_now
     want_occurrences: 0
     want_export: refused
@@ -86,6 +92,7 @@ cases:
         pointer: ""
         payload: '{"type":"future","value":3}'
     prior: none
+    authoritative: true
     want_disposition: committed_now
     want_occurrences: 0
     want_export: refused
@@ -103,6 +110,7 @@ cases:
         pointer: ""
         payload: '{"type":"future","value":4}'
     prior: full
+    authoritative: true
     want_disposition: not_committed
     want_occurrences: 0
     want_export: prior_preserved
@@ -128,6 +136,7 @@ cases:
         pointer: ""
         payload: '{"type":"future","value":6}'
     prior: none
+    authoritative: true
     want_disposition: committed_now
     want_occurrences: 2
     want_export: success
@@ -153,6 +162,7 @@ cases:
         pointer: /payload/content/1
         payload: '{"type":"future","value":8}'
     prior: none
+    authoritative: true
     want_disposition: not_committed
     want_occurrences: 0
     want_export: refused
@@ -170,6 +180,7 @@ cases:
         pointer: /payload/content/1
         payload: '{"type":"future","value":7}'
     prior: none
+    authoritative: true
     forged_full: true
     want_disposition: not_committed
     want_occurrences: 0
@@ -177,12 +188,12 @@ cases:
     want_full_read: refused
     want_failure_code: ""
   # Source-omitted native rows (spec section 10: accounted/unaccounted cause).
-  # Both stay preview with refused full read: the omission placeholder
-  # discriminator (outputRecordsItsOmissions) is V1-only by design, so a
-  # native omission never reaches accounted full certification here — the
-  # pipeline derives unaccounted from ContentOmitted for the same reason, and
-  # placeholder-accounted fullossification stays V1-lane owned. These rows pin
-  # the assessed failure-code distinction at the native scope.
+  # The omission discriminator (outputRecordsItsOmissions) reads the stored
+  # partitions, so a managed capture that carries a positional placeholder is
+  # accounted and may certify FULL, exactly as the V1 entries path does; a
+  # capture whose source recorded an omission with no placeholder stays the
+  # bounded preview. These rows pin the assessed failure-code distinction at
+  # the native scope.
   - name: complete-source-omitted-accounted
     completeness: complete
     carriers:
@@ -195,6 +206,7 @@ cases:
         pointer: /payload/content/1
         payload: '{"type":"future","value":10}'
     prior: none
+    authoritative: true
     source_omitted: true
     unaccounted: false
     want_disposition: committed_now
@@ -214,10 +226,45 @@ cases:
         pointer: /payload/content/1
         payload: '{"type":"future","value":11}'
     prior: none
+    authoritative: true
     source_omitted: true
     unaccounted: true
     want_disposition: committed_now
     want_occurrences: 1
     want_export: success
     want_full_read: refused
+    want_failure_code: source_records_omitted
+  - name: complete-source-omitted-nonauthoritative
+    completeness: complete
+    carriers:
+      - partition: main
+        namespace: message_block
+        kind: future
+        source_ref: src-omitted-nonauthoritative
+        record_index: 3
+        position: 5
+        pointer: /payload/content/1
+        payload: '{"type":"future","value":12}'
+    prior: none
+    authoritative: false
+    source_omitted: true
+    unaccounted: false
+    want_disposition: committed_now
+    want_occurrences: 1
+    want_export: success
+    want_full_read: refused
     want_failure_code: strict_capture_refused
+  - name: complete-source-omitted-placeholder
+    completeness: complete
+    carriers:
+      - partition: main
+        omitted: true
+    prior: none
+    authoritative: true
+    source_omitted: true
+    unaccounted: false
+    want_disposition: committed_now
+    want_occurrences: 0
+    want_export: success
+    want_full_read: success
+    want_failure_code: source_records_omitted

@@ -1,0 +1,28 @@
+requiredNames:
+  - saved-collectives-never-fetched
+  - metadata-fetch-complete
+  - metadata-fetch-scoped-auth-report
+  - metadata-fetch-remote-report
+  - metadata-fetch-local-persistence-report
+  - track-online-visible
+  - untrack-offline-idempotent
+  - fetch-cross-origin-refused
+  - track-cross-origin-refused
+  - untrack-cross-origin-refused
+  - runtime-deadline-retains-catalog-and-history
+  - remote-504-is-not-local-deadline
+  - runtime-invalid-deadline-refuses-startup
+cases:
+  - {name: saved-collectives-never-fetched, method: GET, path: /api/v1/village/collective-observations, status: 200, network: false, shape: catalog}
+  - {name: metadata-fetch-complete, method: POST, path: /api/v1/village/collective-observations/fetch, status: 200, network: true, shape: report}
+  - {name: metadata-fetch-scoped-auth-report, method: POST, path: /api/v1/village/collective-observations/fetch, remoteStatus: 401, status: 401, network: true, shape: report}
+  - {name: metadata-fetch-remote-report, method: POST, path: /api/v1/village/collective-observations/fetch, remoteStatus: 503, status: 502, network: true, shape: report}
+  - {name: metadata-fetch-local-persistence-report, method: POST, path: /api/v1/village/collective-observations/fetch, closeStore: true, status: 500, network: false, shape: report}
+  - {name: track-online-visible, method: PUT, path: /api/v1/village/collective-observations/33333333-3333-4333-8333-333333333333/tracking, status: 200, network: true, shape: catalog}
+  - {name: untrack-offline-idempotent, method: DELETE, path: /api/v1/village/collective-observations/33333333-3333-4333-8333-333333333333/tracking, status: 200, network: false, shape: catalog}
+  - {name: fetch-cross-origin-refused, method: POST, path: /api/v1/village/collective-observations/fetch, origin: 'https://outside.invalid', status: 403, network: false, shape: error}
+  - {name: track-cross-origin-refused, method: PUT, path: /api/v1/village/collective-observations/33333333-3333-4333-8333-333333333333/tracking, origin: 'https://outside.invalid', status: 403, network: false, shape: error}
+  - {name: untrack-cross-origin-refused, method: DELETE, path: /api/v1/village/collective-observations/33333333-3333-4333-8333-333333333333/tracking, origin: 'https://outside.invalid', status: 403, network: false, shape: error}
+  - {name: runtime-deadline-retains-catalog-and-history, method: POST, path: /api/v1/village/collective-observations/fetch, timeout: 2s, stallHistory: true, status: 504, network: true, shape: report}
+  - {name: remote-504-is-not-local-deadline, method: POST, path: /api/v1/village/collective-observations/fetch, remoteStatus: 504, status: 502, network: true, shape: report}
+  - {name: runtime-invalid-deadline-refuses-startup, timeout: invalid, startupError: true, network: false}

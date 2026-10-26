@@ -17,10 +17,9 @@ import (
 
 // OpenCodeIndexer parses legacy JSON trees and Peasant-managed OpenCode projections into SessionEntry slices.
 type OpenCodeIndexer struct {
-	fs                FileSystem
-	fullDepth         bool
-	fullContent       bool
-	provenanceCapture OpenCodeProvenanceIndexerConfig
+	fs          FileSystem
+	fullDepth   bool
+	fullContent bool
 }
 
 // OpenCodeIndexerOption configures an OpenCodeIndexer.
@@ -45,31 +44,9 @@ var _ TranscriptIndexer = (*OpenCodeIndexer)(nil)
 var _ VersionedTranscriptIndexer = (*OpenCodeIndexer)(nil)
 var _ SessionTranscriptSourceResolver = (*OpenCodeIndexer)(nil)
 
-// IndexTranscriptResult refuses incomplete native trees and validates managed
+// IndexTranscriptResult refuses incomplete recorded trees and validates managed
 // projections through their existing bounded, strict decoder.
 func (idx *OpenCodeIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
-	// The provenance candidate path returns the validated V2 generation the
-	// native repair activation consumes. It stays disabled until that repair
-	// path enables it with a real snapshot; while disabled every V1 flow below
-	// keeps its exact retained behavior.
-	if idx.provenanceCapture.Enabled {
-		// The whole V2 exit is sanitized: no refusal on this path carries the
-		// private source path, a raw dependency cause, or a native identifier.
-		// The path-bearing completion wrapper below belongs to the retained V1
-		// transcript flow and must never touch this branch, including the
-		// before-start context check.
-		if err := ctx.Err(); err != nil {
-			return nil, sanitizeOpenCodeRefusal(session.SessionID.String(), "run candidate", "the candidate was cancelled before it started", "retry the candidate with a live context", err)
-		}
-		provenance, err := idx.IndexOpenCodeProvenanceV2(ctx, session)
-		if err != nil {
-			return nil, err
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, sanitizeOpenCodeRefusal(session.SessionID.String(), "return candidate result", "the candidate finished but the caller context ended", "retry the candidate with a live context", err)
-		}
-		return provenance, nil
-	}
 	completion := &indexCompletion{ctx: ctx, session: session}
 	if err := ctx.Err(); err != nil {
 		return nil, completion.failure(err)
@@ -145,14 +122,9 @@ func (idx *OpenCodeIndexer) indexManagedProjection(session DiscoveredSession, da
 	if err != nil {
 		return nil, err
 	}
-	projection, err := decodeManagedOpenCodeProjection(data, expectedFormat, expectedVersion, session.SessionID)
+	_, messages, _, err := decodeManagedOpenCodeSemanticProjection(data, expectedFormat, expectedVersion, session.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while strictly decoding the Peasant-owned envelope: %w; no entry rows were stored; re-run harvest to regenerate the projection", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, err)
-	}
-	kind := managedOpenCodeProjectionKind(session.TranscriptOrigin)
-	messages, _, err := parseManagedOpenCodeSemanticMessages(projection, kind)
-	if err != nil {
-		return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while decoding its normalized semantic corpus: %w; no partial entry rows were stored, so regenerate the managed artifact from a supported source and retry", kind, session.SessionID, err)
 	}
 	return idx.indexSemanticMessages(session.SessionID, messages)
 }
@@ -389,6 +361,8 @@ type openCodeIndexMsg struct {
 	Model     struct {
 		ID      string `json:"id"`
 		ModelID string `json:"modelID"`
+		// Variant is the native thinking-level variant (model.variant).
+		Variant string `json:"variant"`
 	} `json:"model"`
 	Version   string `json:"version"`
 	Directory string `json:"directory"`
@@ -545,6 +519,12 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 	if err != nil {
 		return nil, err
 	}
+	return idx.indexRetainedSemanticMessages(sessionID, messages)
+}
+
+// indexRetainedSemanticMessages consumes the private corpus after opaque
+// retention. Strict capture already performed that step before its checks.
+func (idx *OpenCodeIndexer) indexRetainedSemanticMessages(sessionID SessionID, messages []openCodeSemanticMessage) ([]schema.SessionEntry, error) {
 	entries := make([]schema.SessionEntry, 0, len(messages))
 	messageIndexes := make(map[string]int, len(messages))
 	messageParents := make(map[int]string, len(messages))
@@ -575,7 +555,7 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 			entry.EntryType = EntryTypeToolUse
 		}
 		if entry.Role != RoleAssistant {
-			entry.Extra = removeModelObservation(entry.Extra)
+			entry.Extra = removeThinkingLevelObservation(removeModelObservation(entry.Extra))
 		}
 		if entry.Role == RoleAssistant && pendingObservedModel != "" {
 			// The following assistant turn adopts a preceding model switch only
@@ -1294,6 +1274,17 @@ func buildExtraJSON(msg *openCodeIndexMsg) *string {
 	}
 	if msg.Role == RoleAssistant.String() && ValidObservedModel(msg.ModelID) {
 		extra["model_id"] = msg.ModelID
+	}
+	if msg.Role == RoleAssistant.String() && msg.Model.Variant != "" {
+		// The same mapping the managed provenance path uses; an unrecognized
+		// variant keeps only its raw spelling, never a fabricated level.
+		mapping, _ := mapOpenCodeVariant(msg.Model.Variant)
+		if mapping.Level != "" {
+			extra[ThinkingLevelExtraKey] = mapping.Level
+		}
+		if mapping.Raw != "" {
+			extra[ThinkingLevelRawExtraKey] = mapping.Raw
+		}
 	}
 
 	// Cache fields: prefer tokens-level, fall back to top-level message fields.

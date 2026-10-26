@@ -33,14 +33,14 @@ const (
 // OpenCodeProvenanceFile is one native file attached to a user message. The
 // display text follows the same precedence the row normalizer uses (name,
 // then URI, then description) so the classified media block shows what the
-// retained transcript shows.
+// stored transcript shows.
 type OpenCodeProvenanceFile struct {
 	Name        string
 	URI         string
 	Description string
 }
 
-// DisplayText reports the media label the retained transcript shows.
+// DisplayText reports the media label the stored transcript shows.
 func (f OpenCodeProvenanceFile) DisplayText() string {
 	if f.Name != "" {
 		return f.Name
@@ -69,10 +69,14 @@ type OpenCodeProvenanceAssistantPart struct {
 // populate it; the classifier never reparses native bytes itself, so the
 // envelope always names the evidence the decoder actually proved.
 type OpenCodeProvenanceMessage struct {
-	RetainedUnknown []RetainedUnknown `json:"retainedUnknown,omitempty"`
-	MessageID       string
-	SessionID       string
-	Shape           OpenCodeProvenanceShape
+	// Thinking evidence is mapped at decode; native variant labels never reach
+	// the classifier except as validated raw evidence in the mapped pair.
+	ThinkingLevel    schema.ThinkingLevel
+	ThinkingLevelRaw schema.ThinkingLevelRaw
+	RetainedUnknown  []RetainedUnknown `json:"retainedUnknown,omitempty"`
+	MessageID        string
+	SessionID        string
+	Shape            OpenCodeProvenanceShape
 	// NativeType is the current storage discriminator (user, assistant, shell,
 	// synthetic, system, skill, compaction, agent-switched, model-switched, or
 	// a newer value). Empty for legacy and semantic shapes, which have no
@@ -133,7 +137,7 @@ type OpenCodeMessageAttribution struct {
 	// Inherited marks a settled copied row: delivery becomes inherited_context
 	// while origin and actor stay as the native rule established.
 	Inherited bool
-	// UncertainCopy marks a retained copy whose proof did not survive (the
+	// UncertainCopy marks a copy whose proof did not survive (the
 	// parent payload is gone). The caller must place such blocks in a declared
 	// earlier section; the classifier flags them so the builder can enforce it.
 	UncertainCopy bool
@@ -196,7 +200,7 @@ func ClassifyOpenCodeMessage(msg OpenCodeProvenanceMessage, attr OpenCodeMessage
 		return nil, fmt.Errorf("ingest.ClassifyOpenCodeMessage: session identity is empty for message %q; the block cannot be scoped; supply the native session id", msg.MessageID)
 	}
 	if !attr.Ownership.IsValid() {
-		return nil, fmt.Errorf("ingest.ClassifyOpenCodeMessage: message %q ownership %q is outside the closed set; retained history cannot be explained; use a published ownership", msg.MessageID, attr.Ownership)
+		return nil, fmt.Errorf("ingest.ClassifyOpenCodeMessage: message %q ownership %q is outside the closed set; stored history cannot be explained; use a published ownership", msg.MessageID, attr.Ownership)
 	}
 	if msg.Shape != OpenCodeProvenanceCurrent && msg.Shape != OpenCodeProvenanceV2 &&
 		msg.Shape != OpenCodeProvenanceLegacy && msg.Shape != OpenCodeProvenanceSemantic {
@@ -687,6 +691,12 @@ func classifyOpenCodeAssistant(msg OpenCodeProvenanceMessage, attr OpenCodeMessa
 			TimestampMs: nonEmptyTimestamp(msg.TimeCreated),
 		})
 	}
+	for i := range blocks {
+		if blocks[i].Role == schema.RoleAssistant {
+			blocks[i].ThinkingLevel = msg.ThinkingLevel
+			blocks[i].ThinkingLevelRaw = msg.ThinkingLevelRaw
+		}
+	}
 	if attr.UncertainCopy {
 		markOpenCodeUncertain(blocks)
 	}
@@ -833,7 +843,7 @@ func singleOpenCodeBlock(msg OpenCodeProvenanceMessage, attr OpenCodeMessageAttr
 	return blocks, nil
 }
 
-// markOpenCodeUncertain flags retained copies whose proof did not survive. The
+// markOpenCodeUncertain flags uncertain copies whose proof did not survive. The
 // shared builder only accepts uncertain blocks in a declared earlier section,
 // so the capture builder must route them there.
 func markOpenCodeUncertain(blocks []ClassifiedBlock) {

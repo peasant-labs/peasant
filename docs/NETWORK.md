@@ -4,7 +4,7 @@ This document describes **every piece of data** that Peasant sends over the netw
 
 Peasant is a local-first tool. All ingestion, indexing, and analysis happens on your machine. Data leaves your device only through the actions described below, and by default every one of them is something you run yourself.
 
-**There is one exception, and you have to turn it on.** If you install a Git upload hook for a repository (`peasant village hooks install`), Peasant uploads that repository's sessions automatically from then on — on every commit, or every push, depending on the event you chose. Nothing installs a hook for you, installation is per repository, and `peasant village hooks status` reports what is installed and `peasant village hooks uninstall` removes it. Until you install one, nothing on this page happens without you typing a command.
+**There is one exception, and you have to turn it on.** If you install a Git upload hook for a repository (`peasant village hooks install`, `peasant village auto`, or the local API's settings install route), Peasant uploads that repository's sessions automatically from then on — on every commit, or every push, depending on the event you chose. Nothing installs a hook for you, installation is per repository, and `peasant village hooks status` reports what is installed and `peasant village hooks uninstall` removes it. Until you install one, nothing on this page happens without you typing a command.
 
 ## Summary
 
@@ -12,7 +12,8 @@ Peasant is a local-first tool. All ingestion, indexing, and analysis happens on 
 |--------|---------|-------------|-----------|------------|
 | [Push transcripts](#1-push-transcripts) | `peasant push` | Village API | Session metadata + transcript | No — wizard confirmation |
 | [Push annotations](#2-push-annotations) | `peasant push` | Village API | Annotation labels + scores | No — wizard confirmation |
-| [Hook-triggered push](#6-hook-triggered-push) | `git commit` or `git push` | Village API | Same as the two rows above | **Yes — after an explicit per-repository install** |
+| [Hook-triggered push](#6-hook-triggered-push) | `git commit` or `git push` | Village API | Same as the two rows above; under an auto-publish rule, also a share of each sent transcript with the rule's collectives | **Yes — after an explicit per-repository install** |
+| [`peasant village auto`](#6-hook-triggered-push) | `peasant village auto` | Village API | Nothing (GET only): the shares of the transcript you published last, and your collectives' names | No — explicit command |
 | [Waiting prompt request lookup](#7-waiting-prompt-request-lookup) | `peasant village push` (by hand or from a hook) | Village API | Nothing (GET only) | Yes — whenever a logged-in push runs |
 | [Login](#3-login) | `peasant login` | Village API | OAuth code exchange | No — explicit command |
 | [Logout](#4-logout) | `peasant logout` | Village API | API key revocation | No — explicit command |
@@ -240,11 +241,11 @@ This is the only path on this page that sends data without you running a command
 
 **Trigger:** `git commit` (a `post-commit` hook) or `git push` (a `pre-push` hook), in a repository where you installed one.
 
-**Endpoint:** the same publish endpoints as [Push transcripts](#1-push-transcripts) and [Push annotations](#2-push-annotations). The data sent is identical — this is not a different upload, it is the same one on a different trigger.
+**Endpoint:** the same publish endpoints as [Push transcripts](#1-push-transcripts) and [Push annotations](#2-push-annotations). Under an auto-publish rule, the push also shares each transcript it sent with its rule's collectives (`POST {village}/api/v1/transcripts/{id}/share`, one collective per request). Before sending a bound update, it reads the owned transcript (`GET {village}/api/v1/transcripts/{id}`) to refuse a public audience; unchanged sessions need no such read. Each collective's latest decision is read from `GET {village}/api/v1/users/me/collectives/{groupId}/transcripts/{id}/events`, before offering an update and after sharing to report the outcome.
 
-**Consent mechanism:** installation is the consent step, and it is the whole of it.
+**Consent mechanism:** installing a plain terminal hook consents to its configured publication. Saving a rule consents to that binding and changes what an existing hook publishes. Installing a rule hook adds its trigger; that hook requires an active binding before it sends anything.
 
-- Nothing installs a hook for you. You run `peasant village hooks install --event post-commit` (or `--event pre-push`) yourself, **per repository**, naming the event explicitly — there is no default and no all-repositories option.
+- Nothing installs a hook for you. You run `peasant village hooks install --event post-commit` (or `--event pre-push`) yourself, **per repository**, naming the event explicitly — there is no default and no all-repositories option. `peasant village auto` and the local API's settings install route install the hooks of an auto-publish rule, also one repository per act, and only in a repository Peasant has recorded sessions in.
 - Install writes only into an empty hook slot, or over a hook Peasant itself wrote. Anything else already in that slot — including a file from another tool — is left exactly as it is and reported, never edited, wrapped, or renamed. `peasant village hooks status` is the read-only preview: it reports what Git would run for each event without changing anything.
 - From then on, **every matching Git operation uploads without asking.** The hook runs `peasant village push --non-interactive --quiet`, which deliberately skips the wizard described in section 1. There is no per-commit prompt, and by design there cannot be one: Git is waiting.
 - `peasant village hooks status` reports exactly what is installed and what it will publish at, including a warning if your configuration would make the upload fail.
@@ -252,11 +253,24 @@ This is the only path on this page that sends data without you running a command
 
 **Scope:** the upload is confined to the repository Git is acting on, and it honours the same selection settings as a manual push. It does not publish other projects.
 
+**Auto-publish rules:** `hooks.yaml`, in the config directory (where `credentials.json` is), holds the auto-publish rules. A rule maps one folder glob or one git remote pattern to Village collectives and names the hook events it installs; saving one installs nothing. `peasant village push`, which a hook runs, matches the rules per session, against the repository each session was recorded in; a linked worktree counts as its main repository. When a push sends a session a rule binds, the whole push is collectives-only: every session it sends is published redacted and private, no license is sent whatever `push.license` and `push.visibility` say, and each bound transcript it sent is shared with its rule's collectives (a curated collective holds the share for its owner's approval). A session no rule binds, in such a push, is published private and shared with no one, and an update later keeps that audience; push such a repository apart with `--repository` to publish it as configured. Nothing is held back for review; setting up the rule was the consent. A rule never makes a transcript public: before a bound update, the push asks Village who can read the transcript, and one that is public there is not updated (make it private on Village and the next push updates and shares it). A rule with no event (`events: []`) is paused: the sessions it covers are not published. An update does not ask again a collective that holds the transcript, rejected it, or lost it. A share that fails, including one the `--timeout` budget cuts off, is reported and recorded as the session's latest failed attempt; `peasant village push --repository <repo> --force` publishes and shares it again. `peasant village auto` sets up a rule for one repository with the collectives you published to last, read from the village. Any managed hook applies the rules, including one installed with `peasant village hooks install`, so saving a rule changes what an installed hook publishes. Kickstart's publication and the local web's publish do not read the rules. Removing a rule leaves its hook file, but a rule-installed hook requires an active matching binding before publishing. Deleting or pausing the last binding stops it; overlapping active bindings continue. Separately installed plain terminal hooks keep their independent consent. Existing Village publications and granted access remain.
+
 **Failure behaviour:** a failed upload prints a warning and lets your commit or push proceed. Peasant never blocks or undoes Git work because the village was unreachable, rejected the payload, or your login expired. The hook always exits successfully.
 
 **Latency:** the upload is synchronous and runs inside your Git command, so it adds its own network time to every commit or push. `--timeout` bounds it.
 
 **What redaction covers:** exactly as in section 1 — see [Transcript content is redacted, by pattern](#transcript-content-is-redacted-by-pattern). A hook does not add protection and does not remove any; it changes when the upload happens, not what it contains.
+
+
+Folder globs match repository roots with case-sensitive spelling: `*` stays
+within a path segment, `**` spans depth, and `~` means home. A symlink in the
+literal prefix is resolved. Existing nested repositories match only their own
+roots. If a recorded directory is gone, its former repository root cannot be
+known, so folder rules also match its ancestors; a deleted nested repository can
+therefore inherit a containing folder's rule. Remote patterns ignore case and
+`*` stays within one segment; write `host/group/*/*` to reach subgroups, because
+`**` is refused in remote patterns.
+
 
 ---
 

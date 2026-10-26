@@ -1,0 +1,45 @@
+requiredNames:
+  - village-route-only-from-home
+  - village-direct-link-mounts-body
+  - web-catalog-updated-history-old-502
+  - web-fetch-partial-domain-dates
+  - web-history-three-category-pages
+  - web-history-selected-revision-restart
+  - web-diagnostics-do-not-reset-other-pagers
+  - web-other-account
+  - web-local-server-offline-vs-village-unavailable
+  - existing-settings-auth-rules-hooks-retained
+  - surface-state-parity
+  - optional-assoc-timeout-content-success
+  - full-shell-computed-style-axe-keyboard
+  - tracking-visible-online-untrack-offline
+  - missing-history-revision-actionable
+scenarios: [complete, partial-502, partial-504, remote-history-504, late-history, association-unavailable, association-invalidated]
+projectNames: [dark-desktop, light-desktop, dark-mobile, light-mobile]
+projects:
+  - {name: dark-desktop, theme: dark, surface: desktop, width: 1440, height: 1000, mobile: false}
+  - {name: light-desktop, theme: light, surface: desktop, width: 1440, height: 1000, mobile: false}
+  - {name: dark-mobile, theme: dark, surface: mobile, width: 390, height: 844, mobile: true}
+  - {name: light-mobile, theme: light, surface: mobile, width: 390, height: 844, mobile: true}
+controlActions: [diagnostic, receipt, terminal, snapshot, stop-app, start-app, cli, history, pull]
+categories:
+  - {kind: remote-attempts, label: remote attempts, array: remoteAttempts}
+  - {kind: receipts, label: confirmed local receipts, array: receipts}
+  - {kind: operation-diagnostics, label: operation diagnostics, array: operationDiagnostics}
+settingsLabels: [village, automatic publishing]
+cases:
+  - {name: village-route-only-from-home, mode: navigation}
+  - {name: village-direct-link-mounts-body, mode: direct}
+  - {name: web-catalog-updated-history-old-502, mode: partial, scenario: partial-502, status: 502}
+  - {name: web-fetch-partial-domain-dates, mode: deadline, scenario: partial-504, status: 504}
+  - {name: web-history-three-category-pages, mode: paging}
+  - {name: web-history-selected-revision-restart, mode: conflict}
+  - {name: web-diagnostics-do-not-reset-other-pagers, mode: isolation}
+  - {name: web-other-account, mode: account}
+  - {name: web-local-server-offline-vs-village-unavailable, mode: offline}
+  - {name: existing-settings-auth-rules-hooks-retained, mode: settings}
+  - {name: surface-state-parity, mode: parity}
+  - {name: optional-assoc-timeout-content-success, mode: pull}
+  - {name: full-shell-computed-style-axe-keyboard, mode: styles}
+  - {name: tracking-visible-online-untrack-offline, mode: tracking}
+  - {name: missing-history-revision-actionable, mode: missing-revision}

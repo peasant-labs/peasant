@@ -37,14 +37,14 @@ func newMetadataSchemaVersion(value int) (metadataSchemaVersion, error) {
 // version: writing the rule as "version 9 while the current version is 10"
 // silently stops matching at the next re-pin, and every stored sidecar at 9 AND
 // 10 would then be marked stale by one contract bump that added nothing
-// required. Version 11 is listed for exactly that reason: it is the next
-// expected current version and it adds no required field, so the re-pin is a
-// one-line change here rather than a corpus-wide re-harvest.
+// required. Versions 11 and 12 add only optional fields and remain readable
+// across later bumps. Thinking-level back-fill is driven by the per-harness
+// adapter and indexer targets, not by the metadata schema version.
 //
 // Adding a version here is a claim that nothing REQUIRED was added between it
 // and the current version. A version that adds a required field must be left
 // out, and every older sidecar then refreshes as usual.
-var refreshFreeMetadataVersions = map[metadataSchemaVersion]bool{9: true, 10: true, 11: true}
+var refreshFreeMetadataVersions = map[metadataSchemaVersion]bool{9: true, 10: true, 11: true, 12: true}
 
 // metadataNeedsRefresh reports whether a sidecar recorded at version must be
 // rebuilt before this build can rely on it. current is a parameter, not the
@@ -55,6 +55,37 @@ func metadataNeedsRefresh(version, current metadataSchemaVersion) bool {
 		return false
 	}
 	return version < current
+}
+
+// MetadataSchemaVersionIsCurrent reports whether a recorded metadata schema
+// version is one this build reads as it stands: at or below the version this
+// build writes, and not requiring a rebuild. It is the one place the readable
+// set is stated, so a store-side predicate that compares a stored version
+// against this build's current version shares the refresh-free policy instead
+// of re-stating an exact equality. A version above the current one is not
+// current: only a build that writes it can read it.
+func MetadataSchemaVersionIsCurrent(version int) bool {
+	if version < 1 || version > int(CurrentSchemaVersion) {
+		return false
+	}
+	recorded, err := newMetadataSchemaVersion(version)
+	return err == nil && !metadataNeedsRefresh(recorded, CurrentSchemaVersion)
+}
+
+// ReadableMetadataSchemaVersions returns every recorded metadata schema version
+// this build reads as current, in ascending order. It is the complement, within
+// the versions this build writes, of the versions that require a native
+// refresh. A store-side predicate binds this set instead of comparing a stored
+// version to the current version exactly, so a declared refresh-free schema
+// bump does not make an otherwise current capture read as needing a re-ingest.
+func ReadableMetadataSchemaVersions() []int {
+	versions := make([]int, 0, int(CurrentSchemaVersion))
+	for version := 1; version <= int(CurrentSchemaVersion); version++ {
+		if MetadataSchemaVersionIsCurrent(version) {
+			versions = append(versions, version)
+		}
+	}
+	return versions
 }
 
 // UnifiedMetadata is the on-disk JSON stored alongside each raw transcript.

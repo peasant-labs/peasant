@@ -12,7 +12,6 @@ import { useRouter } from 'next/navigation';
 import { TriangleAlert, ArrowRight } from 'lucide-react';
 import type { ChangeSummary, ReviewListPayload } from '@peasant-labs/schema';
 import { Term } from '@/components/Term';
-import { Explainer, ExplainerToggle, useExplainer, type ExplainerState } from '@/components/Explainer';
 import { CommitGraph, type Commit } from '@/lib/ft-ui';
 import { cn } from '@/lib/utils';
 import { reviewHref, type ProjectHash } from '@/lib/navigation/projectRoutes';
@@ -106,18 +105,13 @@ export function ChangeGraph({
   projectHash,
   projectName,
   payload,
-  explainer: explainerProp,
 }: {
   projectHash: ProjectHash;
   projectName: string;
   payload: ReviewListPayload;
-  explainer?: ExplainerState;
 }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
-  const ownExplainer = useExplainer('changes-embed');
-  const explainer = explainerProp ?? ownExplainer;
-  const ownsToggle = explainerProp === undefined;
   const nowMs = useMemo(() => Date.now(), []);
 
   const graph = useMemo(
@@ -181,41 +175,6 @@ export function ChangeGraph({
 
   return (
     <div className="flex flex-col gap-3">
-      {ownsToggle && (
-        <div className="flex items-center justify-end">
-          <ExplainerToggle explainer={explainer} />
-        </div>
-      )}
-      <Explainer explainer={explainer} title="What am I looking at?">
-        <p>
-          This is the project&rsquo;s timeline, newest at the top. The line down the
-          left is{' '}
-          <span className="font-mono text-ink-2">
-            {payload.defaultBranch ?? 'develop'}
-          </span>
-          , this project&rsquo;s <Term k="defaultBranch">main line</Term> — everything
-          else branches off it.
-        </p>
-        <p>
-          Each square on that line is a <Term k="commit" /> —{' '}
-          <span className="text-ink">filled</span> means we have the{' '}
-          <Term k="session">AI conversation</Term> that produced it,{' '}
-          <span className="text-ink">hollow</span> means none was captured.
-        </p>
-        <p>
-          The cards above the graph are separate{' '}
-          <Term k="change">lines of work</Term> still in progress. Click a card
-          to see what it changed and the conversations that did it. The plain
-          rows are saved history — reference only.
-        </p>
-        <p>
-          Each card carries a freshness badge:{' '}
-          <span className="text-ink">active</span> (worked on in the last 3 days),{' '}
-          <span className="text-ink">idle</span> (paused — no work for 3 to 14
-          days), or <span className="text-ink">stale</span> (untouched for over 2
-          weeks).
-        </p>
-      </Explainer>
 
       {/* open lines of work — TipCards preserve the full branch richness that
           CommitGraph rows don't carry: lifecycle badge (active/idle/stale), fact

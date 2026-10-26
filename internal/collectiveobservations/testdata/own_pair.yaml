@@ -1,0 +1,36 @@
+requiredNames:
+  - targeted-own-pair-reconciles-latest-attempt
+  - targeted-own-pair-unavailable-retains-history
+  - targeted-own-pair-remote-error-retains-history
+  - targeted-own-pair-credential-rotation-discards-response
+cases:
+  - name: targeted-own-pair-reconciles-latest-attempt
+    # Commit count is the contract: one invocation allocation, one pair install.
+    firstCommitFrames: 2
+    secondCommitFrames: 2
+    before: &pending [{eventnum: 1, status: pending, recordedat: '2026-01-01T00:00:00Z', decidedat: null, decidedbyactor: ''}]
+    after: &approved [{eventnum: 1, status: approved, recordedat: '2026-01-01T00:00:00Z', decidedat: '2026-01-02T00:00:00.000000001Z', decidedbyactor: moderator}]
+    expected: *approved
+    wantGeneration: 2
+  - name: targeted-own-pair-unavailable-retains-history
+    firstCommitFrames: 2
+    secondCommitFrames: 1
+    before: *approved
+    status: 404
+    expected: *approved
+    wantError: remote
+  - name: targeted-own-pair-remote-error-retains-history
+    firstCommitFrames: 2
+    secondCommitFrames: 1
+    before: *approved
+    status: 503
+    expected: *approved
+    wantError: remote
+  - name: targeted-own-pair-credential-rotation-discards-response
+    firstCommitFrames: 2
+    secondCommitFrames: 1
+    before: *pending
+    after: *approved
+    rotate: true
+    expected: *pending
+    wantError: credentials

@@ -96,7 +96,7 @@ func decodeOpenCodeV2File(raw json.RawMessage) (openCodeCurrentFile, error) {
 	if err := decodeOpenCodeCurrentJSON(raw, &file); err != nil {
 		return openCodeCurrentFile{}, err
 	}
-	if err := requireOpenCodeCurrentFields(raw, "data", "mime", "source"); err != nil {
+	if err := requireOpenCodeCurrentObjectFields(fields, "data", "mime", "source"); err != nil {
 		return openCodeCurrentFile{}, err
 	}
 	if _, err := base64.StdEncoding.Strict().DecodeString(file.Data); err != nil {
@@ -150,18 +150,6 @@ type openCodeV2ToolError struct {
 	Metadata map[string]json.RawMessage   `json:"metadata,omitempty"`
 }
 
-type openCodeV2ToolTextContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-type openCodeV2ToolFileContent struct {
-	Type string `json:"type"`
-	URI  string `json:"uri"`
-	MIME string `json:"mime"`
-	Name string `json:"name,omitempty"`
-}
-
 func decodeOpenCodeV2ToolState(raw json.RawMessage) (openCodeCurrentToolState, bool, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
@@ -180,7 +168,7 @@ func decodeOpenCodeV2ToolState(raw json.RawMessage) (openCodeCurrentToolState, b
 	if status == "pending" {
 		return state, false, nil
 	}
-	if err := requireOpenCodeCurrentFields(raw, "status", "input"); err != nil {
+	if err := requireOpenCodeCurrentObjectFields(fields, "status", "input"); err != nil {
 		return state, true, err
 	}
 	var contents []json.RawMessage
@@ -246,18 +234,14 @@ func decodeOpenCodeV2ToolState(raw json.RawMessage) (openCodeCurrentToolState, b
 		}
 		switch value.Type {
 		case "text":
-			var typed openCodeV2ToolTextContent
-			if err := decodeOpenCodeCurrentJSON(content, &typed); err != nil {
-				return state, true, err
-			}
+			// The common content decode above already validates Type and Text
+			// as strings; only required-field presence/null checks remain.
 			if err := requireOpenCodeCurrentFields(content, "text"); err != nil {
 				return state, true, err
 			}
 		case "file":
-			var typed openCodeV2ToolFileContent
-			if err := decodeOpenCodeCurrentJSON(content, &typed); err != nil {
-				return state, true, err
-			}
+			// URI, MIME and Name have the same string types in the common
+			// shape, so a second whole-content decode adds no validation.
 			if err := requireOpenCodeCurrentFields(content, "uri", "mime"); err != nil {
 				return state, true, err
 			}
@@ -350,7 +334,7 @@ func normalizeOpenCodeV2StructuralRow(row OpenCodeCurrentMessageRow, raw []byte,
 		if err := decodeOpenCodeCurrentJSON(raw, &value); err != nil {
 			return nil, err
 		}
-		if err := requireOpenCodeCurrentFields(raw, "shellID", "command", "status", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(fields, "shellID", "command", "status", "time"); err != nil {
 			return nil, err
 		}
 		if value.ShellID == "" {
@@ -380,12 +364,12 @@ func normalizeOpenCodeV2StructuralRow(row OpenCodeCurrentMessageRow, raw []byte,
 		if err := decodeOpenCodeCurrentJSON(raw, &value); err != nil {
 			return nil, err
 		}
-		if err := requireOpenCodeCurrentFields(raw, "status", "reason", "time"); err != nil {
+		if err := requireOpenCodeCurrentObjectFields(fields, "status", "reason", "time"); err != nil {
 			return nil, err
 		}
 		switch value.Status {
 		case openCodeV2CompactionRunning, openCodeV2CompactionCompleted:
-			if err := requireOpenCodeCurrentFields(raw, "summary", "recent"); err != nil {
+			if err := requireOpenCodeCurrentObjectFields(fields, "summary", "recent"); err != nil {
 				return nil, err
 			}
 			if value.Error != nil {

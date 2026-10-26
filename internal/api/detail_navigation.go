@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
@@ -98,15 +99,60 @@ func resolveRelationshipNavigation(ctx context.Context, relationships []schema.S
 }
 
 // DetailReadPayload returns the local read projection for one stored session:
-// the validated durable detail plus authorized current-target navigation. The
-// durable content is untouched; navigation is read-only metadata the host uses
-// to build links. Selection never widens or narrows it.
+// the validated durable detail, authorized current-target navigation, and the
+// recorded Claude Code teammate identity. The durable content is untouched;
+// navigation and the teammate are read-only metadata the host uses to build
+// links and an identity line. Selection never widens or narrows it.
 func (p *StoreDataProvider) DetailReadPayload(ctx context.Context, id string) (*schema.SessionDetailReadPayload, error) {
 	detail, err := p.DetailPayload(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return DecorateDetailReadPayload(ctx, detail, p.ResolveStoredTargets)
+	row, err := p.store.SessionByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: detail read totals for session %s: %w", id, err)
+	}
+	withStoredTotals(detail, row)
+	read, err := DecorateDetailReadPayload(ctx, detail, p.ResolveStoredTargets)
+	if err != nil {
+		return nil, err
+	}
+	teammates, err := p.store.ClaudeTeammates(ctx, []string{id})
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: detail read teammate evidence for session %s: %w", id, err)
+	}
+	read.Teammate = teammateFor(teammates, id)
+	// Only the local addition is checked here. The composite payload validator
+	// belongs to the contract tests: re-walking every turn on a served read
+	// would pay for a check the durable detail already passed.
+	if err := read.Teammate.Validate(); err != nil {
+		return nil, fmt.Errorf("store adapter: local detail read for session %s carries an invalid teammate identity: %w; the read was withheld rather than served with evidence the contract refuses", id, err)
+	}
+	return read, nil
+}
+
+// withStoredTotals fills the token and duration totals a detail built from a
+// managed generation leaves at zero, from the session's stored row: the totals
+// home and the session lists show. A total the detail already carries (Pi's
+// per-turn mirrors) stays. This is the local read only. The publication path
+// builds its detail from the same snapshot without it, so a published
+// transcript's bytes and content hash do not move.
+func withStoredTotals(detail *schema.SessionDetailPayload, row *store.SessionRow) {
+	if detail == nil || row == nil {
+		return
+	}
+	if detail.TotalTokens == 0 {
+		detail.TotalTokens = row.TokensTotal
+	}
+	if detail.TokensIn == 0 {
+		detail.TokensIn = row.InputTokens
+	}
+	if detail.TokensOut == 0 {
+		detail.TokensOut = row.OutputTokens
+	}
+	if detail.DurationMins == 0 {
+		detail.DurationMins = row.DurationMinutes
+	}
 }
 
 // DecorateDetailReadPayload augments one validated durable detail payload with

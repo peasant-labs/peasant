@@ -7,8 +7,10 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -164,9 +166,12 @@ func (f *FailingFS) CopyFile(src, dst string, perm os.FileMode) error {
 // blob bytes; ContentETag as the served-blob ETag; ContentErr (e.g.
 // village.ErrNotModified) forces the 304 path.
 type StubVillageReader struct {
-	// NegotiateErr, when non-nil, fails the NEGOTIATE stage.
-	NegotiateErr   error
-	NegotiateCalls int
+	// NegotiateErr, when non-nil, fails the NEGOTIATE stage. NegotiatedEnvelope
+	// is the pull envelope version a successful NEGOTIATE returns; empty returns
+	// defaults.PullContractVersion.
+	NegotiateErr       error
+	NegotiatedEnvelope schema.PushContractVersion
+	NegotiateCalls     int
 
 	// ListResponses is returned (in order) by successive ListPullableTranscripts
 	// calls; the last is repeated once exhausted. ListErr fails the call.
@@ -196,15 +201,26 @@ type StubVillageReader struct {
 	AnnotationsByID  map[schema.TranscriptID][]schema.PullAnnotation
 	AnnotationsErr   error
 	AnnotationsCalls int
+
+	// ListOptions records the options of every ListPullableTranscripts call, so a
+	// test can assert the page window and the collectives filter a caller sent.
+	ListOptions []village.PullListOptions
 }
 
-func (s *StubVillageReader) NegotiatePull(_ context.Context) error {
+func (s *StubVillageReader) NegotiatePull(_ context.Context) (schema.PushContractVersion, error) {
 	s.NegotiateCalls++
-	return s.NegotiateErr
+	if s.NegotiateErr != nil {
+		return "", s.NegotiateErr
+	}
+	if s.NegotiatedEnvelope != "" {
+		return s.NegotiatedEnvelope, nil
+	}
+	return defaults.PullContractVersion, nil
 }
 
-func (s *StubVillageReader) ListPullableTranscripts(_ context.Context, _, _ int) (*schema.PullListResponse, error) {
+func (s *StubVillageReader) ListPullableTranscripts(_ context.Context, opts village.PullListOptions) (*schema.PullListResponse, error) {
 	s.ListCalls++
+	s.ListOptions = append(s.ListOptions, opts)
 	if s.ListErr != nil {
 		return nil, s.ListErr
 	}

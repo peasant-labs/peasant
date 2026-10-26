@@ -9,7 +9,7 @@
 #     resolve a commitSessionIds entry (id/harness/preview only; the fields
 #     NodeRail actually reads)
 #   - expectedFallbackText: non-null only when the row has no session list
-#     (mirrors the existing "no AI conversation captured" line)
+#     (mirrors the existing "no ai conversation captured" line)
 #   - expectedRows: one entry per commitSessionIds id, in the same order,
 #     naming what should render: the resolved display name and, only when
 #     the session resolves, the harness slug the DS ProviderName label shows
@@ -35,7 +35,7 @@ cases:
   - name: zero-session-commit-falls-back-to-the-existing-boolean-copy
     commitSessionIds: []
     knownSessions: []
-    expectedFallbackText: "no AI conversation captured"
+    expectedFallbackText: "no ai conversation captured"
     expectedRows: []
 
   - name: session-id-absent-from-the-sessions-channel-renders-name-only

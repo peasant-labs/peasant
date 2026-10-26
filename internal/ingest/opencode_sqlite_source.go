@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // OpenCodeCatalogScope identifies one bounded catalog projection.
@@ -366,12 +366,15 @@ type OpenCodeSessionRecordCursor struct{ sessionID OpenCodeSessionLinkID }
 // title, and creation time when the session table exposes them; they stay
 // empty for an older layout that lacks those columns.
 type OpenCodeSessionRecord struct {
-	SessionID   OpenCodeSessionLinkID
-	ParentID    OpenCodeSessionLinkID
-	TimeUpdated int64
-	Directory   string
-	Title       string
-	TimeCreated int64
+	// ModelVariant is optional native evidence decoded tolerantly from model.
+	// It is read independently of whether all attribution columns exist.
+	ModelVariant string
+	SessionID    OpenCodeSessionLinkID
+	ParentID     OpenCodeSessionLinkID
+	TimeUpdated  int64
+	Directory    string
+	Title        string
+	TimeCreated  int64
 	// The extended record columns are read together only when the session table
 	// carries every one of them. An older layout that lacks any of them leaves
 	// these fields at their zero value rather than failing the read. Agent labels
@@ -653,6 +656,33 @@ type OpenCodeSQLiteSource interface {
 	CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error)
 	CurrentSessionHasSubstantive(context.Context, OpenCodeCurrentSessionID) (bool, error)
 	Close(context.Context) error
+}
+
+// OpenCodeForkBoundaryType is the closed set of native session_v2 fork
+// boundary kinds. "before" copies the source rows before the named message;
+// "through" copies the source rows through the named message.
+type OpenCodeForkBoundaryType string
+
+const (
+	OpenCodeForkBoundaryBefore  OpenCodeForkBoundaryType = "before"
+	OpenCodeForkBoundaryThrough OpenCodeForkBoundaryType = "through"
+)
+
+// OpenCodeForkEvidence is the native fork pointer one session_v2 row carries:
+// the source session plus the source message that bounds the copied prefix.
+// BoundaryMessageID is the native source message identity; the caller resolves
+// it to a sequence in the source session before building a proof.
+type OpenCodeForkEvidence struct {
+	SourceSessionID   OpenCodeSessionLinkID
+	BoundaryType      OpenCodeForkBoundaryType
+	BoundaryMessageID string
+}
+
+// OpenCodeForkEvidenceSource is the optional native fork read. A source that
+// does not implement it simply has no native fork evidence; a malformed row
+// reports absence rather than guessing a relationship.
+type OpenCodeForkEvidenceSource interface {
+	SessionForkEvidence(context.Context, OpenCodeSessionLinkID) (OpenCodeForkEvidence, bool, error)
 }
 
 // OpenCodeEventSequence is the newest event sequence per session, read once from

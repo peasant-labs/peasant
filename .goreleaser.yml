@@ -25,9 +25,15 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
+    # Windows ships amd64 only. arm64 Windows is deliberately out of scope: no
+    # runner tests it and no consumer asks for it.
+    ignore:
+      - goos: windows
+        goarch: arm64
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w -X github.com/peasant-labs/peasant/internal/defaults.version={{ .Version }}
@@ -39,9 +45,25 @@ archives:
     # FROZEN archive-name contract — consumed by the AUR PKGBUILD source_* URLs,
     # the Homebrew cask url, the install docs, and any future curl-install
     # script. Do NOT change without updating every consumer.
+    #
+    # Windows adds two assets under the same template:
+    #   peasant_<version>_windows_amd64.zip  — the Explorer double-click path,
+    #     carrying the same files as the tar.gz archives.
+    #   peasant_<version>_windows_amd64.exe  — the bare executable, for a direct
+    #     download and for `peasant upgrade`, which replaces the running binary
+    #     and so wants the executable rather than an archive to unpack.
+    # GoReleaser appends the .exe itself, so the template stays extension-free.
     name_template: "peasant_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
+    # The zip carries the same payload as the tar.gz archives, license notices
+    # included. The bare binary format carries no accompanying files by
+    # definition, which is why the zip remains the documented install path.
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+          - binary
     files:
       - LICENSE
       - README.md

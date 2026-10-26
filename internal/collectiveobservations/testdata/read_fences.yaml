@@ -1,0 +1,15 @@
+requiredNames: [catalog-newer-failed-http, catalog-newer-inflight-http, history-newer-failed-http, history-newer-inflight-http, pair-newer-failed-http, pair-newer-inflight-http, tracking-newer-failed-http, tracking-newer-inflight-http, association-newer-failed-http, association-newer-inflight-http, association-older-negative-http, tracking-issuance-fails-before-source, catalogue-issuance-fails-before-source]
+cases:
+  - {name: catalog-newer-failed-http, operation: fetch, failFirst: true}
+  - {name: catalog-newer-inflight-http, operation: fetch}
+  - {name: history-newer-failed-http, operation: history, failFirst: true}
+  - {name: history-newer-inflight-http, operation: history}
+  - {name: pair-newer-failed-http, operation: pair, failFirst: true}
+  - {name: pair-newer-inflight-http, operation: pair}
+  - {name: tracking-newer-failed-http, operation: track, failFirst: true}
+  - {name: tracking-newer-inflight-http, operation: track}
+  - {name: association-newer-failed-http, operation: association, failFirst: true}
+  - {name: association-newer-inflight-http, operation: association}
+  - {name: association-older-negative-http, operation: association, negative: true}
+  - {name: tracking-issuance-fails-before-source, operation: track, denyIssuance: true}
+  - {name: catalogue-issuance-fails-before-source, operation: fetch, denyIssuance: true}

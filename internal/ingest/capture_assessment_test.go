@@ -53,6 +53,7 @@ type captureAssessmentCase struct {
 	NilResult         bool                      `yaml:"nil_result"`
 	TypedNilResult    bool                      `yaml:"typed_nil_result"`
 	ZeroAssessment    bool                      `yaml:"zero_assessment"`
+	PointerResult     bool                      `yaml:"pointer_result"`
 	UnsupportedPolicy *uint8                    `yaml:"unsupported_policy"`
 }
 
@@ -105,6 +106,7 @@ var requiredCaptureAssessmentCaseNames = []string{
 	"known-only",
 	"unknown-only",
 	"omitted-only",
+	"pointer-v1-omitted",
 	"mixed-accounted",
 	"mixed-unaccounted",
 	"legacy-only",
@@ -276,7 +278,11 @@ func TestCaptureAssessmentPins(t *testing.T) {
 				return
 			default:
 				entries := buildAssessmentEntries(t, c, sid)
-				result = indexformat.V1{Entries: entries}
+				if c.PointerResult {
+					result = &indexformat.V1{Entries: entries}
+				} else {
+					result = indexformat.V1{Entries: entries}
+				}
 			}
 
 			facts := ingest.CaptureFacts{

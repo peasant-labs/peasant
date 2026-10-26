@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // ---------------------------------------------------------------------------
@@ -39,6 +39,11 @@ import (
 //	19: duration_ms    (CAST(duration_minutes * 60000 AS INTEGER))
 //	20: git_remote     (from host_slugs JOIN; COALESCE to '' when unknown)
 //	21: parent_id      (nullable FK; COALESCE to '' — empty for root sessions)
+//	                     This is the availability cache, NOT the parent answer:
+//	                     it says which cached row a later join can use. The
+//	                     logical parent is the rendering of the parent rule, and
+//	                     push consumers build on-disk paths from the location,
+//	                     never report this value as a session's parent.
 //	22: project_path   (session worktree, falling back to project canonical cwd)
 //	23: session_origin (NOT NULL over the three-value menu; V46)
 //
@@ -52,16 +57,19 @@ const sqlPushSessionsBase = `SELECT
     s.ingested_ms, s.pushed_at,
     s.source_path, s.source_format,
     s.git_branch, s.tool_version,
-    m.turn_count, m.tool_calls,
-    m.input_tokens, m.output_tokens,
-    COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0),
-    CAST(m.duration_minutes * 60000 AS INTEGER),
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END,
+    m.input_tokens,
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,
+    COALESCE(m.input_tokens, 0) + COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END, 0),
+    CASE WHEN s.active_generation_id IS NOT NULL THEN c.duration_ms ELSE CAST(m.duration_minutes * 60000 AS INTEGER) END,
     COALESCE(h.git_remote, ''),
     COALESCE(s.parent_id, ''),
-    COALESCE(NULLIF(s.git_worktree, ''), p.canonical_cwd, ''),
+    ` + sqlRecordedDirectory + `,
     s.session_origin
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 LEFT JOIN projects p ON s.project_hash = p.project_hash
 LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
 
@@ -257,7 +265,7 @@ func getTitleContextOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) (schem
 	var projectPath string
 	found := false
 	err := sqlitex.ExecuteTransient(conn, `SELECT s.model_harness,
-COALESCE(NULLIF(s.git_worktree, ''), p.canonical_cwd, '')
+`+sqlRecordedDirectory+`
 FROM sessions s LEFT JOIN projects p ON p.project_hash = s.project_hash
 WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},

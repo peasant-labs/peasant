@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // MaterializedSource is a synthetic source confined to a test-owned temporary
@@ -391,8 +391,9 @@ CREATE TABLE session (
 
 // Native v2 column names from anomalyco/opencode commit
 // 52685d451777fbccc99736ab31ffc37de8475a45, packages/opencode/src/session/sql.ts.
-// Unconsumed columns remain empty: their presence tests bounded catalog reads,
-// not adoption of their payload or fork semantics.
+// Columns no read consumes remain empty. fork_session_id and fork_boundary are
+// consumed by the snapshot's native fork evidence read; the other columns test
+// bounded catalog reads only.
 const nativeSessionV2ExtraColumnsSQL = `
 ALTER TABLE session_v2 ADD COLUMN project_id TEXT;
 ALTER TABLE session_v2 ADD COLUMN workspace_id TEXT;

@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { SessionDetailV2 } from './SessionDetailV2';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
+import { PublishProvider } from '@/contexts/PublishContext';
 
 const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ProjectHash;
 
@@ -14,6 +15,13 @@ const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const routerReplace = vi.hoisted(() => vi.fn());
 let currentSearchParams = new URLSearchParams();
 const PATHNAME = '/projects/alpha-project/sess-12345678';
+
+// The publish flow is not this suite's subject; its Local API calls stay
+// pending so no real server is reached.
+vi.mock('@/lib/share/publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/share/publishing')>()),
+  ...(await import('@/test/fixtures/publishingIdle')).PUBLISHING_IDLE,
+}));
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => currentSearchParams,
@@ -64,6 +72,7 @@ vi.mock(import('@peasant-labs/fairtrade/ui'), async (importOriginal) => {
         data-initial-kind={props.initialPosition?.kind ?? 'none'}
         data-initial-turn={props.initialPosition?.kind === 'turn' ? props.initialPosition.turnIndex : -1}
         data-initial-request-key={props.initialPosition?.requestKey ?? 'none'}
+        data-right-rail-open={String(props.rightRailOpen)}
       >
         {/* The trail is host-owned policy (root → project → session), so expose
             it for assertion; the package would render it in its hero. */}
@@ -231,7 +240,11 @@ function renderChangeScope() {
 function TestSessionDetail({ sessionId }: { sessionId: string }) {
   const routeQuery = parseTranscriptRouteQuery(currentSearchParams);
   if (!routeQuery) throw new Error('test transcript query must be valid');
-  return <SessionDetailV2 sessionId={sessionId} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />;
+  return (
+    <PublishProvider>
+      <SessionDetailV2 sessionId={sessionId} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />
+    </PublishProvider>
+  );
 }
 
 function assertDataAttribute(element: HTMLElement, attribute: string, expected: string, invariant: string): void {
@@ -252,17 +265,17 @@ function crumbs(): [string, string | null][] {
 }
 
 describe('SessionDetailV2 — breadcrumb trail', () => {
-  it('walks projects → this project\'s sessions → this session', () => {
+  it('walks sessions → this project\'s sessions → this session', () => {
     currentSearchParams = new URLSearchParams();
     renderChangeScope();
 
     const trail = crumbs();
     expect(trail.map(([label]) => label)).toEqual([
-      'projects',
+      'sessions',
       'alpha-project',
       'sess-123',
     ]);
-    // The root returns to the project list; the project crumb returns to THAT
+    // The root returns to Home's sessions; the project crumb returns to THAT
     // project's session list — never to the capability-gated map.
     expect(trail[0][1]).toBe('/');
     expect(trail[1][1]).toBe(`/sessions/${PROJECT_HASH}`);
@@ -366,18 +379,43 @@ describe('SessionDetailV2 — the "showing every step" prelude is gone', () => {
     channelData = DETAIL;
   });
 
-  it('copies the conversation as Markdown from its new home (headerActions, not the removed prelude)', async () => {
+  it('copies the conversation as Markdown from the header\'s more menu (not the removed prelude)', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
     render(<TestSessionDetail sessionId="sess-12345678" />);
 
     const headerActions = screen.getByTestId('package-header-actions');
-    fireEvent.click(within(headerActions).getByRole('button', { name: 'copy as markdown' }));
+    // The header's secondary actions live in the more menu the publish bar
+    // carries; there is no standalone copy button any more.
+    expect(within(headerActions).queryByRole('button', { name: 'copy as markdown' })).not.toBeInTheDocument();
+    fireEvent.click(within(headerActions).getByRole('button', { name: 'more' }));
+    fireEvent.click(within(headerActions).getByRole('menuitem', { name: 'copy as markdown' }));
 
     expect(writeText).toHaveBeenCalledTimes(1);
     const md = writeText.mock.calls[0][0] as string;
     expect(md).toContain('## You');
     expect(md).toContain('q0'); // the DETAIL fixture's first user turn
+    expect(within(headerActions).getByRole('status')).toHaveTextContent('copied as markdown');
+  });
+
+  it('keeps only the copy actions in the more menu and always shows the session figures', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const { container } = render(<TestSessionDetail sessionId="sess-12345678" />);
+    const headerActions = screen.getByTestId('package-header-actions');
+    const host = container.querySelector('[data-tour="transcript-view"]');
+    // No class hides the figures under the title, and no menu item toggles them.
+    expect(host?.className).not.toMatch(/metrics/);
+
+    fireEvent.click(within(headerActions).getByRole('button', { name: 'more' }));
+    expect(within(headerActions).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['copy as markdown', 'copy link']);
+    fireEvent.click(within(headerActions).getByRole('menuitem', { name: 'copy link' }));
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/projects/${PROJECT_HASH}/sess-12345678`);
+  });
+
+  it('opens with the filters rail folded', () => {
+    render(<TestSessionDetail sessionId="sess-12345678" />);
+    expect(screen.getByTestId('package-session-detail')).toHaveAttribute('data-right-rail-open', 'false');
   });
 
   it('does not render the "prompts & replies only" toggle, the "showing every step" sentence, or the steps waterfall anywhere', () => {
@@ -399,7 +437,7 @@ describe('SessionDetailV2 — the "showing every step" prelude is gone', () => {
   it('keeps the bounded transcript-view shell height class intact after the prelude removal', () => {
     const { container } = render(<TestSessionDetail sessionId="sess-12345678" />);
     expect(container.querySelector('[data-tour="transcript-view"]')).toHaveClass(
-      'h-[calc(100dvh-var(--app-header-height))]',
+      'h-[var(--app-body-height)]',
     );
   });
 

@@ -1,0 +1,57 @@
+# What the publish popup says while it checks a session on this computer: the
+# step running now, and after ten seconds on one step, what is slow. The lines
+# say the check runs here and that publish waits for it. requiredNames pins the
+# cases.
+requiredNames:
+  - preparing
+  - reindexing
+  - reindexing-slow
+  - scanning-a-long-session
+  - scanning-one-turn
+  - scanning-without-turns
+  - scanning-slow
+  - reading-slow
+cases:
+  - name: preparing
+    step: preparing
+    turns: 468
+    elapsedMs: 0
+    stage: checking for secrets and personal details before anything leaves your computer…
+  - name: reindexing
+    step: reindexing
+    turns: 468
+    elapsedMs: 9999
+    stage: updating this session’s index…
+  - name: reindexing-slow
+    step: reindexing
+    turns: 468
+    elapsedMs: 12400
+    stage: updating this session’s index…
+    note: 'taking longer than usual (12s): peasant is reading this session’s recording again, on this computer. publish waits for it.'
+  - name: scanning-a-long-session
+    step: scanning
+    turns: 468
+    elapsedMs: 3000
+    stage: scanning 468 turns…
+  - name: scanning-one-turn
+    step: scanning
+    turns: 1
+    elapsedMs: 0
+    stage: scanning 1 turn…
+  - name: scanning-without-turns
+    step: scanning
+    turns: 0
+    elapsedMs: 0
+    stage: scanning this session…
+  - name: scanning-slow
+    step: scanning
+    turns: 468
+    elapsedMs: 10000
+    stage: scanning 468 turns…
+    note: 'taking longer than usual (10s): every turn is checked for secrets and personal details on this computer before anything is sent. publish waits for it.'
+  - name: reading-slow
+    step: reading
+    turns: 468
+    elapsedMs: 31000
+    stage: reading who can read it online…
+    note: 'taking longer than usual (31s): peasant online is slow to answer.'

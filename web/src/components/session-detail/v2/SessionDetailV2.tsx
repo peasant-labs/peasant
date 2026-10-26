@@ -3,7 +3,7 @@
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ChevronDown, ChevronUp, Copy, X } from 'lucide-react';
+import { Copy, Link as LinkIcon, X } from 'lucide-react';
 import { TrajectoryGraph } from '@peasant-labs/fairtrade/graph';
 // The demo's drop-in composite + its one wire→view adapter, plus the shared
 // transcript helpers, all render the SAME composite as the demo.
@@ -11,6 +11,7 @@ import {
   TranscriptViewer,
   adaptTranscript,
   annotateTranscript,
+  cleanSessionTitle,
   computeAnalytics,
   computePersonalMedians,
   type AdaptTranscriptOptions,
@@ -18,8 +19,9 @@ import {
   type TranscriptTab,
 } from '@peasant-labs/fairtrade/ui';
 import { useTheme } from '@/hooks/useTheme';
+import { useSessionExtras } from '@/hooks/useSessionExtras';
 import '@xyflow/react/dist/style.css';
-import { FeedbackPanel, Skeleton } from '@/lib/ft-ui';
+import { FeedbackPanel, Skeleton, type MenuItem } from '@/lib/ft-ui';
 import { useChannel } from '@/contexts/WebSocketContext';
 import { subscribe } from '@/types/messages';
 import type {
@@ -30,10 +32,11 @@ import type {
 } from '@/types/messages';
 import { detectPhases } from '@/lib/insights';
 import { displayProject } from '@/lib/quality/utils';
-import { sessionsHref, transcriptHref, EarlierHistoryParam, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
+import { sessionsHref, transcriptHref, EarlierHistoryParam, PublishParam, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
 import { useEntryLabels } from './lib/useEntryLabels';
 import { relationshipLinkHref } from './lib/relationshipLink';
 import { useTranscriptReadingState } from './lib/useTranscriptReadingState';
+import { toTranscriptGitContext } from './lib/transcriptGit';
 import {
   clearScopeQuery,
   collectFileTouches,
@@ -47,7 +50,10 @@ import {
 } from './lib/scopeTurns';
 import { TurnLabelPopover } from './canvas/TurnLabelPopover';
 import { TurnTouchedFiles } from './panels/TurnTouchedFiles';
+import { DetectedPullRequests } from './panels/DetectedPullRequests';
 import { adaptQualitySessions } from '@/lib/quality/types';
+import { useTranscriptPublish } from './publish/useTranscriptPublish';
+import { SessionNotIndexed } from './SessionNotIndexed';
 
 /**
  * The heading shown for a session that has no generated title yet. The hero
@@ -70,7 +76,7 @@ interface SessionDetailV2Props {
  * contract is intersected back in here rather than weakening every consumer.
  */
 type SessionDetailWire = SessionDetailPayload &
-  Pick<SessionDetailReadPayload, 'relationshipNavigation'>;
+  Pick<SessionDetailReadPayload, 'relationshipNavigation' | 'teammate'>;
 
 /** The disclosed retained-history sections, keyed the way the viewer keys them. */
 type EarlierHistoryOpen = Record<string, boolean>;
@@ -115,7 +121,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Host element for the mounted viewer; the per-session reading state replays
   // the inner scroller offset against it on the way back.
   const transcriptHostRef = useRef<HTMLDivElement | null>(null);
-  const { data: detail, error } = useChannel<SessionDetailWire>(
+  const { data: detail, error, refresh: refreshDetail } = useChannel<SessionDetailWire>(
     subscribe.sessionDetail(sessionId),
   );
   // The canonical wire permits `null` for an empty turn collection. Normalize
@@ -124,6 +130,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Authorized current-target navigation from the flat local read, kept separate
   // from the durable payload it was read beside.
   const relationshipNavigation = detail?.relationshipNavigation;
+  // The session's own commits and detected pull requests. These are additive,
+  // display-only reads beside the transcript: both degrade to empty on failure.
+  const { commits: sessionCommits, pullRequests } = useSessionExtras(sessionId);
 
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -174,7 +183,13 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // The quality channel feeds the personal-median comparison line on the
   // scorecard. The package never fetches it — peasant computes the medians and
   // passes them in.
-  const { data: quality } = useChannel<QualityPayload>(subscribe.quality());
+  const { data: quality, refresh: refreshQuality } = useChannel<QualityPayload>(subscribe.quality());
+  // A re-index rewrites the session's detail and its stored title; both
+  // channels are sent once on subscribe, so the page reads both again.
+  const readSessionAgain = useCallback(() => {
+    refreshDetail();
+    refreshQuality();
+  }, [refreshDetail, refreshQuality]);
   const medians = useMemo(
     () =>
       computePersonalMedians(
@@ -205,13 +220,10 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // title, and the server only stores one for some sessions, so this stays
   // optional and the breadcrumb falls back to the short id.
   const sessionTitle = useMemo(() => {
-    const found = quality?.sessions?.find((s) => s.id === sessionId)?.title?.trim();
-    return found ? found : undefined;
+    const found = quality?.sessions?.find((s) => s.id === sessionId)?.title;
+    const clean = found ? cleanSessionTitle(found) : '';
+    return clean ? clean : undefined;
   }, [quality?.sessions, sessionId]);
-
-  // Session metrics disclosure, collapsed by default: the transcript is what
-  // you came to read, and duration/turns/tools/tokens are reference figures.
-  const [metricsOpen, setMetricsOpen] = useState(false);
 
   // The viewer's tab, lifted so the host can react to it. The composite
   // renders its keyboard-hint strip on every tab; peasant shows it only on
@@ -266,14 +278,61 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   }, [pathname, router, searchParams]);
 
   // Copy-as-Markdown (roadmap 4.7): copies exactly what's shown (focus/scope
-  // respected), so it pastes cleanly into an issue/PR/doc.
-  const [copied, setCopied] = useState(false);
+  // respected), so it pastes cleanly into an issue/PR/doc. The header says what
+  // was copied for a moment, since the menu that offered it has closed.
+  const [copied, setCopied] = useState<string | null>(null);
+  const copiedTimer = useRef<number | undefined>(undefined);
+  const announceCopied = useCallback((what: string) => {
+    setCopied(what);
+    window.clearTimeout(copiedTimer.current);
+    copiedTimer.current = window.setTimeout(() => setCopied(null), 1500);
+  }, []);
+  useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
   const copyMarkdown = useCallback(() => {
     const md = turnsToMarkdown(displayTurns ?? turns);
     void navigator.clipboard?.writeText(md);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  }, [displayTurns, turns]);
+    announceCopied('copied as markdown');
+  }, [announceCopied, displayTurns, turns]);
+  const copyLink = useCallback(() => {
+    void navigator.clipboard?.writeText(`${window.location.origin}${transcriptHref(projectHash, sessionId)}`);
+    announceCopied('copied the link');
+  }, [announceCopied, projectHash, sessionId]);
+
+  // The header's overflow actions. The viewer's own share and more menus are
+  // off (`showTail={false}`), so these are the page's only secondary actions,
+  // carried by the publish bar's more menu. The session's figures (duration,
+  // turns, tools, tokens) always show under the title, so nothing here hides
+  // or reveals them.
+  const moreItems = useMemo<MenuItem[]>(() => [
+    { label: 'copy as markdown', icon: Copy, onSelect: copyMarkdown },
+    { label: 'copy link', icon: LinkIcon, onSelect: copyLink },
+  ], [copyLink, copyMarkdown]);
+
+  // The filters rail opens on request: the page leads with the conversation
+  // and its outline, and the rail's collapsed strip keeps the filters a click away.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // The publish bar and its popup. `/share?sessionId=` arrives here with
+  // `?publish=open`; closing the popup drops that request from the route so a
+  // reload does not reopen it.
+  const dropPublishRequest = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete(PublishParam);
+    const query = next.toString();
+    router.replace(`${pathname}${query ? `?${query}` : ''}`);
+  }, [pathname, router, searchParams]);
+  const publish = useTranscriptPublish({
+    sessionId,
+    title: sessionTitle ?? UNTITLED_SESSION_TITLE,
+    turns,
+    loaded: detail != null,
+    moreItems,
+    openOnArrival: routeQuery.publish,
+    onArrivalHandled: dropPublishRequest,
+    // A re-index from the popup changes the session, so the page reads it
+    // again instead of keeping the old transcript.
+    onReindexed: readSessionAgain,
+  });
 
   // Host-derived inputs the package takes as props (it never derives them).
   // Both are POSITIONAL over the rendered list, so they must be computed from
@@ -299,15 +358,21 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
-    // The flat local read carries authorized navigation ALONGSIDE the durable
-    // detail. The durable payload boundary rejects that read-only field, so the
-    // host separates the two: only the durable detail reaches `adaptTranscript`
-    // as payload, and the navigation travels through the published
-    // adapter-options boundary, which cooks it into usable source/parent links.
-    const { relationshipNavigation, ...durableDetail } = detail;
+    // The flat local read carries authorized navigation and the recorded
+    // teammate identity ALONGSIDE the durable detail. The durable payload
+    // boundary rejects both read-only fields, so the host separates them: only
+    // the durable detail reaches `adaptTranscript` as payload, and the
+    // navigation travels through the published adapter-options boundary, which
+    // cooks it into usable source/parent links. The teammate is host-owned: the
+    // stream prelude renders it and the durable payload never carries it.
+    const { relationshipNavigation, teammate: _teammate, ...durableDetail } = detail;
     const adapterOptions: AdaptTranscriptOptions = { relationshipNavigation };
+    // Commits ride in as the legacy-compatible `gitContext.commits` shape, which
+    // the adapter cooks into `session.git.commits` — the session-level rows the
+    // viewer renders as its header commit count and its checkpoint markers.
+    // Everything else on the payload is unchanged.
     const adapted = adaptTranscript(
-      { ...durableDetail, turns: visibleTurns },
+      { ...durableDetail, turns: visibleTurns, gitContext: toTranscriptGitContext(sessionCommits) },
       undefined,
       analytics,
       adapterOptions,
@@ -324,7 +389,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       ...adapted,
       session: { ...adapted.session, title: sessionTitle ?? UNTITLED_SESSION_TITLE },
     };
-  }, [detail, displayTurns, medians, turns, sessionTitle, relationshipNavigation]);
+  }, [detail, displayTurns, medians, turns, sessionTitle, relationshipNavigation, sessionCommits]);
 
   // Cooked tool calls by turn index, fed into the graph engine's tool nodes.
   const toolVMsByTurn = useMemo(
@@ -351,8 +416,8 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Project + breadcrumb for the origin-aware trail (Map/Review origin crumb).
   const project = detail?.project ?? projectName;
   const crumb = originCrumb(scope, projectHash);
-  // The trail is projects / {project} / {session} — the path you walked to get
-  // here, each crumb being the page it names. The project crumb leads to that
+  // The trail is sessions / {project} / {session} — the path you walked to get
+  // here, each crumb being the page it names. `sessions` is Home. The project crumb leads to that
   // project's SESSION LIST, not to the map: the map is capability-gated, so a
   // map crumb is a dead end on a default server and there is no reason to route
   // a reader there from a transcript.
@@ -371,7 +436,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // actually were survives alongside the way back to the top.
   const sessionCrumb = (detail?.id ?? sessionId).slice(0, 8);
   const breadcrumb: CrumbItem[] = [
-    { label: 'projects', href: '/' },
+    { label: 'sessions', href: '/' },
     ...(crumb ? [crumb] : []),
     { label: displayProject(project), href: sessionsHref(projectHash) },
     { label: sessionCrumb },
@@ -382,7 +447,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // skeleton with the error swallowed is how a dead backend hides.
     if (error) {
       return (
-        <div className="max-w-[1600px] mx-auto px-6 pt-6">
+        <div className="asb-page">
           <FeedbackPanel variant="error" title="transcript unavailable">
             {String(error)}
           </FeedbackPanel>
@@ -392,16 +457,18 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     return <SessionDetailSkeleton />;
   }
 
+  // Recorded turns with nothing indexed: say so and offer the re-index,
+  // rather than a turn count above an empty transcript.
+  if (turns.length === 0 && detail.turnCount > 0) {
+    return <SessionNotIndexed sessionId={sessionId} turnCount={detail.turnCount} crumbs={breadcrumb} onReindexed={readSessionAgain} />;
+  }
+
   // The callbacks the host wires into the composite. `onNavigateRelationship`
   // is invoked by the viewer's source/parent link with the authorized navigation
   // above; the host owns the route it opens and the Back restoration that
   // follows.
   const viewerCallbacks = {
-    onCopyLink: () => {
-      void navigator.clipboard?.writeText(
-        `${window.location.origin}${transcriptHref(projectHash, detail.id)}`,
-      );
-    },
+    onCopyLink: copyLink,
     onNavigateRelationship: navigateToRelationship,
   };
 
@@ -411,8 +478,27 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Host-owned status context contains state the reader needs: the active-scope
   // chip plus stale-link and connection-error status. View controls remain in
   // the shared composite, while copy-as-markdown is a header action below.
+  //
+  // The recorded teammate identity and the parent transcript link lead the
+  // prelude: both describe where this transcript came from, and both are local
+  // read evidence the durable payload never carries. A session with neither
+  // renders nothing here.
+  const teammate = detail.teammate;
+  const parentSessionId = detail.parentSessionId;
   const streamPrelude = (
     <div className="flex flex-col gap-3">
+      {teammate && (
+        <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[14px] text-ink-2">
+          <span data-transcript-teammate="true">
+            teammate {teammate.name} on {teammate.team}
+          </span>
+          {parentSessionId && (
+            <Link href={transcriptHref(projectHash, parentSessionId)} className="underline hover:no-underline focus-mono">
+              parent transcript
+            </Link>
+          )}
+        </p>
+      )}
       {filteringScope && scope.scope && (
         <ScopeChipRow
           label={scopeChipLabel(scope.scope, scope.scopeVal)}
@@ -445,153 +531,149 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     </div>
   );
 
-  // Copy-as-Markdown's new home: a session-level header action
-  // (via the composite's `headerActions` slot) rather than the removed
-  // prelude's toggle bar. Still copies exactly what's shown (scope respected).
+  // The header row after the breadcrumb: the publish bar (status, its one
+  // action, and the more menu). A copy action says what it copied for a moment.
   const headerActions = (
     <>
-      {/* Session metrics disclosure. The composite's hero always renders the
-          duration/turns/tools/tokens strip; those are reference figures you
-          consult occasionally, not identity you need on screen while reading a
-          transcript. The composite exposes no prop for it, so the toggle lives
-          here and the strip is hidden by a data attribute on the wrapper below
-          (see `.txn-metrics-collapsed` in globals.css).
-
-          Only the `.metaitem` figures collapse — the outcome / harness / model
-          chips in the same row are identity, so they stay put. */}
-      <button
-        type="button"
-        onClick={() => setMetricsOpen((open) => !open)}
-        aria-expanded={metricsOpen}
-        title={metricsOpen ? 'hide the session metrics' : 'show duration, turns, tools and tokens'}
-        className="btn btn-secondary btn-sm"
-      >
-        {metricsOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
-        details
-      </button>
-      <button
-        type="button"
-        onClick={copyMarkdown}
-        title="copy the conversation shown above (respecting the active scope) as markdown text"
-        className="btn btn-secondary btn-sm"
-      >
-        <Copy size={14} aria-hidden />
-        {copied ? 'copied' : 'copy as markdown'}
-      </button>
+      {copied && (
+        <span role="status" className="font-mono text-[14px] text-ink-2">
+          {copied}
+        </span>
+      )}
+      {publish.bar}
     </>
   );
 
   return (
-    // The app shell publishes one responsive header height for both its main
-    // offset and bounded viewers, including the mobile two-row header.
-    <div
-      ref={transcriptHostRef}
-      data-tour="transcript-view"
-      className={[
-        'flex h-[calc(100dvh-var(--app-header-height))] flex-col',
-        metricsOpen ? '' : 'txn-metrics-collapsed',
-        activeTab === 'highlights' ? '' : 'txn-hints-hidden',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
-      <div className="flex-1 min-h-0">
-        <TranscriptViewer
-          viewModel={vm!}
-          theme={theme}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          // Local capabilities: labelling is supported (via renderTurnActions);
-          // contribute / visibility / edit / export are village-only or absent.
-          capabilities={{
-            canEdit: false,
-            canLabel: entryTypes.length > 0,
-            canContribute: false,
-            canChangeVisibility: false,
-            canExport: false,
-          }}
-          callbacks={viewerCallbacks}
-          // Host-owned reading state. The earlier-history disclosure is
-          // controlled by the route, so Back, a reload, and a copied link all
-          // restore exactly the sections the reader had open. The selected turn
-          // and the search query come from the per-session record, so a reader
-          // who follows a stored link and returns finds what they left.
-          earlierHistoryOpen={earlierHistoryOpen}
-          onEarlierHistoryOpenChange={setEarlierHistoryOpen}
-          activeTurn={requestedTurn == null ? activeTurn : undefined}
-          onActiveTurnChange={setActiveTurn}
-          search={search}
-          onSearchChange={setSearch}
-          // Origin-aware host trail through the app router.
-          breadcrumb={breadcrumb}
-          LinkComponent={Link}
-          initialPosition={initialPosition}
-          // Per-turn copied anchors are full permalinks that keep the live
-          // scope/origin params (replacing only `turn`), so a copied link
-          // stays inside the scoped "room" — the pre-composite link shape.
-          anchorHref={(turnIndex) => {
-            const params = new URLSearchParams(searchParams);
-            params.set(TurnParam, String(turnIndex));
-            const base = transcriptHref(projectHash, detail.id);
-            return `${base}${params.toString() ? `?${params.toString()}` : ''}`;
-          }}
-          streamPrelude={streamPrelude}
-          headerActions={headerActions}
-          // The graph toggle mounts fairtrade's @xyflow engine (`/graph`), which
-          // owns graph topology, pan, and zoom while Fairtrade owns visuals.
-          graphSlot={() => (
-            <TrajectoryGraph
-              turns={displayTurns ?? turns}
-              toolVMsByTurn={toolVMsByTurn}
-              filteredTurns={displayTurns ?? turns}
-              phases={phases}
-              annotations={annotations}
-              searchMatches={[]}
-              provider={detail.harness}
-            />
-          )}
-          // Each turn carries its touched files under the card. The
-          // panel reads WIRE turns (tool-call paths), so look the turn back up.
-          renderTurnPanel={(turn) => {
-            const wire = (displayTurns ?? turns).find((w) => w.index === turn.index);
-            if (!wire) return null;
-            const touches = collectFileTouches([wire], workingDirectory)[0];
-            if (!touches) return null;
-            return (
-              <TurnTouchedFiles
-                touches={touches}
-                projectHash={projectHash}
-                activeFile={scope.scope === TranscriptScope.File ? scope.scopeVal : undefined}
+    <>
+      {/* The app shell publishes one responsive header height for both its main
+          offset and bounded viewers, including the mobile two-row header. */}
+      <div
+        ref={transcriptHostRef}
+        data-tour="transcript-view"
+        className={[
+          'flex h-[var(--app-body-height)] flex-col',
+          activeTab === 'highlights' ? '' : 'txn-hints-hidden',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        <div className="flex-1 min-h-0">
+          <TranscriptViewer
+            viewModel={vm!}
+            theme={theme}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            rightRailOpen={filtersOpen}
+            onRightRailOpenChange={setFiltersOpen}
+            // Local capabilities: labelling is supported (via renderTurnActions);
+            // contribute / visibility / edit / export are village-only or absent.
+            capabilities={{
+              canEdit: false,
+              canLabel: entryTypes.length > 0,
+              canContribute: false,
+              canChangeVisibility: false,
+              canExport: false,
+            }}
+            callbacks={viewerCallbacks}
+            // Host-owned reading state. The earlier-history disclosure is
+            // controlled by the route, so Back, a reload, and a copied link all
+            // restore exactly the sections the reader had open. The selected turn
+            // and the search query come from the per-session record, so a reader
+            // who follows a stored link and returns finds what they left.
+            earlierHistoryOpen={earlierHistoryOpen}
+            onEarlierHistoryOpenChange={setEarlierHistoryOpen}
+            activeTurn={requestedTurn == null ? activeTurn : undefined}
+            onActiveTurnChange={setActiveTurn}
+            search={search}
+            onSearchChange={setSearch}
+            // Origin-aware host trail through the app router.
+            breadcrumb={breadcrumb}
+            LinkComponent={Link}
+            initialPosition={initialPosition}
+            // Per-turn copied anchors are full permalinks that keep the live
+            // scope/origin params (replacing only `turn`), so a copied link
+            // stays inside the scoped "room" — the pre-composite link shape.
+            anchorHref={(turnIndex) => {
+              const params = new URLSearchParams(searchParams);
+              params.set(TurnParam, String(turnIndex));
+              const base = transcriptHref(projectHash, detail.id);
+              return `${base}${params.toString() ? `?${params.toString()}` : ''}`;
+            }}
+            streamPrelude={streamPrelude}
+            headerActions={headerActions}
+            // Detected pull requests sit under the meta row as evidence: the
+            // viewer only gives the list a place, the host owns its wording.
+            // Omitted entirely when none were detected, so no empty section
+            // appears on the sessions this feature does not touch.
+            pullRequests={
+              pullRequests.length > 0 ? (
+                <DetectedPullRequests pullRequests={pullRequests} />
+              ) : undefined
+            }
+            // The page owns the header's actions: the viewer's own share and
+            // more menus and its outcome chip are off, and the tab strip carries
+            // the search trigger.
+            showTail={false}
+            showOutcome={false}
+            showSearchTrigger
+            // The graph toggle mounts fairtrade's @xyflow engine (`/graph`), which
+            // owns graph topology, pan, and zoom while Fairtrade owns visuals.
+            graphSlot={() => (
+              <TrajectoryGraph
+                turns={displayTurns ?? turns}
+                toolVMsByTurn={toolVMsByTurn}
+                filteredTurns={displayTurns ?? turns}
+                phases={phases}
+                annotations={annotations}
+                searchMatches={[]}
+                provider={detail.harness}
               />
-            );
-          }}
-          // Peasant's TYPED label model (annotation-type registry): the
-          // restored outcome+flag modal is backed by the real
-          // quality.turn_outcome/quality.turn_flag types, plus a
-          // secondary "more labels" picker for the rest of the registry
-          // (custom free text, system classifiers) — saved chips + both
-          // popovers are host-owned, not the composite's built-in label.
-          renderTurnActions={(turn) => (
-            <span className="inline-flex items-center gap-1.5">
-              {(labelsByEntry.get(turn.index) ?? []).map((label) => (
-                <span key={label.id || `${label.typeId}:${label.value}`} className="chip" title={label.typeName}>
-                  {label.value}
-                </span>
-              ))}
-              {entryTypes.length > 0 && (
-                <TurnLabelPopover
-                  sessionId={sessionId}
-                  entryIndex={turn.index}
-                  types={entryTypes}
-                  savedLabels={labelsByEntry.get(turn.index)}
-                  onSaved={addLabel}
+            )}
+            // Each turn carries its touched files under the card. The
+            // panel reads WIRE turns (tool-call paths), so look the turn back up.
+            renderTurnPanel={(turn) => {
+              const wire = (displayTurns ?? turns).find((w) => w.index === turn.index);
+              if (!wire) return null;
+              const touches = collectFileTouches([wire], workingDirectory)[0];
+              if (!touches) return null;
+              return (
+                <TurnTouchedFiles
+                  touches={touches}
+                  activeFile={scope.scope === TranscriptScope.File ? scope.scopeVal : undefined}
                 />
-              )}
-            </span>
-          )}
-        />
+              );
+            }}
+            // Peasant's TYPED label model (annotation-type registry): the
+            // restored outcome+flag modal is backed by the real
+            // quality.turn_outcome/quality.turn_flag types, plus a
+            // secondary "more labels" picker for the rest of the registry
+            // (custom free text, system classifiers) — saved chips + both
+            // popovers are host-owned, not the composite's built-in label.
+            renderTurnActions={(turn) => (
+              <span className="inline-flex items-center gap-1.5">
+                {(labelsByEntry.get(turn.index) ?? []).map((label) => (
+                  <span key={label.id || `${label.typeId}:${label.value}`} className="chip" title={label.typeName}>
+                    {label.value}
+                  </span>
+                ))}
+                {entryTypes.length > 0 && (
+                  <TurnLabelPopover
+                    sessionId={sessionId}
+                    entryIndex={turn.index}
+                    types={entryTypes}
+                    savedLabels={labelsByEntry.get(turn.index)}
+                    onSaved={addLabel}
+                  />
+                )}
+              </span>
+            )}
+          />
+        </div>
       </div>
-    </div>
+      {/* The publish popup sits beside the viewer, outside its header. */}
+      {publish.dialog}
+    </>
   );
 }
 
@@ -661,11 +743,11 @@ function ScopeChipRow({ label, onClear }: { label: string; onClear: () => void }
 
 function SessionDetailSkeleton() {
   return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12">
+    <div className="asb-page">
       {/* Header block: breadcrumb + title + subtitle stand-ins. */}
       <Skeleton avatar={false} lines={3} label="Loading session header" />
       {/* Transcript body stand-in: an avatar row plus a run of content lines. */}
-      <Skeleton lines={10} label="Loading transcript" className="mt-6" />
+      <Skeleton lines={10} label="Loading transcript" />
     </div>
   );
 }

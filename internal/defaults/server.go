@@ -46,6 +46,15 @@ const (
 	// relationshipNavigation is added beside them. It is a read projection, not
 	// a publication body, so it never carries navigation into published content.
 	RouteSessionDetail Route = "/api/v1/sessions/{id}"
+	// RouteSessionCommits reads the commits the recorded session's work
+	// produced, from the stored session_commits projection. It is a local
+	// display read: it carries no publication body and grants no access.
+	RouteSessionCommits Route = "/api/v1/sessions/{id}/commits"
+	// RouteSessionPullRequests reads the pull requests detected from the
+	// session's stored tool calls. Detection runs on read, so an already-stored
+	// session needs no backfill. It is display-only: it never widens who can
+	// read a transcript and never posts to GitHub.
+	RouteSessionPullRequests Route = "/api/v1/sessions/{id}/pull-requests"
 	// RouteSessionSummaries resolves links: it returns summaries for an explicit
 	// set of session identifiers named in ?ids=, applying neither origin scope
 	// nor selection scope. A sibling RESOURCE rather than a path under
@@ -63,8 +72,24 @@ const (
 	RouteSyncRedactions    Route = "/api/v1/sync/redactions"
 	RouteSyncPush          Route = "/api/v1/sync/push"
 	RouteSyncLogin         Route = "/api/v1/sync/login"
-	RouteSyncIngest        Route = "/api/v1/sync/ingest"
-	RouteSyncIngestStatus  Route = "/api/v1/sync/ingest/status"
+	RouteSyncLogout        Route = "/api/v1/sync/logout"
+	// RoutePublications reads the publication state of named sessions for the
+	// signed-in Village account, whatever the saved selection lists.
+	RoutePublications Route = "/api/v1/publications"
+	// RouteVillageCollectives lists the Village collectives the signed-in user
+	// belongs to, read with this computer's stored credential.
+	RouteVillageCollectives Route = "/api/v1/village/collectives"
+	// RouteAutoPublishRule saves (PUT) or removes (DELETE) one auto-publish
+	// rule of the settings page.
+	RouteAutoPublishRule Route = "/api/v1/settings/auto-publish/{id}"
+	// RouteAutoPublishInstall installs one rule's hooks in one recorded
+	// repository the rule covers.
+	RouteAutoPublishInstall Route = "/api/v1/settings/auto-publish/{id}/install"
+	RouteSyncIngest         Route = "/api/v1/sync/ingest"
+	RouteSyncIngestStatus   Route = "/api/v1/sync/ingest/status"
+	// RouteSyncIngestSession re-indexes one recorded session (?session_id=)
+	// and answers when it is done.
+	RouteSyncIngestSession Route = "/api/v1/sync/ingest/session"
 
 	// Map / Review surfaces. Path params use Go 1.22 ServeMux
 	// {wildcard} syntax; commit/path/file/branch arrive as query params.
@@ -80,6 +105,10 @@ const (
 	// RouteSearch is global full-text transcript search (Cmd-K). Query in ?q=,
 	// optional ?limit=; no path param (search spans all projects).
 	RouteSearch Route = "/api/v1/search"
+
+	// RouteSettings reads every configuration key (GET) and changes one editable
+	// key in config.yaml (PATCH).
+	RouteSettings Route = "/api/v1/settings"
 )
 
 // DevProxy is the default dev-mode proxy address for the Next.js dev server.

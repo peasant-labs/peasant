@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,8 +18,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	villageclient "github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/redact"
+	"github.com/peasant-labs/schema"
 )
 
 // TestPushCmd_RuntimeFailureIsActionableFromAHook covers the two things a user
@@ -171,6 +176,7 @@ func writeTestCredentialsFor(t *testing.T, dir, villageURL string) {
 		t.Fatalf("parse credentials: %v", err)
 	}
 	creds["village_url"] = villageURL
+	creds["user_id"] = testutil.VillageFixtureAccountID.String()
 	rewritten, err := json.Marshal(creds)
 	if err != nil {
 		t.Fatalf("marshal credentials: %v", err)
@@ -333,48 +339,160 @@ func TestPushCmd_TimeoutBoundsTheWholeUpload(t *testing.T) {
 // transport-level acceptance never advances local applied state.
 //
 // A village that answers headers immediately and then stalls its response body —
-// an ordinary proxy, load balancer, or VPN — accepts the transcript, and the
-// upload budget then expires while peasant is still reading the answer. The
+// an ordinary proxy, load balancer, or VPN — accepts the transcript. The caller
+// then cancels while Peasant reads the actual terminal body, just as an expired
+// network budget would, without a startup-performance prerequisite. The
 // "mark pushed" write used to run on that same expiring context, so the work
 // that DID happen was never recorded and every subsequent commit re-sent the
 // identical full transcript, forever.
 func TestPushCmd_AnUploadWithoutATerminalReceiptRemainsTargetedForRetry(t *testing.T) {
 	t.Parallel()
+	f := loadPushGateBoundary(t, "cancelled-terminal-receipt-remains-unapplied")
+	if len(f.Attempts) != 3 {
+		t.Fatal("terminal receipt fixture must retain exactly three explicit invocations, the declared retry contract")
+	}
+	lifetime, finish := context.WithTimeout(t.Context(), 30*time.Second)
+	defer finish()
+	dir := t.TempDir()
 	var publishes atomic.Int64
-	// Headers out at once, body withheld: the transcript is on the village and
-	// the client is left waiting.
+	accepted := make(chan int, len(f.Attempts))
+	handlersDone := make(chan int, len(f.Attempts))
+	// A real accepted request and flushed headers precede cancellation. The
+	// transport observer below also proves the CLIENT entered its real body Read.
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/auth/me" {
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+			return
+		}
 		if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 			_, _ = w.Write([]byte(`{}`))
 			return
 		}
-		_, _ = io.Copy(io.Discard, r.Body)
-		publishes.Add(1)
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Error(err)
+			return
+		}
+		attempt := int(publishes.Add(1))
+		defer func() {
+			select {
+			case handlersDone <- attempt:
+			case <-lifetime.Done():
+			}
+		}()
 		w.WriteHeader(http.StatusCreated)
 		w.(http.Flusher).Flush()
+		select {
+		case accepted <- attempt:
+		case <-lifetime.Done():
+			return
+		}
 		<-r.Context().Done()
 	}))
 	t.Cleanup(village.Close)
-
-	dir := t.TempDir()
 	writeTestCredentialsFor(t, dir, village.URL)
-	cfgPath := seedUploadableSession(t, dir, "cccc3333-cccc-4ccc-8ccc-cccccccccccc")
-
-	// The stall is indefinite, so the budget always expires; it only has to be
-	// long enough for the headers to arrive first, which is the state under
-	// test. Generous rather than tight so a loaded machine cannot turn "the
-	// village accepted it" into "the request never got there".
-	const budget = 3 * time.Second
-	for commit := 1; commit <= 3; commit++ {
-		stdout, stderr, err := executePushCmdSeparate(t, dir,
-			[]string{"--non-interactive", "--quiet", "--config=" + cfgPath, "--timeout", budget.String()})
-		if err == nil {
-			t.Fatalf("attempt %d must report the missing terminal receipt; stdout=%s stderr=%s", commit, stdout, stderr)
-		}
+	cfgPath := seedUploadableSession(t, dir, f.SessionID)
+	for index, name := range f.Attempts {
+		func() {
+			ctx, cancel := context.WithCancel(lifetime)
+			bodyReading := make(chan struct{})
+			var readOnce sync.Once
+			done := make(chan struct{})
+			results := make(chan pushGateCommandResult, 1)
+			cmd := buildPushCommand(pushCommandDependencies{newVillageClient: func(base, key string, client *http.Client) *villageclient.VillageClient {
+				copy := *client
+				next := copy.Transport
+				if next == nil {
+					next = http.DefaultTransport
+				}
+				copy.Transport = pushGateRoundTrip(func(r *http.Request) (*http.Response, error) {
+					response, err := next.RoundTrip(r)
+					if err == nil && strings.HasSuffix(r.URL.Path, "/transcripts/publish") {
+						response.Body = &pushGateReceiptBody{ReadCloser: response.Body, reading: func() { readOnce.Do(func() { close(bodyReading) }) }}
+					}
+					return response, err
+				})
+				return villageclient.NewVillageClient(base, key, &copy)
+			}})
+			go func() {
+				defer close(done)
+				results <- executePushGateCommand(ctx, cmd, dir, []string{"--non-interactive", "--quiet", "--config=" + cfgPath})
+			}()
+			defer func() {
+				cancel()
+				// Also release the owned socket on a failing prerequisite, then
+				// join the command before any temporary Store/server is cleaned.
+				village.CloseClientConnections()
+				<-done
+			}()
+			select {
+			case got := <-accepted:
+				if got != index+1 {
+					t.Fatalf("%s accepted request=%d want=%d", name, got, index+1)
+				}
+			case result := <-results:
+				t.Fatalf("%s ended BEFORE server acceptance: %+v", name, result)
+			case <-lifetime.Done():
+				t.Fatalf("%s never reached server acceptance: %v", name, lifetime.Err())
+			}
+			select {
+			case <-bodyReading:
+			case <-lifetime.Done():
+				t.Fatalf("%s never read the real terminal body", name)
+			}
+			cancel()
+			var result pushGateCommandResult
+			select {
+			case result = <-results:
+			case <-lifetime.Done():
+				t.Fatalf("%s did not finish after body-read cancellation", name)
+			}
+			<-done
+			select {
+			case got := <-handlersDone:
+				if got != index+1 {
+					t.Fatalf("%s handler completion=%d", name, got)
+				}
+			case <-lifetime.Done():
+				t.Fatalf("%s server handler did not finish", name)
+			}
+			if result.err == nil {
+				t.Fatalf("%s must report actual receipt-read cancellation: %+v", name, result)
+			}
+			for _, wanted := range f.StdoutContains {
+				if !strings.Contains(result.stdout, wanted) {
+					t.Fatalf("%s failed to report the actual publication failure: %+v", name, result)
+				}
+			}
+			if publishes.Load() != int64(index+1) {
+				t.Fatalf("%s was not exactly one accepted upload", name)
+			}
+			db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			row, err := db.SessionDetailByID(t.Context(), f.SessionID)
+			if err != nil || row == nil || row.PushedAt != nil {
+				t.Fatalf("%s advanced local applied state without a terminal receipt: row=%+v err=%v", name, row, err)
+			}
+			receipts, err := db.SessionPublications(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), []string{f.SessionID})
+			if err != nil || len(receipts) != 0 {
+				t.Fatalf("%s fabricated a terminal receipt: %+v %v", name, receipts, err)
+			}
+			diagnostic, err := db.LatestSessionPublicationAttempt(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), f.SessionID)
+			if err != nil || diagnostic == nil || diagnostic.Stage != store.PublicationAttemptStagePublish {
+				t.Fatalf("%s did not reach the actual publication-response error stage: %+v %v; stdout=%s stderr=%s", name, diagnostic, err, result.stdout, result.stderr)
+			}
+			for _, wanted := range f.ErrorContains {
+				if !strings.Contains(diagnostic.Message, wanted) {
+					t.Fatalf("%s publication diagnostic lost actual cancellation phase %q: %+v; %s", name, wanted, diagnostic, result)
+				}
+			}
+		}()
 	}
-	if got := publishes.Load(); got != 3 {
-		t.Errorf("the village received %d attempts, want one targeted retry per explicit invocation until a terminal receipt exists", got)
+	if got := publishes.Load(); got != int64(len(f.Attempts)) {
+		t.Fatalf("accepted requests=%d want all explicit invocations=%v", got, f.Attempts)
 	}
 }
 

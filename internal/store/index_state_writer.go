@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 const sqlUpdateIndexState = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = NULL, indexed_input_hash = NULL, indexed_publication_capture_revision = 0 WHERE session_id = ?`
@@ -94,19 +94,31 @@ func updateIndexStateWithSessionEntriesHashOnConn(conn *sqlite.Conn, sessionID i
 
 // ListStaleIndexSessions selects only registered harness targets. The legacy SQL
 // index_version column records the actual indexer revision, not an index format.
+//
+// A session whose latest attempt has fully settled against the
+// harness's producer and adapter targets is excluded: its attempt is known to
+// consume the current pair under the current build, so re-parsing it would be
+// pure churn. A facet that moved (a newer pair, a producer or adapter target
+// bump) keeps the session selected, and the following run replaces the latest
+// attempt once.
 func (s *Store) ListStaleIndexSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
 	if len(targets) == 0 {
 		return nil, nil
 	}
 	conditions := make([]string, 0, len(targets))
-	args := make([]any, 0, len(targets)*2)
+	args := make([]any, 0, len(targets)*4)
 	for _, harness := range slices.Sorted(maps.Keys(targets)) {
 		version := targets[harness].IndexerVersion
 		if !harness.IsKnown() || version < 1 {
 			return nil, fmt.Errorf("store: select stale indexes: harness %q has invalid indexer target %d; supply registered positive harvester versions", harness, version)
 		}
-		conditions = append(conditions, "(model_harness = ? AND index_version < ?)")
+		condition := "(s.model_harness = ? AND s.index_version < ?"
 		args = append(args, string(harness), version)
+		if clause, clauseArgs := latestAttemptSettledClause("s", targets[harness]); clause != "" {
+			condition += " AND " + clause
+			args = append(args, clauseArgs...)
+		}
+		conditions = append(conditions, condition+")")
 	}
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -115,7 +127,7 @@ func (s *Store) ListStaleIndexSessions(ctx context.Context, targets map[ingest.H
 	defer s.pool.Put(conn)
 
 	var sessions []ingest.SessionID
-	if err := sqlitex.ExecuteTransient(conn, "SELECT session_id FROM sessions WHERE "+strings.Join(conditions, " OR ")+" ORDER BY session_id", &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, "SELECT s.session_id FROM sessions s WHERE "+strings.Join(conditions, " OR ")+" ORDER BY s.session_id", &sqlitex.ExecOptions{
 		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			raw := stmt.ColumnText(0)

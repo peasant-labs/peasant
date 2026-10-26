@@ -21,8 +21,11 @@ import (
 // route renders for it. The grouped sync view is opt-in over exactly this set,
 // so it can never list a session the flat route withholds.
 type syncSessionEntry struct {
-	row    ingest.PushSessionRow
-	status string
+	row      ingest.PushSessionRow
+	status   schema.SyncStatus
+	identity store.ParentIdentityRow
+	// hold says why a held row waits; it is empty on every other row.
+	hold schema.SyncHoldReason
 }
 
 // loadSyncEntries applies the EXISTING flat sync predicate and status policy:
@@ -34,6 +37,14 @@ func loadSyncEntries(ctx context.Context, db syncSessionReader) ([]syncSessionEn
 	sessions, err := db.AllPushableSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("api.loadSyncEntries: query pushable sessions for the local sync list: %w; no sync rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
+	}
+	identities, err := db.SyncParentIdentities(ctx, sessions)
+	if err != nil {
+		return nil, fmt.Errorf("api.loadSyncEntries: read durable parent identities for the local sync list: %w; no sync rows returned; retry after verifying the store", err)
+	}
+	identityByID := make(map[string]store.ParentIdentityRow, len(identities))
+	for _, identity := range identities {
+		identityByID[identity.SessionID] = identity
 	}
 
 	heldMap := make(map[string]bool)
@@ -48,10 +59,9 @@ func loadSyncEntries(ctx context.Context, db syncSessionReader) ([]syncSessionEn
 	entries := make([]syncSessionEntry, 0, len(sessions))
 	for _, session := range sessions {
 		input := metadata[session.SessionID]
-		if metadataErr != nil || !push.PublicationMetadataReady(input) {
-			heldMap[session.SessionID] = true
-		}
-		entries = append(entries, syncSessionEntry{row: session, status: computeSyncStatus(session, heldMap, input.Readiness)})
+		metadataReady := metadataErr == nil && push.PublicationMetadataReady(input) && input.Readiness == ingest.PublicationReady
+		status, hold := computeSyncStatus(session, heldMap[session.SessionID], metadataReady)
+		entries = append(entries, syncSessionEntry{row: session, status: status, hold: hold, identity: identityByID[session.SessionID]})
 	}
 	return entries, nil
 }
@@ -64,6 +74,9 @@ type syncGroupedReader interface {
 	syncSessionReader
 	GroupingEvidenceForSessions(ctx context.Context, sessionIDs []string) (map[string]store.GroupingEvidenceRow, error)
 	FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (map[string]string, error)
+	// ClaudeTeammates reads the recorded Claude Code teammate identity for the
+	// same page. A missing key means the session carries no recorded spawn edge.
+	ClaudeTeammates(ctx context.Context, sessionIDs []string) (map[string]schema.SessionTeammate, error)
 }
 
 // gatherGroupedSyncCandidates builds the registered GroupedRouteSync predicate.
@@ -96,7 +109,7 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 	// boundary is enforced. Origin scope is deliberately NOT applied here: the
 	// sync route's predicate is the pushable set, and helper sessions are
 	// agent-driven by definition.
-	policy, err := syncSelectionPolicy(h.config)
+	policy, err := syncSelectionPolicy(h.currentConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -127,12 +140,16 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 	if err != nil {
 		return nil, fmt.Errorf("api.syncHandler.gatherGroupedSyncCandidates: read session previews for the sync chooser: %w; no grouped rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
 	}
+	teammates, err := reader.ClaudeTeammates(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("api.syncHandler.gatherGroupedSyncCandidates: read recorded teammate evidence for the sync chooser: %w; no grouped rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
+	}
 
 	candidates := make([]GroupedCandidate, 0, len(entries))
 	for _, entry := range entries {
 		row := entry.row
 		ev := evidence[row.SessionID]
-		summary, syncSummary, buildErr := buildSyncGroupedRow(row, entry.status, ev, previews[row.SessionID])
+		summary, syncSummary, buildErr := buildSyncGroupedRow(entry, ev, previews[row.SessionID], teammateFor(teammates, row.SessionID))
 		if buildErr != nil {
 			return nil, buildErr
 		}
@@ -156,9 +173,13 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 
 // buildSyncGroupedRow derives the matching SessionSummary/LocalSyncSummary pair
 // for one pushable row from the SAME database read, so the schema's mirror check
-// (identity, harness, project, tokens, turn count and optional input count) can
-// only hold or fail closed here rather than downstream.
-func buildSyncGroupedRow(row ingest.PushSessionRow, status string, ev store.GroupingEvidenceRow, preview string) (schema.SessionSummary, schema.LocalSyncSummary, error) {
+// (identity, harness, project, tokens, turn count, optional input count and the
+// teammate identity) can only hold or fail closed here rather than downstream.
+// The teammate is one read's answer, so both summaries carry the same pointer
+// and cannot disagree about it.
+func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, preview string, teammate *schema.SessionTeammate) (schema.SessionSummary, schema.LocalSyncSummary, error) {
+	row := entry.row
+	parentID, unresolved := syncParentMarkers(entry.identity)
 	projectHash, hashErr := schema.NewProjectHash(row.ProjectHash)
 	if hashErr != nil {
 		return schema.SessionSummary{}, schema.LocalSyncSummary{}, fmt.Errorf("api.buildSyncGroupedRow: session %q has an invalid stored project hash %q while building the sync chooser row: %w; run `peasant ingest verify` and repair the store, then retry", row.SessionID, row.ProjectHash, hashErr)
@@ -176,11 +197,14 @@ func buildSyncGroupedRow(row ingest.PushSessionRow, status string, ev store.Grou
 		ToolCallCount:        row.ToolCalls,
 		// The sync arm validates Project against Sync.ProjectName, so both carry
 		// the stored project name verbatim rather than a display transform.
-		Project:       row.ProjectName,
-		ProjectHash:   projectHash,
-		Preview:       preview,
-		SessionOrigin: schema.SessionOrigin(row.SessionOrigin),
-		Purpose:       ev.Purpose,
+		Project:          row.ProjectName,
+		ProjectHash:      projectHash,
+		Preview:          preview,
+		SessionOrigin:    schema.SessionOrigin(row.SessionOrigin),
+		Purpose:          ev.Purpose,
+		ParentSessionID:  parentID,
+		ParentUnresolved: unresolved,
+		Teammate:         teammate,
 	}
 	syncSummary := schema.LocalSyncSummary{
 		ID:                   row.SessionID,
@@ -194,9 +218,24 @@ func buildSyncGroupedRow(row ingest.PushSessionRow, status string, ev store.Grou
 		TurnCount:            row.TurnCount,
 		Model:                row.ModelID,
 		InputSubmissionCount: ev.InputSubmissionCount,
-		SyncStatus:           status,
+		SyncStatus:           entry.status,
+		HoldReason:           entry.hold,
+		PreviouslyPushed:     row.PushedAt != nil,
+		ParentSessionID:      parentID,
+		ParentUnresolved:     unresolved,
+		Teammate:             teammate,
 	}
 	return summary, syncSummary, nil
+}
+
+func syncParentMarkers(identity store.ParentIdentityRow) (*string, *bool) {
+	if identity.ParentUnresolved {
+		return nil, &identity.ParentUnresolved
+	}
+	if identity.ParentIdentity != "" {
+		return &identity.ParentIdentity, nil
+	}
+	return nil, nil
 }
 
 // syncSelectionPolicy returns the persisted selection projection the grouped

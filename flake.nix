@@ -47,7 +47,7 @@
       # Vendor hash for buildGoModule. Recompute when go.mod/go.sum changes:
       # set this to nixpkgs.lib.fakeHash, run `nix build`, copy the reported `got:`
       # hash back here.
-      vendorHash = "sha256-k2XSvindDNI+0+ruRolLEnxN7J0p7DX65qBrlU7A74s=";
+      vendorHash = "sha256-4NiBRjqGoanjz5HfcrLHLpuTstwf//aRNZ1WAhQWQFY=";
 
       # Extra CLI tools available in the dev shell
       devTools = pkgs: with pkgs; [
@@ -60,6 +60,7 @@
         sqlite # CLI for inspecting analytics store
         goreleaser # validate .goreleaser.yml (`goreleaser check`) + local --snapshot builds
         actionlint # lint GitHub Actions workflow YAML (.github/workflows/*.yml)
+        python3 # audit the SQLite source and owned import boundary
         charm-freeze # Go-native ANSI terminal screenshot renderer (binary: freeze)
         nodejs_26 # Node.js runtime for the web build and validation scripts
         pnpm # required package manager for the web dependency graph
@@ -69,6 +70,10 @@
         # protoc-gen-go      # protobuf Go codegen
         # temporal-cli       # Temporal dev server
         # tlaplus18          # TLC model checker
+      ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+        pkgs.util-linux # persistent-inode flock for the focused built-binary journey
+        pkgs.gnutar # integrity-verified registry artifact inventory and extraction
+        pkgs.chromium # explicit CHROME_PATH; the runner never downloads a browser
       ];
 
       # Native build dependencies (C libraries, system packages)
@@ -148,16 +153,13 @@
               # (embed.go). A committed placeholder (web/out/.gitkeep) already
               # satisfies it, but `src = ./.` would also capture any stale local
               # `make web` output, making the build non-deterministic. Reset
-              # web/out to a deterministic stub so the nix build never bundles a
-              # developer's local front-end build.
+              # web/out to the placeholder alone so the nix build never bundles
+              # a developer's local front-end build; the binary then serves
+              # internal/htmlpage's not-bundled notice in place of the local app.
               postPatch = ''
                 rm -rf web/out
                 mkdir -p web/out
-                cat > web/out/index.html <<'HTML'
-                <!doctype html>
-                <title>Peasant — dashboard assets not bundled</title>
-                <p>This nix build does not bundle the web dashboard front-end. The CLI works fully; build from source with <code>make build</code> for the embedded UI.</p>
-                HTML
+                touch web/out/.gitkeep
               '';
 
               nativeBuildInputs = nativeBuildDeps pkgs;

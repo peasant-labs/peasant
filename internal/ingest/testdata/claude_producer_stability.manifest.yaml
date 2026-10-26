@@ -1,0 +1,4 @@
+requiredNames:
+  - append-refresh-alias-reuse
+  - append-duplicate-existing-uuid
+  - changed-boundary-new-refs

@@ -1,0 +1,13 @@
+requiredNames: [runtime-default, runtime-minimum, runtime-maximum, runtime-short-deadline, runtime-empty-refused, runtime-unitless-refused, runtime-negative-refused, runtime-zero-refused, runtime-too-short-refused, runtime-too-long-refused, runtime-overflow-refused]
+cases:
+  - {name: runtime-default, unset: true, want: 2m}
+  - {name: runtime-minimum, value: 100ms, want: 100ms}
+  - {name: runtime-maximum, value: 10m, want: 10m}
+  - {name: runtime-short-deadline, value: 2s, want: 2s}
+  - {name: runtime-empty-refused, value: '', invalid: true}
+  - {name: runtime-unitless-refused, value: '2', invalid: true}
+  - {name: runtime-negative-refused, value: '-1s', invalid: true}
+  - {name: runtime-zero-refused, value: 0s, invalid: true}
+  - {name: runtime-too-short-refused, value: 99ms, invalid: true}
+  - {name: runtime-too-long-refused, value: 601s, invalid: true}
+  - {name: runtime-overflow-refused, value: 999999999999999999h, invalid: true}

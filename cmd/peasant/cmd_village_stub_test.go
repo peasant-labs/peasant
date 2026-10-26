@@ -28,11 +28,11 @@ import (
 const (
 	// stubOwnerUserID is the village user the seeded creds authenticate as; the
 	// listed transcripts are owned by this user so the sync path scans them.
-	stubOwnerUserID = "user-1"
+	stubOwnerUserID = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 	// stubForeignAuthorID authors a FOREIGN annotation (different from the
 	// requester) — it must LAND on sync. stubOwnerUserID authors an OWN annotation
 	// that must be EXCLUDED.
-	stubForeignAuthorID = "user-foreign-2"
+	stubForeignAuthorID = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"
 )
 
 // stubSchemaVersionBody is the /api/v1/schema/version response advertising a pull
@@ -87,6 +87,10 @@ func (s villageStub) start(t *testing.T, id schema.TranscriptID) *httptest.Serve
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.URL.Path == "/api/v1/auth/me":
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: schema.VillageUUID(stubOwnerUserID), GithubUsername: "owneruser"})
+		case r.URL.Path == "/api/v1/transcripts/"+id.String()+"/collectives":
+			_ = json.NewEncoder(w).Encode(schema.VillageTranscriptCollectivesResponse{Collectives: []schema.VillageTranscriptCollective{}})
 		case r.URL.Path == "/api/v1/schema/version":
 			if s.contractTooOld {
 				// Omit the pull window entirely ⇒ NegotiatePull aborts with a
@@ -104,8 +108,7 @@ func (s villageStub) start(t *testing.T, id schema.TranscriptID) *httptest.Serve
 			_ = json.NewEncoder(w).Encode(schema.PullListResponse{
 				Transcripts: []schema.PullTranscriptInfo{{
 					TranscriptID:    id,
-					OwnerUserID:     stubOwnerUserID,
-					OwnerUsername:   "owneruser",
+					Owner:           testutil.PublicProfile(stubOwnerUserID, "owneruser"),
 					Title:           "Build the thing",
 					Harness:         defaults.HarnessClaudeCode,
 					Visibility:      schema.VisibilityGroup,
@@ -122,14 +125,13 @@ func (s villageStub) start(t *testing.T, id schema.TranscriptID) *httptest.Serve
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(schema.PullTranscriptInfo{
-				TranscriptID:  id,
-				OwnerUserID:   stubOwnerUserID,
-				OwnerUsername: "owneruser",
-				Title:         "Build the thing",
-				Harness:       defaults.HarnessClaudeCode,
-				Visibility:    schema.VisibilityGroup,
-				License:       schema.LicenseCCBY,
-				ContentHash:   blobHash,
+				TranscriptID: id,
+				Owner:        testutil.PublicProfile(stubOwnerUserID, "owneruser"),
+				Title:        "Build the thing",
+				Harness:      defaults.HarnessClaudeCode,
+				Visibility:   schema.VisibilityGroup,
+				License:      schema.LicenseCCBY,
+				ContentHash:  blobHash,
 			})
 
 		case r.URL.Path == "/api/v1/pull/transcripts/"+id.String()+"/content":
@@ -162,13 +164,11 @@ func stubAnnotations() []schema.PullAnnotation {
 	return []schema.PullAnnotation{
 		{
 			AnnotationSummary: schema.AnnotationSummary{ID: "ann-foreign", ContentHash: &foreignHash},
-			AuthorUserID:      stubForeignAuthorID,
-			AuthorUsername:    "bob",
+			Author:            testutil.PublicProfile(stubForeignAuthorID, "bob"),
 		},
 		{
 			AnnotationSummary: schema.AnnotationSummary{ID: "ann-own", ContentHash: &ownHash},
-			AuthorUserID:      stubOwnerUserID,
-			AuthorUsername:    "owneruser",
+			Author:            testutil.PublicProfile(stubOwnerUserID, "owneruser"),
 		},
 	}
 }

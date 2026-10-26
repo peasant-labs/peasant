@@ -44,6 +44,12 @@ export interface GroupedSyncSessionSpec {
   inputSubmissionCount?: number;
   /** Sync status menu: new / updated / synced / held. Defaults to new. */
   syncStatus?: GroupedSyncStatus;
+  /**
+   * Durable evidence of an earlier publish, required on the wire. Defaults to
+   * true for a synced or updated row and false otherwise; a held row that was
+   * published before sets it explicitly.
+   */
+  previouslyPushed?: boolean;
   hostSlug?: string;
   model?: string;
   helperGroups?: GroupedSyncHelperGroupSpec[];
@@ -113,6 +119,8 @@ function transcriptItem(session: GroupedSyncSessionSpec) {
         model: session.model ?? 'fixture-model',
         inputSubmissionCount: session.inputSubmissionCount,
         syncStatus: session.syncStatus ?? 'new',
+        previouslyPushed:
+          session.previouslyPushed ?? (session.syncStatus === 'synced' || session.syncStatus === 'updated'),
       },
     },
     helperGroups: helperGroupItems(session.helperGroups),

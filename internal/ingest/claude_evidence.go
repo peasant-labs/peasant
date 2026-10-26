@@ -18,9 +18,9 @@ type ClaudeTeammateIdentity struct {
 }
 
 // ClaudeEvidenceScope says which facts a cached transcript record carries. A
-// root transcript is mined for the teammate identity, the spawn records, and the
-// display hints. A subagent transcript is only checked for a conversation
-// record, so its cached row must never answer a root question.
+// root transcript is mined for teammate identity, spawns, and display hints.
+// Both scopes carry full structural identity proof; the scope still prevents
+// reusing a child row as a root after a layout change.
 type ClaudeEvidenceScope string
 
 const (
@@ -48,16 +48,26 @@ func (s ClaudeEvidenceScope) IsValid() bool {
 // and a JSON parse of every line, so the result is cached against the size and
 // the modification time of the file that produced it.
 type ClaudeTranscriptEvidence struct {
+	ProofVersion          int
+	Records               []ClaudeIdentityRecord
+	NativeAgentID         string
+	NativeAgentValid      bool
+	ContentDigest         string
 	SourcePath            ResolvedPath
 	Scope                 ClaudeEvidenceScope
 	ModTimeUnixNano       int64
 	SizeBytes             int64
 	HasConversationRecord bool
-	Identity              *ClaudeTeammateIdentity
-	Spawns                []ClaudeTeammateIdentity
-	Title                 string
-	Branch                string
-	CWD                   string
+	// ControlRecordSeen marks a parsed record whose kind is a summary,
+	// file-history, or recognized control record but which carries no session
+	// id. It distinguishes a rotated owner transcript from an empty, blank, or
+	// junk file. It is derived at mine time and never persisted.
+	ControlRecordSeen bool `json:"-"`
+	Identity          *ClaudeTeammateIdentity
+	Spawns            []ClaudeTeammateIdentity
+	Title             string
+	Branch            string
+	CWD               string
 	// Origin is who drove the session, decided by the one rule at mine time from
 	// the evidence this record was read for. Every mined record carries a menu
 	// value: a root from its content, a subagent because it is a child.
@@ -80,18 +90,34 @@ type ClaudeTranscriptEvidence struct {
 // mod time. Re-mining is work discovery already does for a changed file, so the
 // upgrade needs no separate pass.
 //
-// Scope-independent on purpose: EVERY mined record now carries a menu value —
-// a root from its content, a subagent because it is classified Agent at mine
-// time as the child of a root. If a future field ever needs this same
-// treatment, do NOT add a second clause here: two clauses would mean this
-// predicate has silently become "the record is complete", which deserves its
-// own name. Add a record schema-version column instead, which covers every
-// future field at once.
+// ProofVersion marks the schema of the structural ownership evidence. Legacy
+// rows re-mine once even when their file stat is unchanged; future evidence
+// additions advance this marker rather than adding field-by-field predicates.
 func (e ClaudeTranscriptEvidence) Fresh(scope ClaudeEvidenceScope, info os.FileInfo) bool {
-	if info == nil || !scope.IsValid() || e.Scope != scope || e.Origin == "" {
+	if info == nil || e.Origin == "" || e.ProofVersion != ClaudeIdentityProofVersion {
+		return false
+	}
+	if !scope.IsValid() || e.Scope != scope {
 		return false
 	}
 	return e.SizeBytes == info.Size() && e.ModTimeUnixNano == info.ModTime().UnixNano()
+}
+
+// ClaudeIdentityProofVersion invalidates legacy cache rows once when structural
+// identity evidence changes. Unchanged, current rows require no transcript read.
+const ClaudeIdentityProofVersion = 2
+
+// ClaudeIdentityRecord retains only native structural coordinates, never message
+// text. Repeated session IDs describe the distribution and chain, not ownership.
+type ClaudeIdentityRecord struct {
+	SessionID    string `json:"sessionId"`
+	UUID         string `json:"uuid"`
+	ParentUUID   string `json:"parentUuid"`
+	Type         string `json:"type"`
+	Subtype      string `json:"subtype"`
+	SpawnAgentID string `json:"spawnAgentId,omitempty"`
+	AgentID      string `json:"agentId,omitempty"`
+	Sidechain    *bool  `json:"isSidechain,omitempty"`
 }
 
 // ClaudeEvidenceCache persists mined Claude transcript evidence between

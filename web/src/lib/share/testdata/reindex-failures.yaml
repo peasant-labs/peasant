@@ -1,0 +1,32 @@
+# Why the publish popup's one-session re-index stopped, and the one line the
+# failure box shows for it. The server's or the client's whole reason goes to
+# details; the line names the cause in plain words, with no JSON, web address
+# or mention of the online service, and the failure box's one action runs the
+# re-index again when that can help (retryable). requiredNames pins the cases.
+requiredNames:
+  - busy-index
+  - overdue-run
+  - unrecorded-session
+  - app-stopped-answering
+  - other-refusal
+cases:
+  - name: busy-index
+    code: ingest_running
+    line: the re-index did not finish, so publish is off. another index update is running on this computer; try again when it finishes.
+    retryable: true
+  - name: overdue-run
+    code: session_ingest_timeout
+    line: the re-index did not finish, so publish is off. updating this session’s index took too long and was stopped.
+    retryable: true
+  - name: unrecorded-session
+    code: session_not_recorded
+    line: the re-index did not finish, so publish is off. this session is not recorded on this computer yet.
+    retryable: false
+  - name: app-stopped-answering
+    code: unreachable
+    line: the re-index did not finish, so publish is off. the peasant app on this computer stopped answering.
+    retryable: true
+  - name: other-refusal
+    code: other
+    line: the re-index did not finish, so publish is off. details say why.
+    retryable: true

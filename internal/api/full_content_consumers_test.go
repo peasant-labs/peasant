@@ -24,9 +24,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/full_content_consumers.yaml
@@ -221,6 +221,10 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			handler.handleSyncRedactions(scan, httptest.NewRequest("GET", "/api/v1/sync/redactions?session_id="+id+"&level=standard", nil))
 			captured := &syncCapturedPublish{parts: map[string]string{}}
 			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/auth/me" {
+					_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 					_ = json.NewEncoder(w).Encode(schema.SchemaVersionResponse{ContentCapabilities: schema.AllContentCapabilities})
@@ -238,7 +242,7 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			}))
 			defer remote.Close()
 			writeSyncDoorCredentials(t, hs.Config, remote.URL)
-			body, _ := json.Marshal(pushRequest{SessionIDs: []string{id}, Visibility: "private"})
+			body, _ := json.Marshal(schema.SyncPushRequest{SessionIDs: []string{id}})
 			response := httptest.NewRecorder()
 			handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", bytes.NewReader(body)))
 			parts := captured.snapshot()

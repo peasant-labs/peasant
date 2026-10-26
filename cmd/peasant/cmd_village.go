@@ -9,8 +9,8 @@ import (
 func BuildVillageCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "village",
-		Short: "Interact with the Peasant village",
-		Long:  "Commands for pushing transcripts to, and authenticating with, the Peasant village.",
+		Short: "Interact with peasant online",
+		Long:  "Commands for pushing transcripts to, and authenticating with, peasant online.",
 	}
 
 	// push, login, and logout stay directly under `village` deliberately. They are not grouped under a
@@ -30,6 +30,12 @@ func BuildVillageCommand() *cobra.Command {
 	// hooks that run the push above. It lives under `village` because the only
 	// thing a managed hook does is a village upload.
 	cmd.AddCommand(BuildVillageHooksCommand())
+
+	// auto turns on auto-publish for one repository: a rule in hooks.yaml and
+	// the hook that applies it.
+	cmd.AddCommand(BuildVillageAutoCommand())
+	cmd.AddCommand(BuildVillageCollectivesCommand())
+	cmd.AddCommand(BuildVillageContributionsCommand())
 
 	return cmd
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -27,8 +26,8 @@ import (
 // calls it EXACTLY ONCE per run, before the FETCH stages; the four GETs are pure
 // data calls that do NOT re-preflight the pull window.
 type VillageReader interface {
-	NegotiatePull(ctx context.Context) error
-	ListPullableTranscripts(ctx context.Context, page, limit int) (*schema.PullListResponse, error)
+	NegotiatePull(ctx context.Context) (schema.PushContractVersion, error)
+	ListPullableTranscripts(ctx context.Context, opts village.PullListOptions) (*schema.PullListResponse, error)
 	GetPullTranscript(ctx context.Context, id schema.TranscriptID) (*schema.PullTranscriptInfo, error)
 	GetPullTranscriptContent(ctx context.Context, id schema.TranscriptID, ifNoneMatch string) (io.ReadCloser, string, error)
 	GetPullTranscriptAnnotations(ctx context.Context, id schema.TranscriptID) ([]schema.PullAnnotation, error)
@@ -80,31 +79,68 @@ func (c Credentials) IsLoggedIn() bool {
 // Pipeline is the system under test: it orchestrates the staged pull flow over
 // injected dependencies (a VillageReader, an ingest.FileSystem, a PullStore, a
 // Clock, and the requester Credentials). It is constructed with real
-// dependencies in production (the *village.VillageClient, *ingest.OSFileSystem,
+// dependencies in production (the *village.VillageClient, *FileSystem,
 // *store.Store) and with MemFS + a stub reader in tests — the Pipeline itself is
 // never mocked.
 type Pipeline struct {
-	reader    VillageReader
-	fs        ingest.FileSystem
-	store     PullStore
-	clock     Clock
-	creds     Credentials
-	pullsRoot string // resolved village-pulls/ root (defaults.VillagePullsDirPath)
+	reader              VillageReader
+	fs                  ingest.FileSystem
+	store               PullStore
+	clock               Clock
+	creds               Credentials
+	pullsRoot           string // resolved village-pulls/ root (defaults.VillagePullsDirPath)
+	lockInstall         func(context.Context, string, schema.TranscriptID) (func() error, error)
+	syncInstall         func(string) error
+	associationObserver AssociationObserver
 }
 
 // NewPipeline constructs a pull Pipeline from its dependencies. pullsRoot is the
 // resolved village-pulls/ root directory (callers pass
 // defaults.ResolveVillagePullsDirPath()/...With(override) so the path honors the
 // XDG/--data-dir resolution).
-func NewPipeline(reader VillageReader, fs ingest.FileSystem, st PullStore, clock Clock, creds Credentials, pullsRoot string) *Pipeline {
-	return &Pipeline{
-		reader:    reader,
-		fs:        fs,
-		store:     st,
-		clock:     clock,
-		creds:     creds,
-		pullsRoot: pullsRoot,
+func NewPipeline(reader VillageReader, fs ingest.FileSystem, st PullStore, clock Clock, creds Credentials, pullsRoot string, options ...PipelineOption) *Pipeline {
+	p := &Pipeline{
+		reader:      reader,
+		fs:          fs,
+		store:       st,
+		clock:       clock,
+		creds:       creds,
+		pullsRoot:   pullsRoot,
+		lockInstall: lockContentInstall,
+		syncInstall: syncContentPath,
 	}
+	if syncing, ok := fs.(interface{ Sync(string) error }); ok {
+		p.syncInstall = syncing.Sync
+	}
+	for _, option := range options {
+		option(p)
+	}
+	return p
+}
+
+// PipelineOption injects a dependency into the pull pipeline.
+type PipelineOption func(*Pipeline)
+
+// AssociationObserver is the optional metadata dependency, invoked only after
+// independently authorized content success. The command adapter binds it to the
+// original action account through the canonical observation service.
+type AssociationObserver interface {
+	ObserveAssociations(context.Context, schema.TranscriptID) (schema.PullAssociationMetadataResult, error)
+}
+
+func WithAssociationObserver(observer AssociationObserver) PipelineOption {
+	return func(p *Pipeline) { p.associationObserver = observer }
+}
+
+// WithInstallLock supplies filesystem ownership for an injected filesystem.
+// Production defaults to the existing cross-process OS advisory locker.
+func WithInstallLock(lock func(context.Context, string, schema.TranscriptID) (func() error, error)) PipelineOption {
+	return func(p *Pipeline) { p.lockInstall = lock }
+}
+
+// WithInstallSync supplies persistence barriers for an injected filesystem.
+func WithInstallSync(sync func(string) error) PipelineOption {
+	return func(p *Pipeline) { p.syncInstall = sync }
 }
 
 // villageHost returns the on-disk namespace key for the village (the URL host).
@@ -121,12 +157,6 @@ func (p *Pipeline) villageHost() string {
 // {pullsRoot}/{villageHost}/{transcriptId}.
 func (p *Pipeline) pullDir(host string, id schema.TranscriptID) string {
 	return filepath.Join(p.pullsRoot, host, id.String())
-}
-
-// tempDir returns the staging directory a transcript is downloaded into before
-// the copy+remove publish: {pullsRoot}/{villageHost}/.tmp-{transcriptId}.
-func (p *Pipeline) tempDir(host string, id schema.TranscriptID) string {
-	return filepath.Join(p.pullsRoot, host, defaults.TempDirPrefix+id.String())
 }
 
 // classifyStatus maps a non-nil pipeline/client error to the corresponding PullStatus
@@ -155,48 +185,81 @@ func classifyStatus(err error) PullStatus {
 //	DOWNLOAD (temp) → FETCH-ANNOTATIONS (memory) → WRITE (stage+rename) →
 //	DB-TX (CommitPull) → REPORT
 //
-// Error doctrine (inverted fail-open): any failure in RESOLVE…FETCH-ANNOTATIONS
-// leaves ZERO local mutation (the temp dir, if created, is removed). A DB-TX
-// failure AFTER the publish triggers a compensating fs.RemoveAll(pullDir); if that
-// compensation itself fails the returned error names the orphan directory and
-// instructs `--force` to repair (the V34 tables are a derived index of the on-disk
-// manifests). An error is NEVER reported as up-to-date.
-//
-// KNOWN LIMITATION (mirrors ingest M11): the WRITE "publish" is a copy+remove
-// (renameDir = recursive MkdirAll + per-file CopyFile + RemoveAll(src)), NOT an OS
-// atomic rename. A crash mid-publish leaves a manifest-less partial pull dir with
-// no DB row; the derived-index doctrine + `--force` repair cover that window.
-//
-// COMPENSATION CAVEAT: the compensating RemoveAll(pullDir) restores the exact
-// pre-pull state only for a FIRST pull (no prior dir). On a re-pull-REPLACE the
-// prior good copy was already removed before the rename, so a DB-TX failure leaves
-// NO local copy while the DB still holds the OLD (stale) row — not a true restore.
-// Under the cache doctrine (foreign pulled data is a re-pullable derived index)
-// this is acceptable: `--force` re-downloads and overwrites the stale row. We do
-// not save-old→backup; the wording above is exact for first pulls only.
-func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts PullOptions) (*PullResult, error) {
+// Publication uses real filesystem renames, retaining a previous complete copy
+// until index projection succeeds. An interrupted install is validated and
+// reprojected under cross-process ownership on the next non-dry invocation.
+// A database failure reports retained files and repair, never false rollback.
+func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts PullOptions) (result *PullResult, pullErr error) {
+	// Register before filesystem ownership: its release runs first, so optional
+	// network metadata never holds the content publication lock.
+	defer func() {
+		if pullErr == nil {
+			p.ObservePulledAssociations(ctx, result)
+		}
+	}()
 	// --- AUTH-CHECK (RESOLVE already done by ParseTranscriptRef at the CLI) ---
 	if !p.creds.IsLoggedIn() {
 		return &PullResult{Ref: ref, Status: PullStatusNotLoggedIn}, fmt.Errorf(
 			"peasant village pull: not logged in\n" +
-				"  what: no valid village credentials are present\n" +
-				"  why:  pulling a transcript contacts the village and requires authentication\n" +
+				"  what: no valid peasant online credentials are present\n" +
+				"  why:  pulling a transcript contacts peasant online and requires authentication\n" +
 				"  fix:  run `peasant village login`, then re-run the pull")
 	}
 	host := p.villageHost()
 
-	// --- NEGOTIATE (exactly once, before the FETCH stages) ---
-	if err := p.reader.NegotiatePull(ctx); err != nil {
-		return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
+	// --- NEGOTIATE (once per command; a bulk caller sets SkipNegotiate after its
+	// own single NegotiatePull) ---
+	envelope := opts.EnvelopeVersion
+	if !opts.SkipNegotiate {
+		negotiated, err := p.reader.NegotiatePull(ctx)
+		if err != nil {
+			return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
+		}
+		envelope = negotiated
+	} else if opts.EnvelopeVersion != "" {
+		// The caller negotiated on its own client: tell this reader which
+		// envelope to decode, so it refuses the other shape.
+		if reader, ok := p.reader.(interface {
+			SetPullEnvelope(schema.PushContractVersion)
+		}); ok {
+			reader.SetPullEnvelope(opts.EnvelopeVersion)
+		}
 	}
-
-	// --- FETCH-META ---
-	meta, err := p.reader.GetPullTranscript(ctx, ref.ID)
-	if err != nil {
-		return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
+	if envelope == "" {
+		envelope = defaults.PullContractVersion
 	}
 
 	pullDir := p.pullDir(host, ref.ID)
+	if !opts.DryRun {
+		if err := p.fs.MkdirAll(filepath.Dir(pullDir), defaults.PrivateDirPerm); err != nil {
+			return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, installError(err)
+		}
+		release, err := p.lockInstall(ctx, filepath.Dir(pullDir), ref.ID)
+		if err != nil {
+			return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, err
+		}
+		defer release()
+		if err := p.syncInstallAncestors(filepath.Dir(pullDir)); err != nil {
+			return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, installError(err)
+		}
+	}
+
+	// --- FETCH-META (skipped when the caller passed the listing's own row) ---
+	meta := opts.Meta
+	if meta == nil {
+		fetched, err := p.reader.GetPullTranscript(ctx, ref.ID)
+		if err != nil {
+			return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
+		}
+		meta = fetched
+	}
+	meta = readerMeta(meta)
+
+	if !opts.DryRun {
+		if err := p.recoverInstall(ctx, host, ref.ID, opts.Force); err != nil {
+			return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host, PullDir: pullDir}, err
+		}
+	}
 
 	// --- DIFF (manifest RAW hash vs server RAW hash) ---
 	// Load the existing local manifest (if any). The stored ServedBlobHash is the
@@ -207,13 +270,41 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 	// compare settle it. The stored ETag (verbatim, possibly quoted) is the
 	// SEPARATE conditional-GET token echoed below.
 	storedManifest, hasStored := p.storedManifest(pullDir)
+	if hasStored {
+		_, err := p.contentDigest(pullDir, host, ref.ID)
+		hasStored = err == nil
+	}
 	storedHash := ""
 	storedETag := ""
 	if hasStored {
 		storedHash = storedManifest.ServedBlobHash
 		storedETag = storedManifest.ServedETag
 	}
-	if !opts.Force && storedHash != "" && meta.ContentHash != "" && storedHash == meta.ContentHash {
+	// A stored copy whose people the village now shows differently is re-pulled
+	// in full instead of taking a metadata-only update, so the manifest and the
+	// annotation provenance are rewritten and keep no identity the village no
+	// longer shows (and pick up a renamed username):
+	//   - the owner changed kind, account or username;
+	//   - an annotation author stored as a profile is now shown differently.
+	//     Only a fresh annotation read can tell, so a stored copy that names any
+	//     author re-reads its annotations here; the read is reused below.
+	refresh := opts.Force || (hasStored && storedOwnerChanged(storedManifest, meta.Owner))
+	var annotations []schema.PullAnnotation
+	annotationsRead := false
+	if !refresh && hasStored && storedHasProfileAuthor(storedManifest) {
+		read, status, err := p.readAnnotations(ctx, ref.ID, meta.Owner)
+		if err != nil {
+			return &PullResult{Ref: ref, Status: status, VillageHost: host}, err
+		}
+		annotations, annotationsRead = read, true
+		refresh = storedAuthorsChanged(storedManifest, manifestAnnotations(annotations))
+	}
+	if !refresh &&
+		storedHash != "" && meta.ContentHash != "" &&
+		storedHash == meta.ContentHash {
+		if err := p.updateMetadata(ctx, host, ref.ID, meta, opts.DryRun); err != nil {
+			return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host, PullDir: pullDir}, err
+		}
 		return &PullResult{
 			Ref:            ref,
 			Status:         PullStatusUpToDate,
@@ -249,13 +340,19 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 	// second DIFF path). The ETag is the transport token; the raw hash is for
 	// content identity only.
 	ifNoneMatch := ""
-	if !opts.Force {
+	if !refresh {
 		ifNoneMatch = storedETag
 	}
 	body, etag, err := p.reader.GetPullTranscriptContent(ctx, ref.ID, ifNoneMatch)
 	if err != nil {
 		if errors.Is(err, village.ErrNotModified) {
-			// 304: the served blob matches our stored copy — up-to-date, no write.
+			if !hasStored {
+				return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, fmt.Errorf("peasant village pull: content endpoint returned 304 without a validated local file set; no content success can be reported; retry with --force")
+			}
+			if err := p.updateMetadata(ctx, host, ref.ID, meta, false); err != nil {
+				return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host, PullDir: pullDir}, err
+			}
+			// 304: retain blob/provenance; changed metadata was projected above.
 			return &PullResult{
 				Ref:            ref,
 				Status:         PullStatusUpToDate,
@@ -294,7 +391,10 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 	// (no ETag, no metadata ContentHash) but we already hold a byte-identical copy
 	// with the same recomputed hash, this is still up-to-date — avoid a needless
 	// rewrite. Only applies when not forcing.
-	if !opts.Force && storedHash != "" && servedHash == storedHash {
+	if !refresh && storedHash != "" && servedHash == storedHash {
+		if err := p.updateMetadata(ctx, host, ref.ID, meta, false); err != nil {
+			return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host, PullDir: pullDir}, err
+		}
 		return &PullResult{
 			Ref:            ref,
 			Status:         PullStatusUpToDate,
@@ -305,85 +405,38 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 		}, nil
 	}
 
-	// --- FETCH-ANNOTATIONS (to memory) ---
-	annotations, err := p.reader.GetPullTranscriptAnnotations(ctx, ref.ID)
-	if err != nil {
-		return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
-	}
-	if err := validatePulledAnnotations(annotations); err != nil {
-		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, err
+	// --- FETCH-ANNOTATIONS (to memory; reused when the DIFF already read them) ---
+	if !annotationsRead {
+		read, status, err := p.readAnnotations(ctx, ref.ID, meta.Owner)
+		if err != nil {
+			return &PullResult{Ref: ref, Status: status, VillageHost: host}, err
+		}
+		annotations = read
 	}
 
 	now := p.clock.NowUnixMilli()
 
 	// Build the manifest + the metadata snapshot + the annotation provenance.
+	ownerID, ownerUsername := publicPersonColumns(meta.Owner)
 	manifest := PullManifest{
 		ManifestVersion:     PullManifestVersion,
 		VillageURL:          p.creds.VillageURL,
 		VillageHost:         host,
 		TranscriptID:        ref.ID,
 		LocalSessionID:      meta.LocalID,
-		OwnerUserID:         meta.OwnerUserID,
-		OwnerUsername:       meta.OwnerUsername,
+		OwnerUserID:         ownerID,
+		OwnerUsername:       ownerUsername,
 		ServedETag:          servedETag,
 		ServedBlobHash:      servedHash,
 		BlobContractVersion: meta.ContractVersion,
-		PullEnvelopeVersion: defaults.PullContractVersion,
+		PullEnvelopeVersion: envelope,
 		PulledAt:            now,
 		Annotations:         manifestAnnotations(annotations),
 	}
 
-	// --- WRITE (stage into temp, then publish via copy+remove) ---
-	// NOTE: this "publish" is NOT atomic (see PullTranscript doc — copy+remove, not
-	// an OS rename); a crash mid-publish is repaired by --force per the derived-
-	// index doctrine.
-	tmpDir := p.tempDir(host, ref.ID)
-	// Clear any stale temp dir from a crashed prior run before staging.
-	if err := p.fs.RemoveAll(tmpDir); err != nil {
-		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, fmt.Errorf(
-			"peasant village pull: clear stale temp dir %s: %w", tmpDir, err)
-	}
-	if err := p.stageFiles(tmpDir, blob, meta, manifest); err != nil {
-		_ = p.fs.RemoveAll(tmpDir) // pre-WRITE failure ⇒ zero local mutation
-		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, err
-	}
-
-	// Publish: remove any existing pullDir then move temp into place (copy+remove,
-	// NOT atomic). A re-pull-replace destroys the prior copy here BEFORE the move
-	// completes; under the derived-index/cache doctrine this is acceptable — a
-	// crash or DB-TX failure is repaired by --force (which re-downloads).
-	if err := p.fs.RemoveAll(pullDir); err != nil {
-		_ = p.fs.RemoveAll(tmpDir)
-		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, fmt.Errorf(
-			"peasant village pull: clear existing pull dir %s before rename: %w", pullDir, err)
-	}
-	if err := p.renameDir(tmpDir, pullDir); err != nil {
-		_ = p.fs.RemoveAll(tmpDir)
-		_ = p.fs.RemoveAll(pullDir)
-		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, fmt.Errorf(
-			"peasant village pull: atomic rename %s -> %s: %w", tmpDir, pullDir, err)
-	}
-
-	// --- DB-TX (single SQLite transaction: pulled_transcripts + pulled_annotations) ---
 	commit := p.buildCommit(host, pullDir, servedHash, now, meta, annotations)
-	if err := p.store.CommitPull(ctx, commit); err != nil {
-		// Compensating removal: the publish succeeded but the DB-TX failed. Remove
-		// the freshly-published pull dir. This restores the exact pre-pull state for
-		// a FIRST pull; for a re-pull-REPLACE the prior copy is already gone, so this
-		// leaves no local copy + a stale DB row — recoverable via --force (cache
-		// doctrine). If THAT removal fails, name the orphan + instruct --force
-		// (C-actionable-errors).
-		if rmErr := p.fs.RemoveAll(pullDir); rmErr != nil {
-			return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host, PullDir: pullDir}, fmt.Errorf(
-				"peasant village pull: DB commit failed AND compensating cleanup failed — local state is inconsistent\n"+
-					"  what: the transcript blob was written to %s but the database commit failed, and removing the directory also failed\n"+
-					"  why:  DB error: %v; cleanup error: %v\n"+
-					"  where: DB-TX stage, transcript %s @ %s\n"+
-					"  fix:  the directory %s is an orphan (no DB row); re-run with `peasant village transcripts pull --force` to repair, or remove the directory manually",
-				pullDir, err, rmErr, ref.ID, host, pullDir)
-		}
-		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, fmt.Errorf(
-			"peasant village pull: DB commit failed (local files rolled back) for transcript %s @ %s: %w", ref.ID, host, err)
+	if err := p.installContent(ctx, host, ref.ID, blob, meta, manifest, commit, opts.Force, false); err != nil {
+		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host, PullDir: pullDir}, err
 	}
 
 	// --- REPORT ---
@@ -396,6 +449,42 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 		AnnotationCount: len(annotations),
 		License:         meta.License,
 	}, nil
+}
+
+// ObservePulledAssociations completes independently authorized successful
+// content, including the bulk skip-gate path that never calls PullTranscript.
+// Optional source/persistence failure is carried only in the shared metadata
+// result. Required content errors remain the responsibility of the caller.
+func (p *Pipeline) ObservePulledAssociations(ctx context.Context, result *PullResult) {
+	if p.associationObserver == nil || result == nil || result.DryRun {
+		return
+	}
+	if result.Status != PullStatusPulled && result.Status != PullStatusUpToDate {
+		return
+	}
+	metadata, err := p.associationObserver.ObserveAssociations(ctx, result.Ref.ID)
+	if invalid := metadata.Validate(); invalid != nil || (err != nil && metadata.Warning == nil) {
+		metadata = schema.PullAssociationMetadataResult{State: schema.PullAssociationMetadataUnknown, Warning: &schema.OperationIssue{
+			Code: schema.OperationIssueContract, Operation: schema.CollectiveOperationPull,
+			Message: "The optional association source returned an invalid result after the content pull succeeded; no fresh metadata can be reported.",
+			Retry:   "Run peasant village collectives fetch explicitly after checking the selected account and peasant online connection.",
+		}}
+	}
+	result.AssociationMetadata = &metadata
+}
+
+// readAnnotations fetches a transcript's annotations, validates the batch at
+// the schema boundary, and returns them as this CLI may show them. On failure
+// it returns the status the caller reports.
+func (p *Pipeline) readAnnotations(ctx context.Context, id schema.TranscriptID, owner schema.VillagePublicOwner) ([]schema.PullAnnotation, PullStatus, error) {
+	annotations, err := p.reader.GetPullTranscriptAnnotations(ctx, id)
+	if err != nil {
+		return nil, classifyStatus(err), err
+	}
+	if err := validatePulledAnnotations(annotations); err != nil {
+		return nil, PullStatusError, err
+	}
+	return readerAnnotations(annotations, owner), "", nil
 }
 
 // validatePulledAnnotations applies the schema's canonical response target
@@ -464,16 +553,17 @@ func (p *Pipeline) buildCommit(host, pullDir, servedHash string, now int64, meta
 	for i := range annotations {
 		rows = append(rows, p.annotationRow(host, now, meta, &annotations[i]))
 	}
+	ownerID, ownerUsername := publicPersonColumns(meta.Owner)
 	return store.PullCommit{
 		Transcript: store.PulledTranscriptRow{
 			VillageHost:     host,
 			TranscriptID:    meta.TranscriptID,
-			OwnerUserID:     meta.OwnerUserID,
-			OwnerUsername:   meta.OwnerUsername,
+			OwnerUserID:     ownerID,
+			OwnerUsername:   ownerUsername,
 			LocalSessionID:  meta.LocalID,
 			Title:           meta.Title,
 			Harness:         meta.Harness,
-			ProjectName:     meta.ProjectName,
+			ProjectName:     projectNameColumn(meta.ProjectName),
 			ContentHash:     servedHash,
 			Visibility:      meta.Visibility,
 			License:         meta.License,
@@ -491,13 +581,14 @@ func (p *Pipeline) buildCommit(host, pullDir, servedHash string, now int64, meta
 // stored as the payload.
 func (p *Pipeline) annotationRow(host string, now int64, meta *schema.PullTranscriptInfo, a *schema.PullAnnotation) store.PulledAnnotationRow {
 	payload, _ := json.Marshal(a)
+	authorID, authorUsername := publicPersonColumns(a.Author)
 	return store.PulledAnnotationRow{
 		VillageHost:    host,
 		ContentHash:    annotationContentHash(a),
 		TranscriptID:   meta.TranscriptID,
 		LocalSessionID: meta.LocalID,
-		AuthorUserID:   a.AuthorUserID,
-		AuthorUsername: a.AuthorUsername,
+		AuthorUserID:   authorID,
+		AuthorUsername: authorUsername,
 		Payload:        string(payload),
 		PulledAt:       now,
 	}
@@ -526,43 +617,12 @@ func manifestAnnotations(annotations []schema.PullAnnotation) []ManifestAnnotati
 	out := make([]ManifestAnnotation, 0, len(annotations))
 	for i := range annotations {
 		a := &annotations[i]
+		authorID, authorUsername := publicPersonColumns(a.Author)
 		out = append(out, ManifestAnnotation{
 			ContentHash:    annotationContentHash(a),
-			AuthorUserID:   a.AuthorUserID,
-			AuthorUsername: a.AuthorUsername,
+			AuthorUserID:   authorID,
+			AuthorUsername: authorUsername,
 		})
 	}
 	return out
-}
-
-// renameDir moves a directory tree from src to dst via the FileSystem interface.
-// Mirrors ingest.Pipeline.renameDir: MemFS.Rename only moves the directory node,
-// not its contents, so we recursively copy then remove. For OSFileSystem this is
-// a portable recursive move (production could use os.Rename directly, but the
-// portable path keeps one code path across FS implementations).
-func (p *Pipeline) renameDir(src, dst string) error {
-	if err := p.fs.MkdirAll(dst, defaults.PrivateDirPerm); err != nil {
-		return fmt.Errorf("renameDir: mkdir %s: %w", dst, err)
-	}
-	walkErr := p.fs.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == src {
-			return nil
-		}
-		rel := path[len(src)+1:]
-		dstPath := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return p.fs.MkdirAll(dstPath, defaults.PrivateDirPerm)
-		}
-		if err := p.fs.CopyFile(path, dstPath, defaults.PrivateFilePerm); err != nil {
-			return fmt.Errorf("renameDir copy %s -> %s: %w", path, dstPath, err)
-		}
-		return nil
-	})
-	if walkErr != nil {
-		return errors.Join(walkErr, p.fs.RemoveAll(dst))
-	}
-	return p.fs.RemoveAll(src)
 }

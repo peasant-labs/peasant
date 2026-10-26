@@ -228,8 +228,10 @@ func resetAll(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("reset peasant-sync: %w", err)
 	}
 
-	// 5. State directory (PID files).
-	stateDir := string(defaults.State.DirPath)
+	// 5. State directory (PID files). Resolve at call time for the same reason
+	// as pidFilePath: a test that redirects XDG_STATE_HOME resets its own state,
+	// not the developer's.
+	stateDir := string(defaults.ResolveStateDirPath())
 	if err := removeAllIfExists(stateDir); err != nil {
 		return fmt.Errorf("reset state: %w", err)
 	}
@@ -655,6 +657,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			OutputDir:          resolvedOutput,
 			StalenessThreshold: staleness,
 			Parallelism:        0,
+			Write:              cfg.Write,
 			Progress:           progState,
 			AllowedSessionIDs:  allowedIDs,
 		}
@@ -684,6 +687,12 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
 			ingest.WithLogger(db),
 			ingest.WithIndexLogger(db),
+			// A session's commits are part of its identity, not an optional
+			// extra: they are what links a transcript to the pull requests it
+			// produced. Every ingest path detects them unless a caller
+			// explicitly opts out, so onboarding cannot publish a session
+			// without the evidence that makes it reachable from its PR.
+			ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()),
 		)
 
 		pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg, pipelineOpts...)

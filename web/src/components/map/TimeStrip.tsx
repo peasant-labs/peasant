@@ -86,7 +86,10 @@ export function TimeStrip({
           branch chips hang off. */}
       <div
         className="relative flex h-8 min-w-0 flex-1 items-end justify-end gap-[2px] overflow-hidden"
-        role="img"
+        // A group, not an image: when the strip scrubs, its day bars are
+        // buttons, and an image role would hide them from assistive tech while
+        // they stay in the tab order.
+        role="group"
         aria-label={`Session activity: ${total} sessions over ${days.length} days`}
       >
         {days.map((day, i) => {
@@ -139,14 +142,14 @@ export function TimeStrip({
       {/* Branches — the future sits at the right edge, beyond "now". */}
       <div className="flex shrink-0 items-center gap-2">
         {defaultBranch && (
-          <span className="font-mono text-[11px] text-ink-3">{defaultBranch}</span>
+          <span className="font-mono text-[length:var(--fs-label)] text-ink-3">{defaultBranch}</span>
         )}
         {shownBranches.map((b) => (
           <button
             key={b.name}
             type="button"
             aria-label={`Review branch ${b.name}`}
-            className="border border-rule px-2 py-0.5 font-mono tabular-nums text-[11px] text-ink-2 hover:bg-surface-hover focus-mono cursor-pointer"
+            className="border border-rule px-2 py-0.5 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-2 hover:bg-surface-hover focus-mono cursor-pointer"
             onClick={() => onBranchClick?.(b.name)}
           >
             {b.name}
@@ -155,7 +158,7 @@ export function TimeStrip({
         ))}
         {overflow > 0 && (
           <span
-            className="border border-rule px-2 py-0.5 font-mono tabular-nums text-[11px] text-ink-4"
+            className="border border-rule px-2 py-0.5 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-4"
             title={branches
               .slice(maxBranchChips)
               .map((b) => b.name)

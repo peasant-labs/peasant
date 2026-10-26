@@ -139,7 +139,7 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 					}
 					return
 				}
-				for _, fragment := range []string{"enriched transcript push refused", "  what:", "  why: the target Village did not advertise", "  where: push.Pipeline.pushSession", "  when:", "  meaning:", "  fix:", "after local canonical content construction and validation", "before serialization or upload", "no transcript bytes or metadata were sent", "silently removing", "then retry"} {
+				for _, fragment := range []string{"enriched transcript push refused", "  what:", "  why: the target peasant online server did not advertise", "  where: push.Pipeline.pushSession", "  when:", "  meaning:", "  fix:", "after local canonical content construction and validation", "before serialization or upload", "no transcript bytes or metadata were sent", "silently removing", "then retry"} {
 					if !strings.Contains(message, fragment) {
 						t.Errorf("actionable refusal missing %q: %s", fragment, message)
 					}

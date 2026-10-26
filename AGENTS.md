@@ -46,6 +46,14 @@ goldens and a successful PNG generation are not a visual self-review. Dirty capt
 development evidence only. An interface-changing PR needs clean-revision screenshots and durable
 GitHub-hosted review evidence. Generated PNGs stay untracked.
 
+### Performance work
+
+Every performance-critical change follows
+[`.claude/skills/design-performance/SKILL.md`](.claude/skills/design-performance/SKILL.md). This
+includes the hot paths (harvest, ingest, the store write lane, search, migration, reclaim), every
+performance claim and budget, and the design of the parallel work and the memory layout. The live
+store stays read-only for agents; measure on a sandbox copy.
+
 ## Tests and fixtures
 
 The test gate itself — two passes, the no-race registry, the four-rule
@@ -118,6 +126,17 @@ ast-grep scan --config sgconfig.yml .
   retired AST scanner. After changing a vocabulary or its stored behavior, run `go generate
   ./internal/ingest`, the registry/docgen tests, and bump the relevant indexer version when settled
   sessions must be re-indexed.
+
+## Cross-platform code
+
+Peasant builds one module for Linux, macOS, and Windows. Platform-specific code lives in
+build-tagged sibling files (`//go:build unix` / `//go:build windows`, or `unix` / `!unix`) with
+identical signatures; the shared file stays platform-neutral, and the unix side must not change
+behavior. A shared file must never reference a type that exists on only one target.
+[`docs/cross-platform.md`](docs/cross-platform.md) records the split, the path rules, the
+Windows-specific behavior, and the CI and release gates. When you add platform-specific code, add
+a build-tagged test per side and add any Windows-only test name to the `windows` job's `-run` set
+so it actually runs.
 
 ## Data and contract invariants
 
@@ -216,15 +235,34 @@ the server serves the newly built assets before you trust a screenshot or a comp
   by itself.
 - Do not add a fail-closed gate on deep links. An earlier attempt was withdrawn as a misread of
   the user's intent. Do not reintroduce it without a new, explicit ratification.
-- Publishing is a separate, user-initiated action: the `/share` wizard. It never runs
-  automatically or in the background. It draws only from the sessions the user recorded. Pulled
-  transcripts are not re-pushable. Governance for re-sharing pulled sessions is a tracked
-  follow-up.
-- The consented publication paths are the `/share` wizard, the upload hook installed by
-  `peasant village hooks install`, and attaching the prompts behind a pull request. Attaching is
-  a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
+- Publishing is a separate, user-initiated action: the transcript publish popup or the multi-session `/share` wizard. Nothing is published
+  without an explicit act: a click, or a binding the developer set up. It draws only from the
+  sessions the user recorded. Pulled transcripts are not re-pushable. Governance for re-sharing
+  pulled sessions is a tracked follow-up.
+- The consented publication paths are the transcript publish popup, the `/share` wizard, the upload hook installed by
+  `peasant village hooks install`, the auto-publish hook, and attaching the prompts behind a pull
+  request. The auto-publish hook is the same managed hook, installed by `peasant village auto` or
+  by the settings install route, for a repository that an auto-publish rule in `hooks.yaml`
+  covers. The rule is the binding. `autopublish.Decide` is the one matcher of rules,
+  server-side; do not implement it again in React. `peasant village push`, which a managed hook
+  runs, applies it per session, to the repository the session was recorded in (a linked
+  worktree counts as its main repository). A gone directory is matched by its
+  recorded path and ancestors because its repository root is no longer known;
+  a deleted nested repository can inherit a containing folder rule. A push that sends a bound session publishes
+  collectives-only: private, no license, and each bound transcript is shared with its rule's
+  collectives, never with the public. A session a paused rule (no event) covers is not
+  published, a transcript that is public on Village is not updated, and a collective that
+  rejected or lost a transcript is not asked again. Kickstart's publication and the local web's
+  publish do not read the rules. A rule-installed hook requires an active matching binding; deleting or
+  pausing the last binding stops its publication while retaining its hook file.
+  Separately installed plain terminal hooks retain their independent consent.
+  A rule installs no hook by itself: `peasant village auto` and
+  the settings install route install one repository at a time, by an explicit act, and only in
+  a repository Peasant has recorded sessions in. Any managed hook applies the rules, including
+  one installed with `peasant village hooks install`, so saving a rule changes what an installed
+  hook publishes. Attaching is a GitHub-side path: it uploads nothing and publishes nothing, and only widens who may read
   transcripts already published. Do not add a path that publishes without one of these, and do
-  not make any of them automatic.
+  not create a binding for the developer.
 - One requirement is not yet landed. The live tracker is #3. When `mode` is `selected`, the
   user-facing lists show only the configured selection. An explicit session selection must not
   widen visibility to the sibling sessions of its project. Apply the boundary server-side.
@@ -242,19 +280,42 @@ the server serves the newly built assets before you trust a screenshot or a comp
 - The `changes` label and the `/review` routes stay in force. In the home-first registry
   `changes` is a route-only section (`inNav: false`): it keeps its id, label and routes, and
   `home` leads the nav instead. Do not rename or delete the label or the routes silently.
-- `/share` is the canonical share surface. The persistent top-nav action routes there. It stays
-  outside the fairtrade section registry. `LOCAL_APP_SECTIONS` in fairtrade owns the registry:
-  `home | settings` in the nav, then `analytics | changes | code map` by route only.
+- `/share` is the canonical publish route: one-session links open the transcript popup;
+  multi-session and wizard-step links retain the wizard. It stays
+  outside the fairtrade section registry, and the local sidebar does not link to it. `LOCAL_APP_SECTIONS` in fairtrade owns the registry:
+  `home | settings` in the nav, then `online | analytics | changes | code map` by route only
+  (`online` is the label of the `village` id, whose route stays `/village`).
   `GRAPH_APP_SECTIONS` is its deprecated alias with the earlier three-entry value. Derive the nav
-  and routes from the registry and fail loudly on an unmapped id. Do not add a `/push` alternate
-  route.
+  and routes from the registry (`web/src/lib/nav/sections.ts`) and fail loudly on an unmapped id.
+  A nav section this app has no page for stays out of the sidebar until its page ships, so the
+  sidebar never carries a dead link. Nothing in the sidebar or the command palette links to a
+  route-only section; its routes still resolve by URL. Do not add a `/push` alternate route.
+- The local chrome is fairtrade's `AppSidebar` (`web/src/components/LocalSidebar.tsx`), at
+  fairtrade's default width, in fairtrade's own order: the `peasant` home link (the wheat mark
+  alone; the name is its accessible name), the shortcuts (search on ⌘K, the docs opened in a new
+  tab, community marked soon, then a `collectives` link that opens online, the local app's one
+  link to online), the registry's nav sections, and the footer with the account row while this
+  computer is signed in, then the settings gear (fairtrade turns the registry's `settings` entry
+  into it) and the theme toggle. The switcher never lists online or local. A settings page keeps
+  that same nav, the gear current; its sections are fairtrade's in-page section bar
+  (`SettingsLayout`) in the page body, never sidebar groups. Every page that is not full-bleed
+  (a transcript, a map canvas) sits in fairtrade's `.asb-page` frame with one `.iu-page-title`
+  heading at the hero size.
+  Below 768px it is a top bar whose menu opens the same nav as a drawer. It carries no connection
+  indicator. When the local app is unreachable (`GET /api/v1/health` fails or the WebSocket stays
+  down), fairtrade's `LocalOfflineBanner` shows at the top of the page column, in the page flow
+  (pinned there where the screen has room), with the start command and `try again`. Its copy says
+  the app on this computer is not running and that the internet is fine; never replace it with copy
+  that reads as an internet outage. `web/scripts/visual/testdata/shell-chrome.yaml` is the
+  required-name manifest for the sidebar, and the component tests and the mounted shell gates read
+  it.
 - When you replace the share-bridge UI, keep these semantics: auto-scan of uncached selections;
   caching of success and of honest failure, keyed by `(level, session)`, across navigation;
   explicit re-scan; continuation disabled when any session failed; fail-closed behavior on a
   category inconsistency.
 - peasant-labs/fairtrade-design-system#3 tracks the official review, redaction, consent, and
   share composition. Per-category filtering in `RedactionReview` is
-  peasant-labs/fairtrade-design-system#4. Peasant owns the `/share` scan, cache, auth, and
+  peasant-labs/fairtrade-design-system#4. Peasant owns the transcript popup and `/share` scan, app-level cache, auth, and
   network orchestration, and the Village transport.
 - The code map is a known comprehension gap. Future work needs progressive, task-oriented
   disclosure and a real-project user acceptance test. Do not add more text around the same dense
@@ -262,6 +323,11 @@ the server serves the newly built assets before you trust a screenshot or a comp
 
 ## Documentation
 
+- How-to lives only in the docs (peasantlabs.org/docs). The local web app links to the page or
+  section that teaches a task (`web/src/lib/docs.ts`, rendered by `DocsLink`, opened in a new tab)
+  and does not restate commands or steps. What stays in the app: an error naming its recovery, the
+  offline notice's start command, consent and redaction review, and a repository-specific remedy
+  or uninstall command the docs cannot know.
 - Keep the user-visible behavior and the examples accurate. Do not document planned behavior as
   shipped.
 - Generate the CLI reference pages with `make docs-cli`. Do not hand-edit generated CLI pages.

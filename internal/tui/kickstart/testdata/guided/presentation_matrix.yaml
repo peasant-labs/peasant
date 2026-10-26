@@ -1,7 +1,7 @@
-expectedSectionCount: 6
+expectedSectionCount: 7
 expectedThemeCount: 2
 expectedSizeCount: 2
-expectedCaseCount: 24
+expectedCaseCount: 28
 sections:
   - key: auto-ingest
     heading: auto-ingest new branches in fully-selected projects
@@ -11,6 +11,10 @@ sections:
     heading: publication preference
     control: '(•) keep local, do not publish'
     intro: choose whether to keep transcripts local or plan to publish later.
+  - key: auto-publish
+    heading: publish automatically?
+    control: '(•) not now'
+    intro: you choose which folders go to which collectives in settings later.
   - key: privacy
     heading: redaction level
     control: '(•) standard'
@@ -37,6 +41,10 @@ cases:
   - {name: publication-light-80x24, section: publication, theme: light, width: 80, height: 24}
   - {name: publication-dark-120x40, section: publication, theme: dark, width: 120, height: 40}
   - {name: publication-light-120x40, section: publication, theme: light, width: 120, height: 40}
+  - {name: auto-publish-dark-80x24, section: auto-publish, theme: dark, width: 80, height: 24}
+  - {name: auto-publish-light-80x24, section: auto-publish, theme: light, width: 80, height: 24}
+  - {name: auto-publish-dark-120x40, section: auto-publish, theme: dark, width: 120, height: 40}
+  - {name: auto-publish-light-120x40, section: auto-publish, theme: light, width: 120, height: 40}
   - {name: privacy-dark-80x24, section: privacy, theme: dark, width: 80, height: 24}
   - {name: privacy-light-80x24, section: privacy, theme: light, width: 80, height: 24}
   - {name: privacy-dark-120x40, section: privacy, theme: dark, width: 120, height: 40}

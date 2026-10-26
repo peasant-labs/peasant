@@ -1700,7 +1700,7 @@ func TestPipeline_ReceiptPersistenceFailureIsPartialFailure(t *testing.T) {
 		t.Fatalf("receipt persistence failure must remain retryable: %+v", result)
 	}
 	for _, want := range []string{
-		"Village accepted",
+		"Peasant online accepted",
 		"constraint violation",
 		"terminal receipt could not be persisted",
 	} {

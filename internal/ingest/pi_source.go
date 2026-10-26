@@ -79,6 +79,8 @@ type piEntry struct {
 	Data          json.RawMessage `json:"data"`
 	Details       json.RawMessage `json:"details"`
 	Usage         json.RawMessage `json:"usage"`
+	// ThinkingLevel is the new level carried by a thinking_level_change entry.
+	ThinkingLevel string `json:"thinkingLevel"`
 }
 
 type piDocument struct {
@@ -224,7 +226,7 @@ func parsePiDocumentWithLimit(ctx context.Context, data []byte, maxRecordBytes i
 			return doc, piSourceError("decode", line+1, fmt.Errorf("entry type and id are required"))
 		}
 		if doc.header.ID == "" {
-			if entry.Type != piSession || entry.Version != 3 || !strings.HasPrefix(entry.CWD, "/") {
+			if entry.Type != piSession || entry.Version != 3 || !hasAbsolutePathForm(entry.CWD) {
 				return doc, piSourceError("header", line+1, fmt.Errorf("first nonempty record must be a v3 session header with absolute cwd"))
 			}
 			if _, err := NewSessionID(entry.ID); err != nil {

@@ -1,0 +1,6 @@
+requiredNames: [held-full-installation-scope, held-other-base-path-excluded, held-missing-url-no-host-fallback, held-index-identity-mismatch]
+cases:
+  - {name: held-full-installation-scope, url: 'https://village.invalid/one', wantPresent: true}
+  - {name: held-other-base-path-excluded, url: 'https://village.invalid/two', wantPresent: false}
+  - {name: held-missing-url-no-host-fallback, url: '', wantError: true}
+  - {name: held-index-identity-mismatch, url: 'https://village.invalid/one', mismatch: true, wantError: true}

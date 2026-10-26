@@ -12,9 +12,9 @@ const (
 	// unstarted on a store that carries no such state, which is every store
 	// written by this build.
 	StageRecover Stage = "RECOVER"
-	// StageReconcile covers the reconciliation of the retained tree, which runs
-	// before discovery: it visits every retained session's committed metadata and
-	// repairs the ones whose retained pair and mirrored record disagree. It is a
+	// StageReconcile covers the reconciliation of the stored tree, which runs
+	// before discovery: it visits every stored session's committed metadata and
+	// repairs the ones whose stored pair and mirrored record disagree. It is a
 	// displayed stage because that walk is proportional to the whole retained
 	// tree, so on a large tree it is the first thing the user waits for.
 	StageReconcile Stage = "RECONCILE"

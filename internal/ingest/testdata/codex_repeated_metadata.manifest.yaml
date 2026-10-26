@@ -1,0 +1,4 @@
+requiredNames:
+  - subagent-parent-envelope
+  - mismatched-first-envelope
+  - malformed-later-envelope

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/proc"
 )
 
 const (
@@ -90,6 +91,7 @@ func resolveFeedbackPath() (string, error) {
 		return "", err
 	}
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	proc.HideConsoleWindow(cmd)
 	cmd.Dir = cwd
 	out, err := cmd.Output()
 	if err == nil {

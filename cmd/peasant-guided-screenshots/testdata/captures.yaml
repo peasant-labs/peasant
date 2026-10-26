@@ -9,12 +9,12 @@ sheets:
     kind: guided
     title: "final guided sections: dark theme"
     theme: dark
-    viewport: {width: 1800, height: 3420}
+    viewport: {width: 1800, height: 3980}
   - name: guided-light
     kind: guided
     title: "final guided sections: light theme"
     theme: light
-    viewport: {width: 1800, height: 3420}
+    viewport: {width: 1800, height: 3980}
   - name: selection
     kind: selection
     title: "mounted selection: linked submodule and remote-less project, branch, and session previews"
@@ -22,9 +22,9 @@ sheets:
     viewport: {width: 1800, height: 11170}
   - name: push
     kind: push
-    title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"
+    title: "mounted push wizard: start, selection, published-transcript preview, consent, receipt, and keyboard help in both themes"
     theme: dark
-    viewport: {width: 1800, height: 7200}
+    viewport: {width: 1800, height: 7840}
   - name: ingest-progress
     kind: ingest-progress
     title: "shared local import progress: kickstart and inline harvest"
@@ -35,6 +35,11 @@ sheets:
     title: "mounted kickstart completion: warning details, scrolling, and successful control"
     theme: dark
     viewport: {width: 1800, height: 3420}
+  - name: pull-progress
+    kind: pull-progress
+    title: "mounted collective pull progress: running, canceling, and canceled in both themes"
+    theme: dark
+    viewport: {width: 1800, height: 3600}
 
 completion:
   new: 2
@@ -83,6 +88,8 @@ guidedSections:
     wantContains: [auto-ingest new branches in fully-selected projects, "[on]"]
   - key: publication
     wantContains: [publication preference, keep local]
+  - key: auto-publish
+    wantContains: ["publish automatically?", "you choose which folders go to which collectives", "( ) yes", "(•) not now"]
   - key: privacy
     wantContains: [redaction level, "- before:", "+ after:"]
   - key: license
@@ -170,6 +177,17 @@ ingestProgressStates:
     wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 9s", "estimate: 6s", canceling harvest]
   - key: harvest-canceled
     wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 12s", "estimate: 6s", harvest canceled]
+
+pullProgressStates:
+  - key: running
+    wantContains: [collective pull progress, 1/4, "█", "elapsed: 2s", ctrl+c to cancel]
+    wantAbsent: [canceling pull, pull canceled]
+  - key: canceling
+    wantContains: [collective pull progress, 2/4, "█", "elapsed: 9s", canceling pull...]
+    wantAbsent: [ctrl+c to cancel, pull canceled, waiting for current work]
+  - key: canceled
+    wantContains: [collective pull progress, 2/4, "█", "elapsed: 12s", pull canceled]
+    wantAbsent: [ctrl+c to cancel, canceling pull]
 
 selection:
   repositories:
@@ -322,6 +340,10 @@ guidedCaptures:
   - {name: publication-dark-120x40, section: publication, theme: dark, width: 120, height: 40}
   - {name: publication-light-80x24, section: publication, theme: light, width: 80, height: 24}
   - {name: publication-light-120x40, section: publication, theme: light, width: 120, height: 40}
+  - {name: auto-publish-dark-80x24, section: auto-publish, theme: dark, width: 80, height: 24}
+  - {name: auto-publish-dark-120x40, section: auto-publish, theme: dark, width: 120, height: 40}
+  - {name: auto-publish-light-80x24, section: auto-publish, theme: light, width: 80, height: 24}
+  - {name: auto-publish-light-120x40, section: auto-publish, theme: light, width: 120, height: 40}
   - {name: privacy-dark-80x24, section: privacy, theme: dark, width: 80, height: 24}
   - {name: privacy-dark-120x40, section: privacy, theme: dark, width: 120, height: 40}
   - {name: privacy-light-80x24, section: privacy, theme: light, width: 80, height: 24}
@@ -385,15 +407,17 @@ pushStates:
   - key: needs-ingest
     wantContains: ["push-incomplete-0004", "needs ingest", "run peasant ingest", "not selected:"]
   - key: start
-    wantContains: ["push to village", "session(s) are ready to push", "yes"]
+    wantContains: ["push to peasant online", "session(s) are ready to push", "yes"]
   - key: selection
     wantContains: ["selected", "withheld by a branch conflict", "needs ingest", "tab", "project: peasant", "sessions: 2"]
   - key: session-preview
     wantContains: ["push-current-0001", "<ANTHROPIC_KEY>", "peasant publishes the redacted form"]
   - key: consent
-    wantContains: ["metadata", "known patterns", "before it publishes them to the village"]
+    wantContains: ["metadata", "known patterns", "before it publishes them to peasant online"]
   - key: receipt
-    wantContains: ["to the village.", "nothing is removed from this machine.", "sessions in this push"]
+    wantContains: ["to peasant online.", "nothing is removed from this machine.", "sessions in this push"]
+  - key: help
+    wantContains: ["keyboard shortcuts", "navigation", "actions", "press ? or esc to close"]
 
 push:
   sessions:
@@ -451,6 +475,10 @@ pushCaptures:
   - {name: push-receipt-dark-120x40, state: receipt, theme: dark, width: 120, height: 40}
   - {name: push-receipt-light-80x24, state: receipt, theme: light, width: 80, height: 24}
   - {name: push-receipt-light-120x40, state: receipt, theme: light, width: 120, height: 40}
+  - {name: push-help-dark-80x24, state: help, theme: dark, width: 80, height: 24}
+  - {name: push-help-dark-120x40, state: help, theme: dark, width: 120, height: 40}
+  - {name: push-help-light-80x24, state: help, theme: light, width: 80, height: 24}
+  - {name: push-help-light-120x40, state: help, theme: light, width: 120, height: 40}
 
 ingestProgressCaptures:
   - {name: ingest-progress-running-dark-80x24, state: running, theme: dark, width: 80, height: 24}
@@ -469,3 +497,17 @@ ingestProgressCaptures:
   - {name: ingest-progress-harvest-canceled-dark-120x40, state: harvest-canceled, theme: dark, width: 120, height: 40}
   - {name: ingest-progress-harvest-canceled-light-80x24, state: harvest-canceled, theme: light, width: 80, height: 24}
   - {name: ingest-progress-harvest-canceled-light-120x40, state: harvest-canceled, theme: light, width: 120, height: 40}
+
+pullProgressCaptures:
+  - {name: pull-progress-running-dark-80x24, state: running, theme: dark, width: 80, height: 24}
+  - {name: pull-progress-running-dark-120x40, state: running, theme: dark, width: 120, height: 40}
+  - {name: pull-progress-running-light-80x24, state: running, theme: light, width: 80, height: 24}
+  - {name: pull-progress-running-light-120x40, state: running, theme: light, width: 120, height: 40}
+  - {name: pull-progress-canceling-dark-80x24, state: canceling, theme: dark, width: 80, height: 24}
+  - {name: pull-progress-canceling-dark-120x40, state: canceling, theme: dark, width: 120, height: 40}
+  - {name: pull-progress-canceling-light-80x24, state: canceling, theme: light, width: 80, height: 24}
+  - {name: pull-progress-canceling-light-120x40, state: canceling, theme: light, width: 120, height: 40}
+  - {name: pull-progress-canceled-dark-80x24, state: canceled, theme: dark, width: 80, height: 24}
+  - {name: pull-progress-canceled-dark-120x40, state: canceled, theme: dark, width: 120, height: 40}
+  - {name: pull-progress-canceled-light-80x24, state: canceled, theme: light, width: 80, height: 24}
+  - {name: pull-progress-canceled-light-120x40, state: canceled, theme: light, width: 120, height: 40}

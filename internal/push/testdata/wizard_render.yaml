@@ -88,7 +88,7 @@ cases:
 assertions:
   - state: start
     wantContains:
-      - "push to village"
+      - "push to peasant online"
       - "3 session(s) are ready to push"
       - "yes"
       - "no"
@@ -123,7 +123,7 @@ assertions:
       - "metadata"
       - "known patterns"
       - "repository label"
-      - "before it publishes them to the village"
+      - "before it publishes them to peasant online"
       - "go back with esc to review one"
     wantMissing:
       - "No raw data will leave your machine"
@@ -141,7 +141,7 @@ assertions:
       - "No raw data will leave your machine"
   - state: receipt
     wantContains:
-      - "push 3 session(s) to the village."
+      - "push 3 session(s) to peasant online."
       - "nothing is removed from this machine."
       - "sessions in this push"
     wantMissing:

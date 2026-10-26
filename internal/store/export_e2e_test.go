@@ -5,7 +5,7 @@ package store
 import (
 	"testing"
 
-	"zombiezen.com/go/sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
 // Hooks for external store tests that drive the build-tagged V39 legacy-fixture

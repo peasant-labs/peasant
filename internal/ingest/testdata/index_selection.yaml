@@ -3,6 +3,13 @@
 # conditions, and expects whether the parser must run. The stored state
 # carries the current producer and an equal input hash unless a field says
 # otherwise, so each case isolates one term of the decision.
+#
+# surface selects which decision the case exercises: the default
+# captured-input decision (which also binds the pair the input was captured
+# from) or the stored-state decision (which reads no file and so cannot compare
+# the pair). A latest_attempt facet describes the stored latest-attempt pointer
+# the settle comparison reads; the facet rows pair it with an unbound current
+# publication capture so the only reason a case reruns is the facet itself.
 # required_names guards deletion by name; adding a case need not appear here.
 required_names:
   - current-bound-complete-is-settled
@@ -15,6 +22,26 @@ required_names:
   - incomplete-certifiable-reruns
   - incomplete-non-strict-format-is-settled
   - incomplete-non-strict-indexer-is-settled
+  - settled-attempt-with-unbound-capture-is-settled
+  - settled-attempt-forced-reruns
+  - settled-attempt-pair-moved-reruns
+  - settled-attempt-pair-null-reruns
+  - settled-attempt-producer-behind-reruns
+  - settled-attempt-adapter-behind-reruns
+  - settled-attempt-read-pair-mismatch-reruns
+  - settled-attempt-accounted-omission-authority-is-settled
+  - stored-state-settled-attempt-with-unbound-capture-is-settled
+  - stored-state-settled-attempt-pair-moved-reruns
+  - stored-state-settled-attempt-pair-null-reruns
+  - stored-state-settled-attempt-producer-behind-reruns
+  - stored-state-settled-attempt-adapter-behind-reruns
+  - stored-state-settled-attempt-accounted-omission-authority-is-settled
+  - settled-attempt-reindexed-reruns
+  - settled-attempt-reindex-with-no-pending-work-is-settled
+  - stored-state-settled-attempt-reindexed-reruns
+  - stored-state-settled-attempt-reindex-with-no-pending-work-is-settled
+  - zero-target-settled-attempt-reruns
+  - stored-state-zero-target-settled-attempt-reruns
 cases:
   - name: current-bound-complete-is-settled
     needs_work: false
@@ -49,3 +76,139 @@ cases:
     incomplete: true
     lenient_indexer: true
     needs_work: false
+  # A fully settled latest attempt with an unbound current publication capture:
+  # the pending binding is real, but the parse short-circuits because the
+  # attempt already consumed the current pair under this build.
+  - name: settled-attempt-with-unbound-capture-is-settled
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    needs_work: false
+  # Force still bypasses the settle: the deliberate rebuild is not held.
+  - name: settled-attempt-forced-reruns
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    force: true
+    needs_work: true
+  # One facet at a time: a moved pair, a NULL pair, a producer behind the
+  # target, or an adapter behind the target keeps the session selected, so the
+  # next run re-attempts once and settles.
+  - name: settled-attempt-pair-moved-reruns
+    latest_attempt: pair_moved
+    capture_revision: 3
+    unbound: true
+    needs_work: true
+  - name: settled-attempt-pair-null-reruns
+    latest_attempt: pair_null
+    capture_revision: 3
+    unbound: true
+    needs_work: true
+  - name: settled-attempt-producer-behind-reruns
+    latest_attempt: producer_behind
+    capture_revision: 3
+    unbound: true
+    needs_work: true
+  - name: settled-attempt-adapter-behind-reruns
+    latest_attempt: adapter_behind
+    capture_revision: 3
+    unbound: true
+    needs_work: true
+  # The captured-input decision binds the settle to the pair the input was
+  # actually read from: a different pair is never treated as settled.
+  - name: settled-attempt-read-pair-mismatch-reruns
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    read_pair_mismatch: true
+    needs_work: true
+  # The accounted-omission-FULL authority: its stored producer is behind the
+  # target and its capture is incomplete, so the version and content terms
+  # would each fire; the settled attempt gates them all.
+  - name: settled-attempt-accounted-omission-authority-is-settled
+    latest_attempt: settled
+    incomplete: true
+    producer_delta: -1
+    capture_revision: 3
+    unbound: true
+    needs_work: false
+  # The stored-state decision reads no pair, so it cannot bind the input's own
+  # evidence: the same settled attempt still short-circuits there.
+  - name: stored-state-settled-attempt-with-unbound-capture-is-settled
+    surface: stored_state
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    needs_work: false
+  - name: stored-state-settled-attempt-pair-moved-reruns
+    surface: stored_state
+    latest_attempt: pair_moved
+    capture_revision: 3
+    unbound: true
+    needs_work: true
+  - name: stored-state-settled-attempt-pair-null-reruns
+    surface: stored_state
+    latest_attempt: pair_null
+    capture_revision: 3
+    unbound: true
+    needs_work: true
+  - name: stored-state-settled-attempt-producer-behind-reruns
+    surface: stored_state
+    latest_attempt: producer_behind
+    capture_revision: 3
+    unbound: true
+    needs_work: true
+  - name: stored-state-settled-attempt-adapter-behind-reruns
+    surface: stored_state
+    latest_attempt: adapter_behind
+    capture_revision: 3
+    unbound: true
+    needs_work: true
+  - name: stored-state-settled-attempt-accounted-omission-authority-is-settled
+    surface: stored_state
+    latest_attempt: settled
+    incomplete: true
+    producer_delta: -1
+    capture_revision: 3
+    unbound: true
+    needs_work: false
+  # A deliberate reindex disables the settle short-circuit: a pending term
+  # re-attempts once. A reindex with no pending term still settles, so Reindex
+  # is not a full bypass (that is --force).
+  - name: settled-attempt-reindexed-reruns
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    reindex: true
+    needs_work: true
+  - name: settled-attempt-reindex-with-no-pending-work-is-settled
+    latest_attempt: settled
+    reindex: true
+    needs_work: false
+  - name: stored-state-settled-attempt-reindexed-reruns
+    surface: stored_state
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    reindex: true
+    needs_work: true
+  - name: stored-state-settled-attempt-reindex-with-no-pending-work-is-settled
+    surface: stored_state
+    latest_attempt: settled
+    reindex: true
+    needs_work: false
+  # A target that cannot express a settle decision never settles, so the
+  # predicate cannot diverge from the store surfaces' own guard.
+  - name: zero-target-settled-attempt-reruns
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    zero_target: true
+    needs_work: true
+  - name: stored-state-zero-target-settled-attempt-reruns
+    surface: stored_state
+    latest_attempt: settled
+    capture_revision: 3
+    unbound: true
+    zero_target: true
+    needs_work: true

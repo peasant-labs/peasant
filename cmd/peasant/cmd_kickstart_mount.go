@@ -59,8 +59,21 @@ func runKickstartFlow(
 	// One store handle serves the stored-session snapshot, already-imported marks,
 	// and preview bodies for the whole flow. The snapshot feeds both legacy
 	// conversion and the scanner/store union used by the save gate. It is closed
-	// when the flow returns.
-	db, closeStore, storeOpenErr := openKickstartStoreWithError(cmd)
+	// when the flow returns. The handle is opened at the same owned-artifact root
+	// the post-consent ingest runner writes, read-only, so the pane resolves the
+	// managed generations the writers stored.
+	resolvedRoot, err := resolveKickstartOutputRoot(cmd, loaded)
+	if err != nil {
+		return fmt.Errorf(
+			"prepare the kickstart store root: %w.\n"+
+				"what: Peasant could not resolve the output base path the kickstart store opens at.\n"+
+				"why: the output base path (configured output.basePath, or the data-dir fallback when it is unset) is not a usable absolute path.\n"+
+				"where: runKickstartFlow, before the selection screen opened.\n"+
+				"when: while preparing the stored-session snapshot and preview bodies.\n"+
+				"meaning: Peasant opened no store and started no ingest, so the flow had no preview or already-imported marks.\n"+
+				"fix: set output.basePath in config.yaml to a usable directory, or unset it to use the default output location, then run `peasant kickstart` again.", err)
+	}
+	db, closeStore, storeOpenErr := openKickstartStoreWithError(cmd, string(resolvedRoot))
 	defer closeStore()
 	if storeOpenErr != nil {
 		return kickstartStoreOpenError(loaded.Selection.Mode, storeOpenErr)
@@ -246,20 +259,20 @@ func kickstartStoreOpenError(mode config.SelectionMode, err error) error {
 		return fmt.Errorf(
 			"prepare legacy project selection: %w.\n"+
 				"what: Peasant could not open the stored sessions needed to build exact project choices.\n"+
-				"why: Peasant could not read the local session store as a Peasant database.\n"+
+				"why: the Peasant data directory, the local session store database, or the output base path is not usable.\n"+
 				"where: runKickstartFlow, before the selection screen opened.\n"+
 				"when: while converting the saved all-projects setting.\n"+
 				"meaning: Peasant did not change the saved setting or start setup.\n"+
-				"fix: check the Peasant data directory and database, then run `peasant kickstart` again.", err)
+				"fix: check the Peasant data directory and database, and set output.basePath in config.yaml to a usable directory (or unset it to use the default output location), then run `peasant kickstart` again.", err)
 	}
 	return fmt.Errorf(
 		"prepare saved project availability: %w.\n"+
 			"what: Peasant could not open the stored sessions needed to verify the saved project choice.\n"+
-			"why: Peasant could not read the local session store as a Peasant database.\n"+
+			"why: the Peasant data directory, the local session store database, or the output base path is not usable.\n"+
 			"where: runKickstartFlow, before the selection screen opened.\n"+
 			"when: while aligning the no-project save check with the web viewer and push chooser.\n"+
 			"meaning: Peasant did not change the saved setting or start ingest because project availability is unknown.\n"+
-			"fix: check the Peasant data directory and database, then run `peasant kickstart` again.", err)
+			"fix: check the Peasant data directory and database, and set output.basePath in config.yaml to a usable directory (or unset it to use the default output location), then run `peasant kickstart` again.", err)
 }
 
 func kickstartStoreReadError(mode config.SelectionMode, err error) error {
@@ -287,9 +300,22 @@ func kickstartStoreReadError(mode config.SelectionMode, err error) error {
 // the func that closes it. It is best-effort: on a first run the store may not
 // exist yet, and any open problem yields a nil store and a no-op close, so
 // onboarding runs without the marks and preview bodies it would have provided.
-func openKickstartStore(cmd *cobra.Command) (*store.Store, func()) {
-	db, closeStore, _ := openKickstartStoreWithError(cmd)
+// ownedRoot is the resolved output base path the flow's writers use.
+func openKickstartStore(cmd *cobra.Command, ownedRoot string) (*store.Store, func()) {
+	db, closeStore, _ := openKickstartStoreWithError(cmd, ownedRoot)
 	return db, closeStore
+}
+
+// resolveKickstartOutputRoot resolves the owned-artifact root the kickstart
+// store opens at, from the loaded config's output base path with the data-dir
+// fallback the post-consent ingest runner uses, so the reader and the writer
+// resolve one tree.
+func resolveKickstartOutputRoot(cmd *cobra.Command, cfg *config.Config) (ingest.ResolvedPath, error) {
+	outputPath := cfg.Output.BasePath
+	if outputPath == "" {
+		outputPath = string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
+	}
+	return ingest.NewResolvedPath(outputPath)
 }
 
 // openKickstartStoreWithError is the exact store-open boundary used by legacy
@@ -297,7 +323,13 @@ func openKickstartStore(cmd *cobra.Command) (*store.Store, func()) {
 // that only need preview reads best-effort, while runKickstartFlow rejects an
 // unreadable existing store instead of mistaking unavailable evidence for an
 // empty store.
-func openKickstartStoreWithError(cmd *cobra.Command) (*store.Store, func(), error) {
+//
+// The boundary wires the managed-generation reader rooted at the configured
+// output base path, so the pane reads the same managed generations the writers
+// stored instead of refusing a format-2 session. The options are READ-ONLY:
+// opening kickstart never creates the owned artifact tree, and a missing root
+// simply leaves the stored baseline in force.
+func openKickstartStoreWithError(cmd *cobra.Command, ownedRoot string) (*store.Store, func(), error) {
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	if _, err := os.Stat(dbPath); err != nil {
 		if os.IsNotExist(err) {
@@ -305,7 +337,11 @@ func openKickstartStoreWithError(cmd *cobra.Command) (*store.Store, func(), erro
 		}
 		return nil, func() {}, err
 	}
-	db, err := store.Open(dbPath)
+	options, err := generationStoreOptionsReadOnly(ownedRoot)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	db, err := store.Open(dbPath, options...)
 	if err != nil {
 		return nil, func() {}, err
 	}

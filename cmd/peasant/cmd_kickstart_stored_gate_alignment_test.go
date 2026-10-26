@@ -15,8 +15,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitex"
 
 	"github.com/peasant-labs/peasant/internal/codegraph"
 	"github.com/peasant-labs/peasant/internal/codemap"

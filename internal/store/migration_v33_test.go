@@ -22,8 +22,8 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // preV33SessionsDDL is the sessions table as it existed after V23 and before V33:

@@ -1,0 +1,97 @@
+# The local app's persistent chrome, as a required-name manifest: fairtrade's
+# sidebar (AppSidebar, .asb) beside the page, or its top bar and drawer on a
+# phone.
+#
+# The component tests (src/components/LocalSidebar.test.tsx, the command palette
+# test) and the mounted gates (shell-nav-gate.mjs, shell-nav-default-gate.mjs)
+# all read this one file through shell-chrome-manifest.mjs, which also pins the
+# required names below so a deleted row fails loudly.
+#
+# show     items the chrome must carry, each found by its selector (and, where
+#          given, its exact trimmed text).
+#          `page`: the item links to a page this app may not have yet. Until the
+#          page file exists the item must NOT show (a link to it would be dead);
+#          once it exists the item MUST show.
+#          `labels`: the accessible name per theme (the mode it switches to).
+#          `icon`: the item leads with a glyph.
+# hide     items that must not come back, each named by the evidence of the old
+#          control: a selector anywhere on the page and/or text in the chrome.
+# routes   the route-only sections. Nothing outside the page body (<main>) — the
+#          sidebar, the offline notice, any nav beside them — or the palette
+#          links to them, and each still mounts its page by URL. `mount` is the
+#          selector the page's body mounts; `project: true` means the gate opens
+#          a mock project's page under the route (`<path>/<project hash>/`).
+# palette  command ids (`data-command-id`) the palette must never offer
+#          (`forbid`, as prefixes) and must always offer (`require`); the
+#          loader pins the ids below as required.
+show:
+  brand:
+    selector: '.asb-panel a.asb-brand[href="/"]'
+    text: peasant
+  home:
+    selector: '.asb-panel a.asb-item[href="/"]'
+    text: home
+    icon: true
+  search:
+    # fairtrade's own search item, the first shortcut under the brand; its key
+    # hint is a kbd.
+    selector: '.asb-panel .asb-utils button.asb-search'
+    text: search⌘K
+    icon: true
+  theme:
+    # fairtrade's footer toggle, named for the theme it switches to.
+    selector: '.asb-panel .asb-foot button.asb-theme'
+    labels:
+      light: switch to dark mode
+      dark: switch to light mode
+  settings:
+    # fairtrade turns the registry's settings entry into the footer gear.
+    selector: '.asb-panel .asb-foot a.asb-settings[href="/settings"], .asb-panel .asb-foot a.asb-settings[href="/settings/"]'
+    text: settings
+    icon: true
+    page: src/app/settings/page.tsx
+hide:
+  connection-pill:
+    selector: '.cx-pill'
+    text:
+      - live · local
+      - connecting…
+  share-button:
+    selector: '.asb a[href^="/share"]'
+  section-nav:
+    # The old app nav, and fairtrade's section sub-nav wherever it mounts
+    # (GraphAppShell / GraphSectionNav render .iu-subnav "peasant sections").
+    selector: 'nav[aria-label="Main navigation"], .iu-subnav'
+  header-row:
+    # The one-row header the sidebar replaced.
+    selector: 'header.app-header'
+  online-switcher:
+    # The app switcher's online entry. The local app reaches online through the
+    # collectives link only; the switcher offers the docs alone.
+    selector: '.asb-utils .asb-app[title="online"]'
+routes:
+  /village:
+    mount: .village-page
+  /analytics:
+    mount: .gan-root
+  /review:
+    mount: .gmp-changes-root
+    project: true
+  /map:
+    mount: .gmp-root
+    project: true
+palette:
+  forbid:
+    - 'proj-changes:'
+    - 'proj-map:'
+  require:
+    - 'nav:/'
+    - 'action:theme'
+# What the notice's always-mounted live region says (LocalOfflineNotice.tsx's
+# OFFLINE_ANNOUNCEMENTS must equal these; the offline gate listens for them and
+# uses them as build-provenance markers). stillStopped is followed by the time
+# of the failed check.
+announcements:
+  stopped: "peasant isn't running on this computer."
+  stillStopped: "peasant still isn't running on this computer. checked"
+  back: peasant is running again.

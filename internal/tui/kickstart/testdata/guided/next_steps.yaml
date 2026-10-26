@@ -4,7 +4,7 @@ rows:
     valid: true
     kinds: [config, web-start, village-login, village-push]
     wantPreamble:
-      - these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
+      - these useful next steps let you modify config, open the local dashboard, connect to peasant online, or explicitly publish later; kickstart runs none of them.
     wantContains:
       - modify configuration interactively
       - peasant config
@@ -12,7 +12,7 @@ rows:
       - open the local dashboard
       - peasant web start
       - starts the dashboard and prints or opens its actual url
-      - connect to a village later
+      - connect to peasant online later
       - peasant village login
       - connects this machine without publishing a transcript
       - publish later, explicitly

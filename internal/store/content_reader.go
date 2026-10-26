@@ -13,9 +13,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 var _ ingest.SessionEntryFullReader = (*Store)(nil)
@@ -37,7 +37,7 @@ func nullString(s string) any {
 var ErrContentCaptureIncomplete = errors.New("session capture is incomplete; bounded previews are not authoritative")
 
 func contentIntegrityError() error {
-	return fmt.Errorf("store full content read: capture manifest, chunks or semantic entries are inconsistent; complete transcript cannot be trusted; run harvest index --force from retained artifacts to repair")
+	return fmt.Errorf("store full content read: capture manifest, chunks or semantic entries are inconsistent; complete transcript cannot be trusted; run harvest index --force from stored artifacts to repair")
 }
 
 // readCapture returns the stored capture, or NOTHING.
@@ -54,7 +54,7 @@ func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionConten
 		}
 	}()
 	c.SessionID = id
-	err = sqlitex.ExecuteTransient(conn, `SELECT status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision FROM session_content_captures WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
+	err = sqlitex.Execute(conn, `SELECT status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,failure_code,failure_message,publication_capture_revision FROM session_content_captures WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
 		found = true
 		var e error
 		c.Status, e = ingest.NewContentCaptureStatus(st.ColumnText(0))
@@ -90,12 +90,30 @@ func readCapture(conn *sqlite.Conn, id ingest.SessionID) (c ingest.SessionConten
 	}})
 	return
 }
+
+// GetSessionContentCapture is the display-effective capture read: a session
+// that has a latest attempt reports the latest attempt's synthesized
+// capture (incomplete, preview-only, with the recorded failure code and time),
+// so the mounted kickstart notice and the share preview report the partial
+// state. The store's own decisions keep using readCapture, which serves the
+// active authority's certificate.
 func (s *Store) GetSessionContentCapture(ctx context.Context, id ingest.SessionID) (ingest.SessionContentCapture, bool, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return ingest.SessionContentCapture{}, false, err
 	}
 	defer s.pool.Put(conn)
+	pointer, err := readLatestAttemptPointerOnConn(conn, schema.SessionID(id))
+	if err != nil {
+		return ingest.SessionContentCapture{}, false, err
+	}
+	if pointer.found() {
+		capture, err := latestAttemptCapture(id, pointer)
+		if err != nil {
+			return ingest.SessionContentCapture{}, false, err
+		}
+		return capture, true, nil
+	}
 	return readCapture(conn, id)
 }
 
@@ -155,7 +173,7 @@ type contentManifest struct {
 
 func readManifest(conn *sqlite.Conn, e schema.SessionEntry) (m contentManifest, err error) {
 	found := false
-	err = sqlitex.ExecuteTransient(conn, `SELECT full_byte_length,full_sha256,preview_byte_length,preview_sha256,preview_is_full,chunk_count FROM session_entry_full_content WHERE session_id=? AND entry_index=?`, &sqlitex.ExecOptions{Args: []any{string(e.SessionID), e.EntryIndex}, ResultFunc: func(st *sqlite.Stmt) error {
+	err = sqlitex.Execute(conn, `SELECT full_byte_length,full_sha256,preview_byte_length,preview_sha256,preview_is_full,chunk_count FROM session_entry_full_content WHERE session_id=? AND entry_index=?`, &sqlitex.ExecOptions{Args: []any{string(e.SessionID), e.EntryIndex}, ResultFunc: func(st *sqlite.Stmt) error {
 		found = true
 		m = contentManifest{st.ColumnInt(0), st.ColumnText(1), st.ColumnInt(2), st.ColumnText(3), st.ColumnInt(4) == 1, st.ColumnInt(5)}
 		return nil
@@ -166,8 +184,13 @@ func readManifest(conn *sqlite.Conn, e schema.SessionEntry) (m contentManifest, 
 	if (e.ContentPreview != nil) != found {
 		return m, contentIntegrityError()
 	}
-	if found && (m.previewLength != len(*e.ContentPreview) || m.previewHash != contentSHA(*e.ContentPreview) || m.chunks != (m.length+fullContentChunkBytes-1)/fullContentChunkBytes || m.previewFull != (m.length == m.previewLength)) {
-		return m, contentIntegrityError()
+	if found {
+		previewMismatch := m.previewLength != len(*e.ContentPreview) || m.previewHash != contentSHA(*e.ContentPreview)
+		chunkMismatch := m.chunks != (m.length+fullContentChunkBytes-1)/fullContentChunkBytes
+		fullMismatch := m.previewFull != (m.length == m.previewLength)
+		if previewMismatch || chunkMismatch || fullMismatch {
+			return m, contentIntegrityError()
+		}
 	}
 	return m, nil
 }
@@ -184,12 +207,14 @@ func hydrateContent(ctx context.Context, conn *sqlite.Conn, e *schema.SessionEnt
 	}
 	var b strings.Builder
 	count := 0
-	err = sqlitex.ExecuteTransient(conn, `SELECT chunk_index,byte_offset,byte_length,chunk_sha256,data FROM session_entry_full_content_chunks WHERE session_id=? AND entry_index=? ORDER BY chunk_index`, &sqlitex.ExecOptions{Args: []any{string(e.SessionID), e.EntryIndex}, ResultFunc: func(st *sqlite.Stmt) error {
+	err = sqlitex.Execute(conn, `SELECT chunk_index,byte_offset,byte_length,chunk_sha256,data FROM session_entry_full_content_chunks WHERE session_id=? AND entry_index=? ORDER BY chunk_index`, &sqlitex.ExecOptions{Args: []any{string(e.SessionID), e.EntryIndex}, ResultFunc: func(st *sqlite.Stmt) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		n := st.ColumnLen(4)
-		if n > fullContentChunkBytes || n != min(fullContentChunkBytes, m.length-b.Len()) || st.ColumnInt(0) != count || st.ColumnInt(1) != b.Len() || st.ColumnInt(2) != n {
+		invalidLength := n > fullContentChunkBytes || n != min(fullContentChunkBytes, m.length-b.Len()) || st.ColumnInt(2) != n
+		invalidPosition := st.ColumnInt(0) != count || st.ColumnInt(1) != b.Len()
+		if invalidLength || invalidPosition {
 			return contentIntegrityError()
 		}
 		data := make([]byte, n)
@@ -205,7 +230,9 @@ func hydrateContent(ctx context.Context, conn *sqlite.Conn, e *schema.SessionEnt
 		return err
 	}
 	text := b.String()
-	if count != m.chunks || len(text) != m.length || contentSHA(text) != m.hash || !utf8.ValidString(text) || contentPreview(text) != *e.ContentPreview {
+	invalidShape := count != m.chunks || len(text) != m.length
+	invalidText := contentSHA(text) != m.hash || !utf8.ValidString(text) || contentPreview(text) != *e.ContentPreview
+	if invalidShape || invalidText {
 		return contentIntegrityError()
 	}
 	e.ContentPreview = &text
@@ -225,7 +252,15 @@ func verifyCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.S
 	}
 	entries, rows := 0, 0
 	var evidenceEntries []schema.SessionEntry
-	err := sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
+	shimmed, shimErr := shimmedOnConn(conn, string(id))
+	if shimErr != nil {
+		return shimErr
+	}
+	if shimmed {
+		_, err := verifyShimCaptureProjection(ctx, conn, id, c)
+		return err
+	}
+	err := sqlitex.Execute(conn, sqlListEntries, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -269,7 +304,7 @@ func verifyCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.S
 		// incomplete_new generation can never back a publishable full
 		// capture, even with zero carriers; full reads refuse it as forged.
 		var completeness string
-		if err := sqlitex.ExecuteTransient(conn, `SELECT completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		if err := sqlitex.Execute(conn, `SELECT completeness FROM session_projection_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(id), *active},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				completeness = stmt.ColumnText(0)
@@ -293,6 +328,89 @@ func verifyCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.S
 }
 func verifyStoredContent(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionContentCapture) error {
 	return verifyCaptureProjection(ctx, conn, id, c, true)
+}
+
+// verifyShimCaptureProjection verifies a harmonized session's full capture
+// without touching the retired mirror or chunks: every mapped body proves
+// its stored digest, and the full-capture hash recomputes over the decoded
+// active main entries — the write-time domain — against the capture row. It
+// returns the verified full entries for callers that keep reading.
+func verifyShimCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionContentCapture) ([]schema.SessionEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	records, err := shimBodyRecordsOnConn(conn, string(id), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyShimRecords(records); err != nil {
+		return nil, err
+	}
+	h := sha256.New()
+	enc := json.NewEncoder(h)
+	if err := enc.Encode("peasant.full_content.v1"); err != nil {
+		return nil, err
+	}
+	entries, rows := 0, 0
+	var evidenceEntries []schema.SessionEntry
+	shaped := make([]schema.SessionEntry, 0, len(records))
+	for i := range records {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		e := legacyShape(records[i], false)
+		if e.Extra != nil {
+			evidenceEntries = append(evidenceEntries, e)
+		}
+		p := sessionEntriesHashEntryFromEntry(&e)
+		p.ContentPreview = hashString(e.ContentPreview)
+		p.ToolInput = hashString(e.ToolInput)
+		p.ToolOutput = hashString(e.ToolOutput)
+		entries++
+		if e.ContentPreview != nil {
+			rows++
+		}
+		if err := enc.Encode(p); err != nil {
+			return nil, err
+		}
+		shaped = append(shaped, e)
+	}
+	if entries != c.EntryCount || rows != c.ContentRowCount || hex.EncodeToString(h.Sum(nil)) != c.FullCaptureSHA256 {
+		return nil, contentIntegrityError()
+	}
+	active, err := readActiveGenerationOnConn(conn, id)
+	if err != nil {
+		return nil, err
+	}
+	if active != nil {
+		var completeness string
+		if err := sqlitex.Execute(conn, `SELECT completeness FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+			Args: []any{string(id), *active},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				completeness = stmt.ColumnText(0)
+				return nil
+			},
+		}); err != nil {
+			return nil, err
+		}
+		if completeness == string(indexformat.GenerationCompletenessIncompleteNew) && PublishableWithOmissions(c) {
+			return nil, fmt.Errorf("store full content read: session %s generation %s is incomplete_new but the stored capture claims full authority; no complete transcript was returned; re-index the complete native source for a certified capture", id, *active)
+		}
+		snapshot, err := buildReadSnapshotOnConn(conn, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, section := range snapshot.Earlier {
+			evidenceEntries = append(evidenceEntries, section.Content.Entries...)
+		}
+	}
+	if err := validateUnknownCapture(evidenceEntries, c.Status, c.FailureCode); err != nil {
+		return nil, err
+	}
+	for i := range shaped {
+		shaped[i] = mirrorShape(records[i], false)
+	}
+	return shaped, nil
 }
 
 func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opts ingest.SessionEntryReadOptions) (page ingest.SessionEntryReadPage, err error) {
@@ -343,12 +461,43 @@ func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opt
 		// record's place, so it is read whole here. Every other incompleteness
 		// is refused exactly as before.
 		if !found || !PublishableWithOmissions(c) {
-			return page, fmt.Errorf("store full content read: %w; run harvest index --force with retained artifacts before viewing, exporting or publishing full content", ErrContentCaptureIncomplete)
+			return page, fmt.Errorf("store full content read: %w; run harvest index --force with stored artifacts before viewing, exporting or publishing full content", ErrContentCaptureIncomplete)
+		}
+		shimmed, shimErr := shimmedOnConn(conn, string(id))
+		if shimErr != nil {
+			return page, shimErr
+		}
+		if shimmed {
+			verified, verifyErr := verifyShimCaptureProjection(ctx, conn, id, c)
+			if verifyErr != nil {
+				return page, verifyErr
+			}
+			entries, next, bytesRead := shimContentPage(verified, opts.FromIndex, opts.Limit, opts.SoftMaxBytes)
+			page.Entries = entries
+			page.BytesRead = bytesRead
+			if next >= 0 {
+				page.NextIndex = &next
+			}
+			return page, nil
 		}
 		// Validate even a standalone nonzero cursor: callers need not have read
 		// an earlier page, and persisted semantic columns may have been damaged.
 		if err := verifyCaptureProjection(ctx, conn, id, c, false); err != nil {
 			return page, err
+		}
+	}
+	// Preview pages for harmonized sessions serve the same partition-0
+	// body rows through the routing shim the bounded readers use: the
+	// mirror holds no rows once the writer goes harmonized, so paging the
+	// mirror would serve nothing. The cursor contract matches the mirror
+	// pager (index cursor, entry limit, byte budget).
+	if mode == ingest.SessionEntryReadPreview {
+		shimmed, shimErr := shimmedOnConn(conn, string(id))
+		if shimErr != nil {
+			return page, shimErr
+		}
+		if shimmed {
+			return shimPreviewPage(conn, id, opts, page)
 		}
 	}
 	result, err := readContentPageOnConn(ctx, conn, id, opts)
@@ -453,7 +602,7 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 		if ctx.Err() != nil {
 			cause = ctx.Err()
 		}
-		return nil, capture, fmt.Errorf("store complete content read: verification or hydration failed; no complete transcript returned: %w; retry or run harvest index --force from retained artifacts to repair", cause)
+		return nil, capture, fmt.Errorf("store complete content read: verification or hydration failed; no complete transcript returned: %w; retry or run harvest index --force from stored artifacts to repair", cause)
 	}
 	if softMaxBytes < 0 {
 		return fail(fmt.Errorf("negative page budget; use zero defaults or a positive override"))
@@ -468,8 +617,17 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 	}
 	// The omitted-record capture is read whole here too: it carries the same
 	// full-capture proof, and its placeholders are entries like any other.
-	if !found || !PublishableWithOmissions(capture) || capture.FullCaptureSHA256 == "" || capture.SessionID != id {
+	invalidAuthority := !found || !PublishableWithOmissions(capture)
+	invalidCaptureProof := capture.FullCaptureSHA256 == "" || capture.SessionID != id
+	if invalidAuthority || invalidCaptureProof {
 		return fail(ErrContentCaptureIncomplete)
+	}
+	shimmed, shimErr := shimmedOnConn(conn, string(id))
+	if shimErr != nil {
+		return fail(shimErr)
+	}
+	if shimmed {
+		return loadShimFullSessionEntries(ctx, conn, id, capture, softMaxBytes, fail)
 	}
 	if err := verifyCaptureProjection(ctx, conn, id, capture, false); err != nil {
 		return fail(err)
@@ -494,6 +652,88 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 		}
 		from = *page.NextIndex
 	}
+}
+
+// shimPreviewPage serves one bounded preview page for a harmonized session
+// from its partition-0 body rows: the mirror holds no rows for such
+// sessions, so without this branch available reads would serve nothing for
+// valid incomplete authority. Entries shape through the shared shim exactly
+// as the bounded mirror readers shape them, and the cursor advances under
+// the same contract as the mirror pager. The caller's capture rides along
+// on the returned page.
+func shimPreviewPage(conn *sqlite.Conn, id ingest.SessionID, opts ingest.SessionEntryReadOptions, page ingest.SessionEntryReadPage) (ingest.SessionEntryReadPage, error) {
+	records, err := shimBodyRecordsOnConn(conn, string(id), nil, nil)
+	if err != nil {
+		return page, err
+	}
+	bounded, err := shimBoundedOnConn(conn, string(id))
+	if err != nil {
+		return page, err
+	}
+	entries, err := shimListEntries(records, bounded)
+	if err != nil {
+		return page, err
+	}
+	paged, next, bytesRead := shimContentPage(entries, opts.FromIndex, opts.Limit, opts.SoftMaxBytes)
+	page.Entries = paged
+	page.BytesRead = bytesRead
+	if next >= 0 {
+		page.NextIndex = &next
+	}
+	return page, nil
+}
+
+// loadShimFullSessionEntries serves verified full body rows with the same
+// cursor contract as the mirror pager: entries slice by index cursor and
+// byte budget, and the cursor refuses to stall or run past the capture's
+// entry count.
+func loadShimFullSessionEntries(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, capture ingest.SessionContentCapture, softMaxBytes int64, fail func(cause error) ([]schema.SessionEntry, ingest.SessionContentCapture, error)) ([]schema.SessionEntry, ingest.SessionContentCapture, error) {
+	verified, err := verifyShimCaptureProjection(ctx, conn, id, capture)
+	if err != nil {
+		return fail(err)
+	}
+	var entries []schema.SessionEntry
+	for from := 0; ; {
+		if err := ctx.Err(); err != nil {
+			return fail(err)
+		}
+		page, next, _ := shimContentPage(verified, from, 100, contentPageBudget(from, softMaxBytes))
+		entries = append(entries, page...)
+		if next < 0 {
+			if len(entries) != capture.EntryCount {
+				return fail(contentIntegrityError())
+			}
+			return entries, capture, nil
+		}
+		if len(page) == 0 || next <= from {
+			return fail(fmt.Errorf("full content cursor did not advance"))
+		}
+		from = next
+	}
+}
+
+// shimContentPage slices verified full entries by the pager contract: at
+// most limit entries past the index cursor within the byte budget, with the
+// next cursor at the first unsliced entry, or -1 at the end.
+func shimContentPage(verified []schema.SessionEntry, from, limit int, softMaxBytes int64) (page []schema.SessionEntry, next int, bytesRead int64) {
+	next = -1
+	for _, e := range verified {
+		if e.EntryIndex < from {
+			continue
+		}
+		if len(page) >= limit {
+			next = e.EntryIndex
+			break
+		}
+		n := entryStringBytes(e)
+		if len(page) > 0 && bytesRead+n > softMaxBytes {
+			next = e.EntryIndex
+			break
+		}
+		page = append(page, e)
+		bytesRead += n
+	}
+	return page, next, bytesRead
 }
 
 // loadAvailableSessionEntriesOnConn returns the content that is actually
@@ -533,6 +773,87 @@ func loadAvailableSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, i
 		return nil, capture, fmt.Errorf("store available content read: stored retained evidence is corrupt; no preview was served; re-index the source with a position-aware adapter")
 	}
 	return entries, capture, nil
+}
+
+// loadLatestAttemptAvailableEntriesOnConn serves the latest attempt to an
+// available (mounted preview) read. It binds the read to the latest-attempt
+// generation's own rows, so the preview carries the newer bounded projection
+// and never the active authority's full content, and it synthesizes the
+// latest attempt's capture from the recorded pointer so PartialPreviewNeeded
+// and BoundedPreview are true.
+//
+// The capture is deliberately synthesized from the pointer, not read from
+// session_content_captures: that row is the active authority's certificate, and
+// reading it here would certify the preview with the full authority's state.
+// The internal authority read (readCapture) keeps serving the active authority
+// for the store's own decisions.
+func loadLatestAttemptAvailableEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, pointer latestAttemptPointer) (entries []schema.SessionEntry, capture ingest.SessionContentCapture, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, capture, err
+	}
+	capture, err = latestAttemptCapture(id, pointer)
+	if err != nil {
+		return nil, capture, err
+	}
+	if err := latestAttemptGenerationRowExistsOnConn(conn, id, pointer.generationID); err != nil {
+		return nil, capture, err
+	}
+	records, err := shimBodyRecordsForGenerationOnConn(conn, string(id), pointer.generationID, nil, nil)
+	if err != nil {
+		return nil, capture, err
+	}
+	bounded, err := shimBoundedOnConn(conn, string(id))
+	if err != nil {
+		return nil, capture, err
+	}
+	entries, err = shimListEntries(records, bounded)
+	if err != nil {
+		return nil, capture, fmt.Errorf("store latest-attempt available content read: shape the latest attempt's stored evidence for session %s: %w; no preview was served; re-index the source or repair the latest attempt", id, err)
+	}
+	return entries, capture, nil
+}
+
+// latestAttemptGenerationRowExistsOnConn refuses an available read whose
+// latest-attempt pointer names no stored generation row. Serving the empty
+// projection instead would draw a partial-flagged transcript with nothing in it,
+// which reads as an empty session rather than as a broken latest attempt.
+func latestAttemptGenerationRowExistsOnConn(conn *sqlite.Conn, id ingest.SessionID, generationID string) error {
+	found := false
+	if err := sqlitex.Execute(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(id), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			return nil
+		},
+	}); err != nil {
+		return fmt.Errorf("store latest-attempt available content read: locate latest-attempt generation %s for session %s: %w; no preview was served; repair or clear the latest-attempt pointer", generationID, id, err)
+	}
+	if !found {
+		return fmt.Errorf("store latest-attempt available content read: session %s records latest-attempt generation %s but no generation row exists; no preview was served; re-index the source to rebuild the latest attempt", id, generationID)
+	}
+	return nil
+}
+
+// latestAttemptCapture synthesizes the latest attempt's capture from
+// its recorded pointer: incomplete, preview-only, with the failure code and
+// message the latest-attempt commit recorded and the time the source was captured.
+// The failure code is parsed through its constructor, so a code this build
+// cannot name refuses instead of reading as "no failure".
+func latestAttemptCapture(id ingest.SessionID, pointer latestAttemptPointer) (ingest.SessionContentCapture, error) {
+	code, err := ingest.NewContentCaptureFailureCode(pointer.failureCode)
+	if err != nil {
+		return ingest.SessionContentCapture{}, fmt.Errorf("store latest-attempt available content read: the latest attempt for session %s records failure code %q, which this build cannot name; no preview was served; restore valid capture state or use a Peasant build that knows this code: %w", id, pointer.failureCode, err)
+	}
+	return ingest.SessionContentCapture{
+		SessionID:        id,
+		Status:           ingest.ContentCaptureIncomplete,
+		SourceAuthority:  ingest.ContentSourceNewIngest,
+		TranscriptOrigin: ingest.TranscriptOriginFile,
+		CaptureFormat:    ingest.ContentCaptureFormatPreviewOnly,
+		CapturedAtMs:     pointer.capturedAtMs,
+		FailureCode:      code,
+		FailureMessage:   pointer.failureMessage,
+	}, nil
 }
 
 func entryStringBytes(e schema.SessionEntry) int64 {

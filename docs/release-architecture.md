@@ -183,6 +183,7 @@ Homebrew style exceptions.
 | Package format | Target OS/arch | Producer | Validation job | Publish status | Constraints |
 |----------------|----------------|----------|----------------|----------------|-------------|
 | `.tar.gz` archives | Linux amd64/arm64, Darwin amd64/arm64 | Goreleaser `archives` | `release.yml` smoke for Linux amd64/arm64; macOS cask install on rc | GitHub Release | Names are frozen; binary is `peasant`; version injected by ldflags |
+| Windows `.zip` + bare `.exe` | Windows amd64 | Goreleaser `archives` with `format_overrides: [zip, binary]` for windows | `release.yml` `windows-smoke`: downloads both assets, verifies each against `checksums.txt`, asserts the zip payload, runs both binaries' `version`, and starts, probes, and stops the dashboard | GitHub Release | amd64 only (`windows/arm64` is ignored); the zip carries `LICENSE`, `README.md`, `THIRD_PARTY_NOTICES`; the bare `.exe` is what `peasant upgrade` replaces in place |
 | `.deb` | Ubuntu/Debian amd64/arm64 | Goreleaser `nfpms` | `release-validate.yml` deb matrix on Ubuntu 22.04/24.04 | GitHub Release | Empty `Depends`; static binary installed to `/usr/bin/peasant` |
 | `.rpm` | Fedora/openSUSE; **produced** amd64+arm64, **validated** amd64 | Goreleaser `nfpms` | `release-validate.yml` Fedora `dnf` and openSUSE `zypper modifyrepo --disable --all` followed by local `zypper --allow-unsigned-rpm` (amd64) | GitHub Release | Unsigned local rpm install in validation; artifact name `peasant_{version}_linux_{amd64\|arm64}.rpm` (goreleaser `file_name_template`, not the conventional `name-version-release.arch`) |
 | AUR `peasant-bin` | Arch Linux x86_64 | Goreleaser `aurs` | Offline `makepkg` with local release tarball and full checksum verification | Disabled for now via `skip_upload: "true"`; enable (`auto`) after AUR publishing is separately approved | Requires public repo and `AUR_KEY`; prereleases remain skipped with `auto` |
@@ -195,11 +196,13 @@ flowchart TD
   Tag[vX.Y.Z / vX.Y.Z-rcN tag] --> GR[Goreleaser]
   Tag --> FX[flake.nix source build]
   GR --> Tar[tar.gz archives]
+  GR --> Win[Windows zip + bare exe]
   GR --> Deb[deb]
   GR --> Rpm[rpm]
   GR --> Aur[AUR peasant-bin]
   GR --> Brew[Homebrew cask]
   Tar --> GH[GitHub Release]
+  Win --> GH
   Deb --> GH
   Rpm --> GH
   Aur --> Arch[Arch users]

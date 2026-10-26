@@ -10,14 +10,24 @@ const TranscriptContinuationReadBytes int64 = 8 << 20
 // SessionDetailDocumentCapBytes mirrors the wire contract's session_detail and
 // transcript document policy (schema sessionDetailRawPolicy and
 // transcriptRawPolicy, both unexported there). Peasant may not exceed it on any
-// served path, so it is stated ONCE here and every peasant-side check derives
-// from it rather than repeating the literal.
-const SessionDetailDocumentCapBytes int = 8 << 20
+// served path, so schema-bound checks derive from it rather than repeating the
+// literal. Callers may impose their own smaller budgets.
+const SessionDetailDocumentCapBytes int = 128 << 20
+
+// PushTranscriptDocumentCapBytes aligns the publication redaction output scan
+// with the contract document cap stated once above. It is an alias, not a
+// second literal, so the publication scan cannot drift from the served cap.
+const PushTranscriptDocumentCapBytes int = SessionDetailDocumentCapBytes
+
+// PushMetadataDocumentCapBytes mirrors schema's authoritative publish metadata
+// raw-document policy across mapping, redaction output and preflight input.
+// Like the transcript publication scan, it aliases the contract document cap
+// stated once above rather than repeating the value.
+const PushMetadataDocumentCapBytes int = SessionDetailDocumentCapBytes
 
 // ServedDetailDocumentMarginBytes is the headroom peasant keeps below the
-// contract cap. The publication path wraps the same payload in a transcript
-// envelope and then redacts it, and a redaction rewrites values in place and can
-// grow them; the margin absorbs both without a second cap.
+// contract cap for transcript-envelope overhead and redaction growth.
+// Publication checks redacted output against the same contract document cap.
 const ServedDetailDocumentMarginBytes int = 1 << 20
 
 // ServedDetailDocumentBudgetBytes is the encoded size a served session detail is

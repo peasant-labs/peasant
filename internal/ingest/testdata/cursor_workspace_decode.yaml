@@ -1,0 +1,66 @@
+# How a Cursor workspace folder name (an absolute path with every separator,
+# underscore and space written as "-", and no leading "-") resolves to the
+# session's project directory and name. dirs lists the directories that exist
+# ("/a/b" form; a ".git" entry marks a git work tree). A component that itself
+# starts with "-" shows up as "--" in the folder name. A decode that stops
+# short names a project only inside a git work tree (the tail is a branch or
+# worktree suffix); outside one, the workspace stands for itself rather than
+# being pinned on a parent folder. A shorter sibling directory ("-Users-alice"
+# beside "-Users-alice-polyrepo") must not stop the decode short. projectDir
+# "<root>/<workspace>" is the fallback. requiredNames pins the cases.
+requiredNames:
+  - full-match
+  - underscore-directory
+  - nothing-matches
+  - partial-inside-repo-keeps-the-repo
+  - partial-outside-repo-is-not-a-parent-folder
+  - dash-led-component-decodes
+  - dash-led-component-gone-is-not-a-parent-folder
+  - dash-led-component-inside-repo
+  - shorter-sibling-does-not-hide-the-path
+cases:
+  - name: full-match
+    workspace: Users-foo-Desktop-myrepo
+    dirs: [/Users, /Users/foo, /Users/foo/Desktop, /Users/foo/Desktop/myrepo]
+    projectDir: /Users/foo/Desktop/myrepo
+    projectName: myrepo
+  - name: underscore-directory
+    workspace: Users-foo-my-project
+    dirs: [/Users, /Users/foo, /Users/foo/my_project]
+    projectDir: /Users/foo/my_project
+    projectName: my_project
+  - name: nothing-matches
+    workspace: unknown-workspace
+    dirs: []
+    projectDir: <root>/unknown-workspace
+    projectName: unknown-workspace
+  - name: partial-inside-repo-keeps-the-repo
+    workspace: Users-foo-myrepo-feature-branch
+    dirs: [/Users, /Users/foo, /Users/foo/myrepo, /Users/foo/myrepo/.git]
+    projectDir: /Users/foo/myrepo
+    projectName: myrepo
+  - name: partial-outside-repo-is-not-a-parent-folder
+    workspace: Users-foo-Desktop-peasant
+    dirs: [/Users, /Users/foo, /Users/foo/Desktop]
+    projectDir: <root>/Users-foo-Desktop-peasant
+    projectName: Users-foo-Desktop-peasant
+  - name: dash-led-component-decodes
+    workspace: private-tmp-claude-501--Users-alice-polyrepo-scratchpad
+    dirs: [/private, /private/tmp, /private/tmp/claude-501, /private/tmp/claude-501/-Users-alice-polyrepo, /private/tmp/claude-501/-Users-alice-polyrepo/scratchpad]
+    projectDir: /private/tmp/claude-501/-Users-alice-polyrepo/scratchpad
+    projectName: scratchpad
+  - name: dash-led-component-gone-is-not-a-parent-folder
+    workspace: private-tmp-claude-501--Users-alice-polyrepo-scratchpad
+    dirs: [/private, /private/tmp, /private/tmp/claude-501]
+    projectDir: <root>/private-tmp-claude-501--Users-alice-polyrepo-scratchpad
+    projectName: private-tmp-claude-501--Users-alice-polyrepo-scratchpad
+  - name: dash-led-component-inside-repo
+    workspace: home-alice--work-ingest-api
+    dirs: [/home, /home/alice, /home/alice/-work, /home/alice/-work/ingest-api, /home/alice/-work/ingest-api/.git]
+    projectDir: /home/alice/-work/ingest-api
+    projectName: ingest-api
+  - name: shorter-sibling-does-not-hide-the-path
+    workspace: private-tmp-claude-501--Users-alice-polyrepo-scratchpad
+    dirs: [/private, /private/tmp, /private/tmp/claude-501, /private/tmp/claude-501/-Users-alice, /private/tmp/claude-501/-Users-alice-polyrepo, /private/tmp/claude-501/-Users-alice-polyrepo/scratchpad]
+    projectDir: /private/tmp/claude-501/-Users-alice-polyrepo/scratchpad
+    projectName: scratchpad

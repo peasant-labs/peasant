@@ -1,0 +1,12 @@
+# Superseded-generation reclaim identifiers. The reclaim reads the active
+# generation and the pending intent under the exclusive per-session lock, then
+# deletes every other generation's rows in one transaction and removes its
+# directory through the ownership-verified cleanup path. The active generation
+# and any intent-owned generation are never touched.
+session:
+  id: "aaaa1111-1111-4111-8111-111111111111"
+  harness: claude-code
+generation:
+  superseded_id: gen_reclaim_superseded
+  active_id: gen_reclaim_active
+  pending_id: gen_reclaim_pending

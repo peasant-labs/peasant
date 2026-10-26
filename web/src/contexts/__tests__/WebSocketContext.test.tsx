@@ -292,6 +292,35 @@ describe('WebSocketContext store keying', () => {
     expect(rendered).toEqual(payload);
   });
 
+  it('asks the server again for a channel the page holds when the page refreshes it', async () => {
+    let refresh: () => void = () => undefined;
+    function RefreshingConsumer() {
+      const channel = useChannel(mkSub.sessionDetail('abc'));
+      refresh = channel.refresh;
+      return null;
+    }
+    render(
+      <WebSocketProvider>
+        <RefreshingConsumer />
+      </WebSocketProvider>,
+    );
+    const ws = latestInstance();
+    await act(async () => {
+      ws.simulateOpen();
+    });
+    const subscribes = () => ws.sent.map((raw) => JSON.parse(raw)).filter((msg) => msg.type === 'subscribe');
+    const before = subscribes().length;
+
+    await act(async () => {
+      refresh();
+    });
+
+    // One more subscribe for the same channel: the server answers it with a
+    // fresh snapshot and keeps a single subscription.
+    expect(subscribes()).toHaveLength(before + 1);
+    expect(subscribes().at(-1)).toEqual({ type: 'subscribe', channels: [mkSub.sessionDetail('abc')] });
+  });
+
   it('does NOT deliver a session_detail message for session "abc" to a listener for session "xyz"', async () => {
     render(
       <WebSocketProvider>

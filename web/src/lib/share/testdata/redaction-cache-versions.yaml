@@ -1,0 +1,31 @@
+requiredNames:
+  - current-success
+  - grown-session
+  - wizard-success-is-not-popup-success
+  - popup-success-is-not-wizard-success
+  - failure-survives-growth
+cases:
+  - name: current-success
+    initialStatus: success
+    cachedVersion: '12'
+    targetVersion: '12'
+    scans: 0
+  - name: grown-session
+    initialStatus: success
+    cachedVersion: '12'
+    targetVersion: '20'
+    scans: 1
+  - name: wizard-success-is-not-popup-success
+    initialStatus: success
+    targetVersion: '12'
+    scans: 1
+  - name: popup-success-is-not-wizard-success
+    initialStatus: success
+    cachedVersion: '12'
+    scans: 1
+  - name: failure-survives-growth
+    initialStatus: failure
+    cachedVersion: '12'
+    targetVersion: '20'
+    scans: 0
+    rescan: true

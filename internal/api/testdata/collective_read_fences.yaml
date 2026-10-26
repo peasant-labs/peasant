@@ -1,0 +1,4 @@
+requiredNames: [mounted-fetch-older-after-newer-failure, mounted-fetch-older-while-newer-inflight]
+cases:
+  - {name: mounted-fetch-older-after-newer-failure, failFirst: true}
+  - {name: mounted-fetch-older-while-newer-inflight, failFirst: false}

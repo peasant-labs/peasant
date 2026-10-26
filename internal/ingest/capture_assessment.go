@@ -153,7 +153,7 @@ func (a *CaptureAssessment) ContentCapture(authority ContentSourceAuthority, ori
 		}, nil
 	case CaptureCoveragePreview:
 		// Preview-only activation is reported as a preview operation, never as
-		// a successful full or retained capture. The store's absent-value
+		// a successful full or stored capture. The store's absent-value
 		// defaults must never promote this to full: the format is explicit.
 		// A preview with no recorded failure keeps the empty code: it is
 		// first-discovery incompleteness (for example native incomplete_new),
@@ -408,9 +408,19 @@ func assessV2Capture(facts CaptureFacts, v2 indexformat.V2) (CaptureAssessment, 
 		}, nil
 	}
 	if facts.Unaccounted || !facts.Authoritative {
+		// An unaccounted omission whose own source recorded the omission is the
+		// one tuple that stores the omission code rather than the strict
+		// refusal: its message is accurate, and the same fact tuple on an
+		// existing managed capture keeps the accounted-unknown distinction the
+		// code exists for. Every other unaccounted or non-authoritative shape,
+		// and every incomplete_new path above, is untouched.
+		code := ContentCaptureStrictRefused
+		if facts.Unaccounted && facts.SourceOmitted && !hasOmissions {
+			code = ContentCaptureSourceRecordsOmitted
+		}
 		return CaptureAssessment{
 			coverage: CaptureCoveragePreview, policy: facts.Policy,
-			partial: true, failure: ContentCaptureStrictRefused, retained: counts,
+			partial: true, failure: code, retained: counts,
 		}, nil
 	}
 	if facts.SourceOmitted && !hasOmissions {

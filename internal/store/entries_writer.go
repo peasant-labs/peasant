@@ -13,10 +13,10 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"golang.org/x/crypto/sha3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // SQL constants for session_entries write path.
@@ -37,6 +37,13 @@ const (
 ) VALUES `
 
 	sqlSessionEntriesExist = `SELECT 1 FROM session_entries WHERE session_id = ? LIMIT 1`
+
+	// sqlShimEntriesExist covers the harmonized representation: an active
+	// generation's main-partition mapping rows. The mirror holds no rows for
+	// converted sessions, so existence checks both homes.
+	sqlShimEntriesExist = `SELECT 1 FROM session_generation_entries m
+JOIN sessions s ON s.session_id = m.session_id
+WHERE m.session_id = ? AND m.generation_id = s.active_generation_id AND m.partition_id = 0 LIMIT 1`
 
 	// sqlSelectTargetEntriesForSession reads the entry-annotation attachments a
 	// re-index has to carry across its DELETE. Ordered so a restore is
@@ -80,13 +87,24 @@ ORDER BY entry_index`
 	sqlSelectSessionEntriesHash = `SELECT session_entries_hash FROM sessions WHERE session_id = ?`
 
 	sqlSetSessionEntriesHash = `UPDATE sessions SET session_entries_hash = ? WHERE session_id = ?`
+
+	// The durable full-content rows are written one row per entry and one row
+	// per 64 KiB chunk. The statements are prepared once per transaction in
+	// sessionEntryWriteStatements and re-bound per row, so a large session does
+	// not re-prepare the insert for every row.
+	sqlInsertSessionEntryFullContent      = `INSERT INTO session_entry_full_content VALUES(?,?,?,?,?,?,?,?,?)`
+	sqlInsertSessionEntryFullContentChunk = `INSERT INTO session_entry_full_content_chunks VALUES(?,?,?,?,?,?,?)`
 )
 
 type sessionEntryWriteOutcome struct {
-	entriesCount       int
-	skipped            bool
-	sessionEntriesHash string
-	stats              ingest.SessionEntryWriteStats
+	entriesCount int
+	skipped      bool
+	// latestAttemptPreview reports that the write retained the latest preview
+	// attempt instead of replacing the active authority. Counts stay zero and
+	// no active-authority statement ran.
+	latestAttemptPreview bool
+	sessionEntriesHash   string
+	stats                ingest.SessionEntryWriteStats
 }
 
 // IndexSessionEntries atomically replaces all session_entries for a session.
@@ -151,7 +169,9 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 	// here, roll back the entire outer transaction, then propagate the panic.
 	defer endFn(&txnErr)
 	stmts := newSessionEntryWriteStatements(conn)
-	defer func() { txnErr = errors.Join(txnErr, stmts.Close()) }()
+	defer func() {
+		txnErr = errors.Join(txnErr, stmts.Close())
+	}()
 
 	for i := range writes {
 		if results[i].Err != nil {
@@ -170,6 +190,12 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 		}
 		results[i].Written = true
 		results[i].Skipped = outcome.skipped
+		results[i].LatestAttemptPreview = outcome.latestAttemptPreview
+	}
+	if txnErr == nil {
+		if err := reportHarmonizedWriterSeam(harmonizedSeamAtCommit); err != nil {
+			txnErr = err
+		}
 	}
 
 	return results
@@ -180,12 +206,14 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
 		return sessionEntryWriteOutcome{}, fmt.Errorf("store: start session entry savepoint for %s: %w", write.SessionID, err), true
 	}
-	// A forced retained-content repair replaces the projection, but still uses
+	// A forced stored-content repair replaces the projection, but still uses
 	// the same proven metadata/index revision as a content-only backfill. Resolve
 	// it inside this savepoint before replacement can invalidate the old proof.
 	// An explicit rebuild carries the same repair semantics as an ordinary
 	// replace when it certifies full snapshot authority.
-	if (write.Mode == ingest.SessionEntryWriteReplaceAll || write.Mode == ingest.SessionEntryWriteExplicitRebuild || write.Mode == "") && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
+	replacementWrite := write.Mode == ingest.SessionEntryWriteReplaceAll || write.Mode == ingest.SessionEntryWriteExplicitRebuild || write.Mode == ""
+	needsCaptureProof := write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot
+	if replacementWrite && needsCaptureProof {
 		var err error
 		write.CaptureRevision, err = contentBackfillPublicationRevision(conn, write.SessionID)
 		if err != nil {
@@ -197,6 +225,22 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
+	// The authoritative latest-attempt decision runs here, BEFORE the publication
+	// capture is persisted and before any format-change delete: a latest-attempt
+	// write must not touch the active authority's representation, capture, or
+	// stamps. The decision re-runs the identity checks and never enters repair.
+	retainLatestAttempt, err := latestAttemptEligibleOnConn(conn, write)
+	if err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
+	if retainLatestAttempt {
+		outcome, err, fatal := s.retainLatestAttemptWriteOnConn(conn, write, savepointName)
+		if err != nil {
+			return outcome, err, fatal
+		}
+		return outcome, nil, false
 	}
 	// Record the certified publication-capture agreement in this same
 	// transaction, BEFORE the binding stamp: the revision it allocates (or
@@ -219,32 +263,75 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 			return sessionEntryWriteOutcome{}, rollbackErr, fatal
 		}
 	}
-	entries, err := format.Write(ctx, conn, write.SessionID, write.Result)
-	if err == nil {
-		for _, entry := range entries {
-			if entry.SessionID != write.SessionID {
-				err = fmt.Errorf("store: format %d projected entry for session %s into replacement for %s; no replacement was committed; correct the format projection", write.IndexVersion, entry.SessionID, write.SessionID)
-				break
-			}
+	var entries []schema.SessionEntry
+	var outcome sessionEntryWriteOutcome
+	var batchPrepared *preparedHarmonized
+	skippedWrite := false
+	if _, isHarmonized := asV2Value(write.Result); isHarmonized {
+		var skip harmonizedBatchSkip
+		var err error
+		entries, batchPrepared, skip, err = s.harmonizedBatchPrecommit(conn, write, false)
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
+		if !skip.commit {
+			// An idempotent retry: the identical candidate is already
+			// installed, so the commit advances only the bookkeeping below
+			// (the same stamps an ordinary commit records) and reports the
+			// write skipped, exactly as the V1 hash-skip does.
+			outcome = skip.outcome
+			skippedWrite = true
 		}
 	}
-	if err != nil {
-		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
-		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	if !skippedWrite {
+		var err error
+		entries, err = format.Write(ctx, conn, write.SessionID, write.Result)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.SessionID != write.SessionID {
+					err = fmt.Errorf("store: format %d projected entry for session %s into replacement for %s; no replacement was committed; correct the format projection", write.IndexVersion, entry.SessionID, write.SessionID)
+					break
+				}
+			}
+		}
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
 	}
 
 	if err := checkPublicationIndexRevision(conn, write.SessionID, write.CaptureRevision); err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return sessionEntryWriteOutcome{}, rollbackErr, fatal
 	}
-	outcome, err := writeSessionContentOnConn(ctx, conn, write, entries, stmts)
-	outcome.entriesCount = len(entries)
-	if err != nil {
-		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
-		return outcome, rollbackErr, fatal
+	if skippedWrite {
+		// outcome already carries the skip's hash and stats; the shared
+		// stamps below advance the revision, the proof, and the binding.
+	} else if v2, isHarmonized := asV2Value(write.Result); isHarmonized {
+		var err error
+		outcome, err = writeHarmonizedContentOnConn(ctx, conn, write, entries, v2.Generation)
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
+		if batchPrepared != nil {
+			if _, err := upsertCapturedStatsOnConn(conn, capturedStatsForHarnessWrite(write.SessionID, batchPrepared.generation.Metadata.Stats, seedJSONForStats(batchPrepared.generation.Metadata.Stats), write.IndexedAtMs)); err != nil {
+				rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+				return outcome, rollbackErr, fatal
+			}
+		}
+	} else {
+		var err error
+		outcome, err = writeSessionContentOnConn(ctx, conn, write, entries, stmts)
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
 	}
+	outcome.entriesCount = len(entries)
 	if write.Mode != ingest.SessionEntryWriteContentBackfill {
-		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET index_format_version = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{write.IndexVersion, string(write.SessionID)}}); err != nil {
+		if err := sqlitex.Execute(conn, `UPDATE sessions SET index_format_version = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{write.IndexVersion, string(write.SessionID)}}); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
@@ -255,7 +342,7 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 		// input proof and the settled index be recorded in the same commit.
 		// The WHERE clause keeps a stored identity untouched even though the
 		// captured-state check already refused a contradicting claim.
-		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ? AND artifact_hash IS NULL`, &sqlitex.ExecOptions{Args: []any{*write.ArtifactIdentity, string(write.SessionID)}}); err != nil {
+		if err := sqlitex.Execute(conn, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ? AND artifact_hash IS NULL`, &sqlitex.ExecOptions{Args: []any{*write.ArtifactIdentity, string(write.SessionID)}}); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
@@ -265,12 +352,17 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: update index state for %s: %w", write.SessionID, err), write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
+	} else if batchPrepared != nil && write.IndexerVersion == 0 {
+		if err := setSessionEntriesHashOnConn(conn, string(write.SessionID), outcome.sessionEntriesHash); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return outcome, rollbackErr, fatal
+		}
 	} else if conversion == nil && write.Mode != ingest.SessionEntryWriteContentBackfill && write.Mode != ingest.SessionEntryWriteFormatConversion {
 		// An entry-only replacement keeps historical parser stamps but cannot
 		// certify the input, even when the canonical rows happen to match. A
 		// format conversion is excluded because no parser ran: it proved the
 		// canonical rows unchanged, so the input proof still describes them.
-		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET indexed_input_hash = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(write.SessionID)}}); err != nil {
+		if err := sqlitex.Execute(conn, `UPDATE sessions SET indexed_input_hash = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(write.SessionID)}}); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
@@ -280,6 +372,11 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
+	}
+	if err := reportHarmonizedWriterSeam(harmonizedSeamMidActivationBatch); err != nil {
+		// Simulated process loss aborts the outer transaction. Ordinary
+		// validation refusals above still isolate their session savepoint.
+		return sessionEntryWriteOutcome{}, err, true
 	}
 	if err := sqlitex.ExecuteTransient(conn, "RELEASE SAVEPOINT "+savepointName, nil); err != nil {
 		return outcome, fmt.Errorf("store: release session entry savepoint for %s: %w", write.SessionID, err), true
@@ -314,7 +411,13 @@ func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, en
 		if !ingest.IsPiCarrier(entry) {
 			continue
 		}
-		if _, pi, err := ingest.DecodePiExtra(entry.Extra); err != nil || !pi || entry.Role != schema.RoleSystem || entry.EntryType != schema.EntryTypeSystem || entry.ContentPreview != nil || entry.ToolInput != nil || entry.ToolOutput != nil || entry.TokensIn != nil || entry.TokensOut != nil {
+		_, pi, err := ingest.DecodePiExtra(entry.Extra)
+		invalidDecode := err != nil || !pi
+		invalidIdentity := entry.Role != schema.RoleSystem || entry.EntryType != schema.EntryTypeSystem
+		invalidCarrier := invalidDecode || invalidIdentity
+		searchableContent := entry.ContentPreview != nil || entry.ToolInput != nil || entry.ToolOutput != nil
+		countedTokens := entry.TokensIn != nil || entry.TokensOut != nil
+		if invalidCarrier || searchableContent || countedTokens {
 			return sessionEntryWriteOutcome{}, fmt.Errorf("store carrier validation failed during index replacement: private Pi rows must have system role/type and no searchable content or token counts (decode: %v); existing entries were not replaced; repair the Pi indexer and re-index", err)
 		}
 	}
@@ -406,7 +509,7 @@ func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, en
 		{"session_entries_ext", sqlDeleteSessionEntriesExt},
 		{"session_entries", sqlDeleteSessionEntries},
 	} {
-		if err = sqlitex.ExecuteTransient(conn, q.sql, &sqlitex.ExecOptions{
+		if err = sqlitex.Execute(conn, q.sql, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID)},
 		}); err != nil {
 			return outcome, fmt.Errorf("store: delete %s for %s: %w — "+
@@ -531,7 +634,7 @@ func sessionEntryDerivedTablesMatch(conn *sqlite.Conn, sessionID string, entries
 func readStoredSessionEntriesHash(conn *sqlite.Conn, sessionID string) (string, bool, error) {
 	var hash string
 	var hasHash bool
-	err := sqlitex.ExecuteTransient(conn, sqlSelectSessionEntriesHash, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, sqlSelectSessionEntriesHash, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnType(0) != sqlite.TypeNull {
@@ -548,7 +651,7 @@ func readStoredSessionEntriesHash(conn *sqlite.Conn, sessionID string) (string, 
 }
 
 func setSessionEntriesHashOnConn(conn *sqlite.Conn, sessionID string, hash string) error {
-	return sqlitex.ExecuteTransient(conn, sqlSetSessionEntriesHash, &sqlitex.ExecOptions{Args: []any{hash, sessionID}})
+	return sqlitex.Execute(conn, sqlSetSessionEntriesHash, &sqlitex.ExecOptions{Args: []any{hash, sessionID}})
 }
 
 type sessionEntriesHashDocument struct {
@@ -731,7 +834,7 @@ func entryAnnotationTargetSpansMatchEntries(conn *sqlite.Conn, sessionID string,
 
 func readStoredSessionEntries(conn *sqlite.Conn, sessionID string) ([]schema.SessionEntry, error) {
 	entries := []schema.SessionEntry(nil)
-	err := sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, sqlListEntries, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entries = append(entries, scanSessionEntry(stmt))
@@ -754,7 +857,7 @@ func sessionEntriesEqual(stored []schema.SessionEntry, entries []schema.SessionE
 
 func readStoredSessionEntryExtRows(conn *sqlite.Conn, sessionID string) ([]sessionEntryExtRow, error) {
 	rows := []sessionEntryExtRow(nil)
-	err := sqlitex.ExecuteTransient(conn, sqlListEntriesExt, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, sqlListEntriesExt, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			rows = append(rows, sessionEntryExtRow{
@@ -807,7 +910,7 @@ func expectedSessionEntryExtRows(entries []schema.SessionEntry) []sessionEntryEx
 
 func readStoredSessionCommandRows(conn *sqlite.Conn, sessionID string) ([]sessionCommandRow, error) {
 	rows := []sessionCommandRow(nil)
-	err := sqlitex.ExecuteTransient(conn, sqlSelectSessionCommandsForSession, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, sqlSelectSessionCommandsForSession, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			rows = append(rows, sessionCommandRow{
@@ -877,6 +980,14 @@ func nullableColumnInt(stmt *sqlite.Stmt, col int) *int {
 	return &v
 }
 
+func nullableColumnInt64(stmt *sqlite.Stmt, col int) *int64 {
+	if stmt.ColumnType(col) == sqlite.TypeNull {
+		return nil
+	}
+	v := stmt.ColumnInt64(col)
+	return &v
+}
+
 func nullableColumnFloat(stmt *sqlite.Stmt, col int) *float64 {
 	if stmt.ColumnType(col) == sqlite.TypeNull {
 		return nil
@@ -890,6 +1001,12 @@ type sessionEntryWriteStatements struct {
 	entryInsertStmts map[int]*sqlite.Stmt
 	extStmt          *sqlite.Stmt
 	commandStmt      *sqlite.Stmt
+	// fullContentStmt and fullContentChunkStmt back the per-entry durable prose
+	// rows. They are prepared once per transaction and re-bound per row: a
+	// large session writes one manifest row per entry plus one chunk row per
+	// 64 KiB, so re-preparing the statement for every row dominates the write.
+	fullContentStmt      *sqlite.Stmt
+	fullContentChunkStmt *sqlite.Stmt
 }
 
 func newSessionEntryWriteStatements(conn *sqlite.Conn) *sessionEntryWriteStatements {
@@ -921,6 +1038,18 @@ func (stmts *sessionEntryWriteStatements) Close() error {
 			err = errors.Join(err, fmt.Errorf("finalize session_commands insert statement: %w", closeErr))
 		}
 		stmts.commandStmt = nil
+	}
+	if stmts.fullContentStmt != nil {
+		if closeErr := stmts.fullContentStmt.Finalize(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("finalize session_entry_full_content insert statement: %w", closeErr))
+		}
+		stmts.fullContentStmt = nil
+	}
+	if stmts.fullContentChunkStmt != nil {
+		if closeErr := stmts.fullContentChunkStmt.Finalize(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("finalize session_entry_full_content_chunks insert statement: %w", closeErr))
+		}
+		stmts.fullContentChunkStmt = nil
 	}
 	return err
 }
@@ -958,6 +1087,37 @@ func (stmts *sessionEntryWriteStatements) SessionCommand() (*sqlite.Stmt, error)
 		return nil, err
 	}
 	stmts.commandStmt = stmt
+	return stmt, nil
+}
+
+// FullContent prepares the per-entry durable-prose manifest insert once per
+// transaction. A session writes one row per entry that carries content, so
+// re-preparing this statement per row is pure overhead on the serialized
+// writer.
+func (stmts *sessionEntryWriteStatements) FullContent() (*sqlite.Stmt, error) {
+	if stmts.fullContentStmt != nil {
+		return stmts.fullContentStmt, nil
+	}
+	stmt, _, err := stmts.conn.PrepareTransient(sqlInsertSessionEntryFullContent)
+	if err != nil {
+		return nil, err
+	}
+	stmts.fullContentStmt = stmt
+	return stmt, nil
+}
+
+// FullContentChunk prepares the durable-prose chunk insert once per
+// transaction. A large session writes many 64 KiB chunks, so this is the
+// hotter of the two full-content inserts.
+func (stmts *sessionEntryWriteStatements) FullContentChunk() (*sqlite.Stmt, error) {
+	if stmts.fullContentChunkStmt != nil {
+		return stmts.fullContentChunkStmt, nil
+	}
+	stmt, _, err := stmts.conn.PrepareTransient(sqlInsertSessionEntryFullContentChunk)
+	if err != nil {
+		return nil, err
+	}
+	stmts.fullContentChunkStmt = stmt
 	return stmt, nil
 }
 
@@ -999,6 +1159,17 @@ func insertSessionEntryChunk(stmts *sessionEntryWriteStatements, entries []schem
 		return fmt.Errorf("session_entry chunk [%d,%d]: %w", entries[0].EntryIndex, entries[len(entries)-1].EntryIndex, err)
 	}
 	return nil
+}
+
+// stepAndReset runs a reusable prepared statement once for the row currently
+// bound to it and returns the statement to its reusable state. Bind failures
+// surface from Step. Reset and ClearBindings always run, even after a failed
+// Step, so a later write in the same batch can safely reuse the statement.
+func stepAndReset(stmt *sqlite.Stmt) error {
+	_, stepErr := stmt.Step()
+	resetErr := stmt.Reset()
+	clearErr := stmt.ClearBindings()
+	return errors.Join(stepErr, resetErr, clearErr)
 }
 
 func buildSessionEntryInsertSQL(rowCount int) string {
@@ -1121,7 +1292,7 @@ type entryTargetAnchor struct {
 // session, so a re-index can put them back.
 func readEntryAnnotationTargets(conn *sqlite.Conn, sessionID string) ([]entryAnnotationTarget, error) {
 	var targets []entryAnnotationTarget
-	err := sqlitex.ExecuteTransient(conn, sqlSelectTargetEntriesForSession, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, sqlSelectTargetEntriesForSession, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			targets = append(targets, entryAnnotationTarget{
@@ -1157,7 +1328,7 @@ func readEntryAnnotationTargets(conn *sqlite.Conn, sessionID string) ([]entryAnn
 
 func readEntryAnnotationTargetSpans(conn *sqlite.Conn, sessionID string) ([]entryAnnotationTarget, error) {
 	var targets []entryAnnotationTarget
-	err := sqlitex.ExecuteTransient(conn, sqlSelectTargetEntrySpansForSession, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, sqlSelectTargetEntrySpansForSession, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			targets = append(targets, entryAnnotationTarget{
@@ -1172,7 +1343,24 @@ func readEntryAnnotationTargetSpans(conn *sqlite.Conn, sessionID string) ([]entr
 
 func readSessionEntryAnchors(conn *sqlite.Conn, sessionID string) (map[int]entryTargetAnchor, error) {
 	anchors := map[int]entryTargetAnchor{}
-	err := sqlitex.ExecuteTransient(conn, sqlSelectSessionEntryAnchors, &sqlitex.ExecOptions{
+	// Harmonized sessions anchor against the new main entries through the
+	// shim: the entry row's own entry_type, role, and part_type columns.
+	shimmed, err := shimmedOnConn(conn, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	query := sqlSelectSessionEntryAnchors
+	if shimmed {
+		query = `SELECT m.entry_index, b.entry_id, b.tool_call_id, b.entry_type, b.role, b.part_type, b.content_preview
+FROM session_generation_entries m
+JOIN session_entry_bodies b
+  ON b.session_id = m.session_id AND b.body_digest = m.body_digest
+JOIN sessions s ON s.session_id = m.session_id
+WHERE m.session_id = ?
+AND m.generation_id = s.active_generation_id AND m.partition_id = 0
+ORDER BY m.entry_index`
+	}
+	err = sqlitex.Execute(conn, query, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			anchor := entryTargetAnchor{
@@ -1335,9 +1523,10 @@ func anchorsShareKey(a, b entryTargetAnchor) bool {
 
 func insertEntryAnnotationTarget(conn *sqlite.Conn, sessionID string, target entryAnnotationTarget, start, end int, stats *ingest.SessionEntryWriteStats) error {
 	restoreStarted := time.Now()
-	if err := sqlitex.ExecuteTransient(conn, sqlInsertTargetEntry, &sqlitex.ExecOptions{
-		Args: []any{target.annotationID, sessionID, start, end},
-	}); err != nil {
+	// The restore re-attaches through the same guarded existence check as
+	// every other entry-target insert: a carried span whose start entry is
+	// gone refuses here instead of reattaching to nothing.
+	if err := insertAnnotationTargetEntryOnConn(conn, "restoreEntryAnnotationTargets", target.annotationID, sessionID, start, end); err != nil {
 		if stats != nil {
 			stats.AnnotationTargetRestoreTime += time.Since(restoreStarted)
 		}
@@ -1452,12 +1641,27 @@ func (s *Store) SessionEntriesExist(ctx context.Context, sessionID ingest.Sessio
 	}
 
 	var exists bool
-	err = sqlitex.ExecuteTransient(conn, sqlSessionEntriesExist, &sqlitex.ExecOptions{
-		Args:       []any{string(sessionID)},
-		ResultFunc: func(_ *sqlite.Stmt) error { exists = true; return nil },
+	err = sqlitex.Execute(conn, sqlSessionEntriesExist, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(_ *sqlite.Stmt) error {
+			exists = true
+			return nil
+		},
 	})
 	if err != nil {
 		return false, fmt.Errorf("store: check session_entries for %s: %w", sessionID, err)
+	}
+	if !exists {
+		err = sqlitex.Execute(conn, sqlShimEntriesExist, &sqlitex.ExecOptions{
+			Args: []any{string(sessionID)},
+			ResultFunc: func(_ *sqlite.Stmt) error {
+				exists = true
+				return nil
+			},
+		})
+		if err != nil {
+			return false, fmt.Errorf("store: check shim entries for %s: %w", sessionID, err)
+		}
 	}
 	return exists, nil
 }

@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 
@@ -39,6 +41,18 @@ func SaveAtomic(path string, cfg *Config) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("config save: marshal configuration for %q before atomic replacement: %w; no file was changed; correct the unsupported configuration value and retry", path, err)
+	}
+	return SaveAtomicYAML(path, data)
+}
+
+// SaveAtomicYAML validates a configuration document with Parse and atomically
+// replaces the file at path with it, byte for byte. It is SaveAtomic for a
+// caller that edits the document rather than the Config, so the keys the file
+// does not name stay unnamed and its comments survive. A document Parse
+// refuses changes nothing.
+func SaveAtomicYAML(path string, data []byte) error {
+	if path == "" {
+		return fmt.Errorf("config save: destination path is empty while preparing an atomic configuration replacement; no file was changed; pass the resolved --config or --config-dir path and retry")
 	}
 	if _, err := Parse(data); err != nil {
 		return fmt.Errorf("config save: validate serialized configuration for %q before atomic replacement: %w; no file was changed; correct the reported field and retry", path, err)
@@ -77,16 +91,7 @@ func SaveAtomic(path string, cfg *Config) error {
 	}
 	committed = true
 
-	if parent, err := os.Open(dir); err == nil {
-		if syncErr := parent.Sync(); syncErr != nil {
-			_ = parent.Close()
-			return fmt.Errorf("config save: sync destination directory %q after replacing %q: %w; the new file is present but crash durability is not confirmed; verify the file and retry the save", dir, path, syncErr)
-		}
-		if closeErr := parent.Close(); closeErr != nil {
-			return fmt.Errorf("config save: close destination directory %q after replacing %q: %w; the new file is present; verify it before continuing", dir, path, closeErr)
-		}
-	}
-	return nil
+	return syncSavedConfigDir(dir, path)
 }
 
 // SelectionMatcher compiles the persisted selection through the canonical
@@ -218,13 +223,15 @@ const (
 func (m PushMethod) String() string { return string(m) }
 
 // IsValid reports whether the PushMethod is a known value.
-func (m PushMethod) IsValid() bool {
-	switch m {
-	case PushMethodAll, PushMethodBySource, PushMethodIndividual:
-		return true
-	}
-	return false
-}
+func (m PushMethod) IsValid() bool { return slices.Contains(AllPushMethods, m) }
+
+// AllPushMethods are the push methods a stored configuration may carry.
+var AllPushMethods = []PushMethod{PushMethodAll, PushMethodBySource, PushMethodIndividual}
+
+// OfferedPushMethods are the push methods a user may choose. Individual is
+// accepted in a stored configuration but not offered: every push without
+// --source-harness refuses it, a git hook's push included.
+var OfferedPushMethods = []PushMethod{PushMethodAll, PushMethodBySource}
 
 // SharePreference records the user's chosen publication intent. It is a stored
 // preference only: peasant never publishes on its own, and kickstart in
@@ -249,12 +256,17 @@ func (p SharePreference) String() string { return string(p) }
 
 // IsValid reports whether the SharePreference is a known value. The empty value
 // is valid and denotes keep-local.
-func (p SharePreference) IsValid() bool {
-	switch p {
-	case SharePreferenceKeepLocal, SharePreferenceShareLater:
-		return true
-	}
-	return false
+func (p SharePreference) IsValid() bool { return slices.Contains(AllSharePreferences, p) }
+
+// AllSharePreferences is the closed set of publication preferences.
+var AllSharePreferences = []SharePreference{SharePreferenceKeepLocal, SharePreferenceShareLater}
+
+// AutoPublishIntended reports whether the user asked to publish automatically
+// and still plans to publish. Keep-local wins: an intent stored beside a
+// keep-local preference is not an intent, so the two never hold together
+// whichever of them was written last.
+func (p PushConfig) AutoPublishIntended() bool {
+	return p.AutoPublishIntent && p.SharePreference == SharePreferenceShareLater
 }
 
 // Visibility controls the default visibility for pushed transcripts.
@@ -393,6 +405,13 @@ type PushConfig struct {
 	// or intends to publish later. Chosen during kickstart. Empty is treated as
 	// keep-local. It is a stored preference only and never triggers a publish.
 	SharePreference SharePreference `yaml:"sharePreference,omitempty"`
+	// AutoPublishIntent records the "yes" answer to kickstart's "publish
+	// automatically?" question. It is an intent only: it installs no hook,
+	// saves no auto-publish rule, and publishes nothing. The rules in
+	// hooks.yaml decide what a push publishes. The intent lets the first
+	// publish offer auto-publish already ticked. It holds only beside
+	// SharePreferenceShareLater; see AutoPublishIntended.
+	AutoPublishIntent bool `yaml:"autoPublishIntent,omitempty"`
 	// License is the default content license a transcript's first publication
 	// carries (chosen during kickstart). An update of a transcript this machine
 	// has published to the village account keeps the license it has there;
@@ -432,13 +451,10 @@ const (
 func (t Theme) String() string { return string(t) }
 
 // IsValid reports whether the Theme is a known value.
-func (t Theme) IsValid() bool {
-	switch t {
-	case ThemeDark, ThemeLight:
-		return true
-	}
-	return false
-}
+func (t Theme) IsValid() bool { return slices.Contains(AllThemes, t) }
+
+// AllThemes is the closed set of terminal themes.
+var AllThemes = []Theme{ThemeDark, ThemeLight}
 
 // DisplayConfig controls terminal rendering preferences for the TUI.
 type DisplayConfig struct {
@@ -463,13 +479,10 @@ const (
 func (m SelectionMode) String() string { return string(m) }
 
 // IsValid reports whether the SelectionMode is a known value.
-func (m SelectionMode) IsValid() bool {
-	switch m {
-	case SelectionModeAll, SelectionModeSelected:
-		return true
-	}
-	return false
-}
+func (m SelectionMode) IsValid() bool { return slices.Contains(AllSelectionModes, m) }
+
+// AllSelectionModes is the closed set of selection modes.
+var AllSelectionModes = []SelectionMode{SelectionModeAll, SelectionModeSelected}
 
 // ProjectSelection identifies a project by git remote (or project name fallback)
 // and optionally restricts ingestion to specific branches.
@@ -550,6 +563,11 @@ type Config struct {
 	Push      PushConfig      `yaml:"push"`
 	Selection SelectionConfig `yaml:"selection"`
 	Display   DisplayConfig   `yaml:"display"`
+	// Write carries the write.* budgets the ingest pipeline enforces
+	// (batch bounds, per-worker buffers, staged-memory caps, and the
+	// flush interval). Unset knobs take the shipped defaults at the
+	// effective worker count; see ingest.WriteConfig.
+	Write ingest.WriteConfig `yaml:"write"`
 
 	// ClaudeRetentionDays is the Claude Code cleanupPeriodDays value the
 	// onboarding flow lets the user choose. It is NOT a peasant setting: it is
@@ -735,7 +753,22 @@ func BaseConfig() *Config {
 		Display: DisplayConfig{
 			Theme: ThemeDark,
 		},
+		// The write budgets resolve to the shipped defaults at load: scalar
+		// knobs are filled here, and the staged-memory cap (which depends on
+		// the run's effective worker count) derives at the use sites, so a
+		// saved file never pins another machine's worker count.
+		Write: defaultWriteConfig(),
 	}
+}
+
+// defaultWriteConfig fills the write.* scalar knobs with the shipped
+// defaults, leaving the staged-memory cap unset so it derives from the run's
+// effective worker count at the use sites. A saved file therefore never pins
+// another machine's worker count.
+func defaultWriteConfig() ingest.WriteConfig {
+	cfg := ingest.DefaultWriteConfig(1)
+	cfg.StagedMemoryBytes = 0
+	return cfg
 }
 
 // Load reads the YAML config file at path, validates it, and returns the result.
@@ -985,6 +1018,15 @@ func validate(cfg *Config) error {
 	// Validate display config.
 	if cfg.Display.Theme != "" && !cfg.Display.Theme.IsValid() {
 		return fmt.Errorf("config: unknown display.theme %q (valid: dark, light)", cfg.Display.Theme)
+	}
+
+	// Validate the write budgets at the run's worker estimate. Unset knobs
+	// take the shipped defaults and the staged-memory cap derives, so a bad
+	// write.* section fails here, before the first session is read, rather
+	// than mid-harvest. The pipeline re-resolves at its own effective worker
+	// count, which only tightens the derived cap.
+	if err := cfg.Write.WithDefaults(runtime.NumCPU()).Validate(); err != nil {
+		return err
 	}
 	return nil
 }

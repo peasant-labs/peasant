@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
@@ -39,49 +41,80 @@ import (
 
 // BuildPushCommand constructs the fully wired push cobra command.
 func BuildPushCommand() *cobra.Command {
+	return buildPushCommand(pushCommandDependencies{})
+}
+
+// These dependencies keep transport construction and the upload clock boundary
+// explicit. Defaults are the normal Village client and context deadline.
+type pushCommandDependencies struct {
+	newVillageClient func(string, string, *http.Client) *village.VillageClient
+	uploadTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+}
+
+func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
+	if deps.newVillageClient == nil {
+		deps.newVillageClient = village.NewVillageClient
+	}
+	if deps.uploadTimeout == nil {
+		deps.uploadTimeout = context.WithTimeout
+	}
 	var (
-		dryRun             bool
-		force              bool
-		sourceHarness      string
-		visibility         string
-		license            string
-		jsonOutput         bool
-		verbose            bool
-		quiet              bool
-		nonInteractiveFlag bool
-		yesFlag            bool
-		annotationIDs      []string
-		annotationHash     []string
-		timing             bool
-		profileOutput      string
-		profileTrace       string
-		concurrency        int
-		repository         string
-		timeout            time.Duration
+		dryRun                 bool
+		force                  bool
+		sourceHarness          string
+		visibility             string
+		license                string
+		jsonOutput             bool
+		verbose                bool
+		quiet                  bool
+		nonInteractiveFlag     bool
+		requireAutoPublishRule bool
+		autoPublishEvent       string
+		lastGood               bool
+		yesFlag                bool
+		annotationIDs          []string
+		annotationHash         []string
+		timing                 bool
+		profileOutput          string
+		profileTrace           string
+		concurrency            int
+		repository             string
+		timeout                time.Duration
 	)
 
 	cmd := &cobra.Command{
 		Use:   "push",
-		Short: "Push ingested transcripts to the Peasant village",
-		Long: "Upload locally ingested session transcripts to the Peasant village for sharing and analytics.\n\n" +
+		Short: "Push ingested transcripts to peasant online",
+		Long: "Upload locally ingested session transcripts to peasant online for sharing and analytics.\n\n" +
 			"Performance — the --concurrency default is max(1, NumCPU/2), tuned for the common case: a\n" +
 			"steady-state / no-change re-push, where the server manifest skips already-pushed annotations\n" +
 			"and unchanged transcripts so very little goes over the wire. A one-time LARGE COLD push (e.g.\n" +
 			"hundreds of new transcripts + tens of thousands of new annotations) benefits from a higher\n" +
-			"--concurrency. Throughput is bounded by the per-transcript S3 round-trip and the village's\n" +
+			"--concurrency. Throughput is bounded by the per-transcript S3 round-trip and peasant online's\n" +
 			"CPU — NOT by the DB connection pool: a pooled connection is held only for the brief row\n" +
-			"insert (the S3 upload itself holds none), so the village pool (default ~2x its vCPUs) has\n" +
+			"insert (the S3 upload itself holds none), so the peasant online pool (default ~2x its vCPUs) has\n" +
 			"headroom. A genuinely cold run of N new transcripts costs roughly\n" +
 			"ceil(N / effective-concurrency) x the per-upload round-trip. For such a push set\n" +
-			"--concurrency to about 2x NumCPU to scale throughput up to the village's capacity; confirm\n" +
+			"--concurrency to about 2x NumCPU to scale throughput up to peasant online's capacity; confirm\n" +
 			"with --timing. The default stays at max(1, NumCPU/2) — sufficient for the common\n" +
 			"steady-state re-push, where the manifest skip means little goes over the wire.)\n\n" +
+			"Auto-publish rules — when a rule in hooks.yaml in the config directory binds a session\n" +
+			"this push sends (matched against the repository the session was recorded in), the push\n" +
+			"publishes collectives-only: private, with no license, and each bound transcript it sent\n" +
+			"is shared with its rule's collectives. --visibility and --license are then refused. A\n" +
+			"session a paused rule covers, or whose transcript is already public, is not published.\n\n" +
+			"Last-good — a session may keep a newer incomplete attempt beside its last-good full\n" +
+			"generation. Such a session is refused by default: the incomplete attempt is never\n" +
+			"published as the session, and readiness stays not-ready so stale content is never sent\n" +
+			"automatically. --last-good publishes the last-good full transcript instead, as an\n" +
+			"explicit hand-run choice; it is refused together with --auto-publish-event and\n" +
+			"--require-auto-publish-rule, and no generated hook file carries it.\n\n" +
 			"Exit status — a caller that branches on it, including a generated Git hook, needs the\n" +
 			"one distinction it cannot read out of prose: whether anything was published at all.\n\n" +
 			"  0  the run succeeded.\n" +
-			"  1  the run failed after it had started talking to the village, so part of the work\n" +
+			"  1  the run failed after it had started talking to peasant online, so part of the work\n" +
 			"     may be published and recorded as published.\n" +
-			"  3  the run failed BEFORE a single village request was made — a missing or expired\n" +
+			"  3  the run failed BEFORE a single peasant online request was made — a missing or expired\n" +
 			"     login, an unreadable config, a store that would not open, a repository scope that\n" +
 			"     would not resolve. Nothing was published and nothing was recorded as published.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -93,6 +126,18 @@ func BuildPushCommand() *cobra.Command {
 			// every commit. Cobra still prints usage for genuine arg/flag misuse,
 			// which it handles before RunE.
 			cmd.SilenceUsage = true
+
+			// --last-good is a deliberate, hand-run publication of the last-good
+			// full transcript. It is REFUSED together with the hook flags: those
+			// exist so a managed hook publishes automatically, and an automatic
+			// publication must never send stale last-good content. The flag is
+			// never written into a generated hook file, so the refusal is the
+			// second half of the same guarantee. Checked before any local work,
+			// so a bad combination is reported at once rather than after a run
+			// that can exhaust the command's --timeout budget.
+			if lastGood && (autoPublishEvent != "" || requireAutoPublishRule) {
+				return fmt.Errorf("village push: --last-good cannot be combined with --auto-publish-event or --require-auto-publish-rule; the hook flags exist so a managed hook publishes automatically, and an automatic publication must never send the last-good transcript in place of a newer incomplete attempt; nothing was uploaded; drop --last-good, or publish the last-good by hand without the hook flags")
+			}
 
 			ctx := cmd.Context()
 			// Honours --config-dir when --config was not given explicitly, so a
@@ -171,7 +216,7 @@ func BuildPushCommand() *cobra.Command {
 				// client whenever its concurrency fits that pool and builds a wider
 				// one when it does not.
 				run.sharedClientPoolSize = push.DefaultConcurrencyForCPU(runtime.NumCPU())
-				run.sharedClient = village.NewVillageClient(creds.VillageURL, creds.APIKey,
+				run.sharedClient = deps.newVillageClient(creds.VillageURL, creds.APIKey,
 					village.NewPooledHTTPClient(creds.VillageURL, run.sharedClientPoolSize))
 				run.sharedClientBaseURL = creds.VillageURL
 				run.sharedClientAPIKey = creds.APIKey
@@ -182,7 +227,7 @@ func BuildPushCommand() *cobra.Command {
 
 			if timeout > 0 {
 				var cancelBudget context.CancelFunc
-				ctx, cancelBudget = context.WithTimeout(ctx, timeout)
+				ctx, cancelBudget = deps.uploadTimeout(ctx, timeout)
 				defer cancelBudget()
 			}
 
@@ -227,7 +272,7 @@ func BuildPushCommand() *cobra.Command {
 					return fmt.Errorf("not logged in — run 'peasant village login' first")
 				}
 				if creds.VillageURL == "" {
-					return fmt.Errorf("village URL is not set — run 'peasant village login' to re-link your account")
+					return fmt.Errorf("peasant online URL is not set — run 'peasant village login' to re-link your account")
 				}
 
 				cfg, err := loadRunConfig(cfgPath, dryRun)
@@ -284,7 +329,7 @@ func BuildPushCommand() *cobra.Command {
 					fmt.Fprintf(cmd.ErrOrStderr(),
 						"note: 'push.fields.projectHash' in %s is deprecated and ignored. "+
 							"project.hash is a per-install SALTED digest (not the raw remote URL), so sending it leaks nothing, "+
-							"and the village requires it to group your sessions by project — it is now always sent. "+
+							"and peasant online requires it to group your sessions by project — it is now always sent. "+
 							"To silence this note, remove the 'push.fields.projectHash' line from %s.\n",
 						noteCfgPath, noteCfgPath)
 				}
@@ -295,7 +340,7 @@ func BuildPushCommand() *cobra.Command {
 				}
 				cfg.Output.BasePath = string(resolvedOutput)
 
-				db, err := openRunStore(cmd, dryRun, string(resolvedOutput))
+				db, err := openRunStore(cmd, dryRun, string(resolvedOutput), cfg.Write)
 				if err != nil {
 					return fmt.Errorf("open analytics store: %w", err)
 				}
@@ -345,6 +390,7 @@ func BuildPushCommand() *cobra.Command {
 					Quiet:            level == outputQuiet,
 					Concurrency:      resolvedConcurrency,
 					CommandBinding:   run.binding,
+					LastGood:         lastGood,
 				}
 				if cmd.Flags().Changed("repository") {
 					// An empty --repository is rejected rather than ignored. The
@@ -407,9 +453,15 @@ func BuildPushCommand() *cobra.Command {
 				}
 
 				// Run the push wizard for interactive confirmation.
-				// Skipped for --dry-run, --json, non-TTY, or --non-interactive/--yes.
+				// Skipped for --dry-run, --json, non-TTY, --non-interactive/--yes,
+				// or --last-good. The last-good flag skips it because the wizard
+				// previews the newer attempt while the push sends the last-good
+				// authority, and a session with a latest attempt is not even
+				// selectable in the wizard; the flag does NOT imply
+				// --non-interactive, so the public-consent prompt below still
+				// applies.
 				isTTY := term.IsTerminal(int(os.Stdin.Fd()))
-				if !dryRun && !jsonOutput && isTTY && !nonInteractive {
+				if pushWizardEnabled(dryRun, jsonOutput, isTTY, nonInteractive, lastGood) {
 					wizQuery := push.PushCandidateQuery{
 						Force:          force,
 						SourceProvider: sourceHarness,
@@ -431,16 +483,51 @@ func BuildPushCommand() *cobra.Command {
 					runCfg.FilterSessionIDs = wizardIDs
 				}
 
+				// The auto-publish rules the developer set up decide the audience
+				// of the sessions they bind: such a push publishes private, sends
+				// no license, and shares each transcript it sends with its rule's
+				// collectives. The sessions this push would send are matched
+				// here, after every narrowing, so the rules see what is sent.
+				event := schema.AutoPublishEvent(autoPublishEvent)
+				if event != "" && (!requireAutoPublishRule || !event.IsValid()) {
+					return fmt.Errorf("village push: --auto-publish-event requires --require-auto-publish-rule and a supported hook event; nothing was uploaded")
+				}
+				autoPublish, planErr := planAutoPublish(ctx, cmd, db, cfg, runCfg, requireAutoPublishRule, event)
+				if planErr != nil {
+					return planErr
+				}
+				runCfg.PinnedSessionIDs = autoPublish.pinned
+				if autoPublish.bound() {
+					if len(autoPublish.collectives) > 0 {
+						if flagErr := refuseAudienceFlagsUnderRules(cmd); flagErr != nil {
+							return flagErr
+						}
+					}
+					cfg, runCfg = push.CollectiveAudience(cfg, runCfg)
+					reportAutoPublishPlan(cmd.ErrOrStderr(), level == outputQuiet, autoPublish)
+				}
+
 				if redactionPolicy.Raised() {
 					fmt.Fprintln(cmd.ErrOrStderr(),
 						quietAware(level, redactionPolicy.Disclosure(), redactionPolicy.BriefDisclosure()))
 				}
 
-				visibilityPolicy := config.EffectiveVisibility(schema.Visibility(visibility), cfg)
+				visibilityPolicy := config.EffectiveVisibility(runCfg.Visibility, cfg)
 				effectiveVisibility := visibilityPolicy.Effective
 				if visibilityPolicy.Downgraded() {
 					fmt.Fprintln(cmd.ErrOrStderr(),
 						quietAware(level, visibilityPolicy.Disclosure(), visibilityPolicy.BriefDisclosure()))
+				}
+
+				// The last-good publication is an explicit consent statement: the
+				// user asked to send the last-good full transcript in place of a
+				// newer incomplete attempt, and that choice must be on the record
+				// before anything leaves the machine. --quiet still prints it in
+				// brief, exactly like the other disclosures above.
+				if lastGood {
+					fmt.Fprintln(cmd.ErrOrStderr(), quietAware(level,
+						"warning: --last-good publishes the last-good full transcript instead of the newer incomplete attempt. The newer attempt is never sent. This is an explicit, hand-run choice: it cannot be combined with the auto-publish hook flags, and no hook file ever carries it.",
+						"warning: --last-good publishes the last-good full transcript instead of the newer incomplete attempt."))
 				}
 
 				// The redaction report is the published-content record CI logs
@@ -462,9 +549,7 @@ func BuildPushCommand() *cobra.Command {
 						// Narrowed exactly the way the pipeline narrows, through the
 						// same shared helpers, so the record describes what will be
 						// published rather than everything that might have been.
-						reportSessions = filterToSelectedSessions(reportSessions, runCfg.FilterSessionIDs)
-						reportSessions, _ = push.ApplySelection(reportSessions, runCfg.Selection)
-						reportSessions = push.ApplyRepositoryScope(reportSessions, runCfg.Repository)
+						reportSessions, _ = push.NarrowCandidates(reportSessions, runCfg)
 						// Nothing to publish is not a publication to keep a record
 						// of, and the empty-state line below already says what
 						// happened. A hook reaches that state on most commits.
@@ -499,11 +584,13 @@ func BuildPushCommand() *cobra.Command {
 					// No client was built ahead of the clock, or the credentials or
 					// the requested parallelism differ from what it was built for:
 					// build one sized to the concurrency, exactly as before.
-					client = village.NewVillageClient(creds.VillageURL, creds.APIKey,
+					client = deps.newVillageClient(creds.VillageURL, creds.APIKey,
 						village.NewPooledHTTPClient(creds.VillageURL, resolvedConcurrency))
 				}
 				client.SetRequestObserver(run.markVillageRequest)
-				pipeline, err := push.NewPipeline(db, client, creds, cfg, fs, runCfg, pushRedactor, cmd.ErrOrStderr())
+				runCfg.UpdateHold = autoPublish.updateHold(db, creds, client)
+				observations := collectiveobservations.New(collectiveobservations.Dependencies{Store: db, ConfigHome: configDirOverride(cmd), NewIdentityReader: func(auth.Credentials) collectiveobservations.IdentityReader { return client }})
+				pipeline, err := push.NewPipeline(db, client, creds, cfg, fs, runCfg, pushRedactor, cmd.ErrOrStderr(), push.WithObservations(observations, time.Now))
 				if err != nil {
 					return fmt.Errorf("create push pipeline: %w", err)
 				}
@@ -543,7 +630,7 @@ func BuildPushCommand() *cobra.Command {
 				// to all push-eligible sessions). Annotations not tied to a session
 				// are unaffected. mode != selected => runCfg.Selection is nil => no
 				// session gate, so annotation behavior is unchanged.
-				if runCfg.Selection != nil || runCfg.Repository != nil {
+				if runCfg.Selection != nil || runCfg.Repository != nil || runCfg.PinnedSessionIDs != nil {
 					// AllPushableSessions (NOT the narrower unpushed session-push set):
 					// annotations push on their own cadence, so the gate must admit
 					// annotations for ALL selected sessions, including already-pushed
@@ -556,8 +643,7 @@ func BuildPushCommand() *cobra.Command {
 					if selErr != nil {
 						return fmt.Errorf("query sessions for annotation selection: %w", selErr)
 					}
-					keptForAnn, _ := push.ApplySelection(allRows, runCfg.Selection)
-					keptForAnn = push.ApplyRepositoryScope(keptForAnn, runCfg.Repository)
+					keptForAnn, _ := push.NarrowCandidates(allRows, runCfg)
 					sessIDs := make(map[string]bool, len(keptForAnn))
 					for _, s := range keptForAnn {
 						sessIDs[s.SessionID] = true
@@ -621,7 +707,7 @@ func BuildPushCommand() *cobra.Command {
 						return pipeline.Run(ctx)
 					},
 					func(ctx context.Context, published *push.PushResult) (*push.AnnotationPushSummary, error) {
-						selection := annotationSelectionForRun(annSelection, runCfg.FilterSessionIDs != nil, published)
+						selection := annotationSelectionForRun(annSelection, runCfg.FilterSessionIDs != nil || runCfg.PinnedSessionIDs != nil, published)
 						return push.PushAnnotationsSelected(ctx, client, db, selection, dryRun, resolvedConcurrency)
 					},
 				)
@@ -635,7 +721,23 @@ func BuildPushCommand() *cobra.Command {
 				// Recorded before any early return below, so a budget error can say
 				// what did and did not reach the village.
 				run.result = result
+				if result != nil {
+					for _, session := range result.Sessions {
+						if session.HeldReason != "" {
+							fmt.Fprintf(cmd.ErrOrStderr(), "auto-publish: session %s was not published: %s\n", session.SessionID, session.HeldReason)
+						}
+					}
+				}
 				run.annotationSummary = annSummary
+
+				// Under an auto-publish rule, each transcript the run sent is
+				// shared with its rule's collectives. Nothing is shared on a dry
+				// run, and a run that sent nothing shares nothing.
+				var shared []schema.SyncPushSessionResult
+				var shareErr error
+				if len(autoPublish.collectives) > 0 && !dryRun {
+					shared, shareErr = push.RuleShare{Store: db, Village: pipeline.CollectiveSharer(client), Creds: creds, Retry: run.repositoryCommand() + " --force"}.Run(runCtx, result, autoPublish.collectives)
+				}
 
 				// Close the profile run span over the measured stages. A failed
 				// stage marks the run failed; an empty run that reached no error
@@ -720,7 +822,13 @@ func BuildPushCommand() *cobra.Command {
 						return printPushJSON(cmd.OutOrStdout(), result, annSummary, annErr)
 					}
 					// EmptyReason is the final result line — kept even under --quiet.
-					fmt.Fprintln(cmd.OutOrStdout(), result.EmptyReason)
+					// When the rules held every session, the reasons were printed
+					// and --force would not change them, so the line says so.
+					if len(autoPublish.held) > 0 && len(autoPublish.pinned) == 0 {
+						fmt.Fprintf(cmd.OutOrStdout(), "auto-publish: nothing was published; the auto-publish rules held %d session(s) for the reasons printed above\n", len(autoPublish.held))
+					} else {
+						fmt.Fprintln(cmd.OutOrStdout(), result.EmptyReason)
+					}
 					if level != outputQuiet && (annSummary != nil || annErr != nil) {
 						printAnnotationSummary(cmd.OutOrStdout(), annSummary, annErr, dryRun)
 					} else if level == outputQuiet {
@@ -770,10 +878,14 @@ func BuildPushCommand() *cobra.Command {
 					}
 				}
 
-				// Return the first fatal error (transcript before annotation). The
-				// budget check below turns it into the budget's own explanation when
-				// the cap is what ended the run.
-				return firstPushStageError(transcErr, annErr)
+				// Share failures are printed here, so the budget explanation below
+				// cannot hide them.
+				shareFailure := reportAutoPublishShares(cmd.ErrOrStderr(), level == outputQuiet || jsonOutput, shared, shareErr)
+
+				// Return the fatal errors (transcript before annotation, then
+				// sharing). The budget check below turns them into the budget's own
+				// explanation when the cap is what ended the run.
+				return errors.Join(firstPushStageError(transcErr, annErr), shareFailure)
 			}(ctx)
 
 			// A budget that ran out is reported as itself: the raw "context
@@ -794,11 +906,14 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pushed without uploading")
 	cmd.Flags().BoolVar(&force, "force", false, "Re-push all sessions (including already-pushed ones)")
 	cmd.Flags().StringVar(&sourceHarness, "source-harness", "", sourceHarnessHelp())
-	cmd.Flags().StringVar(&visibility, "visibility", "", fmt.Sprintf("Override visibility for this run (%s). Also changes every already-published session the run selects, including ones shared with collectives on the village, which otherwise keep the visibility they have there", config.ImplementedVisibilityMenu()))
-	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s). Also relicenses every already-published session the run selects; a Creative Commons grant cannot be withdrawn. Without it an update keeps the license a transcript has on the village, except that a session with no publication receipt for this village account on this machine is sent the configured license", schema.LicenseMenu()))
+	cmd.Flags().StringVar(&visibility, "visibility", "", fmt.Sprintf("Override visibility for this run (%s). Also changes every already-published session the run selects, including ones shared with collectives on peasant online, which otherwise keep the visibility they have there", config.ImplementedVisibilityMenu()))
+	cmd.Flags().StringVar(&license, "license", "", fmt.Sprintf("Override the content license for this run (%s). Also relicenses every already-published session the run selects; a Creative Commons grant cannot be withdrawn. Without it an update keeps the license a transcript has on peasant online, except that a session with no publication receipt for this peasant online account on this machine is sent the configured license", schema.LicenseMenu()))
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show per-session detail")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line")
+	cmd.Flags().StringVar(&autoPublishEvent, "auto-publish-event", "", "Require consent for this hook event (post-commit or pre-push)")
+	cmd.Flags().BoolVar(&requireAutoPublishRule, "require-auto-publish-rule", false, "Publish only sessions currently bound by an active auto-publish rule (used by rule-installed hooks)")
+	cmd.Flags().BoolVar(&lastGood, "last-good", false, "Publish the last-good full transcript when a newer incomplete attempt is kept beside it. A hand-run choice: it skips the push wizard (the wizard previews the newer attempt, while this flag publishes the last-good authority) and does not imply --non-interactive, so the public-consent prompt still applies. It is refused together with --auto-publish-event/--require-auto-publish-rule and is never written into a hook file, so an automatic publication never sends stale last-good content. The store resolves the last-good authority server-side, so no session or generation identifier is accepted")
 	cmd.Flags().BoolVar(&nonInteractiveFlag, "non-interactive", false, "Run without the interactive wizard or public-consent prompt (for CI/scripts)")
 	cmd.Flags().BoolVar(&yesFlag, "yes", false, "(alias for --non-interactive)")
 	cmd.Flags().StringArrayVar(&annotationIDs, "annotation-id", nil, "Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.")
@@ -806,9 +921,9 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&timing, "timing", false, "Measure and report per-phase push timing (connection setup/server split, redaction, annotation batches) to stderr, plus a per-upload JSONL log under the state dir. Off by default.")
 	cmd.Flags().StringVar(&profileOutput, "profile-output", "", "Write a local JSON v1 push profile to this file (local diagnostic only, mode 0600). Parent directory must exist. Enables profiling; prints path and bottleneck hints to stderr unless --quiet. Works with --json and --timing.")
 	cmd.Flags().StringVar(&profileTrace, "profile-trace", "", "Write an optional JSONL trace of profile events to this file (mode 0600). Requires --profile-output and a distinct regular-file destination with an existing parent. JSON records an opaque trace reference, not the path; the actual path is printed to stderr unless --quiet.")
-	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, use ~22 to saturate the village pool toward the <5s target.")
+	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, use ~22 to saturate the peasant online pool toward the <5s target.")
 	cmd.Flags().StringVar(&repository, "repository", "", "Only push sessions carrying this Git repository's canonical project identity (a path). Peasant first uses the normalized checkout upstream remote when there is one it can normalize, then the normalized origin remote, so separate clones using the same remote share an identity. If neither is usable — including when there is no origin remote or a remote is a local path or file:// URL — identity instead comes from the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which identity was used is printed when the push runs. Default: every configured session")
-	cmd.Flags().DurationVar(&timeout, "timeout", 0, "Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a village that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach the village. Default: no budget. Git hooks always pass one.")
+	cmd.Flags().DurationVar(&timeout, "timeout", 0, "Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a peasant online server that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach peasant online. Default: no budget. Git hooks always pass one.")
 
 	return cmd
 }
@@ -1270,17 +1385,17 @@ func uploadBudgetExceededError(budget time.Duration, run pushRun) error {
 // leaves the village out of it.
 func budgetPhaseNarrative(run pushRun, uploaded, failed, annotationChanges, annotationErrors int) (why, when, impact string) {
 	if run.reachedVillage() {
-		return "the village did not answer in time. A village that accepts a connection and then stalls is the usual cause; a refused connection fails immediately instead",
+		return "peasant online did not answer in time. A server that accepts a connection and then stalls is the usual cause; a refused connection fails immediately instead",
 			fmt.Sprintf("after %d transcript(s) had been uploaded and %d annotation change(s) completed, with %d transcript and %d annotation error(s) recorded", uploaded, annotationChanges, failed, annotationErrors),
-			"whatever was uploaded before the cap is on the village and is recorded locally, so it is skipped next time; the rest was not sent, and nothing local was changed or lost."
+			"whatever was uploaded before the cap is on peasant online and is recorded locally, so it is skipped next time; the rest was not sent, and nothing local was changed or lost."
 	}
 	switch run.phase {
 	case pushPhaseScope:
-		return "the budget expired during local work, before the upload sent anything: resolving which recorded sessions belong to this repository. The waiting-request lookup runs ahead of this budget and cannot draw on it, so the village is not where this budget went",
+		return "the budget expired during local work, before the upload sent anything: resolving which recorded sessions belong to this repository. The waiting-request lookup runs ahead of this budget and cannot draw on it, so peasant online is not where this budget went",
 			"while resolving the repository scope",
 			"nothing was sent and nothing was published; nothing local was changed or lost."
 	default:
-		return "the budget expired during local work, before the upload sent anything: loading credentials and config, opening the analytics store, and preparing the run. The waiting-request lookup runs ahead of this budget and cannot draw on it, so the village is not where this budget went",
+		return "the budget expired during local work, before the upload sent anything: loading credentials and config, opening the analytics store, and preparing the run. The waiting-request lookup runs ahead of this budget and cannot draw on it, so peasant online is not where this budget went",
 			"before the upload started",
 			"nothing was sent and nothing was published; nothing local was changed or lost."
 	}
@@ -1317,7 +1432,7 @@ func budgetRecovery(budget time.Duration, run pushRun, uploaded, annotationChang
 	}
 	return fmt.Sprintf(
 		"this run recorded no upload progress inside the cap, so retrying alone may never finish it. "+
-			"If the village is simply unreachable the next attempt can succeed; if it is reachable, the remaining transcript or annotation work does not fit in %s and every commit will spend the whole budget and stop in the same place. "+
+			"If peasant online is simply unreachable the next attempt can succeed; if it is reachable, the remaining transcript or annotation work does not fit in %s and every commit will spend the whole budget and stop in the same place. "+
 			"Run '%s' by hand once to settle which it is — run by hand it has no budget.%s",
 		budget, manual, hookReinstallAdvice(budget, run))
 }
@@ -1550,7 +1665,7 @@ func printAnnotationSummary(w io.Writer, summary *push.AnnotationPushSummary, er
 	if summary.SkipReason != "" {
 		fmt.Fprintf(w, "\nAnnotations: skipped (%d annotations not uploaded)\n", summary.Total)
 		fmt.Fprintf(w, "  Reason: %s\n", summary.SkipReason)
-		fmt.Fprintf(w, "  Your transcript push was not affected. Upgrade the village to enable annotation syncing.\n")
+		fmt.Fprintf(w, "  Your transcript push was not affected. Upgrade peasant online to enable annotation syncing.\n")
 		printUnpublishableAnnotations(w, summary)
 		return
 	}
@@ -2124,6 +2239,16 @@ func buildPushWizardSessions(
 	return wizSessions, nil
 }
 
+// pushWizardEnabled reports whether this run opens the interactive push wizard.
+// --last-good skips it: the wizard's preview reads the session's available
+// (latest attempt) content while the flag publishes the last-good authority,
+// and a session with a latest attempt is not even selectable in the wizard
+// (it reads as NeedsIngest). The flag does not imply --non-interactive: the
+// public-consent prompt still applies.
+func pushWizardEnabled(dryRun, jsonOutput, isTTY, nonInteractive, lastGood bool) bool {
+	return !dryRun && !jsonOutput && isTTY && !nonInteractive && !lastGood
+}
+
 // runPushWizard is a thin TTY wrapper over buildPushWizardSessions: it builds the
 // selection-aware session list, runs the interactive BubbleTea program, and
 // returns the session IDs the user confirmed for push (nil if cancelled, empty
@@ -2186,7 +2311,7 @@ func storedSessionEntries(ctx context.Context, reader availableContentReader) pu
 		if err != nil {
 			return push.StoredContent{}, fmt.Errorf("preview session %q: %w", sessionID, err)
 		}
-		snapshot, err := reader.ReadSessionAvailable(ctx, id)
+		snapshot, err := readPublicationSnapshot(ctx, reader, id)
 		if err != nil {
 			return push.StoredContent{}, err
 		}
@@ -2257,25 +2382,6 @@ func pushCandidates(
 	default:
 		return db.UnpushedSessions(ctx)
 	}
-}
-
-// filterToSelectedSessions narrows rows to an explicit session selection, which
-// is what the interactive wizard produces. An empty selection narrows nothing.
-func filterToSelectedSessions(sessions []ingest.PushSessionRow, selected []string) []ingest.PushSessionRow {
-	if len(selected) == 0 {
-		return sessions
-	}
-	keep := make(map[string]bool, len(selected))
-	for _, id := range selected {
-		keep[id] = true
-	}
-	kept := make([]ingest.PushSessionRow, 0, len(sessions))
-	for _, session := range sessions {
-		if keep[session.SessionID] {
-			kept = append(kept, session)
-		}
-	}
-	return kept
 }
 
 // configSourceDescription names where a configured value came from, so a refusal
@@ -2402,7 +2508,7 @@ func printRedactionReport(w io.Writer, record redactionRecord) {
 	}
 	if record.MissingMetadataCount > 0 {
 		entries = append(entries, redactionRecordEntry("note:",
-			fmt.Sprintf("%d session(s) need database metadata and matching entries - run 'peasant ingest' with the retained source available before upload",
+			fmt.Sprintf("%d session(s) need database metadata and matching entries - run 'peasant ingest' with the stored source available before upload",
 				record.MissingMetadataCount)))
 	}
 	fmt.Fprintln(w, strings.Join(entries, redactionRecordEntrySeparator))

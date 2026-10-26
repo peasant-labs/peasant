@@ -41,11 +41,13 @@ var RegistryClasses = []Class{
 type PreTestStep string
 
 const (
-	StepFmt          PreTestStep = "fmt"
-	StepLint         PreTestStep = "lint"
-	StepAstGrepScan  PreTestStep = "ast-grep-scan"
-	StepAstGrepGate  PreTestStep = "ast-grep-gate-test"
-	StepReleaseGuard PreTestStep = "release-guard"
+	StepFmt                     PreTestStep = "fmt"
+	StepLint                    PreTestStep = "lint"
+	StepAstGrepScan             PreTestStep = "ast-grep-scan"
+	StepAstGrepGate             PreTestStep = "ast-grep-gate-test"
+	StepProjectionNegativeSeed  PreTestStep = "projection-negative-seed"
+	StepProjectionNegativeScope PreTestStep = "projection-negative-scope"
+	StepReleaseGuard            PreTestStep = "release-guard"
 )
 
 // PreTestSteps is the closed set of pre-test steps, in execution order.
@@ -54,6 +56,8 @@ var PreTestSteps = []PreTestStep{
 	StepLint,
 	StepAstGrepScan,
 	StepAstGrepGate,
+	StepProjectionNegativeSeed,
+	StepProjectionNegativeScope,
 	StepReleaseGuard,
 }
 

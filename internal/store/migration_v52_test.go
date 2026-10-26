@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite/sqlitemigration"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/migrations/v52_legacy_capture.yaml

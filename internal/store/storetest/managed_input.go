@@ -10,10 +10,12 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
 
-// SeedManagedArtifact writes a test-owned retained pair under output and
+// SeedManagedArtifact writes a test-owned stored pair under output and
 // records it in the database with MirrorArtifacts, then stops. It leaves the
 // state a completed harvest leaves before indexing: files on disk and a row,
 // but no index evidence, which is the retained-but-not-yet-indexed session a
@@ -59,7 +61,7 @@ func SeedManagedArtifact(t *testing.T, db *store.Store, filesystem ingest.FileSy
 	return session, path
 }
 
-// MirrorRetainedPair reads a retained pair already written under output and
+// MirrorRetainedPair reads a stored pair already written under output and
 // records its row in the database with MirrorArtifacts. It is the replacement
 // for the old reconcile-from-files step: a test that has written the pair and
 // inserted the base row calls this to establish the pair's artifact identity.
@@ -71,12 +73,12 @@ func MirrorRetainedPair(t *testing.T, db *store.Store, filesystem ingest.FileSys
 	}
 	results := db.MirrorArtifacts(t.Context(), []ingest.ArtifactMirrorRequest{{Artifact: artifact}})
 	if len(results) != 1 || results[0].Err != nil || !results[0].Mirrored {
-		t.Fatalf("mirror retained pair for %s: %+v", sid, results)
+		t.Fatalf("mirror stored pair for %s: %+v", sid, results)
 	}
 }
 
 // SeedManagedInput establishes actual publication and parser evidence for a
-// test-owned retained transcript. It never stamps a proof over manual rows.
+// test-owned stored transcript. It never stamps a proof over manual rows.
 func SeedManagedInput(t *testing.T, db *store.Store, filesystem ingest.FileSystem, output string, meta ingest.UnifiedMetadata, data []byte) []schema.SessionEntry {
 	t.Helper()
 	ctx := t.Context()
@@ -194,4 +196,78 @@ func sameMeta(t *testing.T, meta ingest.UnifiedMetadata, data []byte) ingest.Uni
 	meta.ContentHash = schema.ComputeTranscriptHash(data)
 	meta.MetadataHash = schema.ComputeMetadataHash(&meta)
 	return meta
+}
+
+// SetStoredMetadataSchema rewrites the recorded metadata schema version of an
+// already-stored session's row and publication capture. A database written by
+// an earlier build holds a capture at the schema version current when it was
+// written; this build's write path only ever records its own version, so a test
+// that starts from that earlier state rewrites it here, exactly as the earlier
+// database holds it. The publication snapshot's embedded version and its
+// integrity digest move with the column so the capture stays internally
+// consistent.
+func SetStoredMetadataSchema(t *testing.T, db *store.Store, sid ingest.SessionID, version int) {
+	t.Helper()
+	ctx := t.Context()
+	conn, err := db.Pool().Take(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Pool().Put(conn)
+	var body string
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, "SELECT metadata_json FROM session_publication_metadata WHERE session_id = ?", &sqlitex.ExecOptions{
+		Args: []any{string(sid)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			body = stmt.ColumnText(0)
+			found = true
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		var m schema.UnifiedMetadata
+		if err := json.Unmarshal([]byte(body), &m); err != nil {
+			t.Fatal(err)
+		}
+		m.SchemaVersion = version
+		m.MetadataHash = schema.ComputeMetadataHash(&m)
+		encoded, err := json.Marshal(&m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sqlitex.ExecuteTransient(conn, "UPDATE session_publication_metadata SET schema_version=?, metadata_json=?, metadata_hash=? WHERE session_id=?", &sqlitex.ExecOptions{
+			Args: []any{version, string(encoded), m.MetadataHash, string(sid)},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The v51 trigger clears the recovered provenance and the index binding on
+	// any UPDATE OF schema_version, which a real pre-bump database had already
+	// established. Read them first and re-state them after the version move, so
+	// the rewritten row is the shape the earlier build left, not a row that
+	// looks like it never recovered provenance.
+	var cwdKind string
+	var indexedRevision int64
+	if err := sqlitex.ExecuteTransient(conn, "SELECT cwd_provenance_kind, indexed_publication_capture_revision FROM sessions WHERE session_id=?", &sqlitex.ExecOptions{
+		Args: []any{string(sid)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			cwdKind = stmt.ColumnText(0)
+			indexedRevision = stmt.ColumnInt64(1)
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, "UPDATE sessions SET schema_version=? WHERE session_id=?", &sqlitex.ExecOptions{
+		Args: []any{version, string(sid)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, "UPDATE sessions SET cwd_provenance_kind=?, indexed_publication_capture_revision=? WHERE session_id=?", &sqlitex.ExecOptions{
+		Args: []any{cwdKind, indexedRevision, string(sid)},
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

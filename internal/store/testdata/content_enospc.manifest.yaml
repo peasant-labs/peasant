@@ -1,0 +1,8 @@
+# Required-name manifest for content_enospc: deletion protection by NAME, never by count.
+requiredNames:
+  - stage-full
+  - commit-full
+  - sweep-full
+  - migrate-body-subtxn-full
+  - migrate-catalog-full
+  - migrate-search-consolidation-full

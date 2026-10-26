@@ -7,8 +7,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 func discoverDanglingChild(t *testing.T, parentID string) (*ingest.DiscoveredSession, []ingest.OpenCodeProbeResult, string) {

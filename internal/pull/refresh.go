@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -15,11 +16,12 @@ const refreshPageLimit = 100
 
 // RefreshOwnAnnotations refreshes the FOREIGN annotations on the requester's OWN
 // pushed transcripts. It enumerates the requester's own transcripts from the
-// village pullable listing (OwnerUserID == creds.UserID; optionally narrowed to a
-// single local session via opts.SessionID), fetches each transcript's
-// annotations, EXCLUDES the requester's own authored rows (AuthorUserID ==
-// creds.UserID — the own-author exclusion), and upserts the remaining foreign
-// rows via the store's single-transaction UpsertPulledAnnotations.
+// village pullable listing (an owner profile that is the requester's own
+// account; optionally narrowed to a single local session via opts.SessionID),
+// fetches each transcript's annotations, EXCLUDES the requester's own authored
+// rows (an author profile that is the requester's own account — the own-author
+// exclusion), and upserts the remaining foreign rows via the store's
+// single-transaction UpsertPulledAnnotations.
 //
 // This path touches NO files (annotations only), so a failure simply leaves the
 // pulled_annotations table unchanged. NEGOTIATE runs EXACTLY ONCE before the
@@ -29,14 +31,14 @@ func (p *Pipeline) RefreshOwnAnnotations(ctx context.Context, opts RefreshOption
 	if !p.creds.IsLoggedIn() {
 		return &RefreshResult{Status: PullStatusNotLoggedIn}, fmt.Errorf(
 			"peasant village annotations sync: not logged in\n" +
-				"  what: no valid village credentials are present\n" +
-				"  why:  refreshing annotations contacts the village and requires authentication\n" +
+				"  what: no valid peasant online credentials are present\n" +
+				"  why:  refreshing annotations contacts peasant online and requires authentication\n" +
 				"  fix:  run `peasant village login`, then re-run the sync")
 	}
 	host := p.villageHost()
 
 	// --- NEGOTIATE (exactly once) ---
-	if err := p.reader.NegotiatePull(ctx); err != nil {
+	if _, err := p.reader.NegotiatePull(ctx); err != nil {
 		return &RefreshResult{Status: classifyStatus(err), VillageHost: host}, err
 	}
 
@@ -61,9 +63,12 @@ func (p *Pipeline) RefreshOwnAnnotations(ctx context.Context, opts RefreshOption
 		if err := validatePulledAnnotations(annotations); err != nil {
 			return &RefreshResult{Status: PullStatusError, VillageHost: host, TranscriptsScanned: len(own)}, err
 		}
+		annotations = readerAnnotations(annotations, info.Owner)
 		for j := range annotations {
 			a := &annotations[j]
-			if a.AuthorUserID == p.creds.UserID {
+			// The village always shows a viewer their own profile, so an
+			// anonymous author is never the requester and stays foreign.
+			if a.Author.IsAccount(p.viewerAccount()) {
 				result.Excluded++ // own-authored: never re-enter the local store
 				continue
 			}
@@ -85,13 +90,15 @@ func (p *Pipeline) RefreshOwnAnnotations(ctx context.Context, opts RefreshOption
 }
 
 // listOwnTranscripts enumerates the requester's own pushed transcripts from the
-// village pullable listing (OwnerUserID == creds.UserID), paging until exhausted.
+// village pullable listing (Owner.IsAccount(creds.UserID)), paging until
+// exhausted. An anonymous owner is never the requester: the village always shows
+// a viewer their own profile.
 // When sessionID is non-empty, only the transcript whose LocalID matches it is
 // returned (the --session narrowing).
 func (p *Pipeline) listOwnTranscripts(ctx context.Context, sessionID string) ([]schema.PullTranscriptInfo, error) {
 	var own []schema.PullTranscriptInfo
 	for page := 1; ; page++ {
-		resp, err := p.reader.ListPullableTranscripts(ctx, page, refreshPageLimit)
+		resp, err := p.reader.ListPullableTranscripts(ctx, village.PullListOptions{Page: page, Limit: refreshPageLimit})
 		if err != nil {
 			return nil, err
 		}
@@ -99,8 +106,8 @@ func (p *Pipeline) listOwnTranscripts(ctx context.Context, sessionID string) ([]
 			break
 		}
 		for i := range resp.Transcripts {
-			info := resp.Transcripts[i]
-			if info.OwnerUserID != p.creds.UserID {
+			info := *readerMeta(&resp.Transcripts[i])
+			if !info.Owner.IsAccount(p.viewerAccount()) {
 				continue // only OWN pushed transcripts carry foreign annotations we refresh
 			}
 			if sessionID != "" && info.LocalID != sessionID {
@@ -125,13 +132,14 @@ func (p *Pipeline) listOwnTranscripts(ctx context.Context, sessionID string) ([]
 // the transcript-pull path — the V34 schema intentionally has no FK).
 func (p *Pipeline) refreshAnnotationRow(host string, now int64, info *schema.PullTranscriptInfo, a *schema.PullAnnotation) store.PulledAnnotationRow {
 	payload, _ := json.Marshal(a)
+	authorID, authorUsername := publicPersonColumns(a.Author)
 	return store.PulledAnnotationRow{
 		VillageHost:    host,
 		ContentHash:    annotationContentHash(a),
 		TranscriptID:   info.TranscriptID,
 		LocalSessionID: info.LocalID,
-		AuthorUserID:   a.AuthorUserID,
-		AuthorUsername: a.AuthorUsername,
+		AuthorUserID:   authorID,
+		AuthorUsername: authorUsername,
 		Payload:        string(payload),
 		PulledAt:       now,
 	}

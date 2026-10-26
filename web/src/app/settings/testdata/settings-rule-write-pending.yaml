@@ -1,0 +1,26 @@
+# A held pause must not allow a second rule write or installation to race its
+# captured rule list. After the answer, the other rule remains active and can
+# be paused without restoring the first rule.
+requiredNames:
+  - a pending rule write serializes independent rule decisions
+cases:
+  - name: a pending rule write serializes independent rule decisions
+    rules:
+      - id: acme-api
+        kind: folder
+        match: ~/work/acme/api/**
+        events: [pre-push]
+        collectives: [3f9c1a2b-0000-4000-8000-000000000001]
+        repositories:
+          - path: /home/alice/work/acme/api
+            label: github.com:acme/api
+            hooks: [{event: pre-push, status: absent}]
+      - id: acme-web
+        kind: folder
+        match: ~/work/acme/web/**
+        events: [pre-push]
+        collectives: [3f9c1a2b-0000-4000-8000-000000000001]
+        repositories:
+          - path: /home/alice/work/acme/web
+            label: github.com:acme/web
+            hooks: [{event: pre-push, status: absent}]

@@ -1,0 +1,17 @@
+requiredNames: [all-labels, unknown-empty-group, unknown-item, group-mismatch, malformed, wrong-total, empty-positive, wrong-group-count, wrong-rule-count, cached-unknown, cached-malformed, mock-unknown, mock-inactive-unknown, adaptation-rejection, adaptation-refusal]
+cases:
+  - { name: all-labels, source: network, mutation: none }
+  - { name: unknown-empty-group, source: network, mutation: unknown-empty-group, error: is not recognized }
+  - { name: unknown-item, source: network, mutation: unknown-item, error: is not recognized }
+  - { name: group-mismatch, source: network, mutation: group-mismatch, error: does not match enclosing category }
+  - { name: malformed, source: network, mutation: malformed, error: malformed response }
+  - { name: wrong-total, source: network, mutation: wrong-total, error: invalid occurrence counts }
+  - { name: empty-positive, source: network, mutation: empty-positive, error: invalid occurrence counts }
+  - { name: wrong-group-count, source: network, mutation: wrong-group-count, error: invalid occurrence counts }
+  - { name: wrong-rule-count, source: network, mutation: wrong-rule-count, error: invalid occurrence counts }
+  - { name: cached-unknown, source: cache, mutation: unknown-item, error: is not recognized }
+  - { name: cached-malformed, source: cache, mutation: malformed, error: malformed findings }
+  - { name: mock-unknown, source: mock, mutation: unknown-item, error: is not recognized }
+  - { name: mock-inactive-unknown, source: mock, mutation: unknown-item, minimumLevel: maximum, error: is not recognized }
+  - { name: adaptation-rejection, source: adapter, mutation: none, error: could not classify the scan }
+  - { name: adaptation-refusal, source: adapter, mutation: unknown-item, error: could not classify the scan }

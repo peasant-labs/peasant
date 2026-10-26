@@ -1,0 +1,78 @@
+# The answers to kickstart's "publish automatically?" question.
+#
+# Each case mounts the kickstart Program over a config.yaml in a config
+# directory of its own, beside a git repository of its own and a Village that
+# records every request it gets. The case answers the question, and in some
+# cases the publication step too, then saves through the review step.
+#
+# The test checks the saved intent (push.autoPublishIntent) and publication
+# preference (push.sharePreference), and the review row. It also checks that
+# the answer bound and installed nothing: no hooks.yaml beside config.yaml, no
+# hook file in the repository, no request to the Village, and no step after the
+# save but the local import.
+#
+# publication is the publication step's choice: keep-local, share-later, or
+# empty for no choice. publicationFirst chooses it before the question, and
+# publicationAfter chooses it after the question, from the review step going
+# back. collectives are the collectives the Village lists for the account; a
+# collective exists only on a Village the machine is signed in to.
+#
+# requiredNames is the exact set of cases.
+requiredNames:
+  - yes-no-collective
+  - yes-with-collective
+  - not-now
+  - yes-after-keep-local
+  - keep-local-after-yes
+cases:
+  - name: yes-no-collective
+    # A first run with no Village account: no collective can exist yet, so the
+    # intent is all "yes" can record. The first publish offers auto-publish
+    # ticked.
+    connected: false
+    collectives: []
+    seedSharePreference: ""
+    answer: "yes"
+    wantAutoPublishIntent: true
+    wantSharePreference: share-later
+    wantReview: "publish automatically: yes; you choose which folders go to which collectives in settings later"
+  - name: yes-with-collective
+    # Signed in, and the account is in a collective. Kickstart still binds no
+    # folder to it: the folders and collectives are chosen in settings.
+    connected: true
+    collectives: [Acme Platform]
+    seedSharePreference: ""
+    answer: "yes"
+    wantAutoPublishIntent: true
+    wantSharePreference: share-later
+    wantReview: "publish automatically: yes; you choose which folders go to which collectives in settings later"
+  - name: not-now
+    # "not now" changes nothing: the plan to publish later stays as it was.
+    connected: true
+    collectives: [Acme Platform]
+    seedSharePreference: share-later
+    answer: not now
+    wantAutoPublishIntent: false
+    wantSharePreference: share-later
+    wantReview: "publish automatically: not now"
+  - name: yes-after-keep-local
+    # Keep local is chosen first; "yes" then records the plan to publish,
+    # because the intent never coexists with keep local.
+    connected: false
+    collectives: []
+    seedSharePreference: share-later
+    publicationFirst: keep-local
+    answer: "yes"
+    wantAutoPublishIntent: true
+    wantSharePreference: share-later
+    wantReview: "publish automatically: yes; you choose which folders go to which collectives in settings later"
+  - name: keep-local-after-yes
+    # Going back to keep local after "yes" withdraws the intent.
+    connected: false
+    collectives: []
+    seedSharePreference: ""
+    answer: "yes"
+    publicationAfter: keep-local
+    wantAutoPublishIntent: false
+    wantSharePreference: ""
+    wantReview: "publish automatically: not now"

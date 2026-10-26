@@ -36,9 +36,10 @@ func (p *StoreDataProvider) DetailPayload(ctx context.Context, id string) (*sche
 // DetailPayloadWithReader serves one validated detail payload through the
 // durable snapshot boundary when the reader supports it, and through the
 // preserved legacy callback otherwise. A legacy V1 snapshot explicitly selects
-// the legacy path; a preview-only V2 generation explicitly selects the bounded
-// native preview builder from the same valid snapshot, with partial
-// diagnostics. A session with no stored metadata is reported as the API
+// the legacy path; a preview-only V2 generation, or a session whose newer
+// attempt is an incomplete preview beside its last-good authority, explicitly
+// selects the bounded native preview builder from the same valid snapshot, with
+// partial diagnostics. A session with no stored metadata is reported as the API
 // not-found sentinel; any other snapshot failure is returned, never hidden
 // behind truncated content. There is no error-triggered managed-to-legacy
 // fallback: integrity errors fail closed, and incomplete content never becomes
@@ -52,8 +53,9 @@ func DetailPayloadWithReader(ctx context.Context, reader indexformat.SnapshotRea
 	if ok && supported.GenerationSnapshotsSupported() {
 		if _, payload, err := transcript.BuildSnapshotDetailBytes(ctx, reader, resolver, sessionID); err == nil {
 			return payload, nil
-		} else if errors.Is(err, transcript.ErrSnapshotIncomplete) {
-			// Preview-only completeness: explicitly select the bounded native
+		} else if errors.Is(err, transcript.ErrSnapshotIncomplete) || errors.Is(err, indexformat.ErrLatestAttemptIncomplete) {
+			// Preview-only completeness, or an incomplete latest attempt beside
+			// the last-good authority: explicitly select the bounded native
 			// preview builder from the same valid snapshot. Deep links stay
 			// available for incomplete content; corruption still fails closed
 			// inside the preview builder.

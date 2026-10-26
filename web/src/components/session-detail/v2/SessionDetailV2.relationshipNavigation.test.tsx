@@ -7,6 +7,7 @@ import type { SessionDetailPayload, SessionRelationshipNavigation } from '@peasa
 import { SessionDetailV2 } from './SessionDetailV2';
 import { parseTranscriptRouteQuery, transcriptHref, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { loadContextNavigationFixture } from '@/test/contextNavigationFixture';
+import { PublishProvider } from '@/contexts/PublishContext';
 
 /**
  * The host's boundary with the published adapter, driven by the same fixture as
@@ -25,6 +26,13 @@ const fixture = loadContextNavigationFixture(
 );
 
 const routerPush = vi.hoisted(() => vi.fn());
+
+// The publish flow is not this suite's subject; its Local API calls stay
+// pending so no real server is reached.
+vi.mock('@/lib/share/publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/share/publishing')>()),
+  ...(await import('@/test/fixtures/publishingIdle')).PUBLISHING_IDLE,
+}));
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -81,12 +89,14 @@ function routeQuery() {
 
 function TestDetail() {
   return (
-    <SessionDetailV2
-      sessionId="sess_contextchild"
-      projectHash={PROJECT_HASH}
-      projectName="alpha-project"
-      routeQuery={routeQuery()}
-    />
+    <PublishProvider>
+      <SessionDetailV2
+        sessionId="sess_contextchild"
+        projectHash={PROJECT_HASH}
+        projectName="alpha-project"
+        routeQuery={routeQuery()}
+      />
+    </PublishProvider>
   );
 }
 

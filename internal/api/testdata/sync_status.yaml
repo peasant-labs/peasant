@@ -1,0 +1,22 @@
+# The status and hold reason a sync chooser row carries, from computeSyncStatus.
+# A held row always names why it waits, and no other row names a reason.
+# metricsMissing: the session is listed among the sessions without metrics.
+# metadataReady: its publication metadata is a verified capture.
+# pushed: it holds a publication cursor, at pushedAt; ingested is its last
+# ingest time.
+requiredNames:
+  - metrics-missing-is-held-for-metrics
+  - metadata-missing-is-held-for-metadata
+  - metrics-missing-wins-over-metadata
+  - never-published-is-new
+  - changed-after-publishing-is-updated
+  - unchanged-after-publishing-is-synced
+  - held-after-publishing-stays-held
+cases:
+  - {name: metrics-missing-is-held-for-metrics, metricsMissing: true, metadataReady: true, ingested: 10, expect: {status: held, holdReason: metrics_missing}}
+  - {name: metadata-missing-is-held-for-metadata, metricsMissing: false, metadataReady: false, ingested: 10, expect: {status: held, holdReason: metadata_missing}}
+  - {name: metrics-missing-wins-over-metadata, metricsMissing: true, metadataReady: false, ingested: 10, expect: {status: held, holdReason: metrics_missing}}
+  - {name: never-published-is-new, metricsMissing: false, metadataReady: true, ingested: 10, expect: {status: new}}
+  - {name: changed-after-publishing-is-updated, metricsMissing: false, metadataReady: true, ingested: 20, pushedAt: 10, expect: {status: updated}}
+  - {name: unchanged-after-publishing-is-synced, metricsMissing: false, metadataReady: true, ingested: 10, pushedAt: 10, expect: {status: synced}}
+  - {name: held-after-publishing-stays-held, metricsMissing: false, metadataReady: false, ingested: 20, pushedAt: 10, expect: {status: held, holdReason: metadata_missing}}

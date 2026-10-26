@@ -79,7 +79,13 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	storetest.CopyGoldenTo(t, hs.dbPath())
-	db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
+	// Read as the web server reads: through the managed-generation store the
+	// web ingest writes.
+	storeOptions, err := store.ManagedGenerationOptions(filepath.Join(home, "output"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithSkipMigrations())...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,9 +193,13 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	var calls atomic.Int32
 	captured := &syncCapturedPublish{parts: map[string]string{}}
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/auth/me" {
+			_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if !strings.Contains(r.URL.Path, "/transcripts/publish") {
-			_ = json.NewEncoder(w).Encode(schema.SchemaVersionResponse{ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1}})
+			_ = json.NewEncoder(w).Encode(schema.SchemaVersionResponse{ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1, schema.ContentCapabilitySessionGraphProvenanceV1}})
 			return
 		}
 		n := calls.Add(1)
@@ -207,13 +217,13 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	}))
 	defer village.Close()
 	writeSyncDoorCredentials(t, hs.Config, village.URL)
-	publish := func() pushResponse {
+	publish := func() schema.SyncPushResponse {
 		t.Helper()
 		restoreSource := prepareSourceFreePublication(t, db, cfg.Output.BasePath, filepath.Join(source, id+".jsonl"), id, repo)
 		defer restoreSource()
 		response := httptest.NewRecorder()
-		handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", strings.NewReader(`{"sessionIds":["`+id+`"],"visibility":"private"}`)))
-		var result pushResponse
+		handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", strings.NewReader(`{"sessionIds":["`+id+`"]}`)))
+		var result schema.SyncPushResponse
 		if response.Code != http.StatusOK {
 			t.Fatalf("publish: %d %s", response.Code, response.Body.String())
 		}
@@ -228,7 +238,7 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	if first := publish(); first.New != 1 || calls.Load() != 1 {
 		t.Fatalf("initial publication=%+v calls=%d", first, calls.Load())
 	}
-	receipt, err := db.Publication(t.Context(), village.URL, "user-1", meta.Project.Hash, id)
+	receipt, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), meta.Project.Hash, id)
 	if err != nil || receipt == nil {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
@@ -286,8 +296,11 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	if got, err := db.GetMetrics(t.Context(), sid); err != nil || got == nil {
 		t.Fatalf("metrics lost: %v", err)
 	} else {
-		// Recompute audit time is not a session statistic.
+		// Recompute audit time is not a session statistic. Nor is the input
+		// key: the repair activates a new managed generation, which is a new
+		// metric input. The statistics and their output hash must not move.
 		got.ComputedAt, metrics.ComputedAt = nil, nil
+		got.InputHash, metrics.InputHash = nil, nil
 		if !reflect.DeepEqual(got, metrics) {
 			t.Fatalf("metrics changed: got=%+v want=%+v", got, metrics)
 		}
@@ -297,7 +310,7 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	if got, err := db.GetAssociationAnnotationsForSession(t.Context(), id); err != nil || !reflect.DeepEqual(got, associationAnnotations) {
 		t.Fatalf("durable association changed: got=%+v want=%+v err=%v", got, associationAnnotations, err)
 	}
-	if got, err := db.Publication(t.Context(), village.URL, "user-1", meta.Project.Hash, id); err != nil || !reflect.DeepEqual(got, receipt) {
+	if got, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), meta.Project.Hash, id); err != nil || !reflect.DeepEqual(got, receipt) {
 		t.Fatalf("receipt changed: %v", err)
 	}
 	if calls.Load() != 1 {
@@ -310,11 +323,11 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	if update := publish(); update.Updated != 1 || calls.Load() != 2 {
 		t.Fatalf("repair publication=%+v calls=%d", update, calls.Load())
 	}
-	updatedReceipt, err := db.Publication(t.Context(), village.URL, "user-1", project, id)
+	updatedReceipt, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), project, id)
 	if err != nil || updatedReceipt == nil || updatedReceipt.Receipt.TranscriptID != receipt.Receipt.TranscriptID {
 		t.Fatalf("relocated receipt=%+v err=%v", updatedReceipt, err)
 	}
-	if oldReceipt, err := db.Publication(t.Context(), village.URL, "user-1", meta.Project.Hash, id); err != nil || oldReceipt != nil {
+	if oldReceipt, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), meta.Project.Hash, id); err != nil || oldReceipt != nil {
 		t.Fatalf("old project receipt remains=%+v err=%v", oldReceipt, err)
 	}
 	if !strings.Contains(captured.snapshot()["metadata"], project.String()) {
@@ -331,7 +344,7 @@ func TestOrdinaryAttributionRepairPreservesStoredSession(t *testing.T) {
 	if unchanged := publish(); unchanged.Skipped != 1 || calls.Load() != 2 {
 		t.Fatalf("unchanged publication=%+v calls=%d", unchanged, calls.Load())
 	}
-	if got, err := db.Publication(t.Context(), village.URL, "user-1", project, id); err != nil || !reflect.DeepEqual(got, updatedReceipt) {
+	if got, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), project, id); err != nil || !reflect.DeepEqual(got, updatedReceipt) {
 		t.Fatalf("unchanged publication mutated receipt: %v", err)
 	}
 	// Losing every usable remote must also converge to the adapter's path identity.

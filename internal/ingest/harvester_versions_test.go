@@ -130,10 +130,10 @@ func TestHarvesterVersionRegistry(t *testing.T) {
 				for harness, expected := range fixture.NativeTargets {
 					native[harness] = HarvesterVersions{AdapterVersion: expected.AdapterVersion, IndexerVersion: expected.IndexerVersion, IndexVersion: expected.IndexVersion}
 				}
-				if !maps.Equal(native, NativeGenerationRepairTargets) {
-					t.Fatalf("native targets %+v, want %+v", NativeGenerationRepairTargets, native)
+				if !maps.Equal(native, GenerationRepairTargets) {
+					t.Fatalf("managed-generation targets %+v, want %+v", GenerationRepairTargets, native)
 				}
-				merged := NativeGenerationTargets(targets)
+				merged := GenerationTargets(targets)
 				for harness, baseline := range targets {
 					want := baseline
 					if override, ok := native[harness]; ok {

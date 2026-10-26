@@ -1,0 +1,155 @@
+# How the pull pipeline stores a person the village shows as a public owner.
+# Accounts: self 0a000000-0000-4000-8000-000000000003 is the requester (the
+# test credentials), alice ...0001 owns other transcripts, bob ...0002 authors
+# annotations.
+#
+# requiredNames is the deletion-protection manifest.
+requiredNames:
+  - own-profile-owner
+  - other-profile-owner
+  - anonymous-owner-and-author
+  - unknown-kind-stores-nothing
+  - owner-hidden-since-last-pull
+  - owner-visible-since-last-pull
+  - released-village-envelope
+  - author-hidden-since-last-pull
+  - authors-unchanged-take-the-fast-path
+  - owner-renamed-since-last-pull
+  - repository-targets-dropped-beside-anonymous-owner
+  - refresh-anonymous-author-stays-foreign
+  - refresh-anonymous-owner-is-never-own
+
+pull:
+  - name: own-profile-owner
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000003, username: self}
+    authors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    wantOwner: {id: 0a000000-0000-4000-8000-000000000003, username: self}
+    wantAuthors:
+      - {id: 0a000000-0000-4000-8000-000000000002, username: bob}
+  - name: other-profile-owner
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    authors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000003, username: self}
+    wantOwner: {id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    wantAuthors:
+      - {id: 0a000000-0000-4000-8000-000000000003, username: self}
+  - name: anonymous-owner-and-author
+    owner: {kind: anonymous}
+    authors:
+      - {kind: anonymous}
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    wantOwner: {}
+    wantAuthors:
+      - {}
+      - {id: 0a000000-0000-4000-8000-000000000002, username: bob}
+  # A reader double hands the pipeline a kind this contract does not know,
+  # still carrying identity and a project name: the pipeline stores none of it.
+  - name: unknown-kind-stores-nothing
+    owner: {kind: organization, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    projectName: alice-private-repo
+    authors:
+      - {kind: organization, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    wantOwner: {}
+    wantAuthors:
+      - {}
+    forbidden: [0a000000-0000-4000-8000-000000000001, alice, 0a000000-0000-4000-8000-000000000002, bob, alice-private-repo]
+  # The transcript was pulled while the village showed alice; she is now
+  # anonymous to this viewer. The unchanged blob is re-pulled in full so the
+  # manifest, metadata and index drop her identity.
+  - name: owner-hidden-since-last-pull
+    previousOwner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    previousAuthors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    owner: {kind: anonymous}
+    authors:
+      - {kind: anonymous}
+    wantOwner: {}
+    wantAuthors:
+      - {}
+    wantDownloads: 2
+    forbidden: [0a000000-0000-4000-8000-000000000001, alice]
+  - name: owner-visible-since-last-pull
+    previousOwner: {kind: anonymous}
+    previousAuthors:
+      - {kind: anonymous}
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    authors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    wantOwner: {id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    wantAuthors:
+      - {id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    wantDownloads: 2
+  # Bob authored an annotation while the village showed him; he is now
+  # anonymous to this viewer while the owner and the blob are unchanged. The
+  # annotation re-read sees it and the copy is re-pulled without his identity.
+  - name: author-hidden-since-last-pull
+    previousOwner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    previousAuthors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    authors:
+      - {kind: anonymous}
+    wantOwner: {id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    wantAuthors:
+      - {}
+    wantDownloads: 2
+    forbidden: [0a000000-0000-4000-8000-000000000002, bob]
+  # Nothing about the people changed: the re-read confirms it and the blob is
+  # not downloaded again.
+  - name: authors-unchanged-take-the-fast-path
+    previousOwner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    previousAuthors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    authors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    wantStatus: up-to-date
+    wantOwner: {id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    wantAuthors:
+      - {id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    wantDownloads: 1
+  # Same account, new username: the manifest picks up the new name.
+  - name: owner-renamed-since-last-pull
+    previousOwner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    previousAuthors: []
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice-renamed}
+    authors: []
+    wantOwner: {id: 0a000000-0000-4000-8000-000000000001, username: alice-renamed}
+    wantAuthors: []
+    wantDownloads: 2
+  # Beside an anonymous owner the village withholds an annotation's project
+  # hash and file path; the pipeline keeps none that arrives.
+  - name: repository-targets-dropped-beside-anonymous-owner
+    owner: {kind: anonymous}
+    authors:
+      - {kind: anonymous}
+    annotationTargets: true
+    wantOwner: {}
+    wantAuthors:
+      - {}
+    forbidden: [6f1ed002ab5595859014ebf0951522d9, private/secret-file.go]
+  - name: released-village-envelope
+    envelope: "0.2.0"
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    authors: []
+    wantOwner: {id: 0a000000-0000-4000-8000-000000000001, username: alice}
+    wantAuthors: []
+
+refresh:
+  - name: refresh-anonymous-author-stays-foreign
+    owner: {kind: profile, id: 0a000000-0000-4000-8000-000000000003, username: self}
+    authors:
+      - {kind: anonymous}
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000003, username: self}
+    wantScanned: 1
+    wantExcluded: 1
+    wantAuthors:
+      - {}
+  - name: refresh-anonymous-owner-is-never-own
+    owner: {kind: anonymous}
+    authors:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000002, username: bob}
+    wantScanned: 0
+    wantExcluded: 0
+    wantAuthors: []

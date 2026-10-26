@@ -1,0 +1,76 @@
+# Required names for parent_column_sites.yaml. Exact membership in all three
+# directions: a listed name missing from its section fails, and a section entry
+# with no listed name fails. Removing a classified site without updating this
+# manifest is a deletion, and the guard refuses it.
+requiredResidual:
+  - store-home-identity-parent-cache
+  - store-logical-parent-renderer
+  - store-push-sessions-parent
+  - store-lookup-session-location
+  - store-bulk-lookup-session-locations
+  - store-publication-metadata-select
+  - store-validate-stored-publication-capture
+  - store-read-migrate-oracle-session
+  - store-reconcile-parent-cache
+  - store-parent-cache-legacy-lookup
+  - store-parent-cache-durable-lookup
+  - store-insert-session
+  - store-insert-session-before-source-fingerprint
+  - store-point-session-at-generation
+  - store-write-parent-cache
+  - store-schema-sessions
+  - store-schema-sessions-index
+  - store-v23-data-migration
+  - store-v23-create-sessions
+  - store-v23-recreate-indexes
+  - store-migration-v33
+  - store-migration-v42
+  - store-migration-v53
+  - store-migration-v51
+requiredRouted:
+  - store-all-sessions
+  - store-session-detail-query
+  - store-child-sessions
+  - store-snapshot-session-row
+  - store-harmonized-metadata
+  - store-read-session-parent
+  - store-read-stored-metadata
+  - store-list-stale-origin-sessions
+  - store-invalidate-stale-parent-origins
+  - codemap-sessions-for-project
+  - cmd-annotate-research-root-filter
+requiredForeign:
+  - api-websocket-log-attribute
+  - ingest-opencode-candidate
+  - ingest-opencode-cursor-record
+  - ingest-opencode-v2-cursor-record
+  - ingest-opencode-session-record-decode
+  - ingest-opencode-attribution-after
+  - ingest-opencode-attribution-first
+  - ingest-opencode-columns
+  - ingest-opencode-extended-after
+  - ingest-opencode-extended-first
+  - ingest-opencode-parents-after
+  - ingest-opencode-parents-first
+  - ingest-opencode-records-after
+  - ingest-opencode-records-first
+  - ingest-opencode-v2-attribution-after
+  - ingest-opencode-v2-attribution-first
+  - ingest-opencode-v2-extended-after
+  - ingest-opencode-v2-extended-first
+  - ingest-opencode-v2-parents-after
+  - ingest-opencode-v2-parents-first
+  - ingest-opencode-v2-records-after
+  - ingest-opencode-v2-records-first
+  - ingest-opencode-model-after
+  - ingest-opencode-model-first
+  - ingest-opencode-v2-model-after
+  - ingest-opencode-v2-model-first
+  - ingest-opencode-session-records
+  - ingest-testfixture-current-missing-seq
+  - ingest-testfixture-current-nullable-seq
+  - ingest-testfixture-current-partial-seq
+  - ingest-testfixture-session-no-clock
+  - ingest-testfixture-session
+  - ingest-testfixture-session-attribution
+  - ingest-testfixture-session-extended

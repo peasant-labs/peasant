@@ -14,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -94,7 +95,7 @@ func TestSyncEndpointsRejectInvalidCustomPatternsBeforeSideEffects(t *testing.T)
 			handler.handleSyncRedactions(previewResponse, previewRequest)
 			assertSyncCustomPatternFailure(t, "preview", previewResponse, fixture.ExpectedErrorContains)
 
-			body, marshalErr := json.Marshal(pushRequest{SessionIDs: []string{"11111111-1111-1111-1111-111111111111"}, Visibility: "private"})
+			body, marshalErr := json.Marshal(schema.SyncPushRequest{SessionIDs: []string{"11111111-1111-1111-1111-111111111111"}})
 			if marshalErr != nil {
 				t.Fatal(marshalErr)
 			}

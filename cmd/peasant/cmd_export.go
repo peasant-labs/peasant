@@ -15,10 +15,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // BuildExportCommand constructs the export command tree.
@@ -474,14 +474,44 @@ func exportSessionSummary(cmd *cobra.Command, rows []frictionExportRow, asJSON b
 			return fmt.Errorf("export friction summary: read metadata for %s: %w", sid, err)
 		}
 
-		// Get turn counts.
-		if err := sqlitex.ExecuteTransient(conn, `
+		// Get turn counts from the session's current representation: mapped
+		// body rows for harmonized sessions, the mirror otherwise (file-backed
+		// sessions still own their mirror).
+		countQuery := `
 			SELECT
 				COUNT(*) FILTER (WHERE role = 'user' AND depth = 0),
 				COUNT(*)
 			FROM session_entries WHERE session_id = ?
-		`, &sqlitex.ExecOptions{
+		`
+		countArgs := []any{sid}
+		var generationID any
+		if err := sqlitex.ExecuteTransient(conn, `SELECT s.active_generation_id FROM sessions s
+WHERE s.session_id = ?
+AND EXISTS (SELECT 1 FROM session_generations g WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id)`, &sqlitex.ExecOptions{
 			Args: []any{sid},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				if stmt.ColumnType(0) != sqlite.TypeNull {
+					generationID = stmt.ColumnText(0)
+				}
+				return nil
+			},
+		}); err != nil {
+			return fmt.Errorf("export friction summary: resolve representation for %s: %w", sid, err)
+		}
+		if generationID, ok := generationID.(string); ok {
+			countQuery = `
+				SELECT
+					COUNT(*) FILTER (WHERE b.role = 'user' AND b.depth = 0),
+					COUNT(*)
+				FROM session_generation_entries m
+				JOIN session_entry_bodies b
+				  ON b.session_id = m.session_id AND b.body_digest = m.body_digest
+				WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0
+			`
+			countArgs = []any{sid, generationID}
+		}
+		if err := sqlitex.ExecuteTransient(conn, countQuery, &sqlitex.ExecOptions{
+			Args: countArgs,
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				s.UserMessages = stmt.ColumnInt(0)
 				s.TotalTurns = stmt.ColumnInt(1)
@@ -589,15 +619,23 @@ func printExportSummary(w io.Writer, result *export.ExportResult[export.EEEMetri
 // Exports session transcripts as JSON files with full turn content (not truncated).
 // Each session is written to <output-dir>/<session-id>.json.
 func buildExportSessionsCommand() *cobra.Command {
-	var outputDir string
+	var (
+		outputDir string
+		lastGood  bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "sessions",
 		Short: "Export session transcripts as JSON",
 		Long: `Export session transcripts as JSON files with full turn content.
 
-Each session uses a coherent snapshot of retained input and indexed coordinates,
+Each session uses a coherent snapshot of stored input and indexed coordinates,
 producing a JSON envelope with full content. Stale or unproven inputs are refused.
+
+A session that keeps a newer incomplete attempt beside its last-good generation
+is refused by default: the newer attempt is never exported as the session, and
+the last-good content is not leaked past the refusal. Pass --last-good to export
+the last-good full authority explicitly.
 
 Requires either --session for a single session or --session-from-file for a batch.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -630,7 +668,18 @@ Requires either --session for a single session or --session-from-file for a batc
 
 			var succeeded, failed int
 			for _, sid := range sessionIDs {
-				exported, exportErr := export.ExportSession(ctx, db, fs, sid, cfg.Output.BasePath)
+				// The default seam stays on the authority read; only the explicit
+				// flag routes through the selected one. The last-good selection is
+				// resolved server-side: the selector carries only the intent, and
+				// the store picks the last-good authority itself. No session or
+				// generation identifier is accepted from the caller.
+				var exported *schema.SessionDetailPayload
+				var exportErr error
+				if lastGood {
+					exported, exportErr = exportSessionTranscriptSelected(ctx, db, fs, sid, ingest.SessionReadSelection{LastGood: true}, cfg.Output.BasePath)
+				} else {
+					exported, exportErr = exportSessionTranscript(ctx, db, fs, sid, cfg.Output.BasePath)
+				}
 				if exportErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: %v\n", sid, exportErr)
 					failed++
@@ -675,6 +724,7 @@ Requires either --session for a single session or --session-from-file for a batc
 	cmd.Flags().String("session", "", "Single session ID to export")
 	cmd.Flags().String("session-from-file", "", "Path to a newline-delimited file of session IDs to export")
 	cmd.Flags().StringVar(&outputDir, "output-dir", ".", "Directory to write exported session JSON files")
+	cmd.Flags().BoolVar(&lastGood, "last-good", false, "Export the last-good full transcript when a newer incomplete attempt is kept beside it. Without it such a session is refused rather than exporting the incomplete attempt; the store resolves the last-good authority server-side, so no session or generation identifier is accepted")
 
 	return cmd
 }

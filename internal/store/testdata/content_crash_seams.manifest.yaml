@@ -1,0 +1,11 @@
+# Required-name manifest for content_crash_seams: deletion protection by NAME, never by count.
+requiredNames:
+  - after-prepare
+  - after-sweep-flag
+  - between-stage-txns
+  - before-commit
+  - commit-rollback
+  - mid-activation-batch
+  - savepoint-isolation
+  - after-commit-before-sweep
+  - mid-sweep-batch

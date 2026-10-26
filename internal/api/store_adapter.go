@@ -212,6 +212,15 @@ func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.
 		return nil, fmt.Errorf("store adapter: session summaries preview: %w", err)
 	}
 
+	// The recorded teammate identity is evidence for the same page: the read
+	// answers only for these identifiers, and a missing key means the session
+	// carries no recorded spawn edge. Both arms of this one construction site
+	// therefore carry it, exactly as they carry the preview.
+	teammates, err := p.store.ClaudeTeammates(ctx, sessionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: session summaries teammate evidence: %w", err)
+	}
+
 	summaries := make([]SessionSummary, len(rows))
 	for i := range rows {
 		row := &rows[i]
@@ -238,9 +247,21 @@ func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.
 			s.Outcome = *row.Outcome
 		}
 		s.ParentSessionID = row.ParentID
+		s.Teammate = teammateFor(teammates, row.SessionID)
 		summaries[i] = s
 	}
 	return summaries, nil
+}
+
+// teammateFor returns the recorded teammate identity for one session, or nil
+// when the evidence read named none. The pointer names a value copied out of
+// the read's map, so callers cannot alias the map's storage.
+func teammateFor(teammates map[string]schema.SessionTeammate, sessionID string) *schema.SessionTeammate {
+	teammate, ok := teammates[sessionID]
+	if !ok {
+		return nil
+	}
+	return &teammate
 }
 
 // sessionCandidate projects a stored row onto the visibility package's input.
@@ -267,6 +288,28 @@ func (p *StoreDataProvider) sessionCandidate(row *store.SessionRow) sessionvisib
 		Origin:          sessionorigin.Origin(row.SessionOrigin),
 		ParentSessionID: ingest.SessionID(parent),
 	}
+}
+
+// SelectionScopeByID reports, for each named session stored on this computer,
+// whether the saved selection admits it into the local lists. It applies
+// selection scope only, through the same projection the lists use, and reads
+// exactly the named rows. An identifier that names no stored session is absent
+// from the map. The publication read uses it to say that a session it returns
+// is one the lists leave out; it is never a reason to withhold the session.
+func (p *StoreDataProvider) SelectionScopeByID(ctx context.Context, ids []string) (map[string]bool, error) {
+	rows, err := p.store.SessionsByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: selection scope by id: %w", err)
+	}
+	selected := make(map[string]bool, len(rows))
+	for i := range rows {
+		visible, err := p.visibleSessionRow(&rows[i])
+		if err != nil {
+			return nil, fmt.Errorf("store adapter: selection scope of session %q: %w", rows[i].SessionID, err)
+		}
+		selected[rows[i].SessionID] = visible
+	}
+	return selected, nil
 }
 
 // visibleSessionRow applies SELECTION scope only. It backs the aggregate
@@ -778,6 +821,12 @@ func sessionRowToSession(row *store.SessionRow) ingest.Session {
 	if q := rowToQualityMetrics(row); q != nil {
 		s.Metadata.Quality = q
 	}
+	// The stored session thinking-level seed feeds the local session_detail
+	// payload and export; empty stays empty (unknown, never off). The stored
+	// history rides the same path, nil when no change was observed.
+	s.ThinkingLevel = row.ThinkingLevel
+	s.ThinkingLevelRaw = row.ThinkingLevelRaw
+	s.ThinkingLevelHistory = row.ThinkingLevelHistory
 	return s
 }
 

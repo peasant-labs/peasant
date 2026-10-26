@@ -1,6 +1,6 @@
 package store
 
-import "zombiezen.com/go/sqlite/sqlitemigration"
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 
 // frozenSchema returns the schema as it shipped after exactly n migrations, so
 // a migration test can seed the predecessor state through raw SQL before the

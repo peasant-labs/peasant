@@ -106,7 +106,7 @@ func (s RemoteCapabilitySupport) UnsupportedReason() string {
 		}
 		return "the receiver's capability advertisement could not be obtained"
 	}
-	return "the target Village did not advertise the exact required capability tokens"
+	return "the target peasant online server did not advertise the exact required capability tokens"
 }
 
 // capabilityRefusalRecovery is the "fix:" line for a capability refusal. It
@@ -116,7 +116,7 @@ func (s RemoteCapabilitySupport) UnsupportedReason() string {
 // preservation proof covers the tokens.
 func capabilityRefusalRecovery(support RemoteCapabilitySupport) string {
 	if !support.Known {
-		return "restore connectivity to the Village and retry so a fresh capability advertisement can be read; do not publish without confirming the receiver preserves this evidence"
+		return "restore connectivity to peasant online and retry so a fresh capability advertisement can be read; do not publish without confirming the receiver preserves this evidence"
 	}
-	return "use a Village target that advertises these capabilities after its preservation proof passes, then retry"
+	return "use a peasant online server that advertises these capabilities after its preservation proof passes, then retry"
 }

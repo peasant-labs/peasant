@@ -412,10 +412,15 @@ func ppeBuildPartitions(t *testing.T, built *ppeBuilt, c publishedProvenanceEnve
 			SessionID: meta.SessionID, EntryIndex: 1, Harness: built.harness,
 			EntryType: schema.EntryTypeText, Role: schema.RoleAssistant, ContentPreview: &assistantText,
 		}
+		// The tool input carries the full body, not a bounded preview: under
+		// the harmonized model an emitted ref's content IS its field bytes
+		// (§3.4), so a preview-sized field with a full content record is
+		// not a valid shape. The publish-past-preview-bound assertion below
+		// proves the full body still publishes through the unbounded field.
 		call := schema.SessionEntry{
 			SessionID: meta.SessionID, EntryIndex: 2, Harness: built.harness,
 			EntryType: schema.EntryTypeToolUse, Role: schema.RoleAssistant, Depth: 1, ParentIndex: &carrier,
-			ToolInput: &preview, ToolCallID: &callID,
+			ToolInput: &longBody, ToolCallID: &callID,
 			SourceEntryRef: schema.SourceEntryRef("e_call1"), Provenance: ppeProvenance("s_call1"),
 		}
 		result := schema.SessionEntry{

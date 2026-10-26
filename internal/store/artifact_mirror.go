@@ -8,8 +8,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 var _ ingest.ArtifactMirrorStore = (*Store)(nil)
@@ -62,7 +62,13 @@ func (s *Store) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactM
 		return results
 	}
 	defer s.pool.Put(conn)
-	if err = sqlitex.ExecuteTransient(conn, "BEGIN DEFERRED", nil); err != nil {
+	// Acquire the writer before reading prior state. A deferred transaction
+	// takes a read snapshot first and its project insert then needs a lock
+	// upgrade, which can return BUSY immediately despite busy_timeout. The
+	// ingest lane serializes this process's writes; IMMEDIATE also lets SQLite
+	// apply its bounded busy backoff to writers on other connections before
+	// any snapshot or per-session savepoint is created.
+	if err = sqlitex.ExecuteTransient(conn, "BEGIN IMMEDIATE", nil); err != nil {
 		failAll(fmt.Errorf("begin managed artifact mirror transaction: %w; no session was reconciled; restore database access and retry harvest", err))
 		return results
 	}
@@ -250,7 +256,7 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	entry.SourceFingerprint = request.SourceFingerprint
 	entry.CommitCaptureComplete = request.CommitCaptureComplete
 	if entry.CWDProvenance == "" {
-		// Retained extraction can preserve source facts already proven by a
+		// Stored extraction can preserve source facts already proven by a
 		// database capture. A historical file alone does not establish them.
 		err := sqlitex.ExecuteTransient(conn, `SELECT p.metadata_json,s.cwd_provenance_kind FROM session_publication_metadata p JOIN sessions s USING(session_id) WHERE s.session_id=? AND p.capture_revision=s.publication_capture_revision`, &sqlitex.ExecOptions{
 			Args: []any{string(meta.SessionID)}, ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -329,6 +335,9 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	var prior any
 	if priorArtifactHash != nil {
 		prior = *priorArtifactHash
+	}
+	if err := sqlitex.ExecuteTransient(conn, "DELETE FROM session_source_unavailability WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{string(meta.SessionID)}}); err != nil {
+		return fmt.Errorf("clear unavailable source after session %s artifact refresh: %w; refresh was rolled back; restore database access and retry harvest", meta.SessionID, err)
 	}
 	return sqlitex.ExecuteTransient(conn, "UPDATE sessions SET artifact_hash = ?, indexed_input_hash = CASE WHEN ? IS ? THEN indexed_input_hash ELSE NULL END WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{request.Artifact.ArtifactHash, prior, request.Artifact.ArtifactHash, string(meta.SessionID)}})
 }

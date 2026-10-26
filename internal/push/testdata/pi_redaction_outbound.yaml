@@ -64,3 +64,33 @@ namespaces:
   - name: empty_namespace_remains_present_after_redaction
     namespace: ''
     want: ''
+# A stored Pi row whose private thinking-level evidence was corrupted after
+# indexing must re-encode through publication instead of refusing the session.
+# The overlay JSON is merged onto a valid typed row; wantLevel/wantRaw are the
+# typed values after RedactEntries, so an omitted pair means the malformed half
+# was cleared to match the value the read path serves.
+storedThinkingLevel:
+  - name: stored_valid_pair_reencoded_preserved
+    overlay: '{"thinking_level":"high","thinking_level_raw":"High"}'
+    wantLevel: high
+    wantRaw: High
+  - name: stored_unknown_canonical_reencoded_cleared
+    overlay: '{"thinking_level":"custom"}'
+  - name: stored_edge_whitespace_raw_reencoded_cleared
+    overlay: '{"thinking_level_raw":" deep"}'
+  - name: stored_non_string_level_valid_raw_reencoded_cleared
+    overlay: '{"thinking_level":7,"thinking_level_raw":"Deep"}'
+  - name: stored_pair_non_string_reencoded_cleared
+    overlay: '{"thinking_level":7,"thinking_level_raw":false}'
+  - name: stored_null_level_reencoded_cleared
+    overlay: '{"thinking_level":null}'
+  - name: stored_null_raw_reencoded_cleared
+    overlay: '{"thinking_level_raw":null}'
+  - name: stored_null_pair_reencoded_cleared
+    overlay: '{"thinking_level":null,"thinking_level_raw":null}'
+  - name: stored_null_level_valid_raw_reencoded_keeps_raw
+    overlay: '{"thinking_level":null,"thinking_level_raw":"Deep"}'
+    wantRaw: Deep
+  - name: stored_valid_level_null_raw_reencoded_keeps_level
+    overlay: '{"thinking_level":"high","thinking_level_raw":null}'
+    wantLevel: high

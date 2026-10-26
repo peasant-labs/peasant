@@ -1,0 +1,104 @@
+# Case family for the latest-attempt eligibility predicate. The predicate
+# holds only when ALL hold:
+#   (1) the result is a managed V2 generation;
+#   (2) the candidate is complete (incomplete_new is excluded);
+#   (3) the write carries the ASSESSED unaccounted-omission preview
+#       (capture format preview_only with the source_records_omitted code);
+#   (4) the write is an ordinary replace (never an explicit rebuild, a format
+#       conversion, or a content backfill);
+#   (5) the stored certificate holds full authority (a capture exists and
+#       PublishableWithOmissions certifies it);
+#   (6) a verified pair identity is available (the stored artifact hash is
+#       non-null, or the write supplies one).
+# Most rows vary exactly one clause, keep every other clause at its passing
+# value, and state the outcome they observe. The two rows marked below can only
+# pin an observable an earlier guard decides, so they state that reachability
+# instead of claiming the clause. Every negative row carries want_ok or
+# want_error_contains, so a row cannot pass on an unrelated downstream refusal.
+# Decoded by the strict loader in latest_attempt_matrix_test.go.
+
+pairIdentity: a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+session:
+  id: 4c4c4c4c-4c4c-4c4c-8c4c-4c4c4c4c4c4c
+
+cases:
+  # The fully explicit control: every clause keeps its passing value.
+  - name: managed-complete-assessed-stored-identity
+    routes: [single, batch]
+    result: managed
+    completeness: complete
+    capture: assessed
+    mode: replace_all
+    certificate: publishable
+    identity: stored
+    want_latest_attempt: true
+
+  - name: managed-complete-assessed-supplied-identity
+    routes: [single, batch]
+    identity: supplied
+    want_latest_attempt: true
+
+  - name: managed-complete-assessed-no-identity
+    routes: [single, batch]
+    identity: none
+    want_latest_attempt: false
+    want_error_contains: pair-proof-unavailable
+
+  # Reachability: a non-managed write is refused by the index-format ceiling
+  # before the latest-attempt decision, so this row pins the observable "never
+  # a latest attempt" with the ceiling's refusal, not the managed-result clause.
+  - name: non-managed-result
+    routes: [batch_write]
+    result: v1
+    want_latest_attempt: false
+    want_error_contains: newer than output format 1
+
+  - name: incomplete-new-result
+    routes: [single, batch]
+    completeness: incomplete_new
+    want_latest_attempt: false
+    want_error_contains: last-good read authority
+
+  - name: other-preview-over-full
+    routes: [single, batch]
+    capture: strict_refused
+    want_latest_attempt: false
+    want_error_contains: preview replacement refused over full read authority
+
+  - name: mode-empty
+    routes: [batch_write]
+    mode: ""
+    want_latest_attempt: true
+
+  - name: mode-explicit-rebuild
+    routes: [single, batch]
+    mode: explicit_rebuild
+    want_latest_attempt: false
+    want_ok: true
+
+  # Reachability: this row pins the refusal outcome, but the retention branch's
+  # own conversion refusal is the identical observable, so the ordinary-mode
+  # clause is discriminated by mode-explicit-rebuild and mode-content-backfill.
+  - name: mode-format-conversion
+    routes: [batch_write]
+    mode: format_conversion
+    want_latest_attempt: false
+    want_error_contains: no V2 conversion is registered
+
+  - name: mode-content-backfill
+    routes: [batch_write]
+    mode: content_backfill
+    want_latest_attempt: false
+    want_error_contains: preview replacement refused over full read authority
+
+  - name: certificate-absent
+    routes: [single, batch]
+    certificate: absent
+    want_latest_attempt: false
+    want_ok: true
+
+  - name: certificate-non-publishable
+    routes: [single, batch]
+    certificate: non_publishable
+    want_latest_attempt: false
+    want_ok: true

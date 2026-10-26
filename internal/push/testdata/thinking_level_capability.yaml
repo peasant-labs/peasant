@@ -1,0 +1,57 @@
+cases:
+  - name: stored_seed_requires_token
+    level: ultracode
+    seedOnly: true
+    advertisement: [thinking_level_v1]
+    required: [thinking_level_v1]
+  - name: stored_raw_seed_refuses_without_token
+    raw: custom
+    seedOnly: true
+    required: [thinking_level_v1]
+    refuse: true
+  - name: push_envelope_carries_thinking_level
+    level: ultracode
+    advertisement: [thinking_level_v1]
+    required: [thinking_level_v1]
+  - name: raw_only_requires_token
+    raw: custom
+    advertisement: [thinking_level_v1]
+    required: [thinking_level_v1]
+  - name: canonical_only_requires_token
+    level: off
+    advertisement: [thinking_level_v1]
+    required: [thinking_level_v1]
+  - name: absent_needs_no_token
+    required: []
+  - name: missing_token_refuses_before_upload
+    level: high
+    required: [thinking_level_v1]
+    refuse: true
+  - name: raw_missing_token_refuses_before_upload
+    raw: default
+    required: [thinking_level_v1]
+    refuse: true
+  - name: requirements_accumulate
+    level: medium
+    observedModel: claude-opus-4-6
+    advertisement: [observed_model_v1, thinking_level_v1]
+    required: [observed_model_v1, thinking_level_v1]
+  - name: other_token_does_not_cover_thinking
+    level: high
+    observedModel: claude-opus-4-6
+    advertisement: [observed_model_v1]
+    required: [observed_model_v1, thinking_level_v1]
+    refuse: true
+  - name: history_only_requires_token
+    seedOnly: true
+    history:
+      - {level: high}
+      - {level: "off", raw: none}
+    advertisement: [thinking_level_v1]
+    required: [thinking_level_v1]
+  - name: history_only_refuses_without_token
+    seedOnly: true
+    history:
+      - {level: high}
+    required: [thinking_level_v1]
+    refuse: true

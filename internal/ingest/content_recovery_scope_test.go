@@ -17,10 +17,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/content_recovery_scope.yaml
@@ -164,6 +164,8 @@ func TestContentRecoveryScope(t *testing.T) {
 				t.Fatal(err)
 			}
 			meta := makeMinimalMeta(t, id.String())
+			adapterVersion := ingest.HarvesterVersionRegistry[meta.ModelHarness].AdapterVersion
+			meta.AdapterVersion = &adapterVersion
 			meta.Project.Hash = testutil.TestProjectHash
 			meta.Source.FilePath = "/synthetic/missing.jsonl"
 			stored := *meta

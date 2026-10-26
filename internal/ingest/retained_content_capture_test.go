@@ -12,9 +12,9 @@ import (
 )
 
 //go:embed testdata/retained_content_capture.yaml
-var retainedContentCaptureYAML []byte
+var storedContentCaptureYAML []byte
 
-type retainedContentCaptureFixtures struct {
+type storedContentCaptureFixtures struct {
 	Required         []string `yaml:"required_names"`
 	StrikeTranscript string   `yaml:"strike_transcript"`
 	OpenCodeMessage  string   `yaml:"opencode_message"`
@@ -30,10 +30,10 @@ type retainedContentCaptureFixtures struct {
 	} `yaml:"cases"`
 }
 
-func TestRetainedContentCaptureProducers(t *testing.T) {
+func TestStoredContentCaptureProducers(t *testing.T) {
 	t.Parallel()
-	var fixtures retainedContentCaptureFixtures
-	if err := yaml.Unmarshal(retainedContentCaptureYAML, &fixtures); err != nil {
+	var fixtures storedContentCaptureFixtures
+	if err := yaml.Unmarshal(storedContentCaptureYAML, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
@@ -56,7 +56,7 @@ func TestRetainedContentCaptureProducers(t *testing.T) {
 			}
 			root := t.TempDir()
 			filesystem := &OSFileSystem{}
-			var capturer RetainedContentCapturer
+			var capturer StoredContentCapturer
 			var session DiscoveredSession
 			switch harness {
 			case HarnessStrike:
@@ -97,7 +97,7 @@ func TestRetainedContentCaptureProducers(t *testing.T) {
 			default:
 				t.Fatalf("fixture harness %s has no retained capture producer under test", harness)
 			}
-			capture, err := capturer.CaptureRetainedContent(context.Background(), session)
+			capture, err := capturer.CaptureStoredContent(context.Background(), session)
 			if err != nil {
 				t.Fatalf("retained capture failed: %v", err)
 			}

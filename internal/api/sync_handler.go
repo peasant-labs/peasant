@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -27,8 +30,10 @@ import (
 
 // syncHandler serves the web sync/push API endpoints.
 type syncHandler struct {
-	store  *store.Store
-	config *config.Config
+	store *store.Store
+	// config is the configuration the server applies, including every setting
+	// saved through the settings routes since it started.
+	config *liveConfig
 	// configHome, dataHome, and stateHome override the XDG roots this handler
 	// resolves config, data, and state paths under. Empty keeps the process
 	// environment as the default, so only tests inject explicit roots and the
@@ -40,6 +45,14 @@ type syncHandler struct {
 	// carries. The server owns the bounded scope cache; the sync route only
 	// consumes the issuer seam so its members replay the sync predicate.
 	scopeIssuer groupedScopeIssuer
+	home        *homeHandler
+	// detectReview allows the scan's detector dependency to be supplied without
+	// changing the offered redaction policy. Nil uses the configured engine.
+	detectReview func(string) []redact.Match
+
+	// sessionIngestTimeout bounds one session re-index. Zero uses
+	// defaultSessionIngestTimeout; only tests set it.
+	sessionIngestTimeout time.Duration
 
 	// Ingest state (protected by mu).
 	mu             sync.Mutex
@@ -47,6 +60,9 @@ type syncHandler struct {
 	ingestProgress *ingest.ProgressState
 	ingestResult   *ingest.PipelineResult
 	ingestError    error
+	// sessionIngest is set while a one-session re-index runs, so it and the
+	// whole-machine ingest never run at once in this process.
+	sessionIngest bool
 }
 
 // configDir resolves the config directory this handler reads and writes under,
@@ -72,6 +88,13 @@ func (h *syncHandler) dbPath() defaults.DBFilePath {
 	return defaults.ResolveDBFilePathWith(h.dataHome)
 }
 
+// currentConfig returns the configuration the server applies now, or nil
+// when it runs without one. Each call returns one whole snapshot; a decision
+// that reads several settings reads them from one call.
+func (h *syncHandler) currentConfig() *config.Config {
+	return h.config.load()
+}
+
 // credentials loads the stored village credentials from configDir.
 func (h *syncHandler) credentials() (*auth.Credentials, error) {
 	return auth.LoadCredentialsFrom(h.configHome)
@@ -93,17 +116,24 @@ func syncUserPatterns(cfg *config.Config) ([]redact.UserPattern, error) {
 // --------------------------------------------------------------------------
 
 type syncSessionResponse struct {
-	ID          string `json:"id"`
-	Harness     string `json:"harness"`
-	ProjectName string `json:"projectName"`
-	ProjectHash string `json:"projectHash"`
-	HostSlug    string `json:"hostSlug"`
-	StartTime   string `json:"startTime"`
-	DurationMs  int64  `json:"durationMs"`
-	TotalTokens int    `json:"totalTokens"`
-	TurnCount   int    `json:"turnCount"`
-	Model       string `json:"model"`
-	SyncStatus  string `json:"syncStatus"`
+	ParentSessionID  *string           `json:"parentSessionId,omitempty"`
+	ParentUnresolved *bool             `json:"parentUnresolved,omitempty"`
+	ID               string            `json:"id"`
+	Harness          string            `json:"harness"`
+	ProjectName      string            `json:"projectName"`
+	ProjectHash      string            `json:"projectHash"`
+	HostSlug         string            `json:"hostSlug"`
+	StartTime        string            `json:"startTime"`
+	DurationMs       int64             `json:"durationMs"`
+	TotalTokens      int               `json:"totalTokens"`
+	TurnCount        int               `json:"turnCount"`
+	Model            string            `json:"model"`
+	SyncStatus       schema.SyncStatus `json:"syncStatus"`
+	// HoldReason says why a held row waits. Only a held row carries one.
+	HoldReason schema.SyncHoldReason `json:"holdReason,omitempty"`
+	// PreviouslyPushed reports that this session was published before, whatever
+	// its status now: a held row can have been published.
+	PreviouslyPushed bool `json:"previouslyPushed"`
 }
 
 func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request) {
@@ -111,11 +141,24 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 	// exact legacy flat envelope; only the published grouped value selects the
 	// grouped sync payload, and any other value is refused rather than served
 	// as flat under a name the caller did not ask for.
-	view := r.URL.Query().Get("view")
-	if view != "" && view != groupedViewValue {
+	query, queryErr := schema.ParseLocalSyncSessionsQuery(r.URL.Query())
+	if queryErr != nil {
 		writeAPIError(w, http.StatusBadRequest,
-			fmt.Sprintf("Sync sessions could not be listed because query field \"view\" is %q in internal/api.handleSyncSessions. No sessions were returned, because an unpublished view value cannot be served safely. Omit view for the flat sync list or use view=%s, then retry.", view, groupedViewValue),
+			queryErr.Error(),
 			"grouped_view_unknown")
+		return
+	}
+	view := query.View
+	if view == "home" || view == "project-options" {
+		home := h.home
+		if home == nil {
+			var reader homeReader
+			if h.store != nil {
+				reader = h.store
+			}
+			home = &homeHandler{reader: reader, sync: h, publishing: &publishingHandler{store: h.store, configHome: h.configHome}, resolver: ingest.NewGitRepositoryIdentityResolver()}
+		}
+		home.handleSessions(w, r)
 		return
 	}
 	if view == groupedViewValue {
@@ -133,6 +176,7 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 type syncSessionReader interface {
 	ingest.PublicationMetadataReader
 	AllPushableSessions(context.Context) ([]ingest.PushSessionRow, error)
+	SyncParentIdentities(context.Context, []ingest.PushSessionRow) ([]store.ParentIdentityRow, error)
 	SessionsWithoutMetrics(context.Context) ([]ingest.HeldSession, error)
 }
 
@@ -155,18 +199,23 @@ func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionRea
 	result := make([]syncSessionResponse, 0, len(entries))
 	for _, entry := range entries {
 		s := entry.row
+		parentID, unresolved := syncParentMarkers(entry.identity)
 		result = append(result, syncSessionResponse{
-			ID:          s.SessionID,
-			Harness:     s.ModelHarness,
-			ProjectName: s.ProjectName,
-			ProjectHash: s.ProjectHash,
-			HostSlug:    s.HostSlug,
-			StartTime:   time.UnixMilli(s.StartMs).UTC().Format(time.RFC3339),
-			DurationMs:  s.DurationMs,
-			TotalTokens: s.TokensTotal,
-			TurnCount:   s.TurnCount,
-			Model:       s.ModelID,
-			SyncStatus:  entry.status,
+			ParentSessionID:  parentID,
+			ParentUnresolved: unresolved,
+			ID:               s.SessionID,
+			Harness:          s.ModelHarness,
+			ProjectName:      s.ProjectName,
+			ProjectHash:      s.ProjectHash,
+			HostSlug:         s.HostSlug,
+			StartTime:        time.UnixMilli(s.StartMs).UTC().Format(time.RFC3339),
+			DurationMs:       s.DurationMs,
+			TotalTokens:      s.TokensTotal,
+			TurnCount:        s.TurnCount,
+			Model:            s.ModelID,
+			SyncStatus:       entry.status,
+			HoldReason:       entry.hold,
+			PreviouslyPushed: s.PushedAt != nil,
 		})
 	}
 
@@ -174,22 +223,24 @@ func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionRea
 	w.Write(data)
 }
 
-// computeSyncStatus determines the sync status for a session row.
-// Sessions without a coherent database capture are held until normal ingest.
-func computeSyncStatus(s ingest.PushSessionRow, heldMap map[string]bool, readiness ingest.PublicationReadiness) string {
-	if heldMap[s.SessionID] {
-		return "held"
+// computeSyncStatus determines the sync status for a session row, and why a held
+// row waits. A session whose metrics are not computed yet is held for its
+// metrics; one without a coherent database capture is held for its publication
+// metadata. Both wait for normal ingest.
+func computeSyncStatus(s ingest.PushSessionRow, metricsMissing, metadataReady bool) (schema.SyncStatus, schema.SyncHoldReason) {
+	if metricsMissing {
+		return schema.SyncStatusHeld, schema.SyncHoldReasonMetricsMissing
 	}
-	if readiness != ingest.PublicationReady {
-		return "held"
+	if !metadataReady {
+		return schema.SyncStatusHeld, schema.SyncHoldReasonMetadataMissing
 	}
 	if s.PushedAt == nil {
-		return "new"
+		return schema.SyncStatusNew, ""
 	}
 	if s.IngestedMs > *s.PushedAt {
-		return "updated"
+		return schema.SyncStatusUpdated, ""
 	}
-	return "synced"
+	return schema.SyncStatusSynced, ""
 }
 
 // --------------------------------------------------------------------------
@@ -201,18 +252,44 @@ func (h *syncHandler) handleSyncAuth(w http.ResponseWriter, _ *http.Request) {
 
 	creds, err := h.credentials()
 	if err != nil || creds == nil || !creds.IsValid() {
-		json.NewEncoder(w).Encode(map[string]any{
-			"authenticated": false,
-		})
+		_ = json.NewEncoder(w).Encode(schema.SyncAuthResponse{Authenticated: false})
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]any{
-		"authenticated":     true,
-		"username":          creds.Username,
-		"villageUrl":        creds.VillageURL,
-		"villageConfigured": creds.VillageURL != "",
+	_ = json.NewEncoder(w).Encode(schema.SyncAuthResponse{
+		Authenticated:     true,
+		Username:          creds.Username,
+		VillageURL:        creds.VillageURL,
+		VillageConfigured: creds.VillageURL != "",
 	})
+}
+
+// --------------------------------------------------------------------------
+// POST /api/v1/sync/logout — end this computer's Village sign-in
+// --------------------------------------------------------------------------
+
+// handleSyncLogout removes the stored Village credential. It changes local
+// state only: the key stays valid on Village until it is revoked there, which
+// `peasant village logout` does. Logging out a computer that holds no
+// credential is not an error.
+func (h *syncHandler) handleSyncLogout(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+
+	// A credential file that cannot be parsed still signs this computer in as
+	// far as the user can tell, so it is removed like a valid one.
+	creds, loadErr := h.credentials()
+	held := creds != nil || loadErr != nil
+	if err := auth.ClearCredentialsFrom(h.configHome); err != nil {
+		writeAPIError(w, http.StatusInternalServerError,
+			"Village sign-out could not remove the stored credential in internal/api.handleSyncLogout: "+err.Error()+". This computer is still signed in. Fix the permissions of the Peasant config directory, then sign out again.",
+			"sync_logout_failed")
+		return
+	}
+	status := schema.SyncLogoutAlreadyLoggedOut
+	if held {
+		status = schema.SyncLogoutLoggedOut
+	}
+	_ = json.NewEncoder(w).Encode(schema.SyncLogoutResponse{Status: status})
 }
 
 // --------------------------------------------------------------------------
@@ -222,47 +299,6 @@ func (h *syncHandler) handleSyncAuth(w http.ResponseWriter, _ *http.Request) {
 // maxItemsPerRuleGroup is the maximum number of items returned per rule group
 // in the grouped redaction response.
 const maxItemsPerRuleGroup = 50
-
-// redactionItem is a single redaction match with context information.
-type redactionItem struct {
-	Category            redact.CategoryString `json:"category"`
-	RuleID              string                `json:"ruleId"`
-	RuleDisplayName     string                `json:"ruleDisplayName"`
-	OriginalText        string                `json:"originalText"`
-	RedactedReplacement string                `json:"redactedReplacement"`
-	Description         string                `json:"description"`
-	LineNumber          int                   `json:"lineNumber"`
-	ContextBefore       []string              `json:"contextBefore"`
-	ContextAfter        []string              `json:"contextAfter"`
-}
-
-// ruleGroup holds deduplicated items for a single redaction rule, capped at
-// maxItemsPerRuleGroup entries.
-type ruleGroup struct {
-	RuleID      string          `json:"ruleId"`
-	DisplayName string          `json:"displayName"`
-	Count       int             `json:"count"`
-	Items       []redactionItem `json:"items"`
-}
-
-// categoryGroup holds all rule groups for a single redaction category.
-type categoryGroup struct {
-	Category   redact.CategoryString `json:"category"`
-	TotalCount int                   `json:"totalCount"`
-	Rules      []ruleGroup           `json:"rules"`
-}
-
-// groupedRedactionResponse is the response shape for the grouped redaction endpoint.
-// The server pre-groups matches by category then by rule so the frontend can
-// render an accordion without any client-side aggregation.
-type groupedRedactionResponse struct {
-	Total      int             `json:"total"`
-	Categories []categoryGroup `json:"categories"`
-}
-
-// redactionResponse is kept for backward compatibility but the handler now
-// returns groupedRedactionResponse.
-type redactionResponse = groupedRedactionResponse
 
 func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
@@ -293,7 +329,7 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	redactLevel := config.ResolveRedactionPolicy(requestedLevel).Effective
-	userPatterns, err := syncUserPatterns(h.config)
+	userPatterns, err := syncUserPatterns(h.currentConfig())
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -315,14 +351,19 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusInternalServerError, "create redactor: "+err.Error())
 		return
 	}
-	content, err := h.readReviewContent(r.Context(), sessionID, redactor)
+	document, err := h.readReviewDocument(r.Context(), sessionID, redactor)
 	if err != nil {
 		writeJSONError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	content := document.text
 
 	// Detect matches.
-	matches := redactor.Detect(content)
+	detect := redactor.Detect
+	if h.detectReview != nil {
+		detect = h.detectReview
+	}
+	matches := detect(content)
 
 	// Build replacement lookup.
 	replacements := buildReplacementLookup()
@@ -339,12 +380,26 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	}
 	seen := make(map[dedupKey]bool)
 	var deduped []redact.Match
+	// The item of a deduplicated match names the first turn that shows it. The
+	// scanned text starts with the publish metadata, which repeats the turns'
+	// text, so the first occurrence overall is usually not in a turn; a later
+	// occurrence of the same text under the same rule is.
+	type turnLocation struct {
+		entryIndex int
+		toolCallID string
+	}
+	firstTurn := make(map[dedupKey]turnLocation)
 
 	for _, m := range matches {
 		key := dedupKey{rule: m.Rule, text: m.MatchedText}
 		if !seen[key] {
 			seen[key] = true
 			deduped = append(deduped, m)
+		}
+		if _, located := firstTurn[key]; !located {
+			if entryIndex, toolCallID, inTurn := document.locate(m.Offset); inTurn {
+				firstTurn[key] = turnLocation{entryIndex: entryIndex, toolCallID: toolCallID}
+			}
 		}
 	}
 
@@ -356,7 +411,7 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	}
 	catCounts := make(map[redact.CategoryString]int)
 	catOrder := make([]redact.CategoryString, 0)
-	ruleItems := make(map[ruleKey][]redactionItem)
+	ruleItems := make(map[ruleKey][]schema.SyncRedactionItem)
 	ruleCounts := make(map[ruleKey]int)
 	ruleOrder := make(map[redact.CategoryString][]string) // category → ordered rule IDs
 
@@ -384,8 +439,8 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 			if !ok {
 				replacement = "<REDACTED>"
 			}
-			ruleItems[rk] = append(ruleItems[rk], redactionItem{
-				Category:            cat,
+			item := schema.SyncRedactionItem{
+				Category:            string(cat),
 				RuleID:              m.Rule,
 				RuleDisplayName:     ruleDisplayName(m.Rule),
 				OriginalText:        m.MatchedText,
@@ -394,7 +449,13 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 				LineNumber:          lineNum,
 				ContextBefore:       extractContext(lines, lineNum-1, -2),
 				ContextAfter:        extractContext(lines, lineNum-1, 2),
-			})
+			}
+			if location, inTurn := firstTurn[dedupKey{rule: m.Rule, text: m.MatchedText}]; inTurn {
+				entryIndex := location.entryIndex
+				item.EntryIndex = &entryIndex
+				item.ToolCallID = location.toolCallID
+			}
+			ruleItems[rk] = append(ruleItems[rk], item)
 		}
 	}
 
@@ -410,7 +471,7 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Build the grouped response.
-	categories := make([]categoryGroup, 0, len(sortedCats))
+	categories := make([]schema.SyncRedactionCategoryGroup, 0, len(sortedCats))
 	for _, cat := range sortedCats {
 		// Sort rules within category by count descending.
 		ruleIDs := make([]string, len(ruleOrder[cat]))
@@ -425,14 +486,14 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		rules := make([]ruleGroup, 0, len(ruleIDs))
+		rules := make([]schema.SyncRedactionRuleGroup, 0, len(ruleIDs))
 		for _, ruleID := range ruleIDs {
 			rk := ruleKey{category: cat, rule: ruleID}
 			items := ruleItems[rk]
 			if items == nil {
-				items = []redactionItem{}
+				items = []schema.SyncRedactionItem{}
 			}
-			rules = append(rules, ruleGroup{
+			rules = append(rules, schema.SyncRedactionRuleGroup{
 				RuleID:      ruleID,
 				DisplayName: ruleDisplayName(ruleID),
 				Count:       ruleCounts[rk],
@@ -440,16 +501,22 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 			})
 		}
 
-		categories = append(categories, categoryGroup{
-			Category:   cat,
+		categories = append(categories, schema.SyncRedactionCategoryGroup{
+			Category:   string(cat),
 			TotalCount: catCounts[cat],
 			Rules:      rules,
 		})
 	}
 
-	resp := groupedRedactionResponse{
+	resp := schema.SyncRedactionsResponse{
 		Total:      len(matches), // total raw matches (before dedup)
 		Categories: categories,
+	}
+	// The preview is what the consent step shows, so a preview that breaks
+	// its own contract is refused rather than shown.
+	if err := resp.Validate(); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "redaction preview: "+err.Error())
+		return
 	}
 
 	data, _ := json.Marshal(resp)
@@ -494,45 +561,73 @@ func (h *syncHandler) readTranscriptContent(ctx context.Context, sessionIDStr st
 }
 
 func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string, redactor redact.JSONRedactor) (string, error) {
+	document, err := h.readReviewDocument(ctx, sessionIDStr, redactor)
+	return document.text, err
+}
+
+// reviewDocument is the text the consent scan runs over, with where each turn
+// of the transcript lies in it.
+type reviewDocument struct {
+	text string
+	// transcriptStart is where the transcript's review text starts in text,
+	// after the metadata line.
+	transcriptStart int
+	spans           push.ReviewSpans
+}
+
+// locate names the turn, and the tool call when there is one, that holds the
+// byte at offset in the document's text.
+func (d reviewDocument) locate(offset int) (entryIndex int, toolCallID string, ok bool) {
+	if offset < d.transcriptStart {
+		return 0, "", false
+	}
+	return d.spans.Locate(offset - d.transcriptStart)
+}
+
+func (h *syncHandler) readReviewDocument(ctx context.Context, sessionIDStr string, redactor redact.JSONRedactor) (reviewDocument, error) {
 	input, detail, err := push.LoadPublicationInput(ctx, h.store, sessionIDStr)
 	if err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	if err := push.ValidatePublicationInput(input); err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	var fields config.PushFieldVisibility
-	if h.config != nil {
-		fields = h.config.Push.Fields
+	if cfg := h.currentConfig(); cfg != nil {
+		fields = cfg.Push.Fields
 	}
 	// Validate the same recursive redaction used by publication before reporting
 	// a successful scan. A metadata key collision must remain a failed scan.
 	redacted, err := push.RedactEntries(redactor, input.Entries)
 	if err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	if _, err := push.BuildTranscriptContentValidated(&input.Metadata, redacted, defaults.PublishSchemaVersion, fields, input.SessionOrigin); err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	// The review scan must see the exact bytes the publish will carry, so it
 	// builds the same envelope through the shared durable-first builder and
 	// derives the same capability requirements the upload gate will enforce.
 	content, err := push.BuildPublishTranscriptContent(detail, &input.Metadata, input.Entries, defaults.PublishSchemaVersion, fields, input.SessionOrigin)
 	if err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	metadata, err := push.MapMetadata(push.MapOptions{Meta: &input.Metadata, Metrics: input.Quality, Entries: input.Entries, Associations: input.Associations, Fields: fields.Resolve()})
 	if err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	if _, err := push.ScanPublication(content); err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
 	data, err := push.PublicationReviewText(content, redactor)
 	if err != nil {
-		return "", err
+		return reviewDocument{}, err
 	}
-	return string(metadata) + "\n" + data, nil
+	spans, err := push.PublicationReviewSpans(content)
+	if err != nil {
+		return reviewDocument{}, err
+	}
+	return reviewDocument{text: string(metadata) + "\n" + data, transcriptStart: len(metadata) + 1, spans: spans}, nil
 }
 
 // buildReplacementLookup builds a map from rule ID to replacement string.
@@ -694,47 +789,23 @@ func ruleDescription(ruleID string) string {
 }
 
 // --------------------------------------------------------------------------
-// POST /api/v1/sync/push — execute push pipeline
+// POST /api/v1/sync/push — publish sessions and change who can read them
 // --------------------------------------------------------------------------
-
-type pushRequest struct {
-	SessionIDs     []string `json:"sessionIds"`
-	RedactionLevel string   `json:"redactionLevel"`
-	Visibility     string   `json:"visibility"`
-}
-
-type pushSessionResult struct {
-	SessionID string `json:"sessionId"`
-	Status    string `json:"status"`
-	Error     string `json:"error,omitempty"`
-	Title     string `json:"title,omitempty"`
-}
-
-type pushResponse struct {
-	New      int                 `json:"new"`
-	Updated  int                 `json:"updated"`
-	Skipped  int                 `json:"skipped"`
-	Errors   int                 `json:"errors"`
-	Sessions []pushSessionResult `json:"sessions"`
-}
 
 func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
-	if h.config == nil {
-		http.Error(w, `{"error":"store or config not available"}`, http.StatusServiceUnavailable)
+	cfg := h.currentConfig()
+	if cfg == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "store or config not available", "")
 		return
 	}
 
-	// Parse request body.
-	var req pushRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"invalid request body: %s"}`, err), http.StatusBadRequest)
-		return
-	}
-
-	if len(req.SessionIDs) == 0 {
-		http.Error(w, `{"error":"no session IDs provided"}`, http.StatusBadRequest)
+	// The request is typed and closed: an unknown field, such as a visibility or
+	// a license a stale client still sends, is refused before anything runs.
+	req, changes, err := decodeSyncPushRequest(r.Body)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), syncPushInvalidRequestCode)
 		return
 	}
 
@@ -766,24 +837,24 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	level := config.ResolveRedactionPolicy(requestedLevel).Effective
-	userPatterns, err := syncUserPatterns(h.config)
+	userPatterns, err := syncUserPatterns(cfg)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if h.store == nil {
-		http.Error(w, `{"error":"store or config not available"}`, http.StatusServiceUnavailable)
+		writeAPIError(w, http.StatusServiceUnavailable, "store or config not available", "")
 		return
 	}
 
 	// Load credentials.
 	creds, err := h.credentials()
 	if err != nil || creds == nil || !creds.IsValid() {
-		http.Error(w, `{"error":"not authenticated — run 'peasant village login' first"}`, http.StatusUnauthorized)
+		writeAPIError(w, http.StatusUnauthorized, "not authenticated — run 'peasant village login' first", "")
 		return
 	}
 	if creds.VillageURL == "" {
-		http.Error(w, `{"error":"village URL not configured — run 'peasant village login' to set your village endpoint"}`, http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "village URL not configured — run 'peasant village login' to set your village endpoint", "")
 		return
 	}
 
@@ -799,50 +870,29 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create village client.
 	client := village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
 
-	// Resolve the visibility a first publish opens at. The Share wizard sends it
-	// on every push and has no control that changes the audience of a
-	// transcript already published, so it is never a visibility change: an
-	// update keeps the audience the transcript has on the village, which its
-	// owner may have shared with collectives there.
-	visibility := schema.Visibility("private")
-	if req.Visibility != "" {
-		visibility = schema.Visibility(req.Visibility)
-	}
-
 	// Resolve ~ in output base path (same as CLI cmd_push.go).
-	resolvedOutput, resolveErr := ingest.NewResolvedPath(h.config.Output.BasePath)
+	resolvedOutput, resolveErr := ingest.NewResolvedPath(cfg.Output.BasePath)
 	if resolveErr != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"resolve output path: %s"}`, resolveErr), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "resolve output path: "+resolveErr.Error())
 		return
 	}
-	pushCfg := *h.config
+	pushCfg := *cfg
 	pushCfg.Output.BasePath = string(resolvedOutput)
 
-	// Build and run the push pipeline.
-	pipeline, err := push.NewPipeline(
-		h.store,
-		client,
-		creds,
-		&pushCfg,
-		&ingest.OSFileSystem{},
-		push.PipelineConfig{
-			FilterSessionIDs: req.SessionIDs,
-			Visibility:       visibility,
-		},
-		redactor,
-		io.Discard, // stderr warnings not needed for web response
-	)
+	// A publish from the local web is for collectives: a first publication
+	// opens private with no license, and the collective steps decide who can
+	// read it. An update keeps the audience and license it has.
+	observations := collectiveobservations.New(collectiveobservations.Dependencies{Store: h.store, ConfigHome: h.configHome, NewIdentityReader: func(auth.Credentials) collectiveobservations.IdentityReader { return client }})
+	pipeline, err := push.NewSharePipeline(h.store, client, creds, &pushCfg, redactor, req.SessionIDs, push.WithObservations(observations, time.Now))
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "create push pipeline: "+err.Error())
 		return
 	}
-
-	result, err := pipeline.Run(r.Context())
+	published, err := push.SharePublish{Pipeline: pipeline, Store: h.store, Village: client, Creds: creds}.Run(r.Context(), req.SessionIDs, changes)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"push failed: %s"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "push failed: "+err.Error())
 		return
 	}
 
@@ -850,30 +900,95 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	// session this request published. The user chose those sessions; an
 	// annotation on any other session, or on no session at all, is outside what
 	// they chose to share.
-	_, _ = push.PushAnnotationsSelected(r.Context(), client, h.store, push.AnnotationSelection{}.WithinPublishedSessions(result), false, push.DefaultConcurrency)
+	_, _ = push.PushAnnotationsSelected(r.Context(), client, h.store, push.AnnotationSelection{}.WithinPublishedSessions(published.Pushed), false, push.DefaultConcurrency)
 
-	// Build response.
-	resp := pushResponse{
-		New:      result.New,
-		Updated:  result.Updated,
-		Skipped:  result.Skipped,
-		Errors:   result.Errors,
-		Sessions: make([]pushSessionResult, 0, len(result.Sessions)),
-	}
-	for _, s := range result.Sessions {
-		psr := pushSessionResult{
-			SessionID: s.SessionID,
-			Status:    s.Status.String(),
-			Title:     s.Title,
-		}
-		if s.Error != nil {
-			psr.Error = s.Error.Error()
-		}
-		resp.Sessions = append(resp.Sessions, psr)
-	}
+	_ = json.NewEncoder(w).Encode(published.Response)
+}
 
-	data, _ := json.Marshal(resp)
-	w.Write(data)
+// syncPushInvalidRequestCode marks a push request the typed contract refuses.
+const syncPushInvalidRequestCode = "sync_push_invalid_request"
+
+// syncPushRequestLimit bounds the push request body. A request names sessions
+// and collectives by identifier, so a megabyte holds thousands of each.
+const syncPushRequestLimit = 1 << 20
+
+// nullCollectiveList says why the body is refused when it sends collectives,
+// or one of its lists, as null. The contract declares them non-nullable, and
+// the typed decode would read null as an omitted list, so it is checked on the
+// raw body. It returns "" when the body sends no null list or is not an object.
+func nullCollectiveList(raw []byte) string {
+	var request struct {
+		Collectives json.RawMessage `json:"collectives"`
+	}
+	if json.Unmarshal(raw, &request) != nil || request.Collectives == nil {
+		return ""
+	}
+	if isJSONNull(request.Collectives) {
+		return "collectives is null; omit it to keep each transcript's audience"
+	}
+	var lists struct {
+		Add    json.RawMessage `json:"add"`
+		Remove json.RawMessage `json:"remove"`
+	}
+	if json.Unmarshal(request.Collectives, &lists) != nil {
+		return ""
+	}
+	if isJSONNull(lists.Add) {
+		return "collectives.add is null; omit a list you do not change"
+	}
+	if isJSONNull(lists.Remove) {
+		return "collectives.remove is null; omit a list you do not change"
+	}
+	return ""
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// decodeSyncPushRequest reads the typed push request strictly: one JSON object
+// with only the declared fields, a valid session list, and collectives named by
+// their Village identifier, each in one list. It runs before any read or send.
+func decodeSyncPushRequest(body io.Reader) (schema.SyncPushRequest, push.CollectiveChanges, error) {
+	var req schema.SyncPushRequest
+	refuse := func(why string) (schema.SyncPushRequest, push.CollectiveChanges, error) {
+		return schema.SyncPushRequest{}, push.CollectiveChanges{}, fmt.Errorf("what: the push request is not one this server accepts\nwhy: %s\nwhere: the JSON body of POST /api/v1/sync/push\nmeans: nothing was scanned, published, shared, or taken back\nfix: send {\"sessionIds\": [...], \"redactionLevel\"?: ..., \"collectives\"?: {\"add\"?: [...], \"remove\"?: [...]}} with no other field, then retry", why)
+	}
+	raw, err := io.ReadAll(io.LimitReader(body, syncPushRequestLimit+1))
+	if err != nil {
+		return refuse(fmt.Sprintf("the body could not be read: %v", err))
+	}
+	if len(raw) > syncPushRequestLimit {
+		return refuse(fmt.Sprintf("the body is larger than %d bytes", syncPushRequestLimit))
+	}
+	if why := nullCollectiveList(raw); why != "" {
+		return refuse(why)
+	}
+	if err := decodeStrict(bytes.NewReader(raw), &req); err != nil {
+		why := fmt.Sprintf("the body could not be read as the typed request: %v", err)
+		if strings.Contains(err.Error(), "unknown field") {
+			why += "; the request names only sessions, a redaction level, and collectives, and carries no visibility or license, because publishing from the local web is for collectives"
+		}
+		return refuse(why)
+	}
+	if err := req.Validate(); err != nil {
+		return refuse(err.Error())
+	}
+	var changes push.CollectiveChanges
+	if req.Collectives != nil {
+		for _, list := range []struct {
+			name string
+			ids  []schema.VillageUUID
+		}{{"collectives.add", req.Collectives.Add}, {"collectives.remove", req.Collectives.Remove}} {
+			for _, id := range list.ids {
+				if !village.IsCollectiveID(id) {
+					return refuse(fmt.Sprintf("%s names %q, which is not a Village collective identifier; name each collective by its lowercase Village UUID", list.name, id))
+				}
+			}
+		}
+		changes = push.CollectiveChanges{Add: req.Collectives.Add, Remove: req.Collectives.Remove}
+	}
+	return req, changes, nil
 }
 
 func invalidSyncRedactionsLevelMessage(level redact.RedactionLevel) string {
@@ -955,15 +1070,15 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 	// If already fully authenticated (valid creds + village URL), nothing to do.
 	creds, err := h.credentials()
 	if err == nil && creds != nil && creds.IsValid() && creds.VillageURL != "" {
-		json.NewEncoder(w).Encode(map[string]string{"status": "already_authenticated"})
+		_ = json.NewEncoder(w).Encode(schema.SyncLoginResponse{Status: schema.SyncLoginAlreadyAuthenticated})
 		return
 	}
 
 	// Resolve village URL using the same precedence as the CLI:
 	// env var → config file → production default.
 	villageURL := defaults.DefaultVillageURL.String()
-	if h.config != nil && h.config.Village.URL != "" {
-		villageURL = h.config.Village.URL
+	if cfg := h.currentConfig(); cfg != nil && cfg.Village.URL != "" {
+		villageURL = cfg.Village.URL
 	}
 
 	// Clear any stale credentials so auth.Login doesn't short-circuit with
@@ -980,7 +1095,7 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 		}
 	}()
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+	_ = json.NewEncoder(w).Encode(schema.SyncLoginResponse{Status: schema.SyncLoginPending})
 }
 
 // --------------------------------------------------------------------------
@@ -990,13 +1105,13 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
-	if h.config == nil {
+	if h.currentConfig() == nil {
 		http.Error(w, `{"error":"config not available"}`, http.StatusServiceUnavailable)
 		return
 	}
 
 	h.mu.Lock()
-	if h.ingestStatus == "running" {
+	if h.ingestStatus == "running" || h.sessionIngest {
 		h.mu.Unlock()
 		http.Error(w, `{"error":"ingest already running"}`, http.StatusConflict)
 		return
@@ -1014,84 +1129,196 @@ func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "running"})
 }
 
+// --------------------------------------------------------------------------
+// POST /api/v1/sync/ingest/session?session_id=X — re-index one session
+// --------------------------------------------------------------------------
+
+// defaultSessionIngestTimeout bounds one session re-index. One session takes
+// seconds; a run that has not finished by then is stopped and reported.
+const defaultSessionIngestTimeout = 2 * time.Minute
+
+// handleSyncIngestSession re-reads one recorded session into the local index
+// and answers when it is done. The publish popup runs it when the scan refused
+// the session's stored index, then scans again. It reads and writes the local
+// index only, and it relaxes no reader: the scan that follows runs every check
+// it ran before. It answers within its timeout, so the caller never waits on a
+// run that outlived the server.
+func (h *syncHandler) handleSyncIngestSession(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("session_id")
+	id, err := ingest.NewSessionID(raw)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "re-indexing a session needs a valid session_id; nothing was changed", "session_id_invalid")
+		return
+	}
+	if h.store == nil || h.currentConfig() == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "the local index is not available, so this session cannot be re-indexed; restart peasant and retry", "store_unavailable")
+		return
+	}
+	row, err := h.store.SessionByID(r.Context(), id.String())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("reading this session from the local index: %v; nothing was changed; retry", err), "session_read_failed")
+		return
+	}
+	if row == nil {
+		writeAPIError(w, http.StatusNotFound, "this session is not recorded on this computer, so there is nothing to re-index; run peasant ingest, then retry", "session_not_recorded")
+		return
+	}
+	harness := ingest.Harness(row.ModelHarness)
+	if _, ok := ingest.DefaultAdapterRegistry[harness]; !ok {
+		writeAPIError(w, http.StatusUnprocessableEntity, fmt.Sprintf("this session was recorded by %q, which this version cannot read again; nothing was changed; update peasant and retry", row.ModelHarness), "session_harness_unknown")
+		return
+	}
+
+	h.mu.Lock()
+	if h.ingestStatus == "running" || h.sessionIngest {
+		h.mu.Unlock()
+		writeAPIError(w, http.StatusConflict, "another index update is running on this computer; retry when it finishes", "ingest_running")
+		return
+	}
+	h.sessionIngest = true
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		h.sessionIngest = false
+		h.mu.Unlock()
+	}()
+
+	timeout := h.sessionIngestTimeout
+	if timeout <= 0 {
+		timeout = defaultSessionIngestTimeout
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	pipeline, closeStore, err := h.newIngestPipeline(ingest.NewProgressState(), &ingestSessionScope{id: id, harness: harness})
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error(), "session_ingest_failed")
+		return
+	}
+	defer closeStore()
+	started := time.Now()
+	result, err := pipeline.Run(ctx)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		writeAPIError(w, http.StatusGatewayTimeout, fmt.Sprintf("re-indexing this session took longer than %s and was stopped; the previous index was kept; retry, or run peasant harvest --session %s", timeout, id), "session_ingest_timeout")
+		return
+	}
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("re-indexing this session: %v; the previous index was kept", err), "session_ingest_failed")
+		return
+	}
+	if failure := sessionIngestFailure(result, id); failure != "" {
+		writeAPIError(w, http.StatusUnprocessableEntity, failure, "session_ingest_refused")
+		return
+	}
+	// The run reports what it could not read as diagnostics and carries on:
+	// a recording it cannot capture again leaves the stored copy to be
+	// re-indexed instead. The notes say so; the scan that follows decides.
+	// Only this session's diagnostics are notes: the run also reports on the
+	// stored sessions it was scoped away from.
+	// A recording line the run could not parse is named on its own, so the
+	// popup can say the copy being published stops before it.
+	notes := make([]string, 0, len(result.Diagnostics))
+	unreadable := make([]sessionIngestUnreadable, 0)
+	for _, diagnostic := range result.Diagnostics {
+		if strings.Contains(diagnostic.Location, id.String()) || strings.Contains(diagnostic.Message, id.String()) {
+			notes = append(notes, diagnostic.Message)
+			if line, ok := ingest.MalformedJSONLRecordLine(diagnostic.Message); ok {
+				unreadable = append(unreadable, sessionIngestUnreadable{Line: line, Reason: diagnostic.Message})
+			}
+		}
+	}
+	// The run can finish while leaving the stored copy in place: the recording
+	// may be gone, or the new capture may have been refused and the previous
+	// index preserved. The popup would otherwise repeat the same re-index
+	// action against the same evidence. Say that the run did not replace the
+	// copy and name the step that can still change it.
+	if evidenceErr := h.storedEvidenceStillRefused(r.Context(), id); storedEvidenceRefusal(evidenceErr) {
+		notes = append(notes, storedEvidenceStillRefusedNote(evidenceErr))
+	}
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+	_ = json.NewEncoder(w).Encode(sessionIngestResponse{Status: "done", Duration: time.Since(started).Round(time.Millisecond).String(), Notes: notes, Unreadable: unreadable})
+}
+
+// sessionIngestResponse is a finished one-session re-index.
+type sessionIngestResponse struct {
+	Status   string   `json:"status"`
+	Duration string   `json:"duration"`
+	Notes    []string `json:"notes"`
+	// Unreadable names the recording lines the run could not read; the copy
+	// being published stops before the first of them.
+	Unreadable []sessionIngestUnreadable `json:"unreadable"`
+}
+
+// sessionIngestUnreadable is one recording line a re-index could not read.
+type sessionIngestUnreadable struct {
+	Line   int    `json:"line"`
+	Reason string `json:"reason"`
+}
+
+// sessionIngestFailure is why a scoped run did not re-index the session, or
+// empty when it did. A session the run never reached is a failure too: its
+// recording is no longer where the source reads.
+// storedEvidenceStillRefused applies the publication reader's strict evidence
+// check to the stored copy after a one-session re-index. It reports the exact
+// reason the share scan would still refuse the session, so the response can
+// name a step that changes the outcome instead of inviting the same re-index.
+func (h *syncHandler) storedEvidenceStillRefused(ctx context.Context, id ingest.SessionID) error {
+	entries, err := h.store.ListEntries(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if _, err := ingest.RetainedUnknownOf(entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func storedEvidenceRefusal(err error) bool {
+	if err == nil {
+		return false
+	}
+	var integrity *ingest.EvidenceIntegrityError
+	var legacy *ingest.LegacyPositionUnavailableError
+	return errors.As(err, &integrity) || errors.As(err, &legacy)
+}
+
+func storedEvidenceStillRefusedNote(evidenceErr error) string {
+	return fmt.Sprintf("the stored copy still fails the publication evidence check after re-indexing: %v; the re-index did not replace it, so re-indexing it again will not change it. Restore or repair the original recording and re-index, or re-capture this session.", evidenceErr)
+}
+
+func sessionIngestFailure(result *ingest.PipelineResult, id ingest.SessionID) string {
+	reached := false
+	for _, session := range result.Sessions {
+		if session.SessionID != id {
+			continue
+		}
+		reached = true
+		if session.Error != nil {
+			return fmt.Sprintf("re-indexing this session: %v", session.Error)
+		}
+	}
+	for _, entry := range result.IndexLog {
+		if entry.SessionID == id && entry.ErrorMessage != nil && *entry.ErrorMessage != "" {
+			return fmt.Sprintf("indexing this session: %s", *entry.ErrorMessage)
+		}
+	}
+	if !reached {
+		return "this session's recording was not found where its source is read, so it cannot be re-indexed; the previous index was kept"
+	}
+	return ""
+}
+
 // runIngestPipeline constructs and runs the full ingest pipeline, mirroring
 // the pattern from buildFTUEIngestRunner in cmd/peasant/cmd_kickstart.go.
 func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
-	cfg := h.config
-	fs := &ingest.OSFileSystem{}
-	git := &ingest.ExecGitResolver{}
-
-	// Build source configs from the loaded config.
-	sources := buildWebSourceConfigs(cfg)
-
-	outputPath := cfg.Output.BasePath
-	if outputPath == "" {
-		outputPath = string(h.dataDir())
-	}
-	resolvedOutput, err := ingest.NewResolvedPath(outputPath)
+	pipeline, closeStore, err := h.newIngestPipeline(progState, nil)
 	if err != nil {
-		h.setIngestError(fmt.Errorf("resolve output path: %w", err))
+		h.setIngestError(err)
 		return
 	}
-
-	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
-	if staleness == 0 {
-		staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-	}
-
-	pipelineCfg := ingest.PipelineConfig{
-		Sources:            sources,
-		OutputDir:          resolvedOutput,
-		StalenessThreshold: staleness,
-		Progress:           progState,
-	}
-
-	// Open DB and wire analytics stages.
-	dataDir := string(h.dataDir())
-	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
-		h.setIngestError(fmt.Errorf("create data directory: %w", err))
-		return
-	}
-	db, err := store.Open(string(h.dbPath()))
-	if err != nil {
-		h.setIngestError(fmt.Errorf("open analytics store: %w", err))
-		return
-	}
-	defer db.Close()
-
-	pipelineOpts := []ingest.PipelineOption{
-		ingest.WithStore(db),
-		ingest.WithMetricsStore(db),
-	}
-
-	// Refuse an import under a level this version cannot apply, rather than
-	// storing transcripts the user believes were anonymised at import time. No
-	// supported level redacts while ingest writes: that is the deferred redaction
-	// model, and redaction happens on the way out.
-	if !config.RedactionLevelSupported(cfg.Redaction.Level) {
-		h.setIngestError(&config.UnsupportedRedactionLevelError{
-			Level:     cfg.Redaction.Level,
-			Source:    "the loaded configuration",
-			Operation: "the web ingest",
-			Step:      "before any transcript was read or written",
-			Impact:    "Nothing was imported and nothing already imported was changed.",
-		})
-		return
-	}
-
-	pipelineOpts = append(pipelineOpts,
-		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
-		ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
-		ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
-		ingest.WithLogger(db),
-		ingest.WithIndexLogger(db),
-	)
-
-	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg, pipelineOpts...)
-	if err != nil {
-		h.setIngestError(fmt.Errorf("create pipeline: %w", err))
-		return
-	}
+	defer closeStore()
 
 	result, err := pipeline.Run(context.Background())
 	if err != nil {
@@ -1103,6 +1330,114 @@ func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
 	h.ingestStatus = "done"
 	h.ingestResult = result
 	h.mu.Unlock()
+}
+
+// ingestSessionScope narrows an ingest run to one recorded session.
+type ingestSessionScope struct {
+	id      ingest.SessionID
+	harness ingest.Harness
+}
+
+// newIngestPipeline builds the ingest pipeline the web routes run, and the
+// release of the store it opened. A nil scope runs every configured source; a
+// session scope reads that session's harness source only and processes that
+// session only, re-reading its recording even when the index looks current.
+func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *ingestSessionScope) (*ingest.Pipeline, func(), error) {
+	cfg := h.currentConfig()
+	if cfg == nil {
+		return nil, nil, fmt.Errorf("config not available")
+	}
+	fs := &ingest.OSFileSystem{}
+	git := &ingest.ExecGitResolver{}
+
+	// Build source configs from the loaded config.
+	sources := buildWebSourceConfigs(cfg)
+	if scope != nil {
+		source, ok := sources[scope.harness]
+		if !ok {
+			return nil, nil, fmt.Errorf("the %s source is not enabled in config.yaml, so this session's recording cannot be read again; nothing was changed; enable sources.%s and retry", scope.harness, scope.harness)
+		}
+		sources = map[defaults.Harness]ingest.SourceConfig{scope.harness: source}
+	}
+
+	outputPath := cfg.Output.BasePath
+	if outputPath == "" {
+		outputPath = string(h.dataDir())
+	}
+	resolvedOutput, err := ingest.NewResolvedPath(outputPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve output path: %w", err)
+	}
+
+	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
+	if staleness == 0 {
+		staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
+	}
+
+	pipelineCfg := ingest.PipelineConfig{
+		Sources:            sources,
+		OutputDir:          resolvedOutput,
+		StalenessThreshold: staleness,
+		Write:              cfg.Write,
+		Progress:           progState,
+	}
+	if scope != nil {
+		// The same scope as `peasant harvest --session <id> --force`.
+		pipelineCfg.AllowedSessionIDs = map[ingest.SessionID]bool{scope.id: true}
+		pipelineCfg.Harness = &scope.harness
+		pipelineCfg.Force = true
+	}
+
+	// Refuse an import under a level this version cannot apply, rather than
+	// storing transcripts the user believes were anonymised at import time. No
+	// supported level redacts while ingest writes: that is the deferred redaction
+	// model, and redaction happens on the way out.
+	if !config.RedactionLevelSupported(cfg.Redaction.Level) {
+		return nil, nil, &config.UnsupportedRedactionLevelError{
+			Level:     cfg.Redaction.Level,
+			Source:    "the loaded configuration",
+			Operation: "the web ingest",
+			Step:      "before any transcript was read or written",
+			Impact:    "Nothing was imported and nothing already imported was changed.",
+		}
+	}
+
+	// Open DB and wire analytics stages.
+	dataDir := string(h.dataDir())
+	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
+		return nil, nil, fmt.Errorf("create data directory: %w", err)
+	}
+	// The same store a CLI harvest writes through, so this run indexes at the
+	// managed revision and can re-index what a harvest stored.
+	storeOptions, err := store.ManagedGenerationOptions(string(resolvedOutput))
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err := store.Open(string(h.dbPath()), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open analytics store: %w", err)
+	}
+
+	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg,
+		ingest.WithStore(db),
+		ingest.WithMetricsStore(db),
+		ingest.WithSalt(db.InstallationSalt()),
+		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
+		ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)),
+		ingest.WithLogger(db),
+		ingest.WithIndexLogger(db),
+		// Commit detection is part of ingest, not an opt-in harvest flag: the
+		// web ingest must store the same session_commits a CLI harvest does, or
+		// the transcript it publishes can never match the pull requests its own
+		// commits are in.
+		ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()),
+	)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, fmt.Errorf("create pipeline: %w", err)
+	}
+	return pipeline, func() { _ = db.Close() }, nil
 }
 
 // setIngestError records a pipeline error under the mutex.

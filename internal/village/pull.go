@@ -1,12 +1,16 @@
 package village
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
@@ -51,7 +55,7 @@ var ErrPullNotFound = errors.New("village pull transcript not found (404): not p
 // advertised pull window is MISSING (village too old) or this CLI's pull-contract
 // version falls OUTSIDE the advertised window. Callers classify with errors.Is;
 // The pull pipeline maps it to PullStatus "contract-error".
-var ErrPullContractIncompatible = errors.New("village pull contract incompatible: the village's pull window is absent or excludes this CLI's pull-contract version")
+var ErrPullContractIncompatible = errors.New("village pull contract incompatible: peasant online's pull window is absent or excludes this CLI's pull-contract version")
 
 // --- Pull-window negotiation (stricter than push) ---
 //
@@ -68,35 +72,48 @@ var ErrPullContractIncompatible = errors.New("village pull contract incompatible
 // Wraps ErrPullContractIncompatible so callers can classify with errors.Is.
 func villageTooOldForPullError(villageURL string) error {
 	return fmt.Errorf(
-		"peasant pull aborted: the village does not advertise a pull contract\n"+
+		"peasant pull aborted: peasant online does not advertise a pull contract\n"+
 			"  what: GET /api/v1/schema/version returned no pull window (pullContractVersion/minPullContractVersion absent)\n"+
-			"  why:  this village predates the transcript pull surface\n"+
-			"  where: pull-contract preflight (village %s)\n"+
-			"  fix:  the pull surface requires an updated village; retry once the village has been upgraded (no CLI change is needed)\n"+
+			"  why:  this peasant online server predates the transcript pull surface\n"+
+			"  where: pull-contract preflight (peasant online %s)\n"+
+			"  fix:  the pull surface requires an updated peasant online server; retry once peasant online has been upgraded (no CLI change is needed)\n"+
 			"  (%w)",
 		villageURL, ErrPullContractIncompatible)
 }
 
 // pullContractError is the actionable error returned when the village DOES
-// advertise a pull window but this CLI's pull-envelope version
-// (defaults.PullContractVersion) falls outside it. Wraps
+// advertise a pull window but the envelope it serves lies outside this CLI's
+// pull window
+// [defaults.MinPullContractVersion, defaults.PullContractVersion]. Wraps
 // ErrPullContractIncompatible so callers can classify with errors.Is.
-func pullContractError(cli, min, current schema.PushContractVersion) error {
+func pullContractError(cliMin, cliCurrent, min, current schema.PushContractVersion) error {
+	served := current
+	if served == "" {
+		served = "unknown"
+	}
 	return fmt.Errorf(
-		"peasant pull aborted: this CLI's pull-contract v%s is incompatible with the village's pull window [v%s, v%s]\n"+
-			"  what: the village serves pull envelopes only within [v%s, v%s] and this CLI is outside it\n"+
-			"  why:  the pull-envelope shapes (PullTranscriptInfo/PullListResponse/PullAnnotation) differ across the gap\n"+
+		"peasant pull aborted: this CLI's pull-contract window [v%s, v%s] does not include the envelope peasant online serves (window [v%s, v%s])\n"+
+			"  what: peasant online serves the %s pull envelope and this CLI does not read it\n"+
+			"  why:  the pull-envelope shapes (PullTranscriptInfo/PullListResponse/PullAnnotation) differ across contract versions\n"+
 			"  where: pull-contract preflight\n"+
-			"  fix:  pin/upgrade the peasant CLI to a release whose pull-contract is within [v%s, v%s], then re-run the pull\n"+
+			"  fix:  pin/upgrade the peasant CLI to a release whose pull-contract window includes v%s, then re-run the pull\n"+
 			"  (%w)",
-		cli, min, current, min, current, min, current, ErrPullContractIncompatible)
+		cliMin, cliCurrent, min, current, served, served, ErrPullContractIncompatible)
 }
 
 // NegotiatePull preflights the village schema-version endpoint and verifies the
-// village's advertised pull window is present and compatible with this CLI's
-// pull-envelope version. It returns nil to proceed, or an actionable error that
-// aborts the pull. Stricter than the push negotiate(): a MISSING window is a hard
-// error (villageTooOldForPullError), not a fail-open passthrough.
+// village's advertised pull window is present and that the envelope it serves
+// (its advertised current version) lies inside this CLI's pull window
+// [defaults.MinPullContractVersion, defaults.PullContractVersion]. It returns
+// that envelope version to proceed, or an actionable error that aborts the
+// pull. Stricter than
+// the push negotiate(): a MISSING window is a hard error
+// (villageTooOldForPullError), not a fail-open passthrough.
+//
+// The CLI sends no version on the pull GETs, so the village alone chooses the
+// envelope it serves. The negotiated version is recorded in the pull manifest,
+// and the client keeps it so the pull GETs decode exactly that envelope: at
+// 0.3.0 and later a row carrying only the 0.2.0 account strings is refused.
 //
 // This is the explicit NEGOTIATE stage of the pull pipeline
 // (RESOLVE → AUTH-CHECK → NEGOTIATE → FETCH-META → …). The pipeline calls it
@@ -106,34 +123,34 @@ func pullContractError(cli, min, current schema.PushContractVersion) error {
 // would incur, and removes the consistency window where the outcome could flip
 // mid-pull. Contract-incompatible outcomes
 // wrap ErrPullContractIncompatible (classify with errors.Is).
-func (c *VillageClient) NegotiatePull(ctx context.Context) error {
-	cli := defaults.PullContractVersion
+func (c *VillageClient) NegotiatePull(ctx context.Context) (schema.PushContractVersion, error) {
+	cliMin, cliCurrent := defaults.MinPullContractVersion, defaults.PullContractVersion
 
 	resp, _, err := c.GetSchemaVersion(ctx)
 	if err != nil {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"peasant pull aborted: pull-contract preflight failed\n"+
 				"  what: GET /api/v1/schema/version could not be reached or decoded\n"+
 				"  why:  %v\n"+
-				"  where: pull-contract preflight (village %s)\n"+
-				"  fix:  verify the village URL and your network/credentials, then re-run the pull",
+				"  where: pull-contract preflight (peasant online %s)\n"+
+				"  fix:  verify the peasant online URL and your network/credentials, then re-run the pull",
 			err, c.baseURL)
 	}
 	if resp == nil {
-		return villageTooOldForPullError(c.baseURL)
+		return "", villageTooOldForPullError(c.baseURL)
 	}
 
 	min := resp.MinPullContractVersion
 	current := resp.PullContractVersion
-
-	switch ClassifyContract(cli, min, current) {
-	case NegotiationUnadvertised:
-		return villageTooOldForPullError(c.baseURL)
-	case NegotiationWithin:
-		return nil
-	default: // older-than-min or ahead-of-current ⇒ incompatible pull window
-		return pullContractError(cli, min, current)
+	if min == "" && current == "" {
+		return "", villageTooOldForPullError(c.baseURL)
 	}
+	envelope, ok := NegotiatePullWindow(cliMin, cliCurrent, min, current)
+	if !ok {
+		return "", pullContractError(cliMin, cliCurrent, min, current)
+	}
+	c.SetPullEnvelope(envelope)
+	return envelope, nil
 }
 
 // --- Pull GET methods consumed by the pull pipeline through a narrow interface ---
@@ -145,14 +162,86 @@ func (c *VillageClient) NegotiatePull(ctx context.Context) error {
 // ListPullableTranscripts. This keeps transport (client) separate from
 // policy/stage orchestration (pipeline), matching the push split.
 
+// PullListOptions controls one page read of the village's pullable listing.
+type PullListOptions struct {
+	// Page and Limit are the offset pagination pair. Limit is capped by the
+	// village.
+	Page  int
+	Limit int
+	// Collectives, when non-empty, narrows the listing to transcripts with an
+	// approved share into any listed collective the requester is a member of. The
+	// identifiers travel as one comma-separated parameter, the shape the village
+	// declares. An empty slice lists every pullable transcript.
+	Collectives []schema.VillageUUID
+}
+
+// pullSkipGatePath is the batch currency endpoint: a client POSTs the ids it
+// already holds together with the hashes it holds for them, and the village
+// answers, per id, whether the stored transcript and its annotations are still
+// current.
+const pullSkipGatePath = pullTranscriptsEndpoint + "/skip-gate"
+
+// PullSkipGate asks the village which of the held transcripts are still current,
+// in ONE request, so a bulk pull can skip what has not diverged instead of
+// re-reading each transcript. Only the caller's held hashes travel, never
+// content.
+//
+// A non-pullable id is ABSENT from the answer rather than answered (the
+// village's leak-free withheld semantics), so a caller must read an absent id as
+// "unanswered" and never as "current". A non-2xx status is returned as an
+// actionable error; a caller that can proceed without the gate should treat any
+// error here as "ask about nothing and pull everything".
+//
+// The caller runs NegotiatePull once before this call — it does not preflight the
+// pull window.
+func (c *VillageClient) PullSkipGate(ctx context.Context, request schema.PullSkipGateRequest) (*schema.PullSkipGateResponse, error) {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("encode pull skip-gate request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+pullSkipGatePath, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("create pull skip-gate request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute pull skip-gate request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, pullStatusError("ask the pull skip-gate", pullSkipGatePath, resp)
+	}
+
+	var result schema.PullSkipGateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode pull skip-gate response: %w", err)
+	}
+	return &result, nil
+}
+
 // ListPullableTranscripts fetches one page of the village's pullable-transcript
 // listing (own + group-shared; public excluded by the village's canPullTranscript
 // policy). It issues an authed GET to /api/v1/pull/transcripts with offset
-// pagination (page/limit query params). A non-2xx status is returned as an
-// actionable error. The caller is responsible for running NegotiatePull once
-// before the FETCH stages — this method does NOT preflight the pull window.
-func (c *VillageClient) ListPullableTranscripts(ctx context.Context, page, limit int) (*schema.PullListResponse, error) {
-	endpoint := fmt.Sprintf("%s%s?page=%d&limit=%d", c.baseURL, pullTranscriptsEndpoint, page, limit)
+// pagination (page/limit query params), plus the optional collectives filter. A
+// non-2xx status is returned as an actionable error. The caller is responsible
+// for running NegotiatePull once before the FETCH stages — this method does NOT
+// preflight the pull window.
+func (c *VillageClient) ListPullableTranscripts(ctx context.Context, opts PullListOptions) (*schema.PullListResponse, error) {
+	query := url.Values{}
+	query.Set("page", strconv.Itoa(opts.Page))
+	query.Set("limit", strconv.Itoa(opts.Limit))
+	if len(opts.Collectives) > 0 {
+		identifiers := make([]string, 0, len(opts.Collectives))
+		for _, collective := range opts.Collectives {
+			identifiers = append(identifiers, collective.String())
+		}
+		query.Set("collectives", strings.Join(identifiers, ","))
+	}
+	endpoint := c.baseURL + pullTranscriptsEndpoint + "?" + query.Encode()
 	req, err := c.newAuthedGet(ctx, endpoint)
 	if err != nil {
 		return nil, err
@@ -168,11 +257,15 @@ func (c *VillageClient) ListPullableTranscripts(ctx context.Context, page, limit
 		return nil, pullStatusError("list pullable transcripts", pullTranscriptsEndpoint, resp)
 	}
 
-	var result schema.PullListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read pull-list response: %w", err)
+	}
+	result, err := decodePullListResponse(body, c.negotiatedPullEnvelope())
+	if err != nil {
 		return nil, fmt.Errorf("decode pull-list response: %w", err)
 	}
-	return &result, nil
+	return result, nil
 }
 
 // GetPullTranscript fetches the village's metadata view of a single transcript
@@ -198,8 +291,12 @@ func (c *VillageClient) GetPullTranscript(ctx context.Context, id schema.Transcr
 		return nil, pullStatusError(fmt.Sprintf("get pull metadata for transcript %s", id), path, resp)
 	}
 
-	var result schema.PullTranscriptInfo
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read pull-metadata response: %w", err)
+	}
+	result, err := decodePullTranscriptInfo(body, c.negotiatedPullEnvelope())
+	if err != nil {
 		return nil, fmt.Errorf("decode pull-metadata response: %w", err)
 	}
 	return &result, nil
@@ -247,9 +344,10 @@ func (c *VillageClient) GetPullTranscriptContent(ctx context.Context, id schema.
 }
 
 // GetPullTranscriptAnnotations fetches the authored annotations for a transcript
-// from the pull surface — PullAnnotation rows carrying the village account
-// identity (AuthorUserID/AuthorUsername) the bare AnnotationSummary lacks, so the
-// caller can foreign-mark them and exclude its own authored rows during refresh.
+// from the pull surface — PullAnnotation rows carrying the author as the caller
+// may see them (a profile, or anonymous) beside the bare AnnotationSummary, so
+// the caller can foreign-mark them and exclude its own authored rows during
+// refresh. Either supported envelope is read (see DecodePullAnnotation).
 // A non-2xx status is an actionable error. The caller runs NegotiatePull once
 // before the FETCH stages — this method does NOT preflight the pull window.
 func (c *VillageClient) GetPullTranscriptAnnotations(ctx context.Context, id schema.TranscriptID) ([]schema.PullAnnotation, error) {
@@ -269,8 +367,12 @@ func (c *VillageClient) GetPullTranscriptAnnotations(ctx context.Context, id sch
 		return nil, pullStatusError(fmt.Sprintf("get pull annotations for transcript %s", id), path, resp)
 	}
 
-	var result []schema.PullAnnotation
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read pull-annotations response: %w", err)
+	}
+	result, err := decodePullAnnotations(body, c.negotiatedPullEnvelope())
+	if err != nil {
 		return nil, fmt.Errorf("decode pull-annotations response: %w", err)
 	}
 	return result, nil
@@ -296,20 +398,20 @@ func pullStatusError(op, path string, resp *http.Response) error {
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
 		return fmt.Errorf(
-			"%s: village returned 401 Unauthorized\n"+
+			"%s: peasant online returned 401 Unauthorized\n"+
 				"  what: the pull request to %s was rejected as unauthenticated\n"+
-				"  why:  your credentials are missing, expired, or invalid for this village\n"+
+				"  why:  your credentials are missing, expired, or invalid for this peasant online server\n"+
 				"  fix:  re-authenticate with `peasant village login`, then re-run the pull",
 			op, path)
 	case http.StatusNotFound:
 		return fmt.Errorf(
-			"%s: village returned 404 Not Found\n"+
+			"%s: peasant online returned 404 Not Found\n"+
 				"  what: %s is not pullable for your account\n"+
 				"  why:  the transcript does not exist, or is not owned by or group-shared with you (public transcripts are not pullable)\n"+
 				"  fix:  verify the transcript ID/URL, or ask the owner to share it with a group you belong to\n"+
 				"  (%w)",
 			op, path, ErrPullNotFound)
 	default:
-		return fmt.Errorf("%s: village returned %d for %s: %s", op, resp.StatusCode, path, string(body))
+		return fmt.Errorf("%s: peasant online returned %d for %s: %s", op, resp.StatusCode, path, string(body))
 	}
 }

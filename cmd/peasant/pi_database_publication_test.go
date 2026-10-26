@@ -16,8 +16,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/pi_database_publication.yaml
@@ -121,6 +121,10 @@ func TestPiDatabasePublicationThroughCLI(t *testing.T) {
 			captured := &capturedPublish{parts: map[string]string{}}
 			peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/auth/me" {
+					_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+					return
+				}
 				if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 					_ = json.NewEncoder(w).Encode(schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: schema.AllContentCapabilities})
 					return

@@ -114,7 +114,7 @@ const requiredIdentityFailureNames = [
   'canonical list retries a transient resolution failure',
   'canonical detail retries a transient resolution failure',
 ] as const;
-type IdentityFailureCase = { name: string; view: 'list' | 'detail'; outcome: 'missing' | 'transient'; message: string };
+type IdentityFailureCase = { name: string; view: 'list' | 'detail'; outcome: 'missing' | 'transient'; message: string; shown: string };
 
 function loadIdentityFailureFixture(source: string): IdentityFailureCase[] {
   const root = requireRecord(parseStrictYAML(source, 'project identity failure fixture'), 'project identity failure fixture');
@@ -129,8 +129,8 @@ function loadIdentityFailureFixture(source: string): IdentityFailureCase[] {
   const cases = root.cases.map((value, index) => requireRecord(value, `project identity failure fixture.cases[${index}]`));
   requireUniqueNames(cases, 'project identity failure fixture.cases');
   cases.forEach((testCase, index) => {
-    requireExactRequiredFields(testCase, ['name', 'view', 'outcome', 'message'], `project identity failure fixture.cases[${index}]`);
-    if (!requiredNames.includes(testCase.name) || !['list', 'detail'].includes(String(testCase.view)) || !['missing', 'transient'].includes(String(testCase.outcome)) || typeof testCase.message !== 'string' || testCase.message.length === 0) {
+    requireExactRequiredFields(testCase, ['name', 'view', 'outcome', 'message', 'shown'], `project identity failure fixture.cases[${index}]`);
+    if (!requiredNames.includes(testCase.name) || !['list', 'detail'].includes(String(testCase.view)) || !['missing', 'transient'].includes(String(testCase.outcome)) || typeof testCase.message !== 'string' || testCase.message.length === 0 || typeof testCase.shown !== 'string' || testCase.shown.length === 0) {
       throw new Error(`project identity failure fixture case ${index} is invalid`);
     }
   });
@@ -179,7 +179,13 @@ describe('ReviewSurface — fetch states', () => {
       fetchChangeDetail.mockResolvedValue(DETAIL_OK);
       render(<ReviewSurface projectHash={PROJECT_HASH as never} branch={branch} />);
 
-      expect(await screen.findByRole('alert')).toHaveTextContent(testCase.message);
+      // One human line; a missing project keeps the server's reason to itself,
+      // and any other failure keeps it behind "details".
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(testCase.shown);
+      if (testCase.outcome === 'missing') expect(alert).not.toHaveTextContent(testCase.message);
+      else expect(alert).toHaveTextContent(testCase.message);
+      expect(alert).not.toHaveTextContent('/api/v1/');
       expect(fetchReviewChanges).not.toHaveBeenCalled();
       expect(fetchChangeDetail).not.toHaveBeenCalled();
       expect(fetchChangeDiff).not.toHaveBeenCalled();
@@ -187,7 +193,7 @@ describe('ReviewSurface — fetch states', () => {
 
       if (testCase.outcome === 'transient') {
         fetchProjectResolution.mockResolvedValueOnce({ project: 'resolved project label', projectHash: PROJECT_HASH });
-        fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+        fireEvent.click(screen.getByRole('button', { name: 'try again' }));
         if (testCase.view === 'list') {
           const changes = await screen.findByTestId('changes');
           expect(changes).toHaveAttribute('data-project', 'resolved project label');

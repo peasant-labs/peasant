@@ -1,184 +1,29 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { guardReviewMatches, reviewMatches } from '@/lib/share/reviewMatches';
 import { RedactionReview } from '@/lib/ft-ui';
 import { LoaderIcon } from 'lucide-react';
 import type { ShareSession } from '@/lib/share/types';
-import { fetchMockRedactionPreview } from '@/lib/share/mock-data';
-import type { MockRedaction } from '@/lib/session-detail/mock-redactions';
 import {
-  fetchRedactionPreview,
   isSelectableRedactionLevel,
   SELECTABLE_REDACTION_LEVELS,
-  type RedactionLevel,
   type SelectableRedactionLevel,
 } from '@/lib/share/redactions';
-import type { Redaction } from '@/types/messages';
+import {
+  useRedactionPipeline,
+  type RedactionCache,
+  type RedactionCacheUpdate,
+} from '@/lib/share/redactionScan';
 import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 // ---------------------------------------------------------------------------
-// Redaction pipeline — REAL local scan per session (GET /sync/redactions), or
-// the deterministic mock when the wizard runs in mock mode. Successful results
-// and honest failures are cached by `${level}:${sessionId}` in the wizard, so
-// leaving and returning to this step — or switching back to a scanned level —
-// does not repeat the expensive work or turn a failed scan into an all-clear.
+// Redaction pipeline — the shared local scan (lib/share/redactionScan). Its
+// (level, session) cache is lifted out of this step, so leaving and returning
+// neither repeats the work nor turns a failed scan into an all-clear.
 // ---------------------------------------------------------------------------
 
-// The engine's rule-activation order, used to decide which mock rules a level
-// would fire. It is NOT a menu: SELECTABLE_REDACTION_LEVELS is.
-const REDACTION_LEVEL_ORDER = {
-  minimal: 0,
-  standard: 1,
-  maximum: 2,
-} as const satisfies Record<RedactionLevel, number>;
-
-/** Apply the fixture's rule-level minimum (the real endpoint filters server-side). */
-function filterMockByLevel(items: MockRedaction[], level: RedactionLevel): Redaction[] {
-  return items.filter(
-    (item) => REDACTION_LEVEL_ORDER[item.minimumLevel] <= REDACTION_LEVEL_ORDER[level],
-  );
-}
-
-/** Cache key: a session's scan result is unique per (level, session). */
-function cacheKey(level: RedactionLevel, sessionId: string): string {
-  return `${level}:${sessionId}`;
-}
-
-export type RedactionCacheEntry =
-  | { status: 'scanning' }
-  | { status: 'success'; redactions: Redaction[] }
-  | { status: 'failure'; error: string };
-
-export type RedactionCache = Map<string, RedactionCacheEntry>;
-
-function useRedactionPipeline(
-  selectedSessions: ShareSession[],
-  redactionLevel: RedactionLevel,
-  useMock: boolean,
-  cache: RedactionCache,
-  onCacheChange: (updater: (prev: RedactionCache) => RedactionCache) => void,
-) {
-  // In-flight entries live above the conditionally mounted step too, preventing
-  // duplicate work when a user navigates away during a scan and then returns.
-  const allSettled =
-    selectedSessions.length === 0 ||
-    selectedSessions.every((session) => {
-      const entry = cache.get(cacheKey(redactionLevel, session.id));
-      return entry != null && entry.status !== 'scanning';
-    });
-  const hasInFlight = selectedSessions.some(
-    (session) => cache.get(cacheKey(redactionLevel, session.id))?.status === 'scanning',
-  );
-  const scannedCount = selectedSessions.filter(
-    (session) => cache.get(cacheKey(redactionLevel, session.id))?.status === 'success',
-  ).length;
-  const failureCount = selectedSessions.filter(
-    (session) => cache.get(cacheKey(redactionLevel, session.id))?.status === 'failure',
-  ).length;
-  const scanProgress = selectedSessions.length === 0
-    ? 1
-    : scannedCount / selectedSessions.length;
-
-  // Results for the current level, read straight from the lifted cache.
-  const sessionRedactions = useMemo(() => {
-    const map = new Map<string, Redaction[]>();
-    for (const s of selectedSessions) {
-      const cached = cache.get(cacheKey(redactionLevel, s.id));
-      if (cached?.status === 'success') map.set(s.id, cached.redactions);
-    }
-    return map;
-  }, [selectedSessions, redactionLevel, cache]);
-
-  const scanError = useMemo(() => {
-    for (const session of selectedSessions) {
-      const cached = cache.get(cacheKey(redactionLevel, session.id));
-      if (cached?.status === 'failure') return cached.error;
-    }
-    return null;
-  }, [selectedSessions, redactionLevel, cache]);
-
-  // Latest values for use inside the async scan loop without re-creating it.
-  const cacheRef = useRef(cache);
-  cacheRef.current = cache;
-  const activeScanRef = useRef<string | null>(null);
-
-  // Run the scan. `force` refreshes cached sessions; otherwise only missing
-  // entries are fetched. Results are stored as success/failure discriminants so
-  // the review remains honest across step unmounts.
-  const runScan = useCallback(
-    (force = false) => {
-      const total = selectedSessions.length;
-      if (total === 0) {
-        return;
-      }
-
-      const contextKey = `${redactionLevel}:${selectedSessions.map((session) => session.id).join(',')}`;
-      if (activeScanRef.current === contextKey) return;
-      activeScanRef.current = contextKey;
-
-      const targetKeys = selectedSessions
-        .map((session) => cacheKey(redactionLevel, session.id))
-        .filter((key) => force || !cacheRef.current.has(key));
-      if (targetKeys.length === 0) {
-        activeScanRef.current = null;
-        return;
-      }
-      const targetKeySet = new Set(targetKeys);
-
-      onCacheChange((prev) => {
-        const next = new Map(prev);
-        for (const key of targetKeys) next.set(key, { status: 'scanning' });
-        return next;
-      });
-
-      (async () => {
-        for (const session of selectedSessions) {
-          const key = cacheKey(redactionLevel, session.id);
-          if (!targetKeySet.has(key)) {
-            continue;
-          }
-          try {
-            const items = useMock
-              ? filterMockByLevel(
-                  fetchMockRedactionPreview(session.id).map((r) => ({ ...r, status: 'pending' as const })),
-                  redactionLevel,
-                )
-              : await fetchRedactionPreview(session.id, redactionLevel);
-            onCacheChange((prev) =>
-              new Map(prev).set(key, { status: 'success', redactions: items }),
-            );
-          } catch (e: unknown) {
-            const error = e instanceof Error ? e.message : String(e);
-            onCacheChange((prev) =>
-              new Map(prev).set(key, { status: 'failure', error }),
-            );
-          }
-        }
-        if (activeScanRef.current === contextKey) activeScanRef.current = null;
-      })();
-    },
-    [selectedSessions, redactionLevel, useMock, onCacheChange],
-  );
-
-  // The review flow has no truthful idle state. Auto-scan an uncached selection,
-  // then reuse the lifted cache on revisit; this preserves the canonical surface
-  // without showing a false empty result while waiting for work that has not run.
-  useEffect(() => {
-    if (allSettled) return;
-    if (hasInFlight) return;
-    runScan(false);
-  }, [allSettled, hasInFlight, runScan]);
-
-  return {
-    phase: allSettled ? 'ready' as const : 'scanning' as const,
-    scanProgress,
-    scannedCount,
-    failureCount,
-    sessionRedactions,
-    scanError,
-    runScan,
-  };
-}
+export type { RedactionCache, RedactionCacheEntry } from '@/lib/share/redactionScan';
 
 // ---------------------------------------------------------------------------
 // Map a peasant Redaction into a fairtrade RedactionReview match. The match id
@@ -188,19 +33,6 @@ function useRedactionPipeline(
 // scale; its low-confidence caution fires below 0.70 — same threshold the old
 // per-card badge used at < 70).
 // ---------------------------------------------------------------------------
-
-interface ReviewMatch {
-  id: string;
-  category: string;
-  confidence: number;
-  before: string;
-  after: string;
-  kept: boolean;
-}
-
-function matchId(sessionId: string, redactionId: string): string {
-  return `${sessionId}::${redactionId}`;
-}
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -215,11 +47,11 @@ interface RedactionStepProps {
   onNext: () => void;
   onFooterActionsChange: SetShareFooterActions;
   /**
-   * Redaction-result cache, lifted to the wizard so it survives this step's
-   * mount/unmount. Keyed by `${level}:${sessionId}`.
+   * Redaction-result cache, lifted above this step so it survives the step's
+   * mount/unmount. Keyed by (level, session).
    */
   cache: RedactionCache;
-  onCacheChange: (updater: (prev: RedactionCache) => RedactionCache) => void;
+  onCacheChange: RedactionCacheUpdate;
   /** When true, use deterministic mock data instead of the real local scan. */
   useMock?: boolean;
 }
@@ -260,6 +92,7 @@ export function RedactionStep({
     sessionRedactions,
     scanError,
     runScan,
+    isReviewReady,
   } = useRedactionPipeline(selectedSessions, redactionLevel, useMock, cache, onCacheChange);
 
   // Per-match opt-out state. `kept` = the user opted this match OUT of
@@ -285,37 +118,31 @@ export function RedactionStep({
 
   // Flatten every selected session's findings into one match list — the
   // composite is a single safe-by-default review surface.
-  const matches = useMemo<ReviewMatch[]>(() => {
-    const out: ReviewMatch[] = [];
-    for (const session of selectedSessions) {
-      const items = sessionRedactions.get(session.id) ?? [];
-      for (const r of items) {
-        const id = matchId(session.id, r.id);
-        out.push({
-          id,
-          category: r.category,
-          confidence: r.confidence / 100,
-          before: r.originalText,
-          after: r.redactedReplacement,
-          kept: kept.has(id),
-        });
-      }
-    }
-    return out;
-  }, [selectedSessions, sessionRedactions, kept]);
+  const adaptation = guardReviewMatches(() => selectedSessions.flatMap((session) =>
+    reviewMatches(session.id, sessionRedactions.get(session.id) ?? []).map((match) => ({ ...match, kept: kept.has(match.id) })),
+  ));
+  const { matches } = adaptation;
+  const reviewError = scanError ?? adaptation.error;
 
   const isScanning = phase === 'scanning';
   const isReady = phase === 'ready';
   const sessionCount = selectedSessions.length;
-  const hasScanFailure = failureCount > 0;
+  const hasScanFailure = failureCount > 0 || reviewError !== null;
   const hasOnlyFailedEmptyResults = isReady && hasScanFailure && matches.length === 0;
-  const continueDisabled = isScanning || hasScanFailure;
+  const continueDisabled = !isReady || selectedSessions.length === 0 || hasScanFailure;
+  const actionRef = useRef({ continueDisabled, isReviewReady, onNext });
+  actionRef.current = { continueDisabled, isReviewReady, onNext };
+  const continueReview = useCallback(() => {
+    const current = actionRef.current;
+    if (!current.continueDisabled && current.isReviewReady()) current.onNext();
+  }, []);
+  useEffect(() => () => { actionRef.current.continueDisabled = true; }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onFooterActionsChange({
       primary: {
         label: 'Continue',
-        onClick: onNext,
+        onClick: continueReview,
         disabled: continueDisabled,
         title: isScanning
           ? 'Scanning in progress…'
@@ -328,7 +155,7 @@ export function RedactionStep({
         : undefined,
     });
     return () => onFooterActionsChange(null);
-  }, [continueDisabled, hasScanFailure, isReady, isScanning, onFooterActionsChange, onNext, runScan]);
+  }, [continueDisabled, continueReview, hasScanFailure, isReady, isScanning, onFooterActionsChange, runScan]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -356,7 +183,7 @@ export function RedactionStep({
           <div className="flex items-start gap-3 border border-rule-strong bg-surface-raised p-4" role="alert">
             <div>
               <p className="text-sm font-medium text-ink">redaction scan incomplete</p>
-              <p className="mt-1 text-sm text-ink-2">{scanError}</p>
+              <p className="mt-1 text-sm text-ink-2">{reviewError}</p>
             </div>
           </div>
           <div>
@@ -391,7 +218,7 @@ export function RedactionStep({
           onToggle={handleToggle}
           scanned={scannedCount}
           total={sessionCount}
-          failure={scanError ?? false}
+          failure={reviewError ?? false}
         />
       )}
     </div>

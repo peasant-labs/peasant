@@ -142,6 +142,34 @@ func isCursorSpecialRecordKind(kind string) bool {
 	return slices.Contains(cursorStrictRecordKinds(), kind)
 }
 
+// validateCursorTurnEnding recognizes only established native control shapes.
+// Both content locations are checked so a nested field cannot hide a sibling
+// payload that the projection would otherwise leave unrepresented.
+func validateCursorTurnEnding(line cursorJSONLLine) (bool, error) {
+	if !isCursorSpecialRecordKind(line.Type) {
+		return false, nil
+	}
+	if len(line.Content) != 0 || len(line.Message.Content) != 0 {
+		return true, fmt.Errorf("%s turn carries unrepresented conversation content", line.Status)
+	}
+	switch line.Status {
+	case "success":
+		if line.Role != "" || line.Message.Role != "" {
+			return true, fmt.Errorf("successful turn ending must not carry a conversation role")
+		}
+		if line.Error != nil && *line.Error != "" {
+			return true, fmt.Errorf("successful turn ending carries unrepresented error text")
+		}
+	case "aborted":
+		if line.Error == nil || *line.Error == "" {
+			return true, fmt.Errorf("aborted turn requires recorded error text")
+		}
+	default:
+		return true, fmt.Errorf("unsupported turn ending status %q; restore a supported success or aborted control and retry capture", line.Status)
+	}
+	return true, nil
+}
+
 type TranscriptCaptureResult struct {
 	Entries        []schema.SessionEntry
 	IgnoredRecords []IgnoredSourceRecord
@@ -163,6 +191,34 @@ func validateCaptureRole(role string) error {
 		return nil
 	}
 	return fmt.Errorf("unsupported conversation role %q", role)
+}
+
+// malformedSourceRecord marks a source record a capture could not accept: a
+// record that is not complete JSON, or one whose fields fail validation. The
+// message stays the user-facing one it always was; the type is what tells a
+// settle that the bytes on disk, not the store or the process, are the problem.
+type malformedSourceRecord struct{ cause error }
+
+func (e malformedSourceRecord) Error() string {
+	if e.cause != nil {
+		return e.cause.Error()
+	}
+	return "malformed JSON"
+}
+
+func (e malformedSourceRecord) Unwrap() error { return e.cause }
+
+// contentRecovery is one completed stored-content repair. Recovering content
+// repairs the stored capture only; it does not complete the session, so the
+// pipeline still evaluates the same session for independent adapter and
+// indexer work afterwards.
+type contentRecovery struct {
+	session     DiscoveredSession
+	entries     int
+	recoveredAt int64
+	// charged is the source bytes this recovery read, counted against the run's
+	// content budget.
+	charged int64
 }
 
 func captureFailure(session DiscoveredSession, line int, err error) error {
@@ -192,7 +248,7 @@ func captureTranscriptFile(ctx context.Context, fs FileSystem, idx Authoritative
 // refuses, so nothing is silently certified from an empty projection.
 func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data []byte, validate func([]byte) (*IgnoredSourceRecord, error)) ([]IgnoredSourceRecord, error) {
 	if session.ContentOmitted {
-		return nil, captureFailure(session, 0, fmt.Errorf("the retained transcript omits source records that ingest left out before writing it, so a strict capture cannot certify it as the source's own"))
+		return nil, captureFailure(session, 0, fmt.Errorf("the stored transcript omits source records that ingest left out before writing it, so a strict capture cannot certify it as the source's own"))
 	}
 	var ignored []IgnoredSourceRecord
 	var refusal *UnrepresentedRecordError
@@ -211,7 +267,7 @@ func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data [
 			continue
 		}
 		if !json.Valid(raw) {
-			return nil, captureFailure(session, line, fmt.Errorf("malformed JSON"))
+			return nil, captureFailure(session, line, malformedSourceRecord{})
 		}
 		record, err := validate(raw)
 		if err != nil {
@@ -222,7 +278,7 @@ func validateCaptureJSONL(ctx context.Context, session DiscoveredSession, data [
 				}
 				continue
 			}
-			return nil, captureFailure(session, line, err)
+			return nil, captureFailure(session, line, malformedSourceRecord{err})
 		}
 		if record != nil {
 			ignored = append(ignored, *record)
@@ -347,81 +403,7 @@ func (idx *ClaudeIndexer) IndexTranscriptForCapture(ctx context.Context, s Disco
 	return captureTranscriptFile(ctx, idx.fs, idx, s)
 }
 func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
-	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
-		var line claudeIndexLine
-		if err := json.Unmarshal(raw, &line); err != nil {
-			return nil, err
-		}
-		if line.Type == "" {
-			// A missing discriminator is corruption, not vocabulary:
-			// settling it would hide an actionable malformed record.
-			return nil, fmt.Errorf("record lacks its type")
-		}
-		// The kinds slice governs reachability: a case body below cannot run
-		// for an unlisted kind, so extending the vocabulary means extending
-		// this production census.
-		if !slices.Contains(claudeStrictRecordKinds(), line.Type) && !isClaudeControlRecordType(line.Type) {
-			return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
-		}
-		switch line.Type {
-		case "user", "assistant", "human":
-			if line.Message.Role != "" {
-				if err := validateCaptureRole(line.Message.Role); err != nil {
-					return nil, err
-				}
-			}
-			return nil, validateMessageContent(HarnessClaudeCode, line.Message.Content)
-		case "system":
-			content := line.Content
-			if len(content) == 0 {
-				content = line.Message.Content
-			}
-			if len(content) == 0 && !slices.Contains(claudeStrictSystemSubtypes(), line.Subtype) {
-				return nil, validateMessageContent(HarnessClaudeCode, content)
-			}
-			if len(content) == 0 {
-				switch line.Subtype {
-				case "turn_duration", "compact_boundary", "stop_hook_summary":
-					return &IgnoredSourceRecord{Kind: line.Subtype, Reason: IgnoredRecordControl}, nil
-				case "api_error":
-					if len(line.Error) == 0 || bytes.Equal(line.Error, []byte("null")) {
-						return nil, fmt.Errorf("api_error requires error payload")
-					}
-					return nil, nil
-				}
-			}
-			return nil, validateMessageContent(HarnessClaudeCode, content)
-		case "summary":
-			if line.Summary == nil {
-				return nil, fmt.Errorf("summary requires text")
-			}
-			return nil, nil
-		case "result":
-			return nil, validateMessageContent(HarnessClaudeCode, line.Result)
-		case "progress", "queue-operation", "file-history-snapshot":
-			if len(line.Message.Content) > 0 || len(line.Content) > 0 {
-				return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
-			}
-			return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordControl}, nil
-		case "last-prompt":
-			// A mirror of the prompt already represented by the user turn. It
-			// carries no payload of its own, so it is recorded as metadata.
-			return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordMetadata}, nil
-		default:
-			// A represented control record. The indexer retains its kind and
-			// payload as a depth=0 row, so the capture can certify. The gate
-			// above refused every other unlisted kind; the refusal below is
-			// defense in depth.
-			if isClaudeControlRecordType(line.Type) {
-				return nil, nil
-			}
-			// A well-formed record kind this build does not represent. The
-			// refusal is typed so the ordinary index path can store the
-			// represented entries as an incomplete capture with a terminal
-			// code, bump the producer and settle (see permanentRefusalCode).
-			return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
-		}
-	})
+	ignored, err := validateRetainingJSONL(ctx, s, data, claudeCaptureRecordValidator)
 	if err != nil {
 		return TranscriptCaptureResult{}, err
 	}
@@ -437,6 +419,92 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
 }
 
+// claudeCaptureRecordValidator validates one Claude source record against the
+// strict capture vocabulary. The stored capture exit and the
+// managed-generation producer share it, so both certify exactly the same
+// records and neither drifts from the other.
+func claudeCaptureRecordValidator(raw []byte) (*IgnoredSourceRecord, error) {
+	var line claudeIndexLine
+	if err := json.Unmarshal(raw, &line); err != nil {
+		return nil, err
+	}
+	return validateClaudeDecodedRecord(line)
+}
+
+// validateClaudeDecodedRecord shares the strict envelope checks with callers
+// that already decoded a record for classification.
+func validateClaudeDecodedRecord(line claudeIndexLine) (*IgnoredSourceRecord, error) {
+	if line.Type == "" {
+		// A missing discriminator is corruption, not vocabulary:
+		// settling it would hide an actionable malformed record.
+		return nil, fmt.Errorf("record lacks its type")
+	}
+	// The kinds slice governs reachability: a case body below cannot run
+	// for an unlisted kind, so extending the vocabulary means extending
+	// this production census.
+	if !slices.Contains(claudeStrictRecordKinds(), line.Type) && !isClaudeControlRecordType(line.Type) {
+		return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
+	}
+	switch line.Type {
+	case "user", "assistant", "human":
+		if line.Message.Role != "" {
+			if err := validateCaptureRole(line.Message.Role); err != nil {
+				return nil, err
+			}
+		}
+		return nil, validateMessageContent(HarnessClaudeCode, line.Message.Content)
+	case "system":
+		content := line.Content
+		if len(content) == 0 {
+			content = line.Message.Content
+		}
+		if len(content) == 0 && !slices.Contains(claudeStrictSystemSubtypes(), line.Subtype) {
+			return nil, validateMessageContent(HarnessClaudeCode, content)
+		}
+		if len(content) == 0 {
+			switch line.Subtype {
+			case "turn_duration", "compact_boundary", "stop_hook_summary":
+				return &IgnoredSourceRecord{Kind: line.Subtype, Reason: IgnoredRecordControl}, nil
+			case "api_error":
+				if len(line.Error) == 0 || bytes.Equal(line.Error, []byte("null")) {
+					return nil, fmt.Errorf("api_error requires error payload")
+				}
+				return nil, nil
+			}
+		}
+		return nil, validateMessageContent(HarnessClaudeCode, content)
+	case "summary":
+		if line.Summary == nil {
+			return nil, fmt.Errorf("summary requires text")
+		}
+		return nil, nil
+	case "result":
+		return nil, validateMessageContent(HarnessClaudeCode, line.Result)
+	case "progress", "queue-operation", "file-history-snapshot":
+		if len(line.Message.Content) > 0 || len(line.Content) > 0 {
+			return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
+		}
+		return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordControl}, nil
+	case "last-prompt":
+		// A mirror of the prompt already represented by the user turn. It
+		// carries no payload of its own, so it is recorded as metadata.
+		return &IgnoredSourceRecord{Kind: line.Type, Reason: IgnoredRecordMetadata}, nil
+	default:
+		// A represented control record. The indexer retains its kind and
+		// payload as a depth=0 row, so the capture can certify. The gate
+		// above refused every other unlisted kind; the refusal below is
+		// defense in depth.
+		if isClaudeControlRecordType(line.Type) {
+			return nil, nil
+		}
+		// A well-formed record kind this build does not represent. The
+		// refusal is typed so the ordinary index path can store the
+		// represented entries as an incomplete capture with a terminal
+		// code, bump the producer and settle (see permanentRefusalCode).
+		return nil, &UnrepresentedRecordError{Harness: HarnessClaudeCode, Kind: line.Type}
+	}
+}
+
 func (idx *CursorIndexer) IndexTranscriptForCapture(ctx context.Context, s DiscoveredSession) (TranscriptCaptureResult, error) {
 	return captureTranscriptFile(ctx, idx.fs, idx, s)
 }
@@ -446,14 +514,8 @@ func (idx *CursorIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 		if err := json.Unmarshal(raw, &line); err != nil {
 			return nil, err
 		}
-		if isCursorSpecialRecordKind(line.Type) && line.Status == "aborted" {
-			if len(line.content()) != 0 {
-				return nil, fmt.Errorf("aborted turn carries unrepresented conversation content")
-			}
-			if line.Error == nil || *line.Error == "" {
-				return nil, fmt.Errorf("aborted turn requires recorded error text")
-			}
-			return nil, nil
+		if control, err := validateCursorTurnEnding(line); control {
+			return nil, err
 		}
 		role := firstNonEmpty(line.Role, line.Message.Role)
 		if !slices.Contains(cursorCaptureRoleKinds(), role) {
@@ -503,8 +565,12 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: env.Type}
 		}
 		switch env.Type {
-		case codexTypeSessionMeta, codexTypeTurnContext:
+		case codexTypeSessionMeta:
 			return &IgnoredSourceRecord{Kind: env.Type, Reason: IgnoredRecordMetadata}, nil
+		case codexTypeTurnContext:
+			// turn_context carries per-turn control evidence (the thinking
+			// effort) that the indexer consumes; it is never a display record.
+			return &IgnoredSourceRecord{Kind: env.Type, Reason: IgnoredRecordControl}, nil
 		case codexTypeEventMsg:
 			var event struct {
 				Type    string `json:"type"`
@@ -651,81 +717,60 @@ func (idx *StrikeIndexer) IndexTranscriptForCapture(ctx context.Context, s Disco
 	return captureTranscriptFile(ctx, idx.fs, idx, s)
 }
 func (idx *StrikeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
-	calls := make(map[string]bool)
-	processes := make(map[string]string)
-	pending := make(map[string]bool)
-	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
-		if strikeRecordTooLarge(raw, 0) {
-			return nil, fmt.Errorf("record exceeds Strike format limit")
-		}
-		var env strikeEnvelope
-		if err := json.Unmarshal(raw, &env); err != nil {
-			return nil, err
-		}
-		if !isKnownStrikeEvent(env.Type) {
-			return nil, fmt.Errorf("event lacks its type")
-		}
-		if len(env.Data) == 0 || bytes.Equal(bytes.TrimSpace(env.Data), []byte("null")) {
-			return nil, fmt.Errorf("event requires data object")
-		}
-		event, err := decodeStrikeEventData(env.Data)
-		if err != nil {
-			return nil, err
-		}
-		if slices.Contains(strikeMetadataEventKinds(), env.Type) {
-			return &IgnoredSourceRecord{Kind: string(env.Type), Reason: IgnoredRecordMetadata}, nil
-		}
-		switch env.Type {
-		case strikeEventToolBegin:
-			if event.CallID == "" || firstNonEmpty(event.Name, event.Title) == "" || (len(event.Args) == 0 && len(event.Input) == 0) {
-				return nil, fmt.Errorf("tool begin requires callId, name and input")
-			}
-			calls[event.CallID] = true
-		case strikeEventToolEnd:
-			if event.CallID == "" {
-				return nil, fmt.Errorf("tool end requires callId")
-			}
-			delete(pending, event.CallID)
-		case strikeEventToolOutput:
-			if !calls[event.CallID] {
-				return nil, fmt.Errorf("tool output has no represented call")
-			}
-			pending[event.CallID] = true
-		case strikeEventProcessStarted:
-			if event.ProcessID == "" || !calls[event.CallID] {
-				return nil, fmt.Errorf("process requires processId and represented callId")
-			}
-			processes[event.ProcessID] = event.CallID
-		case strikeEventProcessOutput, strikeEventProcessExited:
-			call := firstNonEmpty(event.CallID, processes[event.ProcessID])
-			if !calls[call] {
-				return nil, fmt.Errorf("process output has no represented call")
-			}
-			pending[call] = true
-		case strikeEventUserMessage, strikeEventAssistantText, strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta:
-			if event.Text == "" && event.Delta == "" && len(event.Content) == 0 && len(event.Message) == 0 {
-				return nil, fmt.Errorf("conversation event requires text payload")
-			}
-		case strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire, strikeEventThinkingDelta:
-			if strikeReasoningText(event) == "" && !bytes.Equal(bytes.TrimSpace(event.Content), []byte("[]")) && !bytes.Equal(bytes.TrimSpace(event.Message), []byte("[]")) {
-				return nil, fmt.Errorf("reasoning event requires text payload")
-			}
-		}
-		return nil, nil
-	})
-	if err != nil {
-		return TranscriptCaptureResult{}, err
+	return idx.captureDecodedStrike(ctx, s, data)
+}
+
+type strikeCaptureValidation struct {
+	calls     map[string]bool
+	processes map[string]string
+	pending   map[string]bool
+}
+
+func (v *strikeCaptureValidation) observe(env strikeEnvelope, event strikeEventData) (*IgnoredSourceRecord, error) {
+	if !isKnownStrikeEvent(env.Type) {
+		return nil, fmt.Errorf("event lacks its type")
 	}
-	if len(pending) != 0 {
-		return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("tool output has no terminal event; restore complete tool trace"))
+	if len(env.Data) == 0 || bytes.Equal(bytes.TrimSpace(env.Data), []byte("null")) {
+		return nil, fmt.Errorf("event requires data object")
 	}
-	copy := *idx
-	copy.fullContent = true
-	copy.retainUnknown = true
-	entries, err := copy.parseWithCompletion(s.SessionID, data, nil)
-	if err != nil {
-		return TranscriptCaptureResult{}, err
+	if slices.Contains(strikeMetadataEventKinds(), env.Type) {
+		return &IgnoredSourceRecord{Kind: string(env.Type), Reason: IgnoredRecordMetadata}, nil
 	}
-	unknown, err := retainedUnknownEntries(entries)
-	return TranscriptCaptureResult{Entries: entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err
+	switch env.Type {
+	case strikeEventToolBegin:
+		if event.CallID == "" || firstNonEmpty(event.Name, event.Title) == "" || (len(event.Args) == 0 && len(event.Input) == 0) {
+			return nil, fmt.Errorf("tool begin requires callId, name and input")
+		}
+		v.calls[event.CallID] = true
+	case strikeEventToolEnd:
+		if event.CallID == "" {
+			return nil, fmt.Errorf("tool end requires callId")
+		}
+		delete(v.pending, event.CallID)
+	case strikeEventToolOutput:
+		if !v.calls[event.CallID] {
+			return nil, fmt.Errorf("tool output has no represented call")
+		}
+		v.pending[event.CallID] = true
+	case strikeEventProcessStarted:
+		if event.ProcessID == "" || !v.calls[event.CallID] {
+			return nil, fmt.Errorf("process requires processId and represented callId")
+		}
+		v.processes[event.ProcessID] = event.CallID
+	case strikeEventProcessOutput, strikeEventProcessExited:
+		call := firstNonEmpty(event.CallID, v.processes[event.ProcessID])
+		if !v.calls[call] {
+			return nil, fmt.Errorf("process output has no represented call")
+		}
+		v.pending[call] = true
+	case strikeEventUserMessage, strikeEventAssistantText, strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta:
+		if event.Text == "" && event.Delta == "" && len(event.Content) == 0 && len(event.Message) == 0 {
+			return nil, fmt.Errorf("conversation event requires text payload")
+		}
+	case strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire, strikeEventThinkingDelta:
+		if strikeReasoningText(event) == "" && !bytes.Equal(bytes.TrimSpace(event.Content), []byte("[]")) && !bytes.Equal(bytes.TrimSpace(event.Message), []byte("[]")) {
+			return nil, fmt.Errorf("reasoning event requires text payload")
+		}
+	}
+	return nil, nil
 }

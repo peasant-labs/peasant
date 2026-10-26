@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,19 +38,41 @@ func loadRunConfig(path string, dryRun bool) (*config.Config, error) {
 	return config.LoadDefaults(context.Background(), &ingest.ExecGitResolver{}), nil
 }
 
+// contentIndexFormats is the index-format registration seam for every CLI
+// store open. The store's WithIndexFormats keeps its shape; this one function
+// names the content representations the command tree supports, so the
+// harmonized handler plugs in at a single site instead of at every open call.
+// It currently registers the managed-generation (V2) handler only.
+func contentIndexFormats() []store.OpenOption {
+	return []store.OpenOption{store.WithIndexFormats(store.V2IndexFormat())}
+}
+
 // generationStoreOptions wires the managed-generation writer, snapshot reader
 // and per-session lock namespace rooted at the owned output directory. The
 // root is the same owned-artifact tree the saved sessions live under; opening
 // it here is what lets a capable store activate and read a managed generation
 // instead of refusing format 2.
 func generationStoreOptions(ownedRoot string) ([]store.OpenOption, error) {
-	options := []store.OpenOption{store.WithIndexFormats(store.V2IndexFormat())}
+	return store.ManagedGenerationOptions(ownedRoot)
+}
+
+// generationStoreOptionsReadOnly wires the managed-generation reader for a
+// dry-run store. It never creates the owned root: a dry run changes no file.
+// The reader is what lets a dry run resolve the same native harness targets a
+// real run uses instead of reporting the stored baseline and false
+// newer-producer refusals. A missing owned root yields the stored baseline,
+// which is the target set a fresh store resolves anyway.
+func generationStoreOptionsReadOnly(ownedRoot string) ([]store.OpenOption, error) {
+	options := contentIndexFormats()
 	if ownedRoot == "" {
 		return options, nil
 	}
-	artifacts, err := store.NewOSGenerationArtifactStore(ownedRoot)
+	artifacts, err := store.NewOSGenerationArtifactStoreExisting(ownedRoot)
 	if err != nil {
-		return nil, fmt.Errorf("open managed generation store: %w", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return options, nil
+		}
+		return nil, fmt.Errorf("open managed generation reader: %w", err)
 	}
 	locker, err := store.NewFileSessionLocker(ownedRoot)
 	if err != nil {
@@ -60,12 +83,19 @@ func generationStoreOptions(ownedRoot string) ([]store.OpenOption, error) {
 
 // openRunStore opens the analytics store for an ingestion or publication run.
 // ownedRoot is the run's resolved output directory; when it is set the store
-// can stage, activate and read managed generations. Dry-run never writes, so it
-// stays read-only and leaves the native-generation targets unadvertised.
-func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string) (*store.Store, error) {
+// can stage, activate and read managed generations. write carries the
+// configured write.* budgets into the staging and activation lanes, so a run
+// honors the user's batch caps instead of the shipped defaults. A dry-run
+// store is opened read-only but with the same target-resolving reader, so its
+// forecast matches a real run; it still changes no file.
+func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string, write ingest.WriteConfig) (*store.Store, error) {
 	path := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	if dryRun {
-		return store.OpenReadOnly(path)
+		options, err := generationStoreOptionsReadOnly(ownedRoot)
+		if err != nil {
+			return nil, err
+		}
+		return store.OpenReadOnlyWithOptions(path, options...)
 	}
 	directory := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
 	if err := os.MkdirAll(directory, defaults.PrivateDirPerm); err != nil {
@@ -75,6 +105,7 @@ func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string) (*store.Sto
 	if err != nil {
 		return nil, err
 	}
+	options = append(options, store.WithWriteConfig(write))
 	return store.Open(path, options...)
 }
 

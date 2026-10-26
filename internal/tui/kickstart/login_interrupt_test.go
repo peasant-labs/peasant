@@ -72,7 +72,7 @@ func TestProgram_LoginSpinnerCtrlCCancelsAndQuits(t *testing.T) {
 	runLoginChildren(cmd)
 	loginCtx := awaitContext(t, started)
 
-	if !strings.Contains(stripRender(p.View()), "connecting to village") {
+	if !strings.Contains(stripRender(p.View()), "connecting to peasant online") {
 		t.Fatal("accepting the connect prompt did not show the connecting spinner")
 	}
 	if !strings.Contains(stripRender(p.View()), "ctrl+c to quit") {
@@ -107,7 +107,7 @@ func TestProgram_LoginSpinnerEscCancelsAndReturns(t *testing.T) {
 	if p.Connected() {
 		t.Fatal("esc must not mark the program connected")
 	}
-	if strings.Contains(stripRender(p.View()), "connecting to village") {
+	if strings.Contains(stripRender(p.View()), "connecting to peasant online") {
 		t.Fatal("esc did not leave the connecting spinner")
 	}
 

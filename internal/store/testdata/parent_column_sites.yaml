@@ -1,0 +1,509 @@
+# The classified set of production declarations that still carry the raw
+# parent-column token in a string literal.
+#
+# sessions.parent_id is a nullable FK availability cache. The parent ANSWER is
+# the logical-parent rule (LogicalParentSQL in parent_reader.go, the in-memory
+# startedByTarget predicate, and every reader that embeds them). A declaration
+# that reads the raw column answers a DIFFERENT question, and every one of those
+# is listed here with its class and its reason.
+#
+# The unit is (file, enclosing declaration) with the COUNT of token-bearing
+# string literals in that declaration, derived with go/parser. Comments and
+# identifiers are excluded by construction; a multi-line or concatenated raw
+# string is one literal. The count is part of the unit: a new literal inside an
+# already-listed declaration changes the set and fails the guard, exactly like a
+# new declaration does.
+#
+# Sections:
+#   residual  declarations that still contain the token after this change.
+#             Classes: renderer (the one raw SELECT that answers the parent
+#             question), availability (which cached row exists, not who is the
+#             parent), integrity-compare (the stored document against the stored
+#             pair), migration-oracle (the V1 lane's durable logical record),
+#             write-guard (the reverse lookup's own NULL-only and cycle guards),
+#             writers (the four statements that SET the column), ddl (immutable
+#             historical schema and migration text), and cross-package (a parent
+#             answer whose rendering belongs to the cross-package reader slice;
+#             it appears here only while that slice has not yet routed the
+#             declaration, and it disappears from this section — and from the
+#             class set's reason to be exercised — when those entries move to
+#             routed).
+#   routed    declarations that render the rule: asserted to carry ZERO
+#             token-bearing literals AND to contain a LogicalParentSQL( or
+#             parentGenerationScopeSQL( call.
+#   foreign   declarations whose token names a different database or is not a
+#             column at all.
+#
+# Scan scope: production .go files under internal/ and cmd/ only. The embedded
+# internal/store/baseline_schema.sql is outside this closure; drift there is
+# caught by its own generator gate.
+#
+# Reconciliation note: the design's routed inventory names ten declarations.
+# Two of them (the codemap project listing and the research root filter) are
+# parent answers rendered outside internal/store. They were moved from this
+# residual section into the routed section in the same change that routed them,
+# and the exact-set assertion fails if the move is half-done in either
+# direction.
+residual:
+  - name: store-home-identity-parent-cache
+    file: internal/store/home_reader.go
+    declaration: Store.HomeIdentityCohort
+    literals: 1
+    class: availability
+    reason: >-
+      The narrow identity cohort carries the cache only as input to
+      SyncParentIdentities. The shared identity reader applies generation and
+      snapshot authority before this last fallback; candidate root/child
+      membership and child counts never use the cache directly.
+  - name: store-logical-parent-renderer
+    file: internal/store/parent_reader.go
+    declaration: LogicalParentSQL
+    literals: 1
+    class: renderer
+    reason: >-
+      The one raw SELECT that answers the parent question. Every other answer
+      reader embeds this rendering instead of re-spelling it.
+  - name: store-push-sessions-parent
+    file: internal/store/push_reader.go
+    declaration: sqlPushSessionsBase
+    literals: 1
+    class: availability
+    reason: >-
+      The push row carries the availability cache so consumers can build on-disk
+      paths. It answers which cached row exists, not who the parent is. The sync
+      identity reader is the one consumer that reads it, and only as its LAST
+      fallback arm after generation evidence and the stored document parent are
+      both silent; it never reports the cache as a session's parent answer.
+  - name: store-lookup-session-location
+    file: internal/store/metrics_reader.go
+    declaration: sqlLookupSessionLocation
+    literals: 1
+    class: availability
+    reason: >-
+      On-disk layout lookup. Routing it would move file lookups, so it keeps the
+      raw cache and documents the distinction.
+  - name: store-bulk-lookup-session-locations
+    file: internal/store/reader.go
+    declaration: Store.BulkLookupSessionLocations
+    literals: 1
+    class: availability
+    reason: >-
+      The batched on-disk layout lookup, same distinction as the single lookup.
+  - name: store-publication-metadata-select
+    file: internal/store/publication_metadata.go
+    declaration: publicationMetadataSelect
+    literals: 1
+    class: integrity-compare
+    reason: >-
+      The capture-integrity compare reads the stored pair, not a parent answer.
+      Changing it would change what a stored capture is validated against.
+  - name: store-validate-stored-publication-capture
+    file: internal/store/publication_metadata.go
+    declaration: validateStoredPublicationCapture
+    literals: 1
+    class: integrity-compare
+    reason: >-
+      Validates the stored document against the stored pair before publication;
+      the documented orphan tolerance depends on this exact comparison.
+  - name: store-read-migrate-oracle-session
+    file: internal/store/harmonized_migrate_session.go
+    declaration: readMigrateOracleSessionOnConn
+    literals: 1
+    class: migration-oracle
+    reason: >-
+      For the V1 lane the column IS the durable logical record; the conversion
+      reads it as the oracle input before the writer persists it.
+  - name: store-reconcile-parent-cache
+    file: internal/store/parent_reconcile.go
+    declaration: Store.ReconcileParentCache
+    literals: 1
+    class: write-guard
+    reason: >-
+      The reverse lookup's cycle walk reads the cache as it will leave it, which
+      is a write guard, not a parent answer.
+  - name: store-parent-cache-legacy-lookup
+    file: internal/store/parent_reconcile.go
+    declaration: parentCacheLegacyLookupTemplate
+    literals: 1
+    class: write-guard
+    reason: >-
+      The heal is NULL-only: the template selects only children whose cache is
+      empty, so a populated cache is never overwritten.
+  - name: store-parent-cache-durable-lookup
+    file: internal/store/parent_reconcile.go
+    declaration: parentCacheDurableLookupTemplate
+    literals: 1
+    class: write-guard
+    reason: >-
+      The durable half of the same NULL-only heal.
+  - name: store-insert-session
+    file: internal/store/writer.go
+    declaration: sqlInsertSession
+    literals: 1
+    class: writers
+    reason: >-
+      One of the four statements that SET the column. Its value is the session's
+      logical ParentUUID or the resolved scheduling edge, with the in-batch
+      cycle refusal, the orphan skip and the authoritative conflict branch.
+  - name: store-insert-session-before-source-fingerprint
+    file: internal/store/writer.go
+    declaration: sqlInsertSessionBeforeSourceFingerprint
+    literals: 1
+    class: writers
+    reason: >-
+      The same metadata upsert selected when the row has no source_fingerprint
+      column; identical inputs, guards and branches.
+  - name: store-point-session-at-generation
+    file: internal/store/index_format_v2.go
+    declaration: pointSessionAtGenerationOnConn
+    literals: 1
+    class: writers
+    reason: >-
+      The generation pointing UPDATE. Its value computes through startedByTarget
+      and DesiredParentCacheID with the FK-existence check as availability.
+  - name: store-write-parent-cache
+    file: internal/store/parent_cache.go
+    declaration: writeParentCacheOnConn
+    literals: 1
+    class: writers
+    reason: >-
+      The one standalone NULL-only cache writer used by the migration conversion
+      and the reverse heal.
+  - name: store-schema-sessions
+    file: internal/store/schema.go
+    declaration: createSessions
+    literals: 1
+    class: ddl
+    reason: The column definition in the current schema.
+  - name: store-schema-sessions-index
+    file: internal/store/schema.go
+    declaration: createSessionsIndexes
+    literals: 1
+    class: ddl
+    reason: The parent index in the current schema.
+  - name: store-v23-data-migration
+    file: internal/store/schema_v23.go
+    declaration: applyV23DataMigration
+    literals: 2
+    class: ddl
+    reason: The V23 data migration's own copy statements.
+  - name: store-v23-create-sessions
+    file: internal/store/schema_v23.go
+    declaration: v23CreateSessionsV2
+    literals: 1
+    class: ddl
+    reason: The V23 table definition.
+  - name: store-v23-recreate-indexes
+    file: internal/store/schema_v23.go
+    declaration: v23RecreateIndexStmts
+    literals: 1
+    class: ddl
+    reason: The V23 index recreation.
+  - name: store-migration-v33
+    file: internal/store/schema_v33.go
+    declaration: migrationV33
+    literals: 1
+    class: ddl
+    reason: Immutable historical migration text.
+  - name: store-migration-v42
+    file: internal/store/schema_v42.go
+    declaration: migrationV42
+    literals: 1
+    class: ddl
+    reason: Immutable historical migration text.
+  - name: store-migration-v53
+    file: internal/store/schema_v53.go
+    declaration: migrationV53
+    literals: 1
+    class: ddl
+    reason: Immutable historical migration text.
+  - name: store-migration-v51
+    file: internal/store/migration_v51.go
+    declaration: migrationV51
+    literals: 1
+    class: ddl
+    reason: Immutable historical trigger text.
+
+routed:
+  - name: store-all-sessions
+    file: internal/store/reader.go
+    declaration: sqlAllSessions
+    class: routed
+    reason: List/row parent answer, rendered.
+  - name: store-session-detail-query
+    file: internal/store/reader.go
+    declaration: sqlSessionDetailByIDQuery
+    class: routed
+    reason: Detail row parent answer, rendered.
+  - name: store-child-sessions
+    file: internal/store/reader.go
+    declaration: sqlChildSessions
+    class: routed
+    reason: Reverse filter embedding the same rendering.
+  - name: store-snapshot-session-row
+    file: internal/store/generation_snapshot.go
+    declaration: readSnapshotSessionRowOnConn
+    class: routed
+    reason: Legacy and certificate snapshot parent answer, rendered.
+  - name: store-harmonized-metadata
+    file: internal/store/harmonized_snapshot.go
+    declaration: harmonizedMetadataOnConn
+    class: routed
+    reason: >-
+      The generation-scoped document parent, rendered with the served
+      generation's own evidence taking precedence.
+  - name: store-read-session-parent
+    file: internal/store/generation_adapters.go
+    declaration: readSessionParentOnConn
+    class: routed
+    reason: Prior document parent answer, rendered, with its error propagated.
+  - name: store-read-stored-metadata
+    file: internal/store/stored_metadata.go
+    declaration: Store.ReadStoredMetadata
+    class: routed
+    reason: Recovered document parent answer, rendered.
+  - name: store-list-stale-origin-sessions
+    file: internal/store/origin_state_writer.go
+    declaration: sqlListStaleOriginSessions
+    class: routed
+    reason: Stored-origin verdict input, rendered.
+  - name: store-invalidate-stale-parent-origins
+    file: internal/store/parent_reconcile.go
+    declaration: sqlInvalidateStaleParentOrigins
+    class: routed
+    reason: >-
+      The re-queue set is the resolver's own parent test, rendered: a raw-cache
+      predicate would miss an evidenced child whose cache is NULL, which is
+      exactly the row the resolve pass judges parent-linked.
+  - name: codemap-sessions-for-project
+    file: internal/codemap/store_queries.go
+    declaration: sqlSessionsForProject
+    class: routed
+    reason: >-
+      The Map/Review project listing's parent column, rendered, so an evidenced
+      child with a NULL cache is not shown as a root.
+  - name: cmd-annotate-research-root-filter
+    file: cmd/peasant/cmd_annotate_research.go
+    declaration: sqlResearchRootSessions
+    class: routed
+    reason: >-
+      The research --only-parent-sessions filter, rendered as an IS NULL over
+      the rule so a NULL cache never proves rootness.
+
+foreign:
+  - name: api-websocket-log-attribute
+    file: internal/api/websocket.go
+    declaration: Hub.sendSnapshots
+    literals: 1
+    class: non-column
+    reason: A log attribute key, not a database column.
+  - name: ingest-opencode-candidate
+    file: internal/ingest/opencode.go
+    declaration: OpenCodeAdapter.discoverSQLiteCandidate
+    literals: 2
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-cursor-record
+    file: internal/ingest/opencode_acquired_cursor.go
+    declaration: openCodeSessionCursorRecordStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-v2-cursor-record
+    file: internal/ingest/opencode_acquired_cursor.go
+    declaration: openCodeSessionV2CursorRecordStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-session-record-decode
+    file: internal/ingest/opencode_sqlite_session_record.go
+    declaration: decodeOpenCodeSessionRecord
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-attribution-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionAttributionAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-attribution-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionAttributionFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-columns
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionColumns
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-extended-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionExtendedAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-extended-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionExtendedFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-parents-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionParentsAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-parents-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionParentsFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-records-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionRecordsAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-records-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionRecordsFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-v2-attribution-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2AttributionAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-v2-attribution-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2AttributionFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-v2-extended-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ExtendedAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-v2-extended-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ExtendedFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-v2-parents-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ParentsAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-v2-parents-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ParentsFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-v2-records-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2RecordsAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-v2-records-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2RecordsFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: OpenCode's own source database schema.
+  - name: ingest-opencode-model-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionModelAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read as the model projection's row
+      statement. The token names OpenCode's own session table column, not this
+      store's availability cache.
+  - name: ingest-opencode-model-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionModelFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read as the model projection's row
+      statement. The token names OpenCode's own session table column, not this
+      store's availability cache.
+  - name: ingest-opencode-v2-model-after
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ModelAfterStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read as the model projection's row
+      statement. The token names OpenCode's own session_v2 table column, not
+      this store's availability cache.
+  - name: ingest-opencode-v2-model-first
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ModelFirstStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read as the model projection's row
+      statement. The token names OpenCode's own session_v2 table column, not
+      this store's availability cache.
+  - name: ingest-opencode-session-records
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: zombiezenOpenCodeSQLiteSource.SessionRecords
+    literals: 18
+    class: foreign-database
+    reason: OpenCode's own source database schema, read as row statements.
+  - name: ingest-testfixture-current-missing-seq
+    file: internal/ingest/testfixture/materialize.go
+    declaration: currentMissingSeqSchemaSQL
+    literals: 1
+    class: foreign-database
+    reason: The materialized OpenCode fixture database schema.
+  - name: ingest-testfixture-current-nullable-seq
+    file: internal/ingest/testfixture/materialize.go
+    declaration: currentNullableSeqSchemaSQL
+    literals: 1
+    class: foreign-database
+    reason: The materialized OpenCode fixture database schema.
+  - name: ingest-testfixture-current-partial-seq
+    file: internal/ingest/testfixture/materialize.go
+    declaration: currentPartialSeqSchemaSQL
+    literals: 1
+    class: foreign-database
+    reason: The materialized OpenCode fixture database schema.
+  - name: ingest-testfixture-session-no-clock
+    file: internal/ingest/testfixture/materialize.go
+    declaration: sessionSchemaNoClockSQL
+    literals: 1
+    class: foreign-database
+    reason: The materialized OpenCode fixture database schema.
+  - name: ingest-testfixture-session
+    file: internal/ingest/testfixture/materialize.go
+    declaration: sessionSchemaSQL
+    literals: 1
+    class: foreign-database
+    reason: The materialized OpenCode fixture database schema.
+  - name: ingest-testfixture-session-attribution
+    file: internal/ingest/testfixture/materialize.go
+    declaration: sessionSchemaWithAttributionSQL
+    literals: 1
+    class: foreign-database
+    reason: The materialized OpenCode fixture database schema.
+  - name: ingest-testfixture-session-extended
+    file: internal/ingest/testfixture/materialize.go
+    declaration: sessionSchemaWithExtendedSQL
+    literals: 1
+    class: foreign-database
+    reason: The materialized OpenCode fixture database schema.

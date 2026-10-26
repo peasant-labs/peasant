@@ -11,9 +11,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/harvester_pipeline.yaml
@@ -66,6 +66,8 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			for _, session := range fixtures.Sessions {
 				meta := makeReindexMeta(t, string(session.ID), "/missing/native.jsonl")
 				meta.ModelHarness = session.Harness
+				adapterVersion := versions[session.Harness].AdapterVersion
+				meta.AdapterVersion = &adapterVersion
 				meta.Project.Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 				storetest.SeedManagedInput(t, db, fs, testOutputDir, *meta, []byte(session.Transcript))
 				previous := ingest.HarvesterVersionRegistry[session.Harness].IndexerVersion

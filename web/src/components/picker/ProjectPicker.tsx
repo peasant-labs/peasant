@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronRight, SearchIcon } from "lucide-react";
 import { displayProject } from "@/lib/quality/utils";
-import { Explainer, type ExplainerState } from "@/components/Explainer";
 import { Term } from "@/components/Term";
 import { Skeleton } from "@/lib/skeleton";
 import { Input, Tooltip } from "@/lib/ft-ui";
@@ -99,38 +98,28 @@ export function rowsFromSessions(sessions: SessionSummary[]): PickerRow[] {
     .sort(byRecency);
 }
 
-/**
- * The shared "What am I looking at?" explainer for BOTH picker surfaces, so the
- * column meaning lives on screen (not only in the header tooltips) and the two
- * surfaces can't drift. `destination` only swaps the closing call-to-action.
- */
-export function PickerExplainer({
-  explainer,
-  destination,
-}: {
-  explainer: ExplainerState;
-  destination: "changes" | "map" | "sessions";
-}) {
-  return (
-    <Explainer explainer={explainer} title="what am I looking at?">
-      <p>
-        Each row is a project this tool found recorded AI conversations for. The
-        columns show <Term k="coverage">recorded files</Term> out of total project
-        files, when it was last worked on, and how many{" "}
-        <Term k="change">lines of work</Term> (branches) haven&rsquo;t been merged
-        back into the main version yet.
-      </p>
-      <p>A recorded file has an edit captured during a saved AI conversation.</p>
-      {/* Every destination's noun IS its key ("changes" / "map" / "sessions"),
-          so the copy reads straight off it rather than through a ternary chain
-          that has to grow with each new destination. */}
-      <p>Click a project to see its {destination}.</p>
-    </Explainer>
-  );
-}
-
+// A wide screen reads each project as one table row. A phone has no room for
+// four columns, so the name takes the first line and the three counts share
+// the second, each with its own small label in place of the column header.
+// The head, the count cells and their phone labels switch display at 48rem in
+// globals.css (.picker-head, .picker-stat, .picker-phone-label): fairtrade's
+// bundle carries its own `hidden` and `flex` utilities after this app's, so a
+// `md:grid` or `md:block` utility here loses to them and the head never shows.
+const WIDE_COLUMNS = "md:grid-cols-[minmax(0,1fr)_104px_92px_104px_24px] md:gap-3";
 const PICKER_GRID =
-  "grid grid-cols-[minmax(0,1fr)_104px_92px_104px_24px] items-center gap-3 px-5";
+  `grid grid-cols-[repeat(3,minmax(0,1fr))_24px] gap-x-3 gap-y-2 ${WIDE_COLUMNS} items-baseline px-5`;
+const PICKER_HEAD = `picker-head ${WIDE_COLUMNS} items-center px-5`;
+const NAME_CELL = "min-w-0 col-span-3 md:col-span-1";
+// the cells share their first baseline (a count with its bar under it, a name with its
+// folder under it); the chevron has none, so it centres on the row
+const END_CELL = "self-center col-start-4 row-start-1 row-span-2 md:col-start-auto md:row-start-auto md:row-span-1";
+const STAT_CELL = "picker-stat";
+const STAT_TEXT = "text-[length:var(--fs-label)] font-mono tabular-nums";
+
+/** A count's name on a phone, where the column headers are hidden. */
+function PhoneLabel({ children }: { children: string }) {
+  return <span className="v2-eyebrow picker-phone-label" aria-hidden>{children}</span>;
+}
 
 /** Coverage cell: the "N of M" count plus a monochrome micro-bar of the
  *  recorded/total ratio — a per-row glance at how much was built on record.
@@ -142,15 +131,15 @@ function CoverageCell({ row, pending }: { row: PickerRow; pending: boolean }) {
   // Stats not yet resolved (and not failed) → shimmer in place of the count/bar.
   if (!has && pending) {
     return (
-      <span className="flex flex-col items-end gap-1">
+      <span className="flex flex-col items-start gap-1 md:items-end">
         <Skeleton className="h-3 w-12" />
         <Skeleton className="h-1 w-16" />
       </span>
     );
   }
   return (
-    <span className="flex flex-col items-end gap-1">
-      <span className="text-xs font-mono text-ink-3 tabular-nums">
+    <span className="flex flex-col items-start gap-1 md:items-end">
+      <span className="text-[length:var(--fs-label)] font-mono text-ink-3 tabular-nums">
         {has ? `${row.recordedFiles} of ${row.totalFiles}` : "—"}
       </span>
       {has && (
@@ -197,7 +186,7 @@ const DEST = {
 
 function coverageAccessibleName(row: PickerRow): string {
   return row.recordedFiles !== null && row.totalFiles !== null && row.totalFiles > 0
-    ? `${row.recordedFiles} recorded files out of ${row.totalFiles} total files`
+    ? `${row.recordedFiles} recorded ${row.recordedFiles === 1 ? "file" : "files"} out of ${row.totalFiles} total ${row.totalFiles === 1 ? "file" : "files"}`
     : "recorded and total file counts unavailable";
 }
 
@@ -245,12 +234,12 @@ export function ProjectPicker({
       )}
 
       {visible.length === 0 ? (
-        <p className="border border-rule bg-surface px-5 py-6 text-center text-[13px] text-ink-3">
-          No projects match &ldquo;{query.trim()}&rdquo;.
+        <p className="border border-rule bg-surface px-5 py-6 text-center text-ink-3">
+          no projects match &ldquo;{query.trim()}&rdquo;.
         </p>
       ) : (
         <div className="border border-rule bg-surface">
-          <div className={`${PICKER_GRID} py-2 border-b border-rule`}>
+          <div className={`${PICKER_HEAD} py-2 border-b border-rule`}>
             <span className="v2-eyebrow">project</span>
             <CoverageHeader />
             <span
@@ -289,33 +278,36 @@ export function ProjectPicker({
                   <span id={`coverage-${row.hash ?? row.name.replace(/[^a-z0-9]+/gi, '-')}`} className="sr-only">
                     {coverageAccessibleName(row)}
                   </span>
-                  <span className="min-w-0">
-                    <span className="block text-[13px] font-medium text-ink truncate">{primary}</span>
+                  <span className={NAME_CELL}>
+                    <span className="block font-medium text-ink [overflow-wrap:anywhere]">{primary}</span>
                     {showPath && (
-                      <span className="block font-mono text-[11px] text-ink-4 truncate" title={row.name}>
+                      <span className="block font-mono text-[length:var(--fs-label)] text-ink-3 truncate" title={row.name}>
                         {home ? "work not tied to a project" : row.name}
                       </span>
                     )}
                   </span>
-                  <span
-                    aria-label={coverageAccessibleName(row)}
-                  >
+                  <span className={STAT_CELL} aria-label={coverageAccessibleName(row)}>
+                    <PhoneLabel>recorded</PhoneLabel>
                     <CoverageCell row={row} pending={statsPending} />
                   </span>
-                  <span className="text-xs font-mono text-ink-3 tabular-nums text-right">
-                    {row.lastWorkMs !== null ? formatRelative(row.lastWorkMs) : "—"}
-                  </span>
-                  {row.openChanges !== null ? (
-                    <span className="text-xs font-mono text-ink-2 tabular-nums text-right">
-                      {row.openChanges}
+                  <span className={STAT_CELL}>
+                    <PhoneLabel>last worked</PhoneLabel>
+                    <span className={`${STAT_TEXT} text-ink-3`}>
+                      {row.lastWorkMs !== null ? formatRelative(row.lastWorkMs) : "—"}
                     </span>
-                  ) : statsPending ? (
-                    // Loading — shimmer in place so the count doesn't pop in.
-                    <Skeleton className="h-3 w-6 justify-self-end" />
-                  ) : (
-                    <span className="text-xs font-mono text-ink-2 tabular-nums text-right">—</span>
-                  )}
-                  <ChevronRight size={15} className="text-ink-4 justify-self-end" aria-hidden />
+                  </span>
+                  <span className={STAT_CELL}>
+                    <PhoneLabel>unmerged</PhoneLabel>
+                    {row.openChanges !== null ? (
+                      <span className={`${STAT_TEXT} text-ink-2`}>{row.openChanges}</span>
+                    ) : statsPending ? (
+                      // Loading — shimmer in place so the count doesn't pop in.
+                      <Skeleton className="h-3 w-6 md:ml-auto" />
+                    ) : (
+                      <span className={`${STAT_TEXT} text-ink-2`}>—</span>
+                    )}
+                  </span>
+                  <ChevronRight size={15} className={`text-ink-4 justify-self-end ${END_CELL}`} aria-hidden />
                 </Link>
               ) : (
                 <div
@@ -323,20 +315,25 @@ export function ProjectPicker({
                   className={`${PICKER_GRID} py-3 opacity-60`}
                   aria-label={`${primary} cannot be opened because its project identity is unavailable`}
                 >
-                  <span className="min-w-0">
-                    <span className="block text-[13px] font-medium text-ink truncate">{primary}</span>
-                    <span className="block font-mono text-[11px] text-ink-4 truncate">project identity unavailable</span>
+                  <span className={NAME_CELL}>
+                    <span className="block font-medium text-ink [overflow-wrap:anywhere]">{primary}</span>
+                    <span className="block font-mono text-[length:var(--fs-label)] text-ink-3">project identity unavailable</span>
                   </span>
-                  <span
-                    aria-label={coverageAccessibleName(row)}
-                  >
+                  <span className={STAT_CELL} aria-label={coverageAccessibleName(row)}>
+                    <PhoneLabel>recorded</PhoneLabel>
                     <CoverageCell row={row} pending={statsPending} />
                   </span>
-                  <span className="text-xs font-mono text-ink-3 tabular-nums text-right">
-                    {row.lastWorkMs !== null ? formatRelative(row.lastWorkMs) : "—"}
+                  <span className={STAT_CELL}>
+                    <PhoneLabel>last worked</PhoneLabel>
+                    <span className={`${STAT_TEXT} text-ink-3`}>
+                      {row.lastWorkMs !== null ? formatRelative(row.lastWorkMs) : "—"}
+                    </span>
                   </span>
-                  <span className="text-xs font-mono text-ink-2 tabular-nums text-right">—</span>
-                  <span aria-hidden />
+                  <span className={STAT_CELL}>
+                    <PhoneLabel>unmerged</PhoneLabel>
+                    <span className={`${STAT_TEXT} text-ink-2`}>—</span>
+                  </span>
+                  <span className={END_CELL} aria-hidden />
                 </div>
               );
             })}

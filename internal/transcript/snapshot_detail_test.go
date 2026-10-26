@@ -59,6 +59,10 @@ type snapshotHydrationFoldedTool struct {
 }
 
 type snapshotHydrationCase struct {
+	ThinkingSeed                 thinkingLevelPair            `yaml:"thinkingSeed,omitempty"`
+	ThinkingHistory              []thinkingLevelPair          `yaml:"thinkingHistory,omitempty"`
+	ExpectedThinkingSeed         thinkingLevelPair            `yaml:"expectedThinkingSeed,omitempty"`
+	ExpectedThinkingHistory      []thinkingLevelPair          `yaml:"expectedThinkingHistory,omitempty"`
 	Name                         string                       `yaml:"name"`
 	Harness                      string                       `yaml:"harness,omitempty"`
 	Purpose                      string                       `yaml:"purpose,omitempty"`
@@ -224,9 +228,12 @@ func buildHydrationSnapshot(t *testing.T, fixtureCase snapshotHydrationCase) (in
 	}
 	purpose := schema.SessionPurpose(fixtureCase.Purpose)
 	metadata := schema.UnifiedMetadata{
-		SchemaVersion: 1,
-		SessionID:     sessionID,
-		ModelHarness:  harness,
+		ThinkingLevel:        schema.ThinkingLevel(fixtureCase.ThinkingSeed.Level),
+		ThinkingLevelRaw:     schema.ThinkingLevelRaw(fixtureCase.ThinkingSeed.Raw),
+		ThinkingLevelHistory: thinkingLevelChanges(fixtureCase.ThinkingHistory),
+		SchemaVersion:        1,
+		SessionID:            sessionID,
+		ModelHarness:         harness,
 		Stats: schema.SessionStats{
 			TurnCount:            fixtureCase.TurnCount,
 			InputSubmissionCount: count,
@@ -306,6 +313,16 @@ func TestSnapshotToDetailValidated(t *testing.T) {
 			}
 			if len(detail.Turns) != len(fixtureCase.ExpectedMainIndices) {
 				t.Fatalf("main turns = %d, want %d", len(detail.Turns), len(fixtureCase.ExpectedMainIndices))
+			}
+			if got := (thinkingLevelPair{Level: string(detail.ThinkingLevel), Raw: string(detail.ThinkingLevelRaw)}); got != fixtureCase.ExpectedThinkingSeed {
+				t.Fatalf("thinking seed = %+v, want %+v", got, fixtureCase.ExpectedThinkingSeed)
+			}
+			var gotHistory []thinkingLevelPair
+			for _, change := range detail.ThinkingLevelHistory {
+				gotHistory = append(gotHistory, thinkingLevelPair{Level: string(change.Level), Raw: string(change.Raw)})
+			}
+			if fmt.Sprint(gotHistory) != fmt.Sprint(fixtureCase.ExpectedThinkingHistory) {
+				t.Fatalf("thinking history = %+v, want %+v", gotHistory, fixtureCase.ExpectedThinkingHistory)
 			}
 			for i, want := range fixtureCase.ExpectedMainIndices {
 				if detail.Turns[i].Index != want {

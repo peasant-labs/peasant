@@ -1,0 +1,52 @@
+required_names:
+  - digest-shape
+  - stats-source-set
+  - migration-phase-range
+  - retirement-precondition-set
+  - migrate-outcome-set
+digests:
+  name: digest-shape
+  accept:
+    - 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    - 0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF
+    - AaBbCcDdEeFf00112233445566778899AaBbCcDdEeFf00112233445566778899
+  reject:
+    - ""
+    - 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde
+    - 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0
+    - gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg
+    - 0123456789abcdef0123456789abzdef0123456789abcdef0123456789abcdef
+stats_sources:
+  name: stats-source-set
+  accept: ["harness", "derived"]
+  reject: ["", "HARNESS", "Derived", "compute", "harness ", " harness", "harness,derived"]
+  closed_set: ["harness", "derived"]
+migration_phases:
+  name: migration-phase-range
+  accept: [0, 1, 2, 3, 4, 5]
+  reject: [-1, 6, 100]
+retirement_preconditions:
+  name: retirement-precondition-set
+  accept:
+    - projection_generations_empty
+    - projection_entries_empty
+    - projection_content_empty
+    - session_entries_fts_absent
+    - no_native_full_content_rows
+  reject:
+    - ""
+    - PROJECTION_GENERATIONS_EMPTY
+    - projection_generations
+    - "projection_generations_empty "
+    - unknown-guard
+  closed_set:
+    - projection_generations_empty
+    - projection_entries_empty
+    - projection_content_empty
+    - session_entries_fts_absent
+    - no_native_full_content_rows
+migrate_outcomes:
+  name: migrate-outcome-set
+  accept: ["converted", "rolled_back", "marked", "skipped"]
+  reject: ["", "CONVERTED", "rolled-back", "rolled back", "pending"]
+  closed_set: ["converted", "rolled_back", "marked", "skipped"]

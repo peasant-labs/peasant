@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,17 +55,20 @@ type codexPriorFixture struct {
 }
 
 type codexEntryFixture struct {
-	Ref           string                 `yaml:"ref"`
-	Role          string                 `yaml:"role"`
-	EntryType     string                 `yaml:"entryType"`
-	Depth         int                    `yaml:"depth"`
-	ParentIndex   *int                   `yaml:"parentIndex"`
-	Content       string                 `yaml:"content"`
-	ToolInput     string                 `yaml:"toolInput"`
-	ToolOutput    string                 `yaml:"toolOutput"`
-	ToolCallID    string                 `yaml:"toolCallId"`
-	SubmissionRef string                 `yaml:"submissionRef"`
-	Provenance    codexProvenanceFixture `yaml:"provenance"`
+	ThinkingLevel    string                 `yaml:"thinkingLevel"`
+	ThinkingLevelRaw string                 `yaml:"thinkingLevelRaw"`
+	Ref              string                 `yaml:"ref"`
+	Role             string                 `yaml:"role"`
+	EntryType        string                 `yaml:"entryType"`
+	Depth            int                    `yaml:"depth"`
+	ParentIndex      *int                   `yaml:"parentIndex"`
+	Content          string                 `yaml:"content"`
+	ToolInput        string                 `yaml:"toolInput"`
+	ToolOutput       string                 `yaml:"toolOutput"`
+	ToolCallID       string                 `yaml:"toolCallId"`
+	ToolCallAbsent   bool                   `yaml:"toolCallAbsent"`
+	SubmissionRef    string                 `yaml:"submissionRef"`
+	Provenance       codexProvenanceFixture `yaml:"provenance"`
 }
 
 type codexEarlierFixture struct {
@@ -72,13 +76,13 @@ type codexEarlierFixture struct {
 	Entries []codexEntryFixture `yaml:"entries"`
 }
 
-// codexRetainedFixture is one inherited evidence block that must stay
+// codexInheritedFixture is one inherited evidence block that must stay
 // recoverable from the managed generation catalog without being emitted as a
 // main or earlier conversational entry.
-type codexRetainedFixture struct {
+type codexInheritedFixture struct {
 	Ref     string `yaml:"ref"`
 	Content string `yaml:"content"`
-	// SegmentInclusion names the captured context segment the retained ref must
+	// SegmentInclusion names the captured context segment the inherited ref must
 	// be attached to, so the inherited evidence keeps its segment provenance.
 	SegmentInclusion string `yaml:"segmentInclusion"`
 }
@@ -109,8 +113,12 @@ type codexExpectFixture struct {
 	TitleRefs             []string                   `yaml:"titleRefs"`
 	Main                  []codexEntryFixture        `yaml:"main"`
 	Earlier               []codexEarlierFixture      `yaml:"earlier"`
-	Retained              []codexRetainedFixture     `yaml:"retained"`
+	Inherited             []codexInheritedFixture    `yaml:"inherited"`
 	MetadataCWD           string                     `yaml:"metadataCWD"`
+	// Diagnostics names the captured-diagnostic error types the case must
+	// produce, so the managed boundary proves a dropped observation is
+	// reported rather than silently ignored.
+	Diagnostics []string `yaml:"diagnostics"`
 }
 
 type codexThreadFixture struct {
@@ -172,6 +180,51 @@ func loadCodexProvenanceFixture(t *testing.T) codexProvenanceFixtureDoc {
 		t.Fatal(err)
 	}
 	return fixture
+}
+
+func assertManagedManifestMutationGuards(t *testing.T, data []byte, names []string) {
+	t.Helper()
+	manifest, err := testutil.DecodeRequiredNamesManifest(data, "managed evidence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range manifest.RequiredNames {
+		index := slices.Index(names, required)
+		if index < 0 {
+			t.Fatalf("required case %q missing before mutation", required)
+		}
+		deleted := append(slices.Clone(names[:index]), names[index+1:]...)
+		if testutil.ValidateRequiredNames(manifest, deleted, "managed evidence") == nil {
+			t.Fatalf("deletion of %q was accepted", required)
+		}
+		renamed := slices.Clone(names)
+		renamed[index] += "-renamed"
+		if testutil.ValidateRequiredNames(manifest, renamed, "managed evidence") == nil {
+			t.Fatalf("rename of %q was accepted", required)
+		}
+	}
+}
+
+func TestManagedEvidenceManifestMutationGuards(t *testing.T) {
+	var names []string
+	for _, c := range loadCodexProvenanceFixture(t).Cases {
+		names = append(names, c.Name)
+	}
+	assertManagedManifestMutationGuards(t, codexProvenanceManifestYAML, names)
+	names = nil
+	for _, c := range loadCodexHistoryProjectionFixture(t).Cases {
+		names = append(names, c.Name)
+	}
+	assertManagedManifestMutationGuards(t, codexHistoryProjectionManifestYAML, names)
+	names = nil
+	doc := loadOpenCodeProvenanceDocument(t)
+	for _, c := range doc.Cases {
+		names = append(names, c.Name)
+	}
+	for _, c := range doc.HistoricalCase {
+		names = append(names, c.Name)
+	}
+	assertManagedManifestMutationGuards(t, openCodeProvenanceManifestYAML, names)
 }
 
 // codexProvenanceSource is a deterministic read-only source double. The
@@ -416,6 +469,31 @@ func codexAssertProvenance(t *testing.T, label string, want codexProvenanceFixtu
 	}
 }
 
+func assertManagedThinkingLevel(t *testing.T, entry schema.SessionEntry, level, raw string) {
+	t.Helper()
+	var extra map[string]json.RawMessage
+	if entry.Extra != nil {
+		if err := json.Unmarshal([]byte(*entry.Extra), &extra); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertValue := func(key, want string) {
+		value, present := extra[key]
+		if want == "" {
+			if present {
+				t.Errorf("entry %s: unexpected %s = %s", entry.SourceEntryRef, key, value)
+			}
+			return
+		}
+		var got string
+		if !present || json.Unmarshal(value, &got) != nil || got != want {
+			t.Errorf("entry %s: %s = %s, want %q", entry.SourceEntryRef, key, value, want)
+		}
+	}
+	assertValue(ingest.ThinkingLevelExtraKey, level)
+	assertValue(ingest.ThinkingLevelRawExtraKey, raw)
+}
+
 func codexAssertEntries(t *testing.T, label string, want []codexEntryFixture, got []schema.SessionEntry) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -423,6 +501,7 @@ func codexAssertEntries(t *testing.T, label string, want []codexEntryFixture, go
 	}
 	for i, w := range want {
 		g := got[i]
+		assertManagedThinkingLevel(t, g, w.ThinkingLevel, w.ThinkingLevelRaw)
 		where := fmt.Sprintf("%s[%d]", label, i)
 		if w.Ref != "" && string(g.SourceEntryRef) != w.Ref {
 			t.Errorf("%s ref = %q, want %q", where, g.SourceEntryRef, w.Ref)
@@ -446,6 +525,9 @@ func codexAssertEntries(t *testing.T, label string, want []codexEntryFixture, go
 		}
 		if w.ToolCallID != "" && (g.ToolCallID == nil || *g.ToolCallID != w.ToolCallID) {
 			t.Errorf("%s toolCallId = %v, want %q", where, g.ToolCallID, w.ToolCallID)
+		}
+		if w.ToolCallAbsent && g.ToolCallID != nil {
+			t.Errorf("%s toolCallId = %v, want absent", where, g.ToolCallID)
 		}
 		codexAssertProvenance(t, where, w.Provenance, g.Provenance)
 		if w.SubmissionRef != "" {
@@ -529,6 +611,18 @@ func codexAssertCase(t *testing.T, c codexProvenanceCase, candidate ingest.Codex
 	if c.Expected.TitleRefs != nil && !slices.Equal(codexReferenceStrings(generation.TitleRefs), c.Expected.TitleRefs) {
 		t.Errorf("titleRefs = %v, want %v", codexReferenceStrings(generation.TitleRefs), c.Expected.TitleRefs)
 	}
+	for _, want := range c.Expected.Diagnostics {
+		found := false
+		for _, diagnostic := range candidate.Diagnostics {
+			if diagnostic.ErrorType == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("captured diagnostics = %+v, want a %q entry", candidate.Diagnostics, want)
+		}
+	}
 	codexAssertEntries(t, "main", c.Expected.Main, generation.Main.Entries)
 	if len(generation.Earlier) != len(c.Expected.Earlier) {
 		t.Fatalf("earlier sections = %d, want %d", len(generation.Earlier), len(c.Expected.Earlier))
@@ -539,16 +633,27 @@ func codexAssertCase(t *testing.T, c codexProvenanceCase, candidate ingest.Codex
 		}
 		codexAssertEntries(t, fmt.Sprintf("earlier[%d]", i), want.Entries, generation.Earlier[i].Content.Entries)
 	}
-	codexAssertRetained(t, candidate, c.Expected.Retained)
+	codexAssertInherited(t, candidate, c.Expected.Inherited)
+	// Every allocated content identity, including inherited call evidence, must
+	// remain reachable through the native alias catalog.
+	aliased := make(map[schema.SourceEntryRef]bool)
+	for _, alias := range generation.Aliases {
+		aliased[alias.Ref] = true
+	}
+	for _, record := range generation.Content {
+		if !aliased[record.Ref] {
+			t.Errorf("content ref %q lost its native alias", record.Ref)
+		}
+	}
 }
 
-// codexAssertRetained proves that inherited evidence stays recoverable from the
+// codexAssertInherited proves that inherited evidence stays recoverable from the
 // managed generation catalog while never entering a main or earlier
-// conversational partition. A retained ref must carry full content, must be
+// conversational partition. An inherited ref must carry full content, must be
 // attached to a captured context segment, and must not appear in either the
-// main or the earlier entry streams. The retained set is derived from the
+// main or the earlier entry streams. The inherited set is derived from the
 // generation itself, never from a bare count.
-func codexAssertRetained(t *testing.T, candidate ingest.CodexCandidate, want []codexRetainedFixture) {
+func codexAssertInherited(t *testing.T, candidate ingest.CodexCandidate, want []codexInheritedFixture) {
 	t.Helper()
 	generation := candidate.V2.Generation
 	emitted := make(map[schema.SourceEntryRef]struct{}, len(generation.Main.Entries))
@@ -569,19 +674,19 @@ func codexAssertRetained(t *testing.T, candidate ingest.CodexCandidate, want []c
 			segmentInclusions[ref][segment.Inclusion] = struct{}{}
 		}
 	}
-	retained := make(map[schema.SourceEntryRef]struct{})
+	inherited := make(map[schema.SourceEntryRef]struct{})
 	for _, record := range generation.Content {
 		if _, ok := emitted[record.Ref]; !ok {
-			retained[record.Ref] = struct{}{}
+			inherited[record.Ref] = struct{}{}
 		}
 	}
-	if len(retained) != len(want) {
-		t.Fatalf("retained refs = %v, want %d named retained entries", codexReferenceStrings(mapKeysOfSet(retained)), len(want))
+	if len(inherited) != len(want) {
+		t.Fatalf("inherited refs = %v, want %d named inherited entries", codexReferenceStrings(mapKeysOfSet(inherited)), len(want))
 	}
 	for _, expected := range want {
 		ref := schema.SourceEntryRef(expected.Ref)
-		if _, ok := retained[ref]; !ok {
-			t.Errorf("ref %q is not retained inherited evidence; inherited content would be lost", expected.Ref)
+		if _, ok := inherited[ref]; !ok {
+			t.Errorf("ref %q is not inherited evidence; inherited content would be lost", expected.Ref)
 			continue
 		}
 		if _, ok := emitted[ref]; ok {
@@ -589,14 +694,14 @@ func codexAssertRetained(t *testing.T, candidate ingest.CodexCandidate, want []c
 		}
 		inclusions := segmentInclusions[ref]
 		if len(inclusions) == 0 {
-			t.Errorf("retained ref %q is not attached to any captured context segment; the evidence is not recoverable", expected.Ref)
+			t.Errorf("inherited ref %q is not attached to any captured context segment; the evidence is not recoverable", expected.Ref)
 		} else if expected.SegmentInclusion != "" {
 			if _, ok := inclusions[indexformat.SegmentInclusion(expected.SegmentInclusion)]; !ok {
-				t.Errorf("retained ref %q is not captured by a %q segment; its segment provenance was lost", expected.Ref, expected.SegmentInclusion)
+				t.Errorf("inherited ref %q is not captured by a %q segment; its segment provenance was lost", expected.Ref, expected.SegmentInclusion)
 			}
 		}
 		if got := string(candidate.Content[ref]); got != expected.Content {
-			t.Errorf("retained content for %q = %q, want %q", expected.Ref, got, expected.Content)
+			t.Errorf("inherited content for %q = %q, want %q", expected.Ref, got, expected.Content)
 		}
 	}
 }
@@ -788,13 +893,13 @@ func TestCodexInheritedPrefixConversionKeepsChildMain(t *testing.T) {
 	fixture := loadCodexProvenanceFixture(t)
 	var testCase codexProvenanceCase
 	for _, candidateCase := range fixture.Cases {
-		if candidateCase.Name == "inherited-copied-prefix-retained" {
+		if candidateCase.Name == "inherited-copied-prefix" {
 			testCase = candidateCase
 			break
 		}
 	}
 	if testCase.Name == "" {
-		t.Fatal("fixture case inherited-copied-prefix-retained is missing")
+		t.Fatal("fixture case inherited-copied-prefix is missing")
 	}
 	candidate, err := runCodexProvenanceCandidate(t, testCase)
 	if err != nil {
@@ -806,9 +911,9 @@ func TestCodexInheritedPrefixConversionKeepsChildMain(t *testing.T) {
 		t.Fatalf("converted turns = %d, want %d", len(turns), testCase.Expected.TurnCount)
 	}
 	for _, turn := range turns {
-		for _, retained := range testCase.Expected.Retained {
-			if strings.Contains(turn.Content, retained.Content) {
-				t.Errorf("rendered turn %d leaked inherited content %q", turn.Index, retained.Content)
+		for _, inherited := range testCase.Expected.Inherited {
+			if strings.Contains(turn.Content, inherited.Content) {
+				t.Errorf("rendered turn %d leaked inherited content %q", turn.Index, inherited.Content)
 			}
 		}
 	}
@@ -827,9 +932,9 @@ func TestCodexInheritedPrefixConversionKeepsChildMain(t *testing.T) {
 		t.Errorf("detail turns = %d, want %d", len(detail.Turns), testCase.Expected.TurnCount)
 	}
 	for _, turn := range detail.Turns {
-		for _, retained := range testCase.Expected.Retained {
-			if strings.Contains(turn.Content, retained.Content) {
-				t.Errorf("detail turn %d leaked inherited content %q", turn.Index, retained.Content)
+		for _, inherited := range testCase.Expected.Inherited {
+			if strings.Contains(turn.Content, inherited.Content) {
+				t.Errorf("detail turn %d leaked inherited content %q", turn.Index, inherited.Content)
 			}
 		}
 	}
@@ -987,19 +1092,16 @@ func TestCodexProvenanceIndexerAdmitsV2Candidate(t *testing.T) {
 		SourcePath:   ingest.ResolvedPath(path),
 		SourceFormat: ingest.SourceFormatJSONL,
 	}
-	indexer := ingest.NewCodexIndexer(&ingest.OSFileSystem{}, ingest.WithCodexProvenanceCapture(ingest.CodexProvenanceIndexerConfig{
-		Enabled:      true,
-		GenerationID: func(ingest.DiscoveredSession) string { return "gen-indexer" },
+	indexer := ingest.NewCodexIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(t.Context(), ingest.GenerationBuildInput{
+		Session:      session,
+		GenerationID: "gen-indexer",
 		Allocator:    &codexScriptedAllocator{entries: []string{"e_u1", "e_ctx1"}, submissions: []string{"s_u1"}},
-	}))
-	result, err := indexer.IndexTranscriptResult(t.Context(), session)
+	})
 	if err != nil {
-		t.Fatalf("IndexTranscriptResult: %v", err)
+		t.Fatalf("BuildGeneration: %v", err)
 	}
-	v2, ok := result.(indexformat.V2)
-	if !ok {
-		t.Fatalf("result = %T, want indexformat.V2", result)
-	}
+	v2 := candidate.Result
 	if v2.Generation.Metadata.Stats.TurnCount != 2 {
 		t.Errorf("turnCount = %d, want 2", v2.Generation.Metadata.Stats.TurnCount)
 	}

@@ -55,7 +55,8 @@ func newSQLiteMaterializedTranscript(metadata *UnifiedMetadata, data []byte, ses
 	// Only source-owned attributes participate, never discovery file/WAL clocks
 	// or decision-time Git configuration. The latter has its own identity trigger.
 	attrs := DiscoveredSession{ParentUUID: session.ParentUUID, CWD: session.CWD,
-		Title: session.Title, Agent: session.Agent, Version: session.Version,
+		OpenCodeModelVariant: session.OpenCodeModelVariant,
+		Title:                session.Title, Agent: session.Agent, Version: session.Version,
 		Slug: session.Slug, Cost: session.Cost, TokensIn: session.TokensIn,
 		TokensOut: session.TokensOut, CreatedAt: session.CreatedAt, ModTime: session.ModTime,
 		ProjectWorktree: session.ProjectWorktree, ProjectName: session.ProjectName, EventSeq: session.EventSeq}
@@ -205,6 +206,22 @@ const (
 	TranscriptOriginOpenCodeCurrentSQLite
 )
 
+// String names one transcript origin for diagnostics and reporting. An origin
+// outside the closed set prints its numeric value rather than a name it does
+// not have.
+func (o TranscriptOrigin) String() string {
+	switch o {
+	case TranscriptOriginFile:
+		return "file"
+	case TranscriptOriginOpenCodeLegacySQLite:
+		return "opencode-legacy-sqlite"
+	case TranscriptOriginOpenCodeCurrentSQLite:
+		return "opencode-current-sqlite"
+	default:
+		return fmt.Sprintf("transcript-origin-%d", uint8(o))
+	}
+}
+
 // Validate rejects unknown origins at the pipeline trust boundary.
 func (o TranscriptOrigin) Validate() error {
 	switch o {
@@ -223,7 +240,7 @@ type SourceConfig struct {
 
 // DiscoveredSession represents a session found during discovery.
 type DiscoveredSession struct {
-	// ContentOmitted is carried from retained metadata when ingestion removed
+	// ContentOmitted is carried from stored metadata when ingestion removed
 	// source records. A filtered artifact cannot certify a complete capture.
 	ContentOmitted bool
 	SessionID      SessionID
@@ -262,6 +279,9 @@ type DiscoveredSession struct {
 	TokensIn  int
 	TokensOut int
 	Cost      float64
+	// OpenCodeModelVariant is the optional native session fallback; message
+	// observations take precedence when deriving metadata.
+	OpenCodeModelVariant string
 	// EventSeq is the session's newest event sequence, a monotonic per-session
 	// counter that advances on every mutation, including an in-place rewrite that
 	// moves no time column. Change detection re-ingests a session whose EventSeq

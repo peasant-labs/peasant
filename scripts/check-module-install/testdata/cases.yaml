@@ -1,0 +1,8 @@
+cases:
+  - name: the audited driver is installed from the real module zip
+    mode: complete
+    succeeds: true
+  - name: an omitted audited driver cannot install
+    mode: omit-driver
+    succeeds: false
+    error_contains: third_party/zombiezen-sqlite

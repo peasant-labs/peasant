@@ -15,8 +15,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/spf13/cobra"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // testConfigYAML is a minimal config that disables all source providers.
@@ -111,7 +111,7 @@ func TestHarvestCmd_Flags(t *testing.T) {
 		{"debug", "false"},
 		{defaults.JSONFlagName, "false"},
 		{"all", "false"},
-		{"detect-commits", "false"},
+		{"detect-commits", "true"},
 	}
 
 	sliceFlags := []flagCheck{
@@ -988,7 +988,7 @@ func TestHarvestCmd_DryRunWithRetainedArtifactsAndNoDatabase(t *testing.T) {
 	// answer.
 	for _, want := range []string{
 		"This dry run creates none",
-		"compared against the retained artifacts on disk",
+		"compared against the stored artifacts on disk",
 		"reported as new when there are none",
 	} {
 		if !strings.Contains(output, want) {

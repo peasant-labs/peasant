@@ -27,3 +27,10 @@ requiredNames:
   - count-delivery-excluded
   - count-action-without-title
   - count-excluded-main-input
+  - channels-tool-call-id-unpaired-result
+  - channels-tool-call-id-incoherent-rejected
+  - channels-omitted-placeholder
+  - channels-omitted-incoherent-rejected
+  - channels-extra-merge
+  - channels-extra-reserved-rejected
+  - channels-raw-byte-length-rejected

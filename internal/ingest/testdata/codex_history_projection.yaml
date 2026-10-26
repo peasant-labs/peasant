@@ -1,4 +1,95 @@
 cases:
+  - name: delivery-scalar-redacts-retained-evidence
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"ghp_abcdefghijklmnopqrstuvwxyz0123456789","content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      retained: ['"ghp_abcdefghijklmnopqrstuvwxyz0123456789"']
+      redacted: ['"\u003cGITHUB_PAT\u003e"']
+      turns: 1
+      submissions: 0
+  - name: delivery-scalar-agent-message
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      retained: ['"final"']
+      turns: 1
+      submissions: 0
+  - name: delivery-unknown-scalar-agent-message
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"user wrote this","content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      retained: ['"user wrote this"']
+      turns: 1
+      submissions: 0
+  - name: delivery-unsupported-retained-shape
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":[true, 7],"content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      retained: ['[true, 7]']
+      turns: 1
+      submissions: 0
+  - name: delivery-absent-agent-message
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      turns: 1
+      submissions: 0
+  - name: delivery-null-agent-message
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":null,"content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      turns: 1
+      submissions: 0
+  - name: delivery-object-correlation
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":{"target":"agent-b","call_id":"c1"},"content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      turns: 1
+      submissions: 0
+  - name: delivery-malformed-correlation-object
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":{"target":7},"content":[{"type":"output_text","text":"answer"}]}}}
+      refusal: delivery correlation_object field target requires a string
+  - name: delivery-wrong-required-item-field
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":7,"delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
+      refusal: codexItemBody.id
+  - name: delivery-repeated-item-completion
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"first"}]}}}
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
+      content: [answer]
+      retained: ['"final"', '"final"']
+      turns: 1
+      submissions: 0
+  - name: delivery-scalar-does-not-open-admission
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"input_text","text":"request"}]}}}
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
+        {"type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+      content: []
+      turns: 0
+      submissions: 0
+  - name: delivery-correlation-opens-admission
+    delivery:
+      records: |
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"input_text","text":"request"}]}}}
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":{"target":"agent-b"},"content":[{"type":"output_text","text":"answer"}]}}}
+        {"type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":1}}
+      content: [request]
+      turns: 1
+      submissions: 0
   - name: copied-prefix-S-boundary
     phases:
       - authority:
@@ -1789,3 +1880,230 @@ cases:
               ownership: own
               hasPayload: true
               payload: '{"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","id":"u1","content":[{"type":"input_text","text":"version two"}]}}'
+
+  - name: turn-context-effort-control-evidence
+    phases:
+      - authority:
+          stableThreadID: 90900001-9090-4090-8090-909090909091
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-03T01:00:00Z","type":"session_meta","payload":{"id":"90900001-9090-4090-8090-909090909091","history_mode":"paginated"}}
+            {"timestamp":"2024-01-03T01:00:01Z","type":"turn_context","payload":{"model":"gpt-5","effort":"high"}}
+            {"timestamp":"2024-01-03T01:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"plan the change"}]}}
+            {"timestamp":"2024-01-03T01:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"first answer"}]}}
+            {"timestamp":"2024-01-03T01:00:04Z","type":"turn_context","payload":{"model":"gpt-5","effort":"none"}}
+            {"timestamp":"2024-01-03T01:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m3","content":[{"type":"output_text","text":"second answer"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1, e_2, e_3]
+          inheritedRefs: []
+          earlierRefs: []
+          diagnostics: []
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|90900001-9090-4090-8090-909090909091|item|m1|message"
+              segment: 0
+              ordinal: 2
+              line: 2
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: m1
+              ownership: own
+              hasPayload: true
+            - ref: e_2
+              nativeKey: "codex|90900001-9090-4090-8090-909090909091|item|m2|message"
+              segment: 0
+              ordinal: 3
+              line: 3
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: m2
+              ownership: own
+              hasPayload: true
+            - ref: e_3
+              nativeKey: "codex|90900001-9090-4090-8090-909090909091|item|m3|message"
+              segment: 0
+              ordinal: 5
+              line: 5
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: m3
+              ownership: own
+              hasPayload: true
+          segments:
+            - ordinal: 0
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 0
+              endExclusive: 6
+              refs: [e_1, e_2, e_3]
+          controls:
+            - nodeIndex: 0
+              segment: 0
+              ordinal: 1
+              thinkingLevel: "high"
+              thinkingLevelRaw: ""
+            - nodeIndex: 2
+              segment: 0
+              ordinal: 4
+              thinkingLevel: "off"
+              thinkingLevelRaw: "none"
+      - authority:
+          stableThreadID: 90900001-9090-4090-8090-909090909091
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-03T01:00:00Z","type":"session_meta","payload":{"id":"90900001-9090-4090-8090-909090909091","history_mode":"paginated"}}
+            {"timestamp":"2024-01-03T01:00:01Z","type":"turn_context","payload":{"model":"gpt-5","effort":"high"}}
+            {"timestamp":"2024-01-03T01:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"plan the change"}]}}
+            {"timestamp":"2024-01-03T01:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"first answer"}]}}
+            {"timestamp":"2024-01-03T01:00:04Z","type":"turn_context","payload":{"model":"gpt-5","effort":"none"}}
+            {"timestamp":"2024-01-03T01:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m3","content":[{"type":"output_text","text":"second answer"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1, e_2, e_3]
+          inheritedRefs: []
+          earlierRefs: []
+          diagnostics: []
+          fingerprintStableWithPrevious: true
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|90900001-9090-4090-8090-909090909091|item|m1|message"
+              segment: 0
+              ordinal: 2
+              line: 2
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: m1
+              ownership: own
+              hasPayload: true
+            - ref: e_2
+              nativeKey: "codex|90900001-9090-4090-8090-909090909091|item|m2|message"
+              segment: 0
+              ordinal: 3
+              line: 3
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: m2
+              ownership: own
+              hasPayload: true
+            - ref: e_3
+              nativeKey: "codex|90900001-9090-4090-8090-909090909091|item|m3|message"
+              segment: 0
+              ordinal: 5
+              line: 5
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: m3
+              ownership: own
+              hasPayload: true
+          segments:
+            - ordinal: 0
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 0
+              endExclusive: 6
+              refs: [e_1, e_2, e_3]
+          controls:
+            - nodeIndex: 0
+              segment: 0
+              ordinal: 1
+              thinkingLevel: "high"
+              thinkingLevelRaw: ""
+            - nodeIndex: 2
+              segment: 0
+              ordinal: 4
+              thinkingLevel: "off"
+              thinkingLevelRaw: "none"
+
+  - name: turn-context-effort-stripped-sibling
+    sameProjectionAs: turn-context-effort-control-evidence
+    phases:
+      - authority:
+          stableThreadID: 90900001-9090-4090-8090-909090909091
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: paginated
+        sources:
+          current: |
+            {"timestamp":"2024-01-03T01:00:00Z","type":"session_meta","payload":{"id":"90900001-9090-4090-8090-909090909091","history_mode":"paginated"}}
+            {"timestamp":"2024-01-03T01:00:01Z","type":"turn_context","payload":{"model":"gpt-5","unused":"high"}}
+            {"timestamp":"2024-01-03T01:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"plan the change"}]}}
+            {"timestamp":"2024-01-03T01:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"first answer"}]}}
+            {"timestamp":"2024-01-03T01:00:04Z","type":"turn_context","payload":{"model":"gpt-5","unused":"none"}}
+            {"timestamp":"2024-01-03T01:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m3","content":[{"type":"output_text","text":"second answer"}]}}
+        expected:
+          mode: paginated
+          completeness: complete
+          mainRefs: [e_1, e_2, e_3]
+          inheritedRefs: []
+          earlierRefs: []
+          diagnostics: []
+          nodes:
+            - ref: e_1
+              nativeKey: "codex|90900001-9090-4090-8090-909090909091|item|m1|message"
+              segment: 0
+              ordinal: 2
+              line: 2
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: m1
+              ownership: own
+              hasPayload: true
+            - ref: e_2
+              nativeKey: "codex|90900001-9090-4090-8090-909090909091|item|m2|message"
+              segment: 0
+              ordinal: 3
+              line: 3
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: m2
+              ownership: own
+              hasPayload: true
+            - ref: e_3
+              nativeKey: "codex|90900001-9090-4090-8090-909090909091|item|m3|message"
+              segment: 0
+              ordinal: 5
+              line: 5
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: assistant
+              itemID: m3
+              ownership: own
+              hasPayload: true
+          segments:
+            - ordinal: 0
+              inclusion: same_thread_surviving_own
+              coordinateKind: codex_ordinal_range
+              start: 0
+              endExclusive: 6
+              refs: [e_1, e_2, e_3]
+          controls:
+            - nodeIndex: 0
+              segment: 0
+              ordinal: 1
+              thinkingLevel: ""
+              thinkingLevelRaw: ""
+            - nodeIndex: 2
+              segment: 0
+              ordinal: 4
+              thinkingLevel: ""
+              thinkingLevelRaw: ""

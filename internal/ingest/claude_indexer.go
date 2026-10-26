@@ -156,6 +156,18 @@ func (idx *ClaudeIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 }
 
 func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
+	return idx.parseClaudeRecords(context.Background(), sessionID, data, completion, false)
+}
+
+// parseClaudeRecords keeps the decoded envelope local to one record. Managed
+// candidates validate that same envelope before projecting it and decomposing
+// its content; the tolerant stored index path retains its existing behavior.
+func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID SessionID, data []byte, completion *indexCompletion, strict bool) ([]schema.SessionEntry, error) {
+	if strict {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	var traversal unknownJSONLTraversal
 	scanner := newJSONLRecordScanner(data, productionJSONLRecordLimit(idx.maxRecordBytes))
 
@@ -165,8 +177,16 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 	// in the transcript. tool_result blocks referencing these IDs keep role=user
 	// (genuine user answers) instead of being reclassified to role=tool.
 	askUserCallIDs := make(map[string]bool)
+	// levelState tracks the ultracode session mode in source order so each
+	// assistant entry carries the level that governed it.
+	var levelState claudeThinkingLevelState
 
 	for scanner.Scan() {
+		if strict {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		var placeholderErr error
 		entries, placeholderErr = appendOmissionPlaceholders(entries, scanner, sessionID, HarnessClaudeCode, &entryIndex)
 		if placeholderErr != nil {
@@ -200,6 +220,16 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 
 		var line claudeIndexLine
 		decodeErr := json.Unmarshal(trimmed, &line)
+		if strict {
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			if _, omitted := parseOmittedRecordSentinel(trimmed); !omitted {
+				if _, err := validateClaudeDecodedRecord(line); err != nil {
+					return nil, err
+				}
+			}
+		}
 		if completion != nil {
 			if err := completion.record(trimmed); err != nil {
 				return nil, err
@@ -219,7 +249,16 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 			}
 			completion.recognized++
 		}
+		if decodeErr == nil {
+			levelState.observe(line.Type, line.Attachment)
+		}
 		entry, ok := claudeLineEntry(sessionID, entryIndex, trimmed, idx.fullContent, line, decodeErr)
+		if ok && entry.Role == RoleAssistant {
+			// The legacy thinkingMetadata.level is seed-only evidence and is
+			// never stamped per turn.
+			mapping, _ := levelState.governing(claudeEffortValue(line.Effort))
+			entry.Extra = addThinkingLevelObservation(entry.Extra, mapping)
+		}
 		if !ok {
 			// Malformed line — skip silently.
 			entryIndex++
@@ -234,7 +273,7 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 
 		// Full-depth decomposition: emit depth=1 entries for each content block.
 		if idx.fullDepth {
-			childEntries := decomposeClaudeContentBlocks(sessionID, &entryIndex, parentIndex, trimmed, idx.fullContent, askUserCallIDs)
+			childEntries := decomposeClaudeContentBlocks(sessionID, &entryIndex, parentIndex, line, idx.fullContent, askUserCallIDs)
 			// Propagate reclassified role to depth=1 children — if the parent
 			// was reclassified (e.g. system-injected skill body), children must
 			// inherit the reclassified role, not the original JSONL role.
@@ -296,8 +335,23 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []b
 		}
 	}
 
+	// An omission-only scan can consume physical records without yielding an
+	// iteration above. Still honor cancellation before emitting its placeholders.
+	if strict {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	if err := scanner.Err(); err != nil {
 		return entries, fmt.Errorf("claude indexer: scanner error for %s: %w", sessionID, err)
+	}
+	if strict && scanner.SawOversized() {
+		// The classifier skips oversized physical records, while the strict
+		// capture validator checks even those bytes. Preserve that distinction
+		// on this exceptional path rather than silently relaxing validation.
+		if _, err := validateClaudeProducerRecords(ctx, DiscoveredSession{SessionID: sessionID, Harness: HarnessClaudeCode}, data); err != nil {
+			return nil, err
+		}
 	}
 
 	if completion != nil && scanner.SawOversized() {
@@ -332,6 +386,11 @@ type claudeIndexLine struct {
 	Timestamp  json.RawMessage `json:"timestamp"`
 	StopReason string          `json:"stop_reason"`
 	Content    json.RawMessage `json:"content"` // Top-level content (system entries use this, not message.content)
+	// Effort is the assistant line's resolved effort; Attachment carries the
+	// nested attachment of an attachment record (ultracode mode evidence).
+	// Both are decoded tolerantly by their helpers.
+	Effort     json.RawMessage `json:"effort"`
+	Attachment json.RawMessage `json:"attachment"`
 	Message    struct {
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
@@ -428,6 +487,20 @@ func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent boo
 		}
 	}
 
+	// A user prompt carried as a content-block array is one prompt, not a
+	// carrier plus one subagent turn per block. Its text blocks supply the
+	// carrier's complete text; a tool result makes the record a mixed wrapper
+	// instead, and that path keeps its existing per-block decomposition.
+	plainUserPrompt := entry.Role == RoleUser
+	if plainUserPrompt {
+		for _, block := range contentBlocks {
+			if block.Type == "tool_result" {
+				plainUserPrompt = false
+				break
+			}
+		}
+	}
+
 	var toolNames []string
 	var preview strings.Builder
 	var thinkingFallback string
@@ -449,7 +522,17 @@ func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent boo
 				thinkingFallback = block.Thinking
 			}
 		case "text":
-			if preview.Len() == 0 && block.Text != "" {
+			if block.Text == "" {
+				continue
+			}
+			if preview.Len() == 0 {
+				preview.WriteString(block.Text)
+				continue
+			}
+			if plainUserPrompt {
+				// The carrier is the whole prompt: the extension writes injected
+				// editor context and the typed prompt as separate text blocks.
+				preview.WriteString("\n")
 				preview.WriteString(block.Text)
 			}
 		case "tool_result":
@@ -630,18 +713,7 @@ type claudeFullBlock struct {
 // askUserCallIDs is the set of tool_call_ids that correspond to AskUserQuestion tool_use blocks
 // seen earlier in the transcript; tool_result blocks that reference these IDs keep role=user
 // (genuine user responses), while all other tool_result blocks are reclassified to role=tool.
-func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIndex int, raw []byte, fullContent bool, askUserCallIDs map[string]bool) []schema.SessionEntry {
-	var line struct {
-		Type    string          `json:"type"`
-		Content json.RawMessage `json:"content"`
-		Message struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		} `json:"message"`
-	}
-	if err := json.Unmarshal(raw, &line); err != nil {
-		return nil
-	}
+func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIndex int, line claudeIndexLine, fullContent bool, askUserCallIDs map[string]bool) []schema.SessionEntry {
 	if fullContent && len(line.Message.Content) == 0 && line.Type == "system" {
 		line.Message.Content = line.Content
 		line.Message.Role = RoleSystem.String()
@@ -663,9 +735,24 @@ func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIn
 	if !role.IsValid() {
 		role = RoleAssistant
 	}
+	// The carrier already holds a plain user prompt's whole text. A mixed
+	// tool-result wrapper keeps its per-block decomposition so its children can
+	// be folded as tool calls.
+	plainUserPrompt := role == RoleUser
+	if plainUserPrompt {
+		for _, block := range blocks {
+			if block.Type == "tool_result" {
+				plainUserPrompt = false
+				break
+			}
+		}
+	}
 
 	var entries []schema.SessionEntry
 	for _, block := range blocks {
+		if plainUserPrompt && block.Type == "text" {
+			continue
+		}
 		entry := schema.SessionEntry{
 			SessionID:   sessionID,
 			EntryIndex:  *entryIndex,

@@ -65,15 +65,15 @@ func (i *StrikeIndexer) IndexTranscriptBytes(_ context.Context, session Discover
 }
 
 var _ VersionedTranscriptIndexer = (*StrikeIndexer)(nil)
-var _ RetainedContentCapturer = (*StrikeIndexer)(nil)
+var _ StoredContentCapturer = (*StrikeIndexer)(nil)
 
-// CaptureRetainedContent reports the retained Strike transcript's own
+// CaptureStoredContent reports the retained Strike transcript's own
 // completeness. Ingest removes oversized records before the artifact is
 // written (filterStrikeOversizedRecords) and records that in the metadata
-// diagnostics, so a retained artifact carrying that mark is known to omit
+// diagnostics, so a stored artifact carrying that mark is known to omit
 // rows: it is captured as incomplete, never certified. A missing metadata
 // sidecar does not omit conversation rows and does not affect completeness.
-func (i *StrikeIndexer) CaptureRetainedContent(ctx context.Context, session DiscoveredSession) (ContentCaptureResult, error) {
+func (i *StrikeIndexer) CaptureStoredContent(ctx context.Context, session DiscoveredSession) (ContentCaptureResult, error) {
 	if err := ctx.Err(); err != nil {
 		return ContentCaptureResult{}, err
 	}
@@ -107,7 +107,7 @@ func (i *StrikeIndexer) IndexTranscriptResult(ctx context.Context, session Disco
 	return i.IndexTranscriptBytesResult(ctx, session, data)
 }
 
-// IndexTranscriptBytesResult verifies retained bytes, not native retention completeness.
+// IndexTranscriptBytesResult verifies stored bytes, not native retention completeness.
 func (i *StrikeIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
 	completion := &indexCompletion{ctx: ctx, session: session}
 	entries, err := i.parseWithCompletion(session.SessionID, data, completion)
@@ -260,86 +260,90 @@ func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, co
 		if completion != nil {
 			completion.recognized++
 		}
-		timestamp := parseIndexTimestamp(envelope.Time)
-
-		switch envelope.Type {
-		case strikeEventUserMessage:
-			a.beginTurn(event.TurnID)
-			content := strikeEventText(event)
-			if content != "" {
-				a.appendUser(content, timestamp, len(trimmed))
-			}
-
-		case strikeEventTurnStarted:
-			a.beginTurn(event.TurnID)
-
-		case strikeEventAssistantText, strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta:
-			content := strikeEventText(event)
-			if content == "" {
-				return
-			}
-			key := a.eventKey(event)
-			parent := a.ensureParent(key, event, timestamp, len(trimmed), EntryTypeText)
-			a.appendParentContent(parent, strikeContentText, content)
-
-		case strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire, strikeEventThinkingDelta:
-			content := strikeReasoningText(event)
-			if content == "" {
-				return
-			}
-			key := a.eventKey(event)
-			parent := a.ensureParent(key, event, timestamp, len(trimmed), EntryTypeThinking)
-			a.appendParentContent(parent, strikeContentReasoning, content)
-
-		case strikeEventToolBegin:
-			a.beginTool(event, timestamp, len(trimmed))
-
-		case strikeEventToolOutput:
-			a.appendCallOutput(event.CallID, a.outputText(event))
-
-		case strikeEventProcessStarted:
-			if event.ProcessID != "" && event.CallID != "" {
-				a.processCalls[event.ProcessID] = event.CallID
-			}
-
-		case strikeEventProcessOutput:
-			callID := event.CallID
-			if callID == "" {
-				callID = a.processCalls[event.ProcessID]
-			}
-			a.appendCallOutput(callID, a.outputText(event))
-
-		case strikeEventProcessExited:
-			callID := event.CallID
-			if callID == "" {
-				callID = a.processCalls[event.ProcessID]
-			}
-			a.finishProcess(callID, event)
-
-		case strikeEventToolEnd:
-			a.endTool(event, timestamp, len(trimmed))
-
-		case strikeEventUsageReported:
-			if parent := a.lookupParent(event); parent != nil {
-				in, inKnown, out, outKnown := strikeUsageCounts(event)
-				if inKnown {
-					a.entries[parent.position].TokensIn = &in
-				}
-				if outKnown {
-					a.entries[parent.position].TokensOut = &out
-				}
-			}
-
-		case strikeEventTurnCompleted:
-			if parent := a.lookupParent(event); parent != nil {
-				if reason, ok := strikeStopReason(event.StopReason); ok {
-					a.entries[parent.position].StopReason = &reason
-				}
-			}
-		}
+		a.applyDecodedEvent(envelope, event, len(trimmed))
 	})
 
 	return a.entries, parseErr
+}
+
+func (a *strikeAssembly) applyDecodedEvent(envelope strikeEnvelope, event strikeEventData, rawLength int) {
+	timestamp := parseIndexTimestamp(envelope.Time)
+
+	switch envelope.Type {
+	case strikeEventUserMessage:
+		a.beginTurn(event.TurnID)
+		content := strikeEventText(event)
+		if content != "" {
+			a.appendUser(content, timestamp, rawLength)
+		}
+
+	case strikeEventTurnStarted:
+		a.beginTurn(event.TurnID)
+
+	case strikeEventAssistantText, strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta:
+		content := strikeEventText(event)
+		if content == "" {
+			return
+		}
+		key := a.eventKey(event)
+		parent := a.ensureParent(key, event, timestamp, rawLength, EntryTypeText)
+		a.appendParentContent(parent, strikeContentText, content)
+
+	case strikeEventReasoning, strikeEventReasoningDelta, strikeEventReasoningDeltaWire, strikeEventThinkingDelta:
+		content := strikeReasoningText(event)
+		if content == "" {
+			return
+		}
+		key := a.eventKey(event)
+		parent := a.ensureParent(key, event, timestamp, rawLength, EntryTypeThinking)
+		a.appendParentContent(parent, strikeContentReasoning, content)
+
+	case strikeEventToolBegin:
+		a.beginTool(event, timestamp, rawLength)
+
+	case strikeEventToolOutput:
+		a.appendCallOutput(event.CallID, a.outputText(event))
+
+	case strikeEventProcessStarted:
+		if event.ProcessID != "" && event.CallID != "" {
+			a.processCalls[event.ProcessID] = event.CallID
+		}
+
+	case strikeEventProcessOutput:
+		callID := event.CallID
+		if callID == "" {
+			callID = a.processCalls[event.ProcessID]
+		}
+		a.appendCallOutput(callID, a.outputText(event))
+
+	case strikeEventProcessExited:
+		callID := event.CallID
+		if callID == "" {
+			callID = a.processCalls[event.ProcessID]
+		}
+		a.finishProcess(callID, event)
+
+	case strikeEventToolEnd:
+		a.endTool(event, timestamp, rawLength)
+
+	case strikeEventUsageReported:
+		if parent := a.lookupParent(event); parent != nil {
+			in, inKnown, out, outKnown := strikeUsageCounts(event)
+			if inKnown {
+				a.entries[parent.position].TokensIn = &in
+			}
+			if outKnown {
+				a.entries[parent.position].TokensOut = &out
+			}
+		}
+
+	case strikeEventTurnCompleted:
+		if parent := a.lookupParent(event); parent != nil {
+			if reason, ok := strikeStopReason(event.StopReason); ok {
+				a.entries[parent.position].StopReason = &reason
+			}
+		}
+	}
 }
 
 func (a *strikeAssembly) beginTurn(turnID string) {

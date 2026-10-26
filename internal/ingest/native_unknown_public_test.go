@@ -10,8 +10,10 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,16 +29,20 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/native_unknown_public.yaml
 var nativeUnknownPublicYAML []byte
 
 type nativeUnknownPublicCase struct {
+	Payload          string         `yaml:"payload"`
+	Expected         string         `yaml:"expected"`
+	Corrupt          string         `yaml:"corrupt"`
+	Kind             string         `yaml:"kind"`
 	KnownTexts       []string       `yaml:"known_texts"`
 	KnownRole        schema.Role    `yaml:"known_role"`
 	RetainedFallback bool           `yaml:"retained_fallback"`
@@ -78,7 +84,15 @@ func loadNativeUnknownPublic(t *testing.T) nativeUnknownPublicDocument {
 	names := map[string]bool{}
 	var actualNames []string
 	for _, c := range doc.Cases {
-		if c.Name == "" || names[c.Name] || len(c.Positions) == 0 || len(c.Positions) != len(c.RecordIndices) || len(c.Positions) != len(c.Pointers) {
+		nameMissing := c.Name == ""
+		nameRepeated := names[c.Name]
+		noPositions := len(c.Positions) == 0
+		recordIndicesMismatch := len(c.Positions) != len(c.RecordIndices)
+		pointerCountMismatch := len(c.Positions) != len(c.Pointers)
+		invalidName := nameMissing || nameRepeated
+		invalidCoordinates := noPositions || recordIndicesMismatch || pointerCountMismatch
+		invalidFixture := invalidName || invalidCoordinates
+		if invalidFixture {
 			t.Fatalf("invalid fixture %q", c.Name)
 		}
 		names[c.Name] = true
@@ -93,19 +107,81 @@ func loadNativeUnknownPublic(t *testing.T) nativeUnknownPublicDocument {
 	return doc
 }
 
-type nativeUnknownFailingStore struct{ *unknownFailingStore }
-
-func (s *nativeUnknownFailingStore) ActivateNativeGeneration(ctx context.Context, activation ingest.NativeGenerationActivation) (ingest.ActivationOutcome, error) {
-	if s.fail {
-		// Exercise the real artifact transaction's missing-blob failure, not a
-		// prepared success result or a fabricated accounting diagnostic.
-		activation.Blobs = maps.Clone(activation.Blobs)
-		delete(activation.Blobs, activation.Generation.Generation.Content[0].Ref)
-	}
-	return s.Store.ActivateNativeGeneration(ctx, activation)
+// nativeUnknownFailingStore drops one captured blob from the envelope at both
+// store seams, so the parallel preparation and the serial activation see the
+// same faulty candidate. The preparation error is recorded for assertions.
+type nativeUnknownFailingStore struct {
+	*unknownFailingStore
+	stageMu   sync.Mutex
+	stageErrs []error
 }
 
-var _ ingest.NativeGenerationActivator = (*nativeUnknownFailingStore)(nil)
+func dropFirstBlob(activation ingest.GenerationActivation) ingest.GenerationActivation {
+	activation.Blobs = maps.Clone(activation.Blobs)
+	delete(activation.Blobs, activation.Generation.Generation.Content[0].Ref)
+	return activation
+}
+
+func (s *nativeUnknownFailingStore) StageGenerationCandidate(ctx context.Context, activation ingest.GenerationActivation) (ingest.GenerationStaged, error) {
+	if !s.fail {
+		return s.Store.StageGenerationCandidate(ctx, activation)
+	}
+	// Exercise the real artifact preparation's missing-blob failure, not a
+	// prepared success result or a fabricated accounting diagnostic.
+	staged, err := s.Store.StageGenerationCandidate(ctx, dropFirstBlob(activation))
+	s.stageMu.Lock()
+	s.stageErrs = append(s.stageErrs, err)
+	s.stageMu.Unlock()
+	return staged, err
+}
+
+func (s *nativeUnknownFailingStore) ActivateStagedGenerationCandidate(ctx context.Context, activation ingest.GenerationActivation, staged ingest.GenerationStaged) (ingest.ActivationOutcome, error) {
+	if s.fail {
+		activation = dropFirstBlob(activation)
+	}
+	return s.Store.ActivateStagedGenerationCandidate(ctx, activation, staged)
+}
+
+func (s *nativeUnknownFailingStore) ActivateGenerationCandidate(ctx context.Context, activation ingest.GenerationActivation) (ingest.ActivationOutcome, error) {
+	if s.fail {
+		activation = dropFirstBlob(activation)
+	}
+	return s.Store.ActivateGenerationCandidate(ctx, activation)
+}
+
+func (s *nativeUnknownFailingStore) StageGenerationCandidates(ctx context.Context, activations []ingest.GenerationActivation) ([]ingest.GenerationStaged, []error) {
+	if s.fail {
+		activations = append([]ingest.GenerationActivation(nil), activations...)
+		for i := range activations {
+			activations[i] = dropFirstBlob(activations[i])
+		}
+	}
+	staged, errs := s.Store.StageGenerationCandidates(ctx, activations)
+	if s.fail {
+		s.stageMu.Lock()
+		s.stageErrs = append(s.stageErrs, errs...)
+		s.stageMu.Unlock()
+	}
+	return staged, errs
+}
+
+func (s *nativeUnknownFailingStore) ActivateStagedGenerationCandidates(ctx context.Context, activations []ingest.GenerationActivation, staged []ingest.GenerationStaged) []ingest.NativeActivationResult {
+	if s.fail {
+		activations = append([]ingest.GenerationActivation(nil), activations...)
+		for i := range activations {
+			activations[i] = dropFirstBlob(activations[i])
+		}
+	}
+	return s.Store.ActivateStagedGenerationCandidates(ctx, activations, staged)
+}
+
+var (
+	_ ingest.GenerationBatchStager       = (*nativeUnknownFailingStore)(nil)
+	_ ingest.GenerationBatchActivator    = (*nativeUnknownFailingStore)(nil)
+	_ ingest.GenerationActivator         = (*nativeUnknownFailingStore)(nil)
+	_ ingest.GenerationStager            = (*nativeUnknownFailingStore)(nil)
+	_ ingest.GenerationPreparedActivator = (*nativeUnknownFailingStore)(nil)
+)
 
 func TestNativeUnknownSourceToPublication(t *testing.T) {
 	t.Parallel()
@@ -115,8 +191,19 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			dir := t.TempDir()
 			fs := &ingest.OSFileSystem{}
 			// Replace the secret marker first so padding substitution cannot alter it.
-			payload := strings.ReplaceAll(strings.ReplaceAll(doc.Payload, "SECRET_BODY", strings.Repeat("A", 36)), "BODY", strings.Repeat("synthetic-", 1024))
-			expected := strings.ReplaceAll(doc.Expected, "BODY", strings.Repeat("synthetic-", 1024))
+			payloadTemplate, expectedTemplate := doc.Payload, doc.Expected
+			if c.Payload != "" {
+				payloadTemplate = c.Payload
+			}
+			if c.Expected != "" {
+				expectedTemplate = c.Expected
+			}
+			corrupt := doc.Corrupt[c.Harness]
+			if c.Corrupt != "" {
+				corrupt = c.Corrupt
+			}
+			payload := strings.ReplaceAll(strings.ReplaceAll(payloadTemplate, "SECRET_BODY", strings.Repeat("A", 36)), "BODY", strings.Repeat("synthetic-", 1024))
+			expected := strings.ReplaceAll(expectedTemplate, "BODY", strings.Repeat("synthetic-", 1024))
 			// Raw-at-rest + redact-at-egress: stored index Extra
 			// byte-equals the raw source (asserted below); export and upload
 			// both emit the baseline-redacted egress form.
@@ -139,7 +226,7 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 					t.Fatal(err)
 				}
 				damageSource = func() {
-					if err := os.WriteFile(path.String(), []byte(source+doc.Corrupt[c.Harness]+"\n"), 0600); err != nil {
+					if err := os.WriteFile(path.String(), []byte(source+corrupt+"\n"), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -224,7 +311,10 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			}
 			capture, found, err := db.GetSessionContentCapture(t.Context(), sid)
 			if c.Unaccounted {
-				if err != nil || !found || capture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted || capture.CaptureFormat != ingest.ContentCaptureFormatPreviewOnly {
+				captureUnavailable := err != nil || !found
+				wrongFailureCode := capture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted
+				wrongFormat := capture.CaptureFormat != ingest.ContentCaptureFormatPreviewOnly
+				if captureUnavailable || wrongFailureCode || wrongFormat {
 					t.Fatalf("unaccounted omission falsely certified: %+v %v", capture, err)
 				}
 				if _, err := export.ExportSession(t.Context(), db, fs, string(sid)); err == nil {
@@ -232,11 +322,24 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || !found || capture.Status != ingest.ContentCaptureIncomplete || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained || capture.CaptureFormat != ingest.ContentCaptureFormatFull {
+			captureUnavailable := err != nil || !found
+			notIncomplete := capture.Status != ingest.ContentCaptureIncomplete
+			wrongFailureCode := capture.FailureCode != ingest.ContentCaptureUnknownDataRetained
+			wrongFormat := capture.CaptureFormat != ingest.ContentCaptureFormatFull
+			invalidCapture := captureUnavailable || notIncomplete ||
+				wrongFailureCode || wrongFormat
+			if invalidCapture {
 				t.Fatalf("unaccounted native status: %+v %v", capture, err)
 			}
 			counts := result.Summary.RetainedUnknownKinds
-			if len(counts) != 1 || counts[0].Namespace != c.Namespace || counts[0].Occurrences != len(c.Positions) || counts[0].Sessions != 1 {
+			if len(counts) != 1 {
+				t.Fatalf("successful occurrence/session accounting: %+v", counts)
+			}
+			count := counts[0]
+			namespaceMismatch := count.Namespace != c.Namespace
+			occurrencesMismatch := count.Occurrences != len(c.Positions)
+			sessionCountMismatch := count.Sessions != 1
+			if namespaceMismatch || occurrencesMismatch || sessionCountMismatch {
 				t.Fatalf("successful occurrence/session accounting: %+v", counts)
 			}
 			if len(c.KnownTexts) > 0 {
@@ -334,7 +437,14 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 					t.Fatal("receiver without retention capability received a stripped upload")
 				}
 				failure := nativePublicationFailure(t, refused, sid)
-				if doc.MissingCapabilityReason == "" || !strings.Contains(failure.Error(), doc.MissingCapabilityReason) || !slices.Contains(refused.Sessions[0].RequiredCapabilities, schema.ContentCapabilityRetainedUnknownV1) || len(publisher.AuthoritativeCalls) != 0 {
+				reasonMissing := doc.MissingCapabilityReason == ""
+				reasonNotNamed := !strings.Contains(failure.Error(), doc.MissingCapabilityReason)
+				if reasonMissing || reasonNotNamed {
+					t.Fatalf("publication did not refuse the exact missing retention capability: %v", failure)
+				}
+				capabilityRequired := slices.Contains(refused.Sessions[0].RequiredCapabilities, schema.ContentCapabilityRetainedUnknownV1)
+				authoritativeRetained := len(publisher.AuthoritativeCalls) != 0
+				if !capabilityRequired || authoritativeRetained {
 					t.Fatalf("publication did not refuse the exact missing retention capability: %v", failure)
 				}
 			}
@@ -343,6 +453,14 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				t.Fatal(err)
 			}
 			before, _ := json.Marshal(priorExport)
+			priorCapture, _, err := db.GetSessionContentCapture(t.Context(), sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			priorState, err := db.ReadIndexState(t.Context(), sid)
+			if err != nil {
+				t.Fatal(err)
+			}
 			cfg.Reindex = true
 			writer.fail = true
 			failed := run()
@@ -356,6 +474,30 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 			afterBytes, _ := json.Marshal(after)
 			if !bytes.Equal(before, afterBytes) {
 				t.Fatal("failed write replaced prior export")
+			}
+			if c.Native {
+				writer.stageMu.Lock()
+				stageErrs := slices.Clone(writer.stageErrs)
+				writer.stageMu.Unlock()
+				if len(stageErrs) == 0 {
+					t.Fatal("the faulty candidate was never prepared")
+				}
+				for _, err := range stageErrs {
+					if err == nil || !strings.Contains(err.Error(), "names no emitted entry and carries no staged bytes") {
+						t.Fatalf("preparation did not refuse the missing blob: %v", err)
+					}
+				}
+				// A refused candidate stages no generation row and records
+				// no intent, so there is nothing to recover: the export
+				// below proves the prior authority is untouched.
+				recoveredExport, err := export.ExportSession(t.Context(), db, fs, string(sid))
+				if err != nil {
+					t.Fatal(err)
+				}
+				recoveredBytes, _ := json.Marshal(recoveredExport)
+				if !bytes.Equal(before, recoveredBytes) {
+					t.Fatal("recovery after the refused candidate replaced prior export")
+				}
 			}
 			if damageSource != nil {
 				writer.fail = false
@@ -383,6 +525,27 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				if !bytes.Equal(before, preservedBytes) {
 					t.Fatal("corrupt known source replaced prior export")
 				}
+				if c.Corrupt != "" {
+					capture, _, err := db.GetSessionContentCapture(t.Context(), sid)
+					if err != nil {
+						t.Fatal(err)
+					}
+					state, err := db.ReadIndexState(t.Context(), sid)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(capture, priorCapture) {
+						t.Fatal("malformed delivery replaced the last-good certificate")
+					}
+					if state == nil || priorState == nil {
+						t.Fatal("last-good producer state disappeared")
+					}
+					if state.IndexerVersion != priorState.IndexerVersion ||
+						!reflect.DeepEqual(state.IndexVersion, priorState.IndexVersion) ||
+						!reflect.DeepEqual(state.IndexedAt, priorState.IndexedAt) {
+						t.Fatal("malformed delivery changed last-good producer stamps")
+					}
+				}
 			}
 		})
 	}
@@ -390,7 +553,14 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 
 func nativePublicationFailure(t *testing.T, result *push.PushResult, sid schema.SessionID) error {
 	t.Helper()
-	if result == nil || result.Errors != 1 || len(result.Sessions) != 1 || result.Sessions[0].SessionID != string(sid) || result.Sessions[0].Status != push.PushStatusError || result.Sessions[0].Error == nil {
+	if result == nil || result.Errors != 1 || len(result.Sessions) != 1 {
+		t.Fatalf("expected one source-specific publication failure: %+v", result)
+	}
+	session := result.Sessions[0]
+	sessionIDMismatch := session.SessionID != string(sid)
+	statusMismatch := session.Status != push.PushStatusError
+	errorMissing := session.Error == nil
+	if sessionIDMismatch || statusMismatch || errorMissing {
 		t.Fatalf("expected one source-specific publication failure: %+v", result)
 	}
 	return result.Sessions[0].Error
@@ -398,12 +568,30 @@ func nativePublicationFailure(t *testing.T, result *push.PushResult, sid schema.
 
 func checkNativeUnknownPublic(t *testing.T, c nativeUnknownPublicCase, expected string, detail *schema.SessionDetailPayload) {
 	t.Helper()
-	if detail == nil || detail.Diagnostics == nil || !detail.Diagnostics.Partial || len(detail.RetainedUnknown) != len(c.Positions) {
+	if detail == nil || detail.Diagnostics == nil {
+		t.Fatalf("public opaque evidence missing: %+v", detail)
+	}
+	notPartial := !detail.Diagnostics.Partial
+	retainedCountMismatch := len(detail.RetainedUnknown) != len(c.Positions)
+	if notPartial || retainedCountMismatch {
 		t.Fatalf("public opaque evidence missing: %+v", detail)
 	}
 	source := ""
+	kind := c.Kind
+	if kind == "" {
+		kind = "future"
+	}
 	for i, record := range detail.RetainedUnknown {
-		if record.Namespace != c.Namespace || record.Kind != "future" || record.RecordIndex != c.RecordIndices[i] || record.Position != c.Positions[i] || record.Pointer != c.Pointers[i] || record.Payload != expected {
+		namespaceMismatch := record.Namespace != c.Namespace
+		kindMismatch := record.Kind != kind
+		recordIndexMismatch := record.RecordIndex != c.RecordIndices[i]
+		positionMismatch := record.Position != c.Positions[i]
+		pointerMismatch := record.Pointer != c.Pointers[i]
+		payloadMismatch := record.Payload != expected
+		invalidKind := namespaceMismatch || kindMismatch
+		invalidCoordinates := recordIndexMismatch || positionMismatch || pointerMismatch
+		invalidRecord := invalidKind || invalidCoordinates || payloadMismatch
+		if invalidRecord {
 			t.Fatalf("public evidence differs: namespace=%s record=%d position=%d pointer=%s payload=%.200s", record.Namespace, record.RecordIndex, record.Position, record.Pointer, record.Payload)
 		}
 		if source != "" && source != record.SourceRef {

@@ -129,7 +129,7 @@ If --session is omitted, recent sessions are listed so you can pick one.`,
 				toIndex = maxIdx
 			}
 
-			entries, err := db.ListEntriesRange(ctx, sid, fromIndex, toIndex)
+			entries, err := readContextEntries(ctx, db, sid, fromIndex, toIndex)
 			if err != nil {
 				return fmt.Errorf("sessions context: %w", err)
 			}

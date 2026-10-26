@@ -1,0 +1,14 @@
+requiredNames:
+  - unavailable-without-saved-copy
+  - unknown-reason-refused
+  - empty-reason-refused
+cases:
+  - name: unavailable-without-saved-copy
+    reason: original-source-unavailable-no-usable-saved-copy
+    valid: true
+  - name: unknown-reason-refused
+    reason: unknown
+    valid: false
+  - name: empty-reason-refused
+    reason: ''
+    valid: false

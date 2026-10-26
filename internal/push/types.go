@@ -1,6 +1,8 @@
 package push
 
 import (
+	"context"
+
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
@@ -57,6 +59,18 @@ type PipelineConfig struct {
 	// FilterSessionIDs, when non-nil, restricts the push to only these session IDs.
 	// Set by the push wizard after user confirmation.
 	FilterSessionIDs []string
+	// PinnedSessionIDs, when non-nil, are the only sessions this run may send,
+	// even when it is empty. The auto-publish rules decide the audience of the
+	// sessions they matched before the run, so a session the run would
+	// otherwise pick up later, or one a rule holds back, is not sent.
+	PinnedSessionIDs map[string]bool
+	// UpdateHold, when set, is asked before the content of a session this
+	// account published to the Village before is sent again, and only then: a
+	// session the Village already holds unchanged is skipped before it is
+	// asked, and a first publication never reaches it. A non-empty answer
+	// holds the session: nothing is sent, the result is PushStatusHeld, and
+	// the answer is its HeldReason. The run's concurrent uploads call it.
+	UpdateHold func(ctx context.Context, sessionID string) string
 	// Selection, when non-nil, restricts the push to command-prepared decisions
 	// computed from the complete stored-session cohort. nil means no selection
 	// filter (push everything otherwise eligible).
@@ -72,6 +86,13 @@ type PipelineConfig struct {
 	// callers. The CLI supplies its shared recorder through the run context.
 	// Nil resolves through perf.RecorderFromContext (Nop when disabled).
 	Recorder perf.Recorder
+	// LastGood selects the last-good full authority for publication
+	// (--last-good). It bypasses ONLY the latest-attempt refusal and reads the
+	// authority through the unchanged active read, so an explicitly consented
+	// publication can still send the last-good full transcript while a newer
+	// incomplete attempt is kept beside it. It is never set by a hook: the
+	// flag is refused together with the hook's auto-publish flags.
+	LastGood bool
 }
 
 // SessionSelection is the immutable branch-aware decision set prepared at the
@@ -120,7 +141,8 @@ const (
 	PushStatusSkipped
 	// PushStatusError means the upload attempt failed.
 	PushStatusError
-	// PushStatusHeld means the session was held back (e.g. missing metrics).
+	// PushStatusHeld means the session was held back and nothing was sent:
+	// the run's UpdateHold refused to send an update, and HeldReason says why.
 	PushStatusHeld
 )
 
@@ -150,6 +172,8 @@ type SessionPushResult struct {
 	Status    PushStatus
 	// Error is non-nil when Status == PushStatusError.
 	Error error
+	// HeldReason says why a session with Status PushStatusHeld was held back.
+	HeldReason string
 	// RequiredCapabilities is the exact receiver capability inventory the
 	// session's durable payload requires, derived locally by the offline scan.
 	// It is populated on every path that reaches the scan — a dry-run forecast,

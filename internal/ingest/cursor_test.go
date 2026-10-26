@@ -3,14 +3,17 @@ package ingest_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
 
 const testCursorProjectsRoot = "/home/test/.cursor/projects"
@@ -22,6 +25,45 @@ func sampleCursorJSONL() []byte {
 		`{"role":"user","timestamp":"2026-06-04T10:01:00Z","message":{"content":[{"type":"text","text":"Thanks"}]}}`,
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+// The same native record fixtures exercise ordinary index completion as well
+// as strict full capture; controls must never become conversational turns.
+func TestCursorTurnEndingCompletion(t *testing.T) {
+	for _, fixture := range loadCaptureFixtures(t) {
+		turnEnding := strings.HasPrefix(fixture.Name, "cursor-success") || strings.HasPrefix(fixture.Name, "cursor-aborted") || fixture.Name == "cursor-unknown-turn-status"
+		invalidConversation := fixture.Name == "cursor-conversation-without-role" || fixture.Name == "cursor-truncated-final-control"
+		if fixture.Harness != ingest.HarnessCursor || (!turnEnding && !invalidConversation) {
+			continue
+		}
+		t.Run(fixture.Name, func(t *testing.T) {
+			fs := testutil.NewMemFS()
+			session, _ := captureFixtureSource(t, fixture, fs, "synthetic control evidence")
+			idx := ingest.NewCursorIndexer(fs)
+			result, err := idx.IndexTranscriptResult(t.Context(), session)
+			if fixture.Reject {
+				if err == nil {
+					t.Fatal("invalid control certified by ordinary index completion")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			v1, ok := result.(indexformat.V1)
+			if !ok || len(v1.Entries) != 1 || v1.Entries[0].Role != ingest.RoleSystem {
+				t.Fatalf("control lost its non-conversation projection: %+v", result)
+			}
+			adapter := ingest.NewCursorAdapter(fs, testutil.NoGitResolver(), salt.Salt{})
+			meta, err := adapter.ExtractMetadata(t.Context(), session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta.Stats.TurnCount != 0 || meta.Stats.InputSubmissionCount != nil && *meta.Stats.InputSubmissionCount != 0 {
+				t.Fatalf("control invented conversation counts: %+v", meta.Stats)
+			}
+		})
+	}
 }
 
 func setupCursorRootFS(t *testing.T, mfs *testutil.MemFS, basePath, workspace, sessionID string, data []byte) string {
@@ -149,6 +191,14 @@ func TestCursorAdapter_ExtractMetadata(t *testing.T) {
 	if meta.ModelHarness != ingest.HarnessCursor {
 		t.Errorf("ModelHarness = %q, want %q", meta.ModelHarness, ingest.HarnessCursor)
 	}
+	if meta.ThinkingLevel != "" || meta.ThinkingLevelRaw != "" {
+		t.Fatalf("Cursor has no recorded thinking-level source, got (%q,%q)", meta.ThinkingLevel, meta.ThinkingLevelRaw)
+	}
+	entries, err := ingest.NewCursorIndexer(mfs).IndexTranscript(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoThinkingLevelEntries(t, entries)
 	if meta.Source.Format != ingest.SourceFormatJSONL {
 		t.Errorf("Source.Format = %q, want %q", meta.Source.Format, ingest.SourceFormatJSONL)
 	}
@@ -813,5 +863,57 @@ func TestCursorAdapter_ExtractMetadata_NoUsageField(t *testing.T) {
 	}
 	if len(meta.Diagnostics.Warnings) != 0 {
 		t.Errorf("Diagnostics.Warnings = %v, want none", meta.Diagnostics.Warnings)
+	}
+}
+
+// TestCursorAdapterWorkspaceProject runs the workspace decode fixture through
+// the real adapter: discovery over a projects root, then metadata extraction
+// with no git remote to rename the project. A session must never be filed
+// under a parent folder of a path the decoder could not finish.
+func TestCursorAdapterWorkspaceProject(t *testing.T) {
+	var fixture struct {
+		Cases []struct {
+			Name        string   `yaml:"name"`
+			Workspace   string   `yaml:"workspace"`
+			Dirs        []string `yaml:"dirs"`
+			ProjectDir  string   `yaml:"projectDir"`
+			ProjectName string   `yaml:"projectName"`
+		} `yaml:"cases"`
+		Required []string `yaml:"requiredNames"`
+	}
+	data, err := os.ReadFile(filepath.Join("testdata", "cursor_workspace_decode.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	const base = testCursorProjectsRoot
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			mfs := testutil.NewMemFS()
+			for _, dir := range c.Dirs {
+				if err := mfs.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			setupCursorRootFS(t, mfs, base, c.Workspace, testutil.TestSessionUUID, sampleCursorJSONL())
+			adapter := ingest.NewCursorAdapter(mfs, testutil.NoGitResolver(), salt.Salt{})
+			sessions, err := adapter.Discover(context.Background(), ingest.SourceConfig{Paths: []ingest.ResolvedPath{ingest.ResolvedPath(base)}, Enabled: true})
+			if err != nil || len(sessions) != 1 {
+				t.Fatalf("Discover = %d sessions, %v", len(sessions), err)
+			}
+			wantDir := strings.Replace(c.ProjectDir, "<root>", base, 1)
+			if sessions[0].CWD != wantDir || sessions[0].ProjectName != c.ProjectName {
+				t.Fatalf("discovered (%q, %q), want (%q, %q)", sessions[0].CWD, sessions[0].ProjectName, wantDir, c.ProjectName)
+			}
+			meta, err := adapter.ExtractMetadata(context.Background(), sessions[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta.Project.FilePath != wantDir || meta.Project.Name != c.ProjectName {
+				t.Fatalf("project (%q, %q), want (%q, %q)", meta.Project.FilePath, meta.Project.Name, wantDir, c.ProjectName)
+			}
+		})
 	}
 }

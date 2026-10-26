@@ -17,9 +17,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // TestPushCmd_SourceHarnessHelpDerived pins the --source-harness flag's help
@@ -106,7 +106,7 @@ func makeCmdStoreEntry(t *testing.T, sessionID, hostSlug, remote, branch string,
 	if err != nil {
 		t.Fatalf("NewModelID: %v", err)
 	}
-	srcPath, err := ingest.NewResolvedPath("/test/path/" + sessionID + ".jsonl")
+	srcPath, err := ingest.NewResolvedPath(testutil.PlatformAbsPath("/test/path/" + sessionID + ".jsonl"))
 	if err != nil {
 		t.Fatalf("NewResolvedPath: %v", err)
 	}

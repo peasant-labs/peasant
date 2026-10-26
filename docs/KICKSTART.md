@@ -28,22 +28,32 @@ Discovery runs before the interactive screen. The guided flow then presents:
    sessions are branchless shows them directly under the project row.
 3. **New branches:** for a narrowed selection, choose whether future branches in fully selected
    projects should be imported automatically. This section is hidden when all sessions are selected.
-4. **Privacy:** review synthetic examples processed by the real Standard redactor used before a later
+4. **Publication:** keep transcripts local, or plan to publish later. Either answer only records a
+   preference.
+5. **Auto-publish:** "publish automatically?" with the answers `yes` and `not now`, which is the
+   default. The line under the question says that you choose which folders go to which collectives
+   in settings later. `yes` saves `push.autoPublishIntent: true` and also sets
+   `push.sharePreference` to `share-later`, because the intent never holds beside keep local:
+   choosing keep local afterwards withdraws it. `not now` changes nothing else. Neither answer saves
+   an auto-publish rule, installs a Git hook, or contacts a Village. The intent is a saved answer
+   that the local settings read reports; the auto-publish rules in `hooks.yaml` decide what a push
+   publishes.
+6. **Privacy:** review synthetic examples processed by the real Standard redactor used before a later
    explicit publication. Each canonical category leads a tokenized diff: `- before:` marks removed
    input and `+ after:` marks replacement output, so color is never the only distinction. Local
    imports remain original unless you explicitly run `peasant redact`. If kickstart cannot validate
    an example, it withholds that unverified output and displays an actionable error; the settings flow
    remains available.
-5. **Content license:** choose the default license for a later explicit share. No license is the
+7. **Content license:** choose the default license for a later explicit share. No license is the
    default, and saving any default does not publish anything.
-6. **Sharing visibility:** when connected to a Village, choose the default visibility for later
+8. **Sharing visibility:** when connected to a Village, choose the default visibility for later
    explicit pushes. A disconnected flow offers an optional login at this boundary before continuing
    locally without the visibility section. Login keeps the buffered selection, filters, tree position,
    and preview focus in place, and publishes nothing.
-7. **Claude retention:** when Claude Code sessions were discovered, choose how long Claude Code keeps
+9. **Claude retention:** when Claude Code sessions were discovered, choose how long Claude Code keeps
    its local transcript files.
-8. **Review and save:** review every visible buffered value and the promised local effects, then
-   confirm one config commit. The consent summary states that kickstart publishes nothing.
+10. **Review and save:** review every visible buffered value and the promised local effects, then
+    confirm one config commit. The consent summary states that kickstart publishes nothing.
 
 Where a section includes narrative guidance, it shows its setting heading first, then its short guide
 band and field description, then the control. Background-bearing guide and diff rows fill the complete
@@ -289,7 +299,7 @@ does not delete existing data.
 
 ## Viewer lists and stored data
 
-Home, Map, and the command palette show the same project list. If one available child session is
+Home and Map show the same project list. If one available child session is
 selected, its stored parent project appears in that list. Showing the parent does not select its
 sibling sessions. The normal push chooser still offers only sessions that the saved selection admits.
 

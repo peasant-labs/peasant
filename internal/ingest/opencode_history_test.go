@@ -235,7 +235,7 @@ func assertOpenCodeHistoryGeneration(t *testing.T, label string, generation inde
 	assertOpenCodeCapturedEvidenceLocal(t, label, generation)
 }
 
-// assertOpenCodeCapturedEvidenceLocal proves inherited context is retained
+// assertOpenCodeCapturedEvidenceLocal proves inherited context is preserved
 // locally as content and alias evidence, and is never also emitted as child
 // main or earlier chat.
 func assertOpenCodeCapturedEvidenceLocal(t *testing.T, label string, generation indexformat.Generation) {
@@ -260,10 +260,10 @@ func assertOpenCodeCapturedEvidenceLocal(t *testing.T, label string, generation 
 	for i := range generation.Segments {
 		for _, ref := range generation.Segments[i].CapturedRefs {
 			if _, ok := contentRefs[ref]; !ok {
-				t.Fatalf("%s captured ref %q has no retained content record; inherited evidence was not preserved locally", label, ref)
+				t.Fatalf("%s captured ref %q has no inherited content record; inherited evidence was not preserved locally", label, ref)
 			}
 			if _, ok := aliasRefs[ref]; !ok {
-				t.Fatalf("%s captured ref %q has no retained native alias; a reopen could not reuse the identity", label, ref)
+				t.Fatalf("%s captured ref %q has no inherited native alias; a reopen could not reuse the identity", label, ref)
 			}
 			if _, ok := emitted[ref]; ok {
 				t.Fatalf("%s captured ref %q is also emitted as child chat; inherited context must stay local, not become main", label, ref)

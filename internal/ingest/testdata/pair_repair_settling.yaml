@@ -1,0 +1,35 @@
+# Settling for a session whose source cannot rebuild its saved pair.
+#
+# Each case seeds one stored session, runs the production harvest twice, and
+# asserts what the pair reports. A repaired session must index once and fall
+# silent; an unrepairable one must report its cause once and fall silent, while
+# the stored copy keeps serving.
+required_names:
+  - transcript_only_source_available
+  - transcript_only_source_missing
+  - transcript_only_source_malformed
+  - transcript_only_source_malformed_forced
+
+cases:
+  - name: transcript_only_source_available
+    stored_transcript: valid
+    native_source: valid
+    want_repaired: true
+
+  - name: transcript_only_source_missing
+    stored_transcript: valid
+    native_source: missing
+    diagnostic_mentions: "is unavailable"
+
+  - name: transcript_only_source_malformed
+    stored_transcript: malformed
+    native_source: malformed
+    diagnostic_mentions: "capture JSONL record 2: malformed complete JSON"
+
+  # The remediation the diagnostic names. An explicit retry must still fail when
+  # the repair does not take, or a person cannot tell it from success.
+  - name: transcript_only_source_malformed_forced
+    stored_transcript: malformed
+    native_source: malformed
+    force: true
+    diagnostic_mentions: "capture JSONL record 2: malformed complete JSON"

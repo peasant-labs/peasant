@@ -22,18 +22,21 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/annotations"
+	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/htmlpage"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/observationinventory"
 	"github.com/peasant-labs/peasant/internal/store"
 	schema "github.com/peasant-labs/schema"
 )
 
-// Package-local response bodies and fallback HTML.
+// Package-local response bodies.
 const (
 	responseHealthOK     = `{"status":"ok"}`
 	responseShuttingDown = `{"status":"shutting_down"}`
-	fallbackHTML         = `<html><body><h1>Peasant Web Dashboard</h1><p>Frontend not built yet. Run <code>make web</code> first.</p></body></html>`
 )
 
 // MockConfigResponse is the JSON response for GET /api/v1/config/mock.
@@ -59,6 +62,10 @@ type ServerConfig struct {
 	// Config is the loaded application config. Used by the sync handler for
 	// redaction settings and push configuration. Nil disables sync endpoints.
 	Config *config.Config
+	// ConfigPath is the configuration file Config was loaded from. The settings
+	// routes read and write it, and a setting saved through them applies to
+	// the sync handler at once. Empty disables the settings routes.
+	ConfigPath string
 	// RepositoryIdentityResolver resolves private discovery rows into logical
 	// repository cohorts. Nil uses the production Git topology resolver.
 	RepositoryIdentityResolver ingest.RepositoryIdentityResolver
@@ -67,14 +74,16 @@ type ServerConfig struct {
 	// The server serves a transcript download from here, so a server started
 	// with --data-dir resolves the same tree the harvest wrote.
 	OutputDir string
-	// ConfigHome, DataHome, and StateHome override the XDG roots the sync
-	// handler resolves its config, data, and state paths under (the same
-	// overrides the --config-dir/--data-dir/--state-dir flags carry). Empty
-	// falls back to the process environment, so the composition root keeps the
-	// environment as the default and only tests inject explicit roots.
+	// ConfigHome, DataHome, and StateHome override the XDG roots the handlers
+	// resolve their config, data, and state paths under: the overrides the
+	// --config-dir/--data-dir/--state-dir flags carry. Empty falls back to the
+	// process environment.
 	ConfigHome string
 	DataHome   string
 	StateHome  string
+	// HookBinding is bound into every git hook the server installs, so the
+	// hook runs with the configuration, rules, and store the server runs with.
+	HookBinding githooks.Binding
 }
 
 // Server is the HTTP server for the web dashboard.
@@ -95,6 +104,10 @@ type Server struct {
 	groupedRevision string
 	// memberScopes is the bounded server-local TTL cache of opaque member scopes.
 	memberScopes *memberScopeCache
+
+	// live is the configuration the handlers apply: Config plus every setting
+	// saved through the settings routes since the server started.
+	live *liveConfig
 
 	// bg tracks background tasks spawned by request handlers (WebSocket
 	// broadcasts after a mutation). Shutdown drains it so no task can touch
@@ -129,6 +142,7 @@ func NewServer(cfg ServerConfig) *Server {
 		hub:             cfg.Hub,
 		groupedVariants: make(map[GroupedRouteVariant]GroupedVariantSource),
 		memberScopes:    newMemberScopeCache(memberScopeTTL, memberScopeMaxEntries),
+		live:            newLiveConfig(cfg.Config),
 	}
 	if provider, ok := cfg.Provider.(groupedCandidateProvider); ok {
 		s.groupedRevision = provider.GroupedScopeRevision()
@@ -140,6 +154,17 @@ func NewServer(cfg ServerConfig) *Server {
 // and sets up routes. After Listen returns, Addr() returns the bound address.
 // Call Serve to start accepting connections.
 func (s *Server) Listen(ctx context.Context) error {
+	fetchTimeout, err := collectiveobservations.RuntimeFetchTimeout()
+	if err != nil {
+		return err
+	}
+	// The settings catalog derives from the Config type and the `peasant
+	// config` registry. A defect there is a build defect: fail the start
+	// rather than the first settings request.
+	catalog, err := buildSettingCatalog()
+	if err != nil {
+		return fmt.Errorf("settings catalog: %w", err)
+	}
 	mux := http.NewServeMux()
 
 	// Grouped list views are opt-in over the existing flat list and search
@@ -155,6 +180,8 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteConfigCapabilities.String(), s.handleUICapabilities)
 	mux.HandleFunc("GET "+defaults.RouteSessions.String(), s.handleSessions)
 	mux.HandleFunc("GET "+defaults.RouteSessionDetail.String(), s.handleSessionDetail)
+	mux.HandleFunc("GET "+defaults.RouteSessionCommits.String(), s.handleSessionCommits)
+	mux.HandleFunc("GET "+defaults.RouteSessionPullRequests.String(), s.handleSessionPullRequests)
 	mux.HandleFunc("GET "+defaults.RouteSessionSummaries.String(), s.handleSessionSummariesByID)
 	mux.HandleFunc("GET /api/v1/web/discovery", s.handleWebDiscovery)
 	mux.HandleFunc("GET "+defaults.RouteSessionTranscript.String(), s.handleSessionTranscript)
@@ -190,7 +217,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	// Sync/push routes
 	sh := &syncHandler{
 		store:       s.cfg.Store,
-		config:      s.cfg.Config,
+		config:      s.live,
 		scopeIssuer: s,
 		configHome:  s.cfg.ConfigHome,
 		dataHome:    s.cfg.DataHome,
@@ -212,8 +239,43 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteSyncRedactions.String(), sh.handleSyncRedactions)
 	mux.HandleFunc("POST "+defaults.RouteSyncPush.String(), sh.handleSyncPush)
 	mux.HandleFunc("POST "+defaults.RouteSyncLogin.String(), sh.handleSyncLogin)
+	mux.HandleFunc("POST "+defaults.RouteSyncLogout.String(), sh.handleSyncLogout)
 	mux.HandleFunc("POST "+defaults.RouteSyncIngest.String(), sh.handleSyncIngest)
 	mux.HandleFunc("GET "+defaults.RouteSyncIngestStatus.String(), sh.handleSyncIngestStatus)
+	mux.HandleFunc("POST "+defaults.RouteSyncIngestSession.String(), sh.handleSyncIngestSession)
+
+	// Publishing reads: the publication state of sessions and the Village
+	// collectives the user can publish to.
+	ph := &publishingHandler{store: s.cfg.Store, configHome: s.cfg.ConfigHome}
+	if selection, ok := s.cfg.Provider.(selectionScopeReader); ok {
+		ph.selection = selection
+	}
+	mux.HandleFunc("GET "+defaults.RoutePublications.String(), ph.handlePublications)
+	var homeStore homeReader
+	if s.cfg.Store != nil {
+		homeStore = s.cfg.Store
+	}
+	identityResolver := s.cfg.RepositoryIdentityResolver
+	if identityResolver == nil {
+		identityResolver = ingest.NewGitRepositoryIdentityResolver()
+	}
+	sh.home = &homeHandler{reader: homeStore, sync: sh, publishing: ph, resolver: identityResolver}
+	mux.HandleFunc("GET "+defaults.RouteVillageCollectives.String(), ph.handleVillageCollectives)
+	observations := &collectiveObservationHandler{service: collectiveobservations.New(collectiveobservations.Dependencies{Store: s.cfg.Store, ConfigHome: s.cfg.ConfigHome, LocallyHeldTranscriptIDs: observationinventory.Held(s.cfg.Store), FetchTimeout: fetchTimeout})}
+	observations.register(mux)
+
+	// Auto-publish rules: save or remove a rule, and install its hooks in one
+	// recorded repository.
+	aph := &autoPublishHandler{store: s.cfg.Store, config: s.live, configHome: s.cfg.ConfigHome, binding: s.cfg.HookBinding}
+	mux.HandleFunc("PUT "+defaults.RouteAutoPublishRule.String(), aph.handleSaveRule)
+	mux.HandleFunc("DELETE "+defaults.RouteAutoPublishRule.String(), aph.handleDeleteRule)
+	mux.HandleFunc("POST "+defaults.RouteAutoPublishInstall.String(), aph.handleInstall)
+
+	// Settings routes: every configuration key and auto-publish rule, and one
+	// key changed at a time.
+	settingsRoutes := &settingsHandler{catalog: catalog, path: s.cfg.ConfigPath, live: s.live, git: &ingest.ExecGitResolver{}, rules: aph}
+	mux.HandleFunc("GET "+defaults.RouteSettings.String(), settingsRoutes.handleGetSettings)
+	mux.HandleFunc("PATCH "+defaults.RouteSettings.String(), settingsRoutes.handleUpdateSetting)
 
 	// Static assets or dev proxy
 	if s.cfg.DevMode && s.cfg.DevProxyAddr != "" {
@@ -228,7 +290,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	} else {
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set(defaults.HeaderContentType, defaults.ContentHTML.String())
-			fmt.Fprint(w, fallbackHTML)
+			w.Write(webDashboardNotBundledHTML)
 		})
 	}
 
@@ -595,7 +657,7 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT
 		COALESCE(ats.session_id, ate.session_id) as sid,
-		COALESCE(m.turn_count, 0),
+		COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0),
 		COALESCE(p.canonical_cwd, p.project_hash, ''),
 		SUM(CASE WHEN ak.name = 'agent' THEN 1 ELSE 0 END) as agent_count,
 		SUM(CASE WHEN ak.name = 'human' THEN 1 ELSE 0 END) as human_count
@@ -607,6 +669,7 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 	LEFT JOIN annotation_target_entries ate ON ate.annotation_id = a.id
 	LEFT JOIN sessions s ON s.session_id = COALESCE(ats.session_id, ate.session_id)
 	LEFT JOIN session_metrics m ON m.session_id = s.session_id
+	LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
 	LEFT JOIN projects p ON s.project_hash = p.project_hash
 	WHERE t.type_id = 'research.friction_episode'
 	AND a.superseded_by IS NULL
@@ -793,17 +856,13 @@ func isSPADynamicRoute(path string) bool {
 	return false
 }
 
-// webDashboardNotBundledHTML is served by the SPA fallback when the embedded
-// web/out contains no index.html — i.e. a build that embedded only the tracked
+// webDashboardNotBundledHTML is served in place of the local app when the
+// embedded web/out holds no index.html, i.e. only the tracked
 // `web/out/.gitkeep` placeholder (`go install …@tag`, `nix build`, or a bare
-// `go build` that never ran `make web`/`make web-stub`). The release binaries
-// embed the real dashboard and never reach this branch.
-//
-// Keep this text in sync with the Makefile `web-stub` target's placeholder —
-// the two live at a Go↔shell boundary and cannot share a single literal.
-const webDashboardNotBundledHTML = "<!doctype html><meta charset=\"utf-8\"><title>peasant</title>" +
-	"<p>The peasant web dashboard is not bundled in this build. " +
-	"Run a full `make build` (or use the release binaries) for the dashboard.</p>\n"
+// `go build` after `make web-stub`), and when no assets are configured at all.
+// The release binaries embed the real app and never reach it. It carries
+// htmlpage.NotBundledPhrase, which the release workflows search for.
+var webDashboardNotBundledHTML = htmlpage.MustRender(htmlpage.NotBundled)
 
 // serveFile opens the given path from the embedded FS and writes it as HTML.
 // Unlike http.FileServer, it does not issue a 301 redirect for /index.html.
@@ -817,7 +876,7 @@ func (h *spaHandler) serveFile(w http.ResponseWriter, _ *http.Request, filePath 
 		// paths here (other extensions 404 before serveFile).
 		w.Header().Set(defaults.HeaderContentType, defaults.ContentHTML.String())
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, webDashboardNotBundledHTML)
+		w.Write(webDashboardNotBundledHTML)
 		return
 	}
 	defer f.Close()

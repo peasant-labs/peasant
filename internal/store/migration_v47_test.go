@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 func TestMigrationV47SessionEntriesHashColumn(t *testing.T) {

@@ -124,7 +124,7 @@ const (
 	// previewNeedsIngestNote sits ABOVE the available transcript rather than
 	// replacing it: it states what publication still needs, and never claims the
 	// stored content cannot be shown.
-	previewNeedsIngestNote = "publication needs database metadata and matching entries.\n\nrun peasant ingest with the retained source available, then retry. nothing has been uploaded."
+	previewNeedsIngestNote = "publication needs database metadata and matching entries.\n\nrun peasant ingest with the stored source available, then retry. nothing has been uploaded."
 )
 
 // wizardPreview is the split's right pane: for the highlighted session, a short

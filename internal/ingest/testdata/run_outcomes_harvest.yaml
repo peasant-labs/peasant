@@ -1,0 +1,23 @@
+name: harvest-worker-failure-and-diagnostic
+requiredNames: [failed-source, warning-source]
+sessions:
+  - name: failed-source
+    sessionId: 59000000-0000-0000-0000-000000000001
+    workerFailure: true
+    kind: worker_error
+    reason: adapter_refresh_unavailable
+  - name: warning-source
+    sessionId: 59000000-0000-0000-0000-000000000002
+    workerFailure: false
+    kind: diagnostic
+    reason: missing_model
+privateMessage: synthetic private source payload
+privateLocation: /synthetic/private/location
+transcript: '{"type":"user","message":{"role":"user","content":"synthetic private transcript"},"timestamp":"2024-02-19T00:00:00Z"}'
+totals:
+  new: 1
+  errors: 1
+  updated: 0
+  unchanged: 0
+  indexed: 0
+  computed: 0

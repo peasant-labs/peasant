@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -75,6 +76,13 @@ func TestResolveVersion(t *testing.T) {
 }
 
 func TestDevVersionScriptFixtures(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// writeFakeGit stubs git with a #! shell script, which Windows cannot
+		// execute: it honors no shebang and resolves commands through PATHEXT.
+		// The version resolution under test is platform-independent Go and stays
+		// covered on unix.
+		t.Skip("the fake git stub is a POSIX shell script")
+	}
 	fixture := loadAppVersionFixture(t)
 	requireCaseNames(t, fixture.DevBuildCases, map[string]struct{}{
 		"normal-git-metadata":                         {},

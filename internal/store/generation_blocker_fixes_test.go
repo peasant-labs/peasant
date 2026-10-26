@@ -3,13 +3,14 @@ package store
 import (
 	"context"
 	_ "embed"
-	"os"
-	"path/filepath"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -88,7 +89,7 @@ func TestGenerationIDValidation(t *testing.T) {
 
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			s, root := openGenerationStore(t)
+			s, _ := openGenerationStore(t)
 			seedGenerationSession(t, s, fixture.Session.ID)
 			complete, completeBlobs := buildTestGeneration(t, id, fixture.Generation.CompleteID, "safe text G1", "safe input G1", "safe output G1")
 			if err := activateTestGeneration(t, s, complete, completeBlobs); err != nil {
@@ -97,29 +98,27 @@ func TestGenerationIDValidation(t *testing.T) {
 
 			switch tc.Name {
 			case "intent-owned-cleanup-preserved":
-				// Leave a pending intent for G2 via a crash before the commit,
-				// then prove cleanup of the intent-owned candidate is refused
-				// and the candidate survives for recovery.
-				installRecoveryFault(t, s, "after-rename-before-db")
+				// Interrupt G2 before the commit, then prove cleanup of the
+				// staged-but-uncommitted candidate is refused: it is neither
+				// a committed row nor a staged manifest, so ownership cannot
+				// be proven. G1 stays visible and a retry commits G2.
+				installHarmonizedFault(t, harmonizedSeamBeforeCommit)
 				failed, failedBlobs := buildTestGeneration(t, id, fixture.Generation.FailedID, "safe text G2", "safe input G2", "safe output G2")
 				if err := activateTestGeneration(t, s, failed, failedBlobs); err == nil {
 					t.Fatal("activation across crash seam succeeded; expected interruption")
 				}
-				clearRecoveryFault(t, s, "after-rename-before-db")
+				clearHarmonizedFault()
 				if err := s.CleanupInactiveGeneration(context.Background(), id, fixture.Generation.FailedID); err == nil {
-					t.Fatal("cleanup removed an intent-owned candidate; it must be preserved for recovery")
+					t.Fatal("cleanup removed a staged-but-uncommitted candidate; ownership could not be proven")
 				}
 				if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
 					t.Fatalf("after refused cleanup visible = %q, want G1", got)
 				}
-				if _, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.FailedID); err != nil {
-					t.Fatalf("intent-owned candidate manifest missing after refused cleanup: %v", err)
-				}
-				if _, err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
-					t.Fatalf("recover intent-owned candidate: %v", err)
+				if err := activateTestGeneration(t, s, failed, failedBlobs); err != nil {
+					t.Fatalf("retry after refused cleanup: %v", err)
 				}
 				if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
-					t.Fatalf("after recovery visible = %q, want G2", got)
+					t.Fatalf("after retry visible = %q, want G2", got)
 				}
 			case "immutable-collision-refused":
 				// G1 is active. Install G2 so G1 is an inactive installed
@@ -143,28 +142,39 @@ func TestGenerationIDValidation(t *testing.T) {
 				if err == nil {
 					t.Fatal("activation of a colliding immutable identifier succeeded; it must be refused")
 				}
-				// A refused collision must not leave an activatable intent
-				// bound to the old staged bytes.
-				if pending, readErr := s.generationArtifacts.ReadIntent(context.Background(), id); readErr != nil {
-					t.Fatalf("read intent after refused collision: %v", readErr)
-				} else if pending != nil {
-					t.Fatalf("refused immutable collision left an activation intent: %+v", pending)
-				}
-				// Recovery must not activate the old G1 bytes under the
-				// rejected envelope; G2 stays the read authority.
-				if _, err := s.RecoverGenerationActivation(context.Background(), id); err != nil {
-					t.Fatalf("recover after refused collision: %v", err)
+				// A second attempt with the same colliding envelope is
+				// refused again: the refused staging wrote no generation row,
+				// so there is nothing to replay and G2 stays the read
+				// authority.
+				if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{
+					Generation:     collision,
+					Blobs:          collisionBlobs,
+					IndexerVersion: 77,
+					IndexedAtMs:    777,
+				}); err == nil {
+					t.Fatal("second colliding activation succeeded; it must be refused")
 				}
 				if got := visibleGeneration(t, s, id); got != fixture.Generation.FailedID {
-					t.Fatalf("after refused collision recovery visible = %q, want G2", got)
+					t.Fatalf("after refused collision visible = %q, want G2", got)
 				}
-				// The installed G1 bytes are unchanged and still readable.
-				manifestPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.CompleteID, "manifest.json")
-				if _, err := os.Stat(manifestPath); err != nil {
-					t.Fatalf("installed generation manifest missing after refused collision: %v", err)
+				// The installed G1 rows are unchanged and still mapped.
+				conn, err := s.pool.Take(context.Background())
+				if err != nil {
+					t.Fatal(err)
 				}
-				if _, err := s.generationArtifacts.ReadManifest(context.Background(), id, fixture.Generation.CompleteID); err != nil {
-					t.Fatalf("installed generation manifest unreadable after refused collision: %v", err)
+				defer s.pool.Put(conn)
+				var mapped int
+				if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+					Args: []any{string(id), fixture.Generation.CompleteID},
+					ResultFunc: func(stmt *sqlite.Stmt) error {
+						mapped = stmt.ColumnInt(0)
+						return nil
+					},
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if mapped == 0 {
+					t.Fatal("installed G1 lost its mapping rows after the refused collision")
 				}
 			default:
 				// Dot, dotdot and non-canonical identifiers are rejected
@@ -181,16 +191,15 @@ func TestGenerationIDValidation(t *testing.T) {
 				if got := visibleGeneration(t, s, id); got != fixture.Generation.CompleteID {
 					t.Fatalf("after refused cleanup visible = %q, want G1", got)
 				}
-				manifestPath := filepath.Join(root, fixture.Session.ID, "generations", fixture.Generation.CompleteID, "manifest.json")
-				if _, err := os.Stat(manifestPath); err != nil {
-					t.Fatalf("active generation manifest missing after refused cleanup of %q: %v", tc.GenerationID, err)
+				if err := assertCatalogRowPresent(t, s, id, fixture.Generation.CompleteID); err != nil {
+					t.Fatalf("active generation rows missing after refused cleanup of %q: %v", tc.GenerationID, err)
 				}
 				// Staging the same identifier is also refused, and the refusal
 				// must not echo the rejected value either.
 				bad := complete
 				bad.Generation.ID = tc.GenerationID
 				if tc.GenerationID != "" {
-					if _, err := s.generationArtifacts.Stage(context.Background(), bad.Generation, completeBlobs); err == nil {
+					if _, err := s.StageGeneration(context.Background(), GenerationActivation{Generation: bad, Blobs: completeBlobs}); err == nil {
 						t.Fatalf("staging of %q succeeded; it must be rejected", tc.GenerationID)
 					} else if strings.Contains(err.Error(), tc.GenerationID) {
 						t.Fatalf("staging refusal echoed the raw generation identifier: %v", err)
@@ -411,4 +420,52 @@ func readIndexStateForTest(t *testing.T, s *Store, sid schema.SessionID) *ingest
 		t.Fatal("no index state; session metadata row is missing")
 	}
 	return state
+}
+
+// assertCatalogRowPresent proves one harmonized generation row is installed.
+func assertCatalogRowPresent(t *testing.T, s *Store, sid schema.SessionID, generationID string) error {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		return err
+	}
+	defer s.pool.Put(conn)
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_generations WHERE session_id = ? AND generation_id = ? LIMIT 1`, &sqlitex.ExecOptions{
+		Args:       []any{string(sid), generationID},
+		ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+	}); err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("no session_generations row for %s", generationID)
+	}
+	return nil
+}
+
+// countMappingRows counts one generation's entry mapping rows.
+func countMappingRows(t *testing.T, s *Store, sid schema.SessionID, generationID string) int {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	mapped := 0
+	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			mapped = stmt.ColumnInt(0)
+			return nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return mapped
+}
+
+// rowPresent reports whether a harmonized generation row names the identifier.
+func rowPresent(t *testing.T, s *Store, sid schema.SessionID, generationID string) bool {
+	t.Helper()
+	return assertCatalogRowPresent(t, s, sid, generationID) == nil
 }

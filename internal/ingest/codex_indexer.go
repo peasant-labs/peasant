@@ -28,10 +28,6 @@ type CodexIndexer struct {
 	fs             FileSystem
 	fullContent    bool
 	historyCapture bool
-	// provenanceCapture wires the native provenance candidate path. It stays
-	// disabled until the maintenance activation composes it with a real
-	// generation identity; while disabled every retained V1 flow is untouched.
-	provenanceCapture CodexProvenanceIndexerConfig
 	// pointerStore is the injected native current-rollout pointer store for
 	// the capture path. Nil means the capture derives the native state
 	// database from the session's sessions tree.
@@ -70,15 +66,6 @@ func WithCodexCaptureNativePointerStore(store CodexNativePointerStore) CodexInde
 	return func(idx *CodexIndexer) { idx.pointerStore = store }
 }
 
-// WithCodexProvenanceCapture enables the native provenance candidate path with
-// its injected prior-state, generation-identity and reference-allocator
-// dependencies. A caller enables it only when it can assign a real generation
-// identity and persist the validated V2 candidate; while disabled every
-// retained V1 flow is untouched.
-func WithCodexProvenanceCapture(config CodexProvenanceIndexerConfig) CodexIndexerOption {
-	return func(idx *CodexIndexer) { idx.provenanceCapture = config }
-}
-
 // WithCodexMaxRecordBytes sets the per-record read limit. Zero keeps the
 // production limit defaults.MaxJSONLRecordBytes. Passing the limit here
 // keeps it out of any global, so tests that inject a small one stay safe
@@ -92,15 +79,6 @@ var _ VersionedTranscriptIndexer = (*CodexIndexer)(nil)
 
 // IndexTranscriptResult verifies completion before authorizing persistent replacement.
 func (idx *CodexIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
-	// The native provenance candidate exit owns a safe refusal boundary of its
-	// own: it never goes through the path-bearing V1 completion wrapper, so a
-	// capture, classifier, projection, or dependency failure cannot surface the
-	// private source locator. It stays disabled until the maintenance activation
-	// composes it with a real generation identity; while disabled the retained
-	// entry parsing below keeps its exact behavior.
-	if idx.provenanceCapture.Enabled {
-		return idx.indexCodexCandidateResult(ctx, session)
-	}
 	completion := &indexCompletion{ctx: ctx, session: session}
 	if err := ctx.Err(); err != nil {
 		return nil, completion.failure(err)
@@ -110,23 +88,6 @@ func (idx *CodexIndexer) IndexTranscriptResult(ctx context.Context, session Disc
 		return nil, completion.failure(err)
 	}
 	return idx.IndexTranscriptBytesResult(ctx, identified, data)
-}
-
-// indexCodexCandidateResult is the registered Codex candidate exit. On success
-// it returns the validated V2 generation the maintenance activation consumes.
-// On refusal it returns a fixed completion diagnostic that names the validated
-// harness and session identity plus the fixed operation, reason, effect, and
-// recovery categories; the native source locator and the underlying failure are
-// never carried, even when a capture or dependency error is path-bearing.
-func (idx *CodexIndexer) indexCodexCandidateResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, codexCandidateCompletionFailure(session, err)
-	}
-	candidate, err := idx.IndexCodexCandidateV2(ctx, session)
-	if err != nil {
-		return nil, codexCandidateCompletionFailure(session, err)
-	}
-	return candidate, nil
 }
 
 // codexCandidateCompletionRefusal is the safe completion diagnostic for the
@@ -154,12 +115,12 @@ func (e *codexCandidateCompletionRefusal) Error() string {
 // carries can reach the diagnostic.
 func codexCandidateCompletionFailure(session DiscoveredSession, failure error) error {
 	refusal := &codexCandidateCompletionRefusal{
-		Operation: "CodexIndexer.IndexTranscriptResult",
+		Operation: "CodexIndexer.BuildGeneration",
 		Harness:   string(HarnessCodex),
 		SessionID: validatedCompletionSessionReference(session),
-		Reason:    "the native Codex source could not be read as a complete candidate",
+		Reason:    "the recorded Codex source could not be read as a complete candidate",
 		Effect:    "no candidate was emitted and the retained generation and producer stamps are unchanged",
-		Recovery:  "restore the native Codex source and retry harvest",
+		Recovery:  "restore the recorded Codex source and retry harvest",
 	}
 	var candidateRefusal *codexCandidateRefusal
 	if errors.As(failure, &candidateRefusal) {
@@ -192,7 +153,7 @@ func validatedCompletionSessionReference(session DiscoveredSession) string {
 
 // readCurrentSource returns the transcript bytes for the completion-gated
 // path. Without the history capture it reads the file exactly as the
-// retained file indexer always has: one read, no authority selection, no
+// stored-file indexer always has: one read, no authority selection, no
 // refusal. With the capture it verifies authority, bounds and stability
 // first, then re-points the session at the stable native identity and
 // authoritative current source the capture selected, so entry parsing
@@ -241,14 +202,6 @@ func (idx *CodexIndexer) captureCurrentSource(ctx context.Context, session Disco
 
 // IndexTranscriptBytesResult consumes precisely the supplied transcript snapshot.
 func (idx *CodexIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
-	// The native provenance candidate cannot be built from the supplied bytes
-	// alone: it needs the captured native node graph, ordered segments, proven
-	// correlations and the verified source authority. The candidate path
-	// therefore re-runs the bounded read-only capture over the same session
-	// instead of treating one file read as a complete native graph.
-	if idx.provenanceCapture.Enabled {
-		return idx.IndexTranscriptResult(ctx, session)
-	}
 	completion := &indexCompletion{ctx: ctx, session: session}
 	entries, err := idx.parseRolloutWithCompletion(session.SessionID, data, completion)
 	return completion.result(entries, err)
@@ -297,6 +250,9 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 	entryIndex := 0
 	var traversalPosition int64
 	previousLine := 0
+	// currentLevel is the effort of the latest turn_context; it governs the
+	// assistant messages that follow it.
+	var currentLevel thinkingLevelMapping
 
 	for scanner.Scan() {
 		var placeholderErr error
@@ -372,6 +328,13 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		// turn_context drive ExtractMetadata; event_msg.{token_count,
 		// task_*} are session-level signals or UI mirrors of response_item
 		// content and would double-count if indexed.
+		if env.Type == codexTypeTurnContext {
+			currentLevel = thinkingLevelMapping{}
+			var tc codexTurnContext
+			if json.Unmarshal(env.Payload, &tc) == nil {
+				currentLevel, _ = mapCodexEffort(tc.Effort)
+			}
+		}
 		if env.Type != codexTypeResponse {
 			continue
 		}
@@ -413,6 +376,9 @@ func (idx *CodexIndexer) parseRolloutWithCompletion(sessionID SessionID, data []
 		}
 		if len(unknown) > 0 && entry.ContentPreview == nil && entry.ToolInput == nil && entry.ToolOutput == nil {
 			entry.Role, entry.EntryType, entry.HasThinking = RoleSystem, EntryTypeSystem, false
+		}
+		if entry.Role == RoleAssistant && payload.Type == codexResponseMessage {
+			entry.Extra = addThinkingLevelObservation(entry.Extra, currentLevel)
 		}
 		entries = append(entries, entry)
 		if completion != nil {

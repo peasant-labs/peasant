@@ -19,6 +19,19 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// Blob staging concurrency. A staged generation holds one content blob per
+// part, so a large session is thousands of small files; writing them with one
+// writer at a time made a single session the long pole of its batch.
+// defaultBlobWriteWorkers bounds the writers inside one staging call;
+// defaultBlobWriteSlots bounds how many blob writes are in flight across every
+// session staging through this store, so many sessions staging at once cannot
+// flood the page cache and the device queue. A test or benchmark may lower
+// either knob on the concrete store to measure the serial behavior.
+const (
+	defaultBlobWriteWorkers = 8
+	defaultBlobWriteSlots   = 16
+)
+
 // GenerationIntent is the durable record that a managed generation has been
 // staged and is waiting for its one activation transaction. It carries the
 // complete validated activation envelope so recovery replays the same guarded
@@ -61,26 +74,37 @@ type GenerationIntent struct {
 	CandidateDigest string `json:"candidateDigest"`
 }
 
+// GenerationFootprint is the on-disk size of one owned generation directory.
+// Bytes is the sum of the file sizes and Files is the number of regular files.
+// A missing directory is the zero footprint, never an error.
+type GenerationFootprint struct {
+	Bytes int64
+	Files int64
+}
+
+// Add accumulates another footprint.
+func (f *GenerationFootprint) Add(other GenerationFootprint) {
+	f.Bytes += other.Bytes
+	f.Files += other.Files
+}
+
 // GenerationArtifactStore owns the file half of the crash protocol. The
-// production implementation is root-confined through os.Root and fsyncs every
-// file and directory before the generation directory is atomically renamed
-// into place. Tests substitute a failing implementation to interrupt a chosen
-// seam.
+// production implementation is root-confined through os.Root, writes the
+// content blobs, fsyncs the manifest and the directory, and atomically renames
+// the generation directory into place. Every binding that trusts a staged
+// candidate re-reads and verifies its blobs. Tests substitute a failing
+// implementation to interrupt a chosen seam.
 type GenerationArtifactStore interface {
-	// Stage writes the generation's content blobs and manifest under an owned,
-	// root-confined generation directory, fsyncs every file and directory, and
-	// atomically renames the complete directory into place. It returns the
-	// generation with its ContentRecord relative paths, byte lengths and
-	// integrity digests filled in.
-	Stage(context.Context, indexformat.Generation, map[schema.SourceEntryRef][]byte) (indexformat.Generation, error)
-	// WriteIntent durably records the activation intent before the DB commit.
-	WriteIntent(context.Context, GenerationIntent) error
+	// ListOwnedSessionIDs discovers valid top-level session directories,
+	// including sessions that have no catalog row. It never follows symlinks.
+	ListOwnedSessionIDs(context.Context) ([]schema.SessionID, error)
+	// OrphanGenerationFootprint measures non-active and reserved directories.
+	// keep names the live file-backed directory, or is empty for no file authority.
+	OrphanGenerationFootprint(context.Context, schema.SessionID, string) (int64, GenerationFootprint, error)
 	// ReadIntent returns the recorded intent, or (nil, nil) when none exists.
 	ReadIntent(context.Context, schema.SessionID) (*GenerationIntent, error)
 	// ClearIntent removes the activation intent after the commit and repair.
 	ClearIntent(context.Context, schema.SessionID) error
-	// RepairMetadata writes the exported metadata projection after the commit.
-	RepairMetadata(context.Context, schema.SessionID, []byte) error
 	// RemoveGeneration removes one INACTIVE owned generation directory.
 	RemoveGeneration(context.Context, schema.SessionID, string) error
 	// ReadManifest reads the self-contained manifest of a staged generation.
@@ -88,13 +112,35 @@ type GenerationArtifactStore interface {
 	// ReadBlob reads one immutable content blob addressed by its captured
 	// relative path and verifies its length and integrity digest.
 	ReadBlob(context.Context, schema.SessionID, string, indexformat.ContentRecord) ([]byte, error)
-	// WritePriorEvidence writes the opaque activation-owned prior document for
-	// one staged generation. It is written after the generation directory is
-	// renamed into place and is fsynced, so a reopen reads the same identities.
-	WritePriorEvidence(context.Context, schema.SessionID, string, []byte) error
+	// BlobExists reports whether one immutable content blob file is
+	// present, without reading its bytes. The preflight samples blob
+	// presence with it; conversion verifies the bytes through ReadBlob.
+	BlobExists(context.Context, schema.SessionID, string, indexformat.ContentRecord) (bool, error)
 	// ReadPriorEvidence returns the persisted prior document for one
 	// generation, or (nil, nil) when none was written.
 	ReadPriorEvidence(context.Context, schema.SessionID, string) ([]byte, error)
+	// GenerationSize reports the on-disk size of one owned generation
+	// directory. A missing directory is the zero footprint, never an error, so
+	// a row-first reclaim that crashed before removing files still plans
+	// cleanly.
+	GenerationSize(context.Context, schema.SessionID, string) (GenerationFootprint, error)
+	// ListGenerationDirectories returns the installed generation directory
+	// names owned by one session, sorted. It skips the owned temporary staging
+	// directories. A missing session directory is an empty list, never an
+	// error.
+	ListGenerationDirectories(context.Context, schema.SessionID) ([]string, error)
+	// RemoveReservedStagingDirs removes the owned reserved staging
+	// directories (.tmp-gen-*) the install listing skips, reporting how many
+	// went away. A missing generations directory is success. The migration
+	// drain owns this call: no other writer creates reserved names.
+	RemoveReservedStagingDirs(context.Context, schema.SessionID) (int, error)
+	// RemoveConvertedSessionFiles removes the managed files a converted
+	// session no longer reads: the whole generations subtree, the exported
+	// generation metadata document, and the activation intent. Retained
+	// transcripts, pair files, and lock files stay. Every removal tolerates
+	// absence, so an interrupted run repeats safely. It reports the removed
+	// footprint for migration progress.
+	RemoveConvertedSessionFiles(context.Context, schema.SessionID) (GenerationFootprint, error)
 }
 
 // priorEvidenceName is the fixed file name of the activation-owned prior
@@ -113,6 +159,12 @@ type osGenerationArtifactStore struct {
 	// seam is a nil production hook that a crash-recovery test sets to fail at
 	// one of the fsync/rename boundaries. Production never sets it.
 	seam func(string) error
+	// blobWorkers is the per-staging-call blob writer count; blobSlots is the
+	// store-wide in-flight bound shared by every concurrent staging call. Both
+	// are set by NewOSGenerationArtifactStore; a zero value stages serially
+	// without a slot bound, which is what a hand-built test store gets.
+	blobWorkers int
+	blobSlots   chan struct{}
 }
 
 var _ GenerationArtifactStore = (*osGenerationArtifactStore)(nil)
@@ -125,7 +177,32 @@ func NewOSGenerationArtifactStore(root string) (GenerationArtifactStore, error) 
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, fmt.Errorf("store: create owned-artifact root in NewOSGenerationArtifactStore: %s; no file was written; fix filesystem access and retry", sanitizeFSError(err))
 	}
-	return &osGenerationArtifactStore{root: root}, nil
+	return &osGenerationArtifactStore{
+		root:        root,
+		blobWorkers: defaultBlobWriteWorkers,
+		blobSlots:   make(chan struct{}, defaultBlobWriteSlots),
+	}, nil
+}
+
+// NewOSGenerationArtifactStoreExisting opens the owned-artifact root for
+// read-only planning. It never creates the root: a dry run promises to change
+// no file, and a store without an owned tree has no staged generation to read.
+// A missing root is returned as fs.ErrNotExist so the caller can fall back to
+// the stored baseline, which is the target set a fresh store resolves anyway.
+func NewOSGenerationArtifactStoreExisting(root string) (GenerationArtifactStore, error) {
+	if strings.TrimSpace(root) == "" {
+		return nil, fmt.Errorf("store: generation artifact root is empty in NewOSGenerationArtifactStoreExisting; managed content cannot be read; configure the owned-artifact root")
+	}
+	owned, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	_ = owned.Close()
+	return &osGenerationArtifactStore{
+		root:        root,
+		blobWorkers: defaultBlobWriteWorkers,
+		blobSlots:   make(chan struct{}, defaultBlobWriteSlots),
+	}, nil
 }
 
 // openOwnedRoot confines one filesystem operation to the owned root.
@@ -229,298 +306,6 @@ func (a *osGenerationArtifactStore) generationRel(id schema.SessionID, generatio
 	return sessionRel, path.Join(sessionRel, "generations", generationID), nil
 }
 
-func blobName(ref schema.SourceEntryRef) string {
-	sum := sha256.Sum256([]byte("peasant.generation.blob.v1\x00" + string(ref)))
-	return "c_" + hex.EncodeToString(sum[:]) + ".blob"
-}
-
-func (a *osGenerationArtifactStore) Stage(ctx context.Context, generation indexformat.Generation, blobs map[schema.SourceEntryRef][]byte) (indexformat.Generation, error) {
-	sessionID := generation.Metadata.SessionID
-	if err := ctx.Err(); err != nil {
-		return indexformat.Generation{}, err
-	}
-	if err := validateGenerationID(generation.ID); err != nil {
-		return indexformat.Generation{}, err
-	}
-	if _, err := a.sessionRel(sessionID); err != nil {
-		return indexformat.Generation{}, err
-	}
-	root, err := a.openOwnedRoot()
-	if err != nil {
-		return indexformat.Generation{}, err
-	}
-	defer root.Close()
-	sessionRel, genRel, err := a.generationRel(sessionID, generation.ID)
-	if err != nil {
-		return indexformat.Generation{}, err
-	}
-	parentRel := path.Join(sessionRel, "generations")
-	if err := root.MkdirAll(parentRel, 0o700); err != nil {
-		return indexformat.Generation{}, fmt.Errorf("store: create generation parent in Stage for session %s generation %s: %s; no generation was staged", sessionID, generation.ID, sanitizeFSError(err))
-	}
-	// A previous interrupted staging may have left an owned temporary directory.
-	// Activation is serialized by the exclusive session lock, so no live writer
-	// owns one; removing stale temp candidates here cannot touch the active
-	// generation. Listing runs through the owned root so a namespace symlink
-	// cannot redirect the scan.
-	if stale := listStaleTempDirs(root, parentRel); stale != nil {
-		for _, dir := range stale {
-			_ = root.RemoveAll(dir)
-		}
-	}
-	tmpRel, err := makeTempGenDir(root, parentRel, generation.ID)
-	if err != nil {
-		return indexformat.Generation{}, fmt.Errorf("store: create temporary generation directory in Stage for session %s generation %s: %s; no generation was staged", sessionID, generation.ID, sanitizeFSError(err))
-	}
-	fail := func(cause error) (indexformat.Generation, error) {
-		_ = root.RemoveAll(tmpRel)
-		return indexformat.Generation{}, fmt.Errorf("store: stage generation %s for session %s in Stage: %s; the temporary candidate was removed and the active generation is unchanged", generation.ID, sessionID, sanitizeFSError(cause))
-	}
-	filled := append([]indexformat.ContentRecord(nil), generation.Content...)
-	refs := make([]int, 0, len(filled))
-	for i := range filled {
-		refs = append(refs, i)
-	}
-	sort.Slice(refs, func(i, j int) bool { return string(filled[refs[i]].Ref) < string(filled[refs[j]].Ref) })
-	for _, i := range refs {
-		ref := filled[i].Ref
-		payload, ok := blobs[ref]
-		if !ok {
-			return fail(fmt.Errorf("content blob for ref %q is missing; the generation is not self-contained; supply every captured blob", ref))
-		}
-		name := blobName(ref)
-		if err := writeRootSyncedFile(root, path.Join(tmpRel, name), payload); err != nil {
-			return fail(err)
-		}
-		digest := sha256.Sum256(payload)
-		filled[i].RelativeBlob = name
-		filled[i].ByteLength = int64(len(payload))
-		filled[i].Digest = hex.EncodeToString(digest[:])
-	}
-	generation.Content = filled
-	// The manifest is the self-contained durable projection of the generation.
-	manifest, err := json.Marshal(generation)
-	if err != nil {
-		return fail(fmt.Errorf("encode generation manifest: %s", sanitizeFSError(err)))
-	}
-	if err := writeRootSyncedFile(root, path.Join(tmpRel, "manifest.json"), manifest); err != nil {
-		return fail(err)
-	}
-	// fsync the temporary directory so a crash cannot lose the rename target.
-	if a.seam != nil {
-		if err := a.seam("before-temp-fsync"); err != nil {
-			return fail(err)
-		}
-	}
-	if err := fsyncRootDir(root, tmpRel); err != nil {
-		return fail(err)
-	}
-	if a.seam != nil {
-		if err := a.seam("after-fsync-before-rename"); err != nil {
-			return fail(err)
-		}
-	}
-	// Immutable generations never move: an existing generation directory with
-	// the same identifier must bind to the identical complete candidate (a
-	// crash retry) or the staging is refused. The comparison covers the whole
-	// manifest and every blob digest, never a partial main-preview subset, and
-	// blindly deleting an existing directory would destroy committed content.
-	if _, err := root.Lstat(genRel); err == nil {
-		existing, readErr := root.ReadFile(path.Join(genRel, "manifest.json"))
-		if readErr != nil {
-			return fail(fmt.Errorf("generation %s is already installed and its manifest cannot be verified; staging was refused and the installed generation is unchanged", generation.ID))
-		}
-		var installed indexformat.Generation
-		if err := json.Unmarshal(existing, &installed); err != nil {
-			return fail(fmt.Errorf("generation %s is already installed and its manifest cannot be decoded; staging was refused and the installed generation is unchanged", generation.ID))
-		}
-		installedBinding, installedErr := computeActivationBinding(installed, bindingFromStaged)
-		incomingBinding, incomingErr := computeActivationBinding(generation, bindingFromBlobs(blobs))
-		if installedErr != nil || incomingErr != nil || installed.ID != generation.ID || installedBinding != incomingBinding {
-			return fail(fmt.Errorf("generation %s is already installed with different candidate evidence; immutable identifiers cannot be reused; the installed generation is unchanged", generation.ID))
-		}
-		if err := root.RemoveAll(genRel); err != nil {
-			return fail(fmt.Errorf("remove prior unactivated candidate for generation %s: %s", generation.ID, sanitizeFSError(err)))
-		}
-	}
-	if err := root.Rename(tmpRel, genRel); err != nil {
-		return fail(fmt.Errorf("atomically rename staged generation %s: %s", generation.ID, sanitizeFSError(err)))
-	}
-	if err := fsyncRootDir(root, parentRel); err != nil {
-		return indexformat.Generation{}, fmt.Errorf("store: fsync generation parent in Stage for session %s generation %s: %s; the staged generation exists but was not durably recorded; activation will be refused and retried", sessionID, generation.ID, sanitizeFSError(err))
-	}
-	if a.seam != nil {
-		if err := a.seam("after-rename-before-db"); err != nil {
-			return indexformat.Generation{}, err
-		}
-	}
-	generation.Content = filled
-	return generation, nil
-}
-
-func listStaleTempDirs(root *os.Root, parentRel string) []string {
-	dir, err := root.Open(parentRel)
-	if err != nil {
-		return nil
-	}
-	defer dir.Close()
-	names, err := dir.Readdirnames(-1)
-	if err != nil {
-		return nil
-	}
-	var stale []string
-	for _, name := range names {
-		if strings.HasPrefix(name, ".tmp-gen-") {
-			stale = append(stale, path.Join(parentRel, name))
-		}
-	}
-	return stale
-}
-
-func makeTempGenDir(root *os.Root, parentRel, generationID string) (string, error) {
-	// Unique owned temporary name without host-tempfile path handling: the
-	// directory lives under the owned parent so the atomic rename never
-	// crosses filesystems and never escapes the root.
-	for attempt := 0; attempt < 32; attempt++ {
-		name := fmt.Sprintf(".tmp-gen-%s-%d", generationID, os.Getpid()*1000+attempt)
-		// Sanitize: generationID is validated, but the temp name must also be
-		// a single confined component.
-		if strings.ContainsAny(name, `/\`) {
-			return "", fmt.Errorf("temporary generation name is not confined")
-		}
-		rel := path.Join(parentRel, name)
-		if err := root.Mkdir(rel, 0o700); err == nil {
-			return rel, nil
-		} else if !errors.Is(err, fs.ErrExist) {
-			// Mkdir through Root reports existence without paths; any other
-			// failure aborts.
-			if _, statErr := root.Lstat(rel); statErr == nil {
-				continue
-			}
-			return "", err
-		}
-	}
-	return "", fmt.Errorf("temporary generation directory could not be created")
-}
-
-// reorderContent restores the caller's original content ordering after the
-// deterministic write pass.
-func reorderContent(filled []indexformat.ContentRecord, byRef map[schema.SourceEntryRef]int) []indexformat.ContentRecord {
-	_ = byRef
-	return filled
-}
-
-// activationBindingContent is one content record reduced to the evidence a
-// candidate binding must carry: its ref and the integrity digest of its blob.
-type activationBindingContent struct {
-	Ref    schema.SourceEntryRef `json:"ref"`
-	Digest string                `json:"digest"`
-}
-
-// activationBinding is the canonical, staging-independent encoding of a
-// complete candidate. The whole generation manifest is included (every
-// partition, segment, alias, title ref and metadata field), and the
-// staging-derived blob path/length/digest fields are normalized out so the
-// pre-stage candidate and the staged manifest produce the same binding.
-type activationBinding struct {
-	Generation indexformat.Generation     `json:"generation"`
-	Content    []activationBindingContent `json:"content"`
-}
-
-// errGenerationContentBlobMissing marks a candidate content record whose
-// captured blob is absent. The record reference comes from candidate data that
-// may still be untrusted (an installed or staged manifest), so the diagnostic
-// names the fixed category only and never the reference.
-var errGenerationContentBlobMissing = errors.New("store: a captured content blob is missing; the generation is not self-contained; supply every captured blob")
-
-// errGenerationContentDigestMissing marks a content record without an integrity
-// digest. The reference may be untrusted manifest data, so the diagnostic names
-// the fixed category only and never the reference.
-var errGenerationContentDigestMissing = errors.New("store: a content record carries no integrity digest; the candidate binding cannot be verified; re-stage the generation")
-
-// computeActivationBinding binds one activation envelope to the COMPLETE
-// candidate. contentDigest supplies each content record's payload digest: the
-// pre-stage caller hashes the blob bytes and the replay path reuses the
-// manifest's verified integrity digest. It never uses a partial main-preview
-// comparison, so two candidates that differ only outside the main preview still
-// bind differently and an installed immutable generation is never rewritten
-// from a partial equality test. A failure names a fixed category and never an
-// untrusted record reference or manifest identifier.
-func computeActivationBinding(generation indexformat.Generation, contentDigest func(indexformat.ContentRecord) (string, error)) (string, error) {
-	normalized := generation
-	normalized.Content = append([]indexformat.ContentRecord(nil), generation.Content...)
-	content := make([]activationBindingContent, 0, len(normalized.Content))
-	for i := range normalized.Content {
-		record := normalized.Content[i]
-		digest, err := contentDigest(record)
-		if err != nil {
-			return "", err
-		}
-		if strings.TrimSpace(digest) == "" {
-			return "", errGenerationContentDigestMissing
-		}
-		content = append(content, activationBindingContent{Ref: record.Ref, Digest: digest})
-		normalized.Content[i].RelativeBlob = ""
-		normalized.Content[i].ByteLength = 0
-		normalized.Content[i].Digest = ""
-	}
-	sort.Slice(content, func(i, j int) bool { return string(content[i].Ref) < string(content[j].Ref) })
-	payload, err := json.Marshal(activationBinding{Generation: normalized, Content: content})
-	if err != nil {
-		return "", fmt.Errorf("store: encode activation binding in computeActivationBinding: %s; the candidate cannot be bound and must be re-staged", sanitizeFSError(err))
-	}
-	sum := sha256.Sum256(payload)
-	return hex.EncodeToString(sum[:]), nil
-}
-
-// bindingFromBlobs hashes the captured blob bytes for a pre-stage candidate.
-func bindingFromBlobs(blobs map[schema.SourceEntryRef][]byte) func(indexformat.ContentRecord) (string, error) {
-	return func(record indexformat.ContentRecord) (string, error) {
-		payload, ok := blobs[record.Ref]
-		if !ok {
-			return "", errGenerationContentBlobMissing
-		}
-		sum := sha256.Sum256(payload)
-		return hex.EncodeToString(sum[:]), nil
-	}
-}
-
-// bindingFromStaged reuses the integrity digest already recorded in a staged
-// manifest. Staging wrote each digest from the exact payload bytes, so it is
-// the same evidence bindingFromBlobs computes before the rename.
-func bindingFromStaged(record indexformat.ContentRecord) (string, error) {
-	if strings.TrimSpace(record.Digest) == "" {
-		return "", errGenerationContentDigestMissing
-	}
-	return record.Digest, nil
-}
-
-func (a *osGenerationArtifactStore) WriteIntent(ctx context.Context, intent GenerationIntent) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := validateGenerationID(intent.GenerationID); err != nil {
-		return err
-	}
-	sessionRel, err := a.sessionRel(intent.SessionID)
-	if err != nil {
-		return err
-	}
-	root, err := a.openOwnedRoot()
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	if err := root.MkdirAll(sessionRel, 0o700); err != nil {
-		return fmt.Errorf("store: create session artifact directory in WriteIntent for session %s: %s; no intent was recorded", intent.SessionID, sanitizeFSError(err))
-	}
-	encoded, err := json.Marshal(intent)
-	if err != nil {
-		return fmt.Errorf("store: encode activation intent in WriteIntent for session %s generation %s: %s; no intent was recorded", intent.SessionID, intent.GenerationID, sanitizeFSError(err))
-	}
-	return writeRootSyncedAtomic(root, path.Join(sessionRel, "generation-intent.json"), encoded, intent.SessionID, intent.GenerationID, "record the activation intent")
-}
-
 func (a *osGenerationArtifactStore) ReadIntent(ctx context.Context, id schema.SessionID) (*GenerationIntent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -567,23 +352,118 @@ func (a *osGenerationArtifactStore) ClearIntent(ctx context.Context, id schema.S
 	return nil
 }
 
-func (a *osGenerationArtifactStore) RepairMetadata(ctx context.Context, id schema.SessionID, metadata []byte) error {
+// RemoveReservedStagingDirs removes the owned reserved staging directories
+// (.tmp-gen-*) the install listing skips, reporting how many went away. A
+// missing generations directory is success. The walk is per-component
+// no-follow like every other recursive removal, and each reserved name is a
+// fixed-prefix match, never a caller-supplied path.
+func (a *osGenerationArtifactStore) RemoveReservedStagingDirs(ctx context.Context, id schema.SessionID) (int, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return 0, err
 	}
 	sessionRel, err := a.sessionRel(id)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	root, err := a.openOwnedRoot()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer root.Close()
-	if err := root.MkdirAll(sessionRel, 0o700); err != nil {
-		return fmt.Errorf("store: create session artifact directory in RepairMetadata for session %s: %s; the exported metadata was not repaired; the committed generation is unchanged and repair is retried on the next open or activation", id, sanitizeFSError(err))
+	dir, err := root.Open(path.Join(sessionRel, "generations"))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("store: list reserved staging directories for session %s in RemoveReservedStagingDirs: %s; no directory was removed", id, sanitizeFSError(err))
 	}
-	return writeRootSyncedAtomic(root, path.Join(sessionRel, "metadata.json"), metadata, id, "", "repair the exported metadata")
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return 0, fmt.Errorf("store: list reserved staging directories for session %s in RemoveReservedStagingDirs: %s; no directory was removed", id, sanitizeFSError(err))
+	}
+	removed := 0
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return removed, err
+		}
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), ".tmp-gen-") {
+			continue
+		}
+		rel := path.Join(sessionRel, "generations", entry.Name())
+		if _, err := noFollowRemovalPath(root, rel); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return removed, fmt.Errorf("store: inspect reserved staging directory for session %s in RemoveReservedStagingDirs: %s; the directory was left in place", id, sanitizeFSError(err))
+		}
+		if err := root.RemoveAll(rel); err != nil {
+			return removed, fmt.Errorf("store: remove reserved staging directory for session %s in RemoveReservedStagingDirs: %s; the directory was left in place", id, sanitizeFSError(err))
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+// RemoveConvertedSessionFiles removes the managed files a converted session
+// no longer reads: the whole generations subtree, the exported generation
+// metadata document, and the activation intent. Stored transcripts, pair
+// files, and lock files stay. Every removal tolerates absence, so an
+// interrupted run repeats safely. The caller proves conversion from the
+// database before calling; the per-component no-follow walk still guards
+// the recursive removal.
+func (a *osGenerationArtifactStore) RemoveConvertedSessionFiles(ctx context.Context, id schema.SessionID) (GenerationFootprint, error) {
+	if err := ctx.Err(); err != nil {
+		return GenerationFootprint{}, err
+	}
+	sessionRel, err := a.sessionRel(id)
+	if err != nil {
+		return GenerationFootprint{}, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return GenerationFootprint{}, err
+	}
+	defer root.Close()
+	var footprint GenerationFootprint
+	generationsRel := path.Join(sessionRel, "generations")
+	measured, err := footprintUnderRoot(root, generationsRel)
+	if err != nil {
+		return GenerationFootprint{}, err
+	}
+	footprint.Add(measured)
+	if _, err := noFollowRemovalPath(root, generationsRel); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return footprint, fmt.Errorf("store: inspect generations for session %s in RemoveConvertedSessionFiles: %s; no file was removed", id, sanitizeFSError(err))
+		}
+	} else if err := root.RemoveAll(generationsRel); err != nil {
+		return footprint, fmt.Errorf("store: remove generations for session %s in RemoveConvertedSessionFiles: %s; remaining files are retried on the next pass", id, sanitizeFSError(err))
+	}
+	for _, name := range []string{"metadata.json", "generation-intent.json"} {
+		if err := ctx.Err(); err != nil {
+			return footprint, err
+		}
+		rel := path.Join(sessionRel, name)
+		info, err := root.Lstat(rel)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return footprint, fmt.Errorf("store: inspect managed file for session %s in RemoveConvertedSessionFiles: %s; remaining files are retried on the next pass", id, sanitizeFSError(err))
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return footprint, fmt.Errorf("store: refuse to remove a managed file for session %s in RemoveConvertedSessionFiles: the owned target is a symbolic link; the file was left in place", id)
+		}
+		if info.IsDir() {
+			return footprint, fmt.Errorf("store: refuse to remove a managed file for session %s in RemoveConvertedSessionFiles: the owned target is a directory; the file was left in place", id)
+		}
+		footprint.Bytes += info.Size()
+		footprint.Files++
+		if err := root.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return footprint, fmt.Errorf("store: remove a managed file for session %s in RemoveConvertedSessionFiles: %s; remaining files are retried on the next pass", id, sanitizeFSError(err))
+		}
+	}
+	return footprint, nil
 }
 
 func (a *osGenerationArtifactStore) RemoveGeneration(ctx context.Context, id schema.SessionID, generationID string) error {
@@ -725,6 +605,35 @@ func (a *osGenerationArtifactStore) ReadManifest(ctx context.Context, id schema.
 	return generation, nil
 }
 
+// BlobExists reports whether one immutable content blob file is present,
+// without reading its bytes. A missing session or generation directory
+// reads as absent, never as an error; other failures name the step.
+func (a *osGenerationArtifactStore) BlobExists(ctx context.Context, id schema.SessionID, generationID string, record indexformat.ContentRecord) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if err := record.Validate(); err != nil {
+		return false, fmt.Errorf("store: resolve managed content in BlobExists for session %s: %w; presence is unknown", id, err)
+	}
+	_, genRel, err := a.generationRel(id, generationID)
+	if err != nil {
+		return false, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return false, err
+	}
+	defer root.Close()
+	_, err = root.Lstat(path.Join(genRel, record.RelativeBlob))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("store: stat managed content in BlobExists for session %s: %s; presence is unknown", id, sanitizeFSError(err))
+	}
+	return true, nil
+}
+
 func (a *osGenerationArtifactStore) ReadBlob(ctx context.Context, id schema.SessionID, generationID string, record indexformat.ContentRecord) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -758,36 +667,6 @@ func (a *osGenerationArtifactStore) ReadBlob(ctx context.Context, id schema.Sess
 	return data, nil
 }
 
-// WritePriorEvidence writes the activation-owned prior document inside one
-// already-staged generation directory. The write is atomic and fsynced, so a
-// reopen reads the exact document the activation committed. An empty document
-// is refused rather than silently deleted: absence is expressed by not calling
-// this method.
-func (a *osGenerationArtifactStore) WritePriorEvidence(ctx context.Context, id schema.SessionID, generationID string, data []byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if len(data) == 0 {
-		return fmt.Errorf("store: prior evidence for session %s generation %s is empty; nothing was written; omit the document to leave prior evidence absent", id, generationID)
-	}
-	if err := validateGenerationID(generationID); err != nil {
-		return err
-	}
-	_, genRel, err := a.generationRel(id, generationID)
-	if err != nil {
-		return err
-	}
-	root, err := a.openOwnedRoot()
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	if err := writeRootSyncedAtomic(root, path.Join(genRel, priorEvidenceName), data, id, generationID, "prior evidence"); err != nil {
-		return fmt.Errorf("store: persist prior evidence for generation %s of session %s: %w; the committed generation is unchanged and the prior is reloaded from its committed rows", generationID, id, err)
-	}
-	return nil
-}
-
 // ReadPriorEvidence returns the persisted prior document for one generation.
 // A generation that never carried a prior document returns (nil, nil); a
 // missing or unreadable directory for another reason is an error, never an
@@ -819,6 +698,219 @@ func (a *osGenerationArtifactStore) ReadPriorEvidence(ctx context.Context, id sc
 		return nil, nil
 	}
 	return data, nil
+}
+
+// GenerationSize reports the on-disk footprint of one owned generation
+// directory through the root-confined view. A missing directory is the zero
+// footprint: a row-first reclaim that already removed the directory, or a
+// generation that was never staged, is not an error.
+func (a *osGenerationArtifactStore) GenerationSize(ctx context.Context, id schema.SessionID, generationID string) (GenerationFootprint, error) {
+	if err := ctx.Err(); err != nil {
+		return GenerationFootprint{}, err
+	}
+	_, genRel, err := a.generationRel(id, generationID)
+	if err != nil {
+		return GenerationFootprint{}, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return GenerationFootprint{}, err
+	}
+	defer root.Close()
+	return footprintUnderRoot(root, genRel)
+}
+
+// ListGenerationDirectories returns the installed generation directory names
+// owned by one session. It reads through the owned root so a namespace symlink
+// cannot redirect the scan, skips the reserved temporary staging directories,
+// and refuses a name the central identifier guard rejects so a caller never
+// treats an unowned entry as a generation. A missing session directory is an
+// empty list.
+func (a *osGenerationArtifactStore) ListGenerationDirectories(ctx context.Context, id schema.SessionID) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	sessionRel, err := a.sessionRel(id)
+	if err != nil {
+		return nil, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	dir, err := root.Open(path.Join(sessionRel, "generations"))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: list generation directories for session %s: %s; the owned generation set cannot be read", id, sanitizeFSError(err))
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, fmt.Errorf("store: list generation directories for session %s: %s; the owned generation set cannot be read", id, sanitizeFSError(err))
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".tmp-gen-") {
+			continue
+		}
+		if err := validateGenerationID(name); err != nil {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func (a *osGenerationArtifactStore) ListOwnedSessionIDs(ctx context.Context) ([]schema.SessionID, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	dir, err := root.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, fmt.Errorf("store: discover owned sessions: %s; no directory was changed; fix owned-root access and retry", sanitizeFSError(err))
+	}
+	var ids []schema.SessionID
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		id, err := schema.NewSessionID(entry.Name())
+		if err == nil {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i] < ids[j]
+	})
+	return ids, nil
+}
+
+func (a *osGenerationArtifactStore) OrphanGenerationFootprint(ctx context.Context, id schema.SessionID, keep string) (int64, GenerationFootprint, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, GenerationFootprint{}, err
+	}
+	sessionRel, err := a.sessionRel(id)
+	if err != nil {
+		return 0, GenerationFootprint{}, err
+	}
+	root, err := a.openOwnedRoot()
+	if err != nil {
+		return 0, GenerationFootprint{}, err
+	}
+	defer root.Close()
+	rel := path.Join(sessionRel, "generations")
+	if _, err := noFollowRemovalPath(root, rel); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, GenerationFootprint{}, nil
+		}
+		return 0, GenerationFootprint{}, err
+	}
+	dir, err := root.Open(rel)
+	if err != nil {
+		return 0, GenerationFootprint{}, err
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return 0, GenerationFootprint{}, err
+	}
+	var count int64
+	var total GenerationFootprint
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return count, total, err
+		}
+		if !entry.IsDir() || entry.Name() == keep {
+			continue
+		}
+		if !strings.HasPrefix(entry.Name(), ".tmp-gen-") && validateGenerationID(entry.Name()) != nil {
+			continue
+		}
+		child := path.Join(rel, entry.Name())
+		if _, err := noFollowRemovalPath(root, child); err != nil {
+			return count, total, err
+		}
+		footprint, err := footprintUnderRoot(root, child)
+		if err != nil {
+			return count, total, err
+		}
+		count++
+		total.Add(footprint)
+	}
+	return count, total, nil
+}
+
+// footprintUnderRoot sums the regular files under one root-relative directory.
+// A missing directory is the zero footprint. The walk runs through the
+// root-confined filesystem view, so a symlink cannot redirect it outside the
+// owned root.
+func footprintUnderRoot(root *os.Root, rel string) (GenerationFootprint, error) {
+	var footprint GenerationFootprint
+	err := fs.WalkDir(root.FS(), rel, func(_ string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return fs.SkipAll
+			}
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		footprint.Bytes += info.Size()
+		footprint.Files++
+		return nil
+	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return GenerationFootprint{}, fmt.Errorf("store: measure generation directory: %s; the footprint could not be read", sanitizeFSError(err))
+	}
+	return footprint, nil
+}
+
+// writeRootFile writes one managed file without a per-file sync. Content blobs
+// use it: the crash protocol's durability point is the manifest, the intent and
+// the rename, and every binding that trusts a staged candidate re-reads each
+// blob through ReadBlob, which verifies its length and digest, so a power loss
+// that loses blob bytes refuses recovery instead of activating a generation
+// whose content cannot be served. The pair installer follows the same model:
+// the database commit, not the file write, is the durability point.
+func writeRootFile(root *os.Root, rel string, data []byte) error {
+	file, err := root.OpenFile(rel, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("create managed file in generation staging: %s; the temporary candidate is removed and the active generation is unchanged", sanitizeFSError(err))
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write managed file in generation staging: %s; the temporary candidate is removed and the active generation is unchanged", sanitizeFSError(err))
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close managed file in generation staging: %s; the temporary candidate is removed and the active generation is unchanged", sanitizeFSError(err))
+	}
+	return nil
 }
 
 func writeRootSyncedFile(root *os.Root, rel string, data []byte) error {
@@ -878,17 +970,5 @@ func writeRootSyncedAtomic(root *os.Root, rel string, data []byte, sessionID sch
 		_ = root.Remove(tmpRel)
 		return fmt.Errorf("store: atomically rename file in %s for session %s: %s; the previous durable file is unchanged; fix filesystem access and retry", step, sessionID, sanitizeFSError(err))
 	}
-	return fsyncRootDir(root, dir)
-}
-
-func fsyncRootDir(root *os.Root, rel string) error {
-	dir, err := root.Open(rel)
-	if err != nil {
-		return fmt.Errorf("open directory to fsync in generation staging: %s; the staged file is not durably recorded; re-run the operation after fixing filesystem access", sanitizeFSError(err))
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
-		return fmt.Errorf("fsync directory in generation staging: %s; the staged file is not durably recorded; re-run the operation after fixing filesystem access", sanitizeFSError(err))
-	}
-	return nil
+	return fsyncGenerationStagingDir(root, dir)
 }

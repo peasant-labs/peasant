@@ -1,0 +1,17 @@
+requiredNames: [original-action-pair, original-action-targets, original-action-associations, rotated-action-pair-no-network, rotated-action-targets-no-network, rotated-action-associations-no-network, original-action-profile-pinned, original-action-generation-rotation, original-action-aba, original-action-tracking, original-action-resolution, original-action-tracking-profile-pinned, rotated-action-tracking-no-network, rotated-action-resolution-no-network, tracking-rotation-during-detail-no-preference]
+cases:
+  - {name: original-action-pair, operation: pair}
+  - {name: original-action-targets, operation: targets}
+  - {name: original-action-associations, operation: associations}
+  - {name: rotated-action-pair-no-network, operation: pair, rotate: true}
+  - {name: rotated-action-targets-no-network, operation: targets, rotate: true}
+  - {name: rotated-action-associations-no-network, operation: associations, rotate: true}
+  - {name: original-action-profile-pinned, operation: pair, otherProfile: true}
+  - {name: original-action-generation-rotation, operation: pair, rotate: true, sameAccount: true}
+  - {name: original-action-aba, operation: pair, rotate: true, switchBack: true}
+  - {name: original-action-tracking, operation: track}
+  - {name: original-action-resolution, operation: resolve}
+  - {name: original-action-tracking-profile-pinned, operation: track, otherProfile: true}
+  - {name: rotated-action-tracking-no-network, operation: track, rotate: true}
+  - {name: rotated-action-resolution-no-network, operation: resolve, rotate: true}
+  - {name: tracking-rotation-during-detail-no-preference, operation: track, rotateDuringDetail: true}

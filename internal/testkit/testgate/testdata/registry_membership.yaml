@@ -33,7 +33,7 @@ partition:
   - internal/ingest|TestNormalIngestStoresAuthoritativeContent
   - internal/ingest|TestPiUnknownPersistence
   - internal/ingest|TestOrdinaryHarvestSettlesStaleIndexSessions
-  - internal/ingest|TestRetainedContentBackfill
+  - internal/ingest|TestStoredContentBackfill
   - internal/ingest|TestNativeUnknownSourceToPublication
   - cmd/peasant|TestPiHarvestCommonModes
   - internal/ingest|TestContentRecoveryScope

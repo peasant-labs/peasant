@@ -423,8 +423,8 @@ func villageAPIRequest(t *testing.T, method, villageURL, path, apiKey string, bo
 // groupShareTranscript group-shares a transcript so a NON-owner member can pull +
 // annotate it, driving the REAL authenticated village API as the transcript OWNER
 // (ownerAPIKey) so the transcript mutation attributes to the owner's UUID. It
-// (a) POSTs /groups {name} (the creator is auto-added as the owner member),
-// (b) POSTs /groups/{id}/members {username} to add the member by username, and
+// (a) POSTs /collectives {name} (the creator is auto-added as the owner member),
+// (b) POSTs /collectives/{id}/members {username} to add the member by username, and
 // (c) POSTs /transcripts/{id}/share {group_ids:[id]}. For an 'open' group the share is
 // approved immediately AND the share call auto-flips visibility private→'shared'
 // (recorded by the governance trigger) — exactly what the pull surface's
@@ -438,25 +438,25 @@ func groupShareTranscript(t *testing.T, villageURL, ownerAPIKey, memberUsername,
 	t.Helper()
 
 	// (a) Create the group; the creator becomes its owner member automatically.
-	status, resp := villageAPIRequest(t, http.MethodPost, villageURL, "/api/v1/groups", ownerAPIKey,
+	status, resp := villageAPIRequest(t, http.MethodPost, villageURL, "/api/v1/collectives", ownerAPIKey,
 		map[string]any{"name": groupName})
 	if status != http.StatusCreated {
-		t.Fatalf("e2e: groupShareTranscript: POST /api/v1/groups status = %d, want 201\nbody: %s", status, resp)
+		t.Fatalf("e2e: groupShareTranscript: POST /api/v1/collectives status = %d, want 201\nbody: %s", status, resp)
 	}
 	var group struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(resp, &group); err != nil || group.ID == "" {
-		t.Fatalf("e2e: groupShareTranscript: parse group id from POST /api/v1/groups response: %v\nbody: %s", err, resp)
+		t.Fatalf("e2e: groupShareTranscript: parse collective id from POST /api/v1/collectives response: %v\nbody: %s", err, resp)
 	}
 
 	// (b) Add the member by USERNAME (the endpoint takes a username, not a user id);
 	// the caller (owner) is authorized because CreateGroup made it the owner member.
 	status, resp = villageAPIRequest(t, http.MethodPost, villageURL,
-		fmt.Sprintf("/api/v1/groups/%s/members", group.ID), ownerAPIKey,
+		fmt.Sprintf("/api/v1/collectives/%s/members", group.ID), ownerAPIKey,
 		map[string]any{"username": memberUsername})
 	if status != http.StatusOK {
-		t.Fatalf("e2e: groupShareTranscript: POST /api/v1/groups/%s/members status = %d, want 200\nbody: %s",
+		t.Fatalf("e2e: groupShareTranscript: POST /api/v1/collectives/%s/members status = %d, want 200\nbody: %s",
 			group.ID, status, resp)
 	}
 

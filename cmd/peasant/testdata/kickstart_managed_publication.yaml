@@ -1,0 +1,45 @@
+requiredNames: [selected-managed-session, local-only, no-selection, invalid-output-root, incomplete-latest-attempt]
+sessions:
+  - sessionId: "11111111-1111-4111-8111-111111111111"
+    projectDir: -fixtures-synthetic-project
+    projectName: synthetic-project
+    workingDir: /fixtures/synthetic-project
+    branch: main
+    title: selected publication
+    prompt: selected orchard prompt
+    reply: selected orchard reply
+  - sessionId: "22222222-2222-4222-8222-222222222222"
+    projectDir: -fixtures-synthetic-project
+    projectName: synthetic-project
+    workingDir: /fixtures/synthetic-project
+    branch: main
+    title: unselected publication
+    prompt: sibling meadow prompt
+    reply: sibling meadow reply
+cases:
+  - name: selected-managed-session
+    visibility: public
+    license: CC-BY-4.0
+    wantUpload: true
+    expectedTurns:
+      - role: user
+        content: selected orchard prompt
+        depth: 0
+      - role: assistant
+        content: selected orchard reply
+        depth: 0
+      - role: assistant
+        content: selected orchard reply
+        depth: 1
+  - name: local-only
+    localOnly: true
+    skip: true
+  - name: no-selection
+    noSelection: true
+    skip: true
+  - name: invalid-output-root
+    invalidRoot: true
+    errorContains: ["prepare managed readers for kickstart publication", "no publication was attempted", "imported sessions remain local", "repair the configured output path", "retry kickstart"]
+  - name: incomplete-latest-attempt
+    incomplete: true
+    errorContains: ["incomplete preview"]

@@ -1,0 +1,13 @@
+requiredNames:
+  - search-only-ancestor-install-and-hash
+  - search-only-ancestor-pending-recovery
+  - search-only-ancestor-creation-barrier-refusal
+  - search-only-ancestor-trailing-root
+cases:
+  - name: search-only-ancestor-install-and-hash
+  - name: search-only-ancestor-pending-recovery
+    recovery: true
+  - name: search-only-ancestor-creation-barrier-refusal
+    failBarrier: true
+  - name: search-only-ancestor-trailing-root
+    trailingSeparator: true

@@ -71,8 +71,8 @@ func (c ContractNegotiation) String() string {
 // upgrading the CLI — never the village.
 func UpgradeCLIError(cli, min schema.PushContractVersion) error {
 	return fmt.Errorf(
-		"peasant push aborted: this CLI's push-contract v%s is older than the village's minimum accepted v%s\n"+
-			"  what: the village (our managed upstream) no longer accepts pushes from this CLI version\n"+
+		"peasant push aborted: this CLI's push-contract v%s is older than peasant online's minimum accepted v%s\n"+
+			"  what: peasant online (our managed upstream) no longer accepts pushes from this CLI version\n"+
 			"  why:  the accepted window starts at v%s and this CLI is below it\n"+
 			"  fix:  upgrade the peasant CLI to >= v%s, then re-run `peasant push`",
 		cli, min, min, min)
@@ -83,8 +83,8 @@ func UpgradeCLIError(cli, min schema.PushContractVersion) error {
 // and downgrade-emit succeeds. It never instructs upgrading the village.
 func DowngradeEmitWarning(cli, current schema.PushContractVersion) string {
 	return fmt.Sprintf(
-		"notice: this CLI's push-contract v%s is ahead of the village's current v%s; "+
-			"emitting v%s for compatibility (a village update is rolling out — no action needed)\n",
+		"notice: this CLI's push-contract v%s is ahead of peasant online's current v%s; "+
+			"emitting v%s for compatibility (a peasant online update is rolling out — no action needed)\n",
 		cli, current, current)
 }
 
@@ -93,10 +93,10 @@ func DowngradeEmitWarning(cli, current schema.PushContractVersion) string {
 // version gap). It instructs PINNING the CLI — never modifying the village.
 func CannotDowngradeError(cli, current schema.PushContractVersion) error {
 	return fmt.Errorf(
-		"peasant push aborted: this CLI's push-contract v%s cannot be downgraded to the village's current v%s\n"+
+		"peasant push aborted: this CLI's push-contract v%s cannot be downgraded to peasant online's current v%s\n"+
 			"  what: the version gap is a breaking (major) change this CLI cannot serialize backward\n"+
-			"  why:  emitting v%s would drop or reshape fields the older village requires\n"+
-			"  fix:  pin the peasant CLI to a release whose push-contract is <= v%s until the village update finishes",
+			"  why:  emitting v%s would drop or reshape fields the older peasant online server requires\n"+
+			"  fix:  pin the peasant CLI to a release whose push-contract is <= v%s until the peasant online update finishes",
 		cli, current, current, current)
 }
 
@@ -115,6 +115,30 @@ func ClassifyContract(cli, min, current schema.PushContractVersion) ContractNego
 		return NegotiationOlderThanMin
 	}
 	return NegotiationWithin
+}
+
+// NegotiatePullWindow returns the pull envelope the village serves when this
+// CLI reads it. A pull request names no version, so the village serves its
+// current envelope to every caller: the one envelope that matters is the
+// village's advertised current version, and this CLI accepts the village only
+// when that version lies inside the CLI's window [cliMin, cliCurrent]. The
+// village's own floor says what older CLIs it still claims to serve and does
+// not change what this CLI receives.
+//
+// A newer current version is refused even when the village's window reaches
+// back into the CLI's: on a 0.x contract a minor bump is not additive (pull
+// contract 0.3.0 removed the account strings 0.2.0 carried), so this CLI cannot
+// read an envelope newer than its own. ok is false when current is empty or
+// outside the window; the caller handles an unadvertised window (both bounds
+// empty) before calling.
+func NegotiatePullWindow(cliMin, cliCurrent, min, current schema.PushContractVersion) (schema.PushContractVersion, bool) {
+	if current == "" || compareSemver(current, cliMin) < 0 || compareSemver(current, cliCurrent) > 0 {
+		return "", false
+	}
+	if min != "" && compareSemver(min, current) > 0 {
+		return "", false
+	}
+	return current, true
 }
 
 // CanDowngrade reports whether this CLI can serialize the older `target`

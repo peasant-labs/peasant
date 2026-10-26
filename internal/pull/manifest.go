@@ -46,7 +46,10 @@ type PullManifest struct {
 	// when the village reported it (round-trip correlation); empty otherwise.
 	LocalSessionID string `json:"localSessionId,omitempty"`
 
-	// OwnerUserID / OwnerUsername are the village account identity of the owner.
+	// OwnerUserID / OwnerUsername are the owner's village account id and
+	// username when the village shows this viewer the owner's profile. Both are
+	// empty when the owner is anonymous to this viewer, so the manifest never
+	// stores a hidden person's identity.
 	OwnerUserID   string `json:"ownerUserId"`
 	OwnerUsername string `json:"ownerUsername"`
 
@@ -72,7 +75,8 @@ type PullManifest struct {
 	// published under (carried by the blob; the pull envelope does not version the
 	// blob). Empty/unknown ⇒ a legacy pre-envelope blob (context errors
 	// actionably on these). PullEnvelopeVersion is the pull-contract version the
-	// transfer was negotiated under.
+	// transfer was negotiated under: the newest version this CLI's pull window
+	// shares with the village's.
 	BlobContractVersion schema.ContractVersion `json:"blobContractVersion,omitempty"`
 	PullEnvelopeVersion schema.ContractVersion `json:"pullEnvelopeVersion"`
 
@@ -86,8 +90,9 @@ type PullManifest struct {
 }
 
 // ManifestAnnotation is the per-annotation provenance entry in a PullManifest:
-// the content-hash (pulled_annotations dedup key) plus the authoring village
-// account identity.
+// the content-hash (pulled_annotations dedup key) plus the author's village
+// account id and username, both empty when the author is anonymous to this
+// viewer.
 type ManifestAnnotation struct {
 	ContentHash    string `json:"contentHash"`
 	AuthorUserID   string `json:"authorUserId"`

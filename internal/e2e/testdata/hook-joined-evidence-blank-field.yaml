@@ -73,14 +73,14 @@ cases:
       - "set redaction.level to standard"
       # A correct exit code carrying a false message is the real hazard here. The
       # hook branches on the upload's status, and its generic-failure text claims
-      # whatever finished "is on the village and is recorded as published" - which
+      # whatever finished "is on peasant online and is recorded as published" - which
       # is a lie for a refusal that contacted nothing. This pins the truthful
       # framing; the matching lie is forbidden below.
-      - "nothing reached the village"
+      - "nothing reached peasant online"
     # A refusal reaches this surface once per commit, forever, until the setting
     # is fixed. Cobra prints the flag listing on error by default, and a usage
     # dump on every commit is a user-facing defect even when the exit status is
     # right.
     forbidden_contains:
       - "Usage:"
-      - "is on the village and is recorded as published"
+      - "is on peasant online and is recorded as published"

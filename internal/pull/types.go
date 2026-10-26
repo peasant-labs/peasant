@@ -101,7 +101,7 @@ func ParseTranscriptRef(raw string) (TranscriptRef, error) {
 			"invalid transcript reference: empty\n" +
 				"  what: no transcript UUID or URL was given\n" +
 				"  why:  `peasant village transcripts pull` needs a reference to pull\n" +
-				"  fix:  pass a transcript UUID (e.g. 99d59925-36bc-424c-a789-8be54d9702ba) or a pasted village web URL")
+				"  fix:  pass a transcript UUID (e.g. 99d59925-36bc-424c-a789-8be54d9702ba) or a pasted peasant online web URL")
 	}
 
 	// URL form: anything that parses with a scheme + host. The path must be the
@@ -174,6 +174,24 @@ type PullOptions struct {
 	// matches the server hash, else PullStatusPulled for "would pull"). Mirrors the
 	// push pipeline's dry-run reporting spirit (no side effects, reports intent).
 	DryRun bool
+	// Meta, when non-nil, is the metadata a caller already read for this transcript
+	// from the pullable listing. Supplying it skips the per-transcript FETCH-META
+	// GET. The listing row is the SAME schema.PullTranscriptInfo projection the
+	// single read returns, including ContentHash, so the DIFF is fed identically.
+	// The DOWNLOAD stage stays authoritative: a transcript that diverged between
+	// the listing and the pull is still settled by the conditional GET and the
+	// post-download hash compare.
+	Meta *schema.PullTranscriptInfo
+	// SkipNegotiate suppresses the NEGOTIATE stage. A caller that has already run
+	// NegotiatePull once for the command sets it, so a bulk run does not repeat the
+	// schema-version preflight per transcript. The pull window cannot change
+	// mid-command, and the caller owns the single check.
+	SkipNegotiate bool
+	// EnvelopeVersion is the pull envelope version the caller's own NegotiatePull
+	// returned. A caller that sets SkipNegotiate passes it so the manifest
+	// records the envelope the transfer actually used; empty falls back to
+	// defaults.PullContractVersion.
+	EnvelopeVersion schema.PushContractVersion
 }
 
 // PullResult is the observable outcome of a PullTranscript run.
@@ -214,6 +232,9 @@ type PullResult struct {
 	// after FETCH-META (pulled, up-to-date, dry-run); persisted to the V38
 	// pulled_transcripts.license_id column on a real pull.
 	License schema.License
+	// AssociationMetadata is independent account-scoped disclosure evidence. It
+	// never authorizes content and is not persisted into the content manifest.
+	AssociationMetadata *schema.PullAssociationMetadataResult
 }
 
 // RefreshOptions controls a RefreshOwnAnnotations run.
@@ -239,6 +260,6 @@ type RefreshResult struct {
 	Updated int
 	Skipped int
 	// Excluded is the number of own-authored annotations filtered out
-	// (AuthorUserID == creds.UserID) before the upsert.
+	// (an author profile that is the requester's own account) before the upsert.
 	Excluded int
 }

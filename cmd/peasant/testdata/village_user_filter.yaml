@@ -1,0 +1,255 @@
+# --user contributor filter: the selection a person gets when they narrow the
+# pullable set to one village account.
+#
+# The world below is seeded onto the collective village double before each case:
+# two member collectives, one transcript from each of three contributors across
+# them, one contributor holding work in both collectives, and one transcript
+# whose owner the village shows this viewer anonymously (no id, no username). Each case names one
+# behaviour, the production command it runs, and the observable outcome — the
+# rows selected, the total reported, and the listing reads the run made. The
+# expectations carry transcript IDs rather than counts, so a case cannot pass by
+# selecting the right NUMBER of the wrong rows.
+world:
+  collectives:
+    - id: 11111111-1111-4111-8111-111111111111
+      name: platform-team
+      member: true
+    - id: 22222222-2222-4222-8222-222222222222
+      name: oss-mirror
+      member: true
+  transcripts:
+    - id: aaaaaaaa-bbbb-cccc-dddd-000000000001
+      owner: alice
+      collectives: [platform-team]
+    - id: aaaaaaaa-bbbb-cccc-dddd-000000000002
+      owner: bob
+      collectives: [platform-team]
+    - id: aaaaaaaa-bbbb-cccc-dddd-000000000003
+      owner: alice
+      collectives: [oss-mirror]
+    - id: aaaaaaaa-bbbb-cccc-dddd-000000000004
+      owner: bob
+      collectives: [oss-mirror]
+    - id: aaaaaaaa-bbbb-cccc-dddd-000000000005
+      owner: carol
+      collectives: [platform-team]
+    - id: aaaaaaaa-bbbb-cccc-dddd-000000000006
+      anonymous: true
+      collectives: [platform-team]
+
+requiredNames:
+  - user filter matches case insensitively
+  - user filter excludes other contributors
+  - user filter alone spans collectives
+  - user filter with collective intersects
+  - user filter unknown user is empty
+  - user filter forces a complete listing
+  - local user filter works offline without credentials
+  - local user filter matches case insensitively
+  - local unknown user is empty
+  - local listing without user retains every transcript
+  - local user filter applies to table output
+  - local unknown user has an empty table
+  - local collective filter remains refused
+  - local explicit limit remains refused
+  - user filter exclusive with a transcript reference
+  - user filter narrows a collective pull to one contributor
+  - user filter alone spans collectives on a pull
+  - user filter never matches an anonymous owner
+  - local user filter never matches an anonymous owner
+  - user filter of only spaces never matches an anonymous owner
+  - local user filter of only spaces never matches an anonymous owner
+  - remote table prints anon for an anonymous owner
+  - local table prints anon for an anonymous owner
+
+cases:
+  # A username is case-insensitive at the village, so the flag folds case the
+  # same way an exact collective name is matched.
+  - name: user filter matches case insensitively
+    command: list
+    user: ALICE
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+    expectTotal: 2
+
+  # Another contributor's rows are excluded, not merely outnumbered.
+  - name: user filter excludes other contributors
+    command: list
+    user: bob
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000002
+      - aaaaaaaa-bbbb-cccc-dddd-000000000004
+    expectTotal: 2
+
+  # Without --collective the filter spans the caller's whole pullable set, so
+  # one contributor's work comes back from every collective they contributed to.
+  - name: user filter alone spans collectives
+    command: list
+    user: alice
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+    expectTotal: 2
+    expectListCalls: 1
+
+  # With --collective the two filters intersect: the contributor's rows in that
+  # collective, and nothing from their work elsewhere.
+  - name: user filter with collective intersects
+    command: list
+    collective: platform-team
+    user: alice
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+    expectTotal: 1
+
+  # An account with nothing in the selection is an empty result, never an
+  # error: answering "no such account" would leak who exists.
+  - name: user filter unknown user is empty
+    command: list
+    user: nobody
+    expect: []
+    expectTotal: 0
+
+  # The filter is applied over the complete listing, so a page size smaller than
+  # the listing cannot truncate it. Two rows a page needs three reads for the
+  # five-row world, and the second of Alice's rows is on page two.
+  - name: user filter forces a complete listing
+    command: list
+    user: alice
+    limit: 2
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+    expectTotal: 2
+    expectListCalls: 3
+
+  # Local cases first pull the synthetic world, then stop the server and remove
+  # credentials. The assertions therefore cannot depend on a remote read.
+  - name: local user filter works offline without credentials
+    command: list-local
+    user: alice
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+
+  - name: local user filter matches case insensitively
+    command: list-local
+    user: ALICE
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+
+  - name: local unknown user is empty
+    command: list-local
+    user: nobody
+    expect: []
+
+  - name: local listing without user retains every transcript
+    command: list-local
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000002
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+      - aaaaaaaa-bbbb-cccc-dddd-000000000004
+      - aaaaaaaa-bbbb-cccc-dddd-000000000005
+      - aaaaaaaa-bbbb-cccc-dddd-000000000006
+
+  - name: local user filter applies to table output
+    command: list-local-table
+    user: bob
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000002
+      - aaaaaaaa-bbbb-cccc-dddd-000000000004
+
+  - name: local unknown user has an empty table
+    command: list-local-table
+    user: nobody
+    expect: []
+
+  - name: local collective filter remains refused
+    command: list-local
+    user: alice
+    collective: platform-team
+    # Signed-out filtering still refuses, now because no private saved scope is
+    # selected. Accountless unfiltered --user behavior above remains unchanged.
+    errorContains: local collective filtering needs a saved account scope
+
+  - name: local explicit limit remains refused
+    command: list-local
+    user: alice
+    limit: 2
+    errorContains: apply to the remote listing
+
+  # One selection: a positional transcript reference and the filters are
+  # alternatives, refused before any credential or database work.
+  - name: user filter exclusive with a transcript reference
+    command: pull-ref
+    user: alice
+    arg: aaaaaaaa-bbbb-cccc-dddd-000000000001
+    errorContains: choose one selection
+
+  # The pull path reads the same listing, so the contributor filter narrows what
+  # is downloaded in a collective pull.
+  - name: user filter narrows a collective pull to one contributor
+    command: pull
+    collective: platform-team
+    user: alice
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+
+  # And alone it pulls one contributor's work from every collective the caller
+  # can pull from, leaving the other contributors' rows untouched.
+  - name: user filter alone spans collectives on a pull
+    command: pull
+    user: alice
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+
+  # An anonymous owner has no username, so no --user value selects it, not
+  # even the label the tables print for it.
+  - name: user filter never matches an anonymous owner
+    command: list
+    user: anon
+    expect: []
+    expectTotal: 0
+
+  - name: local user filter never matches an anonymous owner
+    command: list-local
+    user: anon
+    expect: []
+
+  # A value of only spaces trims to an empty name, which is exactly what an
+  # anonymous owner stores; it still matches nobody.
+  - name: user filter of only spaces never matches an anonymous owner
+    command: list
+    user: "  "
+    expect: []
+    expectTotal: 0
+
+  - name: local user filter of only spaces never matches an anonymous owner
+    command: list-local
+    user: "  "
+    expect: []
+
+  # Tables print "anon" for an anonymous owner, never "@" with an empty name.
+  - name: remote table prints anon for an anonymous owner
+    command: list-table
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000002
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+      - aaaaaaaa-bbbb-cccc-dddd-000000000004
+      - aaaaaaaa-bbbb-cccc-dddd-000000000005
+      - aaaaaaaa-bbbb-cccc-dddd-000000000006
+
+  - name: local table prints anon for an anonymous owner
+    command: list-local-table
+    expect:
+      - aaaaaaaa-bbbb-cccc-dddd-000000000001
+      - aaaaaaaa-bbbb-cccc-dddd-000000000002
+      - aaaaaaaa-bbbb-cccc-dddd-000000000003
+      - aaaaaaaa-bbbb-cccc-dddd-000000000004
+      - aaaaaaaa-bbbb-cccc-dddd-000000000005
+      - aaaaaaaa-bbbb-cccc-dddd-000000000006

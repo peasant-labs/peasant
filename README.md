@@ -8,8 +8,9 @@ them through a web API.
 ## Installation
 
 Peasant ships a single statically linked binary (no runtime dependencies) for
-**linux** and **macOS** on **amd64** and **arm64**. Every release attaches
-`.tar.gz` archives, `.deb`/`.rpm` packages, and a `checksums.txt` to its
+**linux** and **macOS** on **amd64** and **arm64**, and for **Windows** on
+**amd64**. Every release attaches `.tar.gz` archives, a Windows `.zip` and a bare
+Windows `.exe`, `.deb`/`.rpm` packages, and a `checksums.txt` to its
 [GitHub Release](https://github.com/peasant-labs/peasant/releases).
 
 | Platform | Quickest path | Guide |
@@ -20,6 +21,7 @@ Peasant ships a single statically linked binary (no runtime dependencies) for
 | Arch Linux | GitHub release tarball (`linux`) | [docs/install/arch.md](docs/install/arch.md) |
 | macOS | GitHub release tarball (`darwin`) | [docs/install/macos.md](docs/install/macos.md) |
 | Nix | `nix profile install github:peasant-labs/peasant#peasant` | [docs/install/nix.md](docs/install/nix.md) |
+| Windows | `Expand-Archive peasant_<ver>_windows_amd64.zip` (or the bare `.exe`) | [docs/install/windows.md](docs/install/windows.md) |
 | WSL | install as the underlying distro, then read the caveats | [docs/install/wsl.md](docs/install/wsl.md) |
 
 Or download a `peasant_<version>_<os>_<arch>.tar.gz` archive, verify it against
@@ -37,7 +39,7 @@ Or download a `peasant_<version>_<os>_<arch>.tar.gz` archive, verify it against
 nix develop
 
 # Build the binary
-make build          # outputs bin/peasant
+make build          # outputs peasant
 
 # Run the first-time setup wizard
 peasant kickstart
@@ -76,6 +78,7 @@ privacy boundaries, and recovery behavior.
 | `peasant ingest` | Run the data ingestion pipeline |
 | `peasant ingest verify` | Verify database schema integrity |
 | `peasant village push` | Push ingested transcripts + annotations to the Peasant village (incremental — server-manifest skip-gate + retraction; see [flags](#peasant-village-push-flags)) |
+| `peasant village auto` | Publish this repository's sessions on every `git push`, redacted and private, to the collectives you published to last: saves an auto-publish rule in `hooks.yaml` (see [the network reference](docs/NETWORK.md#6-hook-triggered-push)) and installs the pre-push hook here |
 | `peasant login` / `peasant logout` | Authenticate with / disconnect from the village |
 | `peasant models sync` | Fetch and sync model reference data from models.dev |
 | `peasant sessions context` | Print grep-C-style turns around a session turn (terminal-rendered) |
@@ -171,7 +174,7 @@ are replayed once through the ordinary push candidate path.
 | `--json` | Output as JSON instead of human-readable |
 | `--verbose` | Show file-level detail with subagent expansion |
 | `--reindex` | Re-process sessions with stale or missing index data |
-| `--detect-commits` | Detect and store git commits linked to each session |
+| `--detect-commits` | Detect and store git commits linked to each session (default on; pass `--detect-commits=false` to skip) |
 | `--config <path>` | Path to config file |
 
 When a selection index is configured (via `peasant kickstart`), ingest automatically filters to only
@@ -523,6 +526,13 @@ If no config file exists, Peasant uses built-in defaults and prints a notice dir
 `peasant kickstart`. CLI flags (`--source-harness`, `--source-path`, `--output`) override the
 config file for a single run.
 
+The web dashboard's settings page (`http://localhost:8690/settings`) shows every key. A change
+saves to `config.yaml` at once, one key per change. Keys that the dashboard reads only at startup,
+the saved selection (`peasant kickstart` edits it), and the Village sign-in are shown read-only.
+The page also lists the auto-publish rules in `hooks.yaml`. It installs their hooks in the
+repositories Peasant has recorded, only when you choose to. `peasant config` edits a subset of
+the keys. On the page, a key that `peasant config` cannot change is tagged "not in peasant config".
+
 ### Selection index
 
 The kickstart wizard saves the selection index in `config.yaml`. This example shows its persisted
@@ -702,7 +712,7 @@ Start the server in one process and probe it from another:
 
 ```bash
 # Terminal 1: start server in foreground on a test port
-./bin/peasant web start --port 9999 --foreground --no-browser
+./peasant web start --port 9999 --foreground --no-browser
 
 # Terminal 2: verify endpoints
 # Health check
@@ -724,18 +734,18 @@ Compare mock vs real data by running two servers:
 
 ```bash
 # Server A: real data
-./bin/peasant web start --port 9990 --foreground --no-browser &
+./peasant web start --port 9990 --foreground --no-browser &
 
 # Server B: mock data for quality
-./bin/peasant web start --port 9991 --foreground --no-browser --mock-data-store=web,qualitySessions &
+./peasant web start --port 9991 --foreground --no-browser --mock-data-store=web,qualitySessions &
 
 # Compare session counts
 REAL=$(curl -s http://localhost:9990/api/v1/sessions | jq '.sessions | length')
 MOCK=$(curl -s http://localhost:9991/api/v1/sessions | jq '.sessions | length')
 echo "Real: $REAL, Mock: $MOCK"
 
-./bin/peasant web stop --port 9990
-./bin/peasant web stop --port 9991
+./peasant web stop --port 9990
+./peasant web stop --port 9991
 ```
 
 #### Pattern 2: Playwright/Puppeteer browser automation
@@ -765,11 +775,17 @@ backed by an in-memory SQLite store. The WebSocket E2E pattern in `AGENTS.md` ex
 
 ## Experimental features
 
+File familiarity / understanding coverage is an **incomplete experiment**, not a
+shipped app feature. See the [experimental feature register](docs/EXPERIMENTAL_FEATURES.md)
+for its current surfaces and remaining work. Feature completion and its opt-in
+flag are deferred; no familiarity flag is implemented today.
+
 Some features are shelved in the default build and gated behind a flag: the
 `peasant memory` command group (Go build tag `-tags=experimental`), the
 `/review` page's real-data mode (env `NEXT_PUBLIC_EXPERIMENTAL_REVIEW=1`), and the
-code map's web navigation entry points (`peasant web start --experimental`, a
-discoverability gate that never removes the underlying `/map` routes). See
+code-map navigation capability (`peasant web start --experimental`, a
+discoverability gate that never removes the underlying `/map` routes; the local
+app's section registry currently keeps the code map route-only in every mode). See
 [EXPERIMENTAL.md](EXPERIMENTAL.md) for how to enable them, and
 [docs/memory.md](docs/memory.md) for the agent-memory reference.
 
@@ -816,6 +832,17 @@ See [docs/e2e.md](docs/e2e.md) for the harness walkthrough,
 [`TESTING.md`](TESTING.md) for the full E2E testing map (WebSocket E2E, fixture
 meta-tests in `make check`, and this podman harness). The always-on fixture
 meta-tests DO run inside `make check`.
+
+### Cross-platform builds
+
+Peasant builds one module for Linux, macOS, and Windows. The build-tag split, the path rules,
+and the Windows-specific behavior are in [`docs/cross-platform.md`](docs/cross-platform.md).
+Check a Windows build from a Linux workstation before you push:
+
+```bash
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 ./scripts/vet-go.sh
+```
 
 ### Web build & lockfiles
 
@@ -913,7 +940,7 @@ var migrations = []Migration{
 Run verification after migrations:
 
 ```bash
-./bin/peasant ingest verify
+./peasant ingest verify
 ```
 
 ### Database verification

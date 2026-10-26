@@ -1,0 +1,17 @@
+requiredNames: [verified-account, complete-memberships, legacy-memberships-refused, narrow-detail, required-discovery-counters, owner-pairs, owner-attempts, pull-version, pull-metadata, pull-content, pull-annotations, dedicated-associations, remote-mutation-refused, dedicated-associations-transient, dedicated-associations-invalidated]
+cases:
+  - {name: verified-account, path: /api/v1/auth/me, status: 200}
+  - {name: complete-memberships, path: /api/v1/collectives, status: 200}
+  - {name: legacy-memberships-refused, path: /api/v1/groups, status: 404}
+  - {name: narrow-detail, path: '/api/v1/collectives/{collective}', status: 200}
+  - {name: required-discovery-counters, path: /api/v1/users/me/collectives/contributions, status: 200}
+  - {name: owner-pairs, path: '/api/v1/users/me/collectives/{collective}/submissions', status: 200}
+  - {name: owner-attempts, path: '/api/v1/users/me/collectives/{collective}/transcripts/{transcript}/events', status: 200}
+  - {name: pull-version, path: /api/v1/schema/version, status: 200}
+  - {name: pull-metadata, path: '/api/v1/pull/transcripts/{transcript}', status: 200}
+  - {name: pull-content, path: '/api/v1/pull/transcripts/{transcript}/content', status: 200}
+  - {name: pull-annotations, path: '/api/v1/pull/transcripts/{transcript}/annotations', status: 200}
+  - {name: dedicated-associations, path: '/api/v1/transcripts/{transcript}/collectives', status: 200}
+  - {name: remote-mutation-refused, path: /api/v1/collectives, method: POST, status: 405}
+  - {name: dedicated-associations-transient, path: '/api/v1/transcripts/{transcript}/collectives', scenario: association-unavailable, status: 503}
+  - {name: dedicated-associations-invalidated, path: '/api/v1/transcripts/{transcript}/collectives', scenario: association-invalidated, status: 403}

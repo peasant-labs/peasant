@@ -1,6 +1,6 @@
 package store
 
-// migrationV55 separates retained adapter output from computed analytics.
+// migrationV55 separates stored adapter output from computed analytics.
 // Historical producer and input evidence stays unknown until validated files
 // are reconciled; existing metrics and index producer stamps are unchanged.
 const migrationV55 = `

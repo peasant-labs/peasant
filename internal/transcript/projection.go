@@ -3,6 +3,7 @@ package transcript
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -96,6 +97,20 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 		if err := ValidateObservedModelEntries(entries); err != nil {
 			return p, err
 		}
+	}
+	// Malformed stored thinking-level evidence is dropped, never refused. The
+	// fold's thinkingLevelObservation already serves an out-of-contract value
+	// as absent, so warn once per occurrence (with the entry index and the fix)
+	// instead of failing the read. The producer and wire boundaries still refuse
+	// malformed turns (ValidateThinkingLevelTurnEvidence,
+	// schema.ValidateSessionDetailPayload); only stored read-path evidence is
+	// tolerant.
+	for _, warning := range ThinkingLevelEntryWarnings(entries) {
+		slog.Warn(warning.Message(),
+			"session_id", warning.SessionID,
+			"entry_index", warning.EntryIndex,
+			"role", warning.Role,
+			"fix", warning.Fix)
 	}
 	p.Turns = foldEntries(entries, evidence)
 	tools := make(map[string]*ingest.ToolCall)

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // createPendingAnnotations is the DDL for the pending_annotations table (V21).

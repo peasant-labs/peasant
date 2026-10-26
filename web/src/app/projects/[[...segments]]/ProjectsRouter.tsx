@@ -6,6 +6,7 @@ import { Skeleton } from '@/lib/ft-ui';
 import { SessionDetailV2 } from '@/components/session-detail/v2/SessionDetailV2';
 import { formatMapRouteState, mapHref, parseMapRouteState, parseProjectDetailRoute, parseTranscriptRoute, parseTranscriptRouteQuery, transcriptHref, type ProjectHash, type TranscriptHrefOptions, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
 import { useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
+import { ProjectIdentityProblem } from '@/components/ProjectIdentityProblem';
 
 /**
  * /projects/[name]/[id] is the session viewer — the deep-link target Map and
@@ -51,8 +52,8 @@ export function ProjectsRouter() {
   // Redirecting (effect above) — show a brief affordance instead of a blank
   // frame, so the interim is never a flash of nothing.
   return (
-    <div className="flex h-[40vh] items-center justify-center text-[13px] text-ink-4">
-      Taking you Home…
+    <div className="flex h-[40vh] items-center justify-center font-mono text-[length:var(--fs-label)] text-ink-3">
+      taking you home…
     </div>
   );
 }
@@ -69,7 +70,7 @@ function LegacyProjectDetail({ projectLabel, search }: { projectLabel: string; s
   useEffect(() => {
     if (state.phase === 'ready' && state.requestedIdentity === projectLabel) router.replace(canonicalProjectDetailDestination(state.projectHash, search));
   }, [router, search, state]);
-  if (state.phase === 'missing' || state.phase === 'error') return <button type="button" onClick={retry}>{state.message} retry project resolution</button>;
+  if (state.phase === 'missing' || state.phase === 'error') return <ProjectIdentityProblem state={state} onRetry={retry} />;
   return <ProjectsRouteSkeleton />;
 }
 
@@ -83,6 +84,7 @@ function transcriptOptions(query: TranscriptRouteQuery): TranscriptHrefOptions {
     originBranch: query.originBranch ?? undefined,
     returnLocation: query.returnLocation ?? undefined,
     earlierHistoryOpen: query.earlierHistoryOpen,
+    publish: query.publish,
   };
 }
 
@@ -96,7 +98,7 @@ function ResolvedProjectViewer({ projectLabel, sessionId, query, canonical }: { 
   useEffect(() => {
     if (!canonical && state.phase === 'ready' && state.requestedIdentity === projectLabel) router.replace(transcriptHref(state.projectHash, sessionId, transcriptOptions(query)));
   }, [canonical, projectLabel, query, router, sessionId, state]);
-  if (state.phase === 'missing' || state.phase === 'error') return <button type="button" onClick={retry}>{state.message} retry project resolution</button>;
+  if (state.phase === 'missing' || state.phase === 'error') return <ProjectIdentityProblem state={state} onRetry={retry} />;
   // Keyed by session: opening a different stored session (a followed context or
   // starter link) is a new document, so its host-owned reading state must be
   // rehydrated from that session's own persisted state instead of leaking the
@@ -107,7 +109,7 @@ function ResolvedProjectViewer({ projectLabel, sessionId, query, canonical }: { 
 
 function ProjectsRouteSkeleton() {
   return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-4">
+    <div className="asb-page">
       <Skeleton className="h-4 w-44" />
       <Skeleton className="h-[min(72vh,760px)] min-h-[480px]" />
     </div>

@@ -27,6 +27,8 @@ var commands = [...]func() *cobra.Command{
 	BuildMemoryCommand,
 	BuildExportCommand,
 	BuildPruneCommand,
+	BuildReclaimCommand,
+	BuildMigrateCommand,
 	BuildRedactCommand,
 	BuildDocgenCommand,
 	BuildLayoutCommand,
@@ -35,6 +37,7 @@ var commands = [...]func() *cobra.Command{
 }
 
 func main() {
+	sweepUpgradeSidecar()
 	rootCmd := buildRootCommand()
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(exitCodeFor(err).Int())

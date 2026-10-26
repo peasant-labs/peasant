@@ -1,13 +1,8 @@
 # Native repair maintenance oracle. Each case drives the REAL Pipeline with
 # injected harvester targets over real temporary managed files and a real
 # SQLite store. Native sources are sanitized synthetic rollouts, never private
-# user data.
-requiredNames:
-  - codex_stale_v1_maintenance_repair
-  - codex_failed_capture_retains_last_good
-  - codex_future_state_refused
-  - codex_unrelated_harness_unchanged
-  - opencode_stale_v1_native_activation
+# user data. The required-name manifest beside this file is the single case
+# inventory; the fixture declares no second copy.
 cases:
   - name: codex_stale_v1_maintenance_repair
     harness: codex
@@ -53,3 +48,78 @@ cases:
     scenario: opencode_native_activation
     sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
     nativeSource: native-current-rows
+  # A stored V1 full certificate with historical producer/format stamps and no
+  # active managed generation, over a native source whose assistant row still
+  # carries a running/streaming tool. Ordinary maintenance must hold the last
+  # good full authority, install no V2 generation, and name the unsettled
+  # message and sequence; after the tool settles, the same maintenance must
+  # activate a complete V2 generation.
+  - name: opencode_v1_full_authority_holds_unfinished_native
+    harness: opencode
+    scenario: opencode_authority_bridge
+    sessionId: ses_3cd91f52effeXd3QAJ54jOyzn1
+    nativeSource: native-current-rows
+    unsettledNativeSource: native-v2-rows
+    storedIndexerVersion: 16
+    storedIndexFormat: 1
+    heldDiagnosticContains:
+      - msg_v2_assistant
+      - sequence 1
+      - a stored complete capture certificate
+      - origin opencode-current-sqlite
+
+  # A full read authority whose stored pair records an unaccounted source
+  # omission: the metadata warns that a record was left out, and the stored
+  # transcript carries no positional stand-in for it. The refresh's candidate is
+  # the assessed unaccounted-SourceOmitted preview, so the harvest retains it as
+  # the latest attempt and the last-good authority stays the read authority.
+  - name: claude_flag_without_stand_in_retains_latest_attempt
+    harness: claude-code
+    scenario: latest_attempt_retention
+    sessionId: 7a7a7a7a-7777-4777-8777-7a7a7a7a7a7a
+    storedIndexerVersion: 16
+    authority: managed
+    retentionRepeat: true
+    source: |
+      {"type":"user","uuid":"u1","sessionId":"7a7a7a7a-7777-4777-8777-7a7a7a7a7a7a","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"retain the newest preview beside the last good authority"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"7a7a7a7a-7777-4777-8777-7a7a7a7a7a7a","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"the last good authority stays active"}]}}
+
+  # The same retention over a row that predates the artifact-hash column: the
+  # write supplies the verified pair identity, so the bootstrap establishes the
+  # row's artifact hash and latest-attempt pointer records the same value.
+  - name: claude_legacy_null_artifact_retains_with_provided_identity
+    harness: claude-code
+    scenario: latest_attempt_retention
+    sessionId: 8b8b8b8b-8888-4888-8888-8b8b8b8b8b8b
+    storedIndexerVersion: 16
+    authority: managed_legacy_null
+    source: |
+      {"type":"user","uuid":"u1","sessionId":"8b8b8b8b-8888-4888-8888-8b8b8b8b8b8b","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"bootstrap the legacy pair identity"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"8b8b8b8b-8888-4888-8888-8b8b8b8b8b8b","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"the legacy authority is untouched"}]}}
+
+  # A certificate-only authority with no active managed generation: the
+  # retention is written beside the stored certificate, the default read still
+  # refuses, and the explicit last-good read serves the preserved projection.
+  - name: claude_certificate_authority_retains_latest_attempt
+    harness: claude-code
+    scenario: latest_attempt_retention
+    sessionId: 9c9c9c9c-9999-4999-8999-9c9c9c9c9c9c
+    storedIndexerVersion: 16
+    authority: certificate
+    source: |
+      {"type":"user","uuid":"u1","sessionId":"9c9c9c9c-9999-4999-8999-9c9c9c9c9c9c","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"retain beside the stored certificate"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"9c9c9c9c-9999-4999-8999-9c9c9c9c9c9c","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"the certificate keeps its full authority"}]}}
+
+  # The operator override: a forced harvest replaces the authority with the
+  # preview and clears latest-attempt pointer in the same commit, so the explicit
+  # last-good read afterwards refuses the active preview.
+  - name: claude_explicit_rebuild_over_latest_attempt_clears_pointer
+    harness: claude-code
+    scenario: latest_attempt_retention
+    sessionId: adadadad-aaaa-4aaa-8aaa-adadadadadad
+    storedIndexerVersion: 16
+    authority: managed
+    explicitRebuild: true
+    source: |
+      {"type":"user","uuid":"u1","sessionId":"adadadad-aaaa-4aaa-8aaa-adadadadadad","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"the explicit rebuild replaces the authority"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"adadadad-aaaa-4aaa-8aaa-adadadadadad","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"the rebuild owns the result"}]}}

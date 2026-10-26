@@ -1,0 +1,61 @@
+# Pi typed thinking-level evidence boundaries. A case with `level`/`raw`
+# encodes that value through EncodePiExtra and requires the decode round trip to
+# preserve it; an `extra` case supplies the stored raw Extra directly. For an
+# `extra` case the (usually empty) `level`/`raw` fields are the EXPECTED typed
+# values after decode, so a case that omits them asserts the malformed half was
+# cleared.
+#
+# A stored malformed thinking-level value is DROPPED on read, never refused: the
+# typed PiExtra must mirror the value the reader is served so publication can
+# re-encode the row instead of refusing it. A non-string half cannot decode into
+# the typed struct and drops the whole pair; a stored JSON null for either half
+# is treated as omission and clears only that half, so a well-formed surviving
+# half is still served; an out-of-set canonical level or an invalid raw spelling
+# drops only that half. Every other Pi field stays strict, including a null in
+# any other field.
+cases:
+  - name: canonical
+    level: ultra
+  - name: raw-only
+    raw: custom
+  - name: alias-pair
+    level: "off"
+    raw: none
+  - name: absent
+  - name: invalid-canonical
+    level: custom
+    error: true
+  - name: edge-whitespace
+    raw: " high"
+    error: true
+  - name: invalid-utf8
+    rawBase64: /w==
+    error: true
+  - name: null-level-cleared
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":null}'
+  - name: null-raw-cleared
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level_raw":null}'
+  - name: null-pair-cleared
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":null,"thinking_level_raw":null}'
+  - name: null-level-valid-raw-keeps-raw
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":null,"thinking_level_raw":"Deep"}'
+    raw: Deep
+  - name: valid-level-null-raw-keeps-level
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":"high","thinking_level_raw":null}'
+    level: high
+  - name: null-other-field-refused
+    extra: '{"kind":"pi.state","harness":"pi","namespace":null}'
+    error: true
+  - name: unknown-field
+    extra: '{"kind":"pi.state","harness":"pi","thinkingLevel":"high"}'
+    error: true
+  - name: stored-canonical-cleared
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":"custom"}'
+  - name: stored-edge-whitespace-cleared
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level_raw":" deep"}'
+  - name: stored-non-string-level-cleared
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":7}'
+  - name: stored-non-string-level-valid-raw-cleared
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":7,"thinking_level_raw":"Deep"}'
+  - name: stored-pair-non-string-cleared
+    extra: '{"kind":"pi.state","harness":"pi","thinking_level":7,"thinking_level_raw":false}'

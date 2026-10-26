@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DOCS } from '@/lib/docs';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MapRouter } from './MapRouter';
@@ -9,11 +10,6 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/map',
   useRouter: () => ({ replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
-}));
-vi.mock('@/components/Explainer', () => ({
-  Explainer: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  ExplainerToggle: () => null,
-  useExplainer: () => ({ open: false }),
 }));
 
 const fetchProjectSummaries = vi.fn();
@@ -39,7 +35,7 @@ describe('MapRouter project discovery', () => {
     expect(screen.getByRole('link', { name: testCase.expectedLinkName })).toHaveAttribute('href', testCase.expectedHref);
 
     fireEvent.change(search, { target: { value: 'no matching project' } });
-    expect(screen.getByText('No projects match “', { exact: false }).closest('p')).toHaveTextContent('No projects match “no matching project”.');
+    expect(screen.getByText('no projects match “', { exact: false }).closest('p')).toHaveTextContent('no projects match “no matching project”.');
     fireEvent.change(search, { target: { value: testCase.searchQuery } });
     expect(screen.getByRole('link', { name: testCase.expectedLinkName })).toHaveAttribute('href', testCase.expectedHref);
   });
@@ -70,8 +66,8 @@ describe('MapRouter project discovery', () => {
     render(<MapRouter />);
 
     const panel = await screen.findByRole('status', { name: 'project selection recovery' });
-    expect(panel).toHaveTextContent('Peasant hides 2 projects and 5 sessions.');
-    expect(panel).toHaveTextContent('The web viewer does not list it.');
+    expect(panel).toHaveTextContent('peasant hides 2 projects and 5 sessions.');
+    expect(panel).toHaveTextContent('the web viewer does not list it.');
     expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
     for (const identity of fixture.forbiddenIdentities) {
       expect(document.body.textContent).not.toContain(identity);
@@ -83,7 +79,8 @@ describe('MapRouter project discovery', () => {
     fetchProjectSummaries.mockResolvedValue(fixture.summary);
     render(<MapRouter />);
 
-    expect(await screen.findByText('peasant ingest')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: /^how to record sessions/ })).toHaveAttribute('href', DOCS.record);
+    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'project selection recovery' })).not.toBeInTheDocument();
   });
 

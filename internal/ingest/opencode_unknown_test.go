@@ -70,8 +70,8 @@ func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
 			seedOpenCodeProvenanceCase(t, source, ocProvCase{Scope: ocProvScope{SessionID: string(sid), ParentNullProven: true}, Rows: row.Rows})
 			adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 			session := ingest.DiscoveredSession{SessionID: sid, Harness: ingest.HarnessOpenCode, SourcePath: ingest.ResolvedPath(source.Path), TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite}
-			nativeIndexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(openCodeNativeProvenanceConfig(source, string(sid), ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)))
-			candidate, nativeErr := nativeIndexer.BuildNativeGeneration(t.Context(), session)
+			nativeIndexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+			candidate, nativeErr := nativeIndexer.BuildGeneration(t.Context(), openCodeNativeBuildInput(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil))
 			managed, managedErr := adapter.MaterializeTranscript(t.Context(), session)
 			if row.Error {
 				if nativeErr == nil || managedErr == nil {
@@ -156,8 +156,8 @@ func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
 			}
 			t.Log("check stored retained entries")
 			check(stored)
-			activation := ingest.NativeGenerationActivation{Generation: candidate.Result, Blobs: candidate.Blobs, PriorEvidence: candidate.PriorEvidence, IndexerVersion: 18, IndexedAtMs: 1, ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, FailureCode: ingest.ContentCaptureUnknownDataRetained, SourceAuthority: ingest.ContentSourceProviderSource, TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly, CapturedAtMs: 1}}
-			if _, err := db.ActivateNativeGeneration(t.Context(), activation); err != nil {
+			activation := ingest.GenerationActivation{Generation: candidate.Result, Blobs: candidate.Blobs, PriorEvidence: candidate.PriorEvidence, IndexerVersion: 18, IndexedAtMs: 1, ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureIncomplete, FailureCode: ingest.ContentCaptureUnknownDataRetained, SourceAuthority: ingest.ContentSourceProviderSource, TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite, CaptureFormat: ingest.ContentCaptureFormatPreviewOnly, CapturedAtMs: 1}}
+			if _, err := db.ActivateGenerationCandidate(t.Context(), activation); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.Close(); err != nil {
@@ -176,7 +176,7 @@ func TestOpenCodeUnknownNativeAndRetainedPersistence(t *testing.T) {
 			broken := activation
 			broken.Generation.Generation.ID = "failed-unknown-generation"
 			broken.Blobs = map[schema.SourceEntryRef][]byte{}
-			if _, err := db.ActivateNativeGeneration(t.Context(), broken); err == nil {
+			if _, err := db.ActivateGenerationCandidate(t.Context(), broken); err == nil {
 				t.Fatal("missing blobs authorized replacement")
 			}
 			if err := db.WithSessionSnapshot(t.Context(), sid, verify); err != nil {

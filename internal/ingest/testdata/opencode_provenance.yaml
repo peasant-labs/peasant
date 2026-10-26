@@ -2,6 +2,55 @@
 # decoder, the section 3.2 classifier, and the shared projection builder. The
 # rows are sanitized native JSON, never private transcript data.
 cases:
+  - name: opencode-message-variant-level
+    scope: {sessionId: ses_opencodeCurrentChild, shape: current, parentNullProven: true}
+    allocator: {entries: [e_answer], submissions: []}
+    rows:
+      - id: msg_answer
+        type: assistant
+        seq: 1
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"agent":"build","model":{"id":"gpt-5","providerID":"openai","variant":"high"},"content":[{"type":"text","id":"part_answer","text":"answer"}],"time":{"created":1000,"completed":2000}}'
+    want:
+      own: 0
+      turnCount: 1
+      main:
+        - ref: e_answer
+          role: assistant
+          entryType: text
+          content: answer
+          thinkingLevel: high
+          origin: agent_output
+          actor: unknown
+          delivery: system_lifecycle
+          ownership: local
+          evidence: native_typed
+          modality: none
+  - name: opencode-message-no-variant
+    scope: {sessionId: ses_opencodeCurrentChild, shape: current, parentNullProven: true}
+    allocator: {entries: [e_answer], submissions: []}
+    rows:
+      - id: msg_answer
+        type: assistant
+        seq: 1
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"agent":"build","model":{"id":"gpt-5","providerID":"openai"},"content":[{"type":"text","id":"part_answer","text":"answer"}],"time":{"created":1000,"completed":2000}}'
+    want:
+      own: 0
+      turnCount: 1
+      main:
+        - ref: e_answer
+          role: assistant
+          entryType: text
+          content: answer
+          origin: agent_output
+          actor: unknown
+          delivery: system_lifecycle
+          ownership: local
+          evidence: native_typed
+          modality: none
   - name: opencode-current-typed-user
     scope:
       sessionId: ses_opencodeCurrentChild

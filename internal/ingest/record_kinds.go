@@ -165,7 +165,7 @@ func generateRecordKindRegistryFrom(vocabularies []recordKindAdapterVocabulary) 
 			IndexVersion:   versions.IndexVersion,
 			Fallback:       lowerRecordKindFallback(RecordKindRetained, "", ""),
 		}
-		if native, ok := NativeGenerationRepairTargets[vocabulary.Harness]; ok {
+		if native, ok := GenerationRepairTargets[vocabulary.Harness]; ok {
 			section.NativeVersions = &RecordKindVersions{AdapterVersion: native.AdapterVersion, IndexerVersion: native.IndexerVersion, IndexVersion: native.IndexVersion}
 		}
 		for _, declaration := range vocabulary.Inventories {
@@ -210,12 +210,12 @@ func (r RecordKindRegistry) validate() error {
 		if !ok || target != (HarvesterVersions{section.AdapterVersion, section.IndexerVersion, section.IndexVersion}) {
 			return fmt.Errorf("record-kind registry: harness %q baseline versions differ; verify against HarvesterVersionRegistry", harness)
 		}
-		native, hasNative := NativeGenerationRepairTargets[harness]
+		native, hasNative := GenerationRepairTargets[harness]
 		if hasNative != (section.NativeVersions != nil) {
-			return fmt.Errorf("record-kind registry: harness %q native version declaration missing or unexpected", harness)
+			return fmt.Errorf("record-kind registry: harness %q managed-generation version declaration missing or unexpected", harness)
 		}
 		if v := section.NativeVersions; v != nil && native != (HarvesterVersions{v.AdapterVersion, v.IndexerVersion, v.IndexVersion}) {
-			return fmt.Errorf("record-kind registry: harness %q native versions differ; verify against NativeGenerationRepairTargets", harness)
+			return fmt.Errorf("record-kind registry: harness %q managed-generation versions differ; verify against GenerationRepairTargets", harness)
 		}
 		fallback := section.Fallback
 		if fallback.Kind != "" || fallback.Match != "" || fallback.Status != RecordKindRetainedUnknown || fallback.Preview != RecordKindPreviewNo || fallback.Payload == "" || fallback.Reason == "" || fallback.Source == "" || fallback.Outcome != indexformat.OutcomeOpaque || fallback.EntryMode != RecordKindEntryModeRetainedEvidence || fallback.Coordinates != RecordKindCoordinatesRequired {
@@ -474,7 +474,7 @@ func (r RecordKindRegistry) Markdown() string {
 		fmt.Fprintf(&out, "## %s (adapter %d, indexer %d)\n\n", string(harness), section.AdapterVersion, section.IndexerVersion)
 		fmt.Fprintf(&out, "Baseline index format: %d.\n\n", section.IndexVersion)
 		if v := section.NativeVersions; v != nil {
-			fmt.Fprintf(&out, "Native generation: adapter %d, indexer %d, index format %d.\n\n", v.AdapterVersion, v.IndexerVersion, v.IndexVersion)
+			fmt.Fprintf(&out, "Managed generation: adapter %d, indexer %d, index format %d.\n\n", v.AdapterVersion, v.IndexerVersion, v.IndexVersion)
 		}
 		fmt.Fprintf(&out, "Unseen valid kinds: **%s**, preview **%s**. %s Payload: %s. Source: `%s`.\n\n", section.Fallback.Status, section.Fallback.Preview, section.Fallback.Reason, section.Fallback.Payload, section.Fallback.Source)
 		out.WriteString("| Context | Namespace | Kind | Match | Status | Preview | Payload | Detail | Source |\n")

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/api"
@@ -16,9 +17,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // stubDetailReader serves one canned snapshot through the production
@@ -219,7 +220,7 @@ func TestDetailPayloadPreviewSplit(t *testing.T) {
 	}
 }
 
-// seedMountedSession inserts the retained session row a generation activation
+// seedMountedSession inserts the session row a generation activation
 // needs into a copy of the golden database.
 func seedMountedSession(t *testing.T, dbPath, sid string) {
 	t.Helper()
@@ -298,7 +299,7 @@ func activateMountedCandidate(t *testing.T, db *store.Store, sid schema.SessionI
 	if err != nil {
 		t.Fatalf("mounted capture: %v", err)
 	}
-	outcome, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{
+	outcome, err := db.ActivateGenerationCandidate(t.Context(), ingest.GenerationActivation{
 		Generation: v2, Blobs: blobs,
 		IndexerVersion: 1, IndexedAtMs: 1, ContentCapture: capture,
 	})
@@ -316,6 +317,7 @@ func TestDetailPayloadWithReaderRealStore(t *testing.T) {
 	ctx := context.Background()
 	completeID := "45454545-4545-4545-4545-454545454550"
 	previewID := "45454545-4545-4545-4545-454545454551"
+	latestAttemptID := "45454545-4545-4545-4545-454545454552"
 
 	openMountedStore := func(t *testing.T, sid string) *store.Store {
 		t.Helper()
@@ -387,6 +389,82 @@ func TestDetailPayloadWithReaderRealStore(t *testing.T) {
 			t.Fatalf("mounted preview turns = %+v, want bounded preview prose", payload.Turns)
 		}
 	})
+
+	t.Run("latest-attempt", func(t *testing.T) {
+		// A complete authority with a newer incomplete preview attempt kept
+		// beside it: the full read refuses with the latest-attempt sentinel, so
+		// the detail path must serve the bounded preview from the latest-attempt
+		// attempt with partial diagnostics, never the legacy callback.
+		db := openMountedStore(t, latestAttemptID)
+		sid := schema.SessionID(latestAttemptID)
+		activateMountedCandidate(t, db, sid, "gen-mnt-authority", "complete",
+			[]string{"mounted authority prose one", "mounted authority prose two"})
+		conn, err := db.Pool().Take(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sqlitex.Execute(conn, `UPDATE sessions SET artifact_hash = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{strings.Repeat("a", 64), latestAttemptID}}); err != nil {
+			db.Pool().Put(conn)
+			t.Fatal(err)
+		}
+		db.Pool().Put(conn)
+		retainMountedCandidate(t, db, sid, "gen-mnt-attempt", []string{"mounted latest-attempt prose"})
+
+		legacyCalls := 0
+		legacy := func(context.Context, string) (*schema.SessionDetailPayload, error) {
+			legacyCalls++
+			return &schema.SessionDetailPayload{ID: "legacy"}, nil
+		}
+		payload, err := api.DetailPayloadWithReader(ctx, db, db, latestAttemptID, legacy)
+		if err != nil {
+			t.Fatalf("mounted latest-attempt detail: %v", err)
+		}
+		if legacyCalls != 0 {
+			t.Fatal("mounted latest-attempt detail must not fall back to legacy content")
+		}
+		if payload.Diagnostics == nil || !payload.Diagnostics.Partial {
+			t.Fatalf("mounted latest-attempt detail must carry partial diagnostics: %+v", payload.Diagnostics)
+		}
+		if len(payload.Turns) != 1 || payload.Turns[0].Content != "mounted latest-attempt prose" {
+			t.Fatalf("mounted latest-attempt turns = %+v, want the latest attempt's bounded prose", payload.Turns)
+		}
+		// The counts must be the latest attempt's own: the authority reports
+		// 2 turns / 0 tool calls, so a payload that blended the authority's
+		// metadata would report those instead.
+		if payload.TurnCount != 1 || payload.ToolCallCount != 3 {
+			t.Fatalf("mounted latest-attempt counts = %d/%d, want the latest attempt's 1/3", payload.TurnCount, payload.ToolCallCount)
+		}
+	})
+}
+
+// retainMountedCandidate activates one assessed unaccounted-omission preview as
+// the latest attempt over the session's installed authority.
+func retainMountedCandidate(t *testing.T, db *store.Store, sid schema.SessionID, genID string, texts []string) {
+	t.Helper()
+	v2, blobs := mountedV2(t, sid, genID, "complete", texts)
+	// The latest attempt's own producer stats: the authority reports 2 turns and
+	// 0 tool calls, so the counts the detail payload reports name which
+	// generation the read bound.
+	v2.Generation.Metadata.Stats.ToolCallCount = 3
+	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
+		Harness: ingest.Harness("claude-code"), Result: v2,
+		Policy: ingest.CaptureFreshCandidate, Authoritative: true,
+		SourceOmitted: true, Unaccounted: true,
+	})
+	if err != nil {
+		t.Fatalf("latest-attempt assessment: %v", err)
+	}
+	capture, err := assessment.ContentCapture(ingest.ContentSourceNewIngest, ingest.TranscriptOriginFile, 1)
+	if err != nil {
+		t.Fatalf("latest-attempt capture: %v", err)
+	}
+	outcome, err := db.ActivateGenerationCandidate(t.Context(), ingest.GenerationActivation{
+		Generation: v2, Blobs: blobs,
+		IndexerVersion: 18, IndexedAtMs: 2, ContentCapture: capture,
+	})
+	if err != nil || outcome.Disposition != ingest.ActivationLatestAttemptPreview {
+		t.Fatalf("latest-attempt activation: outcome=%+v err=%v", outcome, err)
+	}
 }
 
 // stubLinkProvider exercises the non-store subscription path: it offers exactly

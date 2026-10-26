@@ -22,7 +22,7 @@ import (
 //go:embed testdata/content_backfill.yaml
 var captureBackfillFixtureData []byte
 
-func TestRetainedContentBackfill(t *testing.T) {
+func TestStoredContentBackfill(t *testing.T) {
 	t.Parallel()
 	var fixtures struct {
 		Required []string `yaml:"required_names"`
@@ -87,6 +87,8 @@ func TestRetainedContentBackfill(t *testing.T) {
 					meta.Project.Hash = ""
 				}
 				meta.ModelHarness = harness
+				adapterVersion := ingest.HarvesterVersionRegistry[harness].AdapterVersion
+				meta.AdapterVersion = &adapterVersion
 				meta.Source.FilePath = "/synthetic/missing.jsonl"
 				meta.Source.Format = ingest.SourceFormatJSONL
 				dir := filepath.Join(testOutputDir, testutil.TestHostSlug)

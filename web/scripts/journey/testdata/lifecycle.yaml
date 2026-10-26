@@ -1,0 +1,7 @@
+requiredNames: [forced-child-reaped-once, stale-owner-recovered, stale-owner-other-temp-context, concurrent-recovery-loser-preserves-winner, missing-command-reaped]
+cases:
+  - {name: forced-child-reaped-once, mode: forced, termMs: 50, killMs: 2000}
+  - {name: stale-owner-recovered, mode: stale, termMs: 50, killMs: 2000}
+  - {name: stale-owner-other-temp-context, mode: changed-temp, termMs: 50, killMs: 2000}
+  - {name: concurrent-recovery-loser-preserves-winner, mode: concurrent, termMs: 50, killMs: 2000}
+  - {name: missing-command-reaped, mode: missing, termMs: 50, killMs: 2000}

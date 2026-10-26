@@ -1,0 +1,171 @@
+collectiveId: &collective 33333333-3333-4333-8333-333333333333
+alternateCollectiveId: &alternate 44444444-4444-4444-8444-444444444444
+transcriptId: 22222222-2222-4222-8222-222222222222
+recordedAt: 2026-01-01T00:00:00.000000001Z
+observedAt: 2026-01-10T00:00:00Z
+ordinals: [1, 2, 3, 4, 5, 6, 7]
+receiptIDs: [r1, r2, r3, r4, r5, r6, r7]
+diagnosticIDs:
+  - 50000000-0000-4000-8000-000000000001
+  - 50000000-0000-4000-8000-000000000002
+  - 50000000-0000-4000-8000-000000000003
+  - 50000000-0000-4000-8000-000000000004
+  - 50000000-0000-4000-8000-000000000005
+  - 50000000-0000-4000-8000-000000000006
+  - 50000000-0000-4000-8000-000000000007
+requiredNames:
+  - evidence-all-three-categories-multipage-remote
+  - evidence-all-three-categories-multipage-receipts
+  - evidence-all-three-categories-multipage-diagnostics
+  - evidence-diagnostic-between-every-page-remote
+  - evidence-diagnostic-between-every-page-receipts
+  - evidence-selected-change-409
+  - evidence-new-receipt-conflicts-only-receipts
+  - evidence-diagnostic-change-conflicts-only-diagnostics
+  - evidence-equivalent-poll-keeps-attempt-token
+  - evidence-selected-coverage-change-409
+  - evidence-missing-revision-page-two-400
+  - evidence-malformed-token-400
+  - evidence-token-other-kind-409
+  - evidence-token-other-scope-409
+  - evidence-recreated-scope-old-token-409
+  - evidence-empty-beyond-total
+  - evidence-filter-before-total
+  - evidence-max-page-bound
+  - evidence-catalog-rename-keeps-receipt-token
+cases:
+  - name: evidence-all-three-categories-multipage-remote
+    kind: remote-attempts
+    mode: traverse
+    limit: 1
+    wantStatus: 200
+    wantTotal: 7
+    wantIDs: &remoteIDs ['1','2','3','4','5','6','7']
+  - name: evidence-all-three-categories-multipage-receipts
+    kind: receipts
+    mode: traverse
+    limit: 1
+    wantStatus: 200
+    wantTotal: 7
+    wantIDs: &receiptIDs [r1,r2,r3,r4,r5,r6,r7]
+  - name: evidence-all-three-categories-multipage-diagnostics
+    kind: operation-diagnostics
+    mode: traverse
+    limit: 1
+    wantStatus: 200
+    wantTotal: 7
+    wantIDs: &diagnosticIDs ['50000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000002','50000000-0000-4000-8000-000000000003','50000000-0000-4000-8000-000000000004','50000000-0000-4000-8000-000000000005','50000000-0000-4000-8000-000000000006','50000000-0000-4000-8000-000000000007']
+  - name: evidence-diagnostic-between-every-page-remote
+    kind: remote-attempts
+    mode: diagnostic-between-pages
+    limit: 1
+    wantStatus: 200
+    wantTotal: 7
+    wantIDs: *remoteIDs
+  - name: evidence-diagnostic-between-every-page-receipts
+    kind: receipts
+    mode: diagnostic-between-pages
+    limit: 1
+    wantStatus: 200
+    wantTotal: 7
+    wantIDs: *receiptIDs
+  - name: evidence-selected-change-409
+    kind: remote-attempts
+    mode: selected-change
+    limit: 1
+    page: 2
+    wantStatus: 409
+  - name: evidence-new-receipt-conflicts-only-receipts
+    kind: receipts
+    mode: selected-change
+    limit: 1
+    page: 2
+    wantStatus: 409
+  - name: evidence-diagnostic-change-conflicts-only-diagnostics
+    kind: operation-diagnostics
+    mode: selected-change
+    limit: 1
+    page: 2
+    wantStatus: 409
+  - name: evidence-equivalent-poll-keeps-attempt-token
+    kind: remote-attempts
+    mode: equivalent-poll
+    limit: 1
+    page: 2
+    wantStatus: 200
+    wantTotal: 7
+    wantIDs: ['2']
+  - name: evidence-selected-coverage-change-409
+    kind: remote-attempts
+    mode: coverage-change
+    limit: 1
+    page: 2
+    wantStatus: 409
+  - name: evidence-missing-revision-page-two-400
+    kind: receipts
+    mode: query
+    token: missing
+    limit: 1
+    page: 2
+    wantStatus: 400
+  - name: evidence-malformed-token-400
+    kind: receipts
+    mode: query
+    token: malformed
+    limit: 1
+    page: 2
+    wantStatus: 400
+  - name: evidence-token-other-kind-409
+    kind: receipts
+    mode: query
+    token: other-kind
+    limit: 1
+    page: 2
+    wantStatus: 409
+  - name: evidence-token-other-scope-409
+    kind: receipts
+    mode: query
+    token: other-scope
+    limit: 1
+    page: 2
+    wantStatus: 409
+  - name: evidence-recreated-scope-old-token-409
+    kind: receipts
+    mode: query
+    token: other-incarnation
+    limit: 1
+    page: 2
+    wantStatus: 409
+  - name: evidence-empty-beyond-total
+    kind: receipts
+    mode: query
+    limit: 1
+    page: 9007199254740991
+    wantStatus: 200
+    wantTotal: 7
+    wantIDs: []
+  - name: evidence-filter-before-total
+    kind: receipts
+    mode: query
+    collectiveId: *alternate
+    limit: 1
+    page: 1
+    wantStatus: 200
+    wantTotal: 1
+    wantIDs: [r7]
+  - name: evidence-max-page-bound
+    kind: remote-attempts
+    mode: query
+    limit: 200
+    page: 1
+    wantStatus: 200
+    wantTotal: 7
+    wantIDs: *remoteIDs
+  - name: evidence-catalog-rename-keeps-receipt-token
+    kind: receipts
+    mode: catalog-rename
+    limit: 1
+    page: 2
+    wantStatus: 200
+    wantTotal: 7
+    wantIDs: [r2]

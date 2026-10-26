@@ -1,11 +1,32 @@
 package ingest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 )
+
+type writeAdvisoryReporterKey struct{}
+
+// WithWriteAdvisoryReporter lets a store lane retain a nonfatal advisory in
+// the harvest report even when an interactive progress renderer mutes slog.
+// The reporter must be safe for concurrent staging workers.
+func WithWriteAdvisoryReporter(ctx context.Context, report func(DiagnosticEntry)) context.Context {
+	return context.WithValue(ctx, writeAdvisoryReporterKey{}, report)
+}
+
+// ReportWriteAdvisory returns false when no harvest reporter is attached, so
+// standalone store callers can fall back to their normal logging surface.
+func ReportWriteAdvisory(ctx context.Context, diagnostic DiagnosticEntry) bool {
+	report, ok := ctx.Value(writeAdvisoryReporterKey{}).(func(DiagnosticEntry))
+	if !ok || report == nil {
+		return false
+	}
+	report(diagnostic)
+	return true
+}
 
 // reportMetadataRefusal retains nonfatal warnings independently from slog,
 // which interactive callers may suppress while rendering progress.
@@ -18,6 +39,11 @@ func (p *Pipeline) reportMetadataRefusal(location string, err error) {
 	}
 	diagnostic := DiagnosticEntry{ErrorType: "metadata_refused", Location: location, Message: err.Error(), Remediation: remedy}
 	p.reportDiagnostic(diagnostic)
+	// Only a literal session identity is associated here; managed paths are
+	// intentionally not parsed to infer ownership.
+	if sid, err := NewSessionID(location); err == nil {
+		p.reportSessionDiagnostic(sid, diagnostic)
+	}
 }
 
 // reportDiagnostic reports one entry to the user, once.
@@ -44,7 +70,7 @@ func (p *Pipeline) reportDiagnostic(diagnostic DiagnosticEntry) {
 }
 
 func (p *Pipeline) reportIndexRefusal(sessionID SessionID, err error) {
-	p.reportDiagnostic(DiagnosticEntry{
+	p.reportSessionDiagnostic(sessionID, DiagnosticEntry{
 		ErrorType: "index_refused", Location: string(sessionID),
 		Message:     fmt.Sprintf("index session %s: %v; this attempt preserved the last successful index", sessionID, err),
 		Remediation: "Use a compatible Peasant build or fix the reported parser/input/store problem, then retry harvest.",
@@ -56,6 +82,7 @@ func (p *Pipeline) resetDiagnostics() {
 	defer p.diagnosticsMu.Unlock()
 	p.diagnostics = nil
 	p.diagnosticSet = nil
+	p.diagnosticSessions = nil
 }
 
 func (p *Pipeline) snapshotDiagnostics() []DiagnosticEntry {

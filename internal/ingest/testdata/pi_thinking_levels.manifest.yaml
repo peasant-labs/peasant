@@ -1,0 +1,10 @@
+requiredNames:
+  - invalid_raw_is_dropped_with_diagnostic
+  - off_is_off_identity
+  - medium_then_high_seed_is_earliest
+  - first_valid_observation_after_absent_row_seeds
+  - change_records_preserve_source_order
+  - repeated_governing_level_collapses_in_history
+  - assistant_record_level_wins
+  - unrecognized_level_is_absent_with_raw
+  - no_level_evidence_stays_absent

@@ -66,9 +66,34 @@ describe('useTheme', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
   });
 
-  it('treats a garbage stored value as the dark default', () => {
+  it('treats a garbage stored value as no choice, so the system scheme decides', () => {
     window.localStorage.setItem('peasant-theme', 'chartreuse');
     render(<App />);
     expect(screen.getByTestId('reader')).toHaveTextContent('dark');
+  });
+
+  describe('with a light system scheme', () => {
+    const original = window.matchMedia;
+    beforeEach(() => {
+      window.matchMedia = ((query: string) => ({
+        matches: query === '(prefers-color-scheme: light)',
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })) as unknown as typeof window.matchMedia;
+    });
+    afterEach(() => { window.matchMedia = original; });
+
+    it('follows the system until a theme is picked', () => {
+      render(<App />);
+      expect(screen.getByTestId('reader')).toHaveTextContent('light');
+      expect(document.documentElement.getAttribute('data-tb-theme')).toBe('light');
+    });
+
+    it('lets a stored choice win over the system', () => {
+      window.localStorage.setItem('peasant-theme', 'dark');
+      render(<App />);
+      expect(screen.getByTestId('reader')).toHaveTextContent('dark');
+    });
   });
 });

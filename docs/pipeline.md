@@ -196,6 +196,44 @@ carried annotation targets. If remapping would detach existing entry annotations
 the rewrite is refused and logged as a warning instead of corrupting annotation
 targets.
 
+### Managed generations and the latest attempt
+
+A store that can persist and read a managed generation replaces the relational
+format-1 projection with one immutable format-2 generation per session. The
+generation owns its metadata, content records and completeness; the session row
+records the generation identity, the producer revision and the verified pair
+identity that produced it.
+
+One case is deliberately not a replacement. A managed write whose assessed
+capture is an unaccounted source omission — the stored metadata records that a
+source record was left out, and the stored transcript carries no stand-in for it
+— over a session that already holds a full read authority is **retained** as the
+session's latest attempt instead of installed:
+
+- The active authority is untouched: its generation, content, certificate and
+  stamps stay byte-identical, and the write never enters repair.
+- The attempt is recorded on the session row (`latest_attempt_*`) with its own
+  generation, producer revision, adapter revision and producer stats. An attempt
+  that changes the pair, the producer target or the adapter target replaces the
+  previous attempt; an identical repeat is a true no-op.
+- The durable report is the existing `skipped` outcome with the held reason and
+  a literal zero entry count, so the harvest counts no indexed session.
+- The mounted reads (`ReadSessionAvailable`, the kickstart pane, the share-wizard
+  preview) and the preview-snapshot detail serve the latest attempt's own
+  entries, capture and counts, with partial diagnostics. The full read and the
+  export refuse with the latest-attempt sentinel instead of serving either
+  generation blended.
+- The explicit last-good selection (`--last-good`,
+  `SessionReadSelection{LastGood}`) serves the active full authority. It is
+  refused when the active authority is itself only a preview.
+- Publication readiness refuses while the attempt is retained, naming the
+  coexistence in the actionable reason.
+
+The attempt settles once the pair, the producer target and the adapter target
+all match the recorded facets. A newer complete generation, an explicit rebuild,
+or a skip/repair finalization clears the latest-attempt pointer in the same
+transaction; the ordinary sweep keeps the latest attempt's rows until then.
+
 ### ANNOTATE fast paths
 
 ANNOTATE records an `annotation_run_state` row after a successful classifier pass.
@@ -296,11 +334,24 @@ stamped with the size and the modification time of the file that produced it.
 Rules:
 
 - Discovery stats each transcript, then reuses the cached record when the scope,
-  the size, and the modification time all agree.
+  the size, and the modification time all agree, the origin is present, and the
+  structural proof version matches this build.
 - A new or changed transcript is mined again, and the fresh record replaces the
   cached one. The ambiguity rule is unchanged.
 - One read now produces every content fact discovery needs: the conversation
-  check, the teammate identity, the spawn records, and the display hints.
+  check, the teammate identity, the spawn records, the display hints, and the
+  structural identity proof. The proof stores recorded session IDs, UUID/parent
+  coordinates, record kinds/subtypes, agent IDs, sidechain flags, correlated
+  native spawn IDs, and the captured content digest; it stores no message text.
+- Legacy or prior-version structural proof is re-mined once even when the file
+  stat is unchanged. After a successful cache write, the next unchanged discovery
+  reads the recovered proof without reading the transcript. Malformed stored
+  identity records are skipped and recovered the same way. Recorded session IDs
+  are validated before writing; an invalid ID rolls back the entire cache update.
+- Cached proof helps discovery select ownership, but does not authorize
+  extraction: the adapter verifies the actual captured bytes. Managed captures
+  can retain previously proved relationships after native files rotate only
+  under the retained-transcript identity and digest checks.
 - Discovery deletes the records of transcripts that are gone, but only under the
   source paths that the run walked.
 - The cache is best effort. A missing or failing cache makes discovery mine every

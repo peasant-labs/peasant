@@ -1,0 +1,52 @@
+# Copyright 2021 Roxy Light
+# SPDX-License-Identifier: ISC
+
+name: Build
+on:
+  - push
+  - pull_request
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: ["1.24"]
+        arch: [amd64]
+        include:
+          - os: ubuntu-latest
+            go: "1.24"
+            arch: "386"
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go }}
+    - name: Run tests with race detector
+      run: go test -mod=readonly -race -tags="libc.memgrind" -v ./...
+      if: ${{ matrix.arch == 'amd64' }}
+      env:
+        GOARCH: ${{ matrix.arch }}
+    - name: Run tests without race detector
+      run: go test -mod=readonly -v -tags="libc.memgrind" ./...
+      if: ${{ matrix.arch != 'amd64' }}
+      env:
+        GOARCH: ${{ matrix.arch }}
+  migrate:
+    name: Migration Tool
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: "1.24"
+    - name: Run tests
+      run: go test -mod=readonly -race -v ./...
+      working-directory: ./cmd/zombiezen-sqlite-migrate

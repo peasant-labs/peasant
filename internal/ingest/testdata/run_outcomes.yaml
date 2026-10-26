@@ -1,0 +1,24 @@
+requiredNames: [ordinary-worker-failure, acquisition-failure, session-warning, second-session-warning, run-warning]
+cases:
+  - name: ordinary-worker-failure
+    sessionId: 59000000-0000-0000-0000-000000000001
+    workerError: true
+    reason: error
+    kind: worker_error
+  - name: acquisition-failure
+    sessionId: 59000000-0000-0000-0000-000000000002
+    workerError: true
+    acquisition: true
+    reason: adapter_refresh_unavailable
+    kind: worker_error
+  - name: session-warning
+    sessionId: 59000000-0000-0000-0000-000000000003
+    reason: record_too_large
+    kind: diagnostic
+  - name: run-warning
+    reason: index_coverage_unavailable
+    kind: diagnostic
+  - name: second-session-warning
+    sessionId: 59000000-0000-0000-0000-000000000004
+    reason: record_too_large
+    kind: diagnostic

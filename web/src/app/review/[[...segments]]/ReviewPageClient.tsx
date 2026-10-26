@@ -27,7 +27,7 @@ import type { SessionsPayload, SessionSummary } from '@/types/messages';
 import { mapHref, reviewHref, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { ChangeGraph } from './ChangeGraph';
 import { ChangeDetail } from './ChangeDetail';
-import { ExplainerToggle, useExplainer, type ExplainerState } from '@/components/Explainer';
+import { DocsLink } from '@/components/DocsLink';
 import { projectNames, resolveProjectHash } from './sessions';
 
 const CHANNELS: ['sessions'] = ['sessions'];
@@ -58,11 +58,6 @@ export function ReviewPageClient({
   const projects = useMemo(() => projectNames(sessions), [sessions]);
   const sessionsReady = data !== undefined;
 
-  // One explainer per active view (list vs detail), its "?" toggle lifted into
-  // the page title to match the other surfaces. The content box itself
-  // renders at the top of whichever child view is active.
-  const explainer = useExplainer(branch ? 'change-detail' : 'changes');
-
   const effectiveProject =
     projectName ?? (projects.length === 1 ? projects[0] : null);
   const projectHash = useMemo(
@@ -72,6 +67,7 @@ export function ReviewPageClient({
 
   const cleanName = effectiveProject ? displayProject(effectiveProject) : null;
   const crumbs = [
+    { label: 'home', href: '/' },
     { label: 'changes', href: cleanName || branch ? '/review' : undefined },
     ...(cleanName && effectiveProject
       ? [
@@ -101,37 +97,27 @@ export function ReviewPageClient({
         projectName={effectiveProject}
         projectHash={projectHash}
         branch={branch}
-        explainer={explainer}
       />
     );
   }
 
-  // The "?" sits beside the title only when a graph/detail view is actually
-  // rendered (the same condition that produces ReviewData) — never over the
-  // skeleton, error, or choose-from-home states.
-  const showExplainerToggle = Boolean(sessionsReady && effectiveProject && projectHash);
+  // How to read changes lives in the docs. Its "?" link sits beside the title
+  // only when a graph/detail view is actually rendered (the same condition that
+  // produces ReviewData), never over the skeleton, error, or choose-from-home states.
+  const showDocsLink = Boolean(sessionsReady && effectiveProject && projectHash);
 
   return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
+    <div className="asb-page animate-fade-up">
       <Breadcrumbs items={crumbs} />
 
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-ink">
+            <h1 className={branch ? 'iu-page-title iu-page-title-content page-title' : 'iu-page-title page-title'}>
               {branch ?? 'changes'}
             </h1>
-            {showExplainerToggle && <ExplainerToggle explainer={explainer} />}
+            {showDocsLink && <DocsLink topic="changes" variant="icon">how to read changes</DocsLink>}
           </div>
-          {branch ? (
-            <p className="text-sm text-ink-3 mt-1">
-              What this line of work changes, and the conversations behind it.
-            </p>
-          ) : (
-            <p className="text-sm text-ink-3 mt-1">
-              Each project&rsquo;s lines of work, compared with its main version.
-            </p>
-          )}
         </div>
         {effectiveProject && projectHash && (
           <Link
@@ -145,8 +131,9 @@ export function ReviewPageClient({
         )}
       </div>
 
-      {/* One disconnected strip (null while connected) — the nav pill is the
-          steady-state indicator. Replaces the old stacking strips. */}
+      {/* One disconnected strip (null while connected) for this page's data; the
+          offline notice under the header speaks for the app. Replaces the old
+          stacking strips. */}
       <ConnectionStatus connected={connected} hasData={sessions.length > 0} />
 
       {body}
@@ -162,13 +149,10 @@ function ReviewData({
   projectName,
   projectHash,
   branch,
-  explainer,
 }: {
   projectName: string;
   projectHash: ProjectHash;
   branch: string | null;
-  /** Shared explainer state — toggle is in the page title, box renders here. */
-  explainer: ExplainerState;
 }) {
   const [list, setList] = useState<ReviewListPayload | null>(null);
   const [detail, setDetail] = useState<DecodedChangeDetailPayload | null>(null);
@@ -238,7 +222,6 @@ function ReviewData({
         branch={branch}
         payload={detail}
         navBranches={navBranches}
-        explainer={explainer}
       />
     );
   }
@@ -247,7 +230,7 @@ function ReviewData({
     // home picker (the single-project home embed carries its own anchor).
     return (
       <div data-tour="changes-list">
-        <ChangeGraph projectHash={projectHash} projectName={projectName} payload={list} explainer={explainer} />
+        <ChangeGraph projectHash={projectHash} projectName={projectName} payload={list} />
       </div>
     );
   }

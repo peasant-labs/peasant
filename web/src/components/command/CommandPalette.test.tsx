@@ -5,11 +5,15 @@ import { render, screen, cleanup, fireEvent, act, waitFor } from '@testing-libra
 import { parseStrictYAML, requireExactRequiredFields, requireRecord } from '@/test/strictYaml';
 import {
   CommandPalette,
+  directLookupLabel,
   filterCommands,
+  isDirectLookupResult,
   OPEN_COMMAND_PALETTE_EVENT,
   type Command,
 } from './CommandPalette';
 import { projectViewerStateFixture } from '@/components/picker/projectViewerStateFixtures';
+import { loadShellChromeManifest, paletteFailures } from '../../../scripts/visual/shell-chrome-manifest.mjs';
+import { SHELL_CHROME_CASES } from '@/test/fixtures/shellChromeCases';
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
@@ -17,15 +21,14 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 const toggle = vi.fn();
 vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'light', toggle }) }));
 
-// The code-map "go to" command and per-project "· map" jumps are gated on the
+// The "go to" commands are the header's nav sections, read with the
 // server-advertised capability set (ServerCapabilitiesContext). Tests drive the
 // ReadonlySet<string> of advertised tokens directly — the shape the real
-// provider exposes — so a case reads as the token set the palette reacts to. The
-// search/discovery/retry/a11y cases exercise map commands, so the default keeps
-// the code-map token advertised; the explicit capability-matrix cases below
-// override it to prove map absence vs presence.
+// provider exposes. The default advertises the code-map token, so every case
+// also proves an experimental server brings no route-only section back.
 const CODE_MAP_ENABLED: ReadonlySet<string> = new Set(['code_map_navigation_v1']);
 let capabilities: ReadonlySet<string> = CODE_MAP_ENABLED;
+const shellManifest = loadShellChromeManifest();
 vi.mock('@/contexts/ServerCapabilitiesContext', () => ({
   useServerCapabilities: () => ({
     status: 'ready',
@@ -42,6 +45,14 @@ const validFixture = requireRecord(fixture.valid, 'search discovery fixture.vali
 requireExactRequiredFields(validFixture, ['search', 'discovery'], 'search discovery fixture.valid');
 const invalidFixtures = fixture.invalid as Array<Record<string, unknown>>;
 if (invalidFixtures.length !== 4) throw new Error(`search discovery fixture must contain exactly 4 invalid rows, got ${invalidFixtures.length}`);
+
+const directLookupFixturePath = resolve(process.cwd(), 'src/components/command/testdata/search_direct_lookup.yaml');
+const directLookupFixture = requireRecord(parseStrictYAML(readFileSync(directLookupFixturePath, 'utf8'), 'search direct lookup fixture'), 'search direct lookup fixture');
+requireExactRequiredFields(directLookupFixture, ['valid', 'project_hash'], 'search direct lookup fixture');
+const directLookupValid = requireRecord(directLookupFixture.valid, 'search direct lookup fixture.valid');
+requireExactRequiredFields(directLookupValid, ['search', 'discovery'], 'search direct lookup fixture.valid');
+const directLookupProjectHash = requireRecord(directLookupFixture.project_hash, 'search direct lookup fixture.project_hash');
+requireExactRequiredFields(directLookupProjectHash, ['search', 'discovery'], 'search direct lookup fixture.project_hash');
 
 /**
  * Wrap the fixture's flat search results in the opt-in grouped envelope the
@@ -88,7 +99,6 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input: string | URL) => {
     const url = new URL(String(input), 'http://localhost');
-    if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
     if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope({ results: [] }));
     if (url.pathname === '/api/v1/web/discovery') return Response.json({ items: [] });
     throw new Error(`unexpected test request ${url.pathname}`);
@@ -114,6 +124,26 @@ describe('filterCommands', () => {
   });
 });
 
+describe('direct lookup rows', () => {
+  it('treats an empty or whitespace-only snippet as a direct lookup', () => {
+    expect(isDirectLookupResult({ snippet: '' })).toBe(true);
+    expect(isDirectLookupResult({ snippet: '   ' })).toBe(true);
+    expect(isDirectLookupResult({ snippet: 'fix the [pipeline] retry' })).toBe(false);
+  });
+
+  it('labels a direct hit with its session and project identity', () => {
+    expect(directLookupLabel({ sessionId: 'sess-abc', project: '/work/alpha-project' }, PROJECT_HASH)).toBe(
+      'session sess-abc in alpha-project',
+    );
+  });
+
+  it('falls back to the validated project hash when the wire project is empty', () => {
+    expect(directLookupLabel({ sessionId: 'sess-abc', project: '' }, PROJECT_HASH)).toBe(
+      `session sess-abc in ${PROJECT_HASH}`,
+    );
+  });
+});
+
 describe('CommandPalette', () => {
   function open() {
     render(<CommandPalette />);
@@ -134,73 +164,48 @@ describe('CommandPalette', () => {
   it('navigates to a nav section on Enter', () => {
     open();
     const input = screen.getByRole('combobox');
-    fireEvent.change(input, { target: { value: 'Go to Code Map' } });
+    fireEvent.change(input, { target: { value: 'go to home' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(push).toHaveBeenCalledWith('/map');
+    expect(push).toHaveBeenCalledWith('/');
   });
 
-  // Explicit capability-matrix cases: the code-map "go to" nav command and the
-  // per-project "· map" jump surface only when the server advertises the code-map
-  // token. The non-gated nav commands (analytics, changes) stay in canonical
-  // fairtrade order either way.
-  it('omits code-map discoverability when the server advertises no capabilities', async () => {
-    capabilities = new Set();
+  // The palette links to what the header links to and nothing more: no
+  // per-project jumps into changes or the code map, and no "go to" command for
+  // a route-only section — with or without the code-map capability.
+  it.each(SHELL_CHROME_CASES.paletteCapabilities.map((set) => [set.name, set.tokens] as const))('holds the shell manifest palette rules with capability set %s advertised', async (_name, tokens) => {
+    capabilities = new Set(tokens);
     open();
-    // Project commands populate once the shared summary resolves.
-    await waitFor(() => expect(screen.getByText('alpha-project · changes')).toBeInTheDocument());
-    // No per-project "· map" jump, and no "go to code map" nav command.
-    expect(screen.queryByText('alpha-project · map')).not.toBeInTheDocument();
-    expect(screen.queryByText('go to code map')).not.toBeInTheDocument();
-    // The non-gated nav commands remain, in canonical home-first order.
-    const home = screen.getByText('go to home');
-    const analytics = screen.getByText('go to analytics');
-    expect(home.compareDocumentPosition(analytics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Let any first-open request settle before reading the commands.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(paletteFailures(shellManifest)).toEqual([]);
+    expect(screen.getByText('go to home')).toBeInTheDocument();
+    for (const label of ['go to analytics', 'go to changes', 'go to code map', 'alpha-project · changes', 'alpha-project · map']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+    // Project jumps are gone, so opening the palette no longer loads projects.
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/projects/summary'));
   });
 
-  it('surfaces code-map discoverability when the server advertises the code-map token', async () => {
-    capabilities = new Set(['code_map_navigation_v1']);
-    open();
-    // The per-project "· map" jump appears once the shared summary resolves.
-    await waitFor(() => expect(screen.getByText('alpha-project · map')).toBeInTheDocument());
-    // "go to code map" is present, appended after the non-gated sections in
-    // canonical home · analytics · code map order.
-    const home = screen.getByText('go to home');
-    const analytics = screen.getByText('go to analytics');
-    const map = screen.getByText('go to code map');
-    expect(home.compareDocumentPosition(analytics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(analytics.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('lists the explicit session parent from the shared summary and jumps to its map', async () => {
-    open();
-    const input = screen.getByRole('combobox');
-    // Project commands appear once the summary fetch resolves.
-    await waitFor(() => expect(screen.getByText('alpha-project · map')).toBeInTheDocument());
-    fireEvent.change(input, { target: { value: 'alpha-project · map' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    expect(push).toHaveBeenCalledWith(`/map/${PROJECT_HASH}`);
-    expect(screen.queryByRole('status', { name: 'project selection recovery' })).not.toBeInTheDocument();
-    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
-  });
-
-  it('retries failed project discovery on the same surface and repopulates projects', async () => {
-    let projectCalls = 0;
+  it('retries failed search discovery on the same surface and shows the results', async () => {
+    const valid = validFixture.search as Record<string, unknown>;
+    let discoveryCalls = 0;
     fetchMock.mockImplementation(async (input: string | URL) => {
       const url = new URL(String(input), 'http://localhost');
-      if (url.pathname === '/api/v1/projects/summary') {
-        projectCalls += 1;
-        if (projectCalls === 1) throw new Error('database unavailable');
-        return Response.json({ projects: [{ projectHash: PROJECT_HASH, project: '/work/alpha-project', sessions: 3, recordedFiles: 1, totalFiles: 2, openChanges: 1 }] });
+      if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(valid));
+      if (url.pathname === '/api/v1/web/discovery') {
+        discoveryCalls += 1;
+        if (discoveryCalls === 1) throw new Error('discovery unavailable');
+        return Response.json(validFixture.discovery);
       }
-      if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope({ results: [] }));
-      if (url.pathname === '/api/v1/web/discovery') return Response.json({ items: [] });
       throw new Error(`unexpected test request ${url.pathname}`);
     });
     open();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'retry project discovery' }));
-    expect(await screen.findByText('alpha-project · map')).toBeInTheDocument();
-    expect(projectCalls).toBe(2);
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'pipeline' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'retry search discovery' }));
+    expect(await screen.findByText('fix the [pipeline] retry')).toBeInTheDocument();
+    expect(discoveryCalls).toBe(2);
   });
 
   it('does not search for queries shorter than 2 characters', async () => {
@@ -213,7 +218,7 @@ describe('CommandPalette', () => {
       await new Promise((r) => setTimeout(r, 250));
     });
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/search'));
-    expect(screen.queryByText('Messages')).not.toBeInTheDocument();
+    expect(screen.queryByText('messages')).not.toBeInTheDocument();
   });
 
   it('searches transcripts and deep-links a Messages hit to its task turn', async () => {
@@ -223,7 +228,6 @@ describe('CommandPalette', () => {
       const url = new URL(String(input), 'http://localhost');
       if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(valid));
       if (url.pathname === '/api/v1/web/discovery') return Response.json(discovery);
-      if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
       throw new Error(`unexpected test request ${url.pathname}`);
     });
     open();
@@ -232,7 +236,7 @@ describe('CommandPalette', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/search?q=pipeline&view=grouped&limit=20')));
     const hit = await screen.findByText('fix the [pipeline] retry');
-    expect(screen.getAllByText('Messages')).toHaveLength(2);
+    expect(screen.getAllByText('messages')).toHaveLength(2);
     expect(screen.getAllByTestId('search-annotation')).toHaveLength(2);
     expect(screen.getAllByTestId('search-annotation')[0]).toHaveTextContent('alpha-main·main·selected');
     expect(screen.getAllByTestId('search-annotation')[1]).toHaveTextContent('alpha-feature·main·unselected');
@@ -249,7 +253,6 @@ describe('CommandPalette', () => {
       const url = new URL(String(input), 'http://localhost');
       if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(valid));
       if (url.pathname === '/api/v1/web/discovery') return Response.json(validFixture.discovery);
-      if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
       throw new Error(`unexpected test request ${url.pathname}`);
     });
     open();
@@ -271,13 +274,67 @@ describe('CommandPalette', () => {
       const url = new URL(String(input), 'http://localhost');
       if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(search));
       if (url.pathname === '/api/v1/web/discovery') return Response.json(discovery);
-      if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
       throw new Error(`unexpected test request ${url.pathname}`);
     });
     open();
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'pipeline' } });
     expect(await screen.findByRole('alert')).toHaveTextContent(/discovery/i);
     expect(screen.queryByText(/pipeline/)).not.toBeInTheDocument();
+  });
+
+  it('renders an id-match row beside a content-match row and opens its transcript', async () => {
+    const search = directLookupValid.search as Record<string, unknown>;
+    const query = String((search as { query: unknown }).query);
+    fetchMock.mockImplementation(async (input: string | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(search));
+      if (url.pathname === '/api/v1/web/discovery') return Response.json(directLookupValid.discovery);
+      throw new Error(`unexpected test request ${url.pathname}`);
+    });
+    open();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: query } });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/search?q=')));
+    // The existing FTS5 row renders its snippet unchanged.
+    expect(await screen.findByText('fix the [pipeline] retry')).toBeInTheDocument();
+    // The direct-lookup row identifies the session in its project, not a snippet.
+    const directRow = await screen.findByText(`session ${query} in alpha-project`);
+    expect(directRow).toBeInTheDocument();
+    // A whitespace-only snippet also takes the identity branch with a label.
+    expect(await screen.findByText('session sess-whitespace in alpha-project')).toBeInTheDocument();
+    // No blank or snippet-less row renders alongside the three identified rows.
+    expect(screen.getAllByTestId('search-annotation')).toHaveLength(3);
+    const labels = screen.getAllByTestId('command-label');
+    expect(labels).toHaveLength(3);
+    for (const label of labels) {
+      expect(label.textContent?.trim().length).toBeGreaterThan(0);
+    }
+    fireEvent.mouseDown(directRow);
+    expect(push).toHaveBeenCalledWith(`/projects/${PROJECT_HASH}/${query}?turn=0`);
+  });
+
+  it('renders a project-hash match whose session differs from the query and opens its transcript', async () => {
+    const search = directLookupProjectHash.search as Record<string, unknown>;
+    const query = String((search as { query: unknown }).query);
+    const result = (search.results as Array<Record<string, unknown>>)[0];
+    const resultSessionId = String(result.sessionId);
+    const entryIndex = Number(result.entryIndex);
+    expect(resultSessionId).not.toBe(query);
+    fetchMock.mockImplementation(async (input: string | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/v1/search') return Response.json(groupedEnvelope(search));
+      if (url.pathname === '/api/v1/web/discovery') return Response.json(directLookupProjectHash.discovery);
+      throw new Error(`unexpected test request ${url.pathname}`);
+    });
+    open();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: query } });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/search?q=')));
+    // The empty wire project falls back to the validated hash in the label.
+    const hashRow = await screen.findByText(`session ${resultSessionId} in ${query}`);
+    expect(hashRow).toBeInTheDocument();
+    fireEvent.mouseDown(hashRow);
+    expect(push).toHaveBeenCalledWith(`/projects/${query}/${resultSessionId}?turn=${entryIndex}`);
   });
 
   it('runs the theme action and closes on Escape', () => {

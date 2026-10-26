@@ -21,11 +21,12 @@ import (
 
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
 type ClaudeAdapter struct {
-	fs             FileSystem
-	git            GitResolver
-	salt           salt.Salt
-	evidence       ClaudeEvidenceCache
-	locationLookup SessionLocationLookup
+	fs                  FileSystem
+	git                 GitResolver
+	salt                salt.Salt
+	evidence            ClaudeEvidenceCache
+	locationLookup      SessionLocationLookup
+	logicalParentLookup LogicalParentReader
 	// reminedCount is how many evidence records the most recent Discover had
 	// to mine again. It describes that one call and is overwritten by the next.
 	reminedCount int
@@ -34,6 +35,7 @@ type ClaudeAdapter struct {
 var _ SourceAdapter = (*ClaudeAdapter)(nil)
 var _ ClaudeEvidenceCaching = (*ClaudeAdapter)(nil)
 var _ ClaudeSessionLocationLookupCapable = (*ClaudeAdapter)(nil)
+var _ ClaudeLogicalParentLookupCapable = (*ClaudeAdapter)(nil)
 var _ DiscoveryStatistics = (*ClaudeAdapter)(nil)
 var _ OriginEvidenceMiner = (*ClaudeAdapter)(nil)
 
@@ -49,12 +51,19 @@ func (a *ClaudeAdapter) SetClaudeEvidenceCache(cache ClaudeEvidenceCache) {
 }
 
 // SetSessionLocationLookup gives the adapter a way to confirm whether a
-// candidate cross-run spawner is already persisted, and what parent it
-// already has, so re-parenting can trust data outside this run's own write
-// batch. Without a lookup, cross-run linking never fires (see
-// claudeSessionAlreadyStored and claudeStoredParent).
+// candidate cross-run spawner is already persisted, so re-parenting can trust
+// data outside this run's own write batch. Without a lookup, cross-run linking
+// never fires (see claudeSessionAlreadyStored).
 func (a *ClaudeAdapter) SetSessionLocationLookup(lookup SessionLocationLookup) {
 	a.locationLookup = lookup
+}
+
+// SetLogicalParentLookup gives the adapter the evidence-first accessor it walks
+// an ancestor chain with, so the cycle guard follows a stored session's durable
+// parent even while its availability cache is NULL. Without a lookup the walk
+// stops at this run's own candidate edges (see claudeStoredParent).
+func (a *ClaudeAdapter) SetLogicalParentLookup(lookup LogicalParentReader) {
+	a.logicalParentLookup = lookup
 }
 
 func (a *ClaudeAdapter) Harness() Harness {
@@ -72,7 +81,15 @@ type claudeJSONLLine struct {
 	AgentID   string           `json:"agentId"`
 	UUID      string           `json:"uuid"`
 	Timestamp string           `json:"timestamp"`
-	Message   struct {
+	// Effort is the assistant line's top-level resolved effort. Attachment
+	// carries the nested attachment of an attachment record (the ultracode
+	// mode enter/exit evidence). ThinkingMetadata is the legacy per-line
+	// thinking configuration. All three are decoded tolerantly so a
+	// malformed value never drops the line.
+	Effort           json.RawMessage `json:"effort"`
+	Attachment       json.RawMessage `json:"attachment"`
+	ThinkingMetadata json.RawMessage `json:"thinkingMetadata"`
+	Message          struct {
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"` // string or []contentBlock
@@ -330,6 +347,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 	}
 
+	sessions = a.linkClaudeNativeAgents(sessions, mined)
 	a.linkClaudeTeammates(ctx, sessions, cached, mined)
 	a.saveMinedEvidence(ctx, cfg, cached, mined, remined)
 	a.reminedCount = len(remined)
@@ -531,12 +549,14 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 		evidence.Origin, evidence.Signal = sessionorigin.Classify(sessionorigin.Evidence{})
 		return evidence, false
 	}
+	beginClaudeIdentity(data, &evidence)
 
 	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	var identity *ClaudeTeammateIdentity
 	var invalidIdentity, malformed, conversation bool
 	var validRecords, lineNumber int
+	spawnCalls := make(map[string]bool)
 	var hints claudeSessionHints
 	// The origin captures ride this same scan. Like the identity capture above
 	// them they read every line, because a harness is free to record the launch
@@ -560,8 +580,10 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 		if json.Unmarshal(line, &value) != nil {
 			// A record this build cannot parse fails open.
 			malformed = true
+			evidence.NativeAgentValid = false
 			continue
 		}
+		addClaudeIdentityRecord(value, &evidence, spawnCalls)
 		validRecords++
 		if recordType, present := value["type"]; present {
 			text, isText := recordType.(string)
@@ -615,6 +637,8 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	if !invalidIdentity {
 		evidence.Identity = identity
 	}
+	complete := scanner.Err() == nil && len(scanner.Oversized()) == 0
+	evidence.NativeAgentValid = evidence.NativeAgentValid && evidence.NativeAgentID != "" && complete
 	evidence.HasConversationRecord = conversation || malformed || scanner.Err() != nil || validRecords == 0
 	evidence.Title = hints.title
 	evidence.Branch = hints.branch
@@ -759,13 +783,11 @@ func claudeUserRecordText(value map[string]any) (string, bool) {
 	}
 }
 
-// mineClaudeSubagentTranscript checks one subagent transcript for a
-// conversation record. A subagent file carries no teammate identity and no
-// display hints, so the streaming check that stops at the first conversation
-// record stays the cheapest way to read it.
+// mineClaudeSubagentTranscript mines the whole structural distribution, just
+// like root mining, so native owner proof cannot depend on the first record.
 func (a *ClaudeAdapter) mineClaudeSubagentTranscript(path ResolvedPath, info os.FileInfo) ClaudeTranscriptEvidence {
-	evidence := newClaudeEvidence(path, ClaudeEvidenceScopeSubagent, info)
-	evidence.HasConversationRecord = a.hasClaudeConversationRecord(path.String())
+	evidence, _ := a.mineClaudeRootTranscript(path, info)
+	evidence.Scope = ClaudeEvidenceScopeSubagent
 	// A subagent transcript is by definition the child of a root, which is the
 	// first step of the rule. The rule is asked rather than answered for it, so
 	// that step 1 keeps exactly one definition and a change to it reaches this
@@ -932,8 +954,13 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		FilePath: string(session.SourcePath),
 		Format:   SourceFormatJSONL,
 	}
+	allowed, relationships, identityErr := a.verifyClaudeIdentity(data, session)
+	if identityErr != nil {
+		return nil, identityErr
+	}
+	meta.Relationships = relationships
 
-	firstLine, parseErr := parseClaudeTranscriptMetadata(data, &meta)
+	firstLine, parseErr := parseClaudeTranscriptMetadataWithIdentity(data, &meta, allowed)
 	if parseErr != nil {
 		return nil, parseErr
 	}
@@ -1052,6 +1079,10 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 }
 
 func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJSONLLine, error) {
+	return parseClaudeTranscriptMetadataWithIdentity(data, meta, nil)
+}
+
+func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadata, allowed map[string]bool) (*claudeJSONLLine, error) {
 	var (
 		firstLine      claudeJSONLLine
 		literalCWD     string
@@ -1062,6 +1093,12 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 		toolCount      int
 		tokensIn       int
 		tokensOut      int
+		// levelState tracks the ultracode session mode in source order.
+		levelState claudeThinkingLevelState
+		// modernEffortSeen records any non-empty top-level effort anywhere;
+		// the legacy level is consulted only when none exists.
+		modernEffortSeen bool
+		legacyLevel      string
 	)
 
 	// The shared record reader handles a record of any size: a record up to
@@ -1091,8 +1128,10 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 			continue
 		}
 
-		if line.SessionID != "" && line.SessionID != meta.SessionID.String() &&
-			(meta.ParentUUID == nil || line.SessionID != meta.ParentUUID.String()) {
+		foreignSession := line.SessionID != "" && line.SessionID != meta.SessionID.String()
+		foreignParent := meta.ParentUUID == nil || line.SessionID != meta.ParentUUID.String()
+		identityMismatch := foreignSession && foreignParent && !allowed[line.SessionID]
+		if identityMismatch {
 			return nil, fmt.Errorf("Claude metadata capture for %s: transcript sessionId disagrees with the discovered session or parent identity; no capture was written; restore the matching source and rerun peasant ingest", meta.SessionID)
 		}
 		if literalCWD == "" {
@@ -1109,6 +1148,23 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 				firstTimestamp = line.Timestamp
 			}
 			lastTimestamp = line.Timestamp
+		}
+
+		levelState.observe(string(line.Type), line.Attachment)
+		effort := claudeEffortValue(line.Effort)
+		if effort != "" {
+			modernEffortSeen = true
+		}
+		if legacyLevel == "" {
+			legacyLevel = claudeLegacyThinkingLevel(line.ThinkingMetadata)
+		}
+		if line.Type == claudeRecordTypeAssistant {
+			// The governing level of the earliest assistant line that has one
+			// seeds the session: the ultracode mode while on, otherwise the
+			// line's own effort.
+			mapping, diagnostic := levelState.governing(effort)
+			appendThinkingLevelDiagnostic(meta, diagnostic, lineNum)
+			applyThinkingLevelObservation(meta, mapping)
 		}
 
 		// Count turns.
@@ -1181,6 +1237,14 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 
 	}
 
+	if !modernEffortSeen && meta.ThinkingLevel == "" && meta.ThinkingLevelRaw == "" {
+		// Weak fallback: the legacy level only when no modern effort exists
+		// anywhere in the transcript. Budgets are never consulted.
+		mapping, diagnostic := mapClaudeLegacyLevel(legacyLevel)
+		appendThinkingLevelDiagnostic(meta, diagnostic, 0)
+		applyThinkingLevelSeed(meta, mapping)
+	}
+
 	meta.CWD = literalCWD
 	meta.Stats.TurnCount = turnCount
 	meta.Stats.ToolCallCount = toolCount
@@ -1196,6 +1260,22 @@ func parseClaudeTranscriptMetadata(data []byte, meta *UnifiedMetadata) (*claudeJ
 // claudeProjectsDirSegment is the path segment that identifies a directory as a
 // Claude project memory directory. Used to detect when the CWD fallback points
 // at a Claude internal directory rather than the actual project.
+//
+// The one supported Claude Code session root, on every platform, is the CLI's
+// own per-project memory tree: "~/.claude/projects" (unix / macOS) and, on
+// Windows, "%USERPROFILE%\.claude\projects" — os.UserHomeDir() resolves
+// USERPROFILE there, so the same "~/.claude/projects" default in
+// defaults.DefaultClaudePath expands correctly with no Windows-specific
+// default needed (see internal/defaults/config.go and
+// internal/ingest/types.go's NewResolvedPath). This constant is compared
+// against a slash-normalized cwd (see decodeClaudeProjectDir) so detection
+// works whether cwd arrived with "/" or "\" separators.
+//
+// Explicitly OUT OF SCOPE for this release: the Claude *desktop* app's
+// per-session sandbox roots under "%APPDATA%\Claude\local-agent-mode-sessions\...".
+// Those are a different product surface with their own ad-hoc layout; see the
+// public report anthropics/claude-code#84552. Nothing in this package scans
+// %APPDATA%, and no code should be added here to do so.
 const claudeProjectsDirSegment = "/.claude/projects/"
 
 // decodeClaudeProjectDir checks if cwd is under a Claude project memory directory
@@ -1209,17 +1289,32 @@ const claudeProjectsDirSegment = "/.claude/projects/"
 // method uses a greedy filesystem-based decoder: starting from root, it tries each
 // segment and checks if a directory exists. If not, it merges segments with dashes.
 //
+// cwd may use either "/" or "\" as its separator — on Windows the JSONL "cwd"
+// field and the session file's own directory both use native backslash paths
+// (e.g. "C:\Users\alice\.claude\projects\C--Users-alice-project"), so detection
+// normalizes a copy of cwd with filepath.ToSlash before matching against the
+// forward-slash claudeProjectsDirSegment constant and splitting out the encoded
+// segment. filepath.ToSlash is a no-op on unix (Separator is already "/"), so
+// unix behavior is byte-identical. The decoded path returned by DecodeClaudeSlug
+// is unaffected by this normalization: it is built by decodeProjectSlug via
+// filepath.Join/filepath.Clean, which already render in the build's native
+// separator regardless of the "/"-based root they start from — so callers that
+// hand this value to filesystem/git operations (ResolveGitRemote, a.git.Branch,
+// a.git.Worktree, a.git.WalkUpRemoteURL, filepath.Base) receive a native-form
+// path with no further conversion needed here.
+//
 // Returns the decoded path if it exists on the filesystem, or empty string if
 // decoding fails or the path does not exist.
 func (a *ClaudeAdapter) decodeClaudeProjectDir(cwd string) string {
-	idx := strings.Index(cwd, claudeProjectsDirSegment)
+	normalized := filepath.ToSlash(cwd)
+	idx := strings.Index(normalized, claudeProjectsDirSegment)
 	if idx < 0 {
 		return ""
 	}
 
 	// Extract the portion after "/.claude/projects/".
 	// cwd may be the project dir itself or a parent of the JSONL file.
-	after := cwd[idx+len(claudeProjectsDirSegment):]
+	after := normalized[idx+len(claudeProjectsDirSegment):]
 	if after == "" {
 		return ""
 	}

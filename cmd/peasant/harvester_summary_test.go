@@ -99,7 +99,7 @@ func TestHarvestHarvesterSummary(t *testing.T) {
 			}
 			expectedTargets := ingest.HarvesterVersionRegistry
 			if fixture.ExpectedTargets == "activated" {
-				expectedTargets = ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)
+				expectedTargets = ingest.GenerationTargets(ingest.HarvesterVersionRegistry)
 			}
 			if !maps.Equal(decoded.Summary.HarvesterVersions, expectedTargets) {
 				t.Fatalf("target map = %+v, want %+v", decoded.Summary.HarvesterVersions, expectedTargets)

@@ -1,70 +1,76 @@
-# HTTP scenarios for GET /api/v1/config/capabilities and the expected
-# discoverability of the code-map section (top-nav tab + command-palette
-# entries). The capability boundary fails closed: only an OK response whose body
-# validates against the schema envelope AND advertises the code-map token makes
-# the section discoverable. Every other outcome — still loading, thrown fetch,
-# error status, malformed body, null-bearing body, empty advertisement, or an
-# advertisement of only unknown tokens — hides the section from persistent
-# chrome. Direct /map and /projects routes are unaffected (not exercised here).
+# HTTP scenarios for GET /api/v1/config/capabilities.
+#
+# The capability boundary fails closed: only an OK response whose body validates
+# against the schema envelope AND advertises the code-map token advertises it.
+# Every other outcome — still loading, thrown fetch, error status, malformed
+# body, null-bearing body, empty advertisement, or an advertisement of only
+# unknown tokens — advertises nothing. ServerCapabilitiesContext.test.tsx runs
+# every row against the provider.
+#
+# LayoutShell.capabilities.test.tsx runs every row through the real shell: the
+# code map is a route-only section in the local app registry, so no row — not
+# even one that advertises the code-map token — may put a code-map entry in the
+# header or the command palette. Direct /map and /projects routes are
+# unaffected (not exercised here).
 #
 # Row fields (strict):
-#   name           unique case label
-#   expectVisible  whether the code map must appear in nav AND palette
-#   pending        (optional) fetch never resolves — the loading state
-#   throw          (optional) fetch rejects
-#   status         (optional) HTTP status for the response (default 200)
-#   body           (optional) JSON response body
+#   name              unique case label
+#   expectAdvertised  whether the provider reports the code-map token
+#   pending           (optional) fetch never resolves — the loading state
+#   throw             (optional) fetch rejects
+#   status            (optional) HTTP status for the response (default 200)
+#   body              (optional) JSON response body
 cases:
   - name: loading
-    expectVisible: false
+    expectAdvertised: false
     pending: true
 
   - name: fetch-throws
-    expectVisible: false
+    expectAdvertised: false
     throw: true
 
   - name: http-500
-    expectVisible: false
+    expectAdvertised: false
     status: 500
 
   - name: malformed-body
-    expectVisible: false
+    expectAdvertised: false
     status: 200
     body:
       uiCapabilities:
         not: an-array
 
   - name: null-capabilities
-    expectVisible: false
+    expectAdvertised: false
     status: 200
     body:
       uiCapabilities: null
 
   - name: empty-object
-    expectVisible: false
+    expectAdvertised: false
     status: 200
     body: {}
 
   - name: empty-array
-    expectVisible: false
+    expectAdvertised: false
     status: 200
     body:
       uiCapabilities: []
 
   - name: unknown-token-only
-    expectVisible: false
+    expectAdvertised: false
     status: 200
     body:
       uiCapabilities:
         - some_unrecognized_token_v9
 
-  # Uses the REAL code-map token so the ONLY reason the section stays hidden is
-  # the extra top-level key: zUICapabilitiesResponse is .strict(), so an
+  # Uses the REAL code-map token so the ONLY reason it is not advertised is the
+  # extra top-level key: zUICapabilitiesResponse is .strict(), so an
   # otherwise-valid envelope with any unknown top-level field fails the parse and
   # falls closed. This is maximally distinguishing — dropping .strict() would flip
-  # this case to visible while every other case is unchanged.
+  # this case to advertised while every other case is unchanged.
   - name: unknown-top-level-key-with-real-token
-    expectVisible: false
+    expectAdvertised: false
     status: 200
     body:
       uiCapabilities:
@@ -72,7 +78,7 @@ cases:
       surprise: true
 
   - name: code-map-token
-    expectVisible: true
+    expectAdvertised: true
     status: 200
     body:
       uiCapabilities:

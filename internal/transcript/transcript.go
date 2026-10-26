@@ -467,6 +467,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		if projectedObservation != "" {
 			assignProjectedModelObservation(&t, projectedObservation)
 		}
+		t.ThinkingLevel, t.ThinkingLevelRaw = thinkingLevelObservation(e)
 
 		// Attach folded ToolCalls from depth=1 children.
 		if folded, ok := foldedToolCalls[e.EntryIndex]; ok {
@@ -560,7 +561,13 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		hasContent := strings.TrimSpace(t.Content) != ""
 		hasTools := len(t.ToolCalls) > 0
 		hasObservation := turnObservations[t.Index].present
-		if t.SourceEntryRef == "" && t.Command == nil && suppressEmptyTurn(hasContent, hasTools, hasObservation) {
+		// A managed generation puts a source ref on every entry, including a
+		// control record that carries no conversation. Those empty system turns
+		// are headers over an empty body in the viewer, so suppress them while
+		// keeping every other source-referenced empty turn as the evidence
+		// boundary it is.
+		suppressibleEmpty := t.SourceEntryRef == "" || (t.Role == schema.RoleSystem && t.EntryType == schema.EntryTypeSystem)
+		if suppressibleEmpty && t.Command == nil && suppressEmptyTurn(hasContent, hasTools, hasObservation) {
 			continue
 		}
 		filtered = append(filtered, t)
@@ -576,7 +583,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		prevObservation := turnObservations[prev.Index]
 		currObservation := turnObservations[curr.Index]
 		observationsEqual := modelObservationsEquivalent(prevObservation, currObservation)
-		if prev.SourceEntryRef == "" && curr.SourceEntryRef == "" && prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" && observationsEqual {
+		if prev.SourceEntryRef == "" && curr.SourceEntryRef == "" && prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" && observationsEqual && prev.ThinkingLevel == curr.ThinkingLevel && prev.ThinkingLevelRaw == curr.ThinkingLevelRaw {
 			prevHasTools := len(prev.ToolCalls) > 0
 			currHasTools := len(curr.ToolCalls) > 0
 			if currHasTools && !prevHasTools {
@@ -676,6 +683,9 @@ func SessionToDetailValidated(s *ingest.Session) (*schema.SessionDetailPayload, 
 	if err := validateSessionObservedModelEvidence(s); err != nil {
 		return nil, err
 	}
+	if err := validateSessionThinkingLevelEvidence(s); err != nil {
+		return nil, err
+	}
 	detail := sessionToDetail(s)
 	if s.Harness == schema.HarnessPi {
 		if err := piLegacyMirrors(detail); err != nil {
@@ -698,6 +708,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	turns := turnsToDetail(s.Turns)
 
 	model := sessionModelSeed(s)
+	thinkingLevel, thinkingLevelRaw := sessionThinkingSeed(s)
 
 	// Derive source and status from session fields.
 	source := "imported"
@@ -735,6 +746,9 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		Status:               status,
 		Project:              s.Project,
 		Model:                model,
+		ThinkingLevel:        thinkingLevel,
+		ThinkingLevelRaw:     thinkingLevelRaw,
+		ThinkingLevelHistory: sessionThinkingHistory(s),
 		WorkingDirectory:     s.ProjectPath,
 		GitBranch:            s.GitBranch,
 		GitRemote:            s.GitRemote,
@@ -792,30 +806,32 @@ func turnsToDetail(folded []ingest.Turn) []schema.TurnDetail {
 			}
 		}
 		turns[i] = schema.TurnDetail{
-			SourceEntryRef: schema.SourceEntryRef(t.SourceEntryRef),
-			Provenance:     t.Provenance,
-			Usage:          t.Usage,
-			Index:          t.Index,
-			Role:           t.Role,
-			Command:        t.Command,
-			Content:        t.Content,
-			ToolCalls:      toolCalls,
-			Timestamp:      t.Timestamp.UTC(),
-			Depth:          t.Depth,
-			ParentIndex:    t.ParentIndex,
-			EntryType:      t.EntryType,
-			HasThinking:    t.HasThinking,
-			StopReason:     t.StopReason,
-			TokensIn:       t.TokensIn,
-			TokensOut:      t.TokensOut,
-			ObservedModel:  t.ObservedModel,
+			SourceEntryRef:   schema.SourceEntryRef(t.SourceEntryRef),
+			Provenance:       t.Provenance,
+			Usage:            t.Usage,
+			Index:            t.Index,
+			Role:             t.Role,
+			Command:          t.Command,
+			Content:          t.Content,
+			ToolCalls:        toolCalls,
+			Timestamp:        t.Timestamp.UTC(),
+			Depth:            t.Depth,
+			ParentIndex:      t.ParentIndex,
+			EntryType:        t.EntryType,
+			HasThinking:      t.HasThinking,
+			StopReason:       t.StopReason,
+			TokensIn:         t.TokensIn,
+			TokensOut:        t.TokensOut,
+			ObservedModel:    t.ObservedModel,
+			ThinkingLevel:    t.ThinkingLevel,
+			ThinkingLevelRaw: t.ThinkingLevelRaw,
 		}
 	}
 	return turns
 }
 
 // earlierHistoryToDetail converts retained earlier-history partitions to wire
-// sections. Nil input stays nil so sessions without retained history omit the
+// sections. Nil input stays nil so sessions without stored history omit the
 // field; an explicitly empty retained set is preserved as-is by the caller.
 func earlierHistoryToDetail(sections []ingest.EarlierHistorySection) []schema.EarlierHistorySection {
 	if sections == nil {

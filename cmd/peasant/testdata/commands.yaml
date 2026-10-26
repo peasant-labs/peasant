@@ -25,7 +25,7 @@ commands:
       - { name: verbose, type: bool, default: "false" }
       - { name: debug, type: bool, default: "false", hidden: true }
       - { name: json, type: bool, default: "false" }
-      - { name: detect-commits, type: bool, default: "false" }
+      - { name: detect-commits, type: bool, default: "true" }
       - { name: profile-index, type: bool, default: "false" }
       - { name: session, type: stringSlice, default: "[]" }
       - { name: since, type: string, default: "" }
@@ -55,12 +55,14 @@ commands:
           - { name: session, type: stringSlice, default: "[]" }
           - { name: since, type: string, default: "" }
           - { name: output, type: string, default: "" }
-          - { name: detect-commits, type: bool, default: "false" }
+          - { name: detect-commits, type: bool, default: "true" }
           - { name: profile-index, type: bool, default: "false" }
           - { name: source-harness, type: string, default: "" }
       - use: verify
         flags:
           - { name: verbose, type: bool, default: "false" }
+          - { name: content, type: bool, default: "false" }
+          - { name: repair, type: bool, default: "false" }
     exit_cases:
       - args: ["--help"]
         expect_error: false
@@ -117,6 +119,9 @@ commands:
       - { name: concurrency, type: int, default: "0" }
       - { name: repository, type: string, default: "" }
       - { name: timeout, type: duration, default: "0s" }
+      - { name: require-auto-publish-rule, type: bool, default: "false" }
+      - { name: auto-publish-event, type: string, default: "" }
+      - { name: last-good, type: bool, default: "false" }
     exit_cases:
       - args: ["--help"]
         expect_error: false
@@ -237,6 +242,7 @@ commands:
           - { name: session, type: string, default: "" }
           - { name: session-from-file, type: string, default: "" }
           - { name: output-dir, type: string, default: "." }
+          - { name: last-good, type: bool, default: "false" }
       - use: annotations
         flags:
           - { name: session, type: string, default: "" }
@@ -269,3 +275,15 @@ commands:
       - args: ["capture", "no-such-tool"]
         expect_error: true
         error_contains: ["unknown layout tool"]
+
+  - name: Migrate
+    use: migrate
+    flags:
+      - { name: dry-run, type: bool, default: "false" }
+      - { name: limit, type: int, default: "0" }
+      - { name: confirm, type: bool, default: "false" }
+      - { name: json, type: bool, default: "false" }
+    exit_cases:
+      - args: ["--help"]
+        expect_error: false
+        output_contains: ["migrate"]

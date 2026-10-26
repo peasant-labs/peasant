@@ -48,7 +48,7 @@ func MapCodexGraph(thread CodexThreadEvidence, prior *schema.UnifiedMetadata) (C
 		return CodexGraphMapping{}, &codexCandidateRefusal{
 			Operation: "MapCodexGraph",
 			Reason:    "the mapped Codex relationships are not a valid navigation graph",
-			Effect:    "no candidate was emitted and the retained generation is unchanged",
+			Effect:    "no candidate was emitted and the stored generation is unchanged",
 			Recovery:  "retain the capture, correct the native parent evidence, and retry harvest",
 		}
 	}
@@ -173,85 +173,61 @@ func retainedGraphTarget(prior *schema.UnifiedMetadata, kind schema.SessionRelat
 	return nil
 }
 
-// CodexProvenanceIndexerConfig wires the native provenance candidate path into
-// a CodexIndexer. Prior supplies the last good graph/alias state (nil before a
-// first install), GenerationID assigns the installed generation identity, and
-// Allocator mints or replays opaque references. The path stays disabled until
-// the maintenance activation enables it; while disabled every retained V1 flow
-// is untouched.
-type CodexProvenanceIndexerConfig struct {
-	Enabled      bool
-	Prior        func(session DiscoveredSession) (*schema.UnifiedMetadata, ProjectionPriorState, error)
-	GenerationID func(session DiscoveredSession) string
-	Allocator    RefAllocator
-}
-
-// IndexCodexCandidateV2 runs the production Codex provenance exit: read-only
+// BuildGeneration runs the production Codex candidate exit: read-only
 // current-history capture with recheck, metadata extraction over the verified
 // incarnation, native classification, canonical graph mapping, and the shared
-// validated generation projection. It returns the concrete format-2 candidate
-// the maintenance activation consumes and enables no format target itself.
-func (idx *CodexIndexer) IndexCodexCandidateV2(ctx context.Context, session DiscoveredSession) (indexformat.V2, error) {
-	config := idx.provenanceCapture
-	if !config.Enabled {
-		return indexformat.V2{}, fmt.Errorf("ingest.CodexIndexer.IndexCodexCandidateV2: the provenance candidate path is disabled for session %s; the retained entry path is unchanged; enable it with a real generation identity before requesting a candidate", session.SessionID)
+// validated generation projection. It returns the validated format-2 candidate
+// together with the full captured bytes its content records address and its
+// source diagnostics, so activation can stage a self-contained generation
+// without reopening the mutable source. It enables no format target itself.
+//
+// Every refusal leaves through the fixed completion diagnostic: the validated
+// harness and session identity plus the fixed operation, reason, effect and
+// recovery categories, never the source locator, a raw validator value, or a
+// wrapped dependency, capture, classifier or filesystem error.
+func (idx *CodexIndexer) BuildGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
+	if err := ctx.Err(); err != nil {
+		return GenerationCandidate{}, codexCandidateCompletionFailure(in.Session, err)
 	}
-	if config.GenerationID == nil {
-		return indexformat.V2{}, fmt.Errorf("ingest.CodexIndexer.IndexCodexCandidateV2: no generation identity source was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", session.SessionID)
-	}
-	var prior *schema.UnifiedMetadata
-	priorState := NewProjectionPriorState()
-	if config.Prior != nil {
-		loadedPrior, loadedState, err := config.Prior(session)
-		if err != nil {
-			return indexformat.V2{}, err
-		}
-		prior = loadedPrior
-		priorState = loadedState
-	}
-	generationID := config.GenerationID(session)
-	candidate, err := idx.BuildCodexCandidateForSession(ctx, session, prior, priorState, config.Allocator, generationID)
+	candidate, err := idx.buildCodexGeneration(ctx, in)
 	if err != nil {
-		return indexformat.V2{}, err
+		return GenerationCandidate{}, codexCandidateCompletionFailure(in.Session, err)
 	}
-	return candidate.V2, nil
+	return candidate, nil
 }
 
-// BuildNativeGeneration runs the production Codex candidate exit and returns
-// the validated generation together with the full captured bytes its content
-// records address and its source diagnostics. The maintenance composition uses
-// this exit so it can stage a self-contained generation; the concrete-V2 exit
-// above is the same candidate without the content map.
-func (idx *CodexIndexer) BuildNativeGeneration(ctx context.Context, session DiscoveredSession) (NativeGenerationCandidate, error) {
-	config := idx.provenanceCapture
-	if !config.Enabled {
-		return NativeGenerationCandidate{}, fmt.Errorf("ingest.CodexIndexer.BuildNativeGeneration: the provenance candidate path is disabled for session %s; the retained entry path is unchanged; enable it with a real generation identity before requesting a candidate", session.SessionID)
-	}
-	if config.GenerationID == nil {
-		return NativeGenerationCandidate{}, fmt.Errorf("ingest.CodexIndexer.BuildNativeGeneration: no generation identity source was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", session.SessionID)
+// buildCodexGeneration composes the Codex candidate from the attempt's prior
+// evidence. It never consults the stored-capture authority: a Codex candidate is
+// acquired from the recorded rollout source, and the prior only supplies the
+// last-good graph metadata and the reusable alias state a refresh must retain.
+func (idx *CodexIndexer) buildCodexGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
+	if in.GenerationID == "" {
+		return GenerationCandidate{}, fmt.Errorf("ingest.CodexIndexer.BuildGeneration: no generation identity was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", in.Session.SessionID)
 	}
 	var prior *schema.UnifiedMetadata
 	priorState := NewProjectionPriorState()
-	if config.Prior != nil {
-		loadedPrior, loadedState, err := config.Prior(session)
+	if in.Prior != nil {
+		loaded, err := in.Prior.ReadGenerationPrior(ctx)
 		if err != nil {
-			return NativeGenerationCandidate{}, err
+			return GenerationCandidate{}, err
 		}
-		prior = loadedPrior
-		priorState = loadedState
+		if loaded != nil {
+			prior = loaded.Metadata
+			priorState = generationPriorState(loaded)
+		}
 	}
-	candidate, err := idx.BuildCodexCandidateForSession(ctx, session, prior, priorState, config.Allocator, config.GenerationID(session))
+	candidate, err := idx.BuildCodexCandidateForSession(ctx, in.Session, prior, priorState, in.Allocator, in.GenerationID)
 	if err != nil {
-		return NativeGenerationCandidate{}, err
+		return GenerationCandidate{}, err
 	}
-	return NativeGenerationCandidate{
+	return GenerationCandidate{
 		Result:      candidate.V2,
 		Blobs:       candidate.Content,
 		Diagnostics: candidate.Diagnostics,
 	}, nil
 }
 
-var _ NativeGenerationBuilder = (*CodexIndexer)(nil)
+var _ GenerationBuilder = (*CodexIndexer)(nil)
 
 // codexCandidateRefusal is the safe refusal for the Codex candidate boundary.
 // It names a fixed operation, reason, caller effect, and recovery, and never
@@ -321,7 +297,12 @@ type CodexCandidateInput struct {
 func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
 	for _, diagnostic := range input.History.Diagnostics {
 		if diagnostic.ErrorType == "codex_record_malformed" || diagnostic.ErrorType == "codex_item_body_malformed" {
-			return CodexCandidate{}, fmt.Errorf("build Codex candidate: complete native record is malformed; prior generation remains unchanged; restore intact source and retry")
+			return CodexCandidate{}, &codexCandidateRefusal{
+				Operation: "BuildCodexCandidate",
+				Reason:    fmt.Sprintf("complete native record is malformed at %s: %s", diagnostic.Location, diagnostic.Message),
+				Effect:    "no candidate was emitted and the prior generation and producer stamps remain unchanged",
+				Recovery:  "restore intact native source and retry harvest",
+			}
 		}
 	}
 	if input.History.StableThreadID == "" {
@@ -331,7 +312,7 @@ func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
 		return CodexCandidate{}, &codexCandidateRefusal{
 			Operation: "BuildCodexCandidate",
 			Reason:    "the captured stable thread identity is not a canonical identifier",
-			Effect:    "no candidate was emitted and the retained generation is unchanged",
+			Effect:    "no candidate was emitted and the stored generation is unchanged",
 			Recovery:  "recapture the native history and retry harvest",
 		}
 	}
@@ -345,7 +326,7 @@ func BuildCodexCandidate(input CodexCandidateInput) (CodexCandidate, error) {
 	if err != nil {
 		return CodexCandidate{}, err
 	}
-	blocks, earlierStates, err := ClassifyCodexBlocks(input.History.StableThreadID, input.History.Nodes, thread, input.History.Correlations)
+	blocks, earlierStates, err := ClassifyCodexBlocks(input.History.StableThreadID, input.History.Nodes, input.History.Controls, thread, input.History.Correlations)
 	if err != nil {
 		return CodexCandidate{}, err
 	}
@@ -440,14 +421,14 @@ func (idx *CodexIndexer) BuildCodexCandidateForSession(ctx context.Context, sess
 }
 
 // extractCandidateMetadata extracts the metadata base from the verified
-// capture bytes using the retained extraction kernel: model, version,
+// capture bytes using the stored extraction kernel: model, version,
 // timestamps, token totals, and recorded working-directory and git context.
 // Counts, purpose, relationships, and identity come from the candidate
 // projection, never from this legacy extraction. It never reopens the mutable
 // native source, so a replacement, append, or delete after verification cannot
 // mix one incarnation's entries with another incarnation's metadata. Project
 // identity derivation needs the harvester's salt and git resolver, so it stays
-// with the retained path and maintenance activation.
+// with the stored path and maintenance activation.
 func (idx *CodexIndexer) extractCandidateMetadata(ctx context.Context, session DiscoveredSession, data []byte) (*UnifiedMetadata, error) {
 	meta := NewUnifiedMetadata()
 	meta.SessionID = session.SessionID
@@ -466,7 +447,7 @@ func (idx *CodexIndexer) extractCandidateMetadata(ctx context.Context, session D
 		return nil, &codexCandidateRefusal{
 			Operation: "CodexIndexer.extractCandidateMetadata",
 			Reason:    "the captured metadata is not self-consistent with the captured identity",
-			Effect:    "no candidate was emitted and the retained generation is unchanged",
+			Effect:    "no candidate was emitted and the stored generation is unchanged",
 			Recovery:  "recapture the native history and retry harvest",
 		}
 	}

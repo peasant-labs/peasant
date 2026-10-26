@@ -5,7 +5,7 @@ requiredNames:
   - malformed percent escape is rejected
   - double encoded identity is rejected
   - extra review segment is rejected
-  - missing review identity renders picker guidance
+  - missing review identity lists projects
   - missing legacy resolution is actionable
   - transient legacy resolution can retry
 cases:
@@ -14,6 +14,6 @@ cases:
   - {name: malformed percent escape is rejected, scenario: malformed, pathname: '/review/%', search: '', resolution: none, expected: malformed percent escape}
   - {name: double encoded identity is rejected, scenario: malformed, pathname: '/review/%252E%252E', search: '', resolution: none, expected: still percent-encoded}
   - {name: extra review segment is rejected, scenario: malformed, pathname: '/review/team/extra', search: '', resolution: none, expected: exactly one project segment}
-  - {name: missing review identity renders picker guidance, scenario: route-missing, pathname: '/review', search: '', resolution: none, expected: pick a project from Home to see its changes.}
-  - {name: missing legacy resolution is actionable, scenario: missing, pathname: '/review/absent', search: '', resolution: missing, expected: project was not found}
+  - {name: missing review identity lists projects, scenario: route-missing, pathname: '/review', search: '', resolution: none, expected: changes}
+  - {name: missing legacy resolution is actionable, scenario: missing, pathname: '/review/absent', search: '', resolution: missing, expected: project not found}
   - {name: transient legacy resolution can retry, scenario: retry, pathname: '/review/team', search: 'branch=feat%2Fx', resolution: transient, expected: '/review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Fx'}

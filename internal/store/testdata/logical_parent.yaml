@@ -1,0 +1,113 @@
+# The logical-parent answer family: what every session-level parent reader
+# answers, and which generation's evidence answers it.
+#
+# Every case is driven through the real store: the session rows are stored
+# through the production metadata writer, the generations and their
+# relationship evidence through the real managed activation, and the reads
+# through the production readers. Only the LATEST-ATTEMPT POINTER is arranged
+# directly (the same way the latest-attempt read family arranges it), because
+# no production path installs a latest attempt beside no active generation: the
+# eligibility predicate always keeps the active authority. The evidence rows
+# themselves are always production-written.
+#
+# State vocabulary (the `state` field):
+#   latest-attempt-only   the session has no active generation; its latest
+#                         attempt carries the evidence; the availability cache
+#                         is NULL. This is the state a nil cache must not read
+#                         as "root".
+#   active-and-latest-attempt
+#                         an active generation carries one evidence target and
+#                         the latest attempt another. The active generation
+#                         wins at session level; a read scoped to the latest
+#                         attempt answers its OWN target and must validate.
+#   active-without-evidence
+#                         the active generation carries no started_by row at
+#                         all while the latest attempt names a target. The
+#                         session-level answer is nil: the latest attempt is
+#                         not consulted.
+#   preview-without-evidence
+#                         the active generation names a target that is not
+#                         stored, so the availability cache stays NULL, and
+#                         the latest attempt carries no started_by row at all.
+#                         The preview read serves the latest attempt, whose own
+#                         evidence answers nothing: the document's parent must
+#                         fall back to the session-level rendering (the active
+#                         generation's target), never the raw cache.
+#   no-evidence           a session with no generation at all. The answer is
+#                         the availability cache, and a NULL cache answers nil.
+#   managed-target-unstored
+#                         a managed generation names a target that is not
+#                         stored: the cache stays NULL and the prior document
+#                         still answers the target.
+#   cache-agrees          a managed generation with a stored target: the
+#                         written cache equals the accessor's answer. The
+#                         latest-attempt-only state is the documented
+#                         exception (the cache stays NULL by design).
+#   converted-pair        a V1 pair converted through the real migration: the
+#                         document parent becomes the answer. A document parent
+#                         that names no stored session is REFUSED: the
+#                         availability cache cannot hold an unstored parent, so
+#                         the conversion stops explicitly and the old
+#                         representation is left intact.
+#                         `unstoredDocumentParent` marks that refusing shape.
+#   publication-bundle    the publication bundle's parent, for both the
+#                         no-active and the managed halves, under an explicit
+#                         last-good selection.
+#   availability-raw      the availability readers (single and bulk location
+#                         lookups, push rows) keep the raw cache while the
+#                         evidence answers a target.
+#   origin-listing        the stored-origin work list answers the evidence
+#                         target while the cache is NULL.
+#
+# `activeEvidence` / `latestAttemptEvidence` name the target a generation's
+# started_by row points at (empty = the generation carries no started_by row).
+# `cacheParent` is seeded into the availability cache directly.
+# `documentParent` is the parent the V1 metadata document carries.
+
+child: 9a1e0000-0000-4000-8000-000000000001
+managedChild: 9a1e0000-0000-4000-8000-000000000004
+target: 9a1e0000-0000-4000-8000-000000000002
+alternate: 9a1e0000-0000-4000-8000-000000000003
+activeGeneration: gen_logical_parent_active
+latestAttemptGeneration: gen_logical_parent_latest_attempt
+
+cases:
+  - name: latest-attempt-only-evidence-answers
+    state: latest-attempt-only
+    latestAttemptEvidence: target
+  - name: active-wins-over-latest-attempt
+    state: active-and-latest-attempt
+    activeEvidence: target
+    latestAttemptEvidence: alternate
+  - name: active-without-evidence-ignores-latest-attempt
+    state: active-without-evidence
+    latestAttemptEvidence: target
+  - name: preview-without-evidence-falls-back-to-the-rendering
+    state: preview-without-evidence
+    activeEvidence: target
+  - name: no-evidence-falls-back-to-cache
+    state: no-evidence
+    cacheParent: target
+  - name: managed-target-unstored-prior-answers-target
+    state: managed-target-unstored
+    activeEvidence: alternate
+  - name: written-cache-agrees-with-accessor
+    state: cache-agrees
+    activeEvidence: target
+  - name: converted-pair-answers-document-parent
+    state: converted-pair
+    documentParent: target
+  - name: converted-pair-unstored-document-parent-refused
+    state: converted-pair
+    documentParent: alternate
+    unstoredDocumentParent: true
+  - name: publication-bundle-parent-from-evidence-lastgood
+    state: publication-bundle
+    latestAttemptEvidence: target
+    activeEvidence: alternate
+  - name: availability-readers-keep-raw
+    state: availability-raw
+    latestAttemptEvidence: target
+  - name: origin-listing-answers-latest-attempt-evidence
+    state: origin-listing
+    latestAttemptEvidence: target

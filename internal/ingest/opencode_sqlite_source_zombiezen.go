@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 const (
@@ -35,6 +35,7 @@ const (
 	openCodeCurrentMessagesAfterStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
 	openCodeCurrentMessagesBeforeStatement   = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq < ?2 ORDER BY seq LIMIT ?3"
 	openCodeCurrentMessagesBoundedStatement  = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 AND seq < ?3 ORDER BY seq LIMIT ?4"
+	openCodeSessionV2ForkEvidenceStatement   = "SELECT fork_session_id, fork_boundary FROM session_v2 WHERE id = ?1 LIMIT 2"
 	openCodeCurrentSubstantiveProbeStatement = "SELECT 1 FROM session_message WHERE session_id = ?1 AND type NOT IN ('agent-switched', 'model-switched') LIMIT 1"
 	// The payload-size probes count one session's payload-bearing rows and sum
 	// their data length. LENGTH() computes from the record header, so a probe
@@ -70,6 +71,7 @@ const (
 	openCodeSessionParentsAfterStatement             = "SELECT id, parent_id FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionClockFirstStatement               = "SELECT id, time_updated FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionClockAfterStatement               = "SELECT id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionModelRangeStatement               = "SELECT id, model FROM session WHERE id >= ?1 AND id <= ?2 ORDER BY id LIMIT ?3"
 )
 
 const (
@@ -85,6 +87,11 @@ const (
 	openCodeSessionV2ClockAfterStatement       = "SELECT id, time_updated FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionV2IDsFirstStatement         = "SELECT id FROM session_v2 ORDER BY id LIMIT ?1"
 	openCodeSessionV2IDsAfterStatement         = "SELECT id FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionModelFirstStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionModelAfterStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionV2ModelFirstStatement       = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session_v2 ORDER BY id LIMIT ?1"
+	openCodeSessionV2ModelAfterStatement       = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionV2ModelRangeStatement       = "SELECT id, model FROM session_v2 WHERE id >= ?1 AND id <= ?2 ORDER BY id LIMIT ?3"
 )
 
 type zombiezenOpenCodeSQLiteSource struct {
@@ -130,6 +137,7 @@ type openCodeSessionColumnSupport struct {
 	hasVersion      bool
 	hasSlug         bool
 	hasRevert       bool
+	hasModel        bool
 }
 
 // attribution reports whether the session table carries the working directory,
@@ -151,6 +159,7 @@ func (s openCodeSessionColumnSupport) extendedAttribution() bool {
 }
 
 var _ OpenCodeSQLiteSource = (*zombiezenOpenCodeSQLiteSource)(nil)
+var _ OpenCodeForkEvidenceSource = (*zombiezenOpenCodeSQLiteSource)(nil)
 
 func (s *zombiezenOpenCodeSQLiteSource) withReadTransaction(ctx context.Context, fn func() error) (err error) {
 	select {
@@ -622,6 +631,8 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 		args := []any{request.SessionID.value}
 		if support.table == OpenCodeSessionTableV2 {
 			switch {
+			case readExtended && support.hasModel:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session_v2 WHERE id = ?1", args, decode)
 			case readExtended:
 				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session_v2 WHERE id = ?1", args, decode)
 			case readAttribution:
@@ -637,6 +648,8 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 			}
 		} else {
 			switch {
+			case readExtended && support.hasModel:
+				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session WHERE id = ?1", args, decode)
 			case readExtended:
 				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session WHERE id = ?1", args, decode)
 			case readAttribution:
@@ -652,6 +665,13 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	} else if support.table == OpenCodeSessionTableV2 {
 		projection = "session_v2(id, parent_id, time_updated)"
 		switch {
+		case readExtended && support.hasModel:
+			projection = "session_v2 extended attribution and model"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ModelFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ModelAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
 		case readExtended:
 			projection = "session_v2(id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert)"
 			if request.After == nil {
@@ -697,6 +717,13 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	} else {
 		projection = "session(id, parent_id, time_updated)"
 		switch {
+		case readExtended && support.hasModel:
+			projection = "session extended attribution and model"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionModelFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionModelAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
 		case readExtended:
 			projection = "session(id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert)"
 			if request.After == nil {
@@ -739,6 +766,35 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	// The shared bounded page counts every row seen, valid or skipped, so dropped
 	// rows never shrink a page below its bound and hide later sessions.
 	records, hasNext := bounded.assemble()
+	// Partial layouts can carry model without the extended attribution group.
+	// Read the model column for the whole observed identifier span in one
+	// bounded statement, under this same read lease/snapshot, instead of one
+	// SELECT per kept record. The span endpoints are the first and last
+	// observed identifiers, so every kept record's model is covered.
+	if support.hasModel && !readExtended && len(records) > 0 && len(present) > 0 {
+		models := make(map[string]string, len(records))
+		decodeModel := func(model *sqlite.Stmt) error {
+			if model.ColumnType(0) != sqlite.TypeText {
+				return nil
+			}
+			if model.ColumnType(1) == sqlite.TypeText {
+				models[model.ColumnText(0)] = decodeOpenCodeModelVariant([]byte(model.ColumnText(1)))
+			}
+			return nil
+		}
+		args := []any{present[0].String(), present[len(present)-1].String(), request.PageSize.value + 1}
+		if support.table == OpenCodeSessionTableV2 {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ModelRangeStatement, args, decodeModel)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionModelRangeStatement, args, decodeModel)
+		}
+		if err != nil {
+			return page, s.sourceReadError(lease.ctx, "read optional session model", err, "session model", "supported OpenCode session metadata")
+		}
+		for i := range records {
+			records[i].ModelVariant = models[records[i].SessionID.String()]
+		}
+	}
 	page.Records = records
 	page.PresentSessionIDs = present
 	page.Skipped = skipped
@@ -836,6 +892,8 @@ func openCodeSessionColumns(table OpenCodeSessionTable, columns []OpenCodeColumn
 			support.hasSlug = true
 		case "revert":
 			support.hasRevert = true
+		case "model":
+			support.hasModel = true
 		}
 	}
 	if table == OpenCodeSessionTableV2 && primaryColumns != 1 {
@@ -1309,6 +1367,74 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(ctx context.Context, req
 		page.Next = &cursor
 	}
 	return page, nil
+}
+
+// SessionForkEvidence reads the native session_v2 fork pointer for one session.
+// The pointer is optional evidence: an absent or malformed row reports no
+// evidence, and this read never guesses a relationship from other fields.
+func (s *zombiezenOpenCodeSQLiteSource) SessionForkEvidence(ctx context.Context, sessionID OpenCodeSessionLinkID) (OpenCodeForkEvidence, bool, error) {
+	lease, err := s.beginSourceRead(ctx, "read native session fork evidence")
+	if err != nil {
+		return OpenCodeForkEvidence{}, false, err
+	}
+	defer lease.release()
+
+	columns, err := s.columnsLocked(lease.ctx, string(OpenCodeSessionTableV2))
+	if err != nil {
+		return OpenCodeForkEvidence{}, false, s.sourceReadError(lease.ctx, "read session_v2 fork columns", err, "pragma_table_info(session_v2)", "supported OpenCode session_v2")
+	}
+	if !projectColumnsPresent(columns, "fork_session_id", "fork_boundary") {
+		return OpenCodeForkEvidence{}, false, nil
+	}
+
+	var evidence OpenCodeForkEvidence
+	present := false
+	decode := func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) != sqlite.TypeText || stmt.ColumnText(0) == "" {
+			return nil
+		}
+		sourceID, err := NewOpenCodeSessionLinkID(stmt.ColumnText(0))
+		if err != nil {
+			return nil
+		}
+		boundaryType, messageID, ok := decodeOpenCodeForkBoundary(stmt.ColumnText(1))
+		if !ok {
+			return nil
+		}
+		evidence = OpenCodeForkEvidence{
+			SourceSessionID:   sourceID,
+			BoundaryType:      boundaryType,
+			BoundaryMessageID: messageID,
+		}
+		present = true
+		return nil
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeSessionV2ForkEvidenceStatement, []any{sessionID.value}, decode); err != nil || lease.ctx.Err() != nil {
+		return OpenCodeForkEvidence{}, false, s.sourceReadError(lease.ctx, "read native session fork evidence", err, "session_v2(fork_session_id, fork_boundary) where id", "supported OpenCode session_v2 fork evidence")
+	}
+	return evidence, present, nil
+}
+
+// decodeOpenCodeForkBoundary parses the native fork boundary JSON. The two
+// accepted kinds are the closed native vocabulary; anything else is malformed
+// evidence and reports absence.
+func decodeOpenCodeForkBoundary(raw string) (OpenCodeForkBoundaryType, string, bool) {
+	var wire struct {
+		Type      string `json:"type"`
+		MessageID string `json:"messageID"`
+	}
+	if json.Unmarshal([]byte(raw), &wire) != nil {
+		return "", "", false
+	}
+	switch OpenCodeForkBoundaryType(wire.Type) {
+	case OpenCodeForkBoundaryBefore, OpenCodeForkBoundaryThrough:
+	default:
+		return "", "", false
+	}
+	if _, err := NewOpenCodeCurrentMessageID(wire.MessageID); err != nil {
+		return "", "", false
+	}
+	return OpenCodeForkBoundaryType(wire.Type), wire.MessageID, true
 }
 
 // CurrentSessionHasSubstantive reports whether the current session_message

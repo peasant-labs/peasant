@@ -1,5 +1,11 @@
+# Advice shown when another installer owns the binary, so upgrade must not
+# replace it. Every case here is a unix package-manager install, declared with
+# path_style: unix because its executable path is a unix absolute path that a
+# host with a different path separator cannot represent. A Windows package
+# channel would be added here without that declaration.
 managed_install_cases:
   - name: dpkg
+    path_style: unix
     executable: /usr/bin/peasant
     goos: linux
     goarch: amd64
@@ -15,6 +21,7 @@ managed_install_cases:
       - "sudo apt install"
 
   - name: rpm
+    path_style: unix
     executable: /usr/bin/peasant
     goos: linux
     goarch: amd64
@@ -30,6 +37,7 @@ managed_install_cases:
       - "sudo dnf install"
 
   - name: pacman
+    path_style: unix
     executable: /usr/bin/peasant
     goos: linux
     goarch: amd64
@@ -44,6 +52,7 @@ managed_install_cases:
       - "paru -Syu peasant-bin"
 
   - name: nix
+    path_style: unix
     executable: /nix/store/abc123-peasant-0.5.0/bin/peasant
     goos: linux
     goarch: amd64
@@ -53,6 +62,7 @@ managed_install_cases:
       - "nix profile upgrade peasant"
 
   - name: homebrew
+    path_style: unix
     executable: /opt/homebrew/bin/peasant
     goos: darwin
     goarch: arm64
@@ -369,3 +379,55 @@ raw_confirmation_cases:
       - "installed v9.9.9"
     output_not_contains:
       - "continue? [y/N]"
+
+# Which published release asset a host resolves to. Linux and macOS download a
+# .tar.gz; Windows downloads the published executable itself, because upgrade
+# needs only the binary and the zip's licence and notice files are install-time
+# concerns. Windows arm64 is deliberately unpublished.
+asset_name_cases:
+  - name: linux-amd64-archive
+    tag: v1.2.3
+    goos: linux
+    goarch: amd64
+    want_asset: peasant_1.2.3_linux_amd64.tar.gz
+
+  - name: darwin-arm64-archive
+    tag: v1.2.3
+    goos: darwin
+    goarch: arm64
+    want_asset: peasant_1.2.3_darwin_arm64.tar.gz
+
+  - name: windows-amd64-executable
+    tag: v1.2.3
+    goos: windows
+    goarch: amd64
+    want_asset: peasant_1.2.3_windows_amd64.exe
+
+  - name: windows-tag-without-v
+    tag: "1.2.3"
+    goos: windows
+    goarch: amd64
+    want_asset: peasant_1.2.3_windows_amd64.exe
+
+  - name: windows-arm64-unpublished
+    tag: v1.2.3
+    goos: windows
+    goarch: arm64
+    error_contains:
+      - "does not publish a Windows build for this CPU architecture"
+      - "GOARCH \"arm64\" is not amd64"
+
+  - name: unsupported-goos
+    tag: v1.2.3
+    goos: freebsd
+    goarch: amd64
+    error_contains:
+      - "not supported by Peasant release assets"
+      - "not one of linux, darwin or windows"
+
+  - name: unsupported-goarch
+    tag: v1.2.3
+    goos: linux
+    goarch: "386"
+    error_contains:
+      - "not one of amd64 or arm64"

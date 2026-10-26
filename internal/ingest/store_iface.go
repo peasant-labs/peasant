@@ -49,8 +49,8 @@ type SessionLocation struct {
 	IndexedInputHash *string
 }
 
-// MetricSeedStore reads retained adapter statistics independently of computed
-// results. A nil seed means no retained input has been reconciled yet.
+// MetricSeedStore reads stored adapter statistics independently of computed
+// results. A nil seed means no stored input has been reconciled yet.
 type MetricSeedStore interface {
 	GetMetricSeed(ctx context.Context, sessionID SessionID) (*StatsInfo, error)
 }
@@ -77,6 +77,21 @@ type SessionLocationLookup interface {
 	LookupSessionLocation(ctx context.Context, sessionID SessionID) (hostSlug string, parentID string, err error)
 }
 
+// LogicalParentReader is the optional store capability that answers the ONE
+// logical-parent question: the started_by evidence target of the session's
+// active generation (or its latest attempt when none is active), falling back
+// to the availability cache. A nil answer means no known logical parent; it
+// never proves a root.
+//
+// It is deliberately narrower than SessionLocationLookup. The location lookup
+// answers which cached row exists, which is what on-disk path construction
+// needs; a consumer that must know WHO the parent is — for example, keeping an
+// ancestor-cycle walk honest — depends on this accessor instead, so it follows
+// the durable evidence even while the availability cache is NULL.
+type LogicalParentReader interface {
+	LogicalParentForSession(ctx context.Context, sessionID SessionID) (*string, error)
+}
+
 // OpenCodeSeqCursorStore is the optional store capability that records the
 // OpenCode change cursor: the last ingested newest-event sequence per session.
 // A store that implements it lets the pipeline re-ingest a session whose current
@@ -100,8 +115,11 @@ type ParentCacheReconcile struct {
 
 // OrphanParentReconciler is the optional store capability that heals the FK
 // availability cache of an independently admitted child after a later harvest
-// makes its logical parent available. The production store implements it; a
-// store that does not keeps the cache unchanged.
+// makes its logical parent available, and re-queues the settled parent-linked
+// rows whose origin verdict predates that repair so the next origin resolve
+// pass re-judges them. Every parent-link repair resets the row's origin
+// watermark. The production store implements it; a store that does not keeps
+// the cache and the origin watermarks unchanged.
 type OrphanParentReconciler interface {
 	// ListUncachedChildrenOfParents returns the stored, still-uncached
 	// independently admitted children whose durable logical-parent evidence
@@ -114,6 +132,12 @@ type OrphanParentReconciler interface {
 	// self-parent, or that would close a parent-cache cycle is skipped; every
 	// other update commits or the whole reconciliation rolls back.
 	ReconcileParentCache(ctx context.Context, updates []ParentCacheReconcile) error
+	// InvalidateStaleParentOrigins resets origin_version to 0 for every stored
+	// codex or opencode row that carries a parent link but an unknown origin
+	// verdict at the current rule version, and returns how many rows it
+	// re-queued. It is whole-population and idempotent: a second application
+	// returns zero. Claude Code rows and parentless roots are never touched.
+	InvalidateStaleParentOrigins(ctx context.Context) (int64, error)
 }
 
 // SessionStore abstracts SQLite persistence for the pipeline.
@@ -301,6 +325,17 @@ type SessionIndexState struct {
 	// build's parser already refused, which is what lets the selector give a
 	// refusal a steady state instead of re-parsing it every harvest.
 	ContentFailureCode ContentCaptureFailureCode
+	// LatestAttemptArtifactHash is the latest attempt's recorded pair
+	// identity, or nil when no attempt exists. It is read-only evidence
+	// for the settle comparison; the store never derives a full read from it.
+	LatestAttemptArtifactHash *string
+	// LatestAttemptIndexerVersion is the producer revision the latest
+	// attempt was parsed with, or nil when no attempt exists.
+	LatestAttemptIndexerVersion *int
+	// LatestAttemptAdapterVersion is the adapter revision recorded on the
+	// latest attempt's generation row, or nil when no attempt
+	// exists or the row carries none.
+	LatestAttemptAdapterVersion *int
 }
 
 // StaleIndexWorkError means the captured SQL state changed before the index
@@ -315,6 +350,31 @@ func (e *StaleIndexWorkError) Error() string {
 	return fmt.Sprintf("store: captured index state for session %s changed before replacement; this parser result was refused and current entries and producer evidence were preserved; capture current input and retry indexing", e.SessionID)
 }
 
+// SessionReadSelection selects WHICH generation a store read answers for. The
+// zero value is authority mode: the active generation, or the preserved
+// legacy/certificate read when the session has none.
+//
+// LastGood asks for the last-good FULL authority explicitly, bypassing the
+// latest-attempt block so export and publication can serve the active
+// generation while a newer incomplete preview is kept beside it. The
+// selector deliberately carries no generation identifier: the store resolves
+// the generation internally, so no caller-supplied id can select a full read.
+type SessionReadSelection struct {
+	// LastGood selects the last-good full authority instead of refusing on a
+	// latest attempt. The store still refuses when the active
+	// authority is itself only a preview.
+	LastGood bool
+}
+
+// SelectedSnapshotReader is the explicit-selection form of the store's
+// authoritative snapshot read. The selector names only the last-good intent:
+// the store resolves the generation internally, so no caller-supplied
+// generation identifier can select a full read. It is the read contract the
+// transcript and export selected builders consume.
+type SelectedSnapshotReader interface {
+	WithSessionSnapshotSelected(context.Context, schema.SessionID, SessionReadSelection, func(indexformat.ReadSnapshot) error) error
+}
+
 // SessionIndexStateReader captures SQL evidence only. The indexing caller must
 // separately bind this snapshot to the captured files before claiming coherence.
 type SessionIndexStateReader interface {
@@ -327,8 +387,13 @@ type SessionEntryWriteResult struct {
 	EntriesCount int  // canonical projection rows committed by the format handler
 	Written      bool // true when the write request completed, including an unchanged-row skip
 	Skipped      bool // true when existing entry projections already matched and no entry rows were replaced
-	Stats        SessionEntryWriteStats
-	Err          error
+	// LatestAttemptPreview reports that the write retained the latest preview
+	// attempt instead of replacing the active authority. The active generation
+	// is unchanged, the latest-attempt pointer records the attempt, and the counts
+	// stay zero.
+	LatestAttemptPreview bool
+	Stats                SessionEntryWriteStats
+	Err                  error
 }
 
 // SessionEntryBatchStore is required to persist pipeline index results. Metrics
@@ -1063,7 +1128,7 @@ type AnnotationPushRow struct {
 
 // StaleAdapterSessionLister is the database-driven inventory of sessions whose
 // stored adapter revision is behind this build, or whose stored schema this
-// build re-extracts from native input. It replaces the retained-tree walk the
+// build re-extracts from native input. It replaces the stored-tree walk the
 // ordinary harvest used to run to find adapter-refresh work. The production
 // store implements it; a store that does not is treated as having no such work.
 type StaleAdapterSessionLister interface {

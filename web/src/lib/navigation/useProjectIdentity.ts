@@ -44,7 +44,9 @@ export function useProjectIdentity(requestedIdentity: string | null): {
       })
       .catch((error: unknown) => {
         if (generation !== request.current) return;
-        const message = error instanceof Error ? error.message : 'Project resolution failed without an error message. Retry, then inspect the Peasant server logs.';
+        const message = error instanceof DiscoveryRequestError
+          ? error.detail
+          : error instanceof Error ? error.message : 'Project resolution failed without an error message. Retry, then inspect the Peasant server logs.';
         setState(error instanceof DiscoveryRequestError && error.status === 404
           ? { phase: 'missing', requestedIdentity, message }
           : { phase: 'error', requestedIdentity, message });

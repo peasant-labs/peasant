@@ -14,9 +14,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/native_refresh_repair.yaml
@@ -40,11 +40,24 @@ type nativeRefreshRepairCase struct {
 	UnrelatedSessionID   string         `yaml:"unrelatedSessionId"`
 	UnrelatedTranscript  string         `yaml:"unrelatedTranscript"`
 	NativeSource         string         `yaml:"nativeSource"`
+	// UnsettledNativeSource names the native fixture whose assistant row still
+	// carries a running/streaming tool, for the authority-bridge scenario.
+	UnsettledNativeSource  string   `yaml:"unsettledNativeSource"`
+	HeldDiagnosticContains []string `yaml:"heldDiagnosticContains"`
+	// Authority names the read authority a latest-attempt retention case starts
+	// from: a managed generation, the stored certificate, or a managed
+	// generation whose row predates the artifact-hash column.
+	Authority string `yaml:"authority"`
+	// RetentionRepeat runs the harvest a second time to prove the settled
+	// latest attempt is a true no-op.
+	RetentionRepeat bool `yaml:"retentionRepeat"`
+	// ExplicitRebuild runs a forced harvest after retention to prove the
+	// operator override replaces the authority and clears the latest-attempt pointer.
+	ExplicitRebuild bool `yaml:"explicitRebuild"`
 }
 
 type nativeRefreshRepairFixture struct {
-	RequiredNames []string                  `yaml:"requiredNames"`
-	Cases         []nativeRefreshRepairCase `yaml:"cases"`
+	Cases []nativeRefreshRepairCase `yaml:"cases"`
 }
 
 func loadNativeRefreshRepairFixture(t *testing.T) nativeRefreshRepairFixture {
@@ -73,7 +86,7 @@ func loadNativeRefreshRepairFixture(t *testing.T) nativeRefreshRepairFixture {
 }
 
 // nativeRepairStore opens a real store that can persist and read managed
-// generations, which is the capability the native targets are activated on.
+// generations, which is the capability the managed-generation targets are activated on.
 func nativeRepairStore(t *testing.T, dbPath, root string) *store.Store {
 	t.Helper()
 	artifacts, err := store.NewOSGenerationArtifactStore(root)
@@ -92,7 +105,7 @@ func nativeRepairStore(t *testing.T, dbPath, root string) *store.Store {
 }
 
 // nativeRepairMeta builds the managed metadata a completed harvest leaves for a
-// native session. Its recorded source locator points at the native path the
+// native session. Its recorded source locator points at the source path the
 // adapter recorded.
 func nativeRepairMeta(t *testing.T, sessionID string, harness ingest.Harness, nativePath string) *ingest.UnifiedMetadata {
 	t.Helper()
@@ -105,10 +118,10 @@ func nativeRepairMeta(t *testing.T, sessionID string, harness ingest.Harness, na
 // runNativeRepairPipeline runs the real Pipeline with the managed-generation
 // targets injected explicitly, exactly as production composes them once a
 // capable store is configured.
-func runNativeRepairPipeline(t *testing.T, db *store.Store, fs ingest.FileSystem, outputDir string) *ingest.PipelineResult {
+func runNativeRepairPipeline(t *testing.T, db *store.Store, fs ingest.FileSystem, outputDir string, cfgOpts ...func(*ingest.PipelineConfig)) *ingest.PipelineResult {
 	t.Helper()
-	cfg := makePipelineConfig(outputDir)
-	versions := ingest.NativeGenerationTargets(ingest.HarvesterVersionRegistry)
+	cfg := makePipelineConfig(outputDir, cfgOpts...)
+	versions := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)
 	pipeline, err := newTestPipeline(
 		fs,
 		testutil.DefaultGitResolver(),
@@ -126,7 +139,7 @@ func runNativeRepairPipeline(t *testing.T, db *store.Store, fs ingest.FileSystem
 	}
 	result, err := pipeline.Run(t.Context())
 	if err != nil {
-		t.Fatalf("run native repair pipeline: %v", err)
+		t.Fatalf("run the managed-generation repair pipeline: %v", err)
 	}
 	return result
 }
@@ -175,11 +188,11 @@ func removeManagedPair(t *testing.T, fs ingest.FileSystem, outputDir string, sid
 	}
 }
 
-// runOpenCodeNativeActivation drives the real OpenCode provenance candidate
+// runOpenCodeGenerationActivation drives the real OpenCode provenance candidate
 // through the production managed-generation activation, reopens the store and
 // proves that the persisted prior evidence reuses the captured identities on a
 // refresh. The native SQLite source is byte- and row-immutable across the reads.
-func runOpenCodeNativeActivation(t *testing.T, tc nativeRefreshRepairCase) {
+func runOpenCodeGenerationActivation(t *testing.T, tc nativeRefreshRepairCase) {
 	t.Helper()
 	source := testfixture.MaterializeByName(t, tc.NativeSource)
 	before := testfixture.SnapshotSource(t, source)
@@ -197,20 +210,20 @@ func runOpenCodeNativeActivation(t *testing.T, tc nativeRefreshRepairCase) {
 	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
 	metadata := schema.UnifiedMetadata{SchemaVersion: ingest.CurrentSchemaVersion, SessionID: sid, ModelHarness: ingest.HarnessOpenCode}
 	first := buildOpenCodeRepairCandidate(t, adapter, source.Path, tc.SessionID, sid, metadata, "gen-open-repair-1", ingest.NewProjectionPriorState())
-	if _, err := db.ActivateNativeGeneration(t.Context(), ingest.NativeGenerationActivation{
+	if _, err := db.ActivateGenerationCandidate(t.Context(), ingest.GenerationActivation{
 		Generation:     first.Result,
 		Blobs:          first.Blobs,
 		PriorEvidence:  first.PriorEvidence,
-		IndexerVersion: ingest.NativeGenerationRepairTargets[ingest.HarnessOpenCode].IndexerVersion,
+		IndexerVersion: ingest.GenerationRepairTargets[ingest.HarnessOpenCode].IndexerVersion,
 		IndexedAtMs:    1,
 		ContentCapture: ingest.SessionContentCaptureWrite{
 			Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceProviderSource,
 			TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite, CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: 1,
 		},
 	}); err != nil {
-		t.Fatalf("activate OpenCode native generation: %v", err)
+		t.Fatalf("activate the OpenCode managed generation: %v", err)
 	}
-	prior, err := db.ReadNativeGenerationPrior(t.Context(), sid)
+	prior, err := db.ReadGenerationPrior(t.Context(), sid)
 	if err != nil {
 		t.Fatalf("read prior after activation: %v", err)
 	}
@@ -228,7 +241,7 @@ func runOpenCodeNativeActivation(t *testing.T, tc nativeRefreshRepairCase) {
 	}
 	reopened := nativeRepairStore(t, dbPath, root)
 	defer func() { _ = reopened.Close() }()
-	reloaded, err := reopened.ReadNativeGenerationPrior(t.Context(), sid)
+	reloaded, err := reopened.ReadGenerationPrior(t.Context(), sid)
 	if err != nil {
 		t.Fatalf("read prior after reopen: %v", err)
 	}
@@ -250,21 +263,17 @@ func runOpenCodeNativeActivation(t *testing.T, tc nativeRefreshRepairCase) {
 	testfixture.AssertUnchanged(t, source, before)
 }
 
-func buildOpenCodeRepairCandidate(t *testing.T, adapter *ingest.OpenCodeAdapter, nativePath, nativeSessionID string, sid ingest.SessionID, metadata schema.UnifiedMetadata, generationID string, prior ingest.ProjectionPriorState) ingest.NativeGenerationCandidate {
+func buildOpenCodeRepairCandidate(t *testing.T, adapter *ingest.OpenCodeAdapter, nativePath, nativeSessionID string, sid ingest.SessionID, metadata schema.UnifiedMetadata, generationID string, prior ingest.ProjectionPriorState) ingest.GenerationCandidate {
 	t.Helper()
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(ingest.OpenCodeProvenanceIndexerConfig{
-		Enabled: true,
-		Snapshot: func(ctx context.Context, _ ingest.DiscoveredSession) (ingest.OpenCodeHistorySnapshot, error) {
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(t.Context(), ingest.GenerationBuildInput{
+		Session:          ingest.DiscoveredSession{SessionID: sid, Harness: ingest.HarnessOpenCode, TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite},
+		GenerationID:     generationID,
+		RecordedMetadata: &metadata,
+		Prior:            generationTestPriorFromOpenCode(t, ingest.OpenCodeProvenancePrior{Aliases: prior, HasCompleteGeneration: true}),
+		OpenCode: generationTestOpenCodeSource{snapshot: func(ctx context.Context, _ string) (ingest.OpenCodeHistorySnapshot, error) {
 			return adapter.SnapshotOpenCodeProvenance(ctx, nativePath, nativeSessionID, ingest.OpenCodeSnapshotOptions{})
-		},
-		Metadata:     func(ingest.DiscoveredSession) (schema.UnifiedMetadata, error) { return metadata, nil },
-		GenerationID: func(ingest.DiscoveredSession) string { return generationID },
-		Prior: func(context.Context, ingest.DiscoveredSession) (ingest.OpenCodeProvenancePrior, error) {
-			return ingest.OpenCodeProvenancePrior{Aliases: prior, HasCompleteGeneration: true}, nil
-		},
-	}))
-	candidate, err := indexer.BuildNativeGeneration(t.Context(), ingest.DiscoveredSession{
-		SessionID: sid, Harness: ingest.HarnessOpenCode, TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite,
+		}},
 	})
 	if err != nil {
 		t.Fatalf("build OpenCode candidate %s: %v", generationID, err)
@@ -400,6 +409,19 @@ func readMetricsTitle(t *testing.T, db *store.Store, sid ingest.SessionID) strin
 	return *metrics.TitleGenerated
 }
 
+// knownNativeRepairScenario reports whether a fixture case names a scenario the
+// oracle implements. It keeps the dispatch and the fixture in one place instead
+// of a growing boolean chain.
+func knownNativeRepairScenario(scenario string) bool {
+	switch scenario {
+	case "maintenance_repair", "failed_capture", "future_state", "unrelated_harness",
+		"opencode_native_activation", "opencode_authority_bridge", "latest_attempt_retention":
+		return true
+	default:
+		return false
+	}
+}
+
 // TestNativeRefreshRepair drives the real Pipeline through the named native
 // repair oracle: a stale format-1 Codex projection is repaired into a managed
 // generation with its metadata, a second run is unchanged, a failed native
@@ -408,13 +430,32 @@ func readMetricsTitle(t *testing.T, db *store.Store, sid ingest.SessionID) strin
 func TestNativeRefreshRepair(t *testing.T) {
 	fixture := loadNativeRefreshRepairFixture(t)
 	for _, tc := range fixture.Cases {
-		if tc.Scenario != "maintenance_repair" && tc.Scenario != "failed_capture" && tc.Scenario != "future_state" && tc.Scenario != "unrelated_harness" && tc.Scenario != "opencode_native_activation" {
+		if !knownNativeRepairScenario(tc.Scenario) {
 			t.Fatalf("native_refresh_repair case %q declares unknown scenario %q", tc.Name, tc.Scenario)
+		}
+		if tc.Scenario == "opencode_authority_bridge" && (tc.NativeSource == "" || tc.UnsettledNativeSource == "") {
+			t.Fatalf("native_refresh_repair case %q requires nativeSource and unsettledNativeSource", tc.Name)
+		}
+		if tc.Scenario == "opencode_authority_bridge" {
+			hasHistoricalProducer := tc.StoredIndexerVersion > 0
+			hasV1Format := tc.StoredIndexFormat == 1
+			hasHeldDiagnostics := len(tc.HeldDiagnosticContains) > 0
+			if !hasHistoricalProducer || !hasV1Format || !hasHeldDiagnostics {
+				t.Fatalf("native_refresh_repair case %q requires historical producer, V1 format, and held diagnostic expectations", tc.Name)
+			}
 		}
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 			if tc.Scenario == "opencode_native_activation" {
-				runOpenCodeNativeActivation(t, tc)
+				runOpenCodeGenerationActivation(t, tc)
+				return
+			}
+			if tc.Scenario == "opencode_authority_bridge" {
+				runOpenCodeAuthorityBridgePipeline(t, tc)
+				return
+			}
+			if tc.Scenario == "latest_attempt_retention" {
+				runLatestAttemptCase(t, tc)
 				return
 			}
 			sid, err := ingest.NewSessionID(tc.SessionID)
@@ -436,7 +477,7 @@ func TestNativeRefreshRepair(t *testing.T) {
 			}
 			// Keep the session out of the adapter-refresh inventory so the stale
 			// index inventory is the one that recomposes it from its stored pair.
-			setSessionAdapterVersion(t, db, sid, ingest.NativeGenerationRepairTargets[tc.Harness].AdapterVersion)
+			setSessionAdapterVersion(t, db, sid, ingest.GenerationRepairTargets[tc.Harness].AdapterVersion)
 			if tc.Scenario == "maintenance_repair" {
 				setBadDerivedTitle(t, db, sid, "stale derived title", 99)
 			}

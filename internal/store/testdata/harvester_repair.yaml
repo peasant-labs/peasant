@@ -12,6 +12,7 @@ required_names:
   - adapter_bump_selects_by_row
   - predicate_ignores_missing_metadata_row
   - predicate_ignores_unbindable_kind
+  - predicate_ignores_unrecovered_provenance
 cases:
   # A NULL adapter revision counts as revision 1. At target 1 the row is behind
   # nothing, so it is not selected and an unchanged harvest re-extracts nothing.
@@ -27,10 +28,12 @@ cases:
       - {name: ahead_of_the_bump, id: 'aaaaaaaa-0002-4000-8000-000000000002', harness: claude-code, adapter_version: 3}
     expected: [behind_the_bump]
   # The revision half of the repair predicate fires only when a publication
-  # metadata row exists at the session's current capture revision. Both rows
-  # here have a mismatched indexed revision, and their hash half is settled
-  # (input proof present), so the metadata row is the only thing that can select
-  # them. The row without one is ignored; the identical row with one is repaired.
+  # metadata row exists at the session's current capture revision AND the
+  # session's provenance was recovered, so the index write has a capture it can
+  # actually bind to. Both rows here have a mismatched indexed revision and
+  # their hash half is settled (input proof present), so the metadata row is the
+  # only thing that can select them. The row without one is ignored; the
+  # identical bindable row with one is repaired.
   - name: predicate_ignores_missing_metadata_row
     selector: repair
     harness_targets: [claude-code]
@@ -42,6 +45,7 @@ cases:
         indexed_input_hash: set
         publication_capture_revision: 2
         indexed_publication_capture_revision: 1
+        cwd_provenance_kind: source_exact
         metadata_row_at_revision: 2
       - name: no_metadata_row
         id: 'bbbbbbbb-0002-4000-8000-000000000002'
@@ -51,6 +55,26 @@ cases:
         publication_capture_revision: 2
         indexed_publication_capture_revision: 1
     expected: [has_metadata_row]
+  # A row whose provenance is not_recovered names no capture the index write
+  # could bind to, even when a publication metadata row exists at its counter's
+  # revision. Enumerating it would read its pair on every harvest for a repair
+  # that can never complete, so the publication half excludes it. Its hash half
+  # is settled (input proof present) and its harness is targeted, so the
+  # provenance guard is the only term that can keep it out.
+  - name: predicate_ignores_unrecovered_provenance
+    selector: repair
+    harness_targets: [claude-code]
+    sessions:
+      - name: unrecovered_provenance
+        id: 'dddddddd-0001-4000-8000-000000000001'
+        harness: claude-code
+        artifact_hash: set
+        indexed_input_hash: set
+        publication_capture_revision: 3
+        indexed_publication_capture_revision: 0
+        cwd_provenance_kind: not_recovered
+        metadata_row_at_revision: 3
+    expected: []
   # The repair predicate is harness-scoped: it selects only rows whose harness is
   # a registered target. Both rows satisfy the hash half (a saved pair whose
   # index proof was cleared), but only the targeted harness is returned; a row of

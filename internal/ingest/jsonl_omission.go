@@ -224,14 +224,50 @@ func uncertifiableOversizedRecord(skipped []OversizedRecord, limit int) error {
 //
 // Reading the answer out of the entries themselves, rather than out of a
 // parallel flag, is what keeps the two from drifting: a capture is certified
-// full exactly when the omission is visible in what was stored.
+// full exactly when the omission is visible in what was stored. Both the
+// stored V1 entries and the managed V2 partitions are read the same way.
 func outputRecordsItsOmissions(output indexformat.Result) bool {
-	v1, ok := output.(indexformat.V1)
-	if !ok {
+	switch result := output.(type) {
+	case indexformat.V1:
+		return entriesRecordOmissions(result.Entries)
+	case *indexformat.V1:
+		if result == nil {
+			return false
+		}
+		return entriesRecordOmissions(result.Entries)
+	case indexformat.V2:
+		return generationRecordsItsOmissions(result.Generation)
+	case *indexformat.V2:
+		if result == nil {
+			return false
+		}
+		return generationRecordsItsOmissions(result.Generation)
+	default:
 		return false
 	}
-	for _, entry := range v1.Entries {
+}
+
+// entriesRecordOmissions reports whether any stored entry stands for an omitted
+// source record.
+func entriesRecordOmissions(entries []schema.SessionEntry) bool {
+	for _, entry := range entries {
 		if _, omitted := OmittedRecordOf(entry); omitted {
+			return true
+		}
+	}
+	return false
+}
+
+// generationRecordsItsOmissions reports whether a managed generation carries at
+// least one omission placeholder across its main and earlier partitions. A
+// managed capture is certified full exactly when the omission is visible in the
+// partitions it stores, exactly as the V1 read requires of its entries.
+func generationRecordsItsOmissions(generation indexformat.Generation) bool {
+	if entriesRecordOmissions(generation.Main.Entries) {
+		return true
+	}
+	for i := range generation.Earlier {
+		if entriesRecordOmissions(generation.Earlier[i].Content.Entries) {
 			return true
 		}
 	}

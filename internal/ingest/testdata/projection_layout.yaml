@@ -1625,3 +1625,758 @@ cases:
           titleRefs: []
           main:
             - {nativeKey: u1, index: 0, ref: e_u1, role: user, entryType: text, depth: 0, content: harness input, submissionRef: s_u1, ownership: local}
+
+  - name: channels-tool-call-id-unpaired-result
+    steps:
+      - allocator: [e_a1, e_lost1]
+        capture:
+          id: gen-channels-tcid
+          sessionId: sess_chanstcid
+          harness: codex
+          sourceEvidenceDigest: sha256:channels-tcid
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chanstcid
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: before the lost call
+            - nativeKey: lost1
+              section: {index: 0}
+              role: tool
+              entryType: tool_result
+              toolCallId: toolu_lost_1
+              toolResult: orphan output kept as evidence
+              rawByteLength: 4096
+        want:
+          turnCount: 2
+          inputSubmissionCount: 0
+          titleRefs: []
+          main:
+            - {nativeKey: a1, index: 0, ref: e_a1, role: assistant, entryType: text, depth: 0, content: before the lost call}
+            - nativeKey: lost1
+              index: 1
+              ref: e_lost1
+              role: tool
+              entryType: tool_result
+              depth: 0
+              toolCallId: toolu_lost_1
+              toolOutput: orphan output kept as evidence
+              rawByteLength: 4096
+
+  - name: channels-tool-call-id-incoherent-rejected
+    steps:
+      - allocator: [e_x]
+        wantError: direct source tool id at depth
+        capture:
+          id: gen-channels-tcid-depth
+          sessionId: sess_chanstciddepth
+          harness: codex
+          sourceEvidenceDigest: sha256:channels-tcid-depth
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chanstciddepth
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: carrier
+            - nativeKey: r1
+              section: {index: 0}
+              role: tool
+              entryType: tool_result
+              depth: 1
+              carrierNativeKey: a1
+              toolCallKey: call-1
+              toolCallId: toolu_nested
+              toolResult: nested result
+      - allocator: [e_x]
+        wantError: direct source tool id on a carrier or keyed block
+        capture:
+          id: gen-channels-tcid-keyed
+          sessionId: sess_chanstcidkeyed
+          harness: codex
+          sourceEvidenceDigest: sha256:channels-tcid-keyed
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chanstcidkeyed
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: r1
+              section: {index: 0}
+              role: tool
+              entryType: tool_result
+              toolCallKey: call-1
+              toolCallId: toolu_keyed
+              toolResult: keyed result
+      - allocator: [e_x]
+        wantError: direct source tool id on a carrier or keyed block
+        capture:
+          id: gen-channels-tcid-carrier
+          sessionId: sess_chanstcidcarrier
+          harness: codex
+          sourceEvidenceDigest: sha256:channels-tcid-carrier
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chanstcidcarrier
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: r1
+              section: {index: 0}
+              role: tool
+              entryType: tool_result
+              carrierNativeKey: a1
+              toolCallId: toolu_carried
+              toolResult: carried result
+      - allocator: [e_x]
+        wantError: only an unpaired tool_result names its own id
+        capture:
+          id: gen-channels-tcid-role
+          sessionId: sess_chanstcidrole
+          harness: codex
+          sourceEvidenceDigest: sha256:channels-tcid-role
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chanstcidrole
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: u1
+              section: {index: 0}
+              role: user
+              entryType: text
+              toolCallId: toolu_wrong_role
+              content: not a tool result
+      - allocator: [e_x]
+        wantError: empty direct source tool id
+        capture:
+          id: gen-channels-tcid-empty
+          sessionId: sess_chanstcidempty
+          harness: codex
+          sourceEvidenceDigest: sha256:channels-tcid-empty
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chanstcidempty
+            modelHarness: codex
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: r1
+              section: {index: 0}
+              role: tool
+              entryType: tool_result
+              toolCallId: ""
+              toolResult: empty id result
+
+  - name: channels-omitted-placeholder
+    steps:
+      - allocator: [e_kept, e_omitted]
+        capture:
+          id: gen-channels-omitted
+          sessionId: sess_chansomitted
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomitted
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: kept
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: keep this turn
+            - nativeKey: omitted1
+              section: {index: 0}
+              omitted:
+                reason: record_too_large
+                line: 42
+                bytes: 9000
+                limitBytes: 8000
+                toolCallId: toolu_omitted_1
+        want:
+          turnCount: 1
+          inputSubmissionCount: 0
+          titleRefs: []
+          main:
+            - {nativeKey: kept, index: 0, ref: e_kept, role: user, entryType: text, depth: 0, content: keep this turn}
+            - nativeKey: omitted1
+              index: 1
+              ref: e_omitted
+              role: tool
+              entryType: tool_result
+              depth: 0
+              toolCallId: toolu_omitted_1
+              rawByteLength: 9000
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+
+  - name: channels-omitted-incoherent-rejected
+    steps:
+      - allocator: [e_x]
+        wantError: omission placeholder at depth
+        capture:
+          id: gen-channels-omitted-depth
+          sessionId: sess_chansomitteddepth
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-depth
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomitteddepth
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: carrier
+            - nativeKey: omitted1
+              section: {index: 0}
+              depth: 1
+              carrierNativeKey: a1
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: omission placeholder outside the main partition
+        capture:
+          id: gen-channels-omitted-earlier
+          sessionId: sess_chansomittedearlier
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-earlier
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomittedearlier
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 1, earlier: true}
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: both an extension document and an omission placeholder
+        capture:
+          id: gen-channels-omitted-extra
+          sessionId: sess_chansomittedextra
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-extra
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomittedextra
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              extra: '{"command_name":"/clear"}'
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: omission placeholder with a carrier
+        capture:
+          id: gen-channels-omitted-carrier
+          sessionId: sess_chansomittedcarrier
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-carrier
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomittedcarrier
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              carrierNativeKey: a1
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: omission placeholder with a native call key
+        capture:
+          id: gen-channels-omitted-callkey
+          sessionId: sess_chansomittedcallkey
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-callkey
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomittedcallkey
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              toolCallKey: call-1
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: omission placeholder and a direct source tool id
+        capture:
+          id: gen-channels-omitted-both
+          sessionId: sess_chansomittedboth
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-both
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomittedboth
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              toolCallId: toolu_both
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: omission record is not coherent
+        capture:
+          id: gen-channels-omitted-incoherent
+          sessionId: sess_chansomittedincoherent
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-incoherent
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomittedincoherent
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              omitted: {reason: record_too_large, line: 42, bytes: 100, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: uncertain-subtree
+        capture:
+          id: gen-channels-omitted-uncertain-subtree
+          sessionId: sess_chansomitteduncertain
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-uncertain
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomitteduncertain
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              uncertainSubtree: true
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: ambiguous-pair
+        capture:
+          id: gen-channels-omitted-ambiguous-pair
+          sessionId: sess_chansomittedambiguous
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-ambiguous
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomittedambiguous
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              ambiguousPairKey: probe-pair
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: omission placeholder with a native correlation key
+        capture:
+          id: gen-channels-omitted-native-correlation
+          sessionId: sess_chansomittednativecorrelation
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-native-correlation
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomittednativecorrelation
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              nativeCorrelationKey: corr-omitted
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: omission placeholder with a native correlation key
+        capture:
+          id: gen-channels-omitted-correlated-uncertain
+          sessionId: sess_chansomittedcorrelateduncertain
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-correlated-uncertain
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomittedcorrelateduncertain
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: carrier
+              uncertainSubtree: true
+              nativeCorrelationKey: corr-omitted-union
+            - nativeKey: omitted1
+              section: {index: 0}
+              nativeCorrelationKey: corr-omitted-union
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+      - allocator: [e_x, e_y]
+        wantError: omission placeholder resolved to partition
+        capture:
+          id: gen-channels-omitted-carrier-child-uncertain
+          sessionId: sess_chansomittedcarrierchild
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-carrier-child
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomittedcarrierchild
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+            - nativeKey: child1
+              section: {index: 0}
+              role: assistant
+              entryType: tool_use
+              depth: 1
+              carrierNativeKey: omitted1
+              toolCallKey: call-child
+              toolName: rg
+              toolArguments: rg parser
+              uncertainSubtree: true
+      - allocator: [e_x, e_y]
+        wantError: omission placeholder resolved to partition
+        capture:
+          id: gen-channels-omitted-carrier-child-ambiguous
+          sessionId: sess_chansomittedcarrierambiguous
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-carrier-child-ambiguous
+          completeness: complete
+          earlierStates: [uncertain_migrated]
+          metadata:
+            sessionId: sess_chansomittedcarrierambiguous
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: 8000}
+            - nativeKey: child1
+              section: {index: 0}
+              role: assistant
+              entryType: tool_use
+              depth: 1
+              carrierNativeKey: omitted1
+              toolCallKey: call-child
+              toolName: rg
+              toolArguments: rg parser
+              ambiguousPairKey: probe-pair
+      - allocator: [e_x]
+        wantError: omission record carries negative sizes
+        capture:
+          id: gen-channels-omitted-negative-bytes
+          sessionId: sess_chansomittednegativebytes
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-negative-bytes
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomittednegativebytes
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              omitted: {reason: record_too_large, line: 42, bytes: -1, limitBytes: 8000}
+      - allocator: [e_x]
+        wantError: omission record carries negative sizes
+        capture:
+          id: gen-channels-omitted-negative-limit
+          sessionId: sess_chansomittednegativelimit
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-omitted-negative-limit
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansomittednegativelimit
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: omitted1
+              section: {index: 0}
+              omitted: {reason: record_too_large, line: 42, bytes: 9000, limitBytes: -1}
+
+  - name: channels-extra-merge
+    steps:
+      - allocator: [e_a1, e_u1, s_u1]
+        capture:
+          id: gen-channels-extra
+          sessionId: sess_chansextra
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-extra
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansextra
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: control response
+              extra: '{"command_name":"/clear"}'
+              observedModel: claude-opus-4-6
+              rawByteLength: 4096
+            - nativeKey: u1
+              submissionKey: accept-u1
+              section: {index: 0}
+              role: user
+              entryType: text
+              content: next prompt
+              provenance:
+                origin: submitted_input
+                actor: unknown
+                delivery: session_admission
+                ownership: local
+                evidence: native_typed
+                inputModality: text
+        want:
+          turnCount: 2
+          inputSubmissionCount: 1
+          titleRefs: [e_u1]
+          main:
+            - nativeKey: a1
+              index: 0
+              ref: e_a1
+              role: assistant
+              entryType: text
+              depth: 0
+              content: control response
+              observedModel: claude-opus-4-6
+              rawByteLength: 4096
+              extra:
+                command_name: /clear
+                model_id: claude-opus-4-6
+            - {nativeKey: u1, index: 1, ref: e_u1, role: user, entryType: text, depth: 0, content: next prompt, submissionRef: s_u1, ownership: local}
+      - allocator: [e_a1]
+        capture:
+          id: gen-channels-extra-retained-unknown
+          sessionId: sess_chansextraretainedunknown
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-extra-retained-unknown
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansextraretainedunknown
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: control response
+              extra: '{"command_name":"/clear"}'
+              retainedUnknown:
+                - namespace: record
+                  kind: future
+                  sourceId: src-retained-merge
+                  payload: '{"x":1}'
+        want:
+          turnCount: 1
+          inputSubmissionCount: 0
+          titleRefs: []
+          main:
+            - nativeKey: a1
+              index: 0
+              ref: e_a1
+              role: assistant
+              entryType: text
+              depth: 0
+              content: control response
+              extra:
+                command_name: /clear
+                retainedUnknown:
+                  - harness: claude-code
+                    namespace: record
+                    kind: future
+                    position: {sourceId: src-retained-merge}
+                    payloadText: '{"x":1}'
+
+  - name: channels-raw-byte-length-rejected
+    steps:
+      - allocator: [e_x]
+        wantError: rawByteLength -1 is negative
+        capture:
+          id: gen-channels-raw-negative
+          sessionId: sess_chansrawnegative
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-raw-negative
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansrawnegative
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: negative raw length
+              rawByteLength: -1
+
+  - name: channels-extra-reserved-rejected
+    steps:
+      - allocator: [e_x]
+        wantError: reserved key "retainedUnknown"
+        capture:
+          id: gen-channels-extra-retained
+          sessionId: sess_chansextraretained
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-extra-retained
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansextraretained
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: control response
+              extra: '{"retainedUnknown":[]}'
+      - allocator: [e_x]
+        wantError: reserved key "model_id"
+        capture:
+          id: gen-channels-extra-model
+          sessionId: sess_chansextramodel
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-extra-model
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansextramodel
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: control response
+              extra: '{"model_id":"claude-opus-4-6"}'
+      - allocator: [e_x]
+        wantError: reserved key "omittedRecord"
+        capture:
+          id: gen-channels-extra-omitted
+          sessionId: sess_chansextraomitted
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-extra-omitted
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansextraomitted
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: control response
+              extra: '{"omittedRecord":{"reason":"record_too_large","line":1,"bytes":9000,"limitBytes":8000}}'
+      - allocator: [e_x]
+        wantError: extra is not a JSON object
+        capture:
+          id: gen-channels-extra-array
+          sessionId: sess_chansextraarray
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-extra-array
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansextraarray
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: control response
+              extra: '["not","an","object"]'
+      - allocator: [e_x]
+        wantError: extra is not a JSON object
+        capture:
+          id: gen-channels-extra-null
+          sessionId: sess_chansextranull
+          harness: claude-code
+          sourceEvidenceDigest: sha256:channels-extra-null
+          completeness: complete
+          earlierStates: []
+          metadata:
+            sessionId: sess_chansextranull
+            modelHarness: claude-code
+            schemaVersion: 11
+            purpose: interaction
+          blocks:
+            - nativeKey: a1
+              section: {index: 0}
+              role: assistant
+              entryType: text
+              content: control response
+              extra: 'null'

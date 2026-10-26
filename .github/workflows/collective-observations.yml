@@ -1,0 +1,47 @@
+name: Collective observations binary journey
+on:
+  pull_request:
+    paths:
+      - 'web/**'
+      - 'internal/testutil/cmd/collectiveobservations-fixture/**'
+      - 'internal/collectiveobservations/**'
+      - 'internal/store/collective_*.go'
+      - 'internal/api/collective_observations.go'
+      - 'internal/auth/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'flake.nix'
+      - 'flake.lock'
+      - '.github/workflows/collective-observations.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  built-binary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41
+      - name: Frozen dependencies, support contracts and actual embedded binary journey
+        run: |
+          nix develop --command bash -euo pipefail <<'SCRIPT'
+            export CHROME_PATH="$(command -v chromium)"
+            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+            pnpm --dir web install --frozen-lockfile
+            pnpm --dir web run test:journey:support
+            pnpm --dir web run test:journey:fixture
+            pnpm --dir web run test:journey:api
+            pnpm --dir web run journey:collective-observations
+            pnpm --dir web run test:journey:mutations
+          SCRIPT
+      - name: Retain sanitized build and browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: collective-observations-binary-evidence
+          path: review-capture/collective-observations-*/
+          if-no-files-found: error

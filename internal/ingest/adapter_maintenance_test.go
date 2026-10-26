@@ -112,14 +112,14 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 		t.Run(row.Name, func(t *testing.T) {
 			root := t.TempDir()
 			output := filepath.Join(root, "managed")
-			native := filepath.Join(root, "native.jsonl")
-			filesystem := &adapterMaintenanceFS{OSFileSystem: &ingest.OSFileSystem{}, nativePath: native}
 			database := storetest.OpenWith(t)
 			t.Cleanup(func() { _ = database.Close() })
 			var metadata ingest.UnifiedMetadata
 			if err := json.Unmarshal([]byte(fixture.Metadata), &metadata); err != nil {
 				t.Fatal(err)
 			}
+			native := filepath.Join(root, metadata.SessionID.String()+".jsonl")
+			filesystem := &adapterMaintenanceFS{OSFileSystem: &ingest.OSFileSystem{}, nativePath: native}
 			metadata.Source.FilePath = native
 			if row.UnknownClock {
 				unknown := int64(0)
@@ -154,7 +154,13 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 				baselineConfig := makePipelineConfig(output)
 				baselineConfig.Reindex = true
 				baselineConfig.Sources = nil
-				baseline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, baselineConfig, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
+				// Bootstrap only the index: omitted adapter provenance is the
+				// historical baseline 1 that this corpus subsequently refreshes.
+				baselineVersions := maps.Clone(ingest.HarvesterVersionRegistry)
+				baselineTarget := baselineVersions[metadata.ModelHarness]
+				baselineTarget.AdapterVersion = 1
+				baselineVersions[metadata.ModelHarness] = baselineTarget
+				baseline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, baselineConfig, ingest.WithHarvesterVersions(baselineVersions), ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 				if err != nil {
 					t.Fatal(err)
 				}

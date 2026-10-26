@@ -32,6 +32,10 @@
 #     the same stored message, differing only in whether the read succeeds
 #   - the no-miner arm pairs a harness this build cannot re-read with a Claude
 #     control that is otherwise identical, so the two must settle differently
+#   - the post-heal arm is an OpenCode row (no origin miner) whose parent link
+#     was repaired after it was judged unknown, so the repair left it unknown at
+#     version 0; an implementation that ran the no-miner fallback before the
+#     parent link, or kept the stale verdict, would answer unknown, not agent
 #   - the all-unreadable arm is the trap: an implementation that marked
 #     everything final fails every one of its rows
 
@@ -45,12 +49,14 @@ required_case_names:
   - a_scaffolding_run_past_the_cap_stops_at_unknown
   - a_harness_without_a_miner_keeps_its_first_stored_record
   - parent_linked_row_resolves_without_reading_any_transcript
+  - a_repaired_parent_link_on_a_harness_without_a_miner_resolves_agent
   - cached_menu_origin_is_reused_without_reading_the_transcript
   - live_transcript_is_mined_in_full
   - missing_transcript_resolves_from_the_stored_first_user_message
   - a_degraded_row_stays_retryable_while_a_full_row_is_finalised
   - a_row_already_at_the_current_rule_version_is_skipped
   - a_row_at_the_prior_rule_version_is_reclassified
+  - a_row_seeded_at_the_literal_released_rule_version_is_rejudged
   - a_settled_store_is_written_to_only_once
   - an_interrupted_pass_resumes_without_mis_marking
   - a_degraded_row_never_reaches_agent_on_unrecoverable_markers
@@ -222,6 +228,34 @@ cases:
         finalised: false
         written: false
 
+  # A repaired parent link. The row was judged unknown before its parent link
+  # existed; the repair set the link and reset its origin version to 0 while
+  # keeping the stale verdict. It is an OpenCode row, which has no origin miner,
+  # and there is no transcript on disk and no stored message, so only the
+  # parent link can answer agent. The parent is stored ahead of it in the same
+  # list so the link lands; it has no evidence and settles unknown through the
+  # no-miner path.
+  - name: a_repaired_parent_link_on_a_harness_without_a_miner_resolves_agent
+    arm: repaired-parent-link
+    rows:
+      - session_id: 18000000-0000-4000-8000-000000000001
+        harness: opencode
+        source_path: /opencode/18000000-0000-4000-8000-000000000001.json
+      - session_id: 18000000-0000-4000-8000-000000000002
+        harness: opencode
+        parent_id: 18000000-0000-4000-8000-000000000001
+        source_path: /opencode/18000000-0000-4000-8000-000000000002.json
+        stored_origin: unknown
+    expected:
+      - session_id: 18000000-0000-4000-8000-000000000002
+        origin: agent
+        finalised: true
+        written: true
+      - session_id: 18000000-0000-4000-8000-000000000001
+        origin: unknown
+        finalised: true
+        written: true
+
   # Source two. The transcript is NOT on disk, so only the cache can answer.
   - name: cached_menu_origin_is_reused_without_reading_the_transcript
     arm: cached-origin
@@ -361,6 +395,34 @@ cases:
         origin: user
         finalised: true
         examined: true
+        written: true
+
+  # A row judged by the LITERAL released rule version before the corrected
+  # evidence feed must re-derive. The seed is the literal version a real store
+  # carries, not the build's constant, so the arm fails if the rule-version move
+  # is absent: the row would stay below no line, the pass would not list it, and
+  # its contradicting verdict would stand. The stored parent is the rule's first
+  # source, so the row is judged a child with no file read at all.
+  - name: a_row_seeded_at_the_literal_released_rule_version_is_rejudged
+    arm: literal-released-version
+    rows:
+      - session_id: e0000000-0000-4000-8000-000000000001
+        source_path: /claude/e0000000-0000-4000-8000-000000000001.jsonl
+      - session_id: e0000000-0000-4000-8000-000000000002
+        parent_id: e0000000-0000-4000-8000-000000000001
+        source_path: /claude/e0000000-0000-4000-8000-000000000002.jsonl
+        stored_origin: unknown
+        stored_version: 2
+    expected:
+      # The parent itself has no evidence at all: the degraded control that
+      # makes the child's answer attributable to its parent link.
+      - session_id: e0000000-0000-4000-8000-000000000001
+        origin: unknown
+        finalised: false
+        written: false
+      - session_id: e0000000-0000-4000-8000-000000000002
+        origin: agent
+        finalised: true
         written: true
 
   # Every arm runs the pass twice, but this one is named for it: once the

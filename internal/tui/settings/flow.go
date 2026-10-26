@@ -756,7 +756,7 @@ func (f Flow) guideLines(styles theme.Styles, width int) []string {
 		}
 		lines = append(lines, style.Render(clip(value, width)))
 	}
-	appendLine(guide.Intro, "", styles.Surface, true)
+	appendLine(guide.Intro, "", styles.Inset, true)
 	for _, hint := range guide.Hints {
 		appendLine(hint, "• ", styles.Muted, false)
 	}
@@ -805,24 +805,24 @@ func validateGuideExampleLines(example []GuideExampleLine) error {
 // verified at load time.
 func styleGuideExampleLines(th theme.Theme, width int, example []GuideExampleLine) []string {
 	styles := th.Styles()
-	panel := kit.NewPanel(th).WithBackground(th.Palette.Surface)
+	panel := kit.NewPanel(th).WithBackground(th.Palette.Surface2)
 	panel.SetSize(width, 0)
 	for _, line := range example {
 		switch line.Kind {
 		case GuideExampleLineText:
-			panel.Line(styles.Surface, line.Text)
+			panel.Line(styles.Inset, line.Text)
 		case GuideExampleLineLabel:
 			// Separate each category's before/after block with a blank row - including
 			// the first, so the example set is set off from the guide text above it -
 			// so the examples read as distinct groups rather than one dense column.
-			panel.Line(styles.Surface, "")
+			panel.Line(styles.Inset, "")
 			panel.Line(styles.Header, line.Text)
 		case GuideExampleLineBefore:
 			panel.Line(styles.DiffDel, "- before: "+line.Text)
 		case GuideExampleLineAfter:
 			panel.Line(styles.DiffAdd, "+ after: "+line.Text)
 		case GuideExampleLineSpacer:
-			panel.Line(styles.Surface, "")
+			panel.Line(styles.Inset, "")
 		}
 	}
 	if panel.LineCount() == 0 {
@@ -889,7 +889,7 @@ func guideExampleContractError(what, why, fix string) error {
 }
 
 func (f Flow) guideErrorLines(styles theme.Styles, width int, err error) []string {
-	panel := kit.NewPanel(f.th).WithBackground(f.th.Palette.Surface)
+	panel := kit.NewPanel(f.th).WithBackground(f.th.Palette.Surface2)
 	panel.SetSize(width, 0)
 	values := append([]string{"example unavailable; unverified output withheld"}, splitLines(err.Error())...)
 	for _, value := range values {
@@ -1110,10 +1110,10 @@ func (l helpLayer) View() string {
 		case helpRowFooter:
 			return styles.Muted
 		default:
-			return styles.Surface
+			return styles.Overlay
 		}
 	}
-	// The panel measures its own widest row, so every line shares the surface
+	// The panel measures its own widest row, so every line shares the overlay
 	// background and the card has one straight right edge. The two extra cells
 	// keep a margin past the longest row.
 	widest := 0
@@ -1122,7 +1122,7 @@ func (l helpLayer) View() string {
 			widest = w
 		}
 	}
-	panel := kit.NewPanel(l.th).WithBackground(l.th.Palette.Surface)
+	panel := kit.NewPanel(l.th).WithBackground(l.th.Palette.SurfaceElev)
 	panel.SetSize(widest+helpPanelMargin, 0)
 	for _, r := range rows {
 		panel.Line(styleFor(r.role), r.text)

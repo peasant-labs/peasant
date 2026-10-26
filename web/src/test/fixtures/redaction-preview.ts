@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'yaml';
 import type { RedactionCategory } from '@/types/messages';
+import { AllRedactionCategoryLabels } from '@peasant-labs/schema';
 
 export const RedactionCategoryFixtureKind = {
   Success: 'success',
@@ -23,6 +24,7 @@ export interface RedactionCategoryFixture {
 }
 
 interface RedactionCategoryFixtureFile {
+  requiredNames: string[];
   cases?: RedactionCategoryFixture[];
 }
 
@@ -60,14 +62,15 @@ function loadRedactionCategoryFixtures(): RedactionCategoryFixture[] {
   const source = readFileSync(REDACTION_CATEGORY_FIXTURE_PATH, 'utf8');
   const parsed = parse(source) as RedactionCategoryFixtureFile;
   const cases = parsed.cases ?? [];
-  if (cases.length !== 7) {
+  if (!Array.isArray(parsed.requiredNames) || parsed.requiredNames.some((name) => !cases.some((entry) => entry.name === name))
+    || cases.some((entry) => !parsed.requiredNames.includes(entry.name))) {
     throw new Error(
-      `redaction category fixture has ${cases.length} cases, want four canonical values plus unknown-group, unknown-item, and group/item-mismatch failures`,
+      'redaction category fixture must retain every required named case',
     );
   }
 
   const names = new Set<string>();
-  const canonical = new Set<RedactionCategory>(['CREDENTIAL', 'PII', 'PATH', 'INTERNAL']);
+  const canonical: ReadonlySet<string> = new Set(AllRedactionCategoryLabels);
   const seenCanonical = new Set<RedactionCategory>();
   const failureKinds = new Set<RedactionCategoryFixtureKind>();
   const validKinds = new Set<RedactionCategoryFixtureKind>(
@@ -86,8 +89,8 @@ function loadRedactionCategoryFixtures(): RedactionCategoryFixture[] {
       );
     }
     names.add(fixture.name);
-    const groupKnown = canonical.has(fixture.groupCategory as RedactionCategory);
-    const itemKnown = canonical.has(fixture.itemCategory as RedactionCategory);
+    const groupKnown = canonical.has(fixture.groupCategory);
+    const itemKnown = canonical.has(fixture.itemCategory);
     if (fixture.kind === RedactionCategoryFixtureKind.Success) {
       if (!fixture.expectedCategory || fixture.expectedError) {
         throw new Error(

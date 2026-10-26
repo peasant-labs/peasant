@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/proc"
 )
 
 // DefaultCommandTimeout bounds every git invocation this package makes. Each
@@ -136,6 +138,7 @@ func (g *ExecGit) run(ctx context.Context, dir string, args ...string) (string, 
 
 	full := append([]string{"-C", dir}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
+	proc.HideConsoleWindow(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

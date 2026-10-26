@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { SessionDetailV2 } from './SessionDetailV2';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
+import { PublishProvider } from '@/contexts/PublishContext';
 
 const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ProjectHash;
 const PATHNAME = '/projects/alpha-project/sess-12345678';
@@ -113,6 +114,13 @@ function loadFixtures(manifestText = manifestSource, casesText = casesSource): {
 const routerReplace = vi.hoisted(() => vi.fn());
 let currentSearchParams = new URLSearchParams();
 let channelData: unknown;
+// The publish flow is not this suite's subject; its Local API calls stay
+// pending so no real server is reached.
+vi.mock('@/lib/share/publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/share/publishing')>()),
+  ...(await import('@/test/fixtures/publishingIdle')).PUBLISHING_IDLE,
+}));
+
 vi.mock('next/navigation', () => ({
   useSearchParams: () => currentSearchParams,
   usePathname: () => PATHNAME,
@@ -142,7 +150,11 @@ vi.mock('@peasant-labs/fairtrade/graph', async (importOriginal) => {
 function TestDetail() {
   const routeQuery = parseTranscriptRouteQuery(currentSearchParams);
   if (!routeQuery) throw new Error('fixture route query must be valid');
-  return <SessionDetailV2 sessionId="sess-12345678" projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />;
+  return (
+    <PublishProvider>
+      <SessionDetailV2 sessionId="sess-12345678" projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />
+    </PublishProvider>
+  );
 }
 
 beforeEach(() => {

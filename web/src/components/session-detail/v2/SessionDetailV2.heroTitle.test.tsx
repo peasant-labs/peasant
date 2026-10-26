@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2, UNTITLED_SESSION_TITLE } from './SessionDetailV2';
 
 // The mounted hero heading. The shared viewer renders `session.title` when the
@@ -82,6 +83,13 @@ const fixture = loadFixture();
 let sessionDetailData: unknown;
 let qualityData: unknown;
 
+// The publish flow is not this suite's subject; its Local API calls stay
+// pending so no real server is reached.
+vi.mock('@/lib/share/publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/share/publishing')>()),
+  ...(await import('@/test/fixtures/publishingIdle')).PUBLISHING_IDLE,
+}));
+
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => PATHNAME,
@@ -136,7 +144,11 @@ const BASE_QUALITY_SESSION = {
 function TestDetail() {
   const routeQuery = parseTranscriptRouteQuery(new URLSearchParams());
   if (!routeQuery) throw new Error('hero title route query must be valid');
-  return <SessionDetailV2 sessionId={SESSION_ID} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />;
+  return (
+    <PublishProvider>
+      <SessionDetailV2 sessionId={SESSION_ID} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} />
+    </PublishProvider>
+  );
 }
 
 beforeEach(() => {

@@ -1,0 +1,14 @@
+# Required-name manifest for session_captured_stats: deletion protection by NAME, never by count.
+requiredNames:
+  - capture-upsert
+  - resume-latest-wins
+  - null-is-unknown
+  - derived-source-overwrite
+  - mirror-in-same-transaction
+  - overflow-new-kind
+  - partial-update-merges
+  - older-update-ignored
+  - list-detail-stats-source
+  - seed-unknown-for-compute-only-row
+  - seed-json-survives-derived-update
+  - seed-unknown-after-partial-harness-update

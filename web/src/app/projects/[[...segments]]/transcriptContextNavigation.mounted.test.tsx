@@ -9,6 +9,7 @@ import {
   type SessionRelationshipNavigation,
 } from '@peasant-labs/schema';
 import { ProjectsRouter } from './ProjectsRouter';
+import { PublishProvider } from '@/contexts/PublishContext';
 import { transcriptHref, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import {
   loadContextNavigationFixture,
@@ -40,6 +41,13 @@ const pushed: string[] = [];
 const replaced: string[] = [];
 const channelBySession = new Map<string, unknown>();
 const fetchProjectResolution = vi.fn();
+
+// The publish flow is not this suite's subject; its Local API calls stay
+// pending so no real server is reached.
+vi.mock('@/lib/share/publishing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/share/publishing')>()),
+  ...(await import('@/test/fixtures/publishingIdle')).PUBLISHING_IDLE,
+}));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathname,
@@ -162,7 +170,7 @@ function mountChild(c: ContextNavigationCase) {
   pathname = `/projects/${PROJECT_HASH}/${CHILD_ID}`;
   search = c.search ?? '';
   channelBySession.set(CHILD_ID, childWire(c));
-  return render(<ProjectsRouter />);
+  return render(<PublishProvider><ProjectsRouter /></PublishProvider>);
 }
 
 beforeEach(() => {
@@ -243,7 +251,7 @@ describe('mounted context and starter navigation on the production transcript ro
     pathname = url.pathname;
     search = url.search;
     channelBySession.set('sess_contextsource', targetWire('sess_contextsource'));
-    view.rerender(<ProjectsRouter />);
+    view.rerender(<PublishProvider><ProjectsRouter /></PublishProvider>);
 
     await waitFor(() => expect(document.body.textContent).toContain('current target sess_contextsource'));
     expect(document.body.textContent).not.toContain('child request');
@@ -273,7 +281,7 @@ describe('mounted context and starter navigation on the production transcript ro
     // The host's route write is what the browser applies, so a real Back lands
     // on the disclosed URL and the viewer reopens the section from it.
     search = disclosedRoute.search;
-    view.rerender(<ProjectsRouter />);
+    view.rerender(<PublishProvider><ProjectsRouter /></PublishProvider>);
     await waitFor(() => expect(document.querySelector<HTMLButtonElement>('.txn-earlier-toggle')?.getAttribute('aria-expanded')).toBe('true'));
 
     fireEvent.keyDown(window, { key: 'f', metaKey: true });
@@ -311,13 +319,13 @@ describe('mounted context and starter navigation on the production transcript ro
     pathname = url.pathname;
     search = url.search;
     channelBySession.set('sess_contextsource', targetWire('sess_contextsource'));
-    view.rerender(<ProjectsRouter />);
+    view.rerender(<PublishProvider><ProjectsRouter /></PublishProvider>);
     await waitFor(() => expect(document.body.textContent).toContain('current target sess_contextsource'));
 
     // Back: the browser restores the child URL and re-mounts the child route.
     pathname = childPathname;
     search = childSearch;
-    view.rerender(<ProjectsRouter />);
+    view.rerender(<PublishProvider><ProjectsRouter /></PublishProvider>);
     await waitForViewer();
     await waitFor(() => expect(document.body.textContent).toContain('child request'));
 
@@ -361,7 +369,7 @@ describe('mounted context and starter navigation on the production transcript ro
     pathname = `/projects/${PROJECT_HASH}/${CHILD_ID}`;
     search = '?origin=Map&earlier=earlier-0';
     channelBySession.set(CHILD_ID, childWire(c));
-    render(<ProjectsRouter />);
+    render(<PublishProvider><ProjectsRouter /></PublishProvider>);
     await waitForViewer();
 
     await restoredState(

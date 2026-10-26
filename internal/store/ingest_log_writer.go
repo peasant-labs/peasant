@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // Compile-time guard: Store must implement IngestLogger.
@@ -44,5 +44,8 @@ func (s *Store) LogIngestRun(ctx context.Context, entry ingest.IngestLogEntry) e
 		return fmt.Errorf("store: insert ingest_log: %w", err)
 	}
 
-	return nil
+	// Read the parent identity on the same connection; another run may insert
+	// concurrently, so MAX(id) is not a safe way to associate outcomes.
+	runID := conn.LastInsertRowID()
+	return s.writeIngestRunOutcomes(ctx, conn, runID, entry.Outcomes)
 }

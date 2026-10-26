@@ -4,9 +4,10 @@
 version: 3
 harnesses:
   claude-code:
-    adapter_version: 1
-    indexer_version: 18
+    adapter_version: 3
+    indexer_version: 21
     index_version: 1
+    native_versions: {adapter_version: 3, indexer_version: 22, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no
@@ -18,7 +19,7 @@ harnesses:
         namespace: record
         sources:
           - {file: content_capture.go, symbol: claudeStrictRecordKinds}
-          - {file: content_capture.go, symbol: ClaudeIndexer.IndexTranscriptBytesForCapture, switch: line.Type}
+          - {file: content_capture.go, symbol: claudeCaptureRecordValidator, switch: line.Type}
           - {file: claude_control_records.go, symbol: claudeControlRecordTypes}
           - {file: claude_control_records.go, symbol: isClaudeControlRecordType, prefix_argument: recordType}
         kinds:
@@ -54,7 +55,7 @@ harnesses:
         namespace: system_subtype
         sources:
           - {file: content_capture.go, symbol: claudeStrictSystemSubtypes}
-          - {file: content_capture.go, symbol: ClaudeIndexer.IndexTranscriptBytesForCapture, switch: line.Subtype}
+          - {file: content_capture.go, symbol: claudeCaptureRecordValidator, switch: line.Subtype}
         kinds:
           - {<<: *ignored, kind: turn_duration}
           - {<<: *control, kind: compact_boundary, payload: compactMetadata}
@@ -71,9 +72,66 @@ harnesses:
           - &tool {kind: tool_use, status: represented, preview: no, payload: tool name and arguments}
           - &result {kind: tool_result, status: represented, preview: yes, payload: tool output}
           - {<<: *ignored, kind: tool_reference}
+      - context: native-generation
+        namespace: record
+        sources:
+          - {file: content_capture.go, symbol: claudeStrictRecordKinds}
+          - {file: content_capture.go, symbol: claudeCaptureRecordValidator, switch: line.Type}
+          - {file: claude_control_records.go, symbol: claudeControlRecordTypes}
+          - {file: claude_control_records.go, symbol: isClaudeControlRecordType, prefix_argument: recordType}
+        kinds:
+          - {<<: *text, kind: user}
+          - {<<: *text, kind: assistant}
+          - {<<: *text, kind: human}
+          - {<<: *text, kind: system}
+          - {<<: *text, kind: summary}
+          - {<<: *text, kind: result}
+          - {<<: *ignored, kind: progress}
+          - {<<: *ignored, kind: queue-operation}
+          - {<<: *ignored, kind: file-history-snapshot}
+          - {<<: *ignored, kind: last-prompt}
+          - {<<: *control, kind: permission-mode}
+          - {<<: *control, kind: mode}
+          - {<<: *control, kind: agent-setting}
+          - {<<: *control, kind: agent-name}
+          - {<<: *control, kind: ai-title}
+          - {<<: *control, kind: atis-latch}
+          - {kind: attachment, status: tracked-only, preview: no, payload: bounded control extra}
+          - {<<: *control, kind: bridge-session}
+          - {<<: *control, kind: started}
+          - {<<: *control, kind: cost-state}
+          - {<<: *control, kind: custom-title}
+          - {<<: *control, kind: file-history-delta}
+          - {<<: *control, kind: frame-link}
+          - {<<: *control, kind: fork-context-ref}
+          - {<<: *control, kind: worktree-state}
+          - {<<: *control, kind: launched}
+          - {<<: *control, kind: pr-link}
+          - {<<: *control, kind: artifact-, match: prefix}
+      - context: native-generation
+        namespace: system_subtype
+        sources:
+          - {file: content_capture.go, symbol: claudeStrictSystemSubtypes}
+          - {file: content_capture.go, symbol: claudeCaptureRecordValidator, switch: line.Subtype}
+        kinds:
+          - {<<: *ignored, kind: turn_duration}
+          - {<<: *control, kind: compact_boundary, payload: compactMetadata}
+          - {<<: *ignored, kind: stop_hook_summary}
+          - {<<: *text, kind: api_error}
+      - context: native-generation
+        namespace: content_block
+        sources:
+          - {file: content_capture.go, symbol: captureContentBlockKinds}
+          - {file: claude_indexer.go, symbol: decomposeClaudeContentBlocks, switch: block.Type}
+        kinds:
+          - {<<: *text, kind: text}
+          - {<<: *text, kind: thinking}
+          - {<<: *tool, kind: tool_use}
+          - {<<: *result, kind: tool_result}
+          - {<<: *ignored, kind: tool_reference}
   cursor:
     adapter_version: 1
-    indexer_version: 17
+    indexer_version: 18
     index_version: 1
     fallback: &fallback
       status: retained-unknown
@@ -157,8 +215,8 @@ harnesses:
           - {<<: *tool, kind: tool_use}
           - {<<: *result, kind: tool_result}
   pi:
-    adapter_version: 2
-    indexer_version: 17
+    adapter_version: 3
+    indexer_version: 18
     index_version: 1
     fallback: &fallback
       status: retained-unknown
@@ -202,10 +260,10 @@ harnesses:
           - {<<: *text, kind: image, payload: textual media marker}
           - &tool {kind: toolCall, status: represented, preview: no, payload: tool name and arguments}
   codex:
-    adapter_version: 1
-    indexer_version: 17
+    adapter_version: 2
+    indexer_version: 18
     index_version: 1
-    native_versions: {adapter_version: 2, indexer_version: 18, index_version: 2}
+    native_versions: {adapter_version: 3, indexer_version: 20, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no
@@ -432,10 +490,10 @@ harnesses:
           - {<<: *text, kind: network_proxy.rule_saved}
           - {<<: *text, kind: user_verification.notice}
   opencode:
-    adapter_version: 2
-    indexer_version: 17
+    adapter_version: 3
+    indexer_version: 18
     index_version: 1
-    native_versions: {adapter_version: 3, indexer_version: 18, index_version: 2}
+    native_versions: {adapter_version: 4, indexer_version: 19, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no

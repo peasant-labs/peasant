@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
+import { DOCS } from '@/lib/docs';
+import { render, screen, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import HomePage from './page';
+vi.mock('@/contexts/PublishContext', () => ({ usePublishState: () => ({ settled: stableSettled }) }));
+const stableSettled = new Map();
+vi.mock('@/lib/api/home', () => ({ fetchHomeSessions: () => new Promise(() => {}) }));
 import { newProjectHash, type ProjectSummary } from '@peasant-labs/schema';
 import type { DecodedProjectSummariesPayload } from '@/lib/api/map';
 import type { SessionsPayload } from '@/types/messages';
@@ -20,25 +24,51 @@ import {
 } from '@/test/strictYaml';
 import { projectViewerStateFixture } from '@/components/picker/projectViewerStateFixtures';
 import { localReviewClarityFixture, makeClarityProjectSummaries } from '@/test/fixtures/localReviewClarity';
+import { browseBy, browseTrigger } from '@/test/homeMenus';
 
 // Home's picker rows are the only route into a project; no embedded graph
 // mounts here any more, so no app router is required. Mock it anyway so a
 // transitive Link/router read can never hit "invariant expected app router".
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-// The Changes home reads ambient liveness from the sessions WS channel.
+// The home reads ambient liveness from the sessions WS channel. The stats
+// strip's topics (dashboard, trends, quality) stay unloaded here; their values
+// have their own mounted test (page.root-list.test.tsx).
 let channelData: SessionsPayload | undefined;
 let channelConnected = true;
 let channelError: Error | null = null;
 let channelErrorCode: 'selection_visibility' | undefined;
 vi.mock('@/contexts/WebSocketContext', () => ({
-  useChannel: () => ({
-    data: channelData,
-    connected: channelConnected,
-    error: channelError,
-    errorCode: channelErrorCode,
-  }),
+  useChannel: (subs: unknown) => {
+    const first = Array.isArray(subs) ? subs[0] : subs;
+    const topic = typeof first === 'string' ? first : (first as { topic: string }).topic;
+    return {
+      data: topic === 'sessions' ? channelData : undefined,
+      connected: channelConnected,
+      error: topic === 'sessions' ? channelError : null,
+      errorCode: topic === 'sessions' ? channelErrorCode : undefined,
+    };
+  },
 }));
+
+// The session list's reads stay pending: these tests assert the picker,
+// selection and retained-flow policy; the list has its own mounted tests.
+const listApi = vi.hoisted(() => ({
+  fetchSyncSessions: vi.fn(),
+  fetchPublications: vi.fn(),
+}));
+vi.mock('@/lib/api/publications', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api/publications')>();
+  return { ...actual, ...listApi };
+});
+
+/** Switches Home to one of its retained views from the `browse by` menu. */
+async function openView(name: string): Promise<void> {
+  await browseBy(name);
+}
+const PROJECTS_VIEW = 'project';
+const GROUPED_VIEW = 'helper threads';
+const FLAT_VIEW = 'every session';
 
 // REST stubs — the home fetches per-project summaries (picker rows) only.
 const api = vi.hoisted(() => ({
@@ -281,6 +311,21 @@ function deferred<T>() {
 
 const selectionRetryFixture = loadSelectionRetryFixture();
 
+/**
+ * The saved-selection notices on screen. The page has other live statuses (the
+ * session list's loading state), so the notice is found by its own words.
+ */
+function selectionNotices(): HTMLElement[] {
+  return screen
+    .queryAllByRole('status')
+    .filter((node) => node.textContent?.includes('hidden by a saved selection'));
+}
+
+async function findSelectionNotice(): Promise<HTMLElement> {
+  await waitFor(() => expect(selectionNotices()).toHaveLength(1));
+  return selectionNotices()[0];
+}
+
 describe('HomePage — the changes-first picker', () => {
   beforeEach(() => {
     api.fetchProjectSummaries.mockReturnValue(pending());
@@ -289,6 +334,8 @@ describe('HomePage — the changes-first picker', () => {
     // update after the synchronous assertions.
     groupedApi.fetchGroupedLocalSessions.mockReturnValue(pending());
     groupedApi.fetchGroupedLocalSearch.mockReturnValue(pending());
+    listApi.fetchSyncSessions.mockReturnValue(pending());
+    listApi.fetchPublications.mockReturnValue(pending());
   });
 
   afterEach(() => {
@@ -305,6 +352,7 @@ describe('HomePage — the changes-first picker', () => {
     channelData = { sessions: [makeSession({ id: 'clarity-home', project: testCase.targetProject })] };
     api.fetchProjectSummaries.mockResolvedValue(makeSummaries(makeClarityProjectSummaries(testCase)));
     render(<HomePage />);
+    await openView(PROJECTS_VIEW);
 
     const search = await screen.findByRole('searchbox', { name: localReviewClarityFixture.copy.searchAccessibleName });
     expect(search).toHaveClass('input', 'is-input');
@@ -314,7 +362,7 @@ describe('HomePage — the changes-first picker', () => {
     expect(screen.getByRole('link', { name: testCase.expectedLinkName })).toHaveAttribute('href', testCase.expectedHref);
 
     fireEvent.change(search, { target: { value: 'no matching project' } });
-    expect(screen.getByText('No projects match “', { exact: false }).closest('p')).toHaveTextContent('No projects match “no matching project”.');
+    expect(screen.getByText('no projects match “', { exact: false }).closest('p')).toHaveTextContent('no projects match “no matching project”.');
     fireEvent.change(search, { target: { value: testCase.searchQuery } });
     expect(screen.getByRole('link', { name: testCase.expectedLinkName })).toHaveAttribute('href', testCase.expectedHref);
   });
@@ -324,11 +372,13 @@ describe('HomePage — the changes-first picker', () => {
     channelData = { sessions: [] };
     api.fetchProjectSummaries.mockResolvedValue(fixture.summary);
     render(<HomePage />);
-    // TeachingEmptyState renders lowercase chrome title + the copy-able command.
+    // The empty state names what is missing and links to the docs that teach recording.
+    await openView(PROJECTS_VIEW);
     expect(await screen.findByText('no ai work recorded yet')).toBeInTheDocument();
-    expect(screen.getByText('peasant ingest')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^how to record sessions/ })).toHaveAttribute('href', DOCS.record);
+    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
     // No ledger line without sessions.
-    expect(screen.queryByText(/on your machine/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/on this machine/)).not.toBeInTheDocument();
   });
 
   it('shows one recovery panel instead of stale rows or first-use teaching when selection hides all data', async () => {
@@ -343,12 +393,12 @@ describe('HomePage — the changes-first picker', () => {
     };
     api.fetchProjectSummaries.mockResolvedValue(fixture.summary);
     render(<HomePage />);
-
+    await openView(PROJECTS_VIEW);
     const panel = await screen.findByRole('status', { name: 'project selection recovery' });
-    expect(panel).toHaveTextContent('Peasant hides 2 projects and 5 sessions.');
-    expect(panel).toHaveTextContent('The data stays ingested and indexed.');
-    expect(panel).toHaveTextContent('It is not available for a future push.');
-    expect(panel).toHaveTextContent('Peasant did not delete data.');
+    expect(panel).toHaveTextContent('peasant hides 2 projects and 5 sessions.');
+    expect(panel).toHaveTextContent('the data stays ingested and indexed.');
+    expect(panel).toHaveTextContent('it is not available for a future push.');
+    expect(panel).toHaveTextContent('peasant did not delete data.');
     expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
     expect(screen.queryByText(/hidden by a saved selection/)).not.toBeInTheDocument();
     for (const identity of fixture.forbiddenIdentities) {
@@ -361,6 +411,7 @@ describe('HomePage — the changes-first picker', () => {
     channelData = { sessions: [] };
     api.fetchProjectSummaries.mockResolvedValue(fixture.summary);
     render(<HomePage />);
+    await openView(PROJECTS_VIEW);
 
     expect(
       await screen.findByRole('link', {
@@ -371,7 +422,7 @@ describe('HomePage — the changes-first picker', () => {
     expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
   });
 
-  it('shows the ledger line and the picker rows from the summary endpoint', async () => {
+  it('keeps project summaries lazy and omits the unavailable global ledger', async () => {
     channelData = {
       sessions: [
         makeSession({ id: 's1', project: 'alpha-project' }),
@@ -394,10 +445,9 @@ describe('HomePage — the changes-first picker', () => {
     ]));
     render(<HomePage />);
 
-    // Ledger line — the values copy survives the redesign.
-    expect(
-      await screen.findByText(/AI conversations, on your machine\. Nothing has left it\./),
-    ).toBeInTheDocument();
+    expect(api.fetchProjectSummaries).not.toHaveBeenCalled();
+    expect(screen.queryByText(/sessions on this machine/)).not.toBeInTheDocument();
+    await openView(PROJECTS_VIEW);
 
     // Rows link into /sessions/{projectHash} — that project's session list.
     const alpha = await screen.findByRole('link', {
@@ -440,6 +490,7 @@ describe('HomePage — the changes-first picker', () => {
       }),
     ]));
     render(<HomePage />);
+    await openView(PROJECTS_VIEW);
 
     // StatGrid labels are lowercase chrome; values are data (pre-formatted).
     // 2 projects, coverage (34+6)/(37+63)=40%, open 2+1=3.
@@ -458,6 +509,7 @@ describe('HomePage — the changes-first picker', () => {
     api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'alpha-project' })]));
     groupedApi.fetchGroupedLocalSessions.mockResolvedValue(GROUPED_HOME_PAYLOAD);
     render(<HomePage />);
+    await openView(GROUPED_VIEW);
 
     expect(await screen.findByText('all sessions')).toBeInTheDocument();
     expect(await screen.findByText('2 helper threads')).toBeInTheDocument();
@@ -508,14 +560,13 @@ describe('HomePage — the changes-first picker', () => {
       groupedApi.fetchGroupedLocalSessions.mockResolvedValue(GROUPED_HOME_PAYLOAD);
 
       render(<HomePage />);
-      // The grouped list stays mounted with its own helper counts ...
+      // The grouped list stays reachable with its own helper counts ...
+      await openView(GROUPED_VIEW);
       expect(await screen.findByText('2 helper threads')).toBeInTheDocument();
       expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalledTimes(1);
 
-      // ... and the flat filter + pager stay reachable beside it.
-      fireEvent.click(
-        screen.getByRole('button', { name: /filter and page through every session/i }),
-      );
+      // ... and the flat filter + pager stay reachable from the same menu.
+      await openView(FLAT_VIEW);
       expect(screen.getByText(`${testCase.sessionCount} sessions`)).toBeInTheDocument();
       expect(screen.getByText(`page 1 of ${testCase.expectedTotalPages}`)).toBeInTheDocument();
 
@@ -528,7 +579,6 @@ describe('HomePage — the changes-first picker', () => {
         screen.getByText(`${testCase.expectedFilteredCount} sessions of ${testCase.sessionCount}`),
       ).toBeInTheDocument();
       expect(screen.getByText(`page 1 of ${testCase.expectedFilteredPages}`)).toBeInTheDocument();
-      expect(screen.getByText('2 helper threads')).toBeInTheDocument();
       expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalledTimes(1);
 
       // The top-level pager navigates the filtered result.
@@ -539,7 +589,7 @@ describe('HomePage — the changes-first picker', () => {
     });
   }
 
-  it('falls back to sessions-channel grouping with stats unavailable while the fetch loads', () => {
+  it('falls back to sessions-channel grouping with stats unavailable while the fetch loads', async () => {
     api.fetchProjectSummaries.mockReturnValue(pending());
     channelData = {
       sessions: [
@@ -549,6 +599,7 @@ describe('HomePage — the changes-first picker', () => {
       ],
     };
     render(<HomePage />);
+    await openView(PROJECTS_VIEW);
 
     const alpha = screen.getByRole('link', { name: 'Open the sessions of alpha-project' });
     expect(alpha).toHaveAttribute('href', `/sessions/${ALPHA_HASH}`);
@@ -559,7 +610,7 @@ describe('HomePage — the changes-first picker', () => {
     expect(alpha.textContent).toMatch(/ago/);
   });
 
-  it('mounts pending statistic placeholders without invalid nesting or hydration diagnostics', () => {
+  it('mounts pending statistic placeholders without invalid nesting or hydration diagnostics', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     channelData = {
       sessions: [
@@ -568,6 +619,7 @@ describe('HomePage — the changes-first picker', () => {
       ],
     };
     render(<HomePage />);
+    await openView(PROJECTS_VIEW);
     expect(screen.getAllByText('unmerged branches').length).toBeGreaterThan(0);
     const diagnostics = consoleError.mock.calls.flat().map(String).join('\n');
     expect(diagnostics).not.toMatch(/cannot be a descendant|hydration/i);
@@ -583,6 +635,7 @@ describe('HomePage — the changes-first picker', () => {
       ],
     };
     render(<HomePage />);
+    await openView(PROJECTS_VIEW);
 
     expect(
       await screen.findByRole('link', { name: 'Open the sessions of alpha-project' }),
@@ -601,10 +654,13 @@ describe('HomePage — the changes-first picker', () => {
       'selection_visibility',
     ));
     render(<HomePage />);
-
+    await openView(PROJECTS_VIEW);
     expect(await screen.findByText(/peasant kickstart/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open the sessions of hidden-project' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/AI conversation, on your machine/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/on this machine/)).not.toBeInTheDocument();
+    // Fail closed: no retained view is offered over the stale channel rows.
+    expect(browseTrigger()).toHaveTextContent(`browse by: ${PROJECTS_VIEW}`);
+    expect(document.body.textContent).not.toContain('hidden-project');
   });
 
   for (const testCase of selectionRetryFixture.cases) {
@@ -620,14 +676,15 @@ describe('HomePage — the changes-first picker', () => {
         ))
         .mockReturnValueOnce(retry.promise);
       render(<HomePage />);
-
+      await openView(PROJECTS_VIEW);
       expect(await screen.findByText(/peasant kickstart/)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /retry project discovery/i }));
 
       expect(api.fetchProjectSummaries).toHaveBeenCalledTimes(2);
       expect(screen.getByText(/peasant kickstart/)).toBeInTheDocument();
       expect(screen.queryByRole('link', { name: `Open the sessions of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
-      expect(screen.queryByText(/AI conversation, on your machine/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/on this machine/)).not.toBeInTheDocument();
+      expect(document.body.textContent).not.toContain(testCase.hiddenProject);
 
       if (testCase.retryOutcome === 'success') {
         retry.resolve(makeSummaries(
@@ -644,7 +701,8 @@ describe('HomePage — the changes-first picker', () => {
         await waitFor(() => expect(screen.getByText(/database unavailable/)).toBeInTheDocument());
         expect(screen.getByRole('button', { name: /retry project discovery/i })).toBeInTheDocument();
         expect(screen.queryByRole('link', { name: `Open the sessions of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
-        expect(screen.queryByText(/AI conversation, on your machine/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/on this machine/)).not.toBeInTheDocument();
+        expect(document.body.textContent).not.toContain(testCase.hiddenProject);
       }
     });
   }
@@ -655,7 +713,7 @@ describe('HomePage — the changes-first picker', () => {
     channelErrorCode = 'selection_visibility';
     api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'hidden-project' })]));
     const view = render(<HomePage />);
-
+    await openView(PROJECTS_VIEW);
     expect(await screen.findByText(/peasant kickstart/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open the sessions of hidden-project' })).not.toBeInTheDocument();
 
@@ -671,6 +729,7 @@ describe('HomePage — the changes-first picker', () => {
     channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
     api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'alpha-project' })]));
     render(<HomePage />);
+    await openView(PROJECTS_VIEW);
 
     const row = await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
     expect(row).toHaveAttribute('href', `/sessions/${ALPHA_HASH}`);
@@ -697,8 +756,8 @@ describe('HomePage — the changes-first picker', () => {
       }),
     );
     render(<HomePage />);
-
-    const notice = await screen.findByRole('status');
+    await openView(PROJECTS_VIEW);
+    const notice = await findSelectionNotice();
     // EXACT match, not a substring/blacklist check: a blacklist of forbidden
     // literals (the previous version of this test) can always be defeated by
     // an identity string that just isn't on the list — this caught a real
@@ -714,9 +773,9 @@ describe('HomePage — the changes-first picker', () => {
     fireEvent.click(within(notice).getByRole('button'));
     expect(notice.textContent).toBe(
       '2 projects and 5 sessions hidden by a saved selection'
-      + 'A saved project selection is limiting what’s shown here. '
-      + 'The data stays ingested and indexed — it is only hidden from this list.'
-      + 'Run peasant kickstart to review or widen the selection.',
+      + 'a saved project selection is limiting what’s shown here. '
+      + 'the data stays ingested and indexed; it is only hidden from this list.'
+      + 'change the selection, opens the docs in a new tab',
     );
   });
 
@@ -734,8 +793,8 @@ describe('HomePage — the changes-first picker', () => {
       ),
     );
     render(<HomePage />);
-
-    const notice = await screen.findByRole('status');
+    await openView(PROJECTS_VIEW);
+    const notice = await findSelectionNotice();
     // Same exact-match discipline as the single-project case above, with the
     // singular ("1 project"/"1 session", "is hidden") grammar branch.
     expect(notice.textContent).toBe('1 project and 1 session hidden by a saved selection');
@@ -752,8 +811,9 @@ describe('HomePage — the changes-first picker', () => {
     );
     render(<HomePage />);
 
+    await openView(PROJECTS_VIEW);
     await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(selectionNotices()).toHaveLength(0);
   });
 
   it('shows no selection notice when the selection is active but nothing is hidden', async () => {
@@ -767,14 +827,16 @@ describe('HomePage — the changes-first picker', () => {
     );
     render(<HomePage />);
 
+    await openView(PROJECTS_VIEW);
     await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(selectionNotices()).toHaveLength(0);
   });
 
   it('renders a single-project row from the sessions channel when summaries fail', async () => {
     api.fetchProjectSummaries.mockRejectedValue(new Error('boom'));
     channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
     render(<HomePage />);
+    await openView(PROJECTS_VIEW);
 
     const row = await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
     expect(row).toHaveAttribute('href', `/sessions/${ALPHA_HASH}`);
@@ -789,6 +851,7 @@ describe('HomePage — the changes-first picker', () => {
     api.fetchProjectSummaries.mockRejectedValue(new Error('down'));
     render(<HomePage />);
     // DataState disconnected panel copy (connection ≠ content principle).
+    await openView(PROJECTS_VIEW);
     expect(await screen.findByText(/lost connection to the local program/i)).toBeInTheDocument();
   });
 });

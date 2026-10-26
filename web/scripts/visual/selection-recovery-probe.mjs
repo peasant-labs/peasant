@@ -15,16 +15,17 @@ import { SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
 const WEB = join(REPO, 'web')
-const BIN = join(REPO, 'bin/peasant')
+const BIN = join(REPO, 'peasant')
 const SOURCE = join(WEB, 'src/components/picker/SelectionRecoveryPanel.tsx')
 const FIXTURE = join(WEB, 'src/components/picker/testdata/project_viewer_states.yaml')
 const CHUNKS = join(WEB, 'out/_next/static/chunks')
 const PORT = process.env.PEASANT_RECOVERY_PORT || '8707'
 const ORIGIN = `http://localhost:${PORT}`
 const CHROME = process.env.CHROME_PATH
-const MARKER = 'Your saved selection hides all projects.'
+const MARKER = 'your saved selection hides all projects.'
 const PANEL = '[role="status"][aria-label="project selection recovery"]'
-const ROUTES = [{ id: 'home', path: '/' }, { id: 'map', path: '/map/' }]
+// Home lists sessions first; its project view, where recovery shows, sits behind the browse-by menu.
+const ROUTES = [{ id: 'home', path: '/', view: 'project' }, { id: 'map', path: '/map/' }]
 const pause = (ms) => new Promise((done) => setTimeout(done, ms))
 
 function requireProbe(condition, what, where, evidence, fix) {
@@ -78,12 +79,11 @@ const projectWord = selection.hiddenProjects === 1 ? 'project' : 'projects'
 const sessionWord = selection.hiddenSessions === 1 ? 'session' : 'sessions'
 const acceptedLines = [
   MARKER,
-  `Peasant hides ${selection.hiddenProjects.toLocaleString()} ${projectWord} and ${selection.hiddenSessions.toLocaleString()} ${sessionWord}.`,
-  'The data stays ingested and indexed.',
-  'The web viewer does not list it.',
-  'It is not available for a future push.',
-  'Peasant did not delete data.',
-  'To change the selection, run peasant kickstart.',
+  `peasant hides ${selection.hiddenProjects.toLocaleString()} ${projectWord} and ${selection.hiddenSessions.toLocaleString()} ${sessionWord}.`,
+  'the data stays ingested and indexed.',
+  'the web viewer does not list it.',
+  'it is not available for a future push.',
+  'peasant did not delete data.',
 ]
 const expectedCounts = [`${selection.hiddenProjects.toLocaleString()} ${projectWord}`, `${selection.hiddenSessions.toLocaleString()} ${sessionWord}`]
 
@@ -142,6 +142,13 @@ try {
       for (const route of ROUTES) {
         summaryRequests = 0
         const response = await page.goto(`${ORIGIN}${route.path}`, { waitUntil: 'domcontentloaded' })
+        if (route.view) {
+          const trigger = await page.waitForSelector('button[aria-label^="browse by"], button.choice-menu-trigger', { visible: true, timeout: 15000 }).catch(() => null)
+          await page.evaluate(() => [...document.querySelectorAll('button')].find((button) => button.textContent.trim().startsWith('browse by:'))?.click())
+          await page.waitForSelector('[role="menuitemradio"]', { visible: true, timeout: 5000 }).catch(() => null)
+          await page.evaluate((view) => [...document.querySelectorAll('[role="menuitemradio"]')].find((item) => item.textContent.trim() === view)?.click(), route.view)
+          requireProbe(!!trigger, `${theme}/${route.id} has no browse-by menu`, `${ORIGIN}${route.path}`, 'the project view could not be opened', 'restore Home\'s browse-by menu, rebuild, and rerun')
+        }
         const mounted = await page.waitForSelector(PANEL, { visible: true, timeout: 15000 }).catch(() => null)
         requireProbe(response?.status() === 200 && !!mounted && summaryRequests > 0 && diagnostics.length === 0, `${theme}/${route.id} did not mount cleanly`, `${ORIGIN}${route.path}`, `http=${response?.status()}, panel=${!!mounted}, requests=${summaryRequests}, diagnostics=${JSON.stringify(diagnostics)}`, 'fix the real route or summary request, rebuild, and rerun')
         await page.evaluate(async () => { try { await Promise.all([document.fonts.load('400 16px "Atkinson Hyperlegible"'), document.fonts.load('400 16px "Atkinson Hyperlegible Mono"')]) } catch {} ; await document.fonts.ready })
@@ -158,9 +165,10 @@ try {
           const descendants = panel ? [...panel.querySelectorAll('*')] : []
           const exact = (text) => descendants.find((element) => normalize(element.textContent) === text && visible(element))
           const heading = descendants.find((element) => /^H[1-6]$/.test(element.tagName) && normalize(element.textContent) === lines[0])
-          const body = exact('The data stays ingested and indexed.')
+          const body = exact('the data stays ingested and indexed.')
           const count = exact(counts[0])
-          const copy = panel?.querySelector('button[aria-label="copy command to clipboard"]') || null
+          // How to change the selection lives in the docs: the panel's one control links there.
+          const copy = panel?.querySelector('a[data-docs-topic="selection"][target="_blank"]') || null
           if (copy) copy.focus({ focusVisible: true })
           let surface = heading?.parentElement || null
           while (surface && surface !== panel) {
@@ -187,7 +195,7 @@ try {
             missing: lines.filter((line) => !exact(line)),
             missingCounts: counts.filter((value) => !exact(value)),
             leaks: identities.filter((identity) => panelText.includes(identity)),
-            wrongGuidance: panelText.includes('peasant ingest') || panelText.includes('A saved project selection is limiting'),
+            wrongGuidance: panelText.includes('peasant ingest') || panelText.includes('peasant kickstart') || panelText.includes('a saved project selection is limiting'),
             theme: [root.getAttribute('data-theme'), root.getAttribute('data-tb-theme')],
             themeMatches: root.getAttribute('data-theme') === activeTheme && root.getAttribute('data-tb-theme') === activeTheme,
             fontsLoaded: document.fonts.check('400 16px "Atkinson Hyperlegible"') && document.fonts.check('400 16px "Atkinson Hyperlegible Mono"'),

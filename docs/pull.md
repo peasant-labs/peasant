@@ -374,6 +374,116 @@ round-trip shape-pin test.
 
 ---
 
+## 8. Collective bulk pull (`--collective`)
+
+Explicit live pull references resolve through the shared account-scoped service:
+exact case-insensitive names, UUIDs, and canonical `/collectives/<uuid>` or legacy
+`/groups/<uuid>` URLs under the selected Village's full installation base path.
+The server may disclose a visible nonmember collective; local membership is not a
+second visibility policy. Ambiguous/unknown names and other installations fail
+without tracking or forwarding credentials. All references resolve before any
+tracking preference is written. After the required listing succeeds, each unique
+explicit selection is tracked under the original action account, including an
+empty eligible shelf. Tracking does not join, contribute, publish, or grant
+permission. Credential rotation during resolution/tracking prevents that original
+action from writing a preference under either principal. Dry runs retain their
+existing read-only selection path with no added auth/detail or preference writes;
+bare `--user` retains its existing membership discovery.
+
+`peasant village transcripts pull --collective <ref>...` pulls every
+transcript an accessible collective holds, and
+`peasant village transcripts list --collective <ref>... [--limit N]` lists
+the existing membership-based remote selection. Both contact the village and require login; both
+narrow the pullable listing with the village's `collectives` filter (a
+comma-separated identifier list, the shape the village declares).
+
+A `--collective` value is a collective name (case-insensitive), a collective
+UUID, or a pasted collective page URL under `/groups/<uuid>` or
+`/collectives/<uuid>` (a trailing slash and a query string are allowed; the
+last segment must be a collective identifier, so `/users/<uuid>` and
+`/groups/<slug>` are refused as "not a collective page" rather than resolved
+as a name — mirroring `ParseTranscriptRef`'s separation of a bare identifier
+from a URL whose last segment is wrong). The flag is repeatable; several
+values pull the union, each transcript once (client-side de-duplication, so a
+transcript approved in two listed collectives is pulled once).
+
+A collective holds the transcripts offered to it and approved, so a transcript
+the caller owns but never shared with a listed collective is not part of the
+selection. Required Village content/list authorization remains authoritative;
+resolving a visible collective is not a grant to pull its transcripts.
+Only eligible `approved` shares count; `pending`/rejected, public, and preview shares never do (the
+[auth matrices](auth.md#4-authorization-matrices--web-vs-pull) apply unchanged).
+
+### Contributor filter (`--user`)
+
+`--user <username>` keeps only the transcripts one village account contributed.
+Both `pull` and `list` take it, and it combines with `--collective`: with a
+collective it narrows that collective to one contributor, and alone it spans
+every collective the caller can pull from. `--user` alone needs no collective
+argument, because the unfiltered pullable listing is already everything the
+caller may pull, so filtering it by contributor is exactly "this account, across
+my collectives".
+
+The username matches case-insensitively, the same rule a collective name uses.
+The filter runs client-side over the fully-paged listing, so it is exact: a
+listing narrowed to one contributor pages to the end even without
+`--collective`, because filtering a single page would under-report and make the
+reported total a lie. The total is recomputed from the filtered set, so the
+`Showing N of M` note stays truthful. An account with nothing in the selection is
+an empty result, never an error — answering "no such account" would reveal which
+accounts exist to a caller who can see none of their work.
+
+`--user` is exclusive with a positional transcript reference on `pull`.
+On `list`, combine `--local --user <username>` to filter already-pulled
+transcripts by their stored owner username. This reads the local inventory
+only, requires no login, and makes no Village request. Matching is
+case-insensitive and exact; no matches produce an empty listing. Stored owner
+names are snapshots from the last pull, not a live Village lookup.
+
+Both remote listings show the first page by default. `--all` follows the pages
+to the end, merges, and de-duplicates, so the listing matches what a pull would
+take. A listing narrowed to one contributor (`--user`) always pages to the end,
+because filtering a single page would under-report and make the reported total a
+lie; it never prints a partial-page note. `--limit` sets the page size for the
+remote listing only (`--local` reads the local inventory and refuses `--limit`).
+`--local --collective` instead uses saved
+per-transcript viewer disclosures for the selected account and normalized Village
+installation, without network access. Multiple collectives are ORed, then
+`--user` intersects the result. Missing or invalidated disclosures never match;
+stale disclosures retain their original date. Unfiltered `--local` and
+`--local --user` remain accountless. Signed-out collective filtering explains
+those alternatives instead of selecting another account's observations.
+
+After independently authorized content succeeds, association metadata is
+refreshed through the dedicated viewer endpoint even for equal hashes, HTTP 304,
+downloaded unchanged bytes, and the bulk skip gate. Metadata is account-private,
+not content-manifest or inventory provenance. A transient metadata failure warns
+on stderr without failing successful content; its JSON result is stale with the
+prior date, or unknown without a fabricated date. A dedicated metadata 403/404 is
+a newly dated invalidation, not a timeout. Required content errors still fail,
+and bulk pulls continue and report any required failures. Dry runs do not observe
+or persist associations. JSON retains its existing envelopes and adds the nested
+`associationMetadata` result; warning text never goes to JSON stdout.
+
+A village which predates the filter is refused rather than over-pulled. The
+bulk pull negotiates the pull window once, before any download; a village that
+predates the `collectives` filter advertises an older window there, so the CLI
+aborts with a `contract-error` instead of listing — and pulling — everything.
+A mistyped collective likewise fails before any download.
+
+Tested by `TestCollectiveRefsFixtures` (`cmd/peasant/collective_ref_test.go`,
+driven by `testdata/collective_refs.yaml`) for every accepted and refused
+`--collective` form, by `TestVillagePullCollectivesFixtures`
+(`cmd/peasant/cmd_village_pull_collective_test.go`, driven by
+`testdata/village_pull_collectives.yaml`) for multi-page paging with
+de-duplication, continue-on-error with a non-zero result, skip-gate pruning of
+current transcripts, and skip-gate fallback to per-transcript checks, and by
+`TestVillageUserFilterFixtures` (`cmd/peasant/village_user_filter_test.go`,
+driven by `testdata/village_user_filter.yaml`) for the contributor filter on
+both the listing and the bulk pull.
+
+---
+
 ## See also
 
 - [Peasant ↔ Village Auth Model](auth.md) — login, wire auth, command gates, the

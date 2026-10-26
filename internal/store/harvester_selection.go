@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 var (
@@ -20,7 +20,7 @@ var (
 // ListStaleAdapterSessions selects the sessions whose stored adapter revision
 // is behind this build's target for their harness, or whose stored schema is
 // one this build re-extracts from native input. It is the database-driven
-// replacement for the retained-tree walk that used to find adapter-refresh
+// replacement for the stored-tree walk that used to find adapter-refresh
 // work: it reads no file, and a NULL adapter_version counts as revision 1, so
 // at target 1 no legacy row is selected and nothing is re-extracted every run.
 //
@@ -48,9 +48,17 @@ func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest
 		if !harness.IsKnown() || adapter < 1 {
 			return nil, fmt.Errorf("store: select stale adapters: harness %q has invalid adapter target %d; supply registered positive harvester versions", harness, adapter)
 		}
-		conditions = append(conditions, "(s.model_harness = ? AND s.schema_version <= ? AND (COALESCE(s.adapter_version, 1) < ? OR "+refreshClause+"))")
+		condition := "(s.model_harness = ? AND s.schema_version <= ? AND (COALESCE(s.adapter_version, 1) < ? OR " + refreshClause + ")"
 		args = append(args, string(harness), int(ingest.CurrentSchemaVersion), adapter)
 		args = append(args, refreshArgs...)
+		// A settled latest attempt is not adapter-refresh work: its
+		// adapter revision already meets the target, so a state 6/8 authority
+		// with a settled attempt stops being selected.
+		if clause, clauseArgs := latestAttemptSettledClause("s", targets[harness]); clause != "" {
+			condition += " AND " + clause
+			args = append(args, clauseArgs...)
+		}
+		conditions = append(conditions, condition+")")
 	}
 	return s.selectSessionIDs(ctx, "SELECT s.session_id FROM sessions s WHERE "+strings.Join(conditions, " OR ")+" ORDER BY s.session_id", args)
 }
@@ -60,11 +68,21 @@ func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest
 // proof was cleared, and a row whose current publication capture the index is
 // not yet bound to. Both settle in one ordinary harvest, so the next unchanged
 // harvest selects nothing. It is harness-scoped and reads no file.
+//
+// The publication half is deliberately the exact complement of the binding
+// predicate: it needs a capture at the row's current revision (the metadata row
+// EXISTS), a recovered provenance kind (the same guard publicationBindingSQL
+// applies), and an index revision that has not caught up. A row whose
+// provenance is not_recovered names no capture the index could bind to, so it
+// is never enumerated here; selecting it would read its pair on every harvest
+// for a repair the index write can never complete.
 func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
 	if len(targets) == 0 {
 		return nil, nil
 	}
 	harnessPlaceholders := make([]string, 0, len(targets))
+	settleTerms := make([]string, 0, len(targets))
+	settleArgs := make([]any, 0, len(targets)*3)
 	args := make([]any, 0, len(targets)+1)
 	for _, harness := range slices.Sorted(maps.Keys(targets)) {
 		if !harness.IsKnown() {
@@ -72,15 +90,34 @@ func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[inges
 		}
 		harnessPlaceholders = append(harnessPlaceholders, "?")
 		args = append(args, string(harness))
+		// The settle fragment itself requires a latest-attempt pointer, so the
+		// surrounding NOT stays false — and the session stays listed — for a
+		// session with nothing.
+		if fragment, fragmentArgs, ok := latestAttemptSettleFragment("s", targets[harness]); ok {
+			settleTerms = append(settleTerms, "(s.model_harness = ? AND "+fragment+")")
+			settleArgs = append(settleArgs, string(harness))
+			settleArgs = append(settleArgs, fragmentArgs...)
+		}
 	}
 	args = append(args, int(ingest.CurrentSchemaVersion))
+	// The settle gate applies to the ARTIFACT arm only: a latest attempt that
+	// has settled consumed the current pair, so re-reading it for a cleared
+	// input proof is churn. The publication arm keeps LISTING unchanged: the
+	// pending binding is a real fact in the inventory and in readiness, and the
+	// PARSE decision is what short-circuits for a known-settled attempt.
+	artifactSettle := ""
+	if len(settleTerms) > 0 {
+		artifactSettle = " AND NOT (" + strings.Join(settleTerms, " OR ") + ")"
+		args = append(args, settleArgs...)
+	}
 	query := `SELECT s.session_id FROM sessions s
 WHERE s.model_harness IN (` + strings.Join(harnessPlaceholders, ",") + `)
  AND s.schema_version <= ?
  AND (
-   (s.artifact_hash IS NOT NULL AND s.indexed_input_hash IS NULL)
+   (s.artifact_hash IS NOT NULL AND s.indexed_input_hash IS NULL` + artifactSettle + `)
    OR (s.publication_capture_revision > 0
        AND s.indexed_publication_capture_revision <> s.publication_capture_revision
+       AND s.cwd_provenance_kind != 'not_recovered'
        AND EXISTS (SELECT 1 FROM session_publication_metadata p
                    WHERE p.session_id = s.session_id
                      AND p.capture_revision = s.publication_capture_revision))

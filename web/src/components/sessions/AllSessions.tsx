@@ -131,7 +131,6 @@ export function AllSessions({
   sessions,
   titles,
   title = 'all sessions',
-  subtitle = 'ingested session transcripts.',
 }: {
   sessions: SessionSummary[];
   /**
@@ -141,7 +140,6 @@ export function AllSessions({
   titles?: ReadonlyMap<string, string>;
   /** Heading, so a project-scoped view can name the project it is showing. */
   title?: string;
-  subtitle?: string;
 }) {
   const [page, setPage] = useState(0);
   const [query, setQuery] = useState('');
@@ -201,12 +199,9 @@ export function AllSessions({
       className="flex flex-col gap-2 w-full max-w-none mx-0 px-0"
       data-tour="all-sessions"
     >
-      <div>
-        <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink">
-          {title}
-        </h2>
-        <p className="text-sm text-ink-3 mt-0.5">{subtitle}</p>
-      </div>
+      <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink">
+        {title}
+      </h2>
 
       {/* Filter row: search on the left, live count on the right. The count
           reflects the FILTERED set so it doubles as the result readout while

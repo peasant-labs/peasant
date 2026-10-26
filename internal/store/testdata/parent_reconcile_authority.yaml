@@ -9,12 +9,41 @@
 # pointed at another target. A session with active relationship authority must
 # never be healed from its legacy snapshot.
 #
+# The arm field selects the driver. Empty (the cases above the arm-tagged ones)
+# runs the authority reconcile driver described above. arm: heal stores the
+# child and then its parent, settles both unknown at the current origin rule
+# version, and runs the real reverse lookup and heal: the healed child must be
+# re-queued (origin version 0) by the same statement that set its cache, while
+# the parent keeps its settled watermark. arm: invalidate needs no harvest
+# target: it stores the shared parent (legacy) first, then the stuck child
+# (harness from the case) and a Claude Code control (alternate) under it,
+# settles all three unknown at the current rule version, and calls the bounded
+# invalidation directly. Only the parent-linked child is re-queued
+# (expectInvalidated); the Claude Code control and the parentless parent root
+# keep their settled watermark, and a second application re-queues nothing. An
+# invalidate case that also declares authorityState activates that relationship
+# for the child first, so the child is parent-linked by evidence while its cache
+# follows the case's expectParentCache (null when the evidence target is not
+# stored): a re-queue set read from the raw cache misses exactly that child.
+# arm: write-guard needs no harvest target and no generation: it stores the
+# populated parent (legacy), the logical parent the writer is handed
+# (authorityTarget), the child under the populated parent, and the uncached
+# session (uncached) with no parent at all, then calls the shared cache writer
+# directly. The populated child must keep its cache and its settled watermark,
+# and the NULL cache must be healed by the same statement; the requeue that rides
+# it is pinned by the heal arm, on the production path. The
+# case must hand the writer a logical parent that differs from the cache it
+# expects to survive, so the NULL-only clause — not a caller's own guard — is
+# what refuses the write.
+#
 # Tokens: legacyParent/authorityTarget/expectParentCache name one of the ids
 # below or are empty for none; authorityState is empty (no active generation) or
 # one relationship target state; harvestTarget names the id made available.
 child: 22222222-2222-4222-8222-222222222222
 legacy: 11111111-1111-4111-8111-111111111111
 alternate: 33333333-3333-4333-8333-333333333333
+unstored: 44444444-4444-4444-8444-444444444444
+uncached: 55555555-5555-4555-8555-555555555555
 cases:
   - name: legacy-only-child-reconciles
     legacyParent: legacy
@@ -52,3 +81,53 @@ cases:
     harvestTarget: legacy
     expectParentCache: legacy
     expectUpdates: 1
+  - name: latest-attempt-evidence-child-reconciles
+    legacyParent: legacy
+    authorityState: target_known
+    authorityTarget: alternate
+    scope: latest-attempt
+    harvestTarget: alternate
+    expectParentCache: alternate
+    expectUpdates: 1
+  - name: latest-attempt-authority-not-resurrected-from-legacy
+    legacyParent: legacy
+    authorityState: explicit_none
+    scope: latest-attempt
+    harvestTarget: legacy
+    expectParentCache: null
+    expectUpdates: 0
+  - name: heal-resets-codex-child-origin-version
+    arm: heal
+    harness: codex
+    legacyParent: legacy
+    harvestTarget: legacy
+    expectParentCache: legacy
+    expectUpdates: 1
+  - name: heal-resets-opencode-child-origin-version
+    arm: heal
+    harness: opencode
+    legacyParent: legacy
+    harvestTarget: legacy
+    expectParentCache: legacy
+    expectUpdates: 1
+  - name: invalidate-requeues-codex-parented-child-claude-code-control-untouched
+    arm: invalidate
+    harness: codex
+    expectInvalidated: 1
+  - name: invalidate-requeues-opencode-parented-child-claude-code-control-untouched
+    arm: invalidate
+    harness: opencode
+    expectInvalidated: 1
+  - name: invalidate-requeues-evidenced-child-with-null-cache
+    arm: invalidate
+    harness: codex
+    authorityState: target_known
+    authorityTarget: unstored
+    expectParentCache: null
+    expectInvalidated: 1
+  - name: write-guard-keeps-a-populated-cache-and-heals-a-nil-one
+    arm: write-guard
+    harness: codex
+    legacyParent: legacy
+    authorityTarget: alternate
+    expectParentCache: legacy

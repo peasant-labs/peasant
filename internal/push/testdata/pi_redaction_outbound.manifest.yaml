@@ -19,3 +19,13 @@ requiredNames:
   - missing_model_refuses_upload
   - unknown_advertisement_is_ignored
   - dry_run_no_negotiation_or_upload
+  - stored_valid_pair_reencoded_preserved
+  - stored_unknown_canonical_reencoded_cleared
+  - stored_edge_whitespace_raw_reencoded_cleared
+  - stored_non_string_level_valid_raw_reencoded_cleared
+  - stored_pair_non_string_reencoded_cleared
+  - stored_null_level_reencoded_cleared
+  - stored_null_raw_reencoded_cleared
+  - stored_null_pair_reencoded_cleared
+  - stored_null_level_valid_raw_reencoded_keeps_raw
+  - stored_valid_level_null_raw_reencoded_keeps_level

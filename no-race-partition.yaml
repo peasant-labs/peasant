@@ -209,7 +209,7 @@ partition:
       Subject: native generation activation certifies coverage correctly and
       refuses duplicate or incomplete evidence without serving entries.
       Concurrency: none; each subtest opens a private golden-copy store and calls
-      AssessCapture, ActivateNativeGeneration, and ExportSession sequentially
+      AssessCapture, ActivateGenerationCandidate, and ExportSession sequentially
       under a file session lock it alone holds. The detector is not the oracle:
       the invariant is disposition, active generation, and served entries.
       Retained race coverage: TestConcurrentReadAcrossActivation (store),
@@ -437,9 +437,9 @@ partition:
     cost: { wall_ms: 1940, cpu_ms: 2400 }
 
   - package: internal/ingest
-    test: TestRetainedContentBackfill
+    test: TestStoredContentBackfill
     class: single-threaded-bytes
-    evidence: '#TestRetainedContentBackfill'
+    evidence: '#TestStoredContentBackfill'
     justification: >-
       Subject. Retained content backfill recovers the full text for every
       targeted session, including a 102-session case, reports each refused or

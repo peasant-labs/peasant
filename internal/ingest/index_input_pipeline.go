@@ -63,7 +63,7 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 	}
 	// The stored artifact identity is a CONTRADICTION check, not a presence
 	// check. A row that predates the artifact-hash column has no identity to
-	// check, and its retained pair is the only input it has ever had; the
+	// check, and its stored pair is the only input it has ever had; the
 	// ordinary index write establishes the identity from the pair it parsed
 	// (SessionEntryWrite.ArtifactIdentity), so the next run can check it (see
 	// content_backfill.go's "until an ordinary index run establishes it").

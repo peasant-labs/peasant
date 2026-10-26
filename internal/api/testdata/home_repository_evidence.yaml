@@ -1,0 +1,15 @@
+# Home repository identity evidence. A session's recorded directory is either
+# its captured Git worktree (topology required) or the canonical project
+# directory (which may be outside Git entirely). Only the captured-worktree case
+# is ambiguous topology; the other is ordinary recorded data and must not fail
+# the whole projection.
+requiredNames: [non-git-recorded-directory, stale-git-worktree-directory]
+cases:
+  - name: non-git-recorded-directory
+    storedWorktree: false
+    status: 200
+    ids: [session-recorded-directory]
+  - name: stale-git-worktree-directory
+    storedWorktree: true
+    status: 500
+    ids: []

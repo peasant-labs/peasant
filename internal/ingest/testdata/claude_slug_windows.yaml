@@ -1,0 +1,83 @@
+# decodeProjectSlug (issue #368) must decode both slug shapes Claude Code
+# produces: a unix slug leading with a single dash, decoded from "/", and a
+# Windows slug leading with a drive letter and two dashes (the colon and the
+# path separator each encode as a dash), decoded from that drive's root.
+#
+# Every expectation here is expressed as ORDERED SEGMENTS from the case's
+# root rather than a literal path string. The loading test joins root+dirs
+# and root+want with filepath.Join at run time, so the same case is genuinely
+# green on Linux and on Windows: filepath.Join yields native separators on
+# whichever platform actually ran the test, and the assertion follows suit
+# instead of asserting a hardcoded POSIX (or Windows) string that could only
+# ever be correct on one of them.
+#
+# root is a bare drive letter (e.g. "C") for a Windows-shaped case, or empty
+# for a unix-shaped case that decodes from "/".
+declared_rows: 5
+required_cases:
+  - windows-drive-letter-slug
+  - windows-slug-space-in-directory-name
+  - unix-slug-regression
+  - windows-slug-partial-match-returns-drive-prefix
+  - windows-slug-worktree-suffix-returns-repo-root
+cases:
+  # The case named directly in issue #368: a Windows drive-letter slug must
+  # decode from the drive's root, not fail the leading-"-" check that only
+  # unix slugs satisfy.
+  - name: windows-drive-letter-slug
+    encoded: "C--Users-alice-project"
+    root: "C"
+    dirs:
+      - [Users]
+      - [Users, alice]
+      - [Users, alice, project]
+    want: [Users, alice, project]
+  # Claude's encoding only replaces path separators (and, on Windows, the
+  # drive colon) with dashes — it never touches spaces. A space inside a
+  # directory name therefore survives untouched inside a single
+  # dash-delimited segment, and must decode correctly alongside the new
+  # drive-letter root handling rather than needing dash-merge resolution.
+  - name: windows-slug-space-in-directory-name
+    encoded: "C--Users-alice-My Project"
+    root: "C"
+    dirs:
+      - [Users]
+      - [Users, alice]
+      - [Users, alice, "My Project"]
+    want: [Users, alice, "My Project"]
+  # An existing unix slug, to prove the drive-letter shape introduced no
+  # regression in the byte-identical unix path.
+  - name: unix-slug-regression
+    encoded: "-home-user-dev-project"
+    root: ""
+    dirs:
+      - [home]
+      - [home, user]
+      - [home, user, dev]
+      - [home, user, dev, project]
+    want: [home, user, dev, project]
+  # The "matched nothing" sentinel must compare against the root the slug
+  # actually started from (the drive root here), not the literal "/" — a
+  # Windows slug whose trailing segment doesn't exist must still return the
+  # longest matched drive-relative prefix instead of failing entirely.
+  - name: windows-slug-partial-match-returns-drive-prefix
+    encoded: "C--Users-alice-dev-project"
+    root: "C"
+    dirs:
+      - [Users]
+      - [Users, alice]
+      - [Users, alice, dev]
+      # "project" does not exist — the trailing segment is unmatched.
+    want: [Users, alice, dev]
+  # A worktree or branch name appended after the project root on a Windows
+  # slug must still resolve to the repo root, mirroring the unix behavior.
+  - name: windows-slug-worktree-suffix-returns-repo-root
+    encoded: "C--Users-alice-dev-my-repo-feature-branch"
+    root: "C"
+    dirs:
+      - [Users]
+      - [Users, alice]
+      - [Users, alice, dev]
+      - [Users, alice, dev, my-repo]
+      # "feature" and "branch" segments don't match dirs.
+    want: [Users, alice, dev, my-repo]

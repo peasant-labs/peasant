@@ -474,7 +474,7 @@ func PushAnnotationsSelected(
 
 func unresolvedAnnotationTargetError(rows []ingest.AnnotationTargetAnchorRow) error {
 	first := rows[0]
-	return fmt.Errorf("annotation push refused: %d unresolved annotation target(s) need repair before publication; what: annotation %s on session %s has no safely resolved transcript entry target; why: re-index repair could not prove the old target maps to one unique current entry; where: annotation_target_anchors unresolved state before Village annotation push; when: before building the annotation upload payload; user impact: Peasant did not publish annotations because doing so could mislead readers by attaching user labels to the wrong transcript entry; how to fix: inspect the session with 'peasant annotate list %s', recreate or remove the affected annotation from annotator %q, then re-run the same push", len(rows), first.AnnotationID, first.SessionID, first.SessionID, first.AnnotatorName)
+	return fmt.Errorf("annotation push refused: %d unresolved annotation target(s) need repair before publication; what: annotation %s on session %s has no safely resolved transcript entry target; why: re-index repair could not prove the old target maps to one unique current entry; where: annotation_target_anchors unresolved state before the peasant online annotation push; when: before building the annotation upload payload; user impact: Peasant did not publish annotations because doing so could mislead readers by attaching user labels to the wrong transcript entry; how to fix: inspect the session with 'peasant annotate list %s', recreate or remove the affected annotation from annotator %q, then re-run the same push", len(rows), first.AnnotationID, first.SessionID, first.SessionID, first.AnnotatorName)
 }
 
 // resolveManifestSet fetches the village annotation manifest and returns its hash
@@ -614,7 +614,7 @@ func sendAnnotationBatches(
 	// First batch synchronously (carries retractions; lets a 404 short-circuit).
 	if statusCode, err := sendBatch(ctx, batches[0], retractions); err != nil {
 		if statusCode == http.StatusNotFound {
-			summary.SkipReason = "village server does not support annotation push (requires v1.1.5+)"
+			summary.SkipReason = "the peasant online server does not support annotation push (requires v1.1.5+)"
 			return summary, nil
 		}
 		return summary, fmt.Errorf("upload annotations (batch 0): %w", err)

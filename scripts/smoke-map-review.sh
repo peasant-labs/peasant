@@ -5,7 +5,7 @@
 # Usage:
 #   scripts/smoke-map-review.sh             non-strict: unwired routes print SKIP
 #   scripts/smoke-map-review.sh --strict    integration gate: every check must PASS
-#   scripts/smoke-map-review.sh --no-build  skip the build, use existing bin/peasant
+#   scripts/smoke-map-review.sh --no-build  skip the build, use existing peasant
 #
 # Pass 1 (port 9971, --mock-data-store=web,map,review): full jq shape assertions
 # against the five §3 endpoints, using a projectHash discovered from
@@ -25,7 +25,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$REPO_ROOT/bin/peasant"
+BIN="$REPO_ROOT/peasant"
 PORT_MOCK=9971
 PORT_REAL=9972
 BASE_MOCK="http://localhost:$PORT_MOCK/api/v1"

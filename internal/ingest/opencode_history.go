@@ -74,7 +74,12 @@ type OpenCodeHistorySnapshot struct {
 	Copied            []OpenCodeHistoryRow
 	AgentDeliveredIDs map[string]bool
 	Fork              *OpenCodeForkProof
-	Revert            *OpenCodeRevertState
+	// NativeFork is the native session_v2 fork pointer for this session. It is
+	// provenance evidence, not a copy proof: OpenCode already materializes the
+	// parent prefix in the child, so the pointer records the source session for
+	// a context_from relationship without re-reading or copying the parent.
+	NativeFork *OpenCodeForkEvidence
+	Revert     *OpenCodeRevertState
 	// SourceEvidenceDigest is the SHA-256 hex of the canonical snapshot fields
 	// the reader captured. The capture builder carries it into the generation
 	// so activation can verify what the candidate proves.
@@ -82,18 +87,18 @@ type OpenCodeHistorySnapshot struct {
 }
 
 // OpenCodeMaterializedMessage is one snapshot row with its decided ownership:
-// emitted main content, or retained uncertain evidence for a declared earlier
+// emitted main content, or uncertain evidence for a declared earlier
 // section.
 type OpenCodeMaterializedMessage struct {
 	Row         OpenCodeHistoryRow
 	Attribution OpenCodeMessageAttribution
 	Emit        bool
-	// RetainedSegment names the ordered captured-context segment that owns this
+	// InheritedSegment names the ordered captured-context segment that owns this
 	// message's blocks when it is proven inherited context. It is set only for
-	// an emitted inherited copy; the builder retains those blocks as local
-	// evidence under the segment instead of emitting them as child chat.
-	RetainedSegment *int
-	EarlierIndex    int // 1-based earlier section when Emit is false but retained
+	// an emitted inherited copy; the builder keeps those blocks as inherited
+	// local evidence under the segment instead of emitting them as child chat.
+	InheritedSegment *int
+	EarlierIndex     int // 1-based earlier section when Emit is false but kept
 }
 
 // OpenCodeMaterializedHistory is the settled copy proof plus the emission
@@ -173,7 +178,11 @@ func MaterializeOpenCodeHistory(snapshot OpenCodeHistorySnapshot) (OpenCodeMater
 	for _, row := range own {
 		if !row.Settled {
 			out.Completeness = indexformat.GenerationCompletenessIncompleteNew
-			out.Diagnostics = append(out.Diagnostics, fmt.Sprintf("unfinished own row %q is omitted from the capture; retry after it settles", row.MessageID))
+			position := "an unrecorded sequence"
+			if row.HasSeq {
+				position = fmt.Sprintf("sequence %d", row.Seq)
+			}
+			out.Diagnostics = append(out.Diagnostics, fmt.Sprintf("unfinished own row %q at %s is omitted from the capture; retry after it settles", row.MessageID, position))
 			continue
 		}
 		if snapshot.Revert != nil && snapshot.Revert.Committed && !row.HasSeq {
@@ -267,7 +276,7 @@ func resolveOpenCodeCopies(snapshot OpenCodeHistorySnapshot) ([]indexformat.Cont
 		}
 		if segmentIndex >= 0 {
 			index := segmentIndex
-			message.RetainedSegment = &index
+			message.InheritedSegment = &index
 		}
 		messages = append(messages, message)
 	}
@@ -333,7 +342,7 @@ func openCodeCopyBounds(fork *OpenCodeForkProof) (admitBelow, disputeBelow int64
 	return admitBelow, disputeBelow, hasBound
 }
 
-// needsOpenCodeUncertainSection reports whether any retained message needs a
+// needsOpenCodeUncertainSection reports whether any uncertain message needs a
 // declared earlier-history section.
 func needsOpenCodeUncertainSection(messages []OpenCodeMaterializedMessage) bool {
 	for _, msg := range messages {
@@ -389,6 +398,11 @@ func DigestOpenCodeSnapshot(snapshot OpenCodeHistorySnapshot) string {
 		if snapshot.Fork.ThroughSeq != nil {
 			fmt.Fprintf(&sb, "through=%d completed=%t;", *snapshot.Fork.ThroughSeq, snapshot.Fork.ThroughCompleted)
 		}
+	}
+	if snapshot.NativeFork != nil {
+		writeSnapshotField(&sb, "native-fork-source", snapshot.NativeFork.SourceSessionID.String())
+		writeSnapshotField(&sb, "native-fork-boundary", string(snapshot.NativeFork.BoundaryType))
+		writeSnapshotField(&sb, "native-fork-message", snapshot.NativeFork.BoundaryMessageID)
 	}
 	if snapshot.Revert != nil {
 		fmt.Fprintf(&sb, "revert=%d committed=%t;", snapshot.Revert.TargetSeq, snapshot.Revert.Committed)
@@ -446,6 +460,8 @@ func writeSnapshotMessage(sb *strings.Builder, msg OpenCodeProvenanceMessage) {
 	writeSnapshotField(sb, "m.shellcmd", msg.ShellCommand)
 	writeSnapshotField(sb, "m.shellout", msg.ShellOutput)
 	writeSnapshotField(sb, "m.compaction", msg.CompactionSummary)
+	writeSnapshotField(sb, "m.thinking.level", string(msg.ThinkingLevel))
+	writeSnapshotField(sb, "m.thinking.raw", string(msg.ThinkingLevelRaw))
 	fmt.Fprintf(sb, "m.files=%d;", len(msg.Files))
 	for _, file := range msg.Files {
 		writeSnapshotField(sb, "m.file.name", file.Name)

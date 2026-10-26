@@ -984,7 +984,7 @@ func TestSearchHandler_HappyPath(t *testing.T) {
 // the object fields themselves.
 //
 // Real failure signal: an UNregistered route does NOT 404 here. It falls through to
-// the catch-all `/` handler, which returns 200 + the "Frontend not built yet" HTML
+// the catch-all `/` handler, which returns 200 + the "not bundled in this build" HTML
 // placeholder. So a missing/mis-wired registration surfaces as a text/html
 // Content-Type (and a failed JSON unmarshal), NOT as a non-200 status. The
 // Content-Type assertion is therefore the load-bearing wiring check, and it is fatal

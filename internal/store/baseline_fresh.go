@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // baselineApplications counts the fresh databases this process created from the

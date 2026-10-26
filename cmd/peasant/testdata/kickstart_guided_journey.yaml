@@ -18,7 +18,7 @@ rows:
       - 'estimate:'
       - kickstart complete
     completionPreamble:
-      - these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
+      - these useful next steps let you modify config, open the local dashboard, connect to peasant online, or explicitly publish later; kickstart runs none of them.
     completionCopy:
       - modify configuration interactively
       - peasant config
@@ -26,7 +26,7 @@ rows:
       - open the local dashboard
       - peasant web start
       - starts the dashboard and prints or opens its actual url
-      - connect to a village later
+      - connect to peasant online later
       - peasant village login
       - connects this machine without publishing a transcript
       - publish later, explicitly
@@ -41,13 +41,13 @@ expectedPreambleMutationCount: 4
 preambleMutations:
   - name: not-useful
     lines:
-      - these not useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
+      - these not useful next steps let you modify config, open the local dashboard, connect to peasant online, or explicitly publish later; kickstart runs none of them.
   - name: not-optional
     lines:
-      - these useful but not optional next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
+      - these useful but not optional next steps let you modify config, open the local dashboard, connect to peasant online, or explicitly publish later; kickstart runs none of them.
   - name: negated-no-auto-execution
     lines:
-      - these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; it is false that kickstart runs none of them.
+      - these useful next steps let you modify config, open the local dashboard, connect to peasant online, or explicitly publish later; it is false that kickstart runs none of them.
   - name: hedged-usefulness
     lines:
-      - these potentially useful next steps might let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart might run none of them.
+      - these potentially useful next steps might let you modify config, open the local dashboard, connect to peasant online, or explicitly publish later; kickstart might run none of them.

@@ -23,10 +23,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/ingested_publication.yaml
@@ -88,7 +88,11 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			harvest()
 			dbPath := string(defaults.ResolveDBFilePathWith(dir))
 			open := func() *store.Store {
-				db, err := openPreparedStore(t, dbPath)
+				options, err := generationStoreOptions(output)
+				if err != nil {
+					t.Fatal(err)
+				}
+				db, err := openPreparedStore(t, dbPath, options...)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -180,8 +184,12 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			var publications atomic.Int32
 			village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/auth/me" {
+					_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
+					return
+				}
 				if !strings.Contains(r.URL.Path, "/transcripts/publish") {
-					json.NewEncoder(w).Encode(schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1}})
+					json.NewEncoder(w).Encode(schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1, schema.ContentCapabilitySessionGraphProvenanceV1}})
 					return
 				}
 				captured.record(t, r)
@@ -252,7 +260,7 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 				t.Fatalf("CLI publish: %v %s %s uploads=%d", err, out, stderr, publications.Load())
 			}
 			first := captured.snapshot()
-			firstReceipt, err := db.Publication(t.Context(), village.URL, "user-00001", originalHash, id)
+			firstReceipt, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), originalHash, id)
 			if err != nil || firstReceipt == nil || !firstReceipt.Receipt.Created {
 				t.Fatalf("first receipt missing: %+v %v", firstReceipt, err)
 			}
@@ -265,7 +273,7 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			if !bytes.Contains(statusBody, []byte(`"syncStatus":"synced"`)) {
 				t.Fatalf("publication receipt did not synchronize status: %s; CLI: %s %s", statusBody, out, stderr)
 			}
-			request := fmt.Sprintf(`{"sessionIds":[%q],"visibility":"private"}`, id)
+			request := fmt.Sprintf(`{"sessionIds":[%q]}`, id)
 			resp, err := http.Post(baseURL+defaults.RouteSyncPush.String(), "application/json", strings.NewReader(request))
 			if err != nil {
 				t.Fatal(err)
@@ -276,7 +284,7 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 				t.Fatalf("Share repeat: %d %s uploads=%d", resp.StatusCode, raw, publications.Load())
 			}
 			second := captured.snapshot()
-			secondReceipt, err := db.Publication(t.Context(), village.URL, "user-00001", originalHash, id)
+			secondReceipt, err := db.Publication(t.Context(), village.URL, testutil.VillageFixtureAccountID.String(), originalHash, id)
 			if err != nil || !reflect.DeepEqual(secondReceipt, firstReceipt) {
 				t.Fatalf("unchanged Share publication changed the authoritative receipt: first=%+v second=%+v err=%v", firstReceipt, secondReceipt, err)
 			}

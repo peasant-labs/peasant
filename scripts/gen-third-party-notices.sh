@@ -110,6 +110,15 @@ HEADER
       printf '\n'
     done
   done < "${mods_tmp}"
+
+  # This audited driver is an ordinary package in the main module, so go list
+  # cannot enumerate its original module license. Keep its ISC grant explicit.
+  printf '%s\n' "================================================================================"
+  printf 'Module: zombiezen.com/go/sqlite@v1.4.2 (audited in-module copy)\n'
+  printf 'File:   LICENSE\n'
+  printf '%s\n\n' "================================================================================"
+  cat "${repo_root}/third_party/zombiezen-sqlite/LICENSE"
+  printf '\n'
 } > "${buf_tmp}"
 
 mv "${buf_tmp}" "${out_file}"

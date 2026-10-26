@@ -10,9 +10,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // v5 test session IDs (valid UUIDs).
@@ -458,7 +458,7 @@ func seedTestSessionV5(t *testing.T, ctx context.Context, s *store.Store, sessio
 	if err != nil {
 		t.Fatalf("NewModelID: %v", err)
 	}
-	srcPath, err := ingest.NewResolvedPath("/test/path/session.jsonl")
+	srcPath, err := ingest.NewResolvedPath(testutil.PlatformAbsPath("/test/path/session.jsonl"))
 	if err != nil {
 		t.Fatalf("NewResolvedPath: %v", err)
 	}

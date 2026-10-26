@@ -130,13 +130,13 @@ func TestPushCmd_ABudgetSpentLocallyDoesNotBlameTheVillage(t *testing.T) {
 	if err == nil {
 		t.Fatal("a push whose budget expired must fail")
 	}
-	if strings.Contains(err.Error(), "the village did not answer in time") {
+	if strings.Contains(err.Error(), "peasant online did not answer in time") {
 		t.Errorf("no village request was made; the budget went on local work: %v", err)
 	}
 	for _, want := range []string{
 		"ran out of its 1ms budget",
 		"before the upload sent anything",
-		"the village is not where this budget went",
+		"peasant online is not where this budget went",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error must state %q; got: %v", want, err)

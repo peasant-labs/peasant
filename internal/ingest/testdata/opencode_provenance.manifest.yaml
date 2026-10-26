@@ -1,4 +1,6 @@
 requiredNames:
+  - opencode-message-variant-level
+  - opencode-message-no-variant
   - opencode-current-typed-user
   - opencode-agent-delivery
   - opencode-unproved-child-delivery

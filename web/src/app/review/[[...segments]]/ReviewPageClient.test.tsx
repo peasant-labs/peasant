@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, within, fireEvent } from '@testing-library/react';
 import { ReviewPageClient } from './ReviewPageClient';
 import { ChangeDetail } from './ChangeDetail';
-import type { ExplainerState } from '@/components/Explainer';
+import { DOCS } from '@/lib/docs';
 import type { SessionsPayload } from '@/types/messages';
 import type { ReviewListPayload } from '@peasant-labs/schema';
 import type { DecodedChangeDetailPayload } from '@/lib/api/map';
@@ -192,24 +192,19 @@ describe('ReviewPageClient — change graph', () => {
     expect(within(quiet).getByText(/undated/)).toBeInTheDocument();
   });
 
-  it('sits the explainer "?" next to the page title and reveals the box when opened', async () => {
+  it('sits a docs "?" link next to the page title instead of an in-app explainer', async () => {
     stubFetch({ [`/api/v1/review/${ALPHA_HASH}`]: REVIEW_LIST_PAYLOAD });
     render(<ReviewPageClient projectName="alpha-project" branch={null} />);
     await screen.findByText('feat/graph-cache'); // flush the list fetch
 
-    // The toggle is grouped with the <h1> "Changes" title, not buried in the body.
+    // The link is grouped with the <h1> "changes" title, not buried in the body.
     const heading = screen.getByRole('heading', { level: 1, name: 'changes' });
-    const toggle = screen.getByRole('button', { name: 'what am I looking at?' });
-    expect(heading.parentElement?.contains(toggle)).toBe(true);
-
-    // Collapsed by default — the content box does not render.
+    const docs = screen.getByRole('link', { name: /^how to read changes/ });
+    expect(heading.parentElement?.contains(docs)).toBe(true);
+    expect(docs).toHaveAttribute('href', DOCS.changes);
+    expect(docs).toHaveAttribute('target', '_blank');
+    expect(screen.queryByRole('button', { name: 'what am I looking at?' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Explanation' })).not.toBeInTheDocument();
-
-    // Opening it from the title reveals the box, with the dot vocabulary folded in.
-    fireEvent.click(toggle);
-    const box = screen.getByRole('region', { name: 'Explanation' });
-    expect(within(box).getByText(/filled/)).toBeInTheDocument();
-    expect(within(box).getByText(/worked on in the last 3 days/)).toBeInTheDocument();
   });
 
   it('renders lane 0 from recentCommits and shows merged changes in the "Already merged in" section', async () => {
@@ -320,12 +315,6 @@ describe('ReviewPageClient — change detail (integration)', () => {
 
 // -- ChangeDetail unit renders (work rail, footnotes, exits) --------------------
 
-/** The explainer state lives in the page title now; the detail view receives
- *  it as a prop. Collapsed by default — the box never crowds the detail. */
-function makeExplainer(open = false): ExplainerState {
-  return { id: 'change-detail', open, hydrated: true, show: () => {}, hide: () => {} };
-}
-
 function renderDetail(payload: DecodedChangeDetailPayload = CHANGE_DETAIL_PAYLOAD) {
   return render(
     <ChangeDetail
@@ -333,7 +322,6 @@ function renderDetail(payload: DecodedChangeDetailPayload = CHANGE_DETAIL_PAYLOA
       projectHash={ALPHA_HASH}
       branch="feat/graph-cache"
       payload={payload}
-      explainer={makeExplainer()}
     />,
   );
 }
@@ -349,7 +337,6 @@ describe('ChangeDetail — branch switcher', () => {
         branch="feat/graph-cache"
         payload={CHANGE_DETAIL_PAYLOAD}
         navBranches={['feat/earlier', 'feat/graph-cache', 'feat/later']}
-        explainer={makeExplainer()}
       />,
     );
     const select = screen.getByRole('combobox', { name: 'Switch to another line of work' });
@@ -370,7 +357,6 @@ describe('ChangeDetail — branch switcher', () => {
         branch="feat/merged-already"
         payload={CHANGE_DETAIL_PAYLOAD}
         navBranches={['feat/earlier', 'feat/later']}
-        explainer={makeExplainer()}
       />,
     );
     const select = screen.getByRole('combobox', { name: 'Switch to another line of work' });
@@ -388,7 +374,6 @@ describe('ChangeDetail — branch switcher', () => {
         branch="feat/graph-cache"
         payload={CHANGE_DETAIL_PAYLOAD}
         navBranches={['feat/graph-cache']}
-        explainer={makeExplainer()}
       />,
     );
     expect(
@@ -415,7 +400,6 @@ describe('ChangeDetail — what is unusual (4.4)', () => {
             },
           ],
         }}
-        explainer={makeExplainer()}
       />,
     );
     const band = screen.getByLabelText('Change signals');
@@ -436,7 +420,6 @@ describe('ChangeDetail — recurring friction clusters (5.1)', () => {
         projectHash={ALPHA_HASH}
         branch="feat/graph-cache"
         payload={{ ...CHANGE_DETAIL_PAYLOAD, work: [], violations: [], unusual: [], frictions }}
-        explainer={makeExplainer()}
       />,
     );
   }

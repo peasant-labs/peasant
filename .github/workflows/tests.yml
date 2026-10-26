@@ -28,6 +28,10 @@ on:
       - "**/testdata/**"
       - "go.mod"
       - "go.sum"
+      - "third_party/zombiezen-sqlite/**"
+      - "scripts/check-sqlite-fork.py"
+      - "scripts/vet-go.sh"
+      - "scripts/check-module-install/**"
       - "Makefile"
       - "sgconfig.yml"
       - "ast-grep/**"
@@ -60,6 +64,10 @@ on:
       - "**/testdata/**"
       - "go.mod"
       - "go.sum"
+      - "third_party/zombiezen-sqlite/**"
+      - "scripts/check-sqlite-fork.py"
+      - "scripts/vet-go.sh"
+      - "scripts/check-module-install/**"
       - "Makefile"
       - "sgconfig.yml"
       - "ast-grep/**"
@@ -180,8 +188,9 @@ jobs:
        !startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
     # Routed to the x86_64 pool. `make check` needs only the Go toolchain, a C
-    # compiler for `go vet`/cgo, and the ast-grep binary; it does not need the
-    # Nix devShell. The pool hands a lone job the whole 24-core pool budget
+    # compiler for `go vet`/cgo, Python for the SQLite source audit, and the
+    # ast-grep binary. It does not need the Nix devShell. The pool hands a lone
+    # job the whole 24-core pool budget
     # (hosts/desktop/configuration.nix: pool cpuQuota 2400%, per-runner
     # cpuWeight with no quota), against 2 vCPU on the arm64 Blacksmith runner.
     #
@@ -236,9 +245,16 @@ jobs:
           # the whole shared cache for an upload over the 10 GB limit.
           cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
-      # `make check` shells out to `ast-grep scan`. The devShell supplied it;
-      # the pool image does not, and it ships no unzip or python3 for the GitHub
-      # release zip, so install the prebuilt npm binary (glibc, linux-x64-gnu).
+      # The SQLite source audit uses Python's standard library. The minimal
+      # pool image has no interpreter, so provision it before the quality gate.
+      - name: Install Python for the SQLite source audit
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y python3
+
+      # `make check` shells out to `ast-grep scan`. The pool image does not
+      # provide ast-grep, so install the prebuilt npm binary (glibc, linux-x64-gnu).
       # Version pinned to the devShell's ast-grep so the rules keep their
       # semantics; the scan itself stays the Makefile's, unchanged.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -287,7 +303,17 @@ jobs:
           TESTGATE_OUT="$RUNNER_TEMP/testgate/$(date -u +%Y%m%dT%H%M%SZ)"
           echo "TESTGATE_DIR=$TESTGATE_OUT" >> "$GITHUB_ENV"
           export TESTGATE_OUT
-          make check RACE=${{ env.RACE }}
+          # Root in the container pool otherwise bypasses the DAC permissions
+          # that filesystem tests must exercise. Drop only those bypass powers
+          # irreversibly for this command and its children, not the runner.
+          if [ "$(id -u)" -eq 0 ]; then
+            setpriv --bounding-set=-dac_override,-dac_read_search \
+              --inh-caps=-dac_override,-dac_read_search \
+              --ambient-caps=-dac_override,-dac_read_search --no-new-privs \
+              make check RACE=${{ env.RACE }}
+          else
+            make check RACE=${{ env.RACE }}
+          fi
           end=$(date +%s)
           {
             echo "### amd64 pool gate — phase wall"
@@ -460,6 +486,19 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Cross-compile for Windows
+        run: nix develop -c env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
+
+      # `go build` does not typecheck _test.go files, so a Windows-only test file
+      # that stops compiling passes the step above unnoticed. That is how a store
+      # test referencing syscall.Stat_t - a type Windows does not have - reached
+      # this branch: it broke no build and ran in no job. `go vet` does typecheck
+      # test files, and the repository's own vet wrapper already keeps the
+      # vendored driver's audited uintptr conversions exempt, so it is reused
+      # here with the target set rather than reimplemented. About 17 seconds.
+      - name: Typecheck Windows test files
+        run: nix develop -c env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 ./scripts/vet-go.sh
+
   # The cross-revision harvester guard compiles the reviewed base and the
   # candidate as separate trees and probes both. On a 2-vCPU runner that is
   # ~15 minutes, so it gets its own job and its own budget in parallel with
@@ -537,8 +576,8 @@ jobs:
        github.event_name == 'workflow_dispatch') &&
       (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
-    # Routed to the x86_64 pool: this job is pure Go (build, test, `git archive`)
-    # and needs no Nix devShell.
+    # Routed to the x86_64 pool: Go handles build/test/module ZIP installation;
+    # Python supplies the SQLite source audit. No Nix devShell is required.
     needs: determine-runner
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 20
@@ -557,6 +596,13 @@ jobs:
           # the whole shared cache for an upload over the 10 GB limit.
           cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
+      # The real module-install target also audits the SQLite source first.
+      - name: Install Python for the SQLite source audit
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y python3
+
       # Already namespaced `-go-cgo0-` on both the key and the restore-key, so
       # this release-only lane never collided with the shared prefix; kept as the
       # consistent pattern for every job.
@@ -572,9 +618,7 @@ jobs:
       # Satisfy the `//go:embed all:web/out` directive for `go build ./...`. The
       # committed web/out/.gitkeep placeholder already satisfies the embed on a
       # fresh checkout; `make web-stub` (idempotent + non-destructive)
-      # is the single shared source for the stub and additionally writes a real
-      # index.html stub when one is absent. Belt-and-suspenders in case `make
-      # clean` ever runs first.
+      # recreates it. Belt-and-suspenders in case `make clean` ever runs first.
       - name: Stub web/out embed
         run: make web-stub
 
@@ -584,26 +628,10 @@ jobs:
           CGO_ENABLED=0 go build ./...
           CGO_ENABLED=0 go test ./internal/config/ ./internal/ingest/ ./internal/e2e/
 
-      # Module-zip proxy gate. A Go module
-      # zip (what `go install module@version` fetches) contains ONLY git-tracked
-      # files. `git archive HEAD` reproduces exactly that set, so building
-      # ./cmd/peasant from a clean extraction proves the binary does NOT depend
-      # on any gitignored file — specifically that the committed
-      # web/out/.gitkeep placeholder satisfies `//go:embed all:web/out` without
-      # a local `make web`. This is the honest pre-tag proxy: a live `go install`
-      # from the registry is covered separately after a release is published.
-      # It uses HEAD (committed tree), NOT the working dir, so the defensive
-      # web/out stub above does not leak into the test.
-      - name: Module-zip go-install proxy (git archive HEAD -> build)
-        run: |
-          set -euo pipefail
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-          git archive --format=tar HEAD | tar -x -C "$tmp"
-          cd "$tmp"
-          test -f web/out/.gitkeep || { echo "FAIL: web/out/.gitkeep not in HEAD (go:embed will break go install)"; exit 1; }
-          CGO_ENABLED=0 go build -buildvcs=false ./cmd/peasant
-          echo "module-zip proxy OK: ./cmd/peasant builds from tracked files only"
+      # Exercise the actual Go module ZIP semantics and go install @version.
+      # A second named fixture omits the driver and must fail installation.
+      - name: Install CLI from a real Go module zip
+        run: make module-install-check
 
   # Dependency-license gate. Two invariants on the third-party Go modules
   # compiled into the binary:
@@ -730,3 +758,64 @@ jobs:
             exit 1
           fi
           echo "OK: real pnpm-built dashboard present at web/out/index.html"
+
+  windows:
+    name: windows-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.event.pull_request.title, 'release(') ||
+      github.workflow == 'Release PR'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build every package
+        run: go build ./...
+
+      # internal/proc is the console-window helper and is green here in full.
+      - name: Run focused tests
+        run: go test ./internal/defaults/... ./internal/config/... ./internal/proc/...
+
+      - name: Run credential commit guards
+        run: go test ./internal/auth/ -run 'TestCredential|TestNormalizeVillageURL|TestLogout|TestCancelledLogout|TestAlreadyCancelledLogout'
+
+      # The Windows-specific behaviour this branch adds is named explicitly
+      # instead of running these packages whole. internal/ingest has pre-existing
+      # Windows failures unrelated to this work (80 at the time of writing, in the
+      # OpenCode and filesystem suites), so running all of it would report that
+      # unrelated breakage rather than guarding drive-letter slug decoding, the
+      # absolute-path form check, worktree containment and the debug/ prune.
+      #
+      # `go build ./...` does not typecheck _test.go files, so a Windows test
+      # file that stops compiling would pass it unnoticed. `go vet` does typecheck
+      # test files; run the repository's own wrapper, which keeps the vendored
+      # driver's audited uintptr conversions exempt. This runs on every pull
+      # request, unlike the cross-compile lane's release-gated copy.
+      - name: Typecheck Windows test files
+        shell: bash
+        run: ./scripts/vet-go.sh --skip-sqlite-audit
+
+      # One `go test` command for every package: the default pwsh shell returns
+      # the last command's exit code, so two commands here would discard the
+      # first package's failure and let the job report green over a red test.
+      # A single invocation reports every failing package and exits non-zero.
+      - name: Run the Windows-specific tests
+        run: |
+          go test ./internal/ingest/ ./internal/api/ ./cmd/peasant/ ./internal/store/ ./internal/testutil/ -run 'TestDecodeClaudeSlug|TestDecodeCursorSlug|TestHasAbsolutePathForm|TestDecodeClaudeProjectDir|TestParsePiDocumentAcceptsWindowsRecordedCWD|TestPipeline_moveSessionFiles_PrunesBelowDebugDirectory|TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles|TestExecGitResolver_Worktree|TestIsAddrInUseMatchesARealPortConflict|TestPredicatesMatchEveryDocumentedErrno|TestReplaceExecutable|TestSweepUpgradeSidecar|TestTerminateProcessStopsAChild|TestPidFilePath|TestBackgroundProcAttr|TestSessionLockAcrossProcesses|TestMemFS|TestPlatformAbsPath|TestHarmonized|TestContentModelParity|TestContentPromotion|TestContentOneCopy|TestContentConcurrency|TestContentHarvestENOSPC|TestContentMigration|TestContentCorruption|TestContentCrashSeams|TestContentWriteBudget|TestContentGC|TestContentReleaseGuard|TestContentFamilyInventory|TestContentCLISurface|TestMigrationV62|TestStatsOverflowFamily|TestSessionCapturedStats|TestSchemaFreshVsMigrated|TestGoldenTemplateBodyInsert|TestSerializeEntry|TestComputeActivationBinding|TestEntryFromRow|TestRebuildExtra|TestLegacyShape|TestSeedWriteAllowed|TestComputeDerivedScopeNativeVsLegacy|TestInsertSessionsSeedingGates|TestStoredMetadataSeedSource|TestSweepSession|TestSweepFlagged|TestSweepCrash|TestSweepCorrupt|TestReclaimSelectsByFlag|TestReclaimSweepsOrphans|TestReclaimHarmonized|TestReclaimTableInventory|TestSearchRecall|TestSearchCorruption|TestSearchDeleteTimeCheck|TestSearchRebuildGate|TestSearchSizeRatioReported|TestSearchHealthEntry|TestPruneVerifiesBodies|TestMigrate|TestPlanMigration|TestAnnotationTargetsNoFK|TestEvaluateRetirementPreconditions'
+
+      - name: Build peasant.exe and print its version
+        run: |
+          go build -o peasant.exe ./cmd/peasant
+          ./peasant.exe version

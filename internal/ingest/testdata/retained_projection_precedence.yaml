@@ -75,8 +75,11 @@ requiredNames:
   - oversized_escaped_root_extension_key_is_refused_for_size
 
 # payloadBytes is the total byte size of the over-limit payload literal the
-# loader builds per token below. The 8 MiB payload cannot be written literally,
-# so each template carries a token the test replaces with the built literal:
+# loader builds per token below. It is a few KiB, and the runner injects a
+# smaller limit (half this size) into the production decision path, so the
+# in-place probe refuses the over-limit rows before materializing them without
+# building 128 MiB documents. The payload cannot be written literally, so each
+# template carries a token the test replaces with the built literal:
 #   {{OVER}}             a JSON string of digit ones over the limit, whose
 #                        decoded text is itself a valid JSON document, so the
 #                        authoritative path would accept the record apart from
@@ -107,14 +110,15 @@ requiredNames:
 #   {{FF}}               one raw 0xFF byte (invalid UTF-8, which YAML cannot
 #                        spell literally);
 #   {{DEEP}}             a 12,001-deep raw array, beyond the local depth budget.
-payloadBytes: 8388672
+payloadBytes: 4096
 
 # precedenceCases drive ingest.ProjectRetainedUnknown over stored Extra
-# templates at the real transfer limit. `extras` holds one template per carrier
-# entry. `want` is the required outcome: `integrity` (an EvidenceIntegrityError,
-# never the transfer refusal), `legacy` (the missing-coordinate refusal, never
-# the transfer refusal), or `size` (the 8 MiB transfer refusal: the motivating
-# path or a deliberate precedence change named in the probe header).
+# templates over the small injected transfer limit. `extras` holds one template
+# per carrier entry. `want` is the required outcome: `integrity` (an
+# EvidenceIntegrityError, never the transfer refusal), `legacy` (the
+# missing-coordinate refusal, never the transfer refusal), or `size` (the
+# published transfer refusal: the motivating path or a deliberate precedence
+# change named in the probe header).
 # `authoritative` names the CollectRetainedUnknown outcome for size rows:
 # accepts for canonical rows, integrity for the deliberate set marked with
 # deliberateSizePrecedence. `exportHarness` and `entryHarness` default to codex;

@@ -1,0 +1,34 @@
+# Bulk collective pull driver: the behaviours a multi-transcript run must keep.
+#
+# Each case names one driver behaviour. The test sets up the village double's
+# pullable transcripts and shares per case, runs
+# `peasant village transcripts pull --collective ...` against it, and asserts
+# the observable outcome (pulled rows, exit code, and which village reads
+# happened). No case carries inline expectations beyond its name; the test
+# proves each behaviour against the double and the local pulled index.
+requiredNames:
+  - paging follows a multi-page listing to the end and pulls a transcript held by two collectives once
+  - continue-on-error pulls the others when one transcript fails and reports non-zero
+  - skip-gate pruning does not pull a transcript the gate answers as current
+  - skip-gate fallback pulls every transcript individually when the gate does not answer
+  - progress renders on a terminal with done over total
+  - progress stays silent when stderr is not a terminal
+  - progress stays silent under json and the aggregate is unchanged
+  - cancel reports after N of M and exits non-zero
+  - cancel paints the canceling footer while a transcript is in flight
+  - cancel leaves no partial copy and earlier transcripts stay landed
+  - resume after cancel downloads only what was missing
+  - progress composes through the kit primitives only
+cases:
+  - name: paging follows a multi-page listing to the end and pulls a transcript held by two collectives once
+  - name: continue-on-error pulls the others when one transcript fails and reports non-zero
+  - name: skip-gate pruning does not pull a transcript the gate answers as current
+  - name: skip-gate fallback pulls every transcript individually when the gate does not answer
+  - name: progress renders on a terminal with done over total
+  - name: progress stays silent when stderr is not a terminal
+  - name: progress stays silent under json and the aggregate is unchanged
+  - name: cancel reports after N of M and exits non-zero
+  - name: cancel paints the canceling footer while a transcript is in flight
+  - name: cancel leaves no partial copy and earlier transcripts stay landed
+  - name: resume after cancel downloads only what was missing
+  - name: progress composes through the kit primitives only

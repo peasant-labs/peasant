@@ -2,8 +2,10 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -35,6 +37,19 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("cmd/peasant TestMain: create temp HOME: " + err.Error())
 	}
+	// Preserve the developer's Go caches across the HOME redirect below: `go
+	// build` resolves GOMODCACHE/GOCACHE from HOME, so without this the matrix
+	// build re-downloads the module graph into the throwaway home. Capture the
+	// values while HOME still points at the real one. One `go env` call per
+	// variable: a single space-separated call cannot round-trip a path that
+	// contains a space.
+	for _, key := range []string{"GOMODCACHE", "GOCACHE"} {
+		if out, envErr := exec.Command("go", "env", key).Output(); envErr == nil {
+			if value := strings.TrimSpace(string(out)); value != "" {
+				os.Setenv(key, value)
+			}
+		}
+	}
 	os.Setenv("HOME", home)
 	os.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	os.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
@@ -49,6 +64,7 @@ func TestMain(m *testing.M) {
 	os.Setenv(ingest.EnvArenaSizeBytes, strconv.Itoa(64*1024*1024)) // 64 MiB
 
 	code := m.Run()
+	removePeasantMatrixBuildDir()
 	_ = os.RemoveAll(home)
 	os.Exit(code)
 }

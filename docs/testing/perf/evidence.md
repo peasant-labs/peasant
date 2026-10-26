@@ -34,7 +34,7 @@ warmup, serial, L=0.957 (base-gate calibration), GOMAXPROCS=32.
 | `TestResolveStoredOriginsWritesAVerdictIntoEveryRow` (ingest) | T3 | 41.1 | 38.0 | 1.3 | 0.957 |
 | `TestPiDatabasePublicationThroughCLI` (cmd) | T4 | 35.4 | 33.4 | 1.6 | 0.957 |
 | `TestOrdinaryHarvestSettlesStaleIndexSessions` (ingest) | T3 | 31.0 | 28.5 | 1.3 | 0.957 |
-| `TestRetainedContentBackfill` (ingest) | T3 | 28.3 | 26.0 | 1.2 | 0.957 |
+| `TestStoredContentBackfill` (ingest) | T3 | 28.3 | 26.0 | 1.2 | 0.957 |
 | `TestNativeCoverageMatrix` (ingest) | T3 | 26.4 | 21.9 | 1.2 | 0.957 |
 | `TestPiHarvestCommonModes` (cmd) | T3+T4 | 22.3 | 19.8 | 1.5 | 0.957 |
 | `TestPipelineRetainedAdapterMaintenance` (ingest) | T3 | 18.0 | 16.1 | 1.2 | 0.957 |
@@ -82,7 +82,7 @@ absent in this container). Before column = the survey baseline above
 | `TestPiUnknownPersistence` (ingest) | T3+T4 | 43.1 / 40.2 / 1.6 | 41.7 / 38.8 / 1.5 | 0.945–0.951 |
 | `TestResolveStoredOriginsWritesAVerdictIntoEveryRow` (ingest) | T3 | 41.1 / 38.0 / 1.3 | **warm 8.95 / 6.80 / 0.92** (L1 6.41; cold record: 44.3 / 39.8 / 1.4 (rerun 42.9) — cache state changed (cold -> warm)) | 0.945–0.951 |
 | `TestOrdinaryHarvestSettlesStaleIndexSessions` (ingest) | T3 | 31.0 / 28.5 / 1.3 | **warm 7.95 / 6.34 / 0.92** (L1 5.65; cold record: 33.3 / 29.9 / 1.4 (rerun 32.7) — cache state changed (cold -> warm)) | 0.945–0.951 |
-| `TestRetainedContentBackfill` (ingest) | T3 | 28.3 / 26.0 / 1.2 | **warm 12.12 / 11.03 / 0.89** (L1 4.85; cold record: 28.0 / 26.2 / 1.2 — cache state changed (cold -> warm)) | 0.945–0.951 |
+| `TestStoredContentBackfill` (ingest) | T3 | 28.3 / 26.0 / 1.2 | **warm 12.12 / 11.03 / 0.89** (L1 4.85; cold record: 28.0 / 26.2 / 1.2 — cache state changed (cold -> warm)) | 0.945–0.951 |
 | `TestNativeCoverageMatrix` (ingest) | T3 | 26.4 / 21.9 / 1.2 | 24.9 / 21.1 / 1.1 | 0.945–0.951 |
 | `TestPipelineRetainedAdapterMaintenance` (ingest) | T3 | 18.0 / 16.1 / 1.2 | **warm 5.44 / 4.07 / 0.90** (L1 4.71; cold record: 18.4 / 16.4 / 1.1 — cache state changed (cold -> warm)) | 0.945–0.951 |
 | `TestContentRecoveryScope` (ingest) | T3 | 17.8 / 15.8 / 1.0 | **warm 4.85 / 3.65 / 0.73** (L1 4.59; cold record: 17.9 / 15.9 / 0.9 — cache state changed (cold -> warm)) | 0.945–0.951 |
@@ -271,7 +271,7 @@ wall / user / sys, seconds.
 | test | class | exact command | before wall/CPU | after wall/CPU | L |
 |---|---|---|---|---|---|
 | `TestModelsSync_500_StaticFallback` (cmd) | T2 | `go test -race -count=1 -timeout=0 -run '^TestModelsSync_500_StaticFallback$' ./cmd/peasant` | 10.2 / 8.9 / 1.1 | 6.70 / 5.59 / 0.89 | 0.952 |
-| `TestRetainedContentBackfill` (ingest) | T2 (seed batching) | `go test -race -count=1 -timeout=0 -run '^TestRetainedContentBackfill$' ./internal/ingest` | 28.3 / 26.0 / 1.2 | 25.78 / 24.47 / 1.03 | 0.952 |
+| `TestStoredContentBackfill` (ingest) | T2 (seed batching) | `go test -race -count=1 -timeout=0 -run '^TestStoredContentBackfill$' ./internal/ingest` | 28.3 / 26.0 / 1.2 | 25.78 / 24.47 / 1.03 | 0.952 |
 | `TestResolveStoredOriginsWritesAVerdictIntoEveryRow` (ingest) | T2 (origin conversions; migration-dominated) | `go test -race -count=1 -timeout=0 -run '^TestResolveStoredOriginsWritesAVerdictIntoEveryRow$' ./internal/ingest` | 41.1 / 38.0 / 1.3 | 41.51 / 38.56 / 1.19 | 0.952 |
 
 Behavior proof: `go test -race -count=1 ./internal/store/` PASS — wall
@@ -762,7 +762,7 @@ improved anyway. No profile wall is quoted.
 | `TestNormalIngestStoresAuthoritativeContent` | `internal/ingest` | 16.97 / 14.61 / 1.21 | 2.97 / 1.94 / 0.85 | 11.47 → 10.90 |
 | `TestPiUnknownPersistence` | `internal/ingest` | 29.82 / 27.86 / 1.28 | 3.63 / 3.12 / 0.86 | 11.25 → 10.91 |
 | `TestOrdinaryHarvestSettlesStaleIndexSessions` | `internal/ingest` | 8.29 / 6.69 / 1.01 | 1.94 / 1.63 / 0.77 | 10.48 → 10.91 |
-| `TestRetainedContentBackfill` | `internal/ingest` | 12.93 / 12.15 / 0.98 | 1.98 / 1.83 / 0.76 | 10.36 → 10.83 |
+| `TestStoredContentBackfill` | `internal/ingest` | 12.93 / 12.15 / 0.98 | 1.98 / 1.83 / 0.76 | 10.36 → 10.83 |
 | `TestNativeUnknownSourceToPublication` | `internal/ingest` | 75.02 / 69.64 / 2.33 | 9.12 / 5.75 / 1.23 | 10.30 → 10.83 |
 | `TestPiHarvestCommonModes` | `cmd/peasant` | 6.45 / 4.86 / 1.15 | 2.15 / 1.66 / 0.96 | 10.19 → 10.55 |
 | `TestContentRecoveryScope` | `internal/ingest` | 5.25 / 3.91 / 0.83 | 1.52 / 1.38 / 0.66 | 10.09 → 10.55 |

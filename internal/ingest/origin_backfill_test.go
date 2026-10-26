@@ -67,6 +67,12 @@ type storedBackfillRow struct {
 	// AtPriorRuleVersion puts the row one version below the current rule so the
 	// pass must list it and reclassify it under the new rule.
 	AtPriorRuleVersion bool `yaml:"at_prior_rule_version"`
+	// StoredVersion seeds the row at this EXACT rule version, independent of
+	// the build's current constant. It pins the literal released version a real
+	// store would carry, so an arm can fail when the rule-version move is
+	// absent; a version derived from the constant would move with the bump and
+	// could never catch that.
+	StoredVersion *int `yaml:"stored_version"`
 	// FirstUserMessage is the indexed first user entry, which is the last
 	// surviving content evidence once the transcript is gone.
 	FirstUserMessage *string `yaml:"first_user_message"`
@@ -137,6 +143,12 @@ func LoadStoredBackfillFixtures(data []byte) (storedBackfillFixture, error) {
 			if row.AtCurrentRuleVersion && row.AtPriorRuleVersion {
 				return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill case %q session %q cannot be both at the current and prior rule version", tc.Name, row.SessionID)
 			}
+			if row.StoredVersion != nil && (row.AtCurrentRuleVersion || row.AtPriorRuleVersion) {
+				return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill case %q session %q sets stored_version together with a relative rule-version flag; the seed is ambiguous", tc.Name, row.SessionID)
+			}
+			if row.StoredVersion != nil && *row.StoredVersion < 1 {
+				return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill case %q session %q declares stored_version %d, below the supported watermark 1", tc.Name, row.SessionID, *row.StoredVersion)
+			}
 			if row.FirstUserMessage != nil && row.UserMessages != nil {
 				return storedBackfillFixture{}, fmt.Errorf("stored-origin backfill case %q session %q sets both first_user_message and user_messages during fixture loading; the stored record sequence is ambiguous, so no world can be seeded; use only one of these fields", tc.Name, row.SessionID)
 			}
@@ -181,6 +193,39 @@ func TestLoadStoredBackfillFixturesRejectsAmbiguousMessages(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), fixture.Cases[0].Name) ||
 		!strings.Contains(err.Error(), "sets both first_user_message and user_messages") {
 		t.Fatalf("ambiguous message fields must name the case and both fields: %v", err)
+	}
+
+	// The two stored_version refusals must each fail the decode on their own.
+	// The first case's first row is the vehicle; its ordered message run is
+	// cleared so each refusal is observed in isolation.
+	row := &fixture.Cases[0].Rows[0]
+	row.FirstUserMessage = nil
+	row.UserMessages = nil
+
+	version := 2
+	row.StoredVersion = &version
+	row.AtPriorRuleVersion = true
+	data, err = yaml.Marshal(fixture)
+	if err != nil {
+		t.Fatalf("marshal the fixture seeding an exact version and a relative version flag: %v", err)
+	}
+	_, err = LoadStoredBackfillFixtures(data)
+	if err == nil || !strings.Contains(err.Error(), fixture.Cases[0].Name) ||
+		!strings.Contains(err.Error(), "stored_version together with a relative rule-version flag") {
+		t.Fatalf("a row seeding an exact version and a relative version flag must name the case and the ambiguous seed: %v", err)
+	}
+	row.AtPriorRuleVersion = false
+
+	zero := 0
+	row.StoredVersion = &zero
+	data, err = yaml.Marshal(fixture)
+	if err != nil {
+		t.Fatalf("marshal the fixture seeding a sub-watermark version: %v", err)
+	}
+	_, err = LoadStoredBackfillFixtures(data)
+	if err == nil || !strings.Contains(err.Error(), fixture.Cases[0].Name) ||
+		!strings.Contains(err.Error(), "below the supported watermark 1") {
+		t.Fatalf("a row seeding a sub-watermark rule version must name the case and the watermark: %v", err)
 	}
 }
 
@@ -288,10 +333,12 @@ func newStoredBackfillWorld(t *testing.T, tc storedBackfillCase) storedBackfillW
 		}
 	}
 
-	// Put the already-judged rows above or one version below the current line,
-	// through the same production update the pass itself uses.
+	// Put the already-judged rows at, above, or one version below the current
+	// line, through the same production update the pass itself uses. A row may
+	// name an exact version instead, which pins the literal released version a
+	// real store carries.
 	for _, row := range tc.Rows {
-		if !row.AtCurrentRuleVersion && !row.AtPriorRuleVersion {
+		if !row.AtCurrentRuleVersion && !row.AtPriorRuleVersion && row.StoredVersion == nil {
 			continue
 		}
 		sid, err := ingest.NewSessionID(row.SessionID)
@@ -299,11 +346,14 @@ func newStoredBackfillWorld(t *testing.T, tc storedBackfillCase) storedBackfillW
 			t.Fatalf("NewSessionID(%q): %v", row.SessionID, err)
 		}
 		version := storedBackfillRuleVersion
-		if row.AtPriorRuleVersion {
+		switch {
+		case row.AtPriorRuleVersion:
 			version--
-			if version < 1 {
-				t.Fatalf("row %q requests a prior rule version below the supported watermark", row.SessionID)
-			}
+		case row.StoredVersion != nil:
+			version = *row.StoredVersion
+		}
+		if version < 1 {
+			t.Fatalf("row %q requests an origin rule version below the supported watermark", row.SessionID)
 		}
 		if err := database.UpdateOriginState(ctx, sid, storedBackfillStoredOrigin(row), version); err != nil {
 			t.Fatalf("put %q at origin version %d: %v", row.SessionID, version, err)

@@ -382,7 +382,7 @@ func TestGuidedFramingFixture(t *testing.T) {
 						t.Errorf("connect framing does not contain %q:\n%s", want, view)
 					}
 				}
-				choiceAt := strings.Index(view, "connect to a village now?")
+				choiceAt := strings.Index(view, "connect to peasant online now?")
 				if choiceAt < 0 {
 					t.Fatalf("connect framing does not render its choice after the safety explanation:\n%s", view)
 				}

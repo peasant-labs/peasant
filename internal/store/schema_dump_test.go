@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // TestBaselineShadowRowSensitivity proves the canonical comparison reads FTS5

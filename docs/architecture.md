@@ -34,7 +34,8 @@ Peasant is local-first. It reads the session stores of AI coding harnesses on th
 machine, keeps its own copy and index, and shows the sessions in a local web app. It sends data
 off the machine only when the developer publishes, pulls, logs in, syncs model prices, or
 upgrades. There is no telemetry and no background upload. The git hook upload runs only after
-the developer installs the hook with `peasant village hooks install`.
+the developer installs the hook with `peasant village hooks install`, `peasant village auto`, or
+the settings install route of the local API.
 
 Elements:
 
@@ -54,7 +55,7 @@ Relationships:
 |---|---|---|---|---|
 | developer | peasant | runs commands and opens the local web app | terminal, browser | user |
 | peasant | agent session stores | reads sessions | JSONL, SQLite | `harvest`, `kickstart`, web ingest |
-| peasant | git repository | reads commits, sets hooks | git CLI | `harvest --detect-commits`, `village hooks` |
+| peasant | git repository | reads commits, sets hooks | git CLI | every ingest, `village hooks` |
 | git repository | peasant | runs the upload hook | shell | only after `village hooks install` |
 | peasant | village | publishes and pulls | HTTPS | `village push`, `/share`, `village transcripts pull` |
 | peasant | models.dev | syncs model prices | HTTPS | `peasant models sync` |
@@ -211,11 +212,14 @@ flowchart TB
 `peasant web start` wires `internal/api` over the store. The WebSocket hub pushes session lists
 and session detail. The REST routes serve lists, the code map, review, annotations, and the
 `/share` sync endpoints. The sync handler runs the same `push.Pipeline` as
-`peasant village push`.
+`peasant village push`. The settings handler reads every `config.yaml` key and the
+auto-publish rules, and changes one key at a time with `config.Parse` and
+`config.SaveAtomicYAML`, so `peasant config` sees each change. A saved setting applies to the
+sync handler at once.
 
 | Component | Package | Description |
 |---|---|---|
-| api | `internal/api` | `Server`, `Hub`, `StoreDataProvider`, `spaHandler`, sync handler. |
+| api | `internal/api` | `Server`, `Hub`, `StoreDataProvider`, `spaHandler`, sync handler, settings handler. |
 | transcript | `internal/transcript` | `EntriesToTurns`, `SessionToDetail`, snapshot detail builders. |
 | push | `internal/push` | Target selection, preflight, re-redaction, mapping, upload, receipts. |
 | village client | `internal/village` | Village HTTP client for publish, pull, and schema negotiation. |
@@ -430,7 +434,11 @@ sequenceDiagram
 ### Upload from a git hook
 
 The hook exists only after `peasant village hooks install --event post-commit` or
-`--event pre-push`. The hook always exits 0, so a Village failure never blocks git.
+`--event pre-push`, or after an auto-publish rule's hooks are installed with `peasant village
+auto` or the settings install route. The hook always exits 0, so a Village failure never blocks
+git. When an auto-publish rule in `hooks.yaml` binds a session the upload sends, the upload
+publishes collectives-only (private, no license) and then shares each bound transcript it sent
+with its rule's collectives.
 
 ```mermaid
 sequenceDiagram
@@ -498,7 +506,7 @@ sequenceDiagram
   pipe->>ad: processSession: capture source bytes
   pipe->>pipe: filterOversizedJSONLRecords (over 256 MiB)
   pipe->>sync: write transcript and metadata (rename)
-  pipe->>pipe: LayeredDetection (--detect-commits)
+  pipe->>pipe: LayeredDetection (commit detection, default on)
   Note over cli,st: DB INSERT (drain loop)
   pipe->>st: mirrorDrainedBatch: MirrorArtifacts
   Note over cli,st: INDEX (parser pool, one serial writer)
@@ -584,9 +592,9 @@ sequenceDiagram
   sh->>sh: redact.NewRedactor(level).Detect
   sh-->>wiz: findings grouped by category
   Note over wiz,vapi: submit step
-  wiz->>sh: POST /api/v1/sync/push
-  sh->>sh: auth.LoadCredentials, village.NewVillageClient
-  sh->>push: push.NewPipeline(...).Run
+  wiz->>sh: POST /api/v1/sync/push (sessionIds, collectives add and remove)
+  sh->>sh: decode the closed request, auth.LoadCredentials, village.NewVillageClient
+  sh->>push: push.NewSharePipeline(...), SharePublish.Run
   push->>push: getTargetSessions, preflight (ValidatePublicationInput)
   push->>vc: negotiate: GetSchemaVersion
   vc->>vapi: GET /api/v1/schema/version
@@ -595,8 +603,12 @@ sequenceDiagram
   vc->>vapi: POST /api/v1/transcripts/publish (multipart)
   vapi-->>vc: AuthoritativePublishResponse
   push->>push: UpdateOwner if needed, SavePublication, push_log
-  push->>vc: PushAnnotationsSelected
-  sh-->>wiz: push result
+  push->>vc: UnshareTranscript for each removed collective
+  vc->>vapi: DELETE /api/v1/transcripts/{id}/share/{groupID}
+  push->>vc: ShareTranscript for each added collective, then LatestShareStatus
+  vc->>vapi: POST /api/v1/transcripts/{id}/share, GET /api/v1/users/me/collectives/{groupId}/transcripts/{id}/events
+  sh->>vc: PushAnnotations
+  sh-->>wiz: one result per session, its steps in run order
 ```
 
 ### Village login
@@ -627,7 +639,10 @@ sequenceDiagram
 
 ### Git hook upload
 
-`internal/githooks/script.go` renders the hook command. `cmd/peasant/cmd_push.go` runs it.
+`internal/githooks/script.go` renders the hook command. `cmd/peasant/cmd_push.go` runs it. Before
+the upload, `cmd/peasant/cmd_push_auto_publish.go` matches each session the run would send against
+the rules (`autopublish.Decide`); when a rule binds one, the run publishes collectives-only and
+`push.RuleShare` then shares each bound transcript it sent with its rule's collectives.
 
 ```mermaid
 sequenceDiagram
@@ -709,12 +724,13 @@ sequenceDiagram
 | `internal/indexformat` | Outcome IR and index result versions. | ingest, store |
 | `internal/store` | SQLite schema, migrations, readers, writers. | nearly every command |
 | `internal/transcript` | Stored entries to turns to `SessionDetailPayload`. | api, export, tui |
-| `internal/api` | HTTP server, WebSocket hub, data providers, sync handler. | `web start`, `tui` |
+| `internal/api` | HTTP server, WebSocket hub, data providers, sync handler, settings handler. | `web start`, `tui` |
 | `internal/push` | Publication pipeline and the push wizard. | `village push`, api sync handler |
 | `internal/pull` | Pull pipeline for Village transcripts and annotations. | `village transcripts pull` |
 | `internal/village` | Village HTTP client. | push, pull, api |
 | `internal/auth` | Loopback OAuth login, `credentials.json`. | `village login`, api sync handler |
 | `internal/githooks` | Installs, checks, and removes the upload hooks. | `village hooks` |
+| `internal/autopublish` | Auto-publish rules in `hooks.yaml`, and the one matcher that decides which rules bind a repository. | `village push`, `village auto`, api settings routes, `GET /publications` |
 | `internal/gitops` | Read-only git for the code map and review. | codemap |
 | `internal/codemap`, `internal/codegraph` | Code map and change review graphs. | api map and review routes |
 | `internal/config` | Settings, selection, redaction policy. | CLI, api, push |
@@ -727,3 +743,8 @@ sequenceDiagram
 | `internal/tui` and subpackages | Kickstart, config editor, harvest progress, push wizard, layout kit. | `kickstart`, `config`, `harvest`, `village push` |
 | `internal/mock`, `internal/redactmock` | Mock data provider and generated mock redactions. | `web start`, `cmd/gen-mock-redactions` |
 | `cmd/gen-*`, `cmd/peasant-guided-screenshots`, `cmd/peasant-origin-audit` | Code generators and opt-in audit tools. | developers |
+
+Rule-installed upload hooks carry `--require-auto-publish-rule`: their run uses
+only sessions the canonical matcher binds to an active rule, including its
+annotation scope. Deleting the last binding leaves the hook dormant, while
+retained bindings and separately installed terminal hooks keep their consent.

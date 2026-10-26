@@ -5,11 +5,13 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ReviewSurface } from './ReviewSurface';
 import { parseReviewRoute, parseReviewRouteQuery, reviewHref, type ReturnLocation } from '@/lib/navigation/projectRoutes';
 import { useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
+import { ProjectIdentityProblem } from '@/components/ProjectIdentityProblem';
+import { ProjectPickerPage } from '@/components/picker/ProjectPickerPage';
 
 /**
  * Client-side router for the Changes surface. The
  * route stays /review):
- *   /review                          → pointer back to Home (the project picker).
+ *   /review                          → the project picker, its rows linking to changes.
  *   /review/{project}                → changes list for that project.
  *   /review/{project}?branch=<name>  → change detail. The branch rides in the
  *     query string because branch names contain slashes (feat/graph-cache).
@@ -26,7 +28,7 @@ export function ReviewRouter() {
   if (route.kind === 'canonical') return <ReviewSurface key={`${route.projectHash}:${branch ?? ''}`} projectHash={route.projectHash} branch={branch} returnLocation={returnLocation} />;
   if (route.kind === 'legacy') return <LegacyReviewRoute projectLabel={route.projectLabel} branch={branch} returnLocation={returnLocation} />;
   if (route.kind === 'malformed') return <p role="alert">{route.message}</p>;
-  return <ReviewSurface projectHash={null} branch={branch} returnLocation={returnLocation} />;
+  return <ProjectPickerPage title="changes" destination="changes" docs={{ topic: 'changes', label: 'how to read changes' }} />;
 }
 
 function LegacyReviewRoute({ projectLabel, branch, returnLocation }: { projectLabel: string; branch: string | null; returnLocation: ReturnLocation | null }) {
@@ -35,6 +37,6 @@ function LegacyReviewRoute({ projectLabel, branch, returnLocation }: { projectLa
   useEffect(() => {
     if (state.phase === 'ready' && state.requestedIdentity === projectLabel) router.replace(reviewHref(state.projectHash, { branch: branch ?? undefined, returnLocation: returnLocation ?? undefined }));
   }, [branch, projectLabel, returnLocation, router, state]);
-  if (state.phase === 'missing' || state.phase === 'error') return <button type="button" onClick={retry}>{state.message} retry project resolution</button>;
+  if (state.phase === 'missing' || state.phase === 'error') return <ProjectIdentityProblem state={state} onRetry={retry} />;
   return <p>resolving project…</p>;
 }

@@ -1,0 +1,8 @@
+requiredNames:
+  - an-audience-removal-survives-collective-readiness
+cases:
+  - name: an-audience-removal-survives-collective-readiness
+    base: update-removes-collective
+    delayedRoute: /api/v1/village/collectives
+    readinessSelector: '[role="dialog"] .pub-picker'
+    removeButton: remove Acme Platform

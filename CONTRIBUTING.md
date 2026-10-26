@@ -31,7 +31,8 @@ CLI command tree. Wire-contract changes must first land in the public schema mod
 tag before this repository updates its dependency.
 
 Repository-specific architecture, type-safety, fixture, and migration rules are in
-[`AGENTS.md`](AGENTS.md).
+[`AGENTS.md`](AGENTS.md). The build-tag split, path rules, Windows-specific behavior, and
+the gates that prove them are in [`docs/cross-platform.md`](docs/cross-platform.md).
 
 ## Review
 

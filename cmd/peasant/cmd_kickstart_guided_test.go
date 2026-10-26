@@ -61,7 +61,7 @@ func TestKickstartCommandMountsGuidedProgram(t *testing.T) {
 		program := mounted.Program()
 		program.SetSize(120, 40)
 		connectView := ansiPattern.ReplaceAllString(program.View(), "")
-		if !strings.Contains(connectView, "connect to a village") {
+		if !strings.Contains(connectView, "connect to peasant online") {
 			t.Fatalf("production command did not mount connect framing:\n%s", connectView)
 		}
 		program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})

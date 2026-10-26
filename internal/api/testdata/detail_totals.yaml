@@ -1,0 +1,32 @@
+# The local session detail read (the session_detail WebSocket and the HTTP
+# detail route) carries a session's token and duration totals. A detail built
+# from a managed generation leaves them at 0, so the read fills each zero total
+# from the session's stored row, the totals home shows; a total the detail
+# already carries (Pi's per-turn mirrors) stays. The publication path builds
+# its detail from the same snapshot without this, so a published transcript's
+# bytes and content hash do not move until the packaging follow-up decides
+# how that change is re-published. requiredNames pins the cases.
+requiredNames:
+  - managed-claude-session-read-carries-stored-totals
+  - zero-totals-filled-from-the-row
+  - carried-totals-stay
+  - no-row-leaves-the-detail
+sessions:
+  - name: managed-claude-session-read-carries-stored-totals
+    transcript: |
+      {"sessionId":"SESSION_ID","type":"user","uuid":"u1","timestamp":"2026-10-22T10:00:00Z","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"benchmark the transfer handler"}}
+      {"sessionId":"SESSION_ID","type":"assistant","uuid":"a1","timestamp":"2026-10-22T10:03:00Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"the ledger query takes most of the time"}],"usage":{"input_tokens":1200,"output_tokens":300}}}
+      {"sessionId":"SESSION_ID","type":"user","uuid":"u2","timestamp":"2026-10-22T10:04:00Z","message":{"role":"user","content":"cache it"}}
+      {"sessionId":"SESSION_ID","type":"assistant","uuid":"a2","timestamp":"2026-10-22T10:06:00Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"cached"}],"usage":{"input_tokens":1500,"output_tokens":200}}}
+overlay:
+  - name: zero-totals-filled-from-the-row
+    detail: {totalTokens: 0, tokensIn: 0, tokensOut: 0, durationMins: 0}
+    row: {totalTokens: 3200, tokensIn: 2700, tokensOut: 500, durationMins: 6}
+    want: {totalTokens: 3200, tokensIn: 2700, tokensOut: 500, durationMins: 6}
+  - name: carried-totals-stay
+    detail: {totalTokens: 900, tokensIn: 600, tokensOut: 300, durationMins: 2.5}
+    row: {totalTokens: 3200, tokensIn: 2700, tokensOut: 500, durationMins: 6}
+    want: {totalTokens: 900, tokensIn: 600, tokensOut: 300, durationMins: 2.5}
+  - name: no-row-leaves-the-detail
+    detail: {totalTokens: 0, tokensIn: 0, tokensOut: 0, durationMins: 0}
+    want: {totalTokens: 0, tokensIn: 0, tokensOut: 0, durationMins: 0}

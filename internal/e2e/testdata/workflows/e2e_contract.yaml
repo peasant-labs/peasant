@@ -1,4 +1,4 @@
-expected_village_ref: b8360adacef181baa03fa3061f5530eb3d04af0c
+expected_village_ref: 3c476a6289bd0206ab4a58c789b62f6a4c60306c
 e2e:
   required_triggers:
     - push
@@ -40,7 +40,7 @@ e2e:
     - status=stopped
   cleanup_forbidden_statuses:
     - value: status=dead
-      reason: podman 4.9 rejects the Docker-only dead state
+      reason: podman rejects the Docker-only dead state
     - value: status=created
       reason: a newly created sibling stack may still be starting
     - value: status=running

@@ -1,0 +1,27 @@
+observedAt: 2026-10-16T12:00:00Z
+requiredNames:
+  - installed-content-observed-associations
+  - equal-hash-observes-without-blob-transfer
+  - not-modified-observes-without-blob-transfer
+  - downloaded-same-hash-observes-associations
+  - optional-assoc-timeout-content-success
+  - optional-assoc-no-prior-unknown
+  - optional-assoc-known-negative-invalidated
+  - required-content-failure-never-observes
+  - required-negotiation-failure-never-observes
+  - content-index-failure-never-observes
+  - dry-run-never-observes
+  - dry-run-equal-hash-never-observes
+cases:
+  - {name: installed-content-observed-associations, path: install, state: observed, wantCalls: 1}
+  - {name: equal-hash-observes-without-blob-transfer, path: hash, state: observed, wantCalls: 1}
+  - {name: not-modified-observes-without-blob-transfer, path: etag, state: observed, wantCalls: 1}
+  - {name: downloaded-same-hash-observes-associations, path: download, state: observed, wantCalls: 1}
+  - {name: optional-assoc-timeout-content-success, path: install, state: stale, issue: deadline, wantCalls: 1}
+  - {name: optional-assoc-no-prior-unknown, path: install, state: unknown, issue: remote, wantCalls: 1}
+  - {name: optional-assoc-known-negative-invalidated, path: hash, state: invalidated, wantCalls: 1}
+  - {name: required-content-failure-never-observes, path: content-error, wantCalls: 0, wantError: true}
+  - {name: required-negotiation-failure-never-observes, path: negotiate-error, wantCalls: 0, wantError: true}
+  - {name: content-index-failure-never-observes, path: index-error, wantCalls: 0, wantError: true}
+  - {name: dry-run-never-observes, path: install, dryRun: true, wantCalls: 0}
+  - {name: dry-run-equal-hash-never-observes, path: hash, dryRun: true, wantCalls: 0}

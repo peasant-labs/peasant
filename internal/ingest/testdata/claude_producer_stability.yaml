@@ -1,0 +1,66 @@
+# Claude managed-generation stability fixtures.
+#
+# Each case builds the same session twice. The second attempt receives the
+# first generation's own persisted alias state as its prior, exactly as a
+# harvest refresh does, and the case states which classified keys must keep
+# their reference, which must allocate a fresh one, and which must disappear. A
+# per-attempt ref scheme or a re-keying refresh fails these literals; the shared
+# record/block key rule passes them.
+#
+# The default session is 99d59925-36bc-424c-a789-8be54d9702ba.
+cases:
+  - name: append-refresh-alias-reuse
+    first: |
+      {"type":"user","uuid":"s1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"first prompt"}}
+      {"type":"assistant","uuid":"s2","parentUuid":"s1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"first reply"}]}}
+    second: |
+      {"type":"user","uuid":"s1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"first prompt"}}
+      {"type":"assistant","uuid":"s2","parentUuid":"s1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"first reply"}]}}
+      {"type":"user","uuid":"s3","parentUuid":"s2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"appended prompt"}}
+    unchangedKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:s1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:s2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:s2:0"
+    addedKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:s3"
+    firstSubmissionCount: 1
+    secondSubmissionCount: 2
+
+  - name: append-duplicate-existing-uuid
+    first: |
+      {"type":"user","uuid":"d1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"original"}}
+    second: |
+      {"type":"user","uuid":"d1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"original"}}
+      {"type":"user","uuid":"d1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"appended duplicate"}}
+    unchangedKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:d1"
+    addedKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:d1:dup2"
+    firstSubmissionCount: 1
+    secondSubmissionCount: 2
+    secondDistinctSubmissionRefs: true
+
+  - name: changed-boundary-new-refs
+    # A uuid record inserted before two uuid-less anchors. The uuid record keeps
+    # its identity; the new record allocates; the anchors re-key, so the anchor
+    # key that still exists keeps the reference its key already held and the
+    # deepest anchor is new.
+    first: |
+      {"type":"user","uuid":"p1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"anchored head"}}
+      {"type":"user","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"anchor one"}}
+      {"type":"user","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"anchor two"}}
+    second: |
+      {"type":"user","uuid":"p1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"anchored head"}}
+      {"type":"user","uuid":"n1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"inserted boundary"}}
+      {"type":"user","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"anchor one"}}
+      {"type":"user","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"anchor two"}}
+    unchangedKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:p1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:2"
+    addedKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:n1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:3"
+    removedKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:1"
+    firstSubmissionCount: 3
+    secondSubmissionCount: 4

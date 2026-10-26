@@ -1,4 +1,17 @@
 required_names:
+  - cursor-successful-turn-ended
+  - cursor-success-with-conversation
+  - cursor-success-with-nested-conversation
+  - cursor-success-with-shadowed-conversation
+  - cursor-success-with-error
+  - cursor-success-with-user-role
+  - cursor-aborted-without-error
+  - cursor-unknown-turn-status
+  - cursor-conversation-without-role
+  - cursor-truncated-final-control
+  - claude-corrupt-internal-line
+  - claude-truncated-final-line
+  - claude-corrupt-subagent
   - cursor-user-literal-query-whitespace
   - opencode-control-with-input
   - cursor-literal-query-prose
@@ -30,6 +43,10 @@ required_names:
   - strike-orphan-tool-output
   - claude-missing-text
   - claude-summary-full-text
+  - claude-control-attachment-lone-surrogate
+  - claude-control-attachment-duplicate-key
+  - claude-control-attachment-invalid-utf8
+  - claude-control-attachment-surrogate-pair
   - claude-result-full-text
   - claude-error-full-text
   - claude-control-permission-mode
@@ -58,6 +75,70 @@ required_names:
   - claude-unknown-record-kind
   - codex-reasoning-full-text
 cases:
+  - name: cursor-successful-turn-ended
+    harness: cursor
+    control: true
+    source: '{"type":"turn_ended","status":"success"}'
+    want_role: system
+    want_preview_absent: true
+  - name: cursor-success-with-conversation
+    harness: cursor
+    source: '{"type":"turn_ended","status":"success","content":TEXT}'
+    reject: true
+  - name: cursor-success-with-nested-conversation
+    harness: cursor
+    source: '{"type":"turn_ended","status":"success","message":{"content":TEXT}}'
+    reject: true
+  - name: cursor-success-with-shadowed-conversation
+    harness: cursor
+    source: '{"type":"turn_ended","status":"success","message":{"content":[]},"content":TEXT}'
+    reject: true
+  - name: cursor-success-with-error
+    harness: cursor
+    source: '{"type":"turn_ended","status":"success","error":TEXT}'
+    reject: true
+  - name: cursor-success-with-user-role
+    harness: cursor
+    source: '{"type":"turn_ended","status":"success","role":"user"}'
+    reject: true
+  - name: cursor-aborted-without-error
+    harness: cursor
+    source: '{"type":"turn_ended","status":"aborted"}'
+    reject: true
+  - name: cursor-unknown-turn-status
+    harness: cursor
+    source: '{"type":"turn_ended","status":"future"}'
+    reject: true
+  - name: cursor-conversation-without-role
+    harness: cursor
+    source: '{"content":TEXT}'
+    reject: true
+  - name: cursor-truncated-final-control
+    harness: cursor
+    source: |-
+      {"role":"assistant","content":"intact"}
+      {"type":"turn_ended","status":
+    reject: true
+  - name: claude-corrupt-internal-line
+    harness: claude-code
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":"intact"}}
+      {"type":broken}
+      {"type":"assistant","message":{"role":"assistant","content":"intact later"}}
+    reject: true
+  - name: claude-truncated-final-line
+    harness: claude-code
+    source: |-
+      {"type":"assistant","message":{"role":"assistant","content":"intact"}}
+      {"type":
+    reject: true
+  - name: claude-corrupt-subagent
+    harness: claude-code
+    child: true
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":"synthetic subagent content"}}
+      {"type":broken}
+    reject: true
   - name: cursor-user-literal-query-whitespace
     harness: cursor
     text: " \n before <user_query> example </user_query> SYNTHETIC-SAFE-TAIL \n "
@@ -297,6 +378,56 @@ cases:
       attachmentType: hook_success
     want_extra_absent: [attachment, hookData, uuid]
     want_raw_bytes_min: 8192
+  - name: claude-control-attachment-lone-surrogate
+    harness: claude-code
+    control: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"build ok \ud83d"},"uuid":"at-surrogate"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [attachmentType, kind, rawBytes]
+    want_extra_members:
+      kind: attachment
+      attachmentType: hook_success
+    want_extra_absent: [attachment, stdout, uuid]
+  - name: claude-control-attachment-duplicate-key
+    harness: claude-code
+    control: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"first","stdout":"second"},"uuid":"at-duplicate"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [attachmentType, kind, rawBytes]
+    want_extra_members:
+      kind: attachment
+      attachmentType: hook_success
+    want_extra_absent: [attachment, stdout, uuid]
+  - name: claude-control-attachment-invalid-utf8
+    harness: claude-code
+    control: true
+    invalid_utf8: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"build ok INVALIDBYTE"},"uuid":"at-invalid"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [attachmentType, kind, rawBytes]
+    want_extra_members:
+      kind: attachment
+      attachmentType: hook_success
+    want_extra_absent: [attachment, stdout, uuid]
+  # The clean twin of the three above: a complete surrogate pair is valid
+  # evidence, so the payload is retained whole.
+  - name: claude-control-attachment-surrogate-pair
+    harness: claude-code
+    control: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"build ok \ud83d\ude00"},"uuid":"at-pair"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview_absent: true
+    want_extra_keys: [attachment]
+    want_extra_members:
+      attachment: '{"type":"hook_success","stdout":"build ok \ud83d\ude00"}'
+    want_extra_absent: [kind, rawBytes, uuid]
   - name: claude-control-bridge-session
     harness: claude-code
     control: true

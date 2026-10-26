@@ -16,9 +16,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/opencode_provenance.yaml
@@ -49,23 +49,25 @@ type ocProvAllocator struct {
 }
 
 type ocProvEntryExpect struct {
-	Ref         string `yaml:"ref"`
-	Index       int    `yaml:"index"`
-	Role        string `yaml:"role"`
-	EntryType   string `yaml:"entryType"`
-	Depth       int    `yaml:"depth"`
-	ParentIndex *int   `yaml:"parentIndex"`
-	Content     string `yaml:"content"`
-	ToolInput   string `yaml:"toolInput"`
-	ToolOutput  string `yaml:"toolOutput"`
-	ToolCallID  string `yaml:"toolCallId"`
-	Submission  string `yaml:"submission"`
-	Origin      string `yaml:"origin"`
-	Actor       string `yaml:"actor"`
-	Delivery    string `yaml:"delivery"`
-	Ownership   string `yaml:"ownership"`
-	Evidence    string `yaml:"evidence"`
-	Modality    string `yaml:"modality"`
+	ThinkingLevel    string `yaml:"thinkingLevel"`
+	ThinkingLevelRaw string `yaml:"thinkingLevelRaw"`
+	Ref              string `yaml:"ref"`
+	Index            int    `yaml:"index"`
+	Role             string `yaml:"role"`
+	EntryType        string `yaml:"entryType"`
+	Depth            int    `yaml:"depth"`
+	ParentIndex      *int   `yaml:"parentIndex"`
+	Content          string `yaml:"content"`
+	ToolInput        string `yaml:"toolInput"`
+	ToolOutput       string `yaml:"toolOutput"`
+	ToolCallID       string `yaml:"toolCallId"`
+	Submission       string `yaml:"submission"`
+	Origin           string `yaml:"origin"`
+	Actor            string `yaml:"actor"`
+	Delivery         string `yaml:"delivery"`
+	Ownership        string `yaml:"ownership"`
+	Evidence         string `yaml:"evidence"`
+	Modality         string `yaml:"modality"`
 }
 
 type ocProvWant struct {
@@ -244,6 +246,7 @@ func assertOpenCodeEntries(t *testing.T, entries []schema.SessionEntry, want []o
 	}
 	for i, expected := range want {
 		entry := entries[i]
+		assertManagedThinkingLevel(t, entry, expected.ThinkingLevel, expected.ThinkingLevelRaw)
 		label := "main[" + itoa(i) + "]"
 		if string(entry.SourceEntryRef) != expected.Ref {
 			t.Fatalf("%s ref = %q, want %q", label, entry.SourceEntryRef, expected.Ref)
@@ -364,10 +367,20 @@ type ocFlowParent struct {
 	Rows []ocFlowRow `yaml:"rows"`
 }
 
+// ocFlowRelationship is one expected generation relationship, spelled with
+// the wire vocabulary so the fixture reads as the durable evidence it pins.
+type ocFlowRelationship struct {
+	Kind          string `yaml:"kind"`
+	TargetState   string `yaml:"targetState"`
+	TargetLocalID string `yaml:"targetLocalId"`
+	Evidence      string `yaml:"evidence"`
+}
+
 type ocFlowCase struct {
 	Name               string        `yaml:"name"`
 	Kind               string        `yaml:"kind"`
 	SessionID          string        `yaml:"sessionId"`
+	Source             string        `yaml:"source"`
 	Sentinel           string        `yaml:"sentinel"`
 	Fork               *ocFlowFork   `yaml:"fork"`
 	BoundedFork        *ocFlowFork   `yaml:"boundedFork"`
@@ -383,6 +396,18 @@ type ocFlowCase struct {
 	LargeRowPadding    int           `yaml:"largeRowPadding"`
 	ExpectCopies       int           `yaml:"expectCopies"`
 	ExpectStep         string        `yaml:"expectStep"`
+	AuthorityStatus    string        `yaml:"authorityStatus"`
+	AuthoritySource    string        `yaml:"authoritySource"`
+	AuthorityOrigin    string        `yaml:"authorityOrigin"`
+	AuthorityFormat    string        `yaml:"authorityFormat"`
+	AuthorityCode      string        `yaml:"authorityFailureCode"`
+	ExpectMessage      string        `yaml:"expectMessage"`
+	ExpectSequence     int64         `yaml:"expectSequence"`
+	// AssemblyParentID names the parent written beside the child in the JSON
+	// storage the real metadata assembly reads; empty writes a parentless child.
+	AssemblyParentID      string               `yaml:"assemblyParentId"`
+	ExpectRelationships   []ocFlowRelationship `yaml:"expectRelationships"`
+	ExpectNoRelationships bool                 `yaml:"expectNoRelationships"`
 }
 
 type ocFlowDocument struct {
@@ -455,6 +480,30 @@ func validateOpenCodeFlowCase(row ocFlowCase) error {
 		if row.LargeRowPrefix == "" || row.LargeRowPadding <= 0 {
 			return errors.New("the large-row kind requires a prefix and a positive padding size")
 		}
+	case "authority-bridge":
+		if row.AuthorityStatus == "" || row.AuthoritySource == "" || row.AuthorityFormat == "" {
+			return errors.New("the authority-bridge kind requires the certificate status, source, and format")
+		}
+		if row.AuthorityOrigin == "" {
+			return errors.New("the authority-bridge kind requires the certificate transcript origin")
+		}
+		if row.ExpectMessage == "" || row.ExpectSequence <= 0 {
+			return errors.New("the authority-bridge kind requires the unsettled message and a positive sequence")
+		}
+	case "first-discovery-preview":
+		if row.Source == "" {
+			return errors.New("the first-discovery-preview kind requires the native source fixture that carries an unfinished own row")
+		}
+	case "started-by-assembly":
+		if row.ExpectNoRelationships == (len(row.ExpectRelationships) > 0) {
+			return errors.New("the started-by-assembly kind requires exactly one of expectRelationships or expectNoRelationships")
+		}
+		if row.ExpectNoRelationships && row.AssemblyParentID != "" {
+			return errors.New("the started-by-assembly kind cannot expect no relationship for a child written with a parent")
+		}
+		if len(row.ExpectRelationships) > 0 && row.AssemblyParentID == "" {
+			return errors.New("the started-by-assembly kind requires assemblyParentId when it expects a relationship")
+		}
 	default:
 		return errors.New("kind is outside the closed set")
 	}
@@ -470,7 +519,11 @@ func validateOpenCodeFlowCase(row ocFlowCase) error {
 func TestOpenCodeProvenanceFlow(t *testing.T) {
 	for _, row := range loadOpenCodeProvenanceFlowDocument(t).Cases {
 		t.Run(row.Name, func(t *testing.T) {
-			source := testfixture.MaterializeByName(t, openCodeFlowSourceFixture)
+			sourceName := row.Source
+			if sourceName == "" {
+				sourceName = openCodeFlowSourceFixture
+			}
+			source := testfixture.MaterializeByName(t, sourceName)
 			switch row.Kind {
 			case "identity":
 				runOpenCodeFlowIdentity(t, source, row)
@@ -494,6 +547,12 @@ func TestOpenCodeProvenanceFlow(t *testing.T) {
 				runOpenCodeFlowLargeRow(t, source, row)
 			case "decode-refusal":
 				runOpenCodeFlowDecodeRefusal(t, row)
+			case "authority-bridge":
+				runOpenCodeFlowAuthorityBridge(t, source, row)
+			case "first-discovery-preview":
+				runOpenCodeFlowFirstDiscoveryPreview(t, source, row)
+			case "started-by-assembly":
+				runOpenCodeFlowStartedByAssembly(t, source, row)
 			default:
 				t.Fatalf("unsupported flow kind %q", row.Kind)
 			}
@@ -544,12 +603,95 @@ func runOpenCodeFlowIncomplete(t *testing.T, source testfixture.MaterializedSour
 	}
 
 	completePrior := ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState(), HasCompleteGeneration: true}
-	config := openCodeFlowProvenanceConfig(source, row.SessionID, completePrior, fork)
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	_, err := indexer.IndexTranscriptResult(context.Background(), session)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	_, err := indexer.BuildGeneration(context.Background(), openCodeFlowBuildInput(t, source, session, completePrior, fork))
 	var incomplete *ingest.OpenCodeIncompleteProvenanceError
 	if !errors.As(err, &incomplete) {
 		t.Fatalf("incomplete replacement error = %v, want OpenCodeIncompleteProvenanceError", err)
+	}
+}
+
+// runOpenCodeFlowAuthorityBridge drives the production candidate exit with a
+// bridged stored-capture authority and an unfinished own native row: the
+// incomplete candidate is refused early with an actionable last-good-held
+// result that names the unsettled message and sequence, and the certificate's
+// own origin and format are preserved.
+func runOpenCodeFlowAuthorityBridge(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
+	t.Helper()
+	session := openCodeFlowSession(row)
+	prior := ingest.OpenCodeProvenancePrior{
+		Aliases: ingest.NewProjectionPriorState(),
+		CaptureAuthority: &ingest.StoredCaptureAuthority{
+			Status:           ingest.ContentCaptureStatus(row.AuthorityStatus),
+			SourceAuthority:  ingest.ContentSourceAuthority(row.AuthoritySource),
+			TranscriptOrigin: openCodeFlowOrigin(t, row.AuthorityOrigin),
+			CaptureFormat:    ingest.ContentCaptureFormat(row.AuthorityFormat),
+			FailureCode:      ingest.ContentCaptureFailureCode(row.AuthorityCode),
+		},
+	}
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	_, err := indexer.BuildGeneration(context.Background(), openCodeFlowBuildInput(t, source, session, prior, nil))
+	var incomplete *ingest.OpenCodeIncompleteProvenanceError
+	if !errors.As(err, &incomplete) {
+		t.Fatalf("authority bridge error = %v, want OpenCodeIncompleteProvenanceError", err)
+	}
+	diagnostics := strings.Join(incomplete.Diagnostics, "; ")
+	if !strings.Contains(diagnostics, row.ExpectMessage) {
+		t.Fatalf("refusal diagnostics %q do not name the unsettled message %q", diagnostics, row.ExpectMessage)
+	}
+	if !strings.Contains(diagnostics, fmt.Sprintf("sequence %d", row.ExpectSequence)) {
+		t.Fatalf("refusal diagnostics %q do not name the unsettled sequence %d", diagnostics, row.ExpectSequence)
+	}
+	for label, want := range map[string]string{
+		"status":  row.AuthorityStatus,
+		"origin":  row.AuthorityOrigin,
+		"format":  row.AuthorityFormat,
+		"source":  row.AuthoritySource,
+		"failure": row.AuthorityCode,
+	} {
+		if want == "" {
+			continue
+		}
+		if !strings.Contains(diagnostics, want) {
+			t.Fatalf("refusal diagnostics %q do not preserve the certificate %s %q", diagnostics, label, want)
+		}
+	}
+}
+
+// openCodeFlowOrigin maps a fixture origin name to the closed-set origin the
+// bridged certificate carries and the refusal must state.
+func openCodeFlowOrigin(t *testing.T, name string) ingest.TranscriptOrigin {
+	t.Helper()
+	switch name {
+	case "file":
+		return ingest.TranscriptOriginFile
+	case "opencode-legacy-sqlite":
+		return ingest.TranscriptOriginOpenCodeLegacySQLite
+	case "opencode-current-sqlite":
+		return ingest.TranscriptOriginOpenCodeCurrentSQLite
+	default:
+		t.Fatalf("authority-bridge case names an unknown transcript origin %q", name)
+		return ingest.TranscriptOriginFile
+	}
+}
+
+// runOpenCodeFlowFirstDiscoveryPreview drives the same unfinished native source
+// with no active generation and no stored certificate: the incomplete candidate
+// is a valid first-discovery preview, not a refusal, and the settled own work
+// is still emitted.
+func runOpenCodeFlowFirstDiscoveryPreview(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
+	t.Helper()
+	session := openCodeFlowSession(row)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(context.Background(), openCodeFlowBuildInput(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil))
+	if err != nil {
+		t.Fatalf("first-discovery preview was refused: %v", err)
+	}
+	if candidate.Result.Generation.Completeness != indexformat.GenerationCompletenessIncompleteNew {
+		t.Fatalf("first-discovery completeness = %q, want incomplete_new", candidate.Result.Generation.Completeness)
+	}
+	if len(candidate.Result.Generation.Main.Entries) == 0 {
+		t.Fatal("first-discovery preview dropped the settled own work")
 	}
 }
 
@@ -615,11 +757,10 @@ func runOpenCodeFlowProjectionRefusal(t *testing.T, source testfixture.Materiali
 	t.Helper()
 	applyOpenCodeFlowRowsReplacing(t, source, row.SessionID, row.ReplaceRows)
 	session := openCodeFlowSession(row)
-	config := openCodeFlowProvenanceConfig(source, row.SessionID, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	_, err := indexer.IndexTranscriptResult(context.Background(), session)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	_, err := indexer.BuildGeneration(context.Background(), openCodeFlowBuildInput(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil))
 	if err == nil {
-		t.Fatal("duplicate native part identities produced a V2 candidate instead of a refusal")
+		t.Fatal("duplicate recorded part identities produced a V2 candidate instead of a refusal")
 	}
 	assertOpenCodeSanitizedRefusal(t, err, row)
 }
@@ -628,10 +769,10 @@ func runOpenCodeFlowAllocatorRefusal(t *testing.T, source testfixture.Materializ
 	t.Helper()
 	applyOpenCodeFlowRowsReplacing(t, source, row.SessionID, row.ReplaceRows)
 	session := openCodeFlowSession(row)
-	config := openCodeFlowProvenanceConfig(source, row.SessionID, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
-	config.Allocator = openCodeInvalidRefAllocator{}
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	_, err := indexer.IndexTranscriptResult(context.Background(), session)
+	buildInput := openCodeFlowBuildInput(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
+	buildInput.Allocator = openCodeInvalidRefAllocator{}
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	_, err := indexer.BuildGeneration(context.Background(), buildInput)
 	if err == nil {
 		t.Fatal("an allocator that returns no valid ref produced a V2 candidate instead of a refusal")
 	}
@@ -641,12 +782,10 @@ func runOpenCodeFlowAllocatorRefusal(t *testing.T, source testfixture.Materializ
 func runOpenCodeFlowDependencyRefusal(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
 	t.Helper()
 	session := openCodeFlowSession(row)
-	config := openCodeFlowProvenanceConfig(source, row.SessionID, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
-	config.Prior = func(context.Context, ingest.DiscoveredSession) (ingest.OpenCodeProvenancePrior, error) {
-		return ingest.OpenCodeProvenancePrior{}, errors.New("prior evidence load failed while reading " + row.Sentinel)
-	}
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	_, err := indexer.IndexTranscriptResult(context.Background(), session)
+	buildInput := openCodeFlowBuildInput(t, source, session, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
+	buildInput.Prior = generationTestPriorSource{priorErr: errors.New("prior evidence load failed while reading " + row.Sentinel)}
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	_, err := indexer.BuildGeneration(context.Background(), buildInput)
 	if err == nil {
 		t.Fatal("a failing prior dependency produced a V2 candidate instead of a refusal")
 	}
@@ -761,6 +900,93 @@ func assertOpenCodeSanitizedRefusal(t *testing.T, err error, row ocFlowCase) {
 	}
 }
 
+// runOpenCodeFlowStartedByAssembly drives the adapter's real metadata
+// assembly: the parent (when named) and the child are written as OpenCode JSON
+// storage, discovered together, and the child's metadata comes from the real
+// ExtractMetadata. That metadata is the provenance indexer's metadata
+// dependency, so the assertion observes the relationships the built generation
+// keeps, not a synthetic stand-in.
+func runOpenCodeFlowStartedByAssembly(t *testing.T, source testfixture.MaterializedSource, row ocFlowCase) {
+	t.Helper()
+	const (
+		root      = "/opencode"
+		projHash  = "projflow"
+		directory = "/synthetic/flow-project"
+	)
+	messages := []struct{ id, role, model string }{
+		{"msg_flow_assembly_user", "user", ""},
+		{"msg_flow_assembly_assistant", "assistant", "synthetic-model"},
+	}
+	fs := testutil.NewMemFS()
+	if row.AssemblyParentID != "" {
+		populateOpenCodeStorage(t, fs, root, projHash, directory, row.AssemblyParentID, directory, "", 1770000000000, 1770000050000, messages)
+	}
+	populateOpenCodeStorage(t, fs, root, projHash, directory, row.SessionID, directory, row.AssemblyParentID, 1770000050000, 1770000100000, messages)
+	adapter := newTestOpenCodeAdapter(fs, testutil.DefaultGitResolver(), salt.Salt{})
+	discovered, err := adapter.Discover(context.Background(), ingest.SourceConfig{Paths: []ingest.ResolvedPath{ingest.ResolvedPath(root)}, Enabled: true})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	var child *ingest.DiscoveredSession
+	for i := range discovered {
+		if discovered[i].SessionID == ingest.SessionID(row.SessionID) {
+			child = &discovered[i]
+		}
+	}
+	if child == nil {
+		t.Fatalf("discovery = %+v, want the child %q", discovered, row.SessionID)
+	}
+	if row.AssemblyParentID != "" && (child.ParentUUID == nil || child.ParentUUID.String() != row.AssemblyParentID) {
+		t.Fatalf("discovered child parent = %v, want the discovered parent %q", child.ParentUUID, row.AssemblyParentID)
+	}
+	metadata, err := adapter.ExtractMetadata(context.Background(), *child)
+	if err != nil {
+		t.Fatalf("ExtractMetadata: %v", err)
+	}
+	want := openCodeFlowRelationships(row.ExpectRelationships)
+	assertOpenCodeFlowRelationships(t, "assembled metadata", metadata.Relationships, want)
+
+	buildInput := openCodeFlowBuildInput(t, source, openCodeFlowSession(row), ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()}, nil)
+	buildInput.RecordedMetadata = metadata
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(context.Background(), buildInput)
+	if err != nil {
+		t.Fatalf("BuildGeneration: %v", err)
+	}
+	assertOpenCodeFlowRelationships(t, "built generation", candidate.Result.Generation.Metadata.Relationships, want)
+}
+
+func openCodeFlowRelationships(specs []ocFlowRelationship) []schema.SessionRelationship {
+	relationships := make([]schema.SessionRelationship, 0, len(specs))
+	for _, spec := range specs {
+		relationship := schema.SessionRelationship{Kind: schema.SessionRelationshipKind(spec.Kind), TargetState: schema.RelationshipTargetState(spec.TargetState), Evidence: schema.EvidenceKind(spec.Evidence)}
+		if spec.TargetLocalID != "" {
+			target := schema.SessionID(spec.TargetLocalID)
+			relationship.TargetLocalID = &target
+		}
+		relationships = append(relationships, relationship)
+	}
+	return relationships
+}
+
+func assertOpenCodeFlowRelationships(t *testing.T, label string, got, want []schema.SessionRelationship) {
+	t.Helper()
+	gotJSON, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("%s: marshal relationships: %v", label, err)
+	}
+	wantJSON, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("%s: marshal expected relationships: %v", label, err)
+	}
+	if len(got) == 0 && len(want) == 0 {
+		return
+	}
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("%s relationships = %s, want %s", label, gotJSON, wantJSON)
+	}
+}
+
 func openCodeFlowSession(row ocFlowCase) ingest.DiscoveredSession {
 	session := ingest.DiscoveredSession{
 		SessionID:        ingest.SessionID(row.SessionID),
@@ -788,20 +1014,21 @@ func openCodeFlowFork(spec *ocFlowFork) *ingest.OpenCodeForkProof {
 	}
 }
 
-func openCodeFlowProvenanceConfig(source testfixture.MaterializedSource, sessionID string, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) ingest.OpenCodeProvenanceIndexerConfig {
+// openCodeFlowBuildInput composes one fixture attempt's builder input: the
+// synthetic recorded source the case materialized, the fixture metadata
+// agreement, the case's prior evidence, and the production allocator.
+func openCodeFlowBuildInput(t *testing.T, source testfixture.MaterializedSource, session ingest.DiscoveredSession, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) ingest.GenerationBuildInput {
+	t.Helper()
 	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
-	return ingest.OpenCodeProvenanceIndexerConfig{
-		Enabled: true,
-		Snapshot: func(ctx context.Context, _ ingest.DiscoveredSession) (ingest.OpenCodeHistorySnapshot, error) {
-			return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, sessionID, ingest.OpenCodeSnapshotOptions{Fork: fork})
-		},
-		Metadata: func(_ ingest.DiscoveredSession) (schema.UnifiedMetadata, error) {
-			return schema.UnifiedMetadata{SchemaVersion: 1, SessionID: schema.SessionID(sessionID), ModelHarness: schema.HarnessOpenCode}, nil
-		},
-		GenerationID: func(_ ingest.DiscoveredSession) string { return "gen-flow-" + sessionID },
-		Prior: func(context.Context, ingest.DiscoveredSession) (ingest.OpenCodeProvenancePrior, error) {
-			return prior, nil
-		},
+	metadata := schema.UnifiedMetadata{SchemaVersion: 1, SessionID: session.SessionID, ModelHarness: schema.HarnessOpenCode}
+	return ingest.GenerationBuildInput{
+		Session:          session,
+		GenerationID:     "gen-flow-" + session.SessionID.String(),
+		RecordedMetadata: &metadata,
+		Prior:            generationTestPriorFromOpenCode(t, prior),
+		OpenCode: generationTestOpenCodeSource{snapshot: func(ctx context.Context, _ string) (ingest.OpenCodeHistorySnapshot, error) {
+			return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, session.SessionID.String(), ingest.OpenCodeSnapshotOptions{Fork: fork})
+		}},
 	}
 }
 
@@ -910,7 +1137,7 @@ func TestOpenCodeProvenanceNativeReadOnlySnapshot(t *testing.T) {
 	if snapshot.SourceEvidenceDigest == "" {
 		t.Fatal("snapshot carries no source evidence digest")
 	}
-	built := buildOpenCodeNativeGeneration(t, snapshot)
+	built := buildOpenCodeGeneration(t, snapshot)
 	if built.Generation.Metadata.Stats.InputSubmissionCount == nil || *built.Generation.Metadata.Stats.InputSubmissionCount != 1 {
 		t.Fatalf("inputSubmissionCount = %v, want 1", built.Generation.Metadata.Stats.InputSubmissionCount)
 	}
@@ -936,25 +1163,22 @@ func TestOpenCodeProvenanceIndexerWiring(t *testing.T) {
 		Harness:          ingest.HarnessOpenCode,
 		TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite,
 	}
-	config := ingest.OpenCodeProvenanceIndexerConfig{
-		Enabled: true,
-		Snapshot: func(ctx context.Context, _ ingest.DiscoveredSession) (ingest.OpenCodeHistorySnapshot, error) {
+	metadata := schema.UnifiedMetadata{SchemaVersion: 1, SessionID: schema.SessionID(openCodeNativeChild), ModelHarness: schema.HarnessOpenCode}
+	buildInput := ingest.GenerationBuildInput{
+		Session:          session,
+		GenerationID:     "gen-native-wiring",
+		RecordedMetadata: &metadata,
+		Prior:            generationTestPriorSource{},
+		OpenCode: generationTestOpenCodeSource{snapshot: func(ctx context.Context, _ string) (ingest.OpenCodeHistorySnapshot, error) {
 			return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, openCodeNativeChild, ingest.OpenCodeSnapshotOptions{})
-		},
-		Metadata: func(_ ingest.DiscoveredSession) (schema.UnifiedMetadata, error) {
-			return schema.UnifiedMetadata{SchemaVersion: 1, SessionID: schema.SessionID(openCodeNativeChild), ModelHarness: schema.HarnessOpenCode}, nil
-		},
-		GenerationID: func(_ ingest.DiscoveredSession) string { return "gen-native-wiring" },
+		}},
 	}
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	result, err := indexer.IndexTranscriptResult(context.Background(), session)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(context.Background(), buildInput)
 	if err != nil {
-		t.Fatalf("IndexTranscriptResult: %v", err)
+		t.Fatalf("BuildGeneration: %v", err)
 	}
-	format, ok := result.(indexformat.V2)
-	if !ok {
-		t.Fatalf("IndexTranscriptResult returned %T, want indexformat.V2", result)
-	}
+	format := candidate.Result
 	if format.Generation.Metadata.Stats.InputSubmissionCount == nil || *format.Generation.Metadata.Stats.InputSubmissionCount != 1 {
 		t.Fatalf("inputSubmissionCount = %v, want 1", format.Generation.Metadata.Stats.InputSubmissionCount)
 	}
@@ -962,9 +1186,15 @@ func TestOpenCodeProvenanceIndexerWiring(t *testing.T) {
 		t.Fatalf("generation id = %q, want gen-native-wiring", format.Generation.ID)
 	}
 
-	missing := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(ingest.OpenCodeProvenanceIndexerConfig{Enabled: true}))
-	if _, err := missing.IndexTranscriptResult(context.Background(), session); err == nil || !strings.Contains(err.Error(), "misses its snapshot, metadata, or generation dependency") {
-		t.Fatalf("IndexTranscriptResult with missing dependencies = %v, want a fail-closed dependency refusal", err)
+	missingInput := buildInput
+	missingInput.OpenCode = nil
+	if _, err := indexer.BuildGeneration(context.Background(), missingInput); err == nil || !strings.Contains(err.Error(), "misses its recorded-source access") {
+		t.Fatalf("BuildGeneration with missing recorded-source access = %v, want a fail-closed configuration refusal", err)
+	}
+	unidentified := buildInput
+	unidentified.GenerationID = ""
+	if _, err := indexer.BuildGeneration(context.Background(), unidentified); err == nil || !strings.Contains(err.Error(), "misses its generation identity") {
+		t.Fatalf("BuildGeneration with no generation identity = %v, want a fail-closed configuration refusal", err)
 	}
 }
 
@@ -1023,33 +1253,29 @@ func TestOpenCodeProvenanceAdmissionThroughNativeSQL(t *testing.T) {
 
 func indexOpenCodeNative(t *testing.T, source testfixture.MaterializedSource, session ingest.DiscoveredSession, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) indexformat.V2 {
 	t.Helper()
-	config := openCodeNativeProvenanceConfig(source, session.SessionID.String(), prior, fork)
-	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeProvenanceCapture(config))
-	result, err := indexer.IndexTranscriptResult(context.Background(), session)
+	buildInput := openCodeNativeBuildInput(t, source, session, prior, fork)
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{})
+	candidate, err := indexer.BuildGeneration(context.Background(), buildInput)
 	if err != nil {
-		t.Fatalf("IndexTranscriptResult: %v", err)
+		t.Fatalf("BuildGeneration: %v", err)
 	}
-	built, ok := result.(indexformat.V2)
-	if !ok {
-		t.Fatalf("IndexTranscriptResult returned %T, want indexformat.V2", result)
-	}
-	return built
+	return candidate.Result
 }
 
-func openCodeNativeProvenanceConfig(source testfixture.MaterializedSource, sessionID string, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) ingest.OpenCodeProvenanceIndexerConfig {
+// openCodeNativeBuildInput composes one attempt's builder input over the shared
+// synthetic native-row fixture.
+func openCodeNativeBuildInput(t *testing.T, source testfixture.MaterializedSource, session ingest.DiscoveredSession, prior ingest.OpenCodeProvenancePrior, fork *ingest.OpenCodeForkProof) ingest.GenerationBuildInput {
+	t.Helper()
 	adapter := newTestOpenCodeAdapter(&ingest.OSFileSystem{}, testutil.DefaultGitResolver(), salt.Salt{})
-	return ingest.OpenCodeProvenanceIndexerConfig{
-		Enabled: true,
-		Snapshot: func(ctx context.Context, _ ingest.DiscoveredSession) (ingest.OpenCodeHistorySnapshot, error) {
-			return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, sessionID, ingest.OpenCodeSnapshotOptions{Fork: fork})
-		},
-		Metadata: func(_ ingest.DiscoveredSession) (schema.UnifiedMetadata, error) {
-			return schema.UnifiedMetadata{SchemaVersion: 1, SessionID: schema.SessionID(sessionID), ModelHarness: schema.HarnessOpenCode}, nil
-		},
-		GenerationID: func(_ ingest.DiscoveredSession) string { return "gen-native-" + sessionID },
-		Prior: func(context.Context, ingest.DiscoveredSession) (ingest.OpenCodeProvenancePrior, error) {
-			return prior, nil
-		},
+	metadata := schema.UnifiedMetadata{SchemaVersion: 1, SessionID: session.SessionID, ModelHarness: schema.HarnessOpenCode}
+	return ingest.GenerationBuildInput{
+		Session:          session,
+		GenerationID:     "gen-native-" + session.SessionID.String(),
+		RecordedMetadata: &metadata,
+		Prior:            generationTestPriorFromOpenCode(t, prior),
+		OpenCode: generationTestOpenCodeSource{snapshot: func(ctx context.Context, _ string) (ingest.OpenCodeHistorySnapshot, error) {
+			return adapter.SnapshotOpenCodeProvenance(ctx, source.Path, session.SessionID.String(), ingest.OpenCodeSnapshotOptions{Fork: fork})
+		}},
 	}
 }
 
@@ -1106,12 +1332,12 @@ func assertOpenCodeExistingIdentitiesStable(t *testing.T, label string, before, 
 	}
 }
 
-func buildOpenCodeNativeGeneration(t *testing.T, snapshot ingest.OpenCodeHistorySnapshot) indexformat.V2 {
+func buildOpenCodeGeneration(t *testing.T, snapshot ingest.OpenCodeHistorySnapshot) indexformat.V2 {
 	t.Helper()
-	return buildOpenCodeNativeGenerationPrior(t, snapshot, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()})
+	return buildOpenCodeGenerationPrior(t, snapshot, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState()})
 }
 
-func buildOpenCodeNativeGenerationPrior(t *testing.T, snapshot ingest.OpenCodeHistorySnapshot, prior ingest.OpenCodeProvenancePrior) indexformat.V2 {
+func buildOpenCodeGenerationPrior(t *testing.T, snapshot ingest.OpenCodeHistorySnapshot, prior ingest.OpenCodeProvenancePrior) indexformat.V2 {
 	t.Helper()
 	capture, err := ingest.BuildOpenCodeProvenanceCapture(snapshot, "gen-native", schema.UnifiedMetadata{
 		SchemaVersion: 1,

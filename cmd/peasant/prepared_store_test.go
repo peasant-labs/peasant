@@ -27,3 +27,16 @@ func openPreparedStore(t *testing.T, path string, options ...store.OpenOption) (
 	t.Helper()
 	return storetest.OpenPrepared(t, path, options...)
 }
+
+// mustGenerationStoreOptions returns the managed-generation store options a
+// command's own open uses, rooted at the run's output directory, so a test that
+// inspects a session the command stored as a managed generation reads it with
+// the same writer, snapshot reader and lock namespace.
+func mustGenerationStoreOptions(t *testing.T, ownedRoot string) []store.OpenOption {
+	t.Helper()
+	options, err := generationStoreOptions(ownedRoot)
+	if err != nil {
+		t.Fatalf("open managed generation store options: %v", err)
+	}
+	return options
+}

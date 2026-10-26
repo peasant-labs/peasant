@@ -1,12 +1,32 @@
 'use client';
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { LIGHT_SCHEME, THEME_STORAGE_KEY } from '@/lib/themeBoot';
 
 type Theme = 'light' | 'dark';
 
 const APP_THEME_ATTR = 'data-theme';
 const PACKAGE_THEME_ATTR = 'data-tb-theme';
-const STORAGE_KEY = 'peasant-theme';
+
+/** The choice stored on this device, if it is one of the two themes. */
+function storedTheme(): Theme | null {
+  try {
+    const value = localStorage.getItem(THEME_STORAGE_KEY);
+    return value === 'light' || value === 'dark' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The system's light/dark query, where the browser has one. */
+function schemeQuery(): MediaQueryList | null {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(LIGHT_SCHEME) : null;
+}
+
+/** The person's own choice when they made one on this device, else the system's scheme (dark where it cannot say). */
+function preferredTheme(): Theme {
+  return storedTheme() ?? (schemeQuery()?.matches ? 'light' : 'dark');
+}
 
 /**
  * The theme is ONE value shared by every consumer, held in a module store and
@@ -62,19 +82,28 @@ export function useTheme() {
   const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    // Reject stale/garbage stored values: only an explicit 'light' opts out of
-    // the dark default (aligns with village's stricter guard).
-    const initial = stored === 'light' ? 'light' : 'dark';
+    // A stored choice wins; with none (or a garbage value) the page follows
+    // the system's scheme, the same rule the head script applied before paint.
+    const initial = preferredTheme();
     // Always stamp the attributes on first mount — the store may already hold
     // `initial`, in which case commit() short-circuits and the DOM would keep
     // whatever the prerendered HTML shipped.
     applyTheme(initial);
     commit(initial);
+    // With no stored choice, a system switch (a scheduled dark mode, a changed
+    // setting) re-themes the page too.
+    const query = schemeQuery();
+    const follow = () => { if (storedTheme() === null) commit(preferredTheme()); };
+    query?.addEventListener?.('change', follow);
+    return () => query?.removeEventListener?.('change', follow);
   }, []);
 
   const setTheme = useCallback((next: Theme) => {
-    localStorage.setItem(STORAGE_KEY, next);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // The theme still applies to this page; keeping it is best effort.
+    }
     commit(next);
   }, []);
 

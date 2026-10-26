@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 )
 
 // FileSystem abstracts file operations for testability.
@@ -56,12 +58,29 @@ func (f capturedSourceFileSystem) ReadFile(path string) ([]byte, error) {
 	return f.FileSystem.ReadFile(path)
 }
 
+// malformedRecordFormat is how a capture names a complete JSONL record it
+// cannot parse, by its line number; MalformedJSONLRecordLine reads it back.
+const malformedRecordFormat = "capture JSONL record %d: malformed complete JSON"
+
+var malformedRecordPattern = regexp.MustCompile(`capture JSONL record (\d+): malformed complete JSON`)
+
+// MalformedJSONLRecordLine reports the line a capture message names as a
+// complete record it could not parse, when the message names one.
+func MalformedJSONLRecordLine(message string) (int, bool) {
+	match := malformedRecordPattern.FindStringSubmatch(message)
+	if match == nil {
+		return 0, false
+	}
+	line, err := strconv.Atoi(match[1])
+	return line, err == nil
+}
+
 func completeJSONLPrefix(data []byte) ([]byte, error) {
 	lastComplete := bytes.LastIndexByte(data, '\n')
 	records := bytes.Split(data[:lastComplete+1], []byte{'\n'})
 	for i, record := range records {
 		if len(bytes.TrimSpace(record)) > 0 && !json.Valid(record) {
-			return nil, fmt.Errorf("capture JSONL record %d: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest", i+1)
+			return nil, fmt.Errorf(malformedRecordFormat+"; prior stored snapshot was retained; repair this record and retry ingest", i+1)
 		}
 	}
 	if len(bytes.TrimSpace(data[lastComplete+1:])) == 0 || json.Valid(data[lastComplete+1:]) {
