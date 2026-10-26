@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"path/filepath"
@@ -35,6 +36,19 @@ type pairRepairSettlingFixtures struct {
 // complete JSON. Claude Code stores both lines, so a source carrying it cannot
 // be rebuilt without repairing the record itself.
 const damagedSourceTranscript = `{"type":"user","message":{"role":"user","content":"inspect"},"uuid":"u1"}
+{"type":"assistant","message":{"role":"assistant","content":
+`
+
+// distinctStoredTranscript is a valid transcript that is not the native
+// bytes. The stored axis must not alias the native axis: a rewrite of the
+// stored copy to the native bytes would otherwise still compare equal.
+const distinctStoredTranscript = `{"type":"user","message":{"role":"user","content":"the stored copy"},"uuid":"stored-u1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stored answer"}]},"uuid":"stored-a1"}
+`
+
+// distinctDamagedStoredTranscript is a damaged stored copy that is not the
+// damaged native source. Same reason as distinctStoredTranscript.
+const distinctDamagedStoredTranscript = `{"type":"user","message":{"role":"user","content":"the stored copy"},"uuid":"stored-u1"}
 {"type":"assistant","message":{"role":"assistant","content":
 `
 
@@ -90,15 +104,23 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			valid := []byte(missingPairNativeTranscript)
-			malformed := []byte(damagedSourceTranscript)
-			pick := func(kind string) []byte {
+			nativeValid := []byte(missingPairNativeTranscript)
+			nativeMalformed := []byte(damagedSourceTranscript)
+			storedValid := []byte(distinctStoredTranscript)
+			storedMalformed := []byte(distinctDamagedStoredTranscript)
+			pickNative := func(kind string) []byte {
 				if kind == "malformed" {
-					return malformed
+					return nativeMalformed
 				}
-				return valid
+				return nativeValid
 			}
-			nativeBytes := pick(fixture.NativeSource)
+			pickStored := func(kind string) []byte {
+				if kind == "malformed" {
+					return storedMalformed
+				}
+				return storedValid
+			}
+			nativeBytes := pickNative(fixture.NativeSource)
 			nativePath := "/synthetic/native/" + id.String() + ".jsonl"
 			if fixture.NativeSource != "missing" {
 				if err := memfs.WriteFile(nativePath, nativeBytes, 0600); err != nil {
@@ -110,7 +132,7 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 			meta.ModelHarness = ingest.HarnessClaudeCode
 			meta.Source.Format = ingest.SourceFormatJSONL
 			meta.Source.FilePath = nativePath
-			meta.ContentHash = schema.ComputeTranscriptHash(valid)
+			meta.ContentHash = schema.ComputeTranscriptHash(nativeValid)
 			encoded, err := json.Marshal(meta)
 			if err != nil {
 				t.Fatal(err)
@@ -120,7 +142,7 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 			}
 			// The row records the identity of the last usable pair, so the pair
 			// on disk is what decides whether a repair is owed.
-			pair, err := ingest.NewManagedArtifact(encoded, valid)
+			pair, err := ingest.NewManagedArtifact(encoded, nativeValid)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -143,7 +165,10 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 				t.Fatalf("seed readable prior entries: %+v, %v", beforeEntries, err)
 			}
 
-			storedBytes := pick(fixture.StoredTranscript)
+			storedBytes := pickStored(fixture.StoredTranscript)
+			if bytes.Equal(storedBytes, nativeBytes) {
+				t.Fatal("stored and native axes share bytes; a rewrite of the stored copy to the native bytes would still pass")
+			}
 			storedPath := filepath.Join(ingest.SessionDir(testOutputDir, testutil.TestHostSlug, id.String(), ""), id.String()+"--transcript.jsonl")
 			if err := memfs.WriteFile(storedPath, storedBytes, 0600); err != nil {
 				t.Fatal(err)
@@ -207,9 +232,17 @@ func TestUnrepairableSourceSettles(t *testing.T) {
 
 			// The stored bytes are what the case says they are: a decorative
 			// column would let a case pass without exercising its shape.
+			// They must also stay different from the native bytes, so a
+			// rewrite of the stored copy to those bytes is visible.
 			kept, err := memfs.ReadFile(storedPath)
 			if err != nil || !reflect.DeepEqual(kept, storedBytes) {
 				t.Fatalf("the stored transcript changed: %q, %v", kept, err)
+			}
+			if fixture.NativeSource != "missing" {
+				nativeKept, readErr := memfs.ReadFile(nativePath)
+				if readErr != nil || bytes.Equal(kept, nativeKept) {
+					t.Fatalf("the stored copy matches the native bytes: %q, %v", kept, readErr)
+				}
 			}
 
 			firstReports := reported(first, "pair_repair_unavailable")
