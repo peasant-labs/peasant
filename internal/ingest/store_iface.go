@@ -338,6 +338,18 @@ type SessionIndexState struct {
 	LatestAttemptAdapterVersion *int
 }
 
+// Completed reports whether this snapshot is a finished index, the only stored
+// state that still has something to serve a reader. The rule is a positive
+// producer revision AND a recorded completion time: a producer revision with no
+// completion time has never served, and a completion time with no producer
+// revision names no parser output. The format stamp is not a substitute for
+// either half. The store states the same rule in SQL as completedIndexSQL, and
+// its one other reader of the rule (the metric-input refusal) calls this method,
+// so the two cannot drift.
+func (s *SessionIndexState) Completed() bool {
+	return s != nil && s.IndexerVersion > 0 && s.IndexedAt != nil
+}
+
 // StaleIndexWorkError means the captured SQL state changed before the index
 // replacement. The caller must capture current input and plan a new parser run.
 type StaleIndexWorkError struct {

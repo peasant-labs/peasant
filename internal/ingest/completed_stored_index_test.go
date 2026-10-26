@@ -61,8 +61,8 @@ func TestCompletedStoredIndexMatchesTheStoreRule(t *testing.T) {
 					IndexVersion:   fixture.FormatVersion,
 				}
 			}
-			if got := completedStoredIndex(state); got != fixture.Want {
-				t.Fatalf("completedStoredIndex(%+v) = %v, want %v", state, got, fixture.Want)
+			if got := state.Completed(); got != fixture.Want {
+				t.Fatalf("(*SessionIndexState).Completed(%+v) = %v, want %v", state, got, fixture.Want)
 			}
 			pipeline := &Pipeline{metricsStore: completedIndexStateStore{state: state}}
 			if got := pipeline.hasCompletedStoredIndex(t.Context(), sid); got != fixture.Want {

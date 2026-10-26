@@ -90,11 +90,22 @@ func TestAppendUnroutedRepairFailuresKeepsOneRowPerSession(t *testing.T) {
 // repair is counted under. A repair that reached the selection is already the
 // run's work, so a --harness run cannot drop it for a harness the store could
 // not name; a named harness, an explicit session list and an age window still
-// exclude what they name.
+// exclude what they name. The scope is the shared managed-session predicate
+// every database-driven inventory uses, not a second copy of those filters.
 func TestRepairScopeKeepsARepairWhoseHarnessIsUnnamed(t *testing.T) {
 	harness := HarnessClaudeCode
 	sid := SessionID("11111111-1111-4111-8111-111111111111")
 	const source = "/synthetic/missing.jsonl"
+
+	t.Run("the shared scope test keeps an unnamed harness", func(t *testing.T) {
+		pipeline := &Pipeline{config: PipelineConfig{Harness: &harness}}
+		if !pipeline.includesManagedSession(sid, "") {
+			t.Fatal("the shared scope test dropped a session whose harness is unnamed")
+		}
+		if pipeline.includesManagedSession(sid, HarnessCodex) {
+			t.Fatal("the shared scope test kept a named harness the run did not ask for")
+		}
+	})
 
 	t.Run("an unnamed harness stays in a harness run", func(t *testing.T) {
 		pipeline := &Pipeline{config: PipelineConfig{Harness: &harness}}
@@ -135,4 +146,33 @@ func TestRepairScopeKeepsARepairWhoseHarnessIsUnnamed(t *testing.T) {
 			t.Fatalf("the forced repair was not counted once: %+v", failures)
 		}
 	})
+}
+
+// TestRoutePairRepairCountsAFailureOnlyInsideTheRunFilters pins where the
+// run's filters are decided for an unroutable repair on the reindex path: the
+// caller passes its own verdict from the shared scope test, and this function
+// does not assume one. A repair outside the run's filters is still reported,
+// but it is not counted as this run's failed session; one inside them is
+// counted exactly once.
+func TestRoutePairRepairCountsAFailureOnlyInsideTheRunFilters(t *testing.T) {
+	sid := SessionID("11111111-1111-4111-8111-111111111111")
+	target := reindexTarget{session: DiscoveredSession{SessionID: sid, Harness: HarnessClaudeCode}}
+
+	pipeline := &Pipeline{config: PipelineConfig{Force: true}}
+	routed := pipeline.routePairRepair(t.Context(), target, nil, map[SessionID]DiffEntry{}, map[SessionID]bool{}, false)
+	if routed {
+		t.Fatal("a repair with no reachable source was routed to native re-ingestion")
+	}
+	if failures := pipeline.appendUnroutedRepairFailures(nil); len(failures) != 0 {
+		t.Fatalf("a repair outside the run's filters was counted as its failed session: %+v", failures)
+	}
+
+	pipeline = &Pipeline{config: PipelineConfig{Force: true}}
+	if pipeline.routePairRepair(t.Context(), target, nil, map[SessionID]DiffEntry{}, map[SessionID]bool{}, true) {
+		t.Fatal("a repair with no reachable source was routed to native re-ingestion")
+	}
+	failures := pipeline.appendUnroutedRepairFailures(nil)
+	if len(failures) != 1 || failures[0].SessionID != sid || failures[0].Error == nil {
+		t.Fatalf("a repair inside the run's filters was not counted once: %+v", failures)
+	}
 }

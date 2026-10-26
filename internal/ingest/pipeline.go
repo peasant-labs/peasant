@@ -5161,7 +5161,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			// when discovery did not offer it. A source that is gone is
 			// reported, not silently dropped. A forced run counts that as a
 			// failed session instead of indexing the damaged pair.
-			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch) && !p.config.Force {
+			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch, p.pairRepairInScope(t.session, t.startMs)) && !p.config.Force {
 				fallbackTargets = append(fallbackTargets, t)
 			}
 			continue
@@ -5172,7 +5172,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		// selected sessions are checked, so no tree is walked and no pair is
 		// read for work this run does not owe.
 		if p.pairNeedsRepair(ctx, t.session.SessionID) {
-			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch) && !p.config.Force {
+			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch, p.pairRepairInScope(t.session, t.startMs)) && !p.config.Force {
 				fallbackTargets = append(fallbackTargets, t)
 			}
 			continue
@@ -5502,7 +5502,12 @@ func (t reindexTarget) repairMetadataPath() string {
 // re-ingestion. The session as discovery saw it is preferred (workspace,
 // worktree, commit context); the stored source locator is the fallback. It
 // reports and returns false when no source is reachable.
-func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, sourceSessions map[SessionID]DiscoveredSession, entryByID map[SessionID]DiffEntry, inBatch map[SessionID]bool) bool {
+//
+// inScope is the run's explicit-filter verdict for this target, computed by each
+// caller from pairRepairInScope: the shared harness, session and age test. It is
+// a parameter rather than an assumption because the filters are applied by the
+// caller's stage, not here.
+func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, sourceSessions map[SessionID]DiscoveredSession, entryByID map[SessionID]DiffEntry, inBatch map[SessionID]bool, inScope bool) bool {
 	sid := target.session.SessionID
 	if discovered, found := sourceSessions[sid]; found {
 		entryByID[sid] = DiffEntry{Session: discovered, Status: DiffUpdated, pairRepair: true, repairMetadataPath: target.repairMetadataPath()}
@@ -5521,9 +5526,8 @@ func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, so
 	// Returning false leaves the session out of the extract batch. A forced
 	// run still has to count that unrouted repair; the caller must not also
 	// index the stored pair, which is missing or damaged by definition. The
-	// target reached this call through the run's explicit filters, so the
-	// repair is this run's work.
-	p.noteUnroutedForcedRepair(sid, target.session.Harness, target.originalSourcePath, true)
+	// repair is this run's failure only when the run's own filters cover it.
+	p.noteUnroutedForcedRepair(sid, target.session.Harness, target.originalSourcePath, inScope)
 	return false
 }
 

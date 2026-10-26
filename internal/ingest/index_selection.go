@@ -272,9 +272,12 @@ func (p *Pipeline) scanPeasantSyncSessions(ctx context.Context) []reindexTarget 
 
 // includesManagedSession applies the run's explicit harness and session
 // filters to a stored session. It is the scope test every database-driven
-// inventory shares.
+// inventory shares. A harness the caller cannot name is NOT filtered out: such
+// a candidate already reached a database-driven inventory, and only a named
+// harness can fail a --harness filter, so dropping it would lose work the run
+// selected. Every caller that knows the harness passes it.
 func (p *Pipeline) includesManagedSession(sid SessionID, harness Harness) bool {
-	return (p.config.Harness == nil || harness == *p.config.Harness) &&
+	return (p.config.Harness == nil || harness == "" || harness == *p.config.Harness) &&
 		(p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[sid])
 }
 

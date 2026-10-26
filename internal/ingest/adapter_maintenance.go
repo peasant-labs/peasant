@@ -350,26 +350,17 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 }
 
 // hasCompletedStoredIndex reports whether the stored index is finished and can
-// keep serving while its pair cannot be rebuilt. The store's rule is a positive
-// producer revision and a recorded completion time (sessions.index_version > 0
-// AND indexed_at IS NOT NULL). IndexerVersion is that producer revision;
-// IndexedAt is the completion time. A legacy row with a producer revision and
-// no completion time has never served anything, so its failed install stays a
-// real error. A missing row, or a store that cannot answer, has nothing to serve.
+// keep serving while its pair cannot be rebuilt. It reads the row's snapshot and
+// asks SessionIndexState.Completed, the one definition of a finished index, so a
+// row that has served keeps its promise and one that never completed does not
+// make one. A missing row, or a store that cannot answer, has nothing to serve.
 func (p *Pipeline) hasCompletedStoredIndex(ctx context.Context, sid SessionID) bool {
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
 	if !ok {
 		return false
 	}
 	state, err := reader.ReadIndexState(ctx, sid)
-	return err == nil && completedStoredIndex(state)
-}
-
-// completedStoredIndex is the store rule for a finished index, read from one
-// snapshot. A nil state is no row. The format version is not part of the rule:
-// a format stamp without a producer revision and a completion time has not served.
-func completedStoredIndex(state *SessionIndexState) bool {
-	return state != nil && state.IndexerVersion > 0 && state.IndexedAt != nil
+	return err == nil && state.Completed()
 }
 
 // noteUnroutedForcedRepair records one forced repair that could not be sent to
@@ -457,16 +448,15 @@ func (p *Pipeline) resetUnroutedRepairs() {
 }
 
 // pairRepairInScope applies the run's explicit harness, session and age filters
-// to a repair candidate. A harness the store cannot name keeps the candidate:
-// the repair already reached the selection, so only a named harness can fail a
-// --harness filter. A session whose start is unknown is excluded when --since is
-// set, matching how the index selection treats a reconstructed target without a
-// recorded start.
+// to a repair candidate through the shared managed-session predicate, so it
+// applies the same scope test every database-driven inventory uses. A harness
+// the store cannot name keeps the candidate (the shared predicate treats an
+// unnamed harness as not filtered out): the repair already reached the
+// selection, so only a named harness can fail a --harness filter. A session
+// whose start is unknown is excluded when --since is set, matching how the index
+// selection treats a reconstructed target without a recorded start.
 func (p *Pipeline) pairRepairInScope(session DiscoveredSession, startMs int64) bool {
-	if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[session.SessionID] {
-		return false
-	}
-	if p.config.Harness != nil && session.Harness != "" && session.Harness != *p.config.Harness {
+	if !p.includesManagedSession(session.SessionID, session.Harness) {
 		return false
 	}
 	if p.config.Since == nil {
@@ -810,7 +800,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		// explicit --force run is the remediation the diagnostic names, so it
 		// keeps the failure: a person or a script has to be able to tell that
 		// the repair did not take.
-		if !p.config.Force && sourceRecordUnusable(acquisition) && p.hasCompletedStoredIndex(ctx, entry.Session.SessionID) {
+		if !p.config.Force && sourceUnavailable(acquisition) && p.hasCompletedStoredIndex(ctx, entry.Session.SessionID) {
 			result.result.Error = nil
 			result.result.Status = DiffUnchanged
 		}
