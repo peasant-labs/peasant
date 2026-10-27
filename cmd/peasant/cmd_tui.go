@@ -45,9 +45,9 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 	ctx := context.Background()
 
 	// Load config
-	cfg, err := config.Load(cfgPath, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{})
+	cfg, err := config.LoadForBrowsing(cfgPath, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{})
 	if err != nil {
-		return fmt.Errorf("tui startup: load config %q: %w; the TUI stopped before exposing discovery with default selection, so fix config.yaml or run `peasant kickstart` and retry", cfgPath, err)
+		return fmt.Errorf("tui startup: load config %q: %w; the TUI stopped before opening stored history; fix the reported configuration field and retry", cfgPath, err)
 	}
 	visibility := sessionvisibility.New(cfg.Selection)
 

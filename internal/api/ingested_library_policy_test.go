@@ -77,6 +77,9 @@ func loadLibraryPolicyFixture(t *testing.T) libraryPolicyFixture {
 		t.Fatalf("ingested library seed IDs = %v; must retain the person, agent and helper identities", seedIDs)
 	}
 	for _, fixtureCase := range fixture.Cases {
+		if err := config.ValidateSelection(fixtureCase.Selection); err != nil {
+			t.Fatalf("ingested library policy case %q must supply valid saved selection: %v", fixtureCase.Name, err)
+		}
 		if !fixtureCase.Selection.Mode.IsValid() {
 			t.Fatalf("ingested library policy case %q has invalid selection mode %q", fixtureCase.Name, fixtureCase.Selection.Mode)
 		}
@@ -88,7 +91,7 @@ func loadLibraryPolicyFixture(t *testing.T) libraryPolicyFixture {
 // stored rows never do, so every browsing surface must return the same set in
 // every case.
 const (
-	libraryInsideSession  = "lib-a"
+	libraryInsideSession  = "ses_liba"
 	libraryOutsideSession = "lib-b"
 	libraryAgentSession   = "lib-c"
 	libraryHelperSession  = "lib-h"

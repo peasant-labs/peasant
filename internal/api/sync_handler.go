@@ -1347,6 +1347,9 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	if cfg == nil {
 		return nil, nil, fmt.Errorf("config not available")
 	}
+	if err := config.ValidateSelection(cfg.Selection); err != nil {
+		return nil, nil, fmt.Errorf("web ingest: invalid saved selection while preparing the pipeline in internal/api.newIngestPipeline: %w; no source was read or imported; run `peasant kickstart` to repair the saved selection, then retry", err)
+	}
 	fs := &ingest.OSFileSystem{}
 	git := &ingest.ExecGitResolver{}
 

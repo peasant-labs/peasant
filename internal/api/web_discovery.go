@@ -73,6 +73,9 @@ func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config,
 	if !selection.Mode.IsValid() {
 		return nil, fmt.Errorf("Web discovery could not compute ingest selection status because the saved kickstart selection has no valid mode %q in internal/api.buildWebDiscovery. No partial metadata was returned. Run `peasant kickstart` to repair selection.mode (valid: all, selected), then retry", selection.Mode)
 	}
+	if err := config.ValidateSelection(selection); err != nil {
+		return nil, fmt.Errorf("Web discovery could not compute ingest selection status in internal/api.buildWebDiscovery: %w; no partial metadata was returned; run `peasant kickstart` to repair the saved selection, then retry", err)
+	}
 	var matcher *ingest.SelectionMatcher
 	if selection.Mode == config.SelectionModeSelected {
 		compiled := config.CompileSelectionMatcher(selection)

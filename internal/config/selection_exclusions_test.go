@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -130,7 +131,29 @@ func TestSelectionExclusions_ValidateAndRoundTrip(t *testing.T) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
-			cfg, err := config.Parse([]byte(platformAbsoluteFixturePaths(fixture.Document)))
+			document := []byte(platformAbsoluteFixturePaths(fixture.Document))
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, document, 0600); err != nil {
+				t.Fatal(err)
+			}
+			browsing, err := config.LoadForBrowsing(path, &ingest.OSFileSystem{}, nil)
+			if err != nil {
+				t.Fatalf("browsing loader refused saved selection: %v", err)
+			}
+			raw := config.BaseConfig()
+			if err := yaml.Unmarshal(document, raw); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(browsing.Selection, raw.Selection) {
+				t.Fatal("browsing loader changed saved selection evidence")
+			}
+			if _, err := config.Load(path, &ingest.OSFileSystem{}, nil); (err == nil) != fixture.Valid {
+				t.Fatalf("strict Load error = %v, want valid=%v", err, fixture.Valid)
+			}
+			if err := config.ValidateSelection(browsing.Selection); (err == nil) != fixture.Valid {
+				t.Fatalf("publication policy validation error = %v, want valid=%v", err, fixture.Valid)
+			}
+			cfg, err := config.Parse(document)
 			if !fixture.Valid {
 				if err == nil {
 					t.Fatal("configuration unexpectedly accepted invalid exact exclusion evidence")

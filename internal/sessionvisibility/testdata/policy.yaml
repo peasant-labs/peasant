@@ -1,4 +1,29 @@
 cases:
+  - name: zero_policy_admits_user
+    zero_policy: true
+    candidate: {origin: user}
+    result: error
+    error_contains: run `peasant kickstart`
+    discovery_result: visible
+  - name: zero_policy_admits_unknown
+    zero_policy: true
+    candidate: {origin: unknown}
+    result: error
+    error_contains: run `peasant kickstart`
+    discovery_result: visible
+  - name: zero_policy_withholds_agent
+    zero_policy: true
+    candidate: {origin: agent}
+    result: error
+    error_contains: run `peasant kickstart`
+    discovery_result: hidden
+  - name: zero_policy_rejects_invalid_origin
+    zero_policy: true
+    candidate: {origin: teammate}
+    result: error
+    error_contains: run `peasant kickstart`
+    discovery_result: error
+    discovery_error_contains: re-ingest the session
   - name: all_mode
     mode: all
     candidate: {harness: claude-code, session_id: session-all, project_name: alpha, git_branch: main}

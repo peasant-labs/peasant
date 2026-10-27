@@ -36,6 +36,9 @@ func storedSelectionMembership(ctx context.Context, rows []store.SessionRow, ids
 	if !selection.Mode.IsValid() {
 		return nil, fmt.Errorf("api.storedSelectionMembership: the saved kickstart selection has no valid mode %q, so outsideSelection and autoPublish cannot be reported truthfully; no publication metadata was returned; run `peasant kickstart` to repair selection.mode (valid: all, selected), then retry", selection.Mode)
 	}
+	if err := config.ValidateSelection(selection); err != nil {
+		return nil, fmt.Errorf("api.storedSelectionMembership: the saved ingestion selection is invalid: %w; outsideSelection and autoPublish cannot be reported truthfully, so no publication metadata was returned; run `peasant kickstart` to repair the saved selection, then retry", err)
+	}
 	if selection.Mode == config.SelectionModeAll {
 		for _, row := range rows {
 			if requested[row.SessionID] {

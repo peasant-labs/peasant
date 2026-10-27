@@ -1,14 +1,14 @@
 requiredNames: [mode_all, selected_restrictive, selected_empty, selected_excluded, selected_stale]
 sessions:
-  - {id: lib-a, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, origin: user, pushable: true, text: libraryneedle}
+  - {id: ses_liba, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, origin: user, pushable: true, text: libraryneedle}
   - {id: lib-b, projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, origin: user, pushable: true, text: libraryneedle}
   - {id: lib-c, projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, origin: agent, pushable: true, text: libraryneedle}
-  - {id: lib-h, projectHash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd, origin: agent, purpose: helper_review, owner: lib-a, ownerState: target_known, pushable: true, text: libraryneedle}
+  - {id: lib-h, projectHash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd, origin: agent, purpose: helper_review, owner: ses_liba, ownerState: target_known, pushable: true, text: libraryneedle}
 # Home is a root page. The helper is grouped under its person-driven owner, so it
 # appears on that owner's child page; the combined set is the whole library.
-homeRootIds: [lib-c, lib-b, lib-a]
+homeRootIds: [lib-c, lib-b, ses_liba]
 homeChildIds: [lib-h]
-homeParentId: lib-a
+homeParentId: ses_liba
 # Project options carry no publication metadata and are ordered by project name,
 # then hash: alpha, beta, gamma. The helper project has no root session.
 homeProjectHashes:
@@ -28,13 +28,13 @@ cases:
         codex:
           projects:
             - {name: alpha-project}
-    # Only lib-a is admitted by the saved ingest/push selector.
+    # Only ses_liba is admitted by the saved ingest/push selector.
     outside_selection: [lib-b, lib-c, lib-h]
 
   - name: selected_empty
     selection:
       mode: selected
-    outside_selection: [lib-a, lib-b, lib-c, lib-h]
+    outside_selection: [ses_liba, lib-b, lib-c, lib-h]
 
   - name: selected_excluded
     selection:
@@ -44,8 +44,8 @@ cases:
           projects:
             - {name: alpha-project}
           exclusions:
-            sessions: [lib-a]
-    outside_selection: [lib-a, lib-b, lib-c, lib-h]
+            sessions: [ses_liba]
+    outside_selection: [ses_liba, lib-b, lib-c, lib-h]
 
   - name: selected_stale
     selection:
@@ -55,4 +55,4 @@ cases:
           projects:
             - {name: deleted-project}
           sessions: [lib-gone]
-    outside_selection: [lib-a, lib-b, lib-c, lib-h]
+    outside_selection: [ses_liba, lib-b, lib-c, lib-h]
