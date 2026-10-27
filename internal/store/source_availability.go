@@ -20,6 +20,14 @@ var _ ingest.SourceAvailabilityStore = (*Store)(nil)
 // recorded or replaced by a different cause. A repeated cause returns false.
 // Absence of a row means no unavailability has been observed, not proof that
 // the original source is currently readable.
+//
+// This method records the cause it is handed and replaces any other one, in
+// either direction. Which observed cause outranks a stored one is not decided
+// here: the ordering is one-way, because a present-but-unusable source
+// supersedes a missing one and never the reverse, and the ingest caller
+// (settleUnavailableSource) owns it as the single place that applies it. A
+// caller that writes straight to this method can downgrade a more specific
+// stored cause and make every later harvest report it again.
 func (s *Store) RecordSourceUnavailable(ctx context.Context, sid ingest.SessionID, reason ingest.SourceUnavailabilityReason) (bool, error) {
 	validated, err := ingest.NewSourceUnavailabilityReason(string(reason))
 	if err != nil {
