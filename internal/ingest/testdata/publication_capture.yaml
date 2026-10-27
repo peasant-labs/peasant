@@ -159,6 +159,9 @@ cases:
     reindex_change_managed: true
     expected_manual_indexed: 0
     expected_manual_readiness: ready
+    expected_manual_error: true
+    expected_manual_diagnostic: pair_repair_unavailable
+    expected_manual_diagnostic_text: "is unavailable, so it could not be re-ingested"
   - <<: *claude
     name: reindex_stale_source_capture_held
     reindex_concurrent_capture: true
