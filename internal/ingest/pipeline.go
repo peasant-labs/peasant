@@ -5069,13 +5069,16 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 
 	// Stage 3: FILTER — explicit session and age constraints apply to both stale
 	// and forced work. Saved discovery selection is not an access boundary over
-	// already-stored sessions and is deliberately not applied here.
+	// already-stored sessions and is deliberately not applied here. Only the
+	// session half is tested here: every target was already selected through the
+	// harness half, and a repair target may legitimately carry no named harness,
+	// so testing it strictly again would drop repairs this run selected.
 	filterProfileStart := time.Now()
 	filterTotal := len(targeted)
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageFilter, Total: filterTotal})
 	filtered := targeted[:0]
 	for _, target := range targeted {
-		allowed := p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[target.session.SessionID]
+		allowed := p.includesSession(target.session.SessionID)
 		// Stored metadata records the native session start. The managed file's
 		// mtime is publication time, so it cannot establish a session's age.
 		if allowed {

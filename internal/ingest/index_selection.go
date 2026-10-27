@@ -296,6 +296,15 @@ func discoveredSessionStart(session DiscoveredSession) int64 {
 	return 0
 }
 
+// includesSession is the session half of the run's explicit filters: a run that
+// names sessions reads only those. It is stated once, so a scope test that
+// applies the session half without the harness half — as the reindex FILTER
+// stage does, where Stage 2 has already decided the harness — still reads the
+// same rule as includesManagedSession.
+func (p *Pipeline) includesSession(sid SessionID) bool {
+	return p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[sid]
+}
+
 // includesManagedSession is the strict harness and session half of the run's
 // explicit filters. Every database-driven inventory applies it, each with
 // withinRunAge for the age half: the index inventory, which the artifact mirror
@@ -304,8 +313,7 @@ func discoveredSessionStart(session DiscoveredSession) int64 {
 // does not match a --harness run, because it is no evidence that the session
 // belongs to that harness.
 func (p *Pipeline) includesManagedSession(sid SessionID, harness Harness) bool {
-	return (p.config.Harness == nil || harness == *p.config.Harness) &&
-		(p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[sid])
+	return (p.config.Harness == nil || harness == *p.config.Harness) && p.includesSession(sid)
 }
 
 // includesManagedSessionOrUnknown is includesManagedSession for a repair the
