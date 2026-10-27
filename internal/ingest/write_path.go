@@ -380,10 +380,11 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 		}
 		artifact, err := readArtifactPair(p.fs, output, metadataPath, target.session.SessionID)
 		if err != nil {
-			// A torn or unreadable pair with no row cannot be recorded. The
-			// rebuild names it as a skipped saved copy; a plain index leaves it
-			// to the ordinary readers. There is no row, so no index has
-			// completed and nothing serves from the database.
+			// A torn or unreadable pair with no recorded pair identity cannot be
+			// mirrored: there is nothing to mirror it against. A row may exist
+			// here without that identity, so this says nothing about whether an
+			// index has completed. The rebuild names the pair as a skipped saved
+			// copy; a plain index leaves it to the ordinary readers.
 			if p.config.RebuildAll {
 				p.reportDamagedPair(target.session.SessionID, state)
 				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)

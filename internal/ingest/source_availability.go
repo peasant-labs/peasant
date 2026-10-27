@@ -90,16 +90,17 @@ func causeSupersedes(stored, next SourceUnavailabilityReason) bool {
 
 // settleUnavailableSource records that a session's source cannot repair it
 // and reports whether this run owes the user the transition. A stored row
-// with the same cause is quiet on a routine harvest. A missing row, a cause
-// that supersedes the stored one, or an explicit --force retry is recorded
-// and owed. A less specific cause never replaces a more specific one: a routine
-// harvest is quiet about it, and an explicit --force retry reports it without
-// downgrading the stored row, so the one-way replacement holds on both. A
-// record error is reported and still owed, so a failure to keep the evidence
-// cannot hide the diagnostic. A row written earlier in this same harvest is
-// still owed by a later lane: the index lane reports even when stored-content
-// recovery already recorded the same cause. Callers keep doing their work: only
-// the report settles, and the recorded row is never a reason to skip indexing.
+// with the same cause is quiet on a routine harvest. A missing row or a cause
+// that supersedes the stored one is recorded and owed, and an explicit --force
+// retry is owed whether or not its observation is the more specific one. A less
+// specific cause never replaces a more specific one: a routine harvest is quiet
+// about it, and an explicit --force retry reports it without downgrading the
+// stored row, so the one-way replacement holds on both. A record error is
+// reported and still owed, so a failure to keep the evidence cannot hide the
+// diagnostic. A row written earlier in this same harvest is still owed by a
+// later lane: the index lane reports even when stored-content recovery already
+// recorded the same cause. Callers keep doing their work: only the report
+// settles, and the recorded row is never a reason to skip indexing.
 func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID, cause SourceUnavailabilityReason, lane *storeWriteLane) bool {
 	// A failed read is treated as no stored cause: this harvest still records
 	// what it observed, and a write failure is reported below.
