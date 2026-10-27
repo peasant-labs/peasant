@@ -85,10 +85,28 @@ INSERT INTO host_slugs(opaque_id, host_slug) VALUES('cause-host','cause-host');
 INSERT INTO projects(project_hash) VALUES('cause-project');
 INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
 VALUES('cause-session','claude-code','fixture-model','cause-host','cause-project',1,2,3,'/synthetic/missing.jsonl','jsonl');
+INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
+VALUES('unusable-session','claude-code','fixture-model','cause-host','cause-project',1,2,3,'/synthetic/unusable.jsonl','jsonl');
 INSERT INTO session_source_unavailability(session_id, reason)
 VALUES('cause-session','original-source-unavailable-no-usable-saved-copy');
 `, nil); err != nil {
 		t.Fatal(err)
+	}
+	// A second stored row carries the other cause, so the rebuild has to copy
+	// each row's own value: a copy step that writes one fixed cause fails on the
+	// row holding the other. The predecessor CHECK this migration widens refuses
+	// that cause, so check enforcement is off for this one insert and restored
+	// before the refusal below.
+	if err := sqlitex.ExecuteTransient(conn, `PRAGMA ignore_check_constraints = ON`, nil); err != nil {
+		t.Fatalf("relax the predecessor check to seed the second cause: %v", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `
+INSERT INTO session_source_unavailability(session_id, reason) VALUES('unusable-session', ?)`,
+		&sqlitex.ExecOptions{Args: []any{string(ingest.SourceUnavailableRecordUnusable)}}); err != nil {
+		t.Fatalf("seed the second stored cause: %v", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `PRAGMA ignore_check_constraints = OFF`, nil); err != nil {
+		t.Fatalf("restore the predecessor check after seeding: %v", err)
 	}
 	// The new claim: the shipped table refuses the cause this migration adds, so
 	// the widening is what a stored present-but-unusable source needs.
@@ -98,19 +116,26 @@ VALUES('cause-session','original-source-unavailable-no-usable-saved-copy');
 	if err := sqlitemigration.Migrate(t.Context(), conn, dbSchema); err != nil {
 		t.Fatal(err)
 	}
-	// The rebuild copies the stored rows, so the row the predecessor held has to
-	// survive the drop-and-recreate with the cause it held. This read is taken
-	// before the update below overwrites the cause: a copy step that wrote a
-	// fixed value instead of the stored one would otherwise pass unnoticed.
-	copied := ""
-	if err := sqlitex.ExecuteTransient(conn, `SELECT reason FROM session_source_unavailability WHERE session_id='cause-session'`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
-		copied = stmt.ColumnText(0)
-		return nil
-	}}); err != nil {
-		t.Fatalf("read the cause the rebuild copied: %v", err)
+	// The rebuild copies the stored rows, so each row has to survive the
+	// drop-and-recreate with the cause it held. This read is taken before the
+	// update below overwrites one of the causes: a copy step that wrote a fixed
+	// value instead of the stored one would otherwise pass unnoticed.
+	storedCause := func(session string) string {
+		t.Helper()
+		cause := ""
+		if err := sqlitex.ExecuteTransient(conn, `SELECT reason FROM session_source_unavailability WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{session}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			cause = stmt.ColumnText(0)
+			return nil
+		}}); err != nil {
+			t.Fatalf("read the cause the rebuild copied for %s: %v", session, err)
+		}
+		return cause
 	}
-	if want := string(ingest.SourceUnavailableNoSavedCopy); copied != want {
-		t.Fatalf("the rebuild kept cause %q, want the seeded %q", copied, want)
+	if got, want := storedCause("cause-session"), string(ingest.SourceUnavailableNoSavedCopy); got != want {
+		t.Fatalf("the rebuild kept cause %q for cause-session, want the seeded %q", got, want)
+	}
+	if got, want := storedCause("unusable-session"), string(ingest.SourceUnavailableRecordUnusable); got != want {
+		t.Fatalf("the rebuild kept cause %q for unusable-session, want the seeded %q", got, want)
 	}
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_source_unavailability SET reason=? WHERE session_id='cause-session'`, &sqlitex.ExecOptions{Args: []any{string(ingest.SourceUnavailableRecordUnusable)}}); err != nil {
 		t.Fatalf("widened check refused the present-but-unusable cause: %v", err)
@@ -123,13 +148,8 @@ VALUES('cause-session','original-source-unavailable-no-usable-saved-copy');
 	if updated != 1 {
 		t.Fatalf("the cause update changed %d rows, want 1: the row did not survive the rebuild", updated)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `SELECT reason FROM session_source_unavailability WHERE session_id='cause-session'`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
-		if got := stmt.ColumnText(0); got != string(ingest.SourceUnavailableRecordUnusable) {
-			t.Fatalf("stored cause after the rebuild = %q, want %q", got, ingest.SourceUnavailableRecordUnusable)
-		}
-		return nil
-	}}); err != nil {
-		t.Fatal(err)
+	if got, want := storedCause("cause-session"), string(ingest.SourceUnavailableRecordUnusable); got != want {
+		t.Fatalf("stored cause after the rebuild = %q, want %q", got, want)
 	}
 }
 

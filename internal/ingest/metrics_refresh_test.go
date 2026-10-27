@@ -142,6 +142,9 @@ func TestStoredMetricRefreshAppliesTheRunSessionFilter(t *testing.T) {
 	if outside.Summary.Computed != 0 {
 		t.Fatalf("the refresh computed metrics for %d sessions outside the run's session filter, want 0", outside.Summary.Computed)
 	}
+	// The second run is the control for the first: the same stored session under
+	// a scope that covers it, so a zero above means the filter excluded it rather
+	// than that the refresh had no work to do.
 	inside := run(map[ingest.SessionID]bool{sid: true})
 	if inside.Summary.Computed != 1 {
 		t.Fatalf("the refresh computed metrics for %d sessions inside the run's session filter, want 1", inside.Summary.Computed)

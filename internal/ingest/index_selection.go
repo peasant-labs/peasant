@@ -299,8 +299,9 @@ func discoveredSessionStart(session DiscoveredSession) int64 {
 // includesSession is the session half of the run's explicit filters: a run that
 // names sessions reads only those. It is stated once, so a scope test that
 // applies the session half without the harness half — as the reindex FILTER
-// stage does, where Stage 2 has already decided the harness — still reads the
-// same rule as includesManagedSession.
+// stage does, where the harness half was already decided upstream, by
+// pairRepairTargets in Stage 1 for a repair and by the Stage 2 inventory for the
+// rest — still reads the same rule as includesManagedSession.
 func (p *Pipeline) includesSession(sid SessionID) bool {
 	return p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[sid]
 }

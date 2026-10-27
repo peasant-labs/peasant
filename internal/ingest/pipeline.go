@@ -5070,8 +5070,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Stage 3: FILTER — explicit session and age constraints apply to both stale
 	// and forced work. Saved discovery selection is not an access boundary over
 	// already-stored sessions and is deliberately not applied here. Only the
-	// session half is tested here: every target was already selected through the
-	// harness half, and a repair target may legitimately carry no named harness,
+	// session half is tested here: the harness half was already decided upstream,
+	// by pairRepairTargets in Stage 1 for a repair and by the Stage 2 inventory
+	// for the rest, and a repair target may legitimately carry no named harness,
 	// so testing it strictly again would drop repairs this run selected.
 	filterProfileStart := time.Now()
 	filterTotal := len(targeted)
