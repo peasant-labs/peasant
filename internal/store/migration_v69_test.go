@@ -98,24 +98,29 @@ VALUES('cause-session','original-source-unavailable-no-usable-saved-copy');
 	if err := sqlitemigration.Migrate(t.Context(), conn, dbSchema); err != nil {
 		t.Fatal(err)
 	}
+	// The rebuild copies the stored rows, so the row the predecessor held has to
+	// survive the drop-and-recreate with the cause it held. This read is taken
+	// before the update below overwrites the cause: a copy step that wrote a
+	// fixed value instead of the stored one would otherwise pass unnoticed.
+	copied := ""
+	if err := sqlitex.ExecuteTransient(conn, `SELECT reason FROM session_source_unavailability WHERE session_id='cause-session'`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		copied = stmt.ColumnText(0)
+		return nil
+	}}); err != nil {
+		t.Fatalf("read the cause the rebuild copied: %v", err)
+	}
+	if want := string(ingest.SourceUnavailableNoSavedCopy); copied != want {
+		t.Fatalf("the rebuild kept cause %q, want the seeded %q", copied, want)
+	}
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_source_unavailability SET reason=? WHERE session_id='cause-session'`, &sqlitex.ExecOptions{Args: []any{string(ingest.SourceUnavailableRecordUnusable)}}); err != nil {
 		t.Fatalf("widened check refused the present-but-unusable cause: %v", err)
 	}
-	// The rebuild copies the stored rows, so the row the predecessor held has to
-	// survive the drop-and-recreate with its new cause. A rebuild that dropped it
-	// leaves the cause update above matching no row and reporting no error, so
-	// the survivor is counted rather than inferred from a successful write.
-	var survived int
-	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_source_unavailability WHERE session_id='cause-session'`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
-		survived = int(stmt.ColumnInt64(0))
-		return nil
-	}}); err != nil {
-		t.Fatalf("count the stored rows after the rebuild: %v", err)
-	}
-	if survived != 1 {
-		t.Fatalf("the rebuild kept %d rows for the stored session, want 1", survived)
-	}
-	if updated := conn.Changes(); updated != 1 {
+	// The changed-row count is read immediately: another statement can reset the
+	// connection's last-change count, so a later read would not be about this
+	// update. A rebuild that dropped the row leaves this update matching
+	// nothing and reporting no error.
+	updated := conn.Changes()
+	if updated != 1 {
 		t.Fatalf("the cause update changed %d rows, want 1: the row did not survive the rebuild", updated)
 	}
 	if err := sqlitex.ExecuteTransient(conn, `SELECT reason FROM session_source_unavailability WHERE session_id='cause-session'`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
