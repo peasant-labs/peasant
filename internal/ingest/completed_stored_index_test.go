@@ -32,12 +32,20 @@ func (s completedIndexStateStore) ReadIndexState(context.Context, SessionID) (*S
 	return s.state, nil
 }
 
-// TestCompletedStoredIndexMatchesTheStoreRule pins the one definition of a
-// finished index: a positive producer revision and a recorded completion time.
-// A producer revision with no completion time does not serve. A completion
-// time with a zero producer revision does not serve. No row does not serve.
-// The format stamp is not a substitute for either half.
-func TestCompletedStoredIndexMatchesTheStoreRule(t *testing.T) {
+// TestCompletedStoredIndexIsAFinishedIndex pins the Go definition of a finished
+// index: a positive producer revision and a recorded completion time. A
+// producer revision with no completion time does not serve. A completion time
+// with no producer revision, or with a negative one, does not serve. No row
+// does not serve. The format stamp is not a substitute for either half.
+//
+// The SQL the store runs is not this rule: the only SQL statement of it is the
+// backfilled predicate inside the shipped index-format migration, which is
+// frozen history rather than a live derivation. Two things keep the two honest:
+// internal/store/migration_v54_test.go runs that migration over a fixture of
+// the same shapes (including a negative producer revision), and
+// internal/store/testdata/migration_slots.yaml pins the frozen script by needle,
+// so editing it fails the migration identity check.
+func TestCompletedStoredIndexIsAFinishedIndex(t *testing.T) {
 	var fixtures completedStoredIndexFixtures
 	decodeOneFixture(t, completedStoredIndexFixtureData, &fixtures, "completed-index fixture")
 	names := make(map[string]bool)
