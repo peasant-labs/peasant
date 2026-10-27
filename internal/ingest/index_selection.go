@@ -299,10 +299,10 @@ func discoveredSessionStart(session DiscoveredSession) int64 {
 // includesManagedSession is the strict harness and session half of the run's
 // explicit filters. Every database-driven inventory applies it, each with
 // withinRunAge for the age half: the index inventory, which the artifact mirror
-// and the dry-run plan share, the adapter refresh selection, and the
-// stored-discovery usability check. An unnamed harness does not match a
-// --harness run, because it is no evidence that the session belongs to that
-// harness.
+// and the dry-run plan share, the adapter refresh selection, the stored
+// metrics refresh, and the stored-discovery usability check. An unnamed harness
+// does not match a --harness run, because it is no evidence that the session
+// belongs to that harness.
 func (p *Pipeline) includesManagedSession(sid SessionID, harness Harness) bool {
 	return (p.config.Harness == nil || harness == *p.config.Harness) &&
 		(p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[sid])
