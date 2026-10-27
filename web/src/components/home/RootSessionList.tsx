@@ -150,9 +150,11 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
   const start = pageRows.slice(0, current - 1).reduce((sum, items) => sum + items.length, 0);
   useEffect(() => {
     if (wanted === null) return;
-    if (pageRows.length >= wanted) setPaging((state) => ({ ...state, page: wanted, wanted: null }));
-    else if (!reading && !hasMore) setPaging((state) => ({ ...state, wanted: null }));
-  }, [wanted, pageRows.length, reading, hasMore]);
+    // Rows render before this effect settles the requested page. A newer click
+    // or scope change must win over that older request's completion.
+    if (pageRows.length >= wanted) setPaging((state) => state.scope === scope && state.wanted === wanted ? { ...state, page: wanted, wanted: null } : state);
+    else if (!reading && !hasMore) setPaging((state) => state.scope === scope && state.wanted === wanted ? { ...state, wanted: null } : state);
+  }, [scope, wanted, pageRows.length, reading, hasMore]);
   const choose = (next: number) => {
     if (next <= pageRows.length) {
       setPaging((state) => ({ ...state, page: next, wanted: null }));

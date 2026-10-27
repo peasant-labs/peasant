@@ -119,11 +119,24 @@ describe('mounted Home opaque continuation', () => {
       fireEvent.click(screen.getByRole('button', { name: 'next page' }));
       await waitFor(() => expect(homeReads()).toHaveLength(4));
       await waitFor(() => expect(screen.getByRole('button', { name: 'page 2' })).toHaveAttribute('aria-current', 'page'));
-      fireEvent.click(screen.getByRole('button', { name: 'next page' }));
-      await screen.findByRole('link', { name: 'root-last' });
+      // Click as soon as the last page's rows mount, before passive pager
+      // effects settle. Returning to page 1 must supersede that older request.
+      let returnedFromLastPage = false;
+      const pageArrival = new MutationObserver(() => {
+        if (!screen.queryByRole('link', { name: 'root-last' })) return;
+        pageArrival.disconnect();
+        returnedFromLastPage = true;
+        fireEvent.click(screen.getByRole('button', { name: 'page 1' }));
+      });
+      pageArrival.observe(screen.getByRole('region', { name: 'sessions' }), { childList: true, subtree: true });
+      try {
+        fireEvent.click(screen.getByRole('button', { name: 'next page' }));
+        await screen.findByRole('link', { name: 'root-one' });
+        expect(returnedFromLastPage).toBe(true);
+      } finally {
+        pageArrival.disconnect();
+      }
       // Back on the first page; every page read stays in the loaded window.
-      fireEvent.click(screen.getByRole('button', { name: 'page 1' }));
-      await screen.findByRole('link', { name: 'root-one' });
       const before = homeReads().length;
       fresh = true;
       fireEvent(window, new Event('focus'));
