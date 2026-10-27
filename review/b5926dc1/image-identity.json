@@ -1,0 +1,162 @@
+[
+  {
+    "path": "root/dark/desktop/home-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "37fd6b1da93a10facedf8d2d832864c28a211eb368a26587ed7793a1d8274678",
+    "currentSHA256": "37fd6b1da93a10facedf8d2d832864c28a211eb368a26587ed7793a1d8274678",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/dark/desktop/map-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "eb1a2193a71927d5c107576c202b004feb948a5621e411b8af02a77a5d8fa13b",
+    "currentSHA256": "eb1a2193a71927d5c107576c202b004feb948a5621e411b8af02a77a5d8fa13b",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/dark/desktop/review-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "fa1038960d74786f089c4e58178da91bc15c7d09e076df14a8c34343cdec67d4",
+    "currentSHA256": "fa1038960d74786f089c4e58178da91bc15c7d09e076df14a8c34343cdec67d4",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "home-pages/home-dark-desktop.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "3ca3f55ca4f941022a8246d269612863c127900010ada64b862a896dda783a94",
+    "currentSHA256": "3ca3f55ca4f941022a8246d269612863c127900010ada64b862a896dda783a94",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/dark/phone/home-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "86d5d799fb2e104df493546af0364dc142dbdb4ec464b6147b5b20f644880d18",
+    "currentSHA256": "86d5d799fb2e104df493546af0364dc142dbdb4ec464b6147b5b20f644880d18",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/dark/phone/map-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "3bdcf80c02362c0ed2cc5793582661ab122cdb35774e5b4beed15a85d5de2872",
+    "currentSHA256": "3bdcf80c02362c0ed2cc5793582661ab122cdb35774e5b4beed15a85d5de2872",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/dark/phone/review-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "4eff6f5cf5a50c6964ea933f657fecde6a78cb9b5bd0d4108b24d74d58361e32",
+    "currentSHA256": "4eff6f5cf5a50c6964ea933f657fecde6a78cb9b5bd0d4108b24d74d58361e32",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "home-pages/home-dark-phone.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "6910cbe87a379bdd8686d6d9acc99e857c85f0880f855b4bab4f875a9c8a2982",
+    "currentSHA256": "6910cbe87a379bdd8686d6d9acc99e857c85f0880f855b4bab4f875a9c8a2982",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "publish/dark/desktop/unpublished-outside-ingestion-selection.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "e8f6a61355d0afb11cbec3dd3d980e235daf4ec7a7ad78bb75a6c772d457da2b",
+    "currentSHA256": "e8f6a61355d0afb11cbec3dd3d980e235daf4ec7a7ad78bb75a6c772d457da2b",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "publish/dark/mobile/unpublished-outside-ingestion-selection.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "a09d6b504ec7eb0970c78648a229e6e6972fb265a3b4119846d3ecf6832e41a3",
+    "currentSHA256": "a09d6b504ec7eb0970c78648a229e6e6972fb265a3b4119846d3ecf6832e41a3",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/light/desktop/home-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "abb1b20f55fb243d3f9c714ba4d08e4b9845e56e2e1c1d8c09f4371e3aacbd1d",
+    "currentSHA256": "abb1b20f55fb243d3f9c714ba4d08e4b9845e56e2e1c1d8c09f4371e3aacbd1d",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/light/desktop/map-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "c39b1c10e0fabdcfbd25d22177b7dd4428c21674fd3620e8e1379364c5e74c0a",
+    "currentSHA256": "c39b1c10e0fabdcfbd25d22177b7dd4428c21674fd3620e8e1379364c5e74c0a",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/light/desktop/review-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "f325600822fb847e9a189d70efbc379e9080ab50641211afa314898a2360daa9",
+    "currentSHA256": "f325600822fb847e9a189d70efbc379e9080ab50641211afa314898a2360daa9",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "home-pages/home-light-desktop.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "0b193cc56c33c68c1193500311ce95ef91db923c4de84eeb4d87858d30cc4971",
+    "currentSHA256": "0b193cc56c33c68c1193500311ce95ef91db923c4de84eeb4d87858d30cc4971",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/light/phone/home-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "a56a8d5312bd71947580083d317c79b093a1b5ff0df246102e47c86e3dcd706f",
+    "currentSHA256": "a56a8d5312bd71947580083d317c79b093a1b5ff0df246102e47c86e3dcd706f",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/light/phone/map-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "19ac9bd1df382e1c5e638218868520055944a1692a410567948e7254c7738cdf",
+    "currentSHA256": "19ac9bd1df382e1c5e638218868520055944a1692a410567948e7254c7738cdf",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "root/light/phone/review-projects.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "c2ce61e0c2692efb510f9deac47e0d03fc4af849429c7c6c0f8bf5d660b868ff",
+    "currentSHA256": "c2ce61e0c2692efb510f9deac47e0d03fc4af849429c7c6c0f8bf5d660b868ff",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "home-pages/home-light-phone.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "a08377f9dc7a9ef7b20f5a34cc6b44361f74d4c58b853384a6304665b57996dd",
+    "currentSHA256": "a08377f9dc7a9ef7b20f5a34cc6b44361f74d4c58b853384a6304665b57996dd",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "publish/light/desktop/unpublished-outside-ingestion-selection.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "b0fd894a9074ae96e7daf642850dc99498a64dac4931a111aa4cd3765dde61de",
+    "currentSHA256": "b0fd894a9074ae96e7daf642850dc99498a64dac4931a111aa4cd3765dde61de",
+    "identicalToInspectedImage": true
+  },
+  {
+    "path": "publish/light/mobile/unpublished-outside-ingestion-selection.png",
+    "previousSourceHead": "e9cb80353982d53e409a85500e535454f862f3db",
+    "currentSourceHead": "b5926dc1780687ba53718627bc560ccd471f40e3",
+    "previousSHA256": "f59d4d3cae401be7d420f44ce206a47cae86f01efbfb60cdc3d6727ee59845ad",
+    "currentSHA256": "f59d4d3cae401be7d420f44ce206a47cae86f01efbfb60cdc3d6727ee59845ad",
+    "identicalToInspectedImage": true
+  }
+]
