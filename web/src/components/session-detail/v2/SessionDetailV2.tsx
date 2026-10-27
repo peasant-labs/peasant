@@ -617,6 +617,13 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             showTail={false}
             showOutcome={false}
             showSearchTrigger
+            // The transcript reads as a ledger: a role-led head per turn, one
+            // grouped work panel over its tool calls, and compact system rows.
+            presentation="ledger"
+            // The footer's shortcut hint and position counter stay available,
+            // as they were on the classic surface; the wrapper still hides the
+            // hint outside the highlights tab.
+            footer={{ hints: true, progress: true }}
             // The graph toggle mounts fairtrade's @xyflow engine (`/graph`), which
             // owns graph topology, pan, and zoom while Fairtrade owns visuals.
             graphSlot={() => (

@@ -103,7 +103,9 @@ describe('mounted Strike transcript', () => {
     expect(canonicalDisplayName).toBeTruthy();
     expect(assistantTurn).toHaveAttribute('data-turn', '1');
     expect(roleLabel).toHaveTextContent('assistant');
-    expect(roleLabel?.querySelector('.brand')).toBeInTheDocument();
+    // The ledger head keeps the role word, the turn number, the time and the copy
+    // link; the provider identity stays on the header's meta chip, asserted above.
+    expect(assistantTurn?.querySelector('.txn-roleico')).toBeInTheDocument();
 
     const graphToggle = screen.getByRole('button', { name: /^graph$/i });
     expect(graphToggle).toHaveAttribute('aria-pressed', 'false');
