@@ -7,6 +7,20 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-10-27
+
+### Changed
+- The local transcript moves to Fairtrade 0.0.47. A turn's work is its own row
+  after the prose, opened from its summary line, and the tool and thinking
+  lines are inline detail rather than a footer on the turn. The timeline reads
+  amber for agent turns again, the reader centres in the space it has, and the
+  publish action reads `publish` in every state.
+
+### Fixed
+- Zen takes the app's own sidebar with it. The transcript fills the window
+  while zen is on, and the sidebar's collapse state is untouched, so leaving
+  zen restores exactly what the reader had.
+
 ## [0.13.1] - 2026-10-26
 
 ### Changed
