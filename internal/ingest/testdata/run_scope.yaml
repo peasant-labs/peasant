@@ -34,6 +34,8 @@ required_names:
   - created-at-places-a-repair-inside-the-window
   - mod-time-places-a-repair-inside-the-window
   - created-at-after-the-window-excludes-a-repair
+  - created-at-inside-wins-over-an-earlier-mod-time
+  - created-at-outside-wins-over-a-later-mod-time
 cases:
   - name: unnamed-harness-is-outside-a-harness-inventory
     harness: claude-code
@@ -111,6 +113,26 @@ cases:
   - name: created-at-after-the-window-excludes-a-repair
     session_harness: claude-code
     created_at_ms: 1748735999000
+    since_ms: 1748736000000
+    want_inventory: false
+    want_repair: false
+
+  # Both times are present only in the two cases below, and each of them fails
+  # if the resolution falls back to the file time: the first is included by its
+  # created time and excluded by its modification time, the second the reverse.
+  # Together they pin the created time as the start the candidate prefers.
+  - name: created-at-inside-wins-over-an-earlier-mod-time
+    session_harness: claude-code
+    created_at_ms: 1748736001000
+    mod_time_ms: 1748735999000
+    since_ms: 1748736000000
+    want_inventory: false
+    want_repair: true
+
+  - name: created-at-outside-wins-over-a-later-mod-time
+    session_harness: claude-code
+    created_at_ms: 1748735999000
+    mod_time_ms: 1748736001000
     since_ms: 1748736000000
     want_inventory: false
     want_repair: false
