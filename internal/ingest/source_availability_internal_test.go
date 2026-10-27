@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed testdata/source_record_unusable.yaml
+//go:embed testdata/source_unavailable.yaml
 var sourceUnavailableFixtureData []byte
 
 //go:embed testdata/source_unavailable_cause.yaml
@@ -79,17 +79,20 @@ func requireNamedCases(t *testing.T, label string, required []string, present ma
 // locator, or write fault must keep reporting until it clears on its own.
 func TestSourceUnavailableClassifiesOnlyTheSourceBytes(t *testing.T) {
 	var fixtures sourceUnavailableFixtures
-	decodeOneFixture(t, sourceUnavailableFixtureData, &fixtures, "source-record fixture")
+	decodeOneFixture(t, sourceUnavailableFixtureData, &fixtures, "source unavailable fixture")
 	names := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {
 		if fixture.Name == "" || names[fixture.Name] {
-			t.Fatalf("empty or duplicate source-record fixture %q", fixture.Name)
+			t.Fatalf("empty or duplicate source unavailable fixture %q", fixture.Name)
 		}
 		names[fixture.Name] = true
 	}
 	// This white-box test cannot import internal/testutil (it would close an
 	// import cycle through this package), so it checks the required names here.
-	requireNamedCases(t, "source-record fixture", fixtures.Required, names)
+	// That is why this small validator has a second copy here rather than a
+	// shared leaf package: the check is the same one RequireFixtureNames makes,
+	// and moving it would mean a new package both owners import.
+	requireNamedCases(t, "source unavailable fixture", fixtures.Required, names)
 	for _, fixture := range fixtures.Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			var err error
