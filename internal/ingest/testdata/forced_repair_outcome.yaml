@@ -175,11 +175,10 @@ cases:
     want_indexed: 0
     want_promise: neutral
     want_mentions: "no recorded original source"
+    want_content_promise: neutral
   # The run's own age filter bounds the failure count. This session has no
   # recorded start, so a --since window cannot place it inside the window and its
   # unrouted repair is not this run's failed session.
-    want_content_promise: neutral
-
   - name: harvest-unrecorded-forced-outside-since
     command: harvest
     source: unrecorded
@@ -219,11 +218,10 @@ cases:
     want_updated: 0
     want_promise: neutral
     want_mentions: "no recorded original source"
+    want_content_promise: neutral
   # The same window on a session whose stored metadata survived: its recorded
   # start is inside the window, so the repair is this run's work and the forced
   # failure is counted.
-    want_content_promise: neutral
-
   - name: reindex-damaged-forced-inside-since
     command: reindex
     source: missing
