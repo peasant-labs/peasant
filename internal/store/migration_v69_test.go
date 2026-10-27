@@ -102,7 +102,22 @@ VALUES('cause-session','original-source-unavailable-no-usable-saved-copy');
 		t.Fatalf("widened check refused the present-but-unusable cause: %v", err)
 	}
 	// The rebuild copies the stored rows, so the row the predecessor held has to
-	// survive the drop-and-recreate with its new cause.
+	// survive the drop-and-recreate with its new cause. A rebuild that dropped it
+	// leaves the cause update above matching no row and reporting no error, so
+	// the survivor is counted rather than inferred from a successful write.
+	var survived int
+	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_source_unavailability WHERE session_id='cause-session'`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		survived = int(stmt.ColumnInt64(0))
+		return nil
+	}}); err != nil {
+		t.Fatalf("count the stored rows after the rebuild: %v", err)
+	}
+	if survived != 1 {
+		t.Fatalf("the rebuild kept %d rows for the stored session, want 1", survived)
+	}
+	if updated := conn.Changes(); updated != 1 {
+		t.Fatalf("the cause update changed %d rows, want 1: the row did not survive the rebuild", updated)
+	}
 	if err := sqlitex.ExecuteTransient(conn, `SELECT reason FROM session_source_unavailability WHERE session_id='cause-session'`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
 		if got := stmt.ColumnText(0); got != string(ingest.SourceUnavailableRecordUnusable) {
 			t.Fatalf("stored cause after the rebuild = %q, want %q", got, ingest.SourceUnavailableRecordUnusable)
