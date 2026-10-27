@@ -292,24 +292,24 @@ func (p *StoreDataProvider) sessionCandidate(row *store.SessionRow) sessionvisib
 
 // SelectionScopeByID reports, for each named session stored on this computer,
 // whether the saved selection admits it for INGEST and PUSH metadata. It reads
-// exactly the named rows. An identifier that names no stored session is absent
+// the complete identity cohort, including nonpushable clone evidence, but
+// evaluates only the named rows. An identifier that names no stored session is absent
 // from the map. The publication read uses it to describe the saved ingest/push
 // selector; it is never a reason to withhold the session, and no browsing
 // surface may use it to narrow a list.
-func (p *StoreDataProvider) SelectionScopeByID(ctx context.Context, ids []string) (map[string]bool, error) {
-	rows, err := p.store.SessionsByIDs(ctx, ids)
+func (p *StoreDataProvider) SelectionScopeByID(ctx context.Context, ids []string, resolver ingest.RepositoryIdentityResolver) (map[string]bool, error) {
+	if len(ids) == 0 {
+		return map[string]bool{}, nil
+	}
+	cohort, err := p.store.HomeIdentityCohort(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store adapter: selection scope by id: %w", err)
 	}
-	selected := make(map[string]bool, len(rows))
-	for i := range rows {
-		inSelection, err := p.visibility.SelectedForIngest(p.sessionCandidate(&rows[i]))
-		if err != nil {
-			return nil, fmt.Errorf("store adapter: selection scope of session %q: %w", rows[i].SessionID, err)
-		}
-		selected[rows[i].SessionID] = inSelection
+	rows := make([]store.SessionRow, len(cohort))
+	for i := range cohort {
+		rows[i] = cohort[i].Identity
 	}
-	return selected, nil
+	return storedSelectionMembership(ctx, rows, ids, p.visibility.Selection(), resolver)
 }
 
 // discoverableSessionRow applies the origin discovery scope. It backs the

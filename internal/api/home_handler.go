@@ -215,49 +215,13 @@ func (r *syncHomePageReader) cohort(ctx context.Context) (syncHomeCohort, error)
 // Only publication metadata and the explicit publication=auto filter need it;
 // project options and selection-free browse pages never evaluate it.
 func (r *syncHomePageReader) selectionMembership(ctx context.Context, cohort syncHomeCohort, ids []string) (map[string]bool, error) {
-	membership := make(map[string]bool, len(ids))
-	if len(ids) == 0 {
-		return membership, nil
-	}
-	requested := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		requested[id] = true
-	}
 	selection := config.SelectionConfig{Mode: config.SelectionModeAll}
 	if r.config != nil {
 		selection = r.config.Selection
 	}
-	if !selection.Mode.IsValid() {
-		return nil, fmt.Errorf("api.syncHomePageReader.selectionMembership: the saved kickstart selection has no valid mode %q, so outsideSelection and autoPublish cannot be reported truthfully; no page was returned; run `peasant kickstart` to repair selection.mode (valid: all, selected), then retry", selection.Mode)
-	}
-	if selection.Mode == config.SelectionModeAll {
-		for id := range requested {
-			membership[id] = true
-		}
-		return membership, nil
-	}
-	compiled := config.CompileSelectionMatcher(selection)
-	prepared, remotes, names, err := prepareWebDiscoveryIdentities(ctx, cohort.ordered, selection, r.resolver)
+	membership, err := storedSelectionMembership(ctx, cohort.ordered, ids, selection, r.resolver)
 	if err != nil {
 		return nil, err
-	}
-	for i, row := range cohort.ordered {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if !requested[row.SessionID] {
-			continue
-		}
-		switch match := compiled.MatchBranchCandidate(ingest.DiscoveryCandidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: value(row.CanonicalRemote), ProjectName: row.ProjectName, ClonePath: prepared[i].clonePath, Branch: value(row.GitBranch), RemoteMultiplicity: remotes[i], NameMultiplicity: names[i]}); match {
-		case ingest.BranchMatchYes:
-			membership[row.SessionID] = true
-		case ingest.BranchMatchNo:
-			membership[row.SessionID] = false
-		case ingest.BranchMatchWithheldConflict:
-			return nil, fmt.Errorf("api.syncHomePageReader.selectionMembership: conflicting persisted project branch rules for session %q; outsideSelection cannot be reported truthfully, so no page was returned; run `peasant kickstart` and make the project's branch selection consistent, then retry", row.SessionID)
-		default:
-			return nil, fmt.Errorf("api.syncHomePageReader.selectionMembership: unknown canonical matcher result for session %q; no page was returned because the saved ingest/push selection cannot be reported truthfully; update Peasant and retry", row.SessionID)
-		}
 	}
 	for _, id := range ids {
 		if _, known := membership[id]; !known {

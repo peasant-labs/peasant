@@ -1,4 +1,9 @@
 requiredNames: [mode_all, selected_restrictive, selected_empty, selected_excluded, selected_stale]
+sessions:
+  - {id: lib-a, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, origin: user, pushable: true, text: libraryneedle}
+  - {id: lib-b, projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, origin: user, pushable: true, text: libraryneedle}
+  - {id: lib-c, projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, origin: agent, pushable: true, text: libraryneedle}
+  - {id: lib-h, projectHash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd, origin: agent, purpose: helper_review, owner: lib-a, ownerState: target_known, pushable: true, text: libraryneedle}
 # Home is a root page. The helper is grouped under its person-driven owner, so it
 # appears on that owner's child page; the combined set is the whole library.
 homeRootIds: [lib-c, lib-b, lib-a]

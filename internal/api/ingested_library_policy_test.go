@@ -36,12 +36,13 @@ type libraryPolicyCase struct {
 }
 
 type libraryPolicyFixture struct {
-	RequiredNames     []string            `yaml:"requiredNames"`
-	HomeRootIDs       []string            `yaml:"homeRootIds"`
-	HomeChildIDs      []string            `yaml:"homeChildIds"`
-	HomeParentID      string              `yaml:"homeParentId"`
-	HomeProjectHashes []string            `yaml:"homeProjectHashes"`
-	Cases             []libraryPolicyCase `yaml:"cases"`
+	RequiredNames     []string                    `yaml:"requiredNames"`
+	HomeRootIDs       []string                    `yaml:"homeRootIds"`
+	HomeChildIDs      []string                    `yaml:"homeChildIds"`
+	HomeParentID      string                      `yaml:"homeParentId"`
+	HomeProjectHashes []string                    `yaml:"homeProjectHashes"`
+	Sessions          []helperGroupListingSession `yaml:"sessions"`
+	Cases             []libraryPolicyCase         `yaml:"cases"`
 }
 
 func loadLibraryPolicyFixture(t *testing.T) libraryPolicyFixture {
@@ -63,6 +64,17 @@ func loadLibraryPolicyFixture(t *testing.T) libraryPolicyFixture {
 	}
 	if len(fixture.HomeRootIDs) == 0 || len(fixture.HomeChildIDs) == 0 || fixture.HomeParentID == "" || len(fixture.HomeProjectHashes) == 0 {
 		t.Fatal("ingested library policy fixture must declare its Home root, child, parent and project-option identities")
+	}
+	seedIDs := make([]string, 0, len(fixture.Sessions))
+	for _, session := range fixture.Sessions {
+		seedIDs = append(seedIDs, session.ID)
+		if session.ProjectHash == "" || session.Origin == "" ||
+			session.Text == "" || !session.Pushable {
+			t.Fatalf("ingested library seed %q must declare its project, origin, text and push eligibility", session.ID)
+		}
+	}
+	if !equalIDSet(seedIDs, []string{libraryInsideSession, libraryOutsideSession, libraryAgentSession, libraryHelperSession}) {
+		t.Fatalf("ingested library seed IDs = %v; must retain the person, agent and helper identities", seedIDs)
 	}
 	for _, fixtureCase := range fixture.Cases {
 		if !fixtureCase.Selection.Mode.IsValid() {
@@ -105,7 +117,7 @@ func TestIngestedLibraryBrowsingIgnoresSavedSelection(t *testing.T) {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
 			db := storetest.Open(t)
-			seedIngestedLibrary(t, db)
+			seedIngestedLibrary(t, db, fixture.Sessions)
 
 			cfg := config.BaseConfig()
 			cfg.Selection = fixtureCase.Selection
@@ -132,15 +144,9 @@ func TestIngestedLibraryBrowsingIgnoresSavedSelection(t *testing.T) {
 // seedIngestedLibrary writes the stored rows and the projects their selector
 // rules name. The helper belongs to the person's inside session so group
 // expansion has a real owner.
-func seedIngestedLibrary(t *testing.T, db *store.Store) {
+func seedIngestedLibrary(t *testing.T, db *store.Store, sessions []helperGroupListingSession) {
 	t.Helper()
-	seeded := []helperGroupListingSession{
-		{ID: libraryInsideSession, ProjectHash: libraryAlphaHash.String(), Origin: "user", Pushable: true, Text: "libraryneedle"},
-		{ID: libraryOutsideSession, ProjectHash: libraryBetaHash.String(), Origin: "user", Pushable: true, Text: "libraryneedle"},
-		{ID: libraryAgentSession, ProjectHash: libraryGammaHash.String(), Origin: "agent", Pushable: true, Text: "libraryneedle"},
-		{ID: libraryHelperSession, ProjectHash: libraryHelperHash.String(), Origin: "agent", Purpose: "helper_review", Owner: libraryInsideSession, OwnerState: "target_known", Pushable: true, Text: "libraryneedle"},
-	}
-	for index, session := range seeded {
+	for index, session := range sessions {
 		seedHelperGroupSession(t, db, session, int64(index+1))
 	}
 	homeExec(t, db, `UPDATE projects SET canonical_cwd = ?, canonical_remote = ? WHERE project_hash = ?`,

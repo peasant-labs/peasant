@@ -69,15 +69,15 @@ type Candidate struct {
 //
 //   - the discovery projection, which is origin-only and answers
 //     VisibleForDiscovery; every browsing surface uses this;
-//   - the saved-selection membership, which answers SelectedForIngest and is
-//     read only by the publication-metadata helper that describes the ingest and
-//     push selector.
+//   - the saved-selection membership: SelectedForIngest answers for an isolated
+//     candidate; Selection supplies the selector to cohort-aware publication
+//     metadata, which also needs repository topology and clone multiplicities.
 //
 // A browsing caller must not use SelectedForIngest or the saved selection for
 // any list, count, picker, search, or paging decision.
 type Policy struct {
-	mode    config.SelectionMode
-	matcher ingest.SelectionMatcher
+	selection config.SelectionConfig
+	matcher   ingest.SelectionMatcher
 	// revision is the browsing revision, never the selection digest.
 	revision string
 }
@@ -89,17 +89,21 @@ type Policy struct {
 // error can name the remedy without touching browsing.
 func New(selection config.SelectionConfig) Policy {
 	return Policy{
-		mode:     selection.Mode,
-		matcher:  config.CompileSelectionMatcher(selection),
-		revision: browsingRevision,
+		selection: selection,
+		matcher:   config.CompileSelectionMatcher(selection),
+		revision:  browsingRevision,
 	}
 }
 
 // Browsing returns the origin-only discovery policy. It carries no saved
 // selection: browsing never consults one.
 func Browsing() Policy {
-	return Policy{mode: config.SelectionModeAll, revision: browsingRevision}
+	return New(config.SelectionConfig{Mode: config.SelectionModeAll})
 }
+
+// Selection returns the saved ingest/push selector for cohort-aware metadata
+// projection. Callers must treat it as immutable; browsing must not consult it.
+func (p Policy) Selection() config.SelectionConfig { return p.selection }
 
 // Revision returns the stable browsing revision. Discovery readers record it
 // beside a list so a member continuation replays the same browsing projection.
@@ -109,13 +113,13 @@ func (p Policy) Revision() string { return p.revision }
 // ingest or push metadata. It is NOT a browsing predicate: use
 // VisibleForDiscovery for discovery lists.
 func (p Policy) SelectedForIngest(candidate Candidate) (bool, error) {
-	if !p.mode.IsValid() {
+	if !p.selection.Mode.IsValid() {
 		return false, errorf(
 			"session visibility: the saved kickstart selection has no valid mode while ingest/push membership was requested for session %q; browsing is unaffected, but the publication metadata cannot be reported truthfully; run `peasant kickstart` to repair selection.mode and retry the publication read",
 			candidate.SessionID,
 		)
 	}
-	if p.mode == config.SelectionModeAll {
+	if p.selection.Mode == config.SelectionModeAll {
 		return true, nil
 	}
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -576,6 +577,8 @@ func TestSyncHomeInvalidSelectionFailsMetadataButNotStoredBrowsing(t *testing.T)
 	}
 
 	provider := NewStoreDataProvider(db, sessionvisibility.New(cfg.Selection))
+	base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: cfg, Provider: provider, ConfigHome: t.TempDir()})
+	assertPublicationMetadataFailure(t, &publishingWorld{db: db, baseURL: base}, ids, "selection", "kickstart")
 	sessions, err := provider.Sessions(context.Background())
 	if err != nil {
 		t.Fatalf("plain Sessions: %v", err)
@@ -612,8 +615,12 @@ func assertProjectFilteredConflictMetadata(t *testing.T, tc homeSelectionCase, d
 	cfg.Selection = selection
 	sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
 	h := &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: resolver}
+	base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: cfg, Provider: NewStoreDataProvider(db, sessionvisibility.New(cfg.Selection)), ConfigHome: t.TempDir(), RepositoryIdentityResolver: resolver})
+	world := &publishingWorld{db: db, baseURL: base}
 
-	healthyPage := syncPageRequest(t, http.HandlerFunc(h.handleSessions), "view=home&projectHash="+healthy.ProjectHash, 200)
+	var healthyPage schema.LocalSyncSessionPage
+	world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&projectHash="+healthy.ProjectHash, &healthyPage)
+	assertHomePublicationParity(t, world, healthyPage.Items)
 	gotIDs := make([]string, 0, len(healthyPage.Items))
 	for _, item := range healthyPage.Items {
 		gotIDs = append(gotIDs, item.Sync.ID)
@@ -651,6 +658,36 @@ func assertProjectFilteredConflictMetadata(t *testing.T, tc homeSelectionCase, d
 	if !strings.Contains(envelope.Error, "conflicting") {
 		t.Fatalf("conflicting-project failure = %q, want the conflicting-rule cause", envelope.Error)
 	}
+	assertPublicationMetadataFailure(t, world, []string{healthy.ID, conflicting.ID}, "conflicting", "kickstart")
+}
+
+func assertPublicationMetadataFailure(t *testing.T, world *publishingWorld, ids []string, cause, remedy string) {
+	t.Helper()
+	status, body := world.request(t, http.MethodGet, defaults.RoutePublications.String()+"?sessionIds="+strings.Join(ids, ","), nil)
+	if status != http.StatusInternalServerError {
+		t.Fatalf("publication metadata failure status = %d, want 500; body %s", status, body)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(body, &keys); err != nil {
+		t.Fatal(err)
+	}
+	if keys["publications"] != nil || keys["items"] != nil || keys["next"] != nil {
+		t.Fatalf("publication metadata failure returned partial rows: %s", body)
+	}
+	var envelope errorEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(envelope.Error, cause) || !strings.Contains(envelope.Error, remedy) {
+		t.Fatalf("publication metadata failure = %q, want cause %q and remedy", envelope.Error, cause)
+	}
+	// An entirely stale request has no membership to compute, even when the
+	// stored selector or another row's identity cannot be evaluated.
+	var missing schema.LocalPublicationsResponse
+	world.decode(t, http.MethodGet, defaults.RoutePublications.String()+"?sessionIds=missing-stored-session", &missing)
+	if len(missing.Publications) != 0 {
+		t.Fatalf("missing-only publication read invented rows: %+v", missing.Publications)
+	}
 }
 
 type homeSelectionCase struct {
@@ -658,6 +695,8 @@ type homeSelectionCase struct {
 	Clone                  bool
 	DropIndependentMetrics bool     `yaml:"dropIndependentMetrics"`
 	ConflictUnrelated      bool     `yaml:"conflictUnrelated"`
+	InstalledBinding       bool     `yaml:"installedBinding"`
+	AutoPublish            []string `yaml:"autoPublish"`
 	IDs                    []string `yaml:"ids"`
 	OutsideSelection       []string `yaml:"outsideSelection"`
 }
@@ -694,9 +733,32 @@ func TestSyncHomeListsEveryPushableSessionRegardlessOfSelection(t *testing.T) {
 			}
 			cfg := config.BaseConfig()
 			cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{defaults.HarnessClaudeCode.String(): selection}}
-			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-			sh.home = &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: resolver}
-			p := syncPageRequest(t, http.HandlerFunc(sh.handleSyncSessions), "view=home", 200)
+			var topology ingest.RepositoryIdentityResolver = resolver
+			if tc.InstalledBinding {
+				main := paths[source.Sessions[0].Worktree]
+				runGit(t, main, "init", "-b", "main")
+				runGit(t, main, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "fixture")
+				runGit(t, main, "worktree", "add", "-b", "fixture-feature", paths[source.Sessions[1].Worktree])
+				runGit(t, paths[source.Sessions[2].Worktree], "init", "-b", "main")
+				runGit(t, paths[source.Sessions[3].Worktree], "init", "-b", "main")
+				topology = ingest.NewGitRepositoryIdentityResolver()
+			}
+			base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: cfg, Provider: NewStoreDataProvider(db, sessionvisibility.New(cfg.Selection)), ConfigHome: t.TempDir(), RepositoryIdentityResolver: topology})
+			world := &publishingWorld{db: db, baseURL: base}
+			if tc.InstalledBinding {
+				var saved schema.AutoPublishRule
+				status, body := world.request(t, http.MethodPut, ruleRoute("metadata-parity"), schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: filepath.Dir(paths[source.Sessions[0].Worktree]) + "/*", Events: []schema.AutoPublishEvent{schema.AutoPublishPrePush}, Collectives: []schema.VillageUUID{publishingCollectives["platform"].ID}})
+				decodeContract(t, status, body, &saved)
+				var installed schema.AutoPublishRepository
+				status, body = world.request(t, http.MethodPost, installRoute("metadata-parity"), schema.AutoPublishInstallRequest{Path: paths[source.Sessions[0].Worktree]})
+				decodeContract(t, status, body, &installed)
+				if installed.Hooks[0].Status != schema.AutoPublishHookInstalled {
+					t.Fatalf("binding hook not installed: %+v", installed)
+				}
+			}
+			var p schema.LocalSyncSessionPage
+			world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", &p)
+			assertHomePublicationParity(t, world, p.Items)
 			ids := []string{}
 			for _, row := range p.Items {
 				ids = append(ids, row.Sync.ID)
@@ -713,11 +775,46 @@ func TestSyncHomeListsEveryPushableSessionRegardlessOfSelection(t *testing.T) {
 				if wantOutside && row.Publication.AutoPublish {
 					t.Fatalf("session %q reports autoPublish=true while outsideSelection=true", row.Sync.ID)
 				}
+				if row.Publication.AutoPublish != slices.Contains(tc.AutoPublish, row.Sync.ID) {
+					t.Fatalf("session %q autoPublish=%t, want IDs %v", row.Sync.ID, row.Publication.AutoPublish, tc.AutoPublish)
+				}
 			}
 			if !reflect.DeepEqual(ids, tc.IDs) {
 				t.Fatalf("ids=%v want=%v", ids, tc.IDs)
 			}
+			if tc.InstalledBinding {
+				var automatic schema.LocalSyncSessionPage
+				world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&publication=auto", &automatic)
+				autoIDs := make([]string, 0, len(automatic.Items))
+				for _, row := range automatic.Items {
+					autoIDs = append(autoIDs, row.Sync.ID)
+				}
+				if !slices.Equal(autoIDs, tc.AutoPublish) {
+					t.Fatalf("Home auto view IDs=%v, want=%v", autoIDs, tc.AutoPublish)
+				}
+				assertHomePublicationParity(t, world, automatic.Items)
+			}
 		})
+	}
+}
+
+func assertHomePublicationParity(t *testing.T, world *publishingWorld, items []schema.LocalSyncSessionRow) {
+	t.Helper()
+	ids := make([]string, 0, len(items)+1)
+	for _, item := range items {
+		ids = append(ids, item.Sync.ID)
+	}
+	// A stale identifier must stay omitted, not acquire invented membership.
+	ids = append(ids, "missing-stored-session")
+	var publications schema.LocalPublicationsResponse
+	world.decode(t, http.MethodGet, defaults.RoutePublications.String()+"?sessionIds="+strings.Join(ids, ","), &publications)
+	if len(publications.Publications) != len(items) {
+		t.Fatalf("by-ID publications = %+v, want exactly %d stored rows", publications.Publications, len(items))
+	}
+	for i, item := range items {
+		if !reflect.DeepEqual(publications.Publications[i], item.Publication) {
+			t.Errorf("session %q Home publication %+v differs from by-ID %+v", item.Sync.ID, item.Publication, publications.Publications[i])
+		}
 	}
 }
 
@@ -944,6 +1041,8 @@ func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 				// still reaches the canonical matcher.
 				defaults.HarnessOpenCode.String(): {Projects: []config.ProjectSelection{{Name: "unrelated-name", ClonePaths: []string{physical.String()}}}},
 			}}
+			base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: cfg, Provider: NewStoreDataProvider(db, sessionvisibility.New(cfg.Selection)), ConfigHome: t.TempDir()})
+			world := &publishingWorld{db: db, baseURL: base}
 			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
 			sh.home = &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: ingest.NewGitRepositoryIdentityResolver()}
 			response := httptest.NewRecorder()
@@ -966,6 +1065,7 @@ func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 				if !slices.Equal(ids, tc.IDs) {
 					t.Fatalf("ids = %v, want %v", ids, tc.IDs)
 				}
+				assertHomePublicationParity(t, world, page.Items)
 				return
 			}
 			var body errorEnvelope
@@ -975,6 +1075,7 @@ func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 			if !strings.Contains(body.Error, sessionID) || !strings.Contains(body.Error, "ambiguous") {
 				t.Fatalf("failure body = %q, want the fail-closed topology error naming %q", body.Error, sessionID)
 			}
+			assertPublicationMetadataFailure(t, world, []string{sessionID}, "ambiguous", "Restore")
 		})
 	}
 }

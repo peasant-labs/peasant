@@ -2,7 +2,7 @@
 # set: selection controls future ingestion, never this page. The
 # dropIndependentMetrics case removes one row's metrics, which is a real
 # push-eligibility bound and still applies.
-requiredNames: [clone-and-branch, ambiguous-remote-with-nonpushable-clone, branch-mismatch, explicit-session-does-not-widen, project-filter-skips-unrelated-conflict]
+requiredNames: [clone-and-branch, ambiguous-remote-with-nonpushable-clone, branch-mismatch, explicit-session-does-not-widen, project-filter-skips-unrelated-conflict, clone-and-branch-installed-binding, ambiguous-remote-installed-binding]
 cases:
   - name: clone-and-branch
     clone: true
@@ -27,3 +27,16 @@ cases:
     conflictUnrelated: true
     ids: [session-independent-clone, session-linked-feature, session-selected-main]
     outsideSelection: [session-independent-clone, session-linked-feature]
+  - name: clone-and-branch-installed-binding
+    clone: true
+    branch: main
+    installedBinding: true
+    ids: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-independent-clone]
+    autoPublish: [session-linked-feature, session-selected-main]
+  - name: ambiguous-remote-installed-binding
+    dropIndependentMetrics: true
+    branch: main
+    installedBinding: true
+    ids: [session-other-project, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-linked-feature, session-selected-main]

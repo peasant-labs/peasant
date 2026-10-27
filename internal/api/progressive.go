@@ -272,12 +272,12 @@ func (p *ProgressiveProvider) GroupedScopeRevision() string {
 // SelectionScopeByID answers from the real store whatever the mock settings
 // say: the publication metadata read it serves describes this computer's saved
 // ingest/push selector, which the mock does not have. It never narrows a list.
-func (p *ProgressiveProvider) SelectionScopeByID(ctx context.Context, ids []string) (map[string]bool, error) {
+func (p *ProgressiveProvider) SelectionScopeByID(ctx context.Context, ids []string, resolver ingest.RepositoryIdentityResolver) (map[string]bool, error) {
 	scoped, ok := p.real.(selectionScopeReader)
 	if !ok {
 		return nil, fmt.Errorf("progressive provider: selection scope by id: no stored-session provider is wired, so the saved selection cannot be applied to the named sessions; start Peasant with its normal store and retry")
 	}
-	return scoped.SelectionScopeByID(ctx, ids)
+	return scoped.SelectionScopeByID(ctx, ids, resolver)
 }
 
 // Ensure implementation of DataProvider interface.

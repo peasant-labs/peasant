@@ -260,6 +260,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	if identityResolver == nil {
 		identityResolver = ingest.NewGitRepositoryIdentityResolver()
 	}
+	ph.resolver = identityResolver
 	sh.home = &homeHandler{reader: homeStore, sync: sh, publishing: ph, resolver: identityResolver}
 	mux.HandleFunc("GET "+defaults.RouteVillageCollectives.String(), ph.handleVillageCollectives)
 	observations := &collectiveObservationHandler{service: collectiveobservations.New(collectiveobservations.Dependencies{Store: s.cfg.Store, ConfigHome: s.cfg.ConfigHome, LocallyHeldTranscriptIDs: observationinventory.Held(s.cfg.Store), FetchTimeout: fetchTimeout})}

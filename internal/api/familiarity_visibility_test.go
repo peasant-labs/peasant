@@ -184,7 +184,7 @@ func TestProjectFamiliarity_AggregatesEveryStoredSessionAndCaps(t *testing.T) {
 			}
 			// The fixture keeps its saved-selection input to prove familiarity
 			// aggregates every stored session, selection or not.
-			provider := api.NewStoreDataProvider(s, sessionvisibility.Browsing())
+			provider := api.NewStoreDataProvider(s, sessionvisibility.New(tc.Input.Selection))
 			projectHash, hashErr := schema.NewProjectHash(tc.Input.ProjectHash)
 			if hashErr != nil {
 				t.Fatalf("fixture project hash: %v", hashErr)
