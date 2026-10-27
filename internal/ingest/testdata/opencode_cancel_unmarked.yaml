@@ -1,0 +1,21 @@
+# A cancelled OpenCode read is not a property of the source bytes.
+#
+# The message case is already cancelled when the message is read. The part
+# case stays live through the message and cancels on the part, so a message
+# refusal cannot stand in for the part loop.
+required_names:
+  - cancelled_message
+  - cancelled_part
+
+cases:
+  - name: cancelled_message
+    record: message
+    message_name: msg-1.json
+    message: '{"id":"msg-1","role":"user"}'
+
+  - name: cancelled_part
+    record: part
+    message_name: msg-1.json
+    message: '{"id":"msg-1","role":"user"}'
+    part_name: part-1.json
+    part: '{"type":"text","text":"kept"}'

@@ -96,6 +96,61 @@ func (s *metricsRefreshStore) SaveMetrics(ctx context.Context, value *ingest.Ses
 	return s.Store.SaveMetrics(ctx, value)
 }
 
+// TestStoredMetricRefreshAppliesTheRunSessionFilter pins the stored metrics
+// refresh to the run's shared scope at the call site. The scope rule itself is
+// covered case by case where it is stated (the index inventory and the pair
+// repair); this test answers the separate question of whether the refresh asks
+// it at all, because a refresh that stopped asking would keep computing
+// sessions the run excluded while every rule-level test stayed green.
+func TestStoredMetricRefreshAppliesTheRunSessionFilter(t *testing.T) {
+	t.Parallel()
+	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	meta := makeReindexMeta(t, testutil.TestSessionUUID, "/synthetic/unavailable/session.jsonl")
+	meta.Project.Hash = testutil.TestProjectHash
+	sid := meta.SessionID
+	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+		t.Fatal(err)
+	}
+	entry := schema.SessionEntry{SessionID: sid, Harness: meta.ModelHarness, EntryType: ingest.EntryTypeText, Role: ingest.RoleUser}
+	if err := db.IndexSessionEntries(t.Context(), sid, []schema.SessionEntry{entry}); err != nil {
+		t.Fatal(err)
+	}
+	// Discovery selects nothing, so the only downstream work available to the
+	// run is the stored maintenance this test is about.
+	run := func(scope map[ingest.SessionID]bool) ingest.PipelineResult {
+		t.Helper()
+		config := makePipelineConfig(testOutputDir)
+		config.SessionFilter = func(ingest.DiscoveredSession) bool { return false }
+		config.AllowedSessionIDs = scope
+		pipeline, err := newTestPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(),
+			map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}, config,
+			ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithAnalyzer(metrics.NewEngine(&metricsRefreshStore{Store: db})))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := pipeline.Run(t.Context())
+		if err != nil {
+			t.Fatalf("stored metrics refresh run: %v", err)
+		}
+		return *result
+	}
+	outside := run(map[ingest.SessionID]bool{"22222222-2222-4222-8222-222222222222": true})
+	if outside.Summary.Computed != 0 {
+		t.Fatalf("the refresh computed metrics for %d sessions outside the run's session filter, want 0", outside.Summary.Computed)
+	}
+	// The second run is the control for the first: the same stored session under
+	// a scope that covers it, so a zero above means the filter excluded it rather
+	// than that the refresh had no work to do.
+	inside := run(map[ingest.SessionID]bool{sid: true})
+	if inside.Summary.Computed != 1 {
+		t.Fatalf("the refresh computed metrics for %d sessions inside the run's session filter, want 1", inside.Summary.Computed)
+	}
+}
+
 func TestPipelineRetainsNonfatalMetricRefreshDiagnostics(t *testing.T) {
 	t.Parallel()
 	var fixture struct {

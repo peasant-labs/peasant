@@ -190,7 +190,7 @@ func TestPullRoundTripE2E(t *testing.T) {
 	assertUnauthenticatedAPI401(t, villageURL, rootTranscript.ID)
 
 	// ============================ GROUP-SHARE (before user2 annotates) ============================
-	groupShareTranscript(t, villageURL, user1APIKey, user2.Username, rootTranscript.ID, "pull-e2e-group")
+	groupShareTranscript(t, villageURL, user1APIKey, user2, rootTranscript.ID, "pull-e2e-group")
 	assertLatestVisibilityAudit(t, db, rootTranscript.ID, "shared", user1ID)
 	assertRemoteListAssociationCount(t, peasantBin, user2XDG, rootTranscript.ID, associationFixture.ExpectedAnnotationCount)
 

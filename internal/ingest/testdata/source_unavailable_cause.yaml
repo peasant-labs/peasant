@@ -1,0 +1,38 @@
+# Which failures are a source cause, and which cause they are.
+#
+# A missing file and a record that cannot be used are different causes. A
+# store, locator, or write fault is neither, so it must not settle.
+required_names:
+  - missing_source
+  - wrapped_missing_source
+  - truncated_record
+  - invalid_record
+  - locator_fault
+  - store_write_fault
+  - nil_error
+cases:
+  - name: missing_source
+    kind: not_exist
+    want_cause: original-source-unavailable-no-usable-saved-copy
+    want_ok: true
+  - name: wrapped_missing_source
+    kind: wrapped_not_exist
+    want_cause: original-source-unavailable-no-usable-saved-copy
+    want_ok: true
+  - name: truncated_record
+    kind: malformed
+    want_cause: original-source-present-record-unusable
+    want_ok: true
+  - name: invalid_record
+    kind: malformed_with_cause
+    want_cause: original-source-present-record-unusable
+    want_ok: true
+  - name: locator_fault
+    kind: locator
+    want_ok: false
+  - name: store_write_fault
+    kind: store
+    want_ok: false
+  - name: nil_error
+    kind: nil
+    want_ok: false

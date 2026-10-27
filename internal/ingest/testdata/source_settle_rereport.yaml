@@ -1,0 +1,67 @@
+# What one session owes the user across harvests when its source cannot
+# repair it.
+#
+# The steps run in order against one stored row. A routine repeat of the
+# stored cause is quiet. An explicit retry of that same cause reports again.
+# A cause that replaces the stored one reports once, then goes quiet.
+required_names:
+  - first_missing
+  - routine_repeat
+  - forced_repeat
+  - cause_change
+  - changed_cause_quiet
+  - missing_after_unusable_quiet
+  - forced_missing_after_unusable
+  - routine_after_forced_missing_quiet
+
+steps:
+  - name: first_missing
+    cause: original-source-unavailable-no-usable-saved-copy
+    want_report: true
+    want_stored: original-source-unavailable-no-usable-saved-copy
+
+  - name: routine_repeat
+    cause: original-source-unavailable-no-usable-saved-copy
+    want_report: false
+    want_stored: original-source-unavailable-no-usable-saved-copy
+
+  - name: forced_repeat
+    force: true
+    cause: original-source-unavailable-no-usable-saved-copy
+    want_report: true
+    want_stored: original-source-unavailable-no-usable-saved-copy
+
+  - name: cause_change
+    cause: original-source-present-record-unusable
+    want_report: true
+    want_stored: original-source-present-record-unusable
+
+  - name: changed_cause_quiet
+    cause: original-source-present-record-unusable
+    want_report: false
+    want_stored: original-source-present-record-unusable
+
+  # The reverse observation: a later harvest sees the file gone where it last
+  # saw unusable bytes. The stored cause is the more specific one, so it stays,
+  # and nothing is reported: a one-way replacement is what keeps a routine
+  # harvest quiet instead of re-reporting on every run.
+  - name: missing_after_unusable_quiet
+    cause: original-source-unavailable-no-usable-saved-copy
+    want_report: false
+    want_stored: original-source-present-record-unusable
+
+  # The same observation on an explicit retry. --force owes its report, but it
+  # does not downgrade the row: the one-way replacement holds on the forced
+  # path too, so the more specific cause is still what a later harvest reads.
+  - name: forced_missing_after_unusable
+    force: true
+    cause: original-source-unavailable-no-usable-saved-copy
+    want_report: true
+    want_stored: original-source-present-record-unusable
+
+  # Because the forced run left the row alone, a routine run of the same
+  # observation is quiet rather than re-reporting the downgraded cause.
+  - name: routine_after_forced_missing_quiet
+    cause: original-source-unavailable-no-usable-saved-copy
+    want_report: false
+    want_stored: original-source-present-record-unusable

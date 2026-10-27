@@ -52,7 +52,12 @@ slots:
   - {name: v51-session-cwd, slot: 51, needle: "ALTER TABLE sessions ADD COLUMN session_cwd TEXT;"}
   - {name: v52-full-content, slot: 52, needle: "CREATE TABLE session_entry_full_content ("}
   - {name: v53-harness-menu, slot: 53, needle: "CREATE TABLE sessions_v50 AS SELECT * FROM sessions;"}
-  - {name: v54-index-format-version, slot: 54, needle: "ALTER TABLE sessions ADD COLUMN index_format_version INTEGER CHECK (index_format_version > 0);"}
+  # The backfill predicate is part of this frozen script: the needle covers the
+  # whole script, so editing the shipped predicate to follow the Go definition
+  # of a finished index fails the migration identity check.
+  - name: v54-index-format-version
+    slot: 54
+    needle: "ALTER TABLE sessions ADD COLUMN index_format_version INTEGER CHECK (index_format_version > 0);\nALTER TABLE index_log ADD COLUMN index_format_version INTEGER CHECK (index_format_version > 0);\n\nUPDATE sessions SET index_format_version = 1\nWHERE EXISTS (SELECT 1 FROM session_entries WHERE session_entries.session_id = sessions.session_id)\n   OR (index_version > 0 AND indexed_at IS NOT NULL);"
   - {name: v55-adapter-version, slot: 55, needle: "ALTER TABLE sessions ADD COLUMN adapter_version INTEGER CHECK (adapter_version > 0);"}
   - {name: v56-indexed-input-hash, slot: 56, needle: "ALTER TABLE sessions ADD COLUMN indexed_input_hash TEXT CHECK ("}
   - {name: v57-metrics-input-hash, slot: 57, needle: "ALTER TABLE session_metrics ADD COLUMN input_hash TEXT CHECK ("}
@@ -61,12 +66,13 @@ slots:
   - {name: v60-active-generation, slot: 60, needle: "ALTER TABLE sessions ADD COLUMN active_generation_id TEXT;"}
   - {name: v61-publication-parent-index, slot: 61, needle: "CREATE INDEX idx_session_publication_parent_uuid"}
   - {name: v62-harmonized-content, slot: 62, needle: "CREATE TABLE session_entry_bodies ("}
-  - {name: v63-source-unavailability, slot: 63, needle: "CREATE TABLE session_source_unavailability ("}
+  - {name: v63-source-unavailability, slot: 63, needle: "reason IN ('original-source-unavailable-no-usable-saved-copy'))"}
   - {name: v64-ingest-run-outcomes, slot: 64, needle: "CREATE TABLE ingest_run_outcomes ("}
   - {name: v65-claude-identity-proof, slot: 65, needle: "ADD COLUMN identity_records_json TEXT"}
   - {name: v66-session-thinking-level, slot: 66, needle: "ADD COLUMN thinking_level_raw TEXT"}
   - {name: v67-latest-attempt-pointer, slot: 67, needle: "ADD COLUMN latest_attempt_generation_id TEXT"}
   - {name: v68-collective-observations, slot: 68, needle: "CREATE TABLE collective_observation_scopes"}
+  - {name: v69-source-unavailability-cause, slot: 69, needle: "original-source-present-record-unusable"}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot
