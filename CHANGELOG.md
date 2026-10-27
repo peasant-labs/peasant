@@ -7,6 +7,17 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-26
+
+### Changed
+- The local transcript reads as a ledger on Fairtrade 0.0.46: each turn leads
+  with its role, number, time and copy link, its tool calls gather into one work
+  panel, and a system notice is one compact row. The session views and the
+  search trigger sit in a bottom bar under the body, the shortcut hint and the
+  position counter stay available there, and the reader can set the reading
+  width, enter zen, and copy a turn's anchor from the head. Provider identity
+  stays on the header's meta row.
+
 ## [0.13.0] - 2026-10-26
 
 ### Added
