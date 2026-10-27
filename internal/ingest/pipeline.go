@@ -886,7 +886,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			emitAdvance(prog, StageFilter, 1, len(diffResult.Sessions))
 		}
 		// AllowedSessionIDs filter: skip sessions not in the allowed set.
-		if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[entry.Session.SessionID] {
+		if !p.includesSession(entry.Session.SessionID) {
 			recordDryRun(entry, DiffUnchanged)
 			sessionResults = append(sessionResults, SessionResult{
 				SessionID:  entry.Session.SessionID,
@@ -1350,7 +1350,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			// before reading its pair: the run must not reconstruct or report
 			// refusals for a session it was never going to upgrade, and the
 			// report names the count instead.
-			if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[sid] {
+			if !p.includesSession(sid) {
 				selectionSkipped++
 				continue
 			}
