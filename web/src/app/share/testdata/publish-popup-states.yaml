@@ -122,7 +122,7 @@ cases:
     push: published
     steps: []
     expect:
-      bar: { state: published, text: 'published to 2 collectives', action: update }
+      bar: { state: published, text: 'published to 2 collectives', action: publish }
       popup: null
 
   - name: new-turns
@@ -133,7 +133,7 @@ cases:
     push: published
     steps: []
     expect:
-      bar: { state: new-turns, text: needs update, action: update }
+      bar: { state: new-turns, text: needs update, action: publish }
       popup: null
 
   - name: auto-publish-on
@@ -144,7 +144,7 @@ cases:
     push: published
     steps: []
     expect:
-      bar: { state: auto-publish, text: 'auto-publish on, Acme Platform', action: update }
+      bar: { state: auto-publish, text: 'auto-publish on, Acme Platform', action: publish }
       popup: null
 
   - name: unpublished-outside-ingestion-selection
@@ -274,7 +274,7 @@ cases:
     push: published
     steps: [open, publish]
     expect:
-      bar: { state: published, text: 'published to 2 collectives', action: update }
+      bar: { state: published, text: 'published to 2 collectives', action: publish }
       popup:
         heading: published to Acme Platform and Acme Company
         texts: [village.peasantlabs.org/transcripts/, 'pull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.']
@@ -289,7 +289,7 @@ cases:
     push: approval
     steps: [open, add ML Reading Group, publish]
     expect:
-      bar: { state: published, text: 'published to 2 collectives', action: update }
+      bar: { state: published, text: 'published to 2 collectives', action: publish }
       popup:
         heading: published to Acme Platform and Acme Company
         texts: [ML Reading Group shows it once its owner approves.]
@@ -304,7 +304,7 @@ cases:
     push: stopped:Acme Company
     steps: [open, publish]
     expect:
-      bar: { state: published, text: 'published to 1 collective', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: publish }
       popup:
         heading: publish “{title}”
         texts: ['stopped while sharing it with Acme Company: sharing with this collective failed, so it cannot read the transcript.']
@@ -319,7 +319,7 @@ cases:
     push: published
     steps: [open, add ML Reading Group]
     expect:
-      bar: { state: new-turns, text: needs update, action: update }
+      bar: { state: new-turns, text: needs update, action: publish }
       popup:
         heading: update “{title}”
         texts: [what changed, 6 new turns since you published, ML Reading Group, 'adding, waits for approval', removing a collective takes the transcript back from it., adds ML Reading Group · removes nothing, nothing leaves your machine until you update.]
@@ -334,7 +334,7 @@ cases:
     push: published
     steps: [open, publish]
     expect:
-      bar: { state: published, text: 'published to 1 collective', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: publish }
       popup:
         heading: published to Acme Platform
         texts: [village.peasantlabs.org/transcripts/]
@@ -364,7 +364,7 @@ cases:
     push: published
     steps: [open, connect]
     expect:
-      bar: { state: new-turns, text: needs update, action: update }
+      bar: { state: new-turns, text: needs update, action: publish }
       popup:
         heading: update “{title}”
         texts: [6 new turns since you published, Acme Platform, leave access as it is]
@@ -379,7 +379,7 @@ cases:
     push: published
     steps: [open]
     expect:
-      bar: { state: published, text: 'published to 2 collectives', action: update }
+      bar: { state: published, text: 'published to 2 collectives', action: publish }
       popup:
         heading: update “{title}”
         texts: [no new turns since you published, Acme Platform, Acme Company]
@@ -394,7 +394,7 @@ cases:
     push: published
     steps: [open, add Acme Company, publish]
     expect:
-      bar: { state: published, text: 'published to 2 collectives', action: update }
+      bar: { state: published, text: 'published to 2 collectives', action: publish }
       popup:
         heading: published to Acme Platform and Acme Company
         texts: [village.peasantlabs.org/transcripts/]
@@ -409,7 +409,7 @@ cases:
     push: published
     steps: [open, remove Acme Platform, publish]
     expect:
-      bar: { state: published, text: 'published to 1 collective', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: publish }
       popup:
         heading: published to Acme Company
         texts: [village.peasantlabs.org/transcripts/]
@@ -424,7 +424,7 @@ cases:
     push: published
     steps: [open, remove Acme Platform, publish]
     expect:
-      bar: { state: published, text: 'published to 1 collective', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: publish }
       popup:
         heading: published to Acme Company
         texts: [village.peasantlabs.org/transcripts/]
@@ -439,7 +439,7 @@ cases:
     push: stopped-once:Acme Company
     steps: [open, publish, remove Acme Platform, retry]
     expect:
-      bar: { state: published, text: 'published to 1 collective', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: publish }
       popup:
         heading: published to Acme Company
         texts: [village.peasantlabs.org/transcripts/]
@@ -454,7 +454,7 @@ cases:
     push: stopped:Acme Company
     steps: [open, publish, rescan]
     expect:
-      bar: { state: published, text: 'published to 1 collective', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: publish }
       popup:
         heading: publish “{title}”
         texts: ['the scan failed, so publish is off.']
@@ -469,7 +469,7 @@ cases:
     push: skipped:Acme Company
     steps: [open, publish]
     expect:
-      bar: { state: published, text: 'published to 1 collective', action: update }
+      bar: { state: published, text: 'published to 1 collective', action: publish }
       popup:
         heading: publish “{title}”
         texts: ['stopped while sharing it with']
@@ -529,7 +529,7 @@ cases:
     push: published
     steps: [open]
     expect:
-      bar: { state: new-turns, text: needs update, action: update }
+      bar: { state: new-turns, text: needs update, action: publish }
       popup:
         heading: update “{title}”
         texts: [reading who can read it online]
@@ -619,7 +619,7 @@ cases:
     push: published
     steps: [open, remove Acme Platform, publish]
     expect:
-      bar: { state: published, text: published, action: update }
+      bar: { state: published, text: published, action: publish }
       popup:
         heading: updated, no collective can read it
         texts: [village.peasantlabs.org/transcripts/]
@@ -634,7 +634,7 @@ cases:
     push: approval
     steps: [open, remove Acme Platform, remove Acme Company, add ML Reading Group, publish]
     expect:
-      bar: { state: published, text: published, action: update }
+      bar: { state: published, text: published, action: publish }
       popup:
         heading: submitted to ML Reading Group
         texts: [ML Reading Group shows it once its owner approves.]

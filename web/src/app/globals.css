@@ -878,6 +878,17 @@ textarea::placeholder {
   display: none;
 }
 
+/* Zen gives the transcript the whole window, so the app's own sidebar steps aside with the
+   viewer's rails. Hiding it leaves its collapse state untouched, so leaving zen restores exactly
+   what the reader had. */
+.asb-layout:has(.txn-app.txn-zen) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.asb-layout:has(.txn-app.txn-zen) > .asb {
+  display: none;
+}
+
 /* Compact chrome retains every canonical nav action and its accessible name.
    The breakpoint is Fairtrade's tablet boundary, not a second section registry. */
 .app-header-nav[aria-current="page"] {
