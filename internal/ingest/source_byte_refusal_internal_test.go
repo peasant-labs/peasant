@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -28,8 +29,13 @@ type sourceByteRefusalCase struct {
 	// sentence is then rebuilt from that decode at test time instead of being
 	// written into the fixture, so a standard-library wording change fails only
 	// where the user would see it, and the rest of the sentence still has to
-	// match exactly. A case that sets it must not also set Message.
+	// match exactly. MessageTemplate is the literal wrapper that decode's
+	// failure is printed inside, with one verb for the cause: the wrapper is
+	// pinned here rather than copied from production, so a reworded capture
+	// template fails even though the cause is rebuilt. A case that sets
+	// MessageFrom sets MessageTemplate and must not also set Message.
 	MessageFrom     string `yaml:"message_from"`
+	MessageTemplate string `yaml:"message_template"`
 	MessageContains string `yaml:"message_contains"`
 	Transcript      string `yaml:"transcript"`
 }
@@ -72,9 +78,18 @@ func loadSourceByteRefusalFixture(t *testing.T) sourceByteRefusalFixture {
 				if strings.TrimSpace(testCase.Message) == "" {
 					t.Fatalf("case %s does not pin the full refusal sentence", testCase.Name)
 				}
+				if strings.TrimSpace(testCase.MessageTemplate) != "" {
+					t.Fatalf("case %s pins a template without naming the decode that fills it", testCase.Name)
+				}
 			case "pi-message-content", "strike-event-data":
 				if strings.TrimSpace(testCase.Message) != "" {
 					t.Fatalf("case %s pins both a rebuilt and a literal sentence", testCase.Name)
+				}
+				if strings.TrimSpace(testCase.MessageTemplate) == "" {
+					t.Fatalf("case %s does not pin the refusal wrapper its rebuilt cause is printed inside", testCase.Name)
+				}
+				if strings.Count(testCase.MessageTemplate, "%") != 1 || (!strings.Contains(testCase.MessageTemplate, "%v") && !strings.Contains(testCase.MessageTemplate, "%s")) {
+					t.Fatalf("case %s must carry exactly one %%v or %%s verb for the decoded cause in its message template", testCase.Name)
 				}
 			default:
 				t.Fatalf("case %s names unknown message source %q", testCase.Name, testCase.MessageFrom)
@@ -136,7 +151,7 @@ func TestSourceByteRefusalKeepsTheSentenceAndLeavesCancellationUnmarked(t *testi
 			case "validation", "typed-decode":
 				want := testCase.Message
 				if testCase.MessageFrom != "" {
-					want = rebuiltTypedDecodeSentence(t, testCase.MessageFrom, session, data)
+					want = rebuiltTypedDecodeSentence(t, testCase.MessageFrom, testCase.MessageTemplate, session, data)
 				}
 				if err.Error() != want {
 					t.Fatalf("message changed\n got %q\nwant %q", err.Error(), want)
@@ -173,9 +188,11 @@ func refusalRecords(data []byte) [][]byte {
 // rebuiltTypedDecodeSentence rebuilds a typed-decode refusal from the production
 // decoder that produced it, so the sentence keeps its exact-equality check while
 // the decoder's own wording (which a standard-library upgrade can change) is not
-// copied into this fixture. The record number and the step are the capture's own
-// user-facing coordinates and stay part of the rebuilt sentence.
-func rebuiltTypedDecodeSentence(t *testing.T, from string, session DiscoveredSession, data []byte) string {
+// copied into this fixture. The wrapper around that cause is NOT rebuilt: the
+// fixture's template supplies it literally, with one verb for the cause, so a
+// reworded capture template fails here instead of moving the expectation with
+// it. The record number and the step are part of the pinned template.
+func rebuiltTypedDecodeSentence(t *testing.T, from, template string, session DiscoveredSession, data []byte) string {
 	t.Helper()
 	for index, raw := range refusalRecords(data) {
 		line := index + 1
@@ -190,7 +207,7 @@ func rebuiltTypedDecodeSentence(t *testing.T, from string, session DiscoveredSes
 				continue
 			}
 			if _, err := decodePiContent(message.Content, message.Role == piRoleAssistant); err != nil {
-				return piRecordRefusal("message content", line, err).Error()
+				return fmt.Sprintf(template, err)
 			}
 		case "strike-event-data":
 			var envelope strikeEnvelope
@@ -198,7 +215,7 @@ func rebuiltTypedDecodeSentence(t *testing.T, from string, session DiscoveredSes
 				continue
 			}
 			if _, err := decodeStrikeEventData(envelope.Data); err != nil {
-				return captureFailure(session, line, strikeRecordRefusal(err)).Error()
+				return fmt.Sprintf(template, err)
 			}
 		default:
 			t.Fatalf("unknown typed-decode source %q", from)
