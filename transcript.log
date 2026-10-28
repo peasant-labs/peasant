@@ -1,0 +1,44 @@
+$ # PR #714 — peasant web stop must only signal its own web server (issue #671)
+$ # A stale web-<port>.pid can name ANY reused PID. Plant a harmless
+$ # stand-in (sleep 300, started by this script) in a fake PID file.
+
+================ BEFORE: develop (be2bc57f) ================
+$ sleep 300 &  # stand-in PID 50857, planted in web-18693.pid
+    PID COMMAND         COMMAND
+  50857 sleep           sleep 300
+$ peasant-before web stop --port 18693
+HTTP shutdown failed: Post "http://localhost:18693/api/v1/shutdown": dial tcp [::1]:18693: connect: connection refused, falling back to SIGTERM
+Sent SIGTERM to PID 50857
+exit=0
+>>> stand-in 50857 was KILLED by web stop on develop (BUG, #671)
+
+================ AFTER: PR #714 head (47b14407, rebased) ================
+$ sleep 300 &  # stand-in PID 50896, planted in web-18694.pid
+    PID COMMAND         COMMAND
+  50896 sleep           sleep 300
+$ peasant-after web stop --port 18694
+HTTP shutdown failed: Post "http://localhost:18694/api/v1/shutdown": dial tcp [::1]:18694: connect: connection refused, falling back to SIGTERM
+Error: stale PID file /home/hatch/workspace/pr-evidence/pr-714/evidence/demo-scratch/after-home/.local/state/peasant/web-18694.pid: PID 50896 is not a peasant web server on port 18694, so nothing was signalled; the file was removed. If a server is still running, find it with your process list and stop it there
+exit=1
+>>> stand-in 50896 is STILL ALIVE — nothing was signalled (FIXED)
+$ ls $XDG_STATE_HOME/peasant/  # stale PID file was removed
+# now killing my own stand-in myself:
+stand-in cleaned up
+
+================ LEGIT PATH: real server start/stop (PR binary) ================
+$ peasant-after web start --no-browser --port 18695
+Peasant web dashboard running at http://localhost:18695
+To stop the server, run:
+  peasant web stop
+
+If the server becomes unresponsive, the process ID (50954)
+is saved at /home/hatch/workspace/pr-evidence/pr-714/evidence/demo-scratch/legit-home/.local/state/peasant/web-18695.pid
+start exit=0
+health check HTTP 200
+web-18695.pid
+$ peasant-after web stop --port 18695
+Peasant web dashboard shutting down
+stop exit=0
+>>> server stopped — port 18695 no longer answers
+
+$ # DONE: before = stand-in killed; after = stand-in untouched, real server still stops.
