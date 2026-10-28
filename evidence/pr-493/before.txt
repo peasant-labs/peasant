@@ -1,10 +1,8 @@
-$ peasant layout list   # at base 883c4b39 (cursor/harness-layout-capture-35a4 tip)
-(empty output, exit 0)
+$ peasant layout list   # at base 92d67881 (cursor/harness-layout-capture-35a4 tip)
+(empty output)
 $ peasant layout capture kiro
 Error: unknown layout tool "kiro" (known: [])
 $ peasant layout capture kiro-cli
 Error: unknown layout tool "kiro-cli" (known: [])
 $ peasant layout capture kirocrew
 Error: unknown layout tool "kirocrew" (known: [])
-$ ls internal/harnesslayout/ | grep -i kiro
-(no kiro files on base)

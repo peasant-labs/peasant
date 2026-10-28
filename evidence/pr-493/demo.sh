@@ -6,8 +6,8 @@ export TMPDIR=$HOME/workspace/tools/tmp GOTMPDIR=$HOME/workspace/tools/tmp
 export PS1='$ '
 export GIT_PAGER=cat PAGER=cat TERM=dumb
 cd ~/workspace/pr-evidence/pr-493 || exit 1
-BEFORE=../pr-493-media/peasant-before
-AFTER=../pr-493-media/peasant-after
+BEFORE=../pr-493-media/peasant-before2
+AFTER=../pr-493-media/peasant-after2
 TD=internal/harnesslayout/testdata
 sum() { python3 -c "import json,sys; r=json.load(sys.stdin); roots=sum(x.get('sessions',0) for x in r.get('roots') or []); print(f\"  -> tool={r.get('tool')}  sessions discovered={roots}  captured={len(r.get('captures') or [])}  failures={len(r.get('failures') or [])}\")"; }
 sleep 1
@@ -16,7 +16,7 @@ echo " PR #493 — capture the Kiro, Kiro CLI, and Kiro Crew layouts"
 echo "================================================================"
 sleep 1
 echo
-echo "### BEFORE — base branch tip 883c4b39 (#488 framework, no tools yet)"
+echo "### BEFORE — base branch tip 92d67881 (#488 framework, no tools yet)"
 sleep 1
 echo "\$ peasant layout list"
 $BEFORE layout list
@@ -28,10 +28,10 @@ for t in kiro kiro-cli kirocrew; do
   sleep 0.7
 done
 echo "\$ ls internal/harnesslayout/  (in the base checkout) | grep -i kiro"
-ls ../pr-493-before/internal/harnesslayout/ | grep -i kiro || echo "(no kiro files on base)"
+ls ../pr-493-base2/internal/harnesslayout/ | grep -i kiro || echo "(no kiro files on base)"
 sleep 1.5
 echo
-echo "### AFTER — PR head 60f97318 (rebased onto 883c4b39 + one grammar fix)"
+echo "### AFTER — PR head fccddd0f (rebased onto 92d67881 + one grammar fix)"
 sleep 1
 echo "\$ peasant layout list  (tool lines)"
 $AFTER layout list | grep -E '^[A-Za-z].*\('

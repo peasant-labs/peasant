@@ -2,7 +2,7 @@
  PR #493 — capture the Kiro, Kiro CLI, and Kiro Crew layouts
 ================================================================
 
-### BEFORE — base branch tip 883c4b39 (#488 framework, no tools yet)
+### BEFORE — base branch tip 92d67881 (#488 framework, no tools yet)
 $ peasant layout list
 (no output: zero layouts are registered)
 $ peasant layout capture kiro
@@ -14,7 +14,7 @@ Error: unknown layout tool "kirocrew" (known: [])
 $ ls internal/harnesslayout/  (in the base checkout) | grep -i kiro
 (no kiro files on base)
 
-### AFTER — PR head 60f97318 (rebased onto 883c4b39 + one grammar fix)
+### AFTER — PR head fccddd0f (rebased onto 92d67881 + one grammar fix)
 $ peasant layout list  (tool lines)
 Kiro (kiro)
 Kiro CLI (kiro-cli)
@@ -29,17 +29,17 @@ $ peasant layout capture kirocrew --path <fixture kirocrew root> --limit 0
 
 ### Fixture tests (the sqlite conversation DB case is covered here)
 $ go test -race ./internal/harnesslayout/ -run 'TestKiro|TestKiroCrew' -count=1
-ok  	github.com/peasant-labs/peasant/internal/harnesslayout	7.063s
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	2.578s
 $ go test -race ./internal/harnesslayout/ -count=1   (whole package)
-ok  	github.com/peasant-labs/peasant/internal/harnesslayout	7.580s
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	3.503s
 
 ### Stack after rebase
 $ git log --oneline -6
-60f97318 (HEAD -> cursor/layout-kiro-35a4, origin/cursor/layout-kiro-35a4) test(layout): follow the field-path grammar for the {mid} threads shape
-234cd6e2 docs(layout): cross-link the Kiro, Kiro CLI, and Kiro Crew layouts
-fb3c6d4e feat(layout): capture the KiroCrew session layout
-2e7a112a fix(layout): corroborate the Kiro CLI layout against the open-source Kiro Crew
-8ee7076e feat(layout): capture the Kiro session layout
-883c4b39 (origin/cursor/harness-layout-capture-35a4) merge(develop): take current develop under the layout framework
+fccddd0f (HEAD -> cursor/layout-kiro-35a4, origin/cursor/layout-kiro-35a4) test(layout): follow the field-path grammar for the {mid} threads shape
+b9fef62a docs(layout): cross-link the Kiro, Kiro CLI, and Kiro Crew layouts
+b9e7f5cd feat(layout): capture the KiroCrew session layout
+93b610df fix(layout): corroborate the Kiro CLI layout against the open-source Kiro Crew
+e38b7098 feat(layout): capture the Kiro session layout
+92d67881 (origin/cursor/harness-layout-capture-35a4) chore(layout): drop the bundled test-gate overlap from this branch
 
 Done.
