@@ -51,7 +51,10 @@ func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
 }
 
 func TestPeasantBinWrapperQuotesInjectedCommand(t *testing.T) {
-	t.Parallel()
+	// Other parallel tests fork helpers. A child can inherit the wrapper's
+	// close-on-exec write descriptor before WriteFile closes it and retain it
+	// until its own exec, making the script temporarily busy. Keep this test
+	// sequential with those subprocess tests.
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "fake peasant")
 	script := "#!/bin/sh\necho quoted-peasant \"$@\"\n"
