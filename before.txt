@@ -1,0 +1,10 @@
+BEFORE — binary built at BASE tip 883c4b39 (cursor/harness-layout-capture-35a4, PR #488 branch)
+Base tree has no cline.go and no "cline" registration in internal/harnesslayout.
+
+$ peasant layout capture cline --path <legacy fixture root: testdata/cline/vscode-globalstorage> --include-metadata
+Error: unknown layout tool "cline" (known: [])
+exit=1
+
+$ peasant layout capture cline --path <sdk fixture root: testdata/cline/cline-data> --include-metadata
+Error: unknown layout tool "cline" (known: [])
+exit=1

@@ -1,0 +1,16 @@
+AFTER — binary built at rebased PR head b66870e7 (feat commit on base tip 883c4b39)
+
+$ peasant layout capture cline --path <legacy fixture root: testdata/cline/vscode-globalstorage> --include-metadata
+exit=0 — tool "cline", root present, 4 sessions, 3 captures, 1 intentional failure (tasks/1767484800000, undecodable ui_messages)
+  tasks/1767225600000 | "Add a health check endpoint to the sample service" | /projects/sample-app | models [claude-sonnet-4-5, gpt-5] | artifacts: api-conversation-history, ui-messages, task-metadata, context-history, task-settings, task-history
+  tasks/1767312000000 | "Explain the build script" | /projects/tooling | XML-era tool calls counted heuristically
+  tasks/1767398400000 | "Fix the flaky login test" | malformed api history recorded as shape (Malformed=1)
+
+$ peasant layout capture cline --path <sdk fixture root: testdata/cline/cline-data> --include-metadata
+exit=0 — root present, 3 sessions, 3 captures, 0 failures
+  sessions/1767657600000_k3x9q | "Rename the config loader" | /projects/sample-api | artifacts: session-manifest (kind source:vscode), session-messages, subagent-messages, session-compaction
+  sessions/1767744000000_p7m2d | messages-only session, model gpt-5
+  tasks/1767571200000 | "List the open TODO comments" | standalone task under ~/.cline/data
+
+Full JSON reports: after-legacy.json / after-sdk.json in the evidence branch.
+Tests on rebased head: go test -race -count=1 ./internal/harnesslayout/ -> ok 3.429s; go test -count=1 ./cmd/peasant -run 'TestLayout|TestFixture' -> ok 1.531s

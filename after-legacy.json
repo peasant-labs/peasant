@@ -1,0 +1,1239 @@
+{
+  "tool": "cline",
+  "roots": [
+    {
+      "path": "/home/hatch/workspace/pr-evidence/pr-492/internal/harnesslayout/testdata/cline/vscode-globalstorage",
+      "present": true,
+      "sessions": 4
+    }
+  ],
+  "captures": [
+    {
+      "tool": "cline",
+      "session": "tasks/1767225600000",
+      "metadata": {
+        "sessionId": "1767225600000",
+        "title": "Add a health check endpoint to the sample service",
+        "projectPath": "/projects/sample-app",
+        "startedAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:01:50Z",
+        "models": [
+          "claude-sonnet-4-5",
+          "gpt-5"
+        ],
+        "userTurns": 2,
+        "assistantMessages": 3,
+        "toolCalls": 2
+      },
+      "artifacts": [
+        {
+          "artifact": "api-conversation-history",
+          "path": "tasks/1767225600000/api_conversation_history.json",
+          "format": "json",
+          "role": "transcript",
+          "records": 6,
+          "kinds": {
+            "assistant:text": 1,
+            "assistant:text+thinking+tool_use": 1,
+            "assistant:text+tool_use": 1,
+            "user:text": 2,
+            "user:tool_result": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[]",
+              "types": [
+                "object"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$[].content",
+              "types": [
+                "array"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$[].content[]",
+              "types": [
+                "object"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$[].content[].content",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].content[].content[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].content[].content[].text",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].content[].content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].content[].id",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].content[].input",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].content[].input.path",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].content[].input.result",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].content[].name",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].content[].signature",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].content[].text",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$[].content[].thinking",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].content[].tool_use_id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$[].id",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].metrics",
+              "types": [
+                "object"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].metrics.cost",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].metrics.tokens",
+              "types": [
+                "object"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].metrics.tokens.cached",
+              "types": [
+                "number"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].metrics.tokens.completion",
+              "types": [
+                "number"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].metrics.tokens.prompt",
+              "types": [
+                "number"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].modelInfo",
+              "types": [
+                "object"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].modelInfo.mode",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].modelInfo.modelId",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].modelInfo.providerId",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].role",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 6
+            }
+          ]
+        },
+        {
+          "artifact": "ui-messages",
+          "path": "tasks/1767225600000/ui_messages.json",
+          "format": "json",
+          "role": "transcript",
+          "records": 11,
+          "kinds": {
+            "ask:completion_result": 1,
+            "say:api_req_started": 2,
+            "say:checkpoint_created": 1,
+            "say:completion_result": 1,
+            "say:reasoning": 1,
+            "say:task": 1,
+            "say:text": 2,
+            "say:tool": 1,
+            "say:user_feedback": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[]",
+              "types": [
+                "object"
+              ],
+              "count": 11
+            },
+            {
+              "path": "$[].ask",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].conversationHistoryIndex",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].isCheckpointCheckedOut",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].lastCheckpointHash",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].modelInfo",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].modelInfo.mode",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].modelInfo.modelId",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].modelInfo.providerId",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].partial",
+              "types": [
+                "boolean"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].say",
+              "types": [
+                "string"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$[].text",
+              "types": [
+                "string"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 11
+            },
+            {
+              "path": "$[].type",
+              "types": [
+                "string"
+              ],
+              "count": 11
+            }
+          ]
+        },
+        {
+          "artifact": "task-metadata",
+          "path": "tasks/1767225600000/task_metadata.json",
+          "format": "json",
+          "role": "metadata",
+          "records": 1,
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.environment_history",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.environment_history[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.environment_history[].cline_version",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.environment_history[].host_name",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.environment_history[].host_version",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.environment_history[].os_arch",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.environment_history[].os_name",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.environment_history[].os_version",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.environment_history[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.files_in_context",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.files_in_context[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.files_in_context[].cline_edit_date",
+              "types": [
+                "null"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.files_in_context[].cline_read_date",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.files_in_context[].path",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.files_in_context[].record_source",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.files_in_context[].record_state",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.model_usage",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.model_usage[]",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.model_usage[].mode",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.model_usage[].model_id",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.model_usage[].model_provider_id",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.model_usage[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            }
+          ]
+        },
+        {
+          "artifact": "context-history",
+          "path": "tasks/1767225600000/context_history.json",
+          "format": "json",
+          "role": "auxiliary",
+          "records": 1,
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[]",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[][]",
+              "types": [
+                "array",
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[][][]",
+              "types": [
+                "array",
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[][][][]",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[][][][][]",
+              "types": [
+                "array",
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[][][][][][]",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[][][][][][][]",
+              "types": [
+                "array",
+                "number",
+                "string"
+              ],
+              "count": 4
+            },
+            {
+              "path": "$[][][][][][][][]",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "artifact": "task-settings",
+          "path": "tasks/1767225600000/settings.json",
+          "format": "json",
+          "role": "auxiliary",
+          "records": 1,
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.mode",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "artifact": "task-history",
+          "path": "state/taskHistory.json",
+          "format": "json",
+          "role": "index",
+          "records": 1,
+          "kinds": {
+            "history_item": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[]",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].cacheReads",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].cacheWrites",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].cwdOnTaskInitialization",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].id",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].isFavorited",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].modelId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].size",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].task",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].tokensIn",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].tokensOut",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].totalCost",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].ulid",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "cline",
+      "session": "tasks/1767312000000",
+      "metadata": {
+        "sessionId": "1767312000000",
+        "title": "Explain the build script",
+        "projectPath": "/projects/tooling",
+        "startedAt": "2026-01-02T00:00:00Z",
+        "updatedAt": "2026-01-02T00:01:30Z",
+        "userTurns": 1,
+        "assistantMessages": 3,
+        "toolCalls": 2
+      },
+      "artifacts": [
+        {
+          "artifact": "api-conversation-history",
+          "path": "tasks/1767312000000/api_conversation_history.json",
+          "format": "json",
+          "role": "transcript",
+          "records": 6,
+          "kinds": {
+            "assistant:text": 3,
+            "user:text": 3
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[]",
+              "types": [
+                "object"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$[].content",
+              "types": [
+                "array"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$[].content[]",
+              "types": [
+                "object"
+              ],
+              "count": 9
+            },
+            {
+              "path": "$[].content[].text",
+              "types": [
+                "string"
+              ],
+              "count": 9
+            },
+            {
+              "path": "$[].content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 9
+            },
+            {
+              "path": "$[].role",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            }
+          ]
+        },
+        {
+          "artifact": "ui-messages",
+          "path": "tasks/1767312000000/ui_messages.json",
+          "format": "json",
+          "role": "transcript",
+          "records": 6,
+          "kinds": {
+            "ask:command": 1,
+            "ask:command_output": 1,
+            "say:api_req_started": 1,
+            "say:completion_result": 1,
+            "say:task": 1,
+            "say:tool": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[]",
+              "types": [
+                "object"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$[].ask",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].say",
+              "types": [
+                "string"
+              ],
+              "count": 4
+            },
+            {
+              "path": "$[].text",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$[].type",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            }
+          ]
+        },
+        {
+          "artifact": "task-history",
+          "path": "state/taskHistory.json",
+          "format": "json",
+          "role": "index",
+          "records": 1,
+          "kinds": {
+            "history_item": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[]",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].cacheReads",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].cacheWrites",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].cwdOnTaskInitialization",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].id",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].isFavorited",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].modelId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].size",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].task",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].tokensIn",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].tokensOut",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].totalCost",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].ulid",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "cline",
+      "session": "tasks/1767398400000",
+      "metadata": {
+        "sessionId": "1767398400000",
+        "title": "Fix the flaky login test",
+        "startedAt": "2026-01-03T00:00:00Z",
+        "updatedAt": "2026-01-03T00:00:02Z",
+        "userTurns": 1,
+        "assistantMessages": 0,
+        "toolCalls": 0
+      },
+      "artifacts": [
+        {
+          "artifact": "api-conversation-history",
+          "path": "tasks/1767398400000/api_conversation_history.json",
+          "format": "json",
+          "role": "transcript",
+          "records": 0,
+          "fields": [],
+          "malformed": 1
+        },
+        {
+          "artifact": "ui-messages",
+          "path": "tasks/1767398400000/ui_messages.json",
+          "format": "json",
+          "role": "transcript",
+          "records": 3,
+          "kinds": {
+            "say:api_req_started": 1,
+            "say:error": 1,
+            "say:task": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[]",
+              "types": [
+                "object"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].say",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].text",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].type",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            }
+          ]
+        },
+        {
+          "artifact": "task-history",
+          "path": "state/taskHistory.json",
+          "format": "json",
+          "role": "index",
+          "records": 0,
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[]",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].cacheReads",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].cacheWrites",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].cwdOnTaskInitialization",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].id",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].isFavorited",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].modelId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].size",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[].task",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].tokensIn",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].tokensOut",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].totalCost",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$[].ulid",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "failures": [
+    {
+      "session": "tasks/1767484800000",
+      "error": "cline: no session file decoded: ui-messages: decode JSON: invalid character '\\n' in string literal",
+      "errorClass": "other"
+    }
+  ]
+}

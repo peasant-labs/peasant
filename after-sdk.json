@@ -1,0 +1,1111 @@
+{
+  "tool": "cline",
+  "roots": [
+    {
+      "path": "/home/hatch/workspace/pr-evidence/pr-492/internal/harnesslayout/testdata/cline/cline-data",
+      "present": true,
+      "sessions": 3
+    }
+  ],
+  "captures": [
+    {
+      "tool": "cline",
+      "session": "sessions/1767657600000_k3x9q",
+      "metadata": {
+        "sessionId": "1767657600000_k3x9q",
+        "title": "Rename the config loader",
+        "projectPath": "/projects/sample-api",
+        "startedAt": "2026-01-06T00:00:00Z",
+        "updatedAt": "2026-01-06T00:05:00Z",
+        "models": [
+          "anthropic/claude-sonnet-4.5"
+        ],
+        "userTurns": 1,
+        "assistantMessages": 3,
+        "toolCalls": 2
+      },
+      "artifacts": [
+        {
+          "artifact": "session-manifest",
+          "path": "sessions/1767657600000_k3x9q/1767657600000_k3x9q.json",
+          "format": "json",
+          "role": "metadata",
+          "records": 1,
+          "kinds": {
+            "source:vscode": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.compaction_path",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.cwd",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.enable_spawn",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.enable_teams",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.enable_tools",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.ended_at",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.exit_code",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.interactive",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages_path",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.metadata",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.metadata.cacheReads",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.metadata.cacheWrites",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.metadata.tokensIn",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.metadata.tokensOut",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.metadata.totalCost",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.model",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.pid",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.prompt",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.provider",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.session_id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.source",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.started_at",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.status",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.version",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.workspace_root",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "artifact": "session-messages",
+          "path": "sessions/1767657600000_k3x9q/1767657600000_k3x9q.messages.json",
+          "format": "json",
+          "role": "transcript",
+          "records": 6,
+          "kinds": {
+            "assistant:text": 1,
+            "assistant:text+tool_use": 1,
+            "assistant:thinking+tool_use": 1,
+            "user:text": 1,
+            "user:tool_result": 2
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.agent",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[]",
+              "types": [
+                "object"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$.messages[].content",
+              "types": [
+                "array"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$.messages[].content[]",
+              "types": [
+                "object"
+              ],
+              "count": 8
+            },
+            {
+              "path": "$.messages[].content[].content",
+              "types": [
+                "array",
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].content[].content[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].content[].text",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].id",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].content[].input",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].content[].input.agentId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].input.files",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].input.files[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].input.files[].path",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].is_error",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].name",
+              "types": [
+                "string"
+              ],
+              "count": 4
+            },
+            {
+              "path": "$.messages[].content[].signature",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].text",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.messages[].content[].thinking",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].tool_use_id",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 8
+            },
+            {
+              "path": "$.messages[].id",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$.messages[].metrics",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].metrics.cacheReadTokens",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].metrics.cacheWriteTokens",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].metrics.cost",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].metrics.inputTokens",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].metrics.outputTokens",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].modelInfo",
+              "types": [
+                "object"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.messages[].modelInfo.family",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.messages[].modelInfo.id",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.messages[].modelInfo.provider",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.messages[].role",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$.messages[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$.origin",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.mode",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.sessionId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.source",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.sessionId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.system_prompt",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.updated_at",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.version",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "artifact": "subagent-messages",
+          "path": "sessions/1767657600000_k3x9q/researcher.messages.json",
+          "format": "json",
+          "role": "transcript",
+          "records": 2,
+          "kinds": {
+            "assistant:text": 1,
+            "user:string": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.agent",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[]",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].content",
+              "types": [
+                "array",
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].content[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].text",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].modelInfo",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].modelInfo.id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].modelInfo.provider",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].role",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.origin",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.mode",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.parentThreadId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.sessionId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.source",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.subagent",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.sessionId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.taskType",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.updated_at",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.version",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "artifact": "session-compaction",
+          "path": "sessions/1767657600000_k3x9q/1767657600000_k3x9q.compaction.json",
+          "format": "json",
+          "role": "auxiliary",
+          "records": 1,
+          "kinds": {
+            "user:text": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].text",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].role",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.source_last_message_key",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.source_message_count",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.source_prefix_hash",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.updated_at",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.version",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "cline",
+      "session": "sessions/1767744000000_p7m2d",
+      "metadata": {
+        "sessionId": "1767744000000_p7m2d",
+        "startedAt": "2026-01-07T00:00:00Z",
+        "updatedAt": "2026-01-07T00:01:00Z",
+        "models": [
+          "gpt-5"
+        ],
+        "userTurns": 1,
+        "assistantMessages": 1,
+        "toolCalls": 0
+      },
+      "artifacts": [
+        {
+          "artifact": "session-messages",
+          "path": "sessions/1767744000000_p7m2d/1767744000000_p7m2d.messages.json",
+          "format": "json",
+          "role": "transcript",
+          "records": 2,
+          "kinds": {
+            "assistant:text": 1,
+            "user:file+text": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.agent",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[]",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].content",
+              "types": [
+                "array"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].content[]",
+              "types": [
+                "object"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.messages[].content[].content",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].path",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].content[].text",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.messages[].id",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].metrics",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].metrics.inputTokens",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].metrics.outputTokens",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].modelInfo",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].modelInfo.id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].modelInfo.provider",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.messages[].role",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.messages[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.origin",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.mode",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.sessionId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.origin.source",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.sessionId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.updated_at",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.version",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "cline",
+      "session": "tasks/1767571200000",
+      "metadata": {
+        "sessionId": "1767571200000",
+        "title": "List the open TODO comments",
+        "startedAt": "2026-01-05T00:00:00Z",
+        "updatedAt": "2026-01-05T00:00:30Z",
+        "userTurns": 1,
+        "assistantMessages": 0,
+        "toolCalls": 0
+      },
+      "artifacts": [
+        {
+          "artifact": "ui-messages",
+          "path": "tasks/1767571200000/ui_messages.json",
+          "format": "json",
+          "role": "transcript",
+          "records": 3,
+          "kinds": {
+            "say:api_req_started": 1,
+            "say:completion_result": 1,
+            "say:task": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$[]",
+              "types": [
+                "object"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].say",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].text",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].ts",
+              "types": [
+                "number"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$[].type",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
