@@ -1,0 +1,45 @@
+================================================================
+ PR #493 — capture the Kiro, Kiro CLI, and Kiro Crew layouts
+================================================================
+
+### BEFORE — base branch tip 883c4b39 (#488 framework, no tools yet)
+$ peasant layout list
+(no output: zero layouts are registered)
+$ peasant layout capture kiro
+Error: unknown layout tool "kiro" (known: [])
+$ peasant layout capture kiro-cli
+Error: unknown layout tool "kiro-cli" (known: [])
+$ peasant layout capture kirocrew
+Error: unknown layout tool "kirocrew" (known: [])
+$ ls internal/harnesslayout/  (in the base checkout) | grep -i kiro
+(no kiro files on base)
+
+### AFTER — PR head 60f97318 (rebased onto 883c4b39 + one grammar fix)
+$ peasant layout list  (tool lines)
+Kiro (kiro)
+Kiro CLI (kiro-cli)
+Kiro Crew (kirocrew)
+$ peasant layout capture kiro --path <fixture sessions> --path <fixture kiroagent> --limit 0
+  -> tool=kiro  sessions discovered=6  captured=5  failures=1
+   (the 1 failure is the deliberately truncated legacy .chat fixture)
+$ peasant layout capture kiro-cli --path <fixture cli sessions> --limit 0
+  -> tool=kiro-cli  sessions discovered=1  captured=1  failures=0
+$ peasant layout capture kirocrew --path <fixture kirocrew root> --limit 0
+  -> tool=kirocrew  sessions discovered=3  captured=3  failures=0
+
+### Fixture tests (the sqlite conversation DB case is covered here)
+$ go test -race ./internal/harnesslayout/ -run 'TestKiro|TestKiroCrew' -count=1
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	7.063s
+$ go test -race ./internal/harnesslayout/ -count=1   (whole package)
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	7.580s
+
+### Stack after rebase
+$ git log --oneline -6
+60f97318 (HEAD -> cursor/layout-kiro-35a4, origin/cursor/layout-kiro-35a4) test(layout): follow the field-path grammar for the {mid} threads shape
+234cd6e2 docs(layout): cross-link the Kiro, Kiro CLI, and Kiro Crew layouts
+fb3c6d4e feat(layout): capture the KiroCrew session layout
+2e7a112a fix(layout): corroborate the Kiro CLI layout against the open-source Kiro Crew
+8ee7076e feat(layout): capture the Kiro session layout
+883c4b39 (origin/cursor/harness-layout-capture-35a4) merge(develop): take current develop under the layout framework
+
+Done.
