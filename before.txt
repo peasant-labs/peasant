@@ -1,0 +1,46 @@
+$ git rev-parse HEAD  # base tip of cursor/harness-layout-capture-35a4 (PR #488)
+883c4b3995ae9f0212b6f306fa7e6c4eaafa6207
+
+$ ls internal/harnesslayout/
+capture.go
+env.go
+fixture_test.go
+jsonl_bound_test.go
+layout.go
+layout_test.go
+report_json_test.go
+shape.go
+testdata
+values.go
+
+$ grep -ri grok internal/harnesslayout/ cmd/peasant/ docs/harness-layouts/
+(no matches — Grok Build is not mentioned anywhere)
+
+$ ls internal/harnesslayout/testdata/ ; ls docs/harness-layouts/
+reports
+run_cases.yaml
+shape_cases.yaml
+README.md
+
+$ peasant layout list
+exit:0
+
+$ peasant layout capture grok-build --path internal/harnesslayout/testdata/grok-build --include-metadata
+Error: unknown layout tool "grok-build" (known: [])
+Usage:
+  peasant layout capture <tool> [flags]
+
+Flags:
+  -h, --help               help for capture
+      --include-metadata   Keep paths, session identifiers, titles, and timestamps in the report
+      --limit int          Maximum successful captures; 0 captures every session; a negative value is rejected (default 5)
+      --path strings       Session store root to read instead of the default roots (repeatable)
+
+Global Flags:
+      --config string       Path to config file (default: ~/.config/peasant/config.yaml) (default "/home/hatch/.config/peasant/config.yaml")
+      --config-dir string   Override the config directory (default: $XDG_CONFIG_HOME or ~/.config); config lives under <config-dir>/peasant
+      --data-dir string     Override the data directory (default: $XDG_DATA_HOME or ~/.local/share); the DB + peasant-sync live under <data-dir>/peasant
+      --state-dir string    Override the state directory (default: $XDG_STATE_HOME or ~/.local/state); logs/PID live under <state-dir>/peasant
+  -v, --version             Print the version
+
+exit:1

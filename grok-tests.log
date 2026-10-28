@@ -1,0 +1,15 @@
+=== RUN   TestGrokBuildLayoutResolvesGrokHomeOnEveryOS
+--- PASS: TestGrokBuildLayoutResolvesGrokHomeOnEveryOS (0.00s)
+=== RUN   TestGrokBuildCapturesSessionsFromEveryWorkingDirectoryGroup
+--- PASS: TestGrokBuildCapturesSessionsFromEveryWorkingDirectoryGroup (0.01s)
+=== RUN   TestGrokBuildMetadataPrefersSummaryAndChatHistory
+--- PASS: TestGrokBuildMetadataPrefersSummaryAndChatHistory (0.00s)
+=== RUN   TestGrokBuildToleratesMalformedSummaryAndMissingChatHistory
+--- PASS: TestGrokBuildToleratesMalformedSummaryAndMissingChatHistory (0.02s)
+=== RUN   TestGrokBuildReportNeverContainsTranscriptText
+--- PASS: TestGrokBuildReportNeverContainsTranscriptText (0.02s)
+PASS
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	0.463s
+exit:0
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	0.455s
+full_exit:0

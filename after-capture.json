@@ -1,0 +1,1094 @@
+{
+  "tool": "grok-build",
+  "roots": [
+    {
+      "path": "internal/harnesslayout/testdata/grok-build",
+      "present": true,
+      "sessions": 3
+    }
+  ],
+  "captures": [
+    {
+      "tool": "grok-build",
+      "session": "019a0000-0000-7000-8000-00000000000a",
+      "metadata": {
+        "sessionId": "019a0000-0000-7000-8000-00000000000a",
+        "title": "Add a greeting endpoint",
+        "projectPath": "/work/demo-app",
+        "startedAt": "2026-05-01T10:00:00Z",
+        "updatedAt": "2026-05-01T10:05:00Z",
+        "models": [
+          "grok-build-demo",
+          "grok-build-demo-fast"
+        ],
+        "userTurns": 2,
+        "assistantMessages": 3,
+        "toolCalls": 2
+      },
+      "artifacts": [
+        {
+          "artifact": "summary",
+          "path": "sessions/%2Fwork%2Fdemo-app/019a0000-0000-7000-8000-00000000000a/summary.json",
+          "format": "json",
+          "role": "metadata",
+          "records": 1,
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.agent_name",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.chat_format_version",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.created_at",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.current_model_id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.generated_title",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.git_remotes",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.git_remotes[]",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.git_root_dir",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.head_branch",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.info",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.info.cwd",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.info.id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.last_active_at",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.last_turn_summary",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.next_trace_turn",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.num_chat_messages",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.num_messages",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.sandbox_profile",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.session_summary",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.updated_at",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "artifact": "updates",
+          "path": "sessions/%2Fwork%2Fdemo-app/019a0000-0000-7000-8000-00000000000a/updates.jsonl",
+          "format": "jsonl",
+          "role": "transcript",
+          "records": 10,
+          "kinds": {
+            "agent_message_chunk": 3,
+            "agent_thought_chunk": 1,
+            "available_commands_update": 1,
+            "subagent_spawned": 1,
+            "tool_call": 1,
+            "tool_call_update": 1,
+            "user_message_chunk": 2
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$.method",
+              "types": [
+                "string"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$.params",
+              "types": [
+                "object"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$.params._meta",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params._meta.eventId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.sessionId",
+              "types": [
+                "string"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$.params.update",
+              "types": [
+                "object"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$.params.update.availableCommands",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.availableCommands[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.availableCommands[].description",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.availableCommands[].name",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.child_session_id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.content",
+              "types": [
+                "array",
+                "object"
+              ],
+              "count": 7
+            },
+            {
+              "path": "$.params.update.content.text",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$.params.update.content.type",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$.params.update.content[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.content[].content",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.content[].content.text",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.content[].content.type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.description",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.kind",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.parent_session_id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.rawInput",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.rawInput.path",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.sessionUpdate",
+              "types": [
+                "string"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$.params.update.status",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.params.update.subagent_id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.subagent_type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.title",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.toolCallId",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.timestamp",
+              "types": [
+                "number"
+              ],
+              "count": 10
+            }
+          ]
+        },
+        {
+          "artifact": "chat-history",
+          "path": "sessions/%2Fwork%2Fdemo-app/019a0000-0000-7000-8000-00000000000a/chat_history.jsonl",
+          "format": "jsonl",
+          "role": "transcript",
+          "records": 10,
+          "kinds": {
+            "assistant": 3,
+            "backend_tool_call": 1,
+            "reasoning": 1,
+            "system": 1,
+            "tool_result": 1,
+            "user": 3
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 10
+            },
+            {
+              "path": "$.content",
+              "types": [
+                "array",
+                "string"
+              ],
+              "count": 8
+            },
+            {
+              "path": "$.content[]",
+              "types": [
+                "object"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.content[].text",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.kind",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.kind.action",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.kind.action.query",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.kind.action.type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.kind.id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.kind.status",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.kind.tool_type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.model_id",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.prompt_index",
+              "types": [
+                "number"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.summary",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.synthetic_reason",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.tool_call_id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.tool_calls",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.tool_calls[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.tool_calls[].arguments",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.tool_calls[].id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.tool_calls[].name",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.type",
+              "types": [
+                "string"
+              ],
+              "count": 10
+            }
+          ],
+          "malformed": 1
+        },
+        {
+          "artifact": "signals",
+          "path": "sessions/%2Fwork%2Fdemo-app/019a0000-0000-7000-8000-00000000000a/signals.json",
+          "format": "json",
+          "role": "auxiliary",
+          "records": 1,
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.assistantMessageCount",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.cancellationCount",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.compactionCount",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.errorCount",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.hasReverted",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.toolFailureCount",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.turnCount",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.userMessageCount",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "artifact": "plan",
+          "path": "sessions/%2Fwork%2Fdemo-app/019a0000-0000-7000-8000-00000000000a/plan.json",
+          "format": "json",
+          "role": "auxiliary",
+          "records": 1,
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.todos",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.todos[]",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.todos[].content",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.todos[].id",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.todos[].status",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            }
+          ]
+        },
+        {
+          "artifact": "rewind-points",
+          "path": "sessions/%2Fwork%2Fdemo-app/019a0000-0000-7000-8000-00000000000a/rewind_points.jsonl",
+          "format": "jsonl",
+          "role": "auxiliary",
+          "records": 1,
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.prompt_index",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.snapshots",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.snapshots[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.snapshots[].content",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.snapshots[].path",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.snapshots[].path.Absolute",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "artifact": "subagent-meta",
+          "path": "sessions/%2Fwork%2Fdemo-app/019a0000-0000-7000-8000-00000000000a/subagents/sa-1/meta.json",
+          "format": "json",
+          "role": "metadata",
+          "records": 1,
+          "kinds": {
+            "completed": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.child_session_id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.description",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.parent_session_id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.status",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.subagent_id",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.subagent_type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "grok-build",
+      "session": "019a0000-0000-7000-8000-00000000000b",
+      "metadata": {
+        "sessionId": "019a0000-0000-7000-8000-00000000000b",
+        "projectPath": "/work/demo-app",
+        "startedAt": "2026-05-01T11:00:00Z",
+        "updatedAt": "2026-05-01T11:00:00Z",
+        "userTurns": 1,
+        "assistantMessages": 0,
+        "toolCalls": 0
+      },
+      "artifacts": [
+        {
+          "artifact": "summary",
+          "path": "sessions/%2Fwork%2Fdemo-app/019a0000-0000-7000-8000-00000000000b/summary.json",
+          "format": "json",
+          "role": "metadata",
+          "records": 0,
+          "fields": [],
+          "malformed": 1
+        },
+        {
+          "artifact": "updates",
+          "path": "sessions/%2Fwork%2Fdemo-app/019a0000-0000-7000-8000-00000000000b/updates.jsonl",
+          "format": "jsonl",
+          "role": "transcript",
+          "records": 1,
+          "kinds": {
+            "user_message_chunk": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.method",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.sessionId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.content",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.content.text",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.content.type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.sessionUpdate",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.timestamp",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "grok-build",
+      "session": "019a0000-0000-7000-8000-00000000000c",
+      "metadata": {
+        "sessionId": "019a0000-0000-7000-8000-00000000000c",
+        "projectPath": "/work/a-very-long-project-path",
+        "startedAt": "2026-05-01T12:00:00Z",
+        "updatedAt": "2026-05-01T12:02:00Z",
+        "userTurns": 1,
+        "assistantMessages": 1,
+        "toolCalls": 1
+      },
+      "artifacts": [
+        {
+          "artifact": "updates",
+          "path": "sessions/very-long-project-0123456789abcdef/019a0000-0000-7000-8000-00000000000c/updates.jsonl",
+          "format": "jsonl",
+          "role": "transcript",
+          "records": 4,
+          "kinds": {
+            "agent_message_chunk": 1,
+            "tool_call": 1,
+            "user_message_chunk": 2
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 4
+            },
+            {
+              "path": "$.method",
+              "types": [
+                "string"
+              ],
+              "count": 4
+            },
+            {
+              "path": "$.params",
+              "types": [
+                "object"
+              ],
+              "count": 4
+            },
+            {
+              "path": "$.params.sessionId",
+              "types": [
+                "string"
+              ],
+              "count": 4
+            },
+            {
+              "path": "$.params.update",
+              "types": [
+                "object"
+              ],
+              "count": 4
+            },
+            {
+              "path": "$.params.update.content",
+              "types": [
+                "object"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.params.update.content.text",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.params.update.content.type",
+              "types": [
+                "string"
+              ],
+              "count": 3
+            },
+            {
+              "path": "$.params.update.kind",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.sessionUpdate",
+              "types": [
+                "string"
+              ],
+              "count": 4
+            },
+            {
+              "path": "$.params.update.status",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.title",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.params.update.toolCallId",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.timestamp",
+              "types": [
+                "number"
+              ],
+              "count": 4
+            }
+          ],
+          "malformed": 1
+        }
+      ]
+    }
+  ]
+}
