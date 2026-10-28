@@ -1,0 +1,704 @@
+{
+  "sha": "2ca93bd91ade6f8baa87a9cf7bcc29a79c5909ea",
+  "base": "d461022c858ef800782490318e6b59b3558b75e4",
+  "binary": "<workspace>/peasant/peasant-770--release--fairtrade-transcript-adoption/peasant",
+  "binarySha256": "7f405c47890bde1bee04864fed0c29671217ffb1a2e19252731aec40265380d2",
+  "publishedVersion": "0.0.48",
+  "assets": [
+    {
+      "subject": "app",
+      "asset": "/_next/static/css/67a3d9a6012f5eaa.css",
+      "sha256": "ce6acc6755e6c63f8eb5e6898aae9cf1331764f35948bead72d72f40876ea129"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/css/7523e2a4e812a9e2.css",
+      "sha256": "a1a70a8929bdbb08eea40381d95b6caac4eaf837a591ca798bf7e2faca79e28b"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/css/44a4bf73a1261b2d.css",
+      "sha256": "4bb61c4eb8adeda7a93730860773c9c88d80907c6de64455e5cb964432eff12e"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/webpack-5c3e2d4aefd56754.js",
+      "sha256": "9c1a1a65e3ad0f4fa3181f7f94fbe6663829bdb950f90f35b531e22801f211f4"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/1581e093-df44a9a2e7ddb4bb.js",
+      "sha256": "55e2b29414305e617c959e34a873824bdd67eaed6e72ac4c77b493217c1f2042"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/5941-1bc5866d13b535b5.js",
+      "sha256": "cd5af00234d2f18ebeea96e213c4a1266c57ecb8de38567564e022a0e475f787"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/main-app-e7655e659b54fd59.js",
+      "sha256": "af06b38799488bedba742f0b0f91184231cc33cd96b5a24705bb6c90aa9a5292"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/03c4fccc-8bdd8cc6622967a0.js",
+      "sha256": "173513497480c17e89b5a9c1449541cf1a6f6cdeb56966cdd542c4534a9573fe"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/d625453e-c272899a0b4cc2a6.js",
+      "sha256": "1037d790d4ad098ded04df5468946c8c3745330a7e20a0f3977f6cd36385484e"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/3937-3aba3e67ca403361.js",
+      "sha256": "c65c67bad31be32d29be9d1f93dd9a757e4617075dc91a787f41446c800ffdce"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/3443-1def3fcb41f94786.js",
+      "sha256": "743027850b8ea3a152c16876f22775bbe1b83f6970c27f85a2cc313660ee8426"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/3045-21ec9c254d6d714d.js",
+      "sha256": "bb4dc8070ec2e20f9f12271bac3b24e18cb07bbe7c4191c6bd46c91e39b3c44b"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/2595-d6d68c9716f152cb.js",
+      "sha256": "9b5f0c0798c799d7931decb6a1980710d804e68d0544c32783a1654face0d638"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/9142-08e19fca1ed1e7b0.js",
+      "sha256": "de90cf337c4a2dcab62e072d0adfed31d8cbb35698c6e6095024901495a9f8d7"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/4922-8cdf8cdbb87c57bd.js",
+      "sha256": "dc629b6427204e4b5145cd581f0e7d4df768ce9abc38e6376998c249de4c4591"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/9291-f3f123c0aaa61926.js",
+      "sha256": "e9606cd937199de6a51d18f83b77a95ffb7b5b761dff8ce96cba9efe82cff5bb"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/app/layout-5450b627128b0efb.js",
+      "sha256": "d513931b7ca5b6b3a41c8524a565c72c92f1b38adad905c9532c69bd8c1f0941"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/app/not-found-7ef38936b6a7c29e.js",
+      "sha256": "502051d5be178d443af3465c883c59912b2bea8b71e163a9c7c99619e97b9515"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/917-a4da0bd1fc2cebfc.js",
+      "sha256": "d1d4c487fb7e0e0d756789f73bcd9c0d9c53d7a7b787da9c6c9da94b3be02d89"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/665-2d8629b670e2d517.js",
+      "sha256": "c17d6ee0be4318d8fc664bce3c60c402f540c6b0ce8ab5465c59ee45f7fe58c9"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/app/page-8dde1f2c54ba071d.js",
+      "sha256": "721272f0a164aeda2737dd717b65169bd305fab4c539e17ebf2f6b14139343e2"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/polyfills-42372ed130431b0a.js",
+      "sha256": "0973c1d64c88adc8e3c950410cb58b288f72118d5965b78049438deb8f2f9683"
+    },
+    {
+      "subject": "app",
+      "asset": "/_next/static/chunks/webpack-5c3e2d4aefd56754.js",
+      "sha256": "9c1a1a65e3ad0f4fa3181f7f94fbe6663829bdb950f90f35b531e22801f211f4"
+    },
+    {
+      "subject": "demo",
+      "asset": "/assets/index-Bud8vKb0.js",
+      "sha256": "263461775d9f8ea2953dfd0ccb30cf495045740a1cd26abc3ea84ea893e06d79"
+    },
+    {
+      "subject": "demo",
+      "asset": "/assets/index-CS6ELrNR.css",
+      "sha256": "9569a899655f6337777f38843420b5fb1e1918366a216f49bc5f430e2d42ab22"
+    }
+  ],
+  "captures": [
+    {
+      "path": "<evidence>/peasant-770-captures/app/dark/desktop-reading.png",
+      "subject": "app",
+      "theme": "dark",
+      "device": "desktop",
+      "state": "reading",
+      "url": "http://localhost:8690/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "metrics": {
+        "theme": "dark",
+        "stream": {
+          "x": 488,
+          "y": 197,
+          "width": 919,
+          "height": 755,
+          "top": 197,
+          "right": 1407,
+          "bottom": 952,
+          "left": 488
+        },
+        "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(11, 11, 10)",
+        "chromeFont": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "240px 920px 32px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/app/dark/desktop-output.png",
+      "subject": "app",
+      "theme": "dark",
+      "device": "desktop",
+      "state": "output",
+      "url": "http://localhost:8690/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "metrics": {
+        "theme": "dark",
+        "stream": {
+          "x": 488,
+          "y": 197,
+          "width": 919,
+          "height": 755,
+          "top": 197,
+          "right": 1407,
+          "bottom": 952,
+          "left": 488
+        },
+        "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(11, 11, 10)",
+        "chromeFont": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "240px 920px 32px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/app/dark/phone-reading.png",
+      "subject": "app",
+      "theme": "dark",
+      "device": "phone",
+      "state": "reading",
+      "url": "http://localhost:8690/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "metrics": {
+        "theme": "dark",
+        "stream": {
+          "x": 0,
+          "y": 236,
+          "width": 390,
+          "height": 560,
+          "top": 236,
+          "right": 390,
+          "bottom": 796,
+          "left": 0
+        },
+        "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(11, 11, 10)",
+        "chromeFont": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "0px 390px 0px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/app/dark/phone-output.png",
+      "subject": "app",
+      "theme": "dark",
+      "device": "phone",
+      "state": "output",
+      "url": "http://localhost:8690/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "metrics": {
+        "theme": "dark",
+        "stream": {
+          "x": 0,
+          "y": 225,
+          "width": 390,
+          "height": 571,
+          "top": 225,
+          "right": 390,
+          "bottom": 796,
+          "left": 0
+        },
+        "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(11, 11, 10)",
+        "chromeFont": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "0px 390px 0px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/app/light/desktop-reading.png",
+      "subject": "app",
+      "theme": "light",
+      "device": "desktop",
+      "state": "reading",
+      "url": "http://localhost:8690/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "metrics": {
+        "theme": "light",
+        "stream": {
+          "x": 488,
+          "y": 197,
+          "width": 919,
+          "height": 755,
+          "top": 197,
+          "right": 1407,
+          "bottom": 952,
+          "left": 488
+        },
+        "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(251, 250, 247)",
+        "chromeFont": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "240px 920px 32px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/app/light/desktop-output.png",
+      "subject": "app",
+      "theme": "light",
+      "device": "desktop",
+      "state": "output",
+      "url": "http://localhost:8690/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "metrics": {
+        "theme": "light",
+        "stream": {
+          "x": 488,
+          "y": 197,
+          "width": 919,
+          "height": 755,
+          "top": 197,
+          "right": 1407,
+          "bottom": 952,
+          "left": 488
+        },
+        "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(251, 250, 247)",
+        "chromeFont": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "240px 920px 32px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/app/light/phone-reading.png",
+      "subject": "app",
+      "theme": "light",
+      "device": "phone",
+      "state": "reading",
+      "url": "http://localhost:8690/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "metrics": {
+        "theme": "light",
+        "stream": {
+          "x": 0,
+          "y": 236,
+          "width": 390,
+          "height": 560,
+          "top": 236,
+          "right": 390,
+          "bottom": 796,
+          "left": 0
+        },
+        "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(251, 250, 247)",
+        "chromeFont": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "0px 390px 0px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/app/light/phone-output.png",
+      "subject": "app",
+      "theme": "light",
+      "device": "phone",
+      "state": "output",
+      "url": "http://localhost:8690/projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/",
+      "metrics": {
+        "theme": "light",
+        "stream": {
+          "x": 0,
+          "y": 225,
+          "width": 390,
+          "height": 571,
+          "top": 225,
+          "right": 390,
+          "bottom": 796,
+          "left": 0
+        },
+        "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(251, 250, 247)",
+        "chromeFont": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "0px 390px 0px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/demo/dark/desktop-reading.png",
+      "subject": "demo",
+      "theme": "dark",
+      "device": "desktop",
+      "state": "reading",
+      "url": "http://localhost:15359/?app=transcript&transcript=ledger-actions&fb=off&theme=dark#inuse",
+      "metrics": {
+        "theme": "dark",
+        "stream": {
+          "x": 272,
+          "y": 261.953125,
+          "width": 863,
+          "height": 692,
+          "top": 261.953125,
+          "right": 1135,
+          "bottom": 953.953125,
+          "left": 272
+        },
+        "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(11, 11, 10)",
+        "chromeFont": "\"Atkinson Hyperlegible Mono\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "240px 864px 272px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/demo/dark/desktop-output.png",
+      "subject": "demo",
+      "theme": "dark",
+      "device": "desktop",
+      "state": "output",
+      "url": "http://localhost:15359/?app=transcript&transcript=ledger-actions&fb=off&theme=dark#inuse",
+      "metrics": {
+        "theme": "dark",
+        "stream": {
+          "x": 272,
+          "y": 204.953125,
+          "width": 863,
+          "height": 749,
+          "top": 204.953125,
+          "right": 1135,
+          "bottom": 953.953125,
+          "left": 272
+        },
+        "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(11, 11, 10)",
+        "chromeFont": "\"Atkinson Hyperlegible Mono\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "240px 864px 272px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/demo/dark/phone-reading.png",
+      "subject": "demo",
+      "theme": "dark",
+      "device": "phone",
+      "state": "reading",
+      "url": "http://localhost:15359/?app=transcript&transcript=ledger-actions&fb=off&theme=dark#inuse",
+      "metrics": {
+        "theme": "dark",
+        "stream": {
+          "x": 12,
+          "y": 203.5,
+          "width": 366,
+          "height": 595,
+          "top": 203.5,
+          "right": 378,
+          "bottom": 798.5,
+          "left": 12
+        },
+        "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(11, 11, 10)",
+        "chromeFont": "\"Atkinson Hyperlegible Mono\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "0px 366px 0px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/demo/dark/phone-output.png",
+      "subject": "demo",
+      "theme": "dark",
+      "device": "phone",
+      "state": "output",
+      "url": "http://localhost:15359/?app=transcript&transcript=ledger-actions&fb=off&theme=dark#inuse",
+      "metrics": {
+        "theme": "dark",
+        "stream": {
+          "x": 12,
+          "y": 165.5,
+          "width": 366,
+          "height": 633,
+          "top": 165.5,
+          "right": 378,
+          "bottom": 798.5,
+          "left": 12
+        },
+        "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(11, 11, 10)",
+        "chromeFont": "\"Atkinson Hyperlegible Mono\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "0px 366px 0px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/demo/light/desktop-reading.png",
+      "subject": "demo",
+      "theme": "light",
+      "device": "desktop",
+      "state": "reading",
+      "url": "http://localhost:15359/?app=transcript&transcript=ledger-actions&fb=off&theme=light#inuse",
+      "metrics": {
+        "theme": "light",
+        "stream": {
+          "x": 272,
+          "y": 261.953125,
+          "width": 863,
+          "height": 692,
+          "top": 261.953125,
+          "right": 1135,
+          "bottom": 953.953125,
+          "left": 272
+        },
+        "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(251, 250, 247)",
+        "chromeFont": "\"Atkinson Hyperlegible Mono\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "240px 864px 272px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/demo/light/desktop-output.png",
+      "subject": "demo",
+      "theme": "light",
+      "device": "desktop",
+      "state": "output",
+      "url": "http://localhost:15359/?app=transcript&transcript=ledger-actions&fb=off&theme=light#inuse",
+      "metrics": {
+        "theme": "light",
+        "stream": {
+          "x": 272,
+          "y": 204.953125,
+          "width": 863,
+          "height": 749,
+          "top": 204.953125,
+          "right": 1135,
+          "bottom": 953.953125,
+          "left": 272
+        },
+        "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(251, 250, 247)",
+        "chromeFont": "\"Atkinson Hyperlegible Mono\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "240px 864px 272px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/demo/light/phone-reading.png",
+      "subject": "demo",
+      "theme": "light",
+      "device": "phone",
+      "state": "reading",
+      "url": "http://localhost:15359/?app=transcript&transcript=ledger-actions&fb=off&theme=light#inuse",
+      "metrics": {
+        "theme": "light",
+        "stream": {
+          "x": 12,
+          "y": 203.5,
+          "width": 366,
+          "height": 595,
+          "top": 203.5,
+          "right": 378,
+          "bottom": 798.5,
+          "left": 12
+        },
+        "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(251, 250, 247)",
+        "chromeFont": "\"Atkinson Hyperlegible Mono\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "0px 366px 0px",
+        "bodyOverflow": false
+      }
+    },
+    {
+      "path": "<evidence>/peasant-770-captures/demo/light/phone-output.png",
+      "subject": "demo",
+      "theme": "light",
+      "device": "phone",
+      "state": "output",
+      "url": "http://localhost:15359/?app=transcript&transcript=ledger-actions&fb=off&theme=light#inuse",
+      "metrics": {
+        "theme": "light",
+        "stream": {
+          "x": 12,
+          "y": 165.5,
+          "width": 366,
+          "height": 633,
+          "top": 165.5,
+          "right": 378,
+          "bottom": 798.5,
+          "left": 12
+        },
+        "font": "\"Atkinson Hyperlegible\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "fontSize": "16px",
+        "lineHeight": "24px",
+        "background": "rgb(251, 250, 247)",
+        "chromeFont": "\"Atkinson Hyperlegible Mono\", ui-monospace, Menlo, Consolas, monospace",
+        "radius": "0px",
+        "grid": "0px 366px 0px",
+        "bodyOverflow": false
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "subject": "app",
+      "theme": "dark",
+      "device": "desktop",
+      "type": "http",
+      "status": 400,
+      "url": "http://localhost:8690/api/v1/sessions/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/commits"
+    },
+    {
+      "subject": "app",
+      "theme": "dark",
+      "device": "desktop",
+      "type": "http",
+      "status": 400,
+      "url": "http://localhost:8690/api/v1/sessions/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/pull-requests"
+    },
+    {
+      "subject": "app",
+      "theme": "dark",
+      "device": "phone",
+      "type": "http",
+      "status": 400,
+      "url": "http://localhost:8690/api/v1/sessions/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/commits"
+    },
+    {
+      "subject": "app",
+      "theme": "dark",
+      "device": "phone",
+      "type": "http",
+      "status": 400,
+      "url": "http://localhost:8690/api/v1/sessions/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/pull-requests"
+    },
+    {
+      "subject": "app",
+      "theme": "light",
+      "device": "desktop",
+      "type": "http",
+      "status": 400,
+      "url": "http://localhost:8690/api/v1/sessions/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/commits"
+    },
+    {
+      "subject": "app",
+      "theme": "light",
+      "device": "desktop",
+      "type": "http",
+      "status": 400,
+      "url": "http://localhost:8690/api/v1/sessions/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/pull-requests"
+    },
+    {
+      "subject": "app",
+      "theme": "light",
+      "device": "phone",
+      "type": "http",
+      "status": 400,
+      "url": "http://localhost:8690/api/v1/sessions/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/commits"
+    },
+    {
+      "subject": "app",
+      "theme": "light",
+      "device": "phone",
+      "type": "http",
+      "status": 400,
+      "url": "http://localhost:8690/api/v1/sessions/sess-c3d4e5f6-a7b8-9012-cdef-123456789012/pull-requests"
+    }
+  ],
+  "checks": [],
+  "served": {
+    "chunks": [
+      "/_next/static/chunks/03c4fccc-8bdd8cc6622967a0.js",
+      "/_next/static/chunks/1581e093-df44a9a2e7ddb4bb.js",
+      "/_next/static/chunks/2595-d6d68c9716f152cb.js",
+      "/_next/static/chunks/3045-21ec9c254d6d714d.js",
+      "/_next/static/chunks/3443-1def3fcb41f94786.js",
+      "/_next/static/chunks/3937-3aba3e67ca403361.js",
+      "/_next/static/chunks/4922-8cdf8cdbb87c57bd.js",
+      "/_next/static/chunks/5941-1bc5866d13b535b5.js",
+      "/_next/static/chunks/665-2d8629b670e2d517.js",
+      "/_next/static/chunks/9142-08e19fca1ed1e7b0.js",
+      "/_next/static/chunks/917-a4da0bd1fc2cebfc.js",
+      "/_next/static/chunks/9291-f3f123c0aaa61926.js",
+      "/_next/static/chunks/app/layout-5450b627128b0efb.js",
+      "/_next/static/chunks/app/not-found-7ef38936b6a7c29e.js",
+      "/_next/static/chunks/app/page-8dde1f2c54ba071d.js",
+      "/_next/static/chunks/d625453e-c272899a0b4cc2a6.js",
+      "/_next/static/chunks/main-app-e7655e659b54fd59.js",
+      "/_next/static/chunks/polyfills-42372ed130431b0a.js",
+      "/_next/static/chunks/webpack-5c3e2d4aefd56754.js"
+    ],
+    "markerChunks": {
+      "txn-thinking-box": [
+        "/_next/static/chunks/03c4fccc-8bdd8cc6622967a0.js"
+      ],
+      "txn-sticky-disclosure": [
+        "/_next/static/chunks/03c4fccc-8bdd8cc6622967a0.js"
+      ],
+      "txn-rail-title": [
+        "/_next/static/chunks/03c4fccc-8bdd8cc6622967a0.js"
+      ]
+    },
+    "binChecked": true
+  },
+  "demoTree": "1d6bab0b0d53e2f7db7fdd4525995d92b920c508",
+  "releaseTree": "1d6bab0b0d53e2f7db7fdd4525995d92b920c508"
+}
