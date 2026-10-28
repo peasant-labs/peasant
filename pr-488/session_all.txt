@@ -1,0 +1,157 @@
+## BEFORE - develop be2bc57f (no PR #488)
+$ git log -1 --oneline  # in the develop checkout
+be2bc57f release(v0.13.4): restore canonical transcript host and recorded PR evidence (#774)
+
+$ ls internal/harnesslayout
+ls: cannot access 'internal/harnesslayout': No such file or directory
+
+$ ls docs/harness-layouts
+ls: cannot access 'docs/harness-layouts': No such file or directory
+
+$ grep -rl harnesslayout --include='*.go' . | head
+(no matches - the package does not exist on develop)
+
+$ peasant layout list
+Error: unknown command "layout" for "peasant"
+Run 'peasant --help' for usage.
+
+$ peasant --help | grep -i layout
+(no layout command in help - nothing to capture
+ the storage layout of non-ingested tools with)
+## AFTER - PR #488 head 92d67881 (rebased on develop)
+$ git log --oneline develop..HEAD
+92d67881 chore(layout): drop the bundled test-gate overlap from this branch
+8f3861f4 fix(layout): pin the report grammar and cover the review findings
+3e9ead1e fix(layout): keep only an error class in shape-only reports
+eb7f5d41 feat(layout): capture the storage layout of tools Peasant does not ingest yet
+
+$ ls internal/harnesslayout
+capture.go
+env.go
+fixture_test.go
+jsonl_bound_test.go
+layout.go
+layout_test.go
+report_json_test.go
+shape.go
+testdata
+values.go
+
+$ peasant layout --help
+Describe and capture where coding tools that Peasant does not ingest yet keep
+their session metadata and transcripts.
+
+A capture reads the local session store read-only and prints a JSON report of
+the structure of each artifact: field paths, JSON types, and record-kind
+counts. It never prints transcript text. By default it also removes paths,
+session identifiers, titles, and timestamps, so the report can be attached to
+a public issue.
+
+Usage:
+  peasant layout [flags]
+  peasant layout [command]
+
+Available Commands:
+  capture     Print the value-free structure of a tool's local sessions as JSON
+  list        List the declared tool layouts and their roots on this machine
+
+Flags:
+  -h, --help   help for layout
+
+Global Flags:
+      --config string       Path to config file (default: ~/.config/peasant/config.yaml) (default "/tmp/fakehome488/.config/peasant/config.yaml")
+      --config-dir string   Override the config directory (default: $XDG_CONFIG_HOME or ~/.config); config lives under <config-dir>/peasant
+      --data-dir string     Override the data directory (default: $XDG_DATA_HOME or ~/.local/share); the DB + peasant-sync live under <data-dir>/peasant
+      --state-dir string    Override the state directory (default: $XDG_STATE_HOME or ~/.local/state); logs/PID live under <state-dir>/peasant
+  -v, --version             Print the version
+
+Use "peasant layout [command] --help" for more information about a command.
+
+$ peasant layout list
+(framework only: zero tools registered on this
+ branch - per-tool layouts land in stacked PRs)
+
+$ peasant layout capture no-such-tool
+Error: unknown layout tool "no-such-tool" (known: [])
+Usage:
+  peasant layout capture <tool> [flags]
+## AFTER - capture engine: fixture tests (synthetic stores)
+$ go test -v -run 'TestRunCaptures|TestRunHonors|TestSavedReportFixtures|TestRunCases' ./internal/harnesslayout/
+=== RUN   TestRunCases
+=== RUN   TestRunCases/limit-counts-success-after-failure
+=== RUN   TestRunCases/negative-limit-rejected
+=== RUN   TestRunCases/already-canceled
+=== RUN   TestRunCases/unsorted-sessions-are-ordered
+=== RUN   TestRunCases/discovery-permission-stripped
+=== RUN   TestRunCases/discovery-not-found-class
+=== RUN   TestRunCases/discovery-canceled-class
+=== RUN   TestRunCases/discovery-other-class
+=== RUN   TestRunCases/capture-permission-stripped
+--- PASS: TestRunCases (0.09s)
+=== RUN   TestRunCapturesShapeAndMetadataWithoutContent
+--- PASS: TestRunCapturesShapeAndMetadataWithoutContent (0.00s)
+=== RUN   TestRunHonorsLimitAndRecordsFailures
+--- PASS: TestRunHonorsLimitAndRecordsFailures (0.00s)
+=== RUN   TestSavedReportFixtures
+=== RUN   TestSavedReportFixtures/public_success
+=== RUN   TestSavedReportFixtures/private_success
+=== RUN   TestSavedReportFixtures/missing_root
+=== RUN   TestSavedReportFixtures/failures
+--- PASS: TestSavedReportFixtures (0.00s)
+PASS
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	0.756s
+
+$ go test ./internal/harnesslayout/
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	0.158s
+## AFTER - the shape-only report a future adapter consumes
+$ cat internal/harnesslayout/testdata/reports/public_success.json
+{
+    "tool": "example-tool",
+    "roots": [
+        {
+            "present": true,
+            "sessions": 1
+        }
+    ],
+    "captures": [
+        {
+            "tool": "example-tool",
+            "session": "",
+            "metadata": {
+                "models": [
+                    "m-1"
+                ],
+                "userTurns": 1,
+                "assistantMessages": 0,
+                "toolCalls": 0
+            },
+            "artifacts": [
+                {
+                    "artifact": "transcript",
+                    "format": "jsonl",
+                    "role": "transcript",
+                    "records": 1,
+                    "kinds": {
+                        "user": 1
+                    },
+                    "fields": [
+                        {
+                            "path": "$",
+                            "types": [
+                                "object"
+                            ],
+                            "count": 1
+                        },
+                        {
+                            "path": "$.model",
+                            "types": [
+                                "string"
+                            ],
+                            "count": 1
+                        },
+                        {
+                            "path": "$.text",
+
+# Report contract (docs/harness-layouts/README.md):
+# field paths + JSON types + record-kind census only -
+# never transcript text; paths/ids/titles stripped by default.
