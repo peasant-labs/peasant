@@ -7,6 +7,21 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-10-28
+
+### Changed
+- The local transcript moves to Fairtrade 0.0.48. Model actions appear once per
+  user turn after the first prose, with the action list open and each output
+  closed. Compact mode collapses the lists. Thinking has its own boxed output,
+  and Bash input keeps one prompt without a repeated icon.
+
+### Fixed
+- Turn selection follows clicks and rapid keyboard navigation, the reading
+  width stays where it was set, and the outline follows the reading position.
+  System turns can be hidden with the filters. Action disclosures and sidebars
+  retain their contents while closing, and the condensed header exchanges
+  space with the timeline without a jump, respecting reduced motion.
+
 ## [0.13.2] - 2026-10-27
 
 ### Changed
@@ -913,6 +928,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.13.3]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.3
 [0.11.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.11.1
 [0.11.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.11.0
 [0.10.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.10.0
