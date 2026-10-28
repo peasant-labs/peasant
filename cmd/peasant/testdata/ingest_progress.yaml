@@ -35,7 +35,7 @@ execution:
     - {name: ui-error-over-failure, cancel_at: before-final, run_error: true, ui_error: true, want: failed, want_error: ui, json: true}
     - {name: ui-error-over-cancellation, cancel_at: pipeline, run_error: true, ui_error: true, want: canceled, want_error: ui}
     - {name: session-failure-summary, cancel_at: none, session_errors: 2, want: succeeded, want_error: sessions, contains: ["peasant harvest: 9 sessions", "duration: 2.3s"]}
-    - {name: json-session-failure-payload, cancel_at: none, session_errors: 2, want: succeeded, json: true, contains: ['"New": 7', '"Errors": 2', '"duration": "2.3s"']}
+    - {name: json-session-failure-payload, cancel_at: none, session_errors: 2, want: succeeded, want_error: sessions, json: true, contains: ['"New": 7', '"Errors": 2', '"duration": "2.3s"']}
 command_startup:
   required_cases: [command-pre-canceled-before-setup, command-pre-canceled-json-before-setup]
   cases:

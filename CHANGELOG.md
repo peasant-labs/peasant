@@ -7,6 +7,13 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Changed
+- **Exit code:** `peasant harvest --json` now exits 1 when a session fails,
+  as the human output already did. Stdout is still one JSON document
+  (`summary.Errors` counts the failures) and stderr gets
+  `Error: N session(s) failed`. Scripts that treated exit 0 as "JSON was
+  printed" should read `summary.Errors` or accept exit 1.
+
 ## [0.13.4] - 2026-10-28
 
 ### Changed

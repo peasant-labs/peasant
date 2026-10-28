@@ -238,7 +238,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			args := []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
 			output, err := executeHarvestCmd(t, commandRoot, args)
 			if testCase.Harvest == legacySQLiteHarvestSessionError {
-				if err == nil || !strings.Contains(err.Error(), "session(s) failed") {
+				if err == nil || !errors.Is(err, errSessionsFailed) {
 					t.Fatalf("mounted malformed-row harvest error=%v, want per-session failure\n%s", err, output)
 				}
 			} else if err != nil {

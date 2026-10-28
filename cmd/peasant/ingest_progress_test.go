@@ -668,7 +668,8 @@ func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
 			if !errors.Is(err, wantError) {
 				t.Fatalf("output error = %v, want %v", err, wantError)
 			}
-			if cmd.SilenceUsage != (c.WantError == "context" || c.WantError == "ui") {
+			// A JSON session failure silences usage so stdout stays one document.
+			if cmd.SilenceUsage != (c.WantError == "context" || c.WantError == "ui" || (c.WantError == "sessions" && c.JSON)) {
 				t.Fatalf("unexpected usage suppression for %v", err)
 			}
 			if len(c.Contains) == 0 && output.Len() != 0 {

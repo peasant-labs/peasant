@@ -186,7 +186,9 @@ func runInstallCommand(t *testing.T, w installWorld, command string, filesystem 
 	root.SetOut(&out)
 	root.SetErr(&diagnostics)
 	root.SetArgs(w.args(command))
-	if err := root.Execute(); err != nil {
+	// A failed session still prints the full JSON document; the command then
+	// exits non-zero for it, which the callers assert through result.Sessions.
+	if err := root.Execute(); err != nil && !errors.Is(err, errSessionsFailed) {
 		t.Fatalf("mounted %s: %v\n%s\n%s", command, err, &out, &diagnostics)
 	}
 	var result jsonPipelineResult

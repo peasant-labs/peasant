@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -557,6 +558,10 @@ type harvestOutputOptions struct {
 	upgrade ingest.UpgradeResult
 }
 
+// errSessionsFailed ends a harvest that finished but failed at least one
+// session, in human and --json mode alike. Callers match it with errors.Is.
+var errSessionsFailed = errors.New("session(s) failed")
+
 // outputHarvest consumes only the committed execution, after terminal and logger
 // cleanup. In particular, cancellation during that cleanup cannot change output.
 func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harvestOutputOptions) error {
@@ -593,7 +598,18 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		printIndexProfile(os.Stderr, options.indexProfiler.Snapshot())
 	}
 	if options.flags.jsonOutput {
-		return printJSON(cmd.OutOrStdout(), result)
+		if err := printJSON(cmd.OutOrStdout(), result); err != nil {
+			return err
+		}
+		// The exit code must not depend on the output format: a script that
+		// asks for JSON learns about a failed session the same way.
+		if result.Summary.Errors > 0 {
+			// Usage text would land on stdout after the document and make
+			// it unparseable.
+			cmd.SilenceUsage = true
+			return fmt.Errorf("%d %w", result.Summary.Errors, errSessionsFailed)
+		}
+		return nil
 	}
 	printSummary(cmd.OutOrStdout(), result, options.flags.verbose, options.flags.includeActive, options.outputDir, options.configPath, options.sources, options.customPatternCount)
 	if remaining := result.Summary.ContentCaptureRemaining; remaining > 0 {
@@ -613,7 +629,7 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 
 	// 11. Exit code: 1 if any errors occurred during ingestion.
 	if result.Summary.Errors > 0 {
-		return fmt.Errorf("%d session(s) failed", result.Summary.Errors)
+		return fmt.Errorf("%d %w", result.Summary.Errors, errSessionsFailed)
 	}
 	return nil
 }
