@@ -6,8 +6,8 @@ cases:
     # The request options and the response check are semantic; the minified identifiers around
     # them (request helper, schema namespace) move with the compiler. The injected guard names
     # the response local, so a rename fails the expected-error check instead of passing silently.
-    find: '{method:"POST",signal:e});if(!'
-    replace: '{method:"POST",signal:e});if(!s.ok)throw Error("typed partial report discarded");if(!'
+    find: '{method:"POST",signal:t});if(!'
+    replace: '{method:"POST",signal:t});if(!a.ok)throw Error("typed partial report discarded");if(!'
     expectedError: metadata fetch partial
   - name: village-back-in-nav
     testName: village-route-only-from-home
