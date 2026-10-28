@@ -8,7 +8,7 @@ echo 'Synthetic fixtures only (repo testdata + a synthetic state.vscdb)'
 echo '================================================================'
 sleep 1
 echo
-echo '--- BEFORE: base tip 883c4b39 (PR #488 branch, no Devin Desktop) ---'
+echo '--- BEFORE: base tip 92d67881 (PR #488 branch, no Devin Desktop) ---'
 sleep 1
 echo '$ peasant-base layout list'
 ./peasant-base layout list | sed "s|$HOME|~|g"
@@ -20,7 +20,7 @@ echo '$ peasant-base layout capture devin-desktop --path fixtures/... --include-
 echo "exit: ${PIPESTATUS[0]}  <- Devin Desktop layout is NOT captured at the base"
 sleep 1
 echo
-echo '--- AFTER: PR head 6fd4d83e (rebased onto 883c4b39) ---'
+echo '--- AFTER: PR head c8bdc95d (rebased onto 92d67881) ---'
 sleep 1
 echo '$ peasant-head layout list'
 ./peasant-head layout list | sed "s|$HOME|~|g"
