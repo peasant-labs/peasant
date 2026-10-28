@@ -1,0 +1,52 @@
+=== [BEFORE] binary: /home/hatch/workspace/pr-evidence/pr-721-evidence/bin/peasant-before
+peasant dev
+$ peasant harvest   # synthetic session aaaaaaaa-0000-4000-8000-000000000682
+Output:  /home/hatch/workspace/pr-evidence/pr-721-evidence/home-BEFORE-r2/out
+Config:  /home/hatch/workspace/pr-evidence/pr-721-evidence/home-BEFORE-r2/config.yaml
+Sources:
+   - claude-code: /home/hatch/workspace/pr-evidence/pr-721-evidence/home-BEFORE-r2/projects
+
+peasant harvest: 1 sessions
+   - 0     new
+   - 0     updated
+   - 0     unchanged
+   - 0     errors
+   - 1     active (included)
+duration: 2.3s
+
+index: 1 indexed, 1 computed (metadata_version=12)
+harvester targets:
+  claude-code: adapter_version=3 indexer_version=22 index_version=2
+  codex: adapter_version=3 indexer_version=20 index_version=2
+  cursor: adapter_version=1 indexer_version=18 index_version=1
+  opencode: adapter_version=4 indexer_version=19 index_version=2
+  pi: adapter_version=3 indexer_version=18 index_version=1
+  strike: adapter_version=1 indexer_version=17 index_version=1
+
+  ACTIVE     claude-code aaaaaaaa-0000-4000-8000-000000000682  ->  /home/hatch/workspace/pr-evidence/pr-721-evidence/home-BEFORE-r2/out/__peasant-untracked__--8704d6f4--proj/aaaaaaaa-0000-4000-8000-000000000682
+exit=0
+$ peasant harvest verify --content   # clean harvest
+Content verification
+sessions checked: 1
+orphan content: 0 bodies, 0 blobs, 0 database payload bytes
+orphan owned directories: 0, 0 bytes
+unflagged orphan sessions: 0
+damaged sessions: none
+search index: healthy
+search size: 16384 bytes over 174 bytes of text (18 documents), fresh estimate 68 bytes, ratio 241.44 (needs-optimize: run the offline optimize + VACUUM)
+Status: PASSED
+exit=0
+$ sqlite3 DB "PRAGMA foreign_keys=OFF; DELETE FROM sessions WHERE session_id='aaaaaaaa-0000-4000-8000-000000000682'"
+sessions rows left: 0
+content bodies left for that session: 18
+$ peasant harvest verify --content   # content is now orphaned
+Content verification
+sessions checked: 0
+orphan content: 0 bodies, 0 blobs, 0 database payload bytes
+orphan owned directories: 0, 0 bytes
+unflagged orphan sessions: 0
+damaged sessions: none
+search index: healthy
+search size: 16384 bytes over 174 bytes of text (18 documents), fresh estimate 68 bytes, ratio 241.44 (needs-optimize: run the offline optimize + VACUUM)
+Status: PASSED
+exit=0

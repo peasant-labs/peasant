@@ -1,0 +1,110 @@
+=== [AFTER] binary: /home/hatch/workspace/pr-evidence/pr-721-evidence/bin/peasant-after
+peasant v0.13.5-0.20261028173119-7860fd2909b4
+$ peasant harvest   # synthetic session aaaaaaaa-0000-4000-8000-000000000682
+Output:  /home/hatch/workspace/pr-evidence/pr-721-evidence/home-AFTER-r2/out
+Config:  /home/hatch/workspace/pr-evidence/pr-721-evidence/home-AFTER-r2/config.yaml
+Sources:
+   - claude-code: /home/hatch/workspace/pr-evidence/pr-721-evidence/home-AFTER-r2/projects
+
+peasant harvest: 1 sessions
+   - 0     new
+   - 0     updated
+   - 0     unchanged
+   - 0     errors
+   - 1     active (included)
+duration: 33.2s
+
+index: 1 indexed, 1 computed (metadata_version=12)
+harvester targets:
+  claude-code: adapter_version=3 indexer_version=22 index_version=2
+  codex: adapter_version=3 indexer_version=20 index_version=2
+  cursor: adapter_version=1 indexer_version=18 index_version=1
+  opencode: adapter_version=4 indexer_version=19 index_version=2
+  pi: adapter_version=3 indexer_version=18 index_version=1
+  strike: adapter_version=1 indexer_version=17 index_version=1
+
+  ACTIVE     claude-code aaaaaaaa-0000-4000-8000-000000000682  ->  /home/hatch/workspace/pr-evidence/pr-721-evidence/home-AFTER-r2/out/__peasant-untracked__--3d0bf971--proj/aaaaaaaa-0000-4000-8000-000000000682
+exit=0
+$ peasant harvest verify --content   # clean harvest
+Content verification
+sessions checked: 1
+orphan content: 0 bodies, 0 blobs, 0 database payload bytes
+orphan owned directories: 0, 0 bytes
+unflagged orphan sessions: 0
+sessions with content but no sessions row: 0
+damaged sessions: none
+search index: healthy
+search size: 16384 bytes over 174 bytes of text (18 documents), fresh estimate 68 bytes, ratio 241.44 (needs-optimize: run the offline optimize + VACUUM)
+Status: PASSED
+exit=0
+$ sqlite3 DB "PRAGMA foreign_keys=OFF; DELETE FROM sessions WHERE session_id='aaaaaaaa-0000-4000-8000-000000000682'"
+sessions rows left: 0
+content bodies left for that session: 18
+$ peasant harvest verify --content   # content is now orphaned
+Content verification
+sessions checked: 0
+orphan content: 18 bodies, 0 blobs, 174 database payload bytes
+orphan owned directories: 0, 0 bytes
+unflagged orphan sessions: 0
+sessions with content but no sessions row: 1
+  (their bodies are also counted in the orphan content totals above)
+  - aaaaaaaa-0000-4000-8000-000000000682: its sessions row is missing; run peasant harvest --force --session aaaaaaaa-0000-4000-8000-000000000682 to re-index it from its transcript
+damaged sessions: none
+search index: healthy
+search size: 16384 bytes over 174 bytes of text (18 documents), fresh estimate 68 bytes, ratio 241.44 (needs-optimize: run the offline optimize + VACUUM)
+Error: content verification failed: 1 session(s) have content but no sessions row
+Usage:
+  peasant harvest verify [flags]
+
+Flags:
+      --content   Verify session content objects and the search index
+  -h, --help      help for verify
+      --repair    Mark content corruptions found by --content for the repair activation (requires --content)
+      --verbose   Show sample data from each table
+
+Global Flags:
+      --config string       Path to config file (default: ~/.config/peasant/config.yaml) (default "/home/hatch/.config/peasant/config.yaml")
+      --config-dir string   Override the config directory (default: $XDG_CONFIG_HOME or ~/.config); config lives under <config-dir>/peasant
+      --data-dir string     Override the data directory (default: $XDG_DATA_HOME or ~/.local/share); the DB + peasant-sync live under <data-dir>/peasant
+      --state-dir string    Override the state directory (default: $XDG_STATE_HOME or ~/.local/state); logs/PID live under <state-dir>/peasant
+  -v, --version             Print the version
+
+exit=1
+$ peasant harvest --force --session aaaaaaaa-0000-4000-8000-000000000682   # the printed recovery
+notice: The database is empty, but peasant-sync/ already holds saved sessions. Run `peasant harvest index --all` first to rebuild the database from them. A harvest now reads the harness sources again and overwrites the saved copies.
+Output:  /home/hatch/workspace/pr-evidence/pr-721-evidence/home-AFTER-r2/out
+Config:  /home/hatch/workspace/pr-evidence/pr-721-evidence/home-AFTER-r2/config.yaml
+Sources:
+   - claude-code: /home/hatch/workspace/pr-evidence/pr-721-evidence/home-AFTER-r2/projects
+
+peasant harvest: 1 sessions
+   - 0     new
+   - 0     updated
+   - 0     unchanged
+   - 0     errors
+   - 1     active (included)
+duration: 2.7s
+
+index: 1 indexed, 1 computed (metadata_version=12)
+harvester targets:
+  claude-code: adapter_version=3 indexer_version=22 index_version=2
+  codex: adapter_version=3 indexer_version=20 index_version=2
+  cursor: adapter_version=1 indexer_version=18 index_version=1
+  opencode: adapter_version=4 indexer_version=19 index_version=2
+  pi: adapter_version=3 indexer_version=18 index_version=1
+  strike: adapter_version=1 indexer_version=17 index_version=1
+
+  ACTIVE     claude-code aaaaaaaa-0000-4000-8000-000000000682  ->  /home/hatch/workspace/pr-evidence/pr-721-evidence/home-AFTER-r2/out/__peasant-untracked__--3d0bf971--proj/aaaaaaaa-0000-4000-8000-000000000682
+exit=0
+$ peasant harvest verify --content   # after recovery
+Content verification
+sessions checked: 1
+orphan content: 0 bodies, 0 blobs, 0 database payload bytes
+orphan owned directories: 0, 0 bytes
+unflagged orphan sessions: 0
+sessions with content but no sessions row: 0
+damaged sessions: none
+search index: healthy
+search size: 16384 bytes over 174 bytes of text (18 documents), fresh estimate 68 bytes, ratio 241.44 (needs-optimize: run the offline optimize + VACUUM)
+Status: PASSED
+exit=0
