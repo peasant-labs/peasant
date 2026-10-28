@@ -1,0 +1,14 @@
+VET_OK
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	3.429s
+TEST_EXIT=0
+=== RUN   TestCursorCLICapturesChatStoreShapeAndMetadata
+=== RUN   TestCursorCLIToleratesAMissingRootAndAnEmptyStore
+=== RUN   TestCursorIDEStateCapturesComposersAndBubbles
+=== RUN   TestCursorIDEStateToleratesMissingGlobalStore
+--- PASS: TestCursorCLICapturesChatStoreShapeAndMetadata (3.47s)
+--- PASS: TestCursorIDEStateToleratesMissingGlobalStore (0.20s)
+--- PASS: TestCursorCLIToleratesAMissingRootAndAnEmptyStore (0.18s)
+--- PASS: TestCursorIDEStateCapturesComposersAndBubbles (4.29s)
+PASS
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	4.713s
+DONE
