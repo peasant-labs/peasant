@@ -1,0 +1,39 @@
+testgate: SUBSET RUN — patterns: ./internal/testkit/testgate/overlapprobe/left, ./internal/testkit/testgate/overlapprobe/right
+testgate: subset packages: 2 of 94 repo packages; NOT a full-suite gate result
+testgate: plan 2 packages, list-wall 5.901s (recorded separately from the test wall)
+testgate: pre-test wall n/a (CHECK_START_NS unset)
+testgate: calibration L=4.637 (probe 171ms, reference 37ms)
+testgate: INCONCLUSIVE — L=4.637 > 4: this box is too loaded to quote a budget against
+
+=== per-invocation records (no-race (single pass)) ===
+UNIT                                                     CLASS                       WALL      USER    SYSTEM
+github.com/peasant-labs/peasant/internal/testkit/testgate/overlapprobe/right race                      3.565s     561ms     290ms
+github.com/peasant-labs/peasant/internal/testkit/testgate/overlapprobe/left race                      3.538s     282ms     152ms
+
+=== per-class decision table (wall − CPU = work cores cannot compress) ===
+CLASS                    UNITS      WALL      USER    SYSTEM       GAP  BASIS
+race                         2    3.568s     560ms     289ms    2.719s  pass-level-aggregate
+
+=== capacity check (CPU seconds; the bar is HELD at 120s — this measurement does not decide it) ===
+measured CPU today (user+system, all passes): 851ms
+Y  post-optimization CPU numerator: PENDING (the parallelism/faking work has not run)
+check CPU_seconds(Y)/120: PENDING — no impossibility claim is asserted in either direction
+
+=== summary ===
+single no-race wall:    3.568s
+combined test wall:     8.205s
+pre-test wall:          n/a (CHECK_START_NS unset)
+calibration L:          4.637
+effective -p:           2 (package invocations concurrent)
+effective -parallel:    2 per package (default: GOMAXPROCS; not pinned)
+-count:                 1 (result cache bypassed)
+cache:                  GOCACHE=/home/hatch/workspace/tools/gocache (results not cached; -count=1)
+race:                   off (single no-race pass; plan + screen still run)
+budget:                 not applicable (subset run: 2 of 94 packages)
+
+=== screen ===
+all four rules passed: every test ran exactly once across the passes
+
+testgate: streams under /home/hatch/workspace/pr-evidence/evidence-758/out-overlap
+testgate: report /home/hatch/workspace/pr-evidence/evidence-758/out-overlap/report.json
+testgate: PASS

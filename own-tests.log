@@ -1,0 +1,3 @@
+ok  	github.com/peasant-labs/peasant/cmd/testgate	107.638s	(go test -race -count=1)
+ok  	github.com/peasant-labs/peasant/internal/testkit/testgate	356.895s	(go test -race -count=1 -timeout 40m; first attempt hit the default 10m test timeout under VM load, rerun passes)
+ok  	github.com/peasant-labs/peasant/internal/ingest	60.168s	(focused rerun: TestOpenCodeNativeCLI, after warm build cache; first focused run: other 4 touched tests passed, this one exceeded its in-test 3m build deadline under load)

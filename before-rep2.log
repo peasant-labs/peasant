@@ -1,0 +1,43 @@
+testgate: SUBSET RUN — patterns: ./internal/testkit/coveragemap, ./internal/testkit/teststream, ./internal/testkit/fsdecorator, ./internal/metrics, ./internal/auth, ./internal/defaults
+testgate: subset packages: 6 of 92 repo packages; NOT a full-suite gate result
+testgate: plan 6 packages, list-wall 2m8.979s (recorded separately from the test wall)
+testgate: pre-test wall n/a (CHECK_START_NS unset)
+testgate: calibration L=27.970 (probe 1.029s, reference 37ms)
+testgate: INCONCLUSIVE — L=27.970 > 4: this box is too loaded to quote a budget against
+
+=== per-invocation records (no-race (single pass)) ===
+UNIT                                                     CLASS                       WALL      USER    SYSTEM
+github.com/peasant-labs/peasant/internal/metrics         race                     49.312s    3.143s    1.695s
+github.com/peasant-labs/peasant/internal/defaults        race                     41.739s    1.626s    1.263s
+github.com/peasant-labs/peasant/internal/testkit/coveragemap race                     33.142s    1.919s    1.102s
+github.com/peasant-labs/peasant/internal/auth            race                     32.329s    1.561s     793ms
+github.com/peasant-labs/peasant/internal/testkit/fsdecorator race                     30.427s    1.823s    1.168s
+github.com/peasant-labs/peasant/internal/testkit/teststream race                      10.32s     447ms     324ms
+
+=== per-class decision table (wall − CPU = work cores cannot compress) ===
+CLASS                    UNITS      WALL      USER    SYSTEM       GAP  BASIS
+race                         6 3m17.268s    10.52s    6.345s  3m0.403s  serialized-per-invocation
+
+=== capacity check (CPU seconds; the bar is HELD at 120s — this measurement does not decide it) ===
+measured CPU today (user+system, all passes): 16.866s
+Y  post-optimization CPU numerator: PENDING (the parallelism/faking work has not run)
+check CPU_seconds(Y)/120: PENDING — no impossibility claim is asserted in either direction
+
+=== summary ===
+single no-race wall:    3m17.514s
+combined test wall:     3m26.596s
+pre-test wall:          n/a (CHECK_START_NS unset)
+calibration L:          27.970
+effective -p:           2 (package invocations concurrent)
+effective -parallel:    2 per package (default: GOMAXPROCS; not pinned)
+-count:                 1 (result cache bypassed)
+cache:                  GOCACHE=/home/hatch/workspace/tools/gocache (results not cached; -count=1)
+race:                   off (single no-race pass; plan + screen still run)
+budget:                 not applicable (subset run: 6 of 92 packages)
+
+=== screen ===
+all four rules passed: every test ran exactly once across the passes
+
+testgate: streams under /home/hatch/workspace/pr-evidence/evidence-758/out-before-rep2
+testgate: report /home/hatch/workspace/pr-evidence/evidence-758/out-before-rep2/report.json
+testgate: PASS
