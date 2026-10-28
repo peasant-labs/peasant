@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,7 +15,81 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/session_pull_request_sources.yaml
+var pullRequestSourcesYAML []byte
+
+//go:embed testdata/session_pull_request_sparse.yaml
+var sparsePullRequestSourcesYAML []byte
+
+type pullRequestSourceFixture struct {
+	RequiredNames []string `yaml:"requiredNames"`
+	Cases         []struct {
+		Name          string `yaml:"name"`
+		Owner         string `yaml:"owner"`
+		Repo          string `yaml:"repo"`
+		Number        int    `yaml:"number"`
+		TurnIndex     int    `yaml:"turnIndex"`
+		ToolCallIndex int    `yaml:"toolCallIndex"`
+		ToolCallID    string `yaml:"toolCallId"`
+	} `yaml:"cases"`
+}
+
+func TestSessionPullRequestsSparseSources(t *testing.T) {
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name          string `yaml:"name"`
+			Detail        string `yaml:"detail"`
+			TurnIndex     int    `yaml:"turnIndex"`
+			ToolCallIndex int    `yaml:"toolCallIndex"`
+			ToolCallID    string `yaml:"toolCallId"`
+		} `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(sparsePullRequestSourcesYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	db := newSessionExtrasStore(t)
+	names := map[string]bool{}
+	for _, c := range fixture.Cases {
+		if names[c.Name] {
+			t.Fatalf("duplicate fixture %q", c.Name)
+		}
+		names[c.Name] = true
+		t.Run(c.Name, func(t *testing.T) {
+			var detail schema.SessionDetailReadPayload
+			if err := json.Unmarshal([]byte(c.Detail), &detail); err != nil {
+				t.Fatal(err)
+			}
+			baseURL := startSessionExtrasServer(t, db, detailReadStubProvider{payload: &detail})
+			status, body, _ := getSessionExtras(t, baseURL+"/api/v1/sessions/"+extrasSessionID+"/pull-requests")
+			if status != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", status, body)
+			}
+			var response schema.SessionPullRequestsResponse
+			if err := json.Unmarshal(body, &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.UnverifiedPullRequests == nil || len(*response.UnverifiedPullRequests) != 1 {
+				t.Fatalf("unverified = %+v", response.UnverifiedPullRequests)
+			}
+			source := (*response.UnverifiedPullRequests)[0].Source
+			if source.TurnIndex != c.TurnIndex || source.ToolCallIndex != c.ToolCallIndex || source.ToolCallID != c.ToolCallID {
+				t.Fatalf("source = %+v", source)
+			}
+			if len(response.PullRequests) != 1 || response.PullRequests[0].Source != "gh_pr_create" {
+				t.Fatalf("legacy projection = %+v", response.PullRequests)
+			}
+		})
+	}
+	for _, name := range fixture.RequiredNames {
+		if !names[name] {
+			t.Errorf("missing required fixture %q", name)
+		}
+	}
+}
 
 const (
 	extrasSessionID  = "acce5500-0000-4000-8000-000000000001"
@@ -348,11 +423,14 @@ func TestSessionPullRequestsRoute(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)
 	}
-	if len(decoded) != 1 {
-		t.Fatalf("response keys = %v, want exactly pullRequests", decoded)
+	if len(decoded) != 2 {
+		t.Fatalf("response keys = %v, want pullRequests and unverified_pull_requests", decoded)
 	}
 	if _, ok := decoded["pullRequests"]; !ok {
 		t.Fatalf("response keys = %v, want a pullRequests key", decoded)
+	}
+	if value, ok := decoded["unverified_pull_requests"]; !ok || string(value) == "null" {
+		t.Fatalf("unverified_pull_requests = %s (present %t), want a non-null array", value, ok)
 	}
 	// The served payload is the contract envelope. Decoding it into the schema
 	// type and validating checks both the row shape and the fields the contract
@@ -363,6 +441,30 @@ func TestSessionPullRequestsRoute(t *testing.T) {
 	}
 	if err := envelope.Validate(); err != nil {
 		t.Fatalf("served pull requests envelope violates the schema contract: %v", err)
+	}
+	var fixture pullRequestSourceFixture
+	if err := yaml.Unmarshal(pullRequestSourcesYAML, &fixture); err != nil {
+		t.Fatalf("decode pull request sources: %v", err)
+	}
+	rows := *envelope.UnverifiedPullRequests
+	if len(rows) != len(fixture.Cases) {
+		t.Fatalf("unverified rows = %d, want %d", len(rows), len(fixture.Cases))
+	}
+	names := make(map[string]bool)
+	for index, expected := range fixture.Cases {
+		if names[expected.Name] {
+			t.Fatalf("duplicate fixture name %q", expected.Name)
+		}
+		names[expected.Name] = true
+		row := rows[index]
+		if row.Owner != expected.Owner || row.Repo != expected.Repo || row.Number != expected.Number || row.Source.TurnIndex != expected.TurnIndex || row.Source.ToolCallIndex != expected.ToolCallIndex || row.Source.ToolCallID != expected.ToolCallID {
+			t.Errorf("%s: unexpected source row %+v", expected.Name, row)
+		}
+	}
+	for _, name := range fixture.RequiredNames {
+		if !names[name] {
+			t.Errorf("missing required fixture %q", name)
+		}
 	}
 	got := envelope.PullRequests
 	want := []schema.SessionPullRequest{

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/peasant-labs/peasant/internal/commandpr"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
+	"github.com/peasant-labs/schema/commandpr"
 )
 
 // The two session-extra reads build the contract's own envelopes
@@ -134,15 +134,17 @@ func (s *Server) handleSessionPullRequests(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	calls := make([]schema.ToolCallDetail, 0)
-	for _, turn := range detail.Turns {
-		calls = append(calls, turn.ToolCalls...)
+	unverified := commandpr.DetectSession(detail.SessionDetailPayload)
+	if unverified == nil {
+		unverified = []schema.UnverifiedPullRequest{}
 	}
-	pullRequests := commandpr.Detect(calls)
-	if pullRequests == nil {
-		pullRequests = []schema.SessionPullRequest{}
+	pullRequests := make([]schema.SessionPullRequest, 0, len(unverified))
+	for _, row := range unverified {
+		pullRequests = append(pullRequests, schema.SessionPullRequest{
+			Owner: row.Owner, Repo: row.Repo, Number: row.Number, URL: row.URL, Source: "gh_pr_create",
+		})
 	}
-	response := schema.SessionPullRequestsResponse{PullRequests: pullRequests}
+	response := schema.SessionPullRequestsResponse{PullRequests: pullRequests, UnverifiedPullRequests: &unverified}
 	if err := response.Validate(); err != nil {
 		writeAPIError(w, http.StatusInternalServerError,
 			fmt.Sprintf("the pull-request read for session %s produced a response that breaks the Local API session-pull-requests contract, so nothing was served: %v; repair the detector or the read in the session pull requests handler before retrying", sessionID, err), "")
