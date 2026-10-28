@@ -1,0 +1,447 @@
+{
+  "tool": "devin-desktop",
+  "roots": [
+    {
+      "path": "fixtures/config/Devin",
+      "present": true,
+      "sessions": 3
+    },
+    {
+      "path": "fixtures/home/.codeium/windsurf",
+      "present": true,
+      "sessions": 1
+    }
+  ],
+  "captures": [
+    {
+      "tool": "devin-desktop",
+      "session": "0b1d2c3e-0000-4000-8000-00000000a001",
+      "metadata": {
+        "sessionId": "0b1d2c3e-0000-4000-8000-00000000a001",
+        "title": "Fixture widget rename",
+        "startedAt": "2026-06-10T09:00:00Z",
+        "updatedAt": "2026-06-10T09:05:00Z",
+        "models": [
+          "fixture-model-1"
+        ],
+        "userTurns": 2,
+        "assistantMessages": 2,
+        "toolCalls": 1
+      },
+      "artifacts": [
+        {
+          "artifact": "acp-events",
+          "path": "User/acp-events/0b1d2c3e-0000-4000-8000-00000000a001.ndjson",
+          "format": "jsonl",
+          "role": "transcript",
+          "records": 11,
+          "kinds": {
+            "agent_message_chunk": 3,
+            "agent_thought_chunk": 1,
+            "available_commands_update": 1,
+            "session_info_update": 1,
+            "tool_call": 1,
+            "tool_call_update": 1,
+            "usage_update": 1,
+            "user_message_chunk": 2
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 11
+            },
+            {
+              "path": "$.notification",
+              "types": [
+                "object"
+              ],
+              "count": 11
+            },
+            {
+              "path": "$.notification._meta",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification._meta[\"cognition.ai/cachedReadTokens\"]",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification._meta[\"cognition.ai/inputTokens\"]",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification._meta[\"cognition.ai/model\"]",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification._meta[\"cognition.ai/outputTokens\"]",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.availableCommands",
+              "types": [
+                "array"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.availableCommands[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.availableCommands[].description",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.availableCommands[].name",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.content",
+              "types": [
+                "array",
+                "object"
+              ],
+              "count": 7
+            },
+            {
+              "path": "$.notification.content.text",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$.notification.content.type",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$.notification.content[]",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.content[].content",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.content[].content.text",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.content[].content.type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.content[].type",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.kind",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.messageId",
+              "types": [
+                "string"
+              ],
+              "count": 6
+            },
+            {
+              "path": "$.notification.metadata",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.metadata.created_at",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.sessionUpdate",
+              "types": [
+                "string"
+              ],
+              "count": 11
+            },
+            {
+              "path": "$.notification.size",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.status",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.notification.title",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.notification.toolCallId",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.notification.updatedAt",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.notification.used",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.providerId",
+              "types": [
+                "string"
+              ],
+              "count": 11
+            }
+          ],
+          "malformed": 1
+        }
+      ]
+    },
+    {
+      "tool": "devin-desktop",
+      "session": "0b1d2c3e-0000-4000-8000-00000000a002",
+      "metadata": {
+        "sessionId": "0b1d2c3e-0000-4000-8000-00000000a002",
+        "userTurns": 1,
+        "assistantMessages": 1,
+        "toolCalls": 0
+      },
+      "artifacts": [
+        {
+          "artifact": "acp-events",
+          "path": "User/acp-events/0b1d2c3e-0000-4000-8000-00000000a002.ndjson",
+          "format": "jsonl",
+          "role": "transcript",
+          "records": 2,
+          "kinds": {
+            "agent_message_chunk": 1,
+            "user_message_chunk": 1
+          },
+          "fields": [
+            {
+              "path": "$",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.notification",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.notification.content",
+              "types": [
+                "object"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.notification.content.text",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.notification.content.type",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.notification.sessionUpdate",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            },
+            {
+              "path": "$.providerId",
+              "types": [
+                "string"
+              ],
+              "count": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "devin-desktop",
+      "session": "User/globalStorage/state.vscdb",
+      "metadata": {
+        "userTurns": 0,
+        "assistantMessages": 0,
+        "toolCalls": 0
+      },
+      "artifacts": [
+        {
+          "artifact": "global-state",
+          "path": "User/globalStorage/state.vscdb",
+          "format": "sqlite",
+          "role": "index",
+          "records": 4,
+          "kinds": {
+            "windsurf.state.cachedActiveTrajectory:*": 1,
+            "windsurf.state.cachedTrajectorySummaries:*": 1,
+            "windsurf.syntheticCount": 1,
+            "windsurf.syntheticFlag": 1
+          },
+          "fields": [
+            {
+              "path": "$.ItemTable.key",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.ItemTable.value",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.codeium.windsurf",
+              "types": [
+                "object"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.codeium.windsurf.windsurf.state.cachedActiveTrajectory:*",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.codeium.windsurf.windsurf.state.cachedTrajectorySummaries:*",
+              "types": [
+                "string"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.codeium.windsurf.windsurf.syntheticCount",
+              "types": [
+                "number"
+              ],
+              "count": 1
+            },
+            {
+              "path": "$.codeium.windsurf.windsurf.syntheticFlag",
+              "types": [
+                "boolean"
+              ],
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": "devin-desktop",
+      "session": "0b1d2c3e-0000-4000-8000-00000000c001",
+      "metadata": {
+        "sessionId": "0b1d2c3e-0000-4000-8000-00000000c001",
+        "startedAt": "2026-10-28T17:57:55.851801295Z",
+        "updatedAt": "2026-10-28T17:57:55.851801295Z",
+        "userTurns": 0,
+        "assistantMessages": 0,
+        "toolCalls": 0
+      },
+      "artifacts": [
+        {
+          "artifact": "cascade-trajectory",
+          "path": "cascade/0b1d2c3e-0000-4000-8000-00000000c001.pb",
+          "format": "text",
+          "role": "transcript",
+          "records": 1,
+          "kinds": {
+            "opaque-under-64KiB": 1
+          },
+          "fields": []
+        }
+      ]
+    }
+  ]
+}

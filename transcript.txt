@@ -1,0 +1,57 @@
+================================================================
+PR #490 - feat(layout): capture the Devin Desktop session layout
+Synthetic fixtures only (repo testdata + a synthetic state.vscdb)
+================================================================
+
+--- BEFORE: base tip 883c4b39 (PR #488 branch, no Devin Desktop) ---
+$ peasant-base layout list
+(no output above: no layout tools are registered at the base)
+
+$ peasant-base layout capture devin-desktop --path fixtures/... --include-metadata
+Error: unknown layout tool "devin-desktop" (known: [])
+exit: 1  <- Devin Desktop layout is NOT captured at the base
+
+--- AFTER: PR head 3ae8910c (rebased onto 883c4b39) ---
+$ peasant-head layout list
+Devin Desktop (devin-desktop)
+  One ACP event stream per agent session, and one opaque Cascade trajectory file per legacy Cascade conversation; the shared global state database is captured once as its own entry.
+  root ~/.config/Devin [absent]
+  root ~/.codeium/windsurf [absent]
+  transcript jsonl    User/acp-events/*.ndjson
+  transcript text     cascade/*.pb
+  index      sqlite   User/globalStorage/state.vscdb
+
+$ peasant-head layout capture devin-desktop --path fixtures/config/Devin \
+    --path fixtures/home/.codeium/windsurf --include-metadata --limit 0
+exit: 0
+root fixtures/config/Devin: present=True sessions=3
+root fixtures/home/.codeium/windsurf: present=True sessions=1
+captures: 4  failures: 0
+- session 0b1d2c3e-0000-4000-8000-00000000a001 title='Fixture widget rename' models=['fixture-model-1'] user=2 assistant=2 toolCalls=1
+    acp-events: format=jsonl role=transcript records=11 kinds={'agent_message_chunk': 3, 'agent_thought_chunk': 1, 'available_commands_update': 1, 'session_info_update': 1, 'tool_call': 1, 'tool_call_update': 1, 'usage_update': 1, 'user_message_chunk': 2}
+- session 0b1d2c3e-0000-4000-8000-00000000a002 user=1 assistant=1 toolCalls=0
+    acp-events: format=jsonl role=transcript records=2 kinds={'agent_message_chunk': 1, 'user_message_chunk': 1}
+- session User/globalStorage/state.vscdb
+    global-state: format=sqlite role=index records=4 kinds={'windsurf.state.cachedActiveTrajectory:*': 1, 'windsurf.state.cachedTrajectorySummaries:*': 1, 'windsurf.syntheticCount': 1, 'windsurf.syntheticFlag': 1}
+- session 0b1d2c3e-0000-4000-8000-00000000c001
+    cascade-trajectory: format=text role=transcript records=1 kinds={'opaque-under-64KiB': 1}
+
+$ leak check: no transcript text, secrets, values or workspace IDs in the report
+clean: FIXTURE-USER-PROMPT not present
+clean: FIXTURE-AGENT-REPLY not present
+clean: FIXTURE-TOOL-OUTPUT not present
+clean: SYNTHETIC-SECRET-VALUE not present
+clean: synthetic-ws-1 not present
+
+--- TESTS (rebased head) ---
+$ go test -race ./internal/harnesslayout/ -run TestDevinDesktop -v
+=== RUN   TestDevinDesktopCapturesACPStreamsCascadeInventoryAndStateIndex
+--- PASS: TestDevinDesktopCapturesACPStreamsCascadeInventoryAndStateIndex (0.93s)
+=== RUN   TestDevinDesktopToleratesMissingAndMalformedStores
+--- PASS: TestDevinDesktopToleratesMissingAndMalformedStores (1.42s)
+PASS
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	4.849s
+$ go test ./internal/harnesslayout/
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	1.389s
+
+DONE: base = not captured / unknown tool; head = 4 captures, no leaks, tests pass
