@@ -3,6 +3,7 @@ import {
   zSessionPullRequestsResponse,
   type CommitInfo,
   type SessionPullRequest,
+  type SessionPullRequestsResponse,
 } from '@peasant-labs/schema';
 import {
   decodeLocalAnswer,
@@ -127,7 +128,7 @@ const sessionCommitsContract: LocalContract<{ commits: CommitInfo[] }> = {
   },
 };
 
-const sessionPullRequestsContract: LocalContract<{ pullRequests: SessionPullRequest[] }> = {
+const sessionPullRequestsContract: LocalContract<SessionPullRequestsResponse> = {
   safeParse(value) {
     if (!isRecord(value) || !Array.isArray(value.pullRequests)) {
       return malformed('the answer has no "pullRequests" array');
@@ -157,8 +158,16 @@ export async function fetchSessionPullRequests(
   sessionId: string,
   signal?: AbortSignal,
 ): Promise<SessionPullRequest[]> {
+  return (await fetchSessionPullRequestsResponse(sessionId, signal)).pullRequests;
+}
+
+/** Preserve omission of provenance on older servers rather than inventing a locator. */
+export async function fetchSessionPullRequestsResponse(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionPullRequestsResponse> {
   const path = sessionPullRequestsPath(sessionId);
   const answer = await readLocalAnswer(path, { signal });
   if (!answer.ok) throw localRefusal(path, answer);
-  return decodeLocalAnswer(path, answer, sessionPullRequestsContract).pullRequests;
+  return decodeLocalAnswer(path, answer, sessionPullRequestsContract);
 }

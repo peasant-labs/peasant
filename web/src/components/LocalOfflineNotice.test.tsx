@@ -208,7 +208,7 @@ function expectShown() {
   expect(sidebar?.contains(region)).toBe(false);
   const wrapper = region!.parentElement!;
   expect(wrapper.closest('.asb-main')).not.toBeNull();
-  expect(wrapper.nextElementSibling?.tagName).toBe('MAIN');
+  expect(wrapper.closest('main.asb-main')).not.toBeNull();
   expect(wrapper.classList.contains('absolute')).toBe(false);
   expect(wrapper.classList.contains('fixed')).toBe(false);
   expect(wrapper.classList.contains(NOTICE_PINNED_CLASS)).toBe(true);
@@ -237,8 +237,7 @@ describe('LocalOfflineNotice', () => {
     const mountedAt = Date.now();
     render(
       <LayoutShell>
-        {/* As app/layout.tsx mounts it: not focusable at rest. */}
-        <main>body<button type="button">page control</button></main>
+        body<button type="button">page control</button>
       </LayoutShell>,
     );
     await advance(0);

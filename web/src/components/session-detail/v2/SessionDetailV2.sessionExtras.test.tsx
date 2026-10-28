@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import YAML from 'yaml';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2 } from './SessionDetailV2';
@@ -43,6 +46,7 @@ const PULL_REQUEST = {
 
 let sessionDetailData: unknown;
 let qualityData: unknown;
+const visual = vi.hoisted(() => ({ theme: 'dark' as 'dark' | 'light' }));
 let extras: { commits: { status: number; body: unknown }; pullRequests: { status: number; body: unknown } };
 
 vi.mock('@/lib/share/publishing', async (importOriginal) => ({
@@ -66,7 +70,7 @@ vi.mock('./lib/useEntryLabels', () => ({
   useEntryLabels: () => ({ entryTypes: [], labelsByEntry: new Map(), addLabel: vi.fn() }),
 }));
 vi.mock('@/hooks/useTheme', () => ({
-  useTheme: () => ({ theme: 'dark', setTheme: vi.fn(), toggle: vi.fn() }),
+  useTheme: () => ({ theme: visual.theme, setTheme: vi.fn(), toggle: vi.fn() }),
 }));
 vi.mock('@peasant-labs/fairtrade/graph', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@peasant-labs/fairtrade/graph')>();
@@ -126,6 +130,55 @@ afterEach(() => {
   vi.unstubAllGlobals();
   sessionDetailData = undefined;
   qualityData = undefined;
+});
+
+const utilityFixture = YAML.parse(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/transcript_utility_actions.yaml'), 'utf8')) as {
+  requiredNames: string[];
+  cases: { name: string; theme: 'light' | 'dark'; action: 'transcript' | 'link'; result: 'success' | 'denied' | 'pending' }[];
+};
+
+describe('transcript utility actions', () => {
+  it('retains every required named scenario', () => {
+    expect(new Set(utilityFixture.cases.map((entry) => entry.name))).toEqual(new Set(utilityFixture.requiredNames));
+    expect(utilityFixture.cases).toHaveLength(new Set(utilityFixture.cases.map((entry) => entry.name)).size);
+  });
+  for (const entry of utilityFixture.cases) {
+    it(entry.name, async () => {
+      visual.theme = entry.theme;
+      let resolveWrite: () => void = () => undefined;
+      const pending = new Promise<void>((resolve) => { resolveWrite = resolve; });
+      const writeText = entry.result === 'denied' ? vi.fn().mockRejectedValue(new Error('clipboard denied'))
+        : entry.result === 'pending' ? vi.fn().mockReturnValue(pending) : vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText } });
+      stubLocalApi();
+      const view = render(<TestDetail />);
+      await waitFor(() => expect(view.container.querySelector('.txn-app')).toBeInTheDocument());
+      const bar = await screen.findByRole('group', { name: 'publish' });
+      expect(within(bar).queryByRole('button', { name: 'more' })).not.toBeInTheDocument();
+      expect(within(bar).queryByRole('button', { name: 'copy transcript' })).not.toBeInTheDocument();
+      if (entry.action === 'transcript') {
+        fireEvent.click(screen.getByRole('button', { name: 'copy transcript' }));
+        expect(writeText).toHaveBeenCalledWith(expect.stringContaining('add the canvas row'));
+      } else {
+        fireEvent.click(screen.getByRole('button', { name: 'more' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: 'copy link' }));
+        expect(writeText).toHaveBeenCalledWith(expect.stringContaining(SESSION_ID));
+      }
+      const confirmation = entry.action === 'transcript' ? 'copied as markdown' : 'copied the link';
+      if (entry.result === 'pending') {
+        expect(screen.queryByText(confirmation)).not.toBeInTheDocument();
+        resolveWrite();
+      }
+      if (entry.result !== 'denied') {
+        const message = await screen.findByText(confirmation);
+        expect(message.closest('[role="status"]')).not.toBeNull();
+        expect(bar.contains(message)).toBe(false);
+      } else {
+        await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+        expect(screen.queryByText(confirmation)).not.toBeInTheDocument();
+      }
+    });
+  }
 });
 
 /** True when `later` sits after `earlier` in document order. */

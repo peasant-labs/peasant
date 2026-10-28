@@ -3,16 +3,18 @@
 import { useEffect, useState } from 'react';
 import {
   fetchSessionCommits,
-  fetchSessionPullRequests,
+  fetchSessionPullRequestsResponse,
   type CommitInfo,
   type SessionPullRequest,
 } from '@/lib/api/session-extras';
+import type { UnverifiedPullRequest } from '@peasant-labs/schema';
 
 export interface SessionExtras {
   /** The commits recorded for this session; empty when it produced none. */
   commits: CommitInfo[];
   /** The pull requests a recorded `gh pr create` created; empty when none. */
   pullRequests: SessionPullRequest[];
+  unverifiedPullRequests?: UnverifiedPullRequest[];
 }
 
 const NO_EXTRAS: SessionExtras = { commits: [], pullRequests: [] };
@@ -46,9 +48,9 @@ export function useSessionExtras(sessionId: string): SessionExtras {
         if (!signal.aborted) setExtras((current) => ({ ...current, commits }));
       })
       .catch(() => undefined);
-    void fetchSessionPullRequests(sessionId, signal)
-      .then((pullRequests) => {
-        if (!signal.aborted) setExtras((current) => ({ ...current, pullRequests }));
+    void fetchSessionPullRequestsResponse(sessionId, signal)
+      .then((response) => {
+        if (!signal.aborted) setExtras((current) => ({ ...current, pullRequests: response.pullRequests, unverifiedPullRequests: response.unverified_pull_requests }));
       })
       .catch(() => undefined);
     return () => controller.abort();

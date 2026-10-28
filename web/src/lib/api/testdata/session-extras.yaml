@@ -23,7 +23,31 @@ requiredNames:
   - pull-requests-empty-owner
   - pull-requests-empty-repo
   - pull-requests-empty-source
+  - unverified-source-locator
+  - unverified-empty
+  - unverified-null
+  - unverified-source-missing-index
 cases:
+  - name: unverified-source-locator
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[],"unverified_pull_requests":[{"owner":"acme","repo":"web","number":42,"url":"https://github.com/acme/web/pull/42","source":{"turnIndex":42,"toolCallIndex":1,"toolCallId":"call-2"}}]}'
+    expect: rows
+  - name: unverified-empty
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[],"unverified_pull_requests":[]}'
+    expect: rows
+  - name: unverified-null
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[],"unverified_pull_requests":null}'
+    expect: contract
+  - name: unverified-source-missing-index
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[],"unverified_pull_requests":[{"owner":"acme","repo":"web","number":42,"url":"https://github.com/acme/web/pull/42","source":{"turnIndex":42}}]}'
+    expect: contract
   - name: commits-recorded
     endpoint: commits
     status: 200

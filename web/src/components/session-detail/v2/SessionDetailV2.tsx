@@ -9,6 +9,9 @@ import { TrajectoryGraph } from '@peasant-labs/fairtrade/graph';
 // transcript helpers, all render the SAME composite as the demo.
 import {
   TranscriptViewer,
+  UnverifiedPullRequests,
+  ToastProvider,
+  useToast,
   adaptTranscript,
   annotateTranscript,
   cleanSessionTitle,
@@ -18,6 +21,7 @@ import {
   type TranscriptInitialPosition,
   type TranscriptTab,
 } from '@peasant-labs/fairtrade/ui';
+import type { UnverifiedPullRequestSource } from '@peasant-labs/schema';
 import { useTheme } from '@/hooks/useTheme';
 import { useSessionExtras } from '@/hooks/useSessionExtras';
 import '@xyflow/react/dist/style.css';
@@ -112,12 +116,15 @@ export function SessionDetailV2(props: SessionDetailV2Props) {
   // (Next 15 CSR bailout); own it here so mounting pages need no changes.
   return (
     <Suspense fallback={<SessionDetailSkeleton />}>
-      <SessionDetailV2Inner {...props} />
+      <ToastProvider placement="top-right" max={1} duration={1800}>
+        <SessionDetailV2Inner {...props} />
+      </ToastProvider>
     </Suspense>
   );
 }
 
 function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery }: SessionDetailV2Props) {
+  const toast = useToast();
   // Host element for the mounted viewer; the per-session reading state replays
   // the inner scroller offset against it on the way back.
   const transcriptHostRef = useRef<HTMLDivElement | null>(null);
@@ -132,7 +139,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   const relationshipNavigation = detail?.relationshipNavigation;
   // The session's own commits and detected pull requests. These are additive,
   // display-only reads beside the transcript: both degrade to empty on failure.
-  const { commits: sessionCommits, pullRequests } = useSessionExtras(sessionId);
+  const { commits: sessionCommits, pullRequests, unverifiedPullRequests } = useSessionExtras(sessionId);
 
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -252,6 +259,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   }, [detail, filteringScope, scope.scope, scope.scopeVal, turns]);
 
   const requestedTurn = routeQuery.turn;
+  const [sourcePosition, setSourcePosition] = useState<(UnverifiedPullRequestSource & { requestKey: string }) | null>(null);
+  const sourceSequence = useRef(0);
+  useEffect(() => setSourcePosition(null), [requestedTurn]);
+  const selectSource = useCallback((source: UnverifiedPullRequestSource) => {
+    setActiveTab('trace');
+    if (filteringScope) router.replace(`${pathname}${clearScopeQuery(searchParams)}`);
+    sourceSequence.current += 1;
+    setSourcePosition({ ...source, requestKey: `source:${sourceSequence.current}` });
+  }, [filteringScope, router, pathname, searchParams]);
   const requestedTurnExists = requestedTurn == null || turns.some((turn) => turn.index === requestedTurn);
   const requestedTurnVisible = requestedTurn == null || (displayTurns ?? turns).some((turn) => turn.index === requestedTurn);
   // A turn target this view cannot render right now gets NO one-time position
@@ -260,11 +276,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // fall back to its own legacy mount position and move the reader somewhere the
   // host never asked for.
   const initialPosition = useMemo<TranscriptInitialPosition | null>(() => {
+    if (sourcePosition) {
+      if (filteringScope) return null;
+      return { kind: 'tool-call', ...sourcePosition };
+    }
     if (requestedTurn == null) return { kind: 'top' };
     if (!requestedTurnExists) return { kind: 'top', requestKey: `missing-turn:${requestedTurn}` };
     if (!requestedTurnVisible) return null;
     return { kind: 'turn', turnIndex: requestedTurn };
-  }, [requestedTurn, requestedTurnExists, requestedTurnVisible]);
+  }, [sourcePosition, filteringScope, requestedTurn, requestedTurnExists, requestedTurnVisible]);
 
   const revealRequestedTurn = useCallback(() => {
     if (filteringScope) router.replace(`${pathname}${clearScopeQuery(searchParams)}`);
@@ -278,35 +298,26 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   }, [pathname, router, searchParams]);
 
   // Copy-as-Markdown (roadmap 4.7): copies exactly what's shown (focus/scope
-  // respected), so it pastes cleanly into an issue/PR/doc. The header says what
-  // was copied for a moment, since the menu that offered it has closed.
-  const [copied, setCopied] = useState<string | null>(null);
-  const copiedTimer = useRef<number | undefined>(undefined);
-  const announceCopied = useCallback((what: string) => {
-    setCopied(what);
-    window.clearTimeout(copiedTimer.current);
-    copiedTimer.current = window.setTimeout(() => setCopied(null), 1500);
-  }, []);
-  useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
+  // respected), so it pastes cleanly into an issue/PR/doc. Announce only after
+  // the browser confirms that the clipboard write succeeded.
   const copyMarkdown = useCallback(() => {
     const md = turnsToMarkdown(displayTurns ?? turns);
-    void navigator.clipboard?.writeText(md);
-    announceCopied('copied as markdown');
-  }, [announceCopied, displayTurns, turns]);
+    if (!navigator.clipboard) return;
+    void navigator.clipboard.writeText(md).then(() => toast.ok('copied as markdown')).catch(() => undefined);
+  }, [toast, displayTurns, turns]);
   const copyLink = useCallback(() => {
-    void navigator.clipboard?.writeText(`${window.location.origin}${transcriptHref(projectHash, sessionId)}`);
-    announceCopied('copied the link');
-  }, [announceCopied, projectHash, sessionId]);
+    if (!navigator.clipboard) return;
+    void navigator.clipboard.writeText(`${window.location.origin}${transcriptHref(projectHash, sessionId)}`)
+      .then(() => toast.ok('copied the link')).catch(() => undefined);
+  }, [toast, projectHash, sessionId]);
 
-  // The header's overflow actions. The viewer's own share and more menus are
-  // off (`showTail={false}`), so these are the page's only secondary actions,
-  // carried by the publish bar's more menu. The session's figures (duration,
+  // The viewer's built-in share and more menus are off (`showTail={false}`),
+  // so the host supplies its own secondary actions in the utility slot. The session's figures (duration,
   // turns, tools, tokens) always show under the title, so nothing here hides
   // or reveals them.
   const moreItems = useMemo<MenuItem[]>(() => [
-    { label: 'copy as markdown', icon: Copy, onSelect: copyMarkdown },
     { label: 'copy link', icon: LinkIcon, onSelect: copyLink },
-  ], [copyLink, copyMarkdown]);
+  ], [copyLink]);
 
   // The filters rail opens on request: the page leads with the conversation
   // and its outline, and the rail's collapsed strip keeps the filters a click away.
@@ -425,11 +436,8 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // The project crumb keeps the project NAME rather than a literal "sessions",
   // because it is the only part of the trail that says which project you are in.
   //
-  // The last crumb is the session ID, NOT its title: the hero renders the title
-  // directly beneath the trail, so repeating it there says the same thing twice
-  // and — titles being a sentence long — pushes the crumbs that actually
-  // navigate off to the side. The ID is fixed-width and adds the one
-  // identifying fact the hero does not show.
+  // Non-viewer fallback states end with the short session ID. The viewer gets
+  // only ancestors and appends its own title to the trail.
   //
   // An origin crumb (map · node, changes · branch) is inserted after the root
   // when you arrived from one of those surfaces, so the way back to where you
@@ -531,28 +539,25 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     </div>
   );
 
-  // The header row after the breadcrumb: the publish bar (status, its one
-  // action, and the more menu). A copy action says what it copied for a moment.
-  const headerActions = (
+  // The primary publish action and its status remain in the header.
+  const headerActions = publish.bar;
+  const utilityActions = (
     <>
-      {copied && (
-        <span role="status" className="font-mono text-[14px] text-ink-2">
-          {copied}
-        </span>
-      )}
-      {publish.bar}
+      <button type="button" className="btn btn-ghost btn-sm" onClick={copyMarkdown} aria-label="copy transcript">
+        <Copy size={14} aria-hidden="true" />
+      </button>
+      {publish.utilities}
     </>
   );
 
   return (
     <>
-      {/* The app shell publishes one responsive header height for both its main
-          offset and bounded viewers, including the mobile two-row header. */}
+      {/* The shared viewport shell budgets the sidebar and offline notice. */}
       <div
         ref={transcriptHostRef}
         data-tour="transcript-view"
         className={[
-          'flex h-[var(--app-body-height)] flex-col',
+          'flex h-full min-h-0 flex-col',
           activeTab === 'highlights' ? '' : 'txn-hints-hidden',
         ]
           .filter(Boolean)
@@ -588,7 +593,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             search={search}
             onSearchChange={setSearch}
             // Origin-aware host trail through the app router.
-            breadcrumb={breadcrumb}
+            breadcrumbContext={breadcrumb.slice(0, -1)}
             LinkComponent={Link}
             initialPosition={initialPosition}
             // Per-turn copied anchors are full permalinks that keep the live
@@ -602,12 +607,13 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             }}
             streamPrelude={streamPrelude}
             headerActions={headerActions}
-            // Detected pull requests sit under the meta row as evidence: the
-            // viewer only gives the list a place, the host owns its wording.
-            // Omitted entirely when none were detected, so no empty section
-            // appears on the sessions this feature does not touch.
+            utilityActions={utilityActions}
+            // Older servers expose only display-only legacy rows; they cannot
+            // supply a source action without a real locator.
             pullRequests={
-              pullRequests.length > 0 ? (
+              unverifiedPullRequests !== undefined ? (
+                <UnverifiedPullRequests pullRequests={unverifiedPullRequests} onSourceSelect={selectSource} />
+              ) : pullRequests.length > 0 ? (
                 <DetectedPullRequests pullRequests={pullRequests} />
               ) : undefined
             }
@@ -617,9 +623,6 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             showTail={false}
             showOutcome={false}
             showSearchTrigger
-            // The transcript reads as a ledger: a role-led head per turn, one
-            // grouped work panel over its tool calls, and compact system rows.
-            presentation="ledger"
             // The footer's shortcut hint and position counter stay available,
             // as they were on the classic surface; the wrapper still hides the
             // hint outside the highlights tab.

@@ -4,10 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
 import {
   fetchSessionCommits,
-  fetchSessionPullRequests,
+  fetchSessionPullRequestsResponse,
   type CommitInfo,
-  type SessionPullRequest,
 } from './session-extras';
+import type { SessionPullRequestsResponse } from '@peasant-labs/schema';
 
 // The two additive session reads are display-only, so the boundary that matters
 // is what the page does with an answer it cannot use: decode the rows, or refuse
@@ -49,10 +49,10 @@ const cases = root.cases.map((row, index) => {
 });
 requireUniqueNames(cases, 'session extras cases');
 
-function answer(caseRow: SessionExtrasCase): Promise<CommitInfo[] | SessionPullRequest[]> {
+function answer(caseRow: SessionExtrasCase): Promise<CommitInfo[] | SessionPullRequestsResponse> {
   return caseRow.endpoint === 'commits'
     ? fetchSessionCommits(SESSION_ID)
-    : fetchSessionPullRequests(SESSION_ID);
+    : fetchSessionPullRequestsResponse(SESSION_ID);
 }
 
 /** One raw commit as the local read carries it: millisecond times are JSON numbers. */
@@ -62,7 +62,7 @@ type RawCommit = Omit<CommitInfo, 'commitTime' | 'authorTime'> & {
 };
 
 /** The decoded rows a `rows` case must produce: commit times are the contract's bigint. */
-function expectedRows(caseRow: SessionExtrasCase): CommitInfo[] | SessionPullRequest[] {
+function expectedRows(caseRow: SessionExtrasCase): CommitInfo[] | SessionPullRequestsResponse {
   if (caseRow.endpoint === 'commits') {
     const { commits } = JSON.parse(caseRow.body) as { commits: RawCommit[] };
     return commits.map((commit) => ({
@@ -71,7 +71,7 @@ function expectedRows(caseRow: SessionExtrasCase): CommitInfo[] | SessionPullReq
       authorTime: BigInt(commit.authorTime),
     }));
   }
-  return (JSON.parse(caseRow.body) as { pullRequests: SessionPullRequest[] }).pullRequests;
+  return JSON.parse(caseRow.body) as SessionPullRequestsResponse;
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -97,11 +97,11 @@ describe('session extra reads', () => {
         });
       } else {
         // A shape refusal names either the offending row or the missing array.
-        const field = caseRow.endpoint === 'commits' ? 'commits' : 'pullRequests';
+        const field = caseRow.endpoint === 'commits' ? 'commits' : '(pullRequests|unverified_pull_requests)';
         await expect(answer(caseRow)).rejects.toMatchObject({
           name: 'LocalRequestError',
           status: caseRow.status,
-          message: expect.stringMatching(new RegExp(`${field}(\\[0\\]|" array)`)),
+          message: expect.stringMatching(new RegExp(`${field}(\\[0\\]|" array|:)`)),
         });
       }
 

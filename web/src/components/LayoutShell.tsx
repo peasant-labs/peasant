@@ -11,6 +11,7 @@ import { LocalOfflineNotice } from '@/components/LocalOfflineNotice';
 import { CommandPalette } from '@/components/command/CommandPalette';
 import { DevAnnotateOverlay } from '@/components/dev/DevAnnotateOverlay';
 import { playEnter } from '@/lib/motion/enter';
+import { parseTranscriptRoute } from '@/lib/navigation/projectRoutes';
 
 /** The transcript holds dialogs that position against the screen, so it only fades in. */
 const FADE_ONLY = ['/projects'];
@@ -56,12 +57,14 @@ function PageEnter() {
  * so they outlive the pages that use them.
  */
 export function LayoutShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname() ?? '/';
+  const route = parseTranscriptRoute(pathname);
+  const viewport = route.kind === 'canonical' || route.kind === 'legacy';
   return (
     <WebSocketProvider>
       <ServerCapabilitiesProvider>
         <PublishProvider>
-          <AppSidebarLayout sidebar={<LocalSidebar />}>
-            <LocalOfflineNotice />
+          <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<LocalOfflineNotice />} mainAs="main">
             {children}
           </AppSidebarLayout>
           <PageEnter />

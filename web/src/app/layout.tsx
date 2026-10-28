@@ -36,9 +36,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen bg-surface text-ink antialiased">
         <LayoutShell>
-          {/* The offline notice may move focus here (making <main> focusable only for that
-              move); it is a container, not a control, so it draws no focus ring. */}
-          <main className="focus:outline-none">{children}</main>
+          {children}
         </LayoutShell>
       </body>
     </html>

@@ -569,6 +569,9 @@ describe.each(fixture.cases)('publish state $name on /projects/[name]/[id]', (en
     if (entry.steps.includes('arrive')) search = 'publish=open';
     render(<Page />);
     await screen.findByRole('group', { name: 'publish' }, WAIT);
+    expect(bar().closest('.txn-actions')).not.toBeNull();
+    expect(within(bar()).queryByRole('button', { name: 'more' })).not.toBeInTheDocument();
+    expect(within(bar()).queryByRole('button', { name: 'copy transcript' })).not.toBeInTheDocument();
 
     if ('alert' in entry.expect.bar) await within(bar()).findByRole('alert', {}, WAIT);
     else await waitFor(() => expect(bar().querySelector('.pub-state')).not.toBeNull(), WAIT);
@@ -817,7 +820,7 @@ describe.each(automaticFixture.cases)('automatic publishing consent: $name', (en
       await waitFor(() => expect(primaryButton()).toBeEnabled(), WAIT);
       expect(within(dialog()).queryByRole('checkbox')).not.toBeInTheDocument();
       await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
-      await user.click(within(bar()).getByRole('button', { name: 'more' }));
+      await user.click(screen.getByRole('button', { name: 'more' }));
       await user.click(screen.getByRole('menuitem', { name: 'automatic publishing settings' }));
       expect(pushed).toEqual(['/settings']);
       expect(mutations).toEqual([]);
@@ -855,7 +858,7 @@ describe.each(automaticFixture.cases)('automatic publishing consent: $name', (en
       expect(within(dialog()).queryByRole('button', { name: 'retry' })).not.toBeInTheDocument();
       await waitFor(() => expect(bar().querySelector('.pub-state')).toHaveAttribute('data-state', 'published'), WAIT);
       await user.click(within(dialog()).getByRole('button', { name: 'cancel' }));
-      await user.click(within(bar()).getByRole('button', { name: 'more' }));
+      await user.click(screen.getByRole('button', { name: 'more' }));
       await user.click(screen.getByRole('menuitem', { name: 'automatic publishing settings' }));
       expect(pushed).toEqual(['/settings']);
     }

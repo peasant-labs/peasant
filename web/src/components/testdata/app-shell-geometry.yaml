@@ -24,7 +24,7 @@ noticeHeight:
   token: setProperty('--app-notice-height'
 consumers:
   - path: src/components/session-detail/v2/SessionDetailV2.tsx
-    token: h-[var(--app-body-height)]
+    token: flex h-full min-h-0 flex-col
 forbidden:
   - calc(100vh - 64px)
   - calc(100dvh - 64px)
@@ -32,4 +32,4 @@ forbidden:
 # steer Tab and keyboard scrolling. The offline notice makes it focusable only
 # for its own focus move. Nothing fixed sits over it, so it pads no top.
 restingMain:
-  path: src/app/layout.tsx
+  path: src/components/LayoutShell.tsx

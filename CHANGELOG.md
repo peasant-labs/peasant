@@ -7,6 +7,11 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Changed
+- The transcript uses the shared bounded layout and identifies recorded pull
+  requests as unverified evidence. Their source opens the recorded command and
+  result without making a GitHub request or changing access.
+
 ## [0.13.3] - 2026-10-28
 
 ### Changed

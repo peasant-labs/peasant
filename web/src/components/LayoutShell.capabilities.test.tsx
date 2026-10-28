@@ -86,7 +86,7 @@ describe('LayoutShell — the code map stays route-only whatever the server adve
       mockHttp(row);
       render(
         <LayoutShell>
-          <main>body</main>
+          body
         </LayoutShell>,
       );
       // Let the capability request settle (or stay pending) before reading.
