@@ -7,7 +7,7 @@ export PS1='$ '
 export GIT_PAGER=cat PAGER=cat TERM=dumb
 cd ~/workspace/pr-evidence/pr-493 || exit 1
 BEFORE=../pr-493-media/peasant-before2
-AFTER=../pr-493-media/peasant-after2
+AFTER=../pr-493-media/peasant-after3
 TD=internal/harnesslayout/testdata
 sum() { python3 -c "import json,sys; r=json.load(sys.stdin); roots=sum(x.get('sessions',0) for x in r.get('roots') or []); print(f\"  -> tool={r.get('tool')}  sessions discovered={roots}  captured={len(r.get('captures') or [])}  failures={len(r.get('failures') or [])}\")"; }
 sleep 1
@@ -31,7 +31,7 @@ echo "\$ ls internal/harnesslayout/  (in the base checkout) | grep -i kiro"
 ls ../pr-493-base2/internal/harnesslayout/ | grep -i kiro || echo "(no kiro files on base)"
 sleep 1.5
 echo
-echo "### AFTER — PR head fccddd0f (rebased onto 92d67881 + one grammar fix)"
+echo "### AFTER — PR head 9118db77 (rebased onto 92d67881 + grammar & SQLite-fork fixes)"
 sleep 1
 echo "\$ peasant layout list  (tool lines)"
 $AFTER layout list | grep -E '^[A-Za-z].*\('
@@ -56,8 +56,8 @@ go test -race ./internal/harnesslayout/ -count=1
 sleep 1
 echo
 echo "### Stack after rebase"
-echo "\$ git log --oneline -6"
-git log --oneline -6
+echo "\$ git log --oneline -7"
+git log --oneline -7
 sleep 2
 echo
 echo "Done."

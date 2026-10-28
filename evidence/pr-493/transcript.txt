@@ -14,7 +14,7 @@ Error: unknown layout tool "kirocrew" (known: [])
 $ ls internal/harnesslayout/  (in the base checkout) | grep -i kiro
 (no kiro files on base)
 
-### AFTER — PR head fccddd0f (rebased onto 92d67881 + one grammar fix)
+### AFTER — PR head 9118db77 (rebased onto 92d67881 + grammar & SQLite-fork fixes)
 $ peasant layout list  (tool lines)
 Kiro (kiro)
 Kiro CLI (kiro-cli)
@@ -29,13 +29,14 @@ $ peasant layout capture kirocrew --path <fixture kirocrew root> --limit 0
 
 ### Fixture tests (the sqlite conversation DB case is covered here)
 $ go test -race ./internal/harnesslayout/ -run 'TestKiro|TestKiroCrew' -count=1
-ok  	github.com/peasant-labs/peasant/internal/harnesslayout	2.578s
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	2.245s
 $ go test -race ./internal/harnesslayout/ -count=1   (whole package)
-ok  	github.com/peasant-labs/peasant/internal/harnesslayout	3.503s
+ok  	github.com/peasant-labs/peasant/internal/harnesslayout	2.241s
 
 ### Stack after rebase
-$ git log --oneline -6
-fccddd0f (HEAD -> cursor/layout-kiro-35a4, origin/cursor/layout-kiro-35a4) test(layout): follow the field-path grammar for the {mid} threads shape
+$ git log --oneline -7
+9118db77 (HEAD -> cursor/layout-kiro-35a4, origin/cursor/layout-kiro-35a4) fix(layout): use the audited SQLite fork in the Kiro CLI capture
+fccddd0f test(layout): follow the field-path grammar for the {mid} threads shape
 b9fef62a docs(layout): cross-link the Kiro, Kiro CLI, and Kiro Crew layouts
 b9e7f5cd feat(layout): capture the KiroCrew session layout
 93b610df fix(layout): corroborate the Kiro CLI layout against the open-source Kiro Crew
