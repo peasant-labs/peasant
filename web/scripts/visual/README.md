@@ -484,3 +484,22 @@ than more browser scenarios. The capture process owns its server and browser,
 tears them down on success and ordinary failure, and uses a dedicated port
 (default 8847). Concurrent captures must set distinct ports and output roots.
 A forced kill may require closing the child browser/server before rerunning.
+
+### Mounted long transcript and recorded source journey
+
+Run the built binary with an isolated HOME and mock data, then execute the focused
+Playwright journey (set the actual binary and browser paths):
+
+```sh
+CHROME_PATH=/path/to/chrome PEASANT_ORIGIN=http://localhost:15570 \
+  PEASANT_BIN=/path/to/peasant pnpm exec playwright test --config playwright.transcript-viewport.config.mjs
+```
+
+The four named viewport/theme cases exercise the real hydrated session route,
+the mock WebSocket's 52-turn payload, bounded shell and inner scrolling. The
+source case augments that synthetic WebSocket payload and intercepts the additive
+pull-request response; it checks the mounted source action and scope clearing,
+not backend detection or a real GitHub request. The shell mutation removes the
+viewport class to prove that the footer assertion detects the previous failure.
+Set `TRANSCRIPT_CAPTURE_DIR` only to a private output directory when screenshots
+are needed. Use an isolated HOME so account details cannot leak into captures.
