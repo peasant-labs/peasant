@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -23,7 +24,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/content_capture.yaml
@@ -125,26 +125,41 @@ func captureFixtureSource(t *testing.T, fixture captureFixture, fs *testutil.Mem
 
 func loadCaptureFixtures(t *testing.T) []captureFixture {
 	t.Helper()
+	fixtures, err := decodeCaptureFixtures(contentCaptureFixtures)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fixtures
+}
+
+func decodeCaptureFixtures(data []byte) ([]captureFixture, error) {
 	var document struct {
 		Required []string         `yaml:"required_names"`
 		Cases    []captureFixture `yaml:"cases"`
 	}
-	if err := yaml.Unmarshal(contentCaptureFixtures, &document); err != nil {
-		t.Fatal(err)
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
+		return nil, err
 	}
 	names := make(map[string]bool)
 	for _, fixture := range document.Cases {
 		if names[fixture.Name] {
-			t.Fatalf("duplicate fixture %s", fixture.Name)
+			return nil, fmt.Errorf("duplicate fixture %s", fixture.Name)
 		}
 		names[fixture.Name] = true
 	}
 	for _, name := range document.Required {
 		if !names[name] {
-			t.Fatalf("missing required fixture %s", name)
+			return nil, fmt.Errorf("missing required fixture %s", name)
 		}
 	}
-	return document.Cases
+	return document.Cases, nil
+}
+
+func TestCaptureFixtureRejectsUnknownField(t *testing.T) {
+	_, err := decodeCaptureFixtures([]byte("required_names: [case]\ncases:\n  - name: case\n    want_extra_kesy: [kind]\n"))
+	if err == nil {
+		t.Fatal("unknown fixture field was accepted")
+	}
 }
 
 func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {

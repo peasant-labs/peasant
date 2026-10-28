@@ -20,6 +20,15 @@ const (
 	codexEventWebSearchEnd          = "web_search_end"
 )
 
+func isCodexNativeControlKind(kind string) bool {
+	switch kind {
+	case codexTypeWorldState, codexEventSubAgentActivity, codexEventPatchApplyEnd, codexEventThreadSettingsApplied, codexEventWebSearchEnd:
+		return true
+	default:
+		return false
+	}
+}
+
 // codexControlRecordKind names the known rollout-level and event-level
 // annotations represented as depth-0 system entries. Unknown records return
 // ok=false so the retained-unknown boundary can preserve them as opaque evidence.

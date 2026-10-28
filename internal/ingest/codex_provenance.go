@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
 )
 
@@ -695,6 +696,33 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 		c.inheriting = false
 		block := ClassifiedBlock{NativeKey: node.NativeKey + "/retained-unknown", Section: sectionOf(ownership), Uncertain: ownership == schema.ContentOwnershipUncertain, Role: RoleSystem, EntryType: EntryTypeSystem, RetainedUnknown: node.RetainedUnknown,
 			Provenance: &schema.ContentProvenance{Origin: schema.ContentOriginUnknown, Actor: schema.ActorOriginUnknown, Delivery: schema.DeliveryOriginUnknown, Ownership: ownership, Evidence: schema.EvidenceNativeTyped, InputModality: schema.InputModalityNone}}
+		c.emit(block)
+		return nil
+	}
+	if isCodexNativeControlKind(node.NativeType) {
+		kind := node.NativeType
+		preview := truncateString(codexControlPreview(kind, node.Payload), defaults.ContentPreviewLimit)
+		rawLen := int(node.ByteEndExclusive - node.ByteStart)
+		block := ClassifiedBlock{
+			NativeKey:     node.NativeKey + "/control",
+			Section:       sectionOf(ownershipOf(node, metadata)),
+			Role:          RoleSystem,
+			EntryType:     EntryTypeSystem,
+			PartType:      &kind,
+			Content:       preview,
+			RawByteLength: &rawLen,
+			Provenance: &schema.ContentProvenance{
+				Origin:        schema.ContentOriginUnknown,
+				Actor:         schema.ActorOriginUnknown,
+				Delivery:      schema.DeliveryOriginUnknown,
+				Ownership:     ownershipOf(node, metadata),
+				Evidence:      schema.EvidenceNativeTyped,
+				InputModality: schema.InputModalityNone,
+			},
+		}
+		if payload := codexControlPayload(kind, node.Payload); payload != nil {
+			block.Extra = `{"control":` + *payload + `}`
+		}
 		c.emit(block)
 		return nil
 	}

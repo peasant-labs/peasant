@@ -15,10 +15,28 @@ cases:
         expected:
           mode: legacy
           completeness: complete
-          mainRefs: [e_1]
+          mainRefs: [e_1, e_2]
           inheritedRefs: []
           earlierRefs: []
           diagnostics: []
+          nodes:
+            - ref: e_1
+              ordinal: 1
+              line: 1
+              envelopeType: world_state
+              nativeType: world_state
+              nativeRole: system
+              ownership: own
+              hasPayload: true
+            - ref: e_2
+              ordinal: 2
+              line: 2
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: u1
+              ownership: own
+              hasPayload: true
 
   - name: delivery-scalar-redacts-retained-evidence
     delivery:
