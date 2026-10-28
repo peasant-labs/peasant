@@ -1,0 +1,61 @@
+Output:  /home/hatch/workspace/pr-evidence/pr-710/work/out
+Config:  /home/hatch/workspace/pr-evidence/pr-710/work/config.yaml
+Sources:
+   - claude-code: /home/hatch/workspace/pr-evidence/pr-710/work/src
+
+peasant harvest: 1 sessions
+   - 0     new
+   - 0     updated
+   - 0     unchanged
+   - 1     errors
+   - 0     active (included)
+duration: 100ms
+harvester targets:
+  claude-code: adapter_version=3 indexer_version=22 index_version=2
+  codex: adapter_version=3 indexer_version=20 index_version=2
+  cursor: adapter_version=1 indexer_version=18 index_version=1
+  opencode: adapter_version=4 indexer_version=19 index_version=2
+  pi: adapter_version=3 indexer_version=18 index_version=1
+  strike: adapter_version=1 indexer_version=17 index_version=1
+
+  ERROR      claude-code dddddddd-0000-4000-8000-000000000001
+             capture transcript source for dddddddd-0000-4000-8000-000000000001: capture JSONL record 2: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest; prior stored state remains unchanged; restore source readability and retry
+Error: 1 session(s) failed
+Usage:
+  peasant harvest [flags]
+  peasant harvest [command]
+
+Aliases:
+  harvest, ingest
+
+Available Commands:
+  index       Populate database from existing peasant-sync/ files
+  logs        Extract transcripts to peasant-sync/ (no database)
+  verify      Verify database schema integrity
+
+Flags:
+      --all                     Process ALL sessions (clears filters, implies --force)
+      --detect-commits          Detect and store git commits linked to each session (default true)
+      --dry-run                 Show what would be processed without writing
+      --force                   Force re-process sessions that match current filters
+  -h, --help                    help for harvest
+      --include-active          Deprecated compatibility flag; active sessions are processed by default (default true)
+      --json                    Output as JSON instead of human-readable
+      --output string           Override output base path
+      --profile-index           Print INDEX parse/write timing diagnostics
+      --session strings         Filter to specific session IDs (repeatable, comma-separated)
+      --since string            Filter to sessions from the last N period (e.g. 2w, 3m, 7d)
+      --source-harness string   Override source harness (claude-code, opencode, codex, cursor, strike, pi)
+      --source-path string      Override source paths for the harness (replaces config, not additive)
+      --verbose                 Show file-level detail
+
+Global Flags:
+      --config string       Path to config file (default: ~/.config/peasant/config.yaml) (default "/home/hatch/.config/peasant/config.yaml")
+      --config-dir string   Override the config directory (default: $XDG_CONFIG_HOME or ~/.config); config lives under <config-dir>/peasant
+      --data-dir string     Override the data directory (default: $XDG_DATA_HOME or ~/.local/share); the DB + peasant-sync live under <data-dir>/peasant
+      --state-dir string    Override the state directory (default: $XDG_STATE_HOME or ~/.local/state); logs/PID live under <state-dir>/peasant
+  -v, --version             Print the version
+
+Use "peasant harvest [command] --help" for more information about a command.
+
+exit:1
