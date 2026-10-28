@@ -1,0 +1,12 @@
+Capture application source: 8bcfef0eb1f6c73dfe7e8d9317e608768c77f9d9. Later 59b856497dc24265bb885db751a75a8675e95a79 changes tests and documentation only.
+Binary SHA256: 8801ee0eb7a2d82ed70ae1889fea7ec37bc87a64fe15c5ebe52a33b5d0601440
+Embedded layout asset SHA256: 06bdc018ac024849e05412cf38c62846ffca17b644645cdba3a78164d6fd6a55 (app/layout-ffb5c116c4433b8f.js)
+Shared UI asset SHA256: 3db2255a84d7ce05d4acc4c4c0b5038ceffa626db17299cf30bf606f0bd82bdb (8e12c895-bc9221483ef720fe.js)
+Served-build helper verified root asset list and markers against web/out and binary age. The capture used the built binary with isolated empty HOME and mock store; no real account appeared. Schema 0.36.0 includes the synthetic session project label and internal/mock/sessions.go generates the text and file names shown. No external GitHub calls or real transcript data.
+Image hashes:
+51e74e54b625db7fec134142b577771081a8a561fd06f691a03488d003d36062 clean-desktop-dark.png
+b966d79ea7c65064925db6cba223816d127ec69845dd4e24c3697e843bafc40e clean-desktop-light.png
+982432d499534b1dd5bdff1c90cb0250ce9ffc7a9d5e3d29dd3e4d77d5bcbeee clean-mobile-dark.png
+ed8601d274909fe857c5d8dcec33052b0ba1106f5f005408448b0b33b5dbfddf clean-mobile-light.png
+
+Published dependencies resolved for the application: Fairtrade 0.0.49 and Schema 0.36.0. The viewport capture uses the mock WebSocket and mock REST services. The separate source-action journey injects synthetic source evidence into the mock WebSocket and intercepts its additive REST response; screenshots do not show that journey.
