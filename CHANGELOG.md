@@ -7,6 +7,18 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Changed
+- Strike sessions holding lifecycle, control or metadata events
+  (permissions, questions, child and team events, phases, verification,
+  scheduling, retries, engine errors, selections and the `session.header`
+  line) now capture complete instead of partial with retained unknown
+  evidence. Teammate messages and steer guidance appear as user turns.
+  A child Strike session links to its parent from the parent's `child.*`
+  events when its sidecar names no parent, `leadSessionId` becomes the
+  root session, `forkedFrom` becomes a `context_from` relationship, and
+  prompt-cache read and write token counts are recorded. Existing Strike
+  sessions re-extract and re-index on the next harvest.
+
 ## [0.13.4] - 2026-10-28
 
 ### Changed

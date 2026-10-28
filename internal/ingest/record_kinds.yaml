@@ -167,8 +167,8 @@ harnesses:
           - &tool {kind: tool_use, status: represented, preview: no, payload: tool name and arguments}
           - &result {kind: tool_result, status: represented, preview: yes, payload: tool output}
   strike:
-    adapter_version: 1
-    indexer_version: 17
+    adapter_version: 2
+    indexer_version: 18
     index_version: 1
     fallback: &fallback
       status: retained-unknown
@@ -205,6 +205,55 @@ harnesses:
           - {<<: *result, kind: process.output}
           - {<<: *result, kind: process.exited}
           - {<<: *structural, kind: usage.reported}
+          - {<<: *ignored, kind: session.header}
+          - {<<: *ignored, kind: agent.selected}
+          - {<<: *ignored, kind: effort.selected}
+          - {<<: *ignored, kind: autonomy.selected}
+          - {<<: *ignored, kind: permission.mode}
+          - {<<: *ignored, kind: fast.selected}
+          - {<<: *ignored, kind: context.controls}
+          - {<<: *ignored, kind: session.meta}
+          - {<<: *ignored, kind: prompt.effective}
+          - {<<: *ignored, kind: permission.asked}
+          - {<<: *ignored, kind: permission.resolved}
+          - {<<: *ignored, kind: permission.decided}
+          - {<<: *ignored, kind: admission.decided}
+          - {<<: *ignored, kind: question.asked}
+          - {<<: *ignored, kind: question.resolved}
+          - {<<: *text, kind: turn.steered}
+          - {<<: *ignored, kind: verification.started}
+          - {<<: *ignored, kind: verification.completed}
+          - {<<: *ignored, kind: harness.progress}
+          - {<<: *ignored, kind: phase.changed}
+          - {<<: *ignored, kind: plan.handoff}
+          - {<<: *ignored, kind: artifact.updated}
+          - {<<: *ignored, kind: ledger.updated}
+          - {<<: *ignored, kind: phase.grant_approved}
+          - {<<: *ignored, kind: files.invalidated}
+          - {<<: *ignored, kind: path.overlap}
+          - {<<: *ignored, kind: engine.error}
+          - {<<: *ignored, kind: child.started}
+          - {<<: *ignored, kind: child.completed}
+          - {<<: *ignored, kind: child.escalated}
+          - {<<: *ignored, kind: delegation.changed}
+          - {<<: *ignored, kind: wait.started}
+          - {<<: *ignored, kind: wait.resolved}
+          - {<<: *ignored, kind: agent.contract.timeout}
+          - {<<: *ignored, kind: team.roster}
+          - {<<: *ignored, kind: provider.retrying}
+          - {<<: *ignored, kind: tool.retrying}
+          - {<<: *ignored, kind: tool.loop_detected}
+          - {<<: *ignored, kind: scheduler.queued}
+          - {<<: *ignored, kind: scheduler.admitted}
+          - {<<: *ignored, kind: scheduler.canceled}
+          - {<<: *ignored, kind: compaction.started}
+          - {<<: *ignored, kind: compaction.completed}
+          - {<<: *ignored, kind: session.rewound}
+          - {<<: *ignored, kind: hook.matched}
+          - {<<: *ignored, kind: diagnostic.bundle}
+          - {<<: *ignored, kind: context.fit_warning}
+          - {<<: *ignored, kind: session.budget_warning}
+          - {<<: *text, kind: agent.message}
       - context: retained-format-1
         namespace: content_block
         sources:

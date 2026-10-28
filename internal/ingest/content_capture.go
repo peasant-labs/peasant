@@ -736,7 +736,16 @@ func (v *strikeCaptureValidation) observe(env strikeEnvelope, event strikeEventD
 	if slices.Contains(strikeMetadataEventKinds(), env.Type) {
 		return &IgnoredSourceRecord{Kind: string(env.Type), Reason: IgnoredRecordMetadata}, nil
 	}
+	if slices.Contains(strikeControlEventKinds(), env.Type) {
+		return &IgnoredSourceRecord{Kind: string(env.Type), Reason: IgnoredRecordControl}, nil
+	}
 	switch env.Type {
+	case strikeEventAgentMessage, strikeEventTurnSteered:
+		// A steer may be recorded without its guidance text; it is then
+		// control state, not an empty conversation turn.
+		if event.Text == "" {
+			return &IgnoredSourceRecord{Kind: string(env.Type), Reason: IgnoredRecordControl}, nil
+		}
 	case strikeEventToolBegin:
 		if event.CallID == "" || firstNonEmpty(event.Name, event.Title) == "" || (len(event.Args) == 0 && len(event.Input) == 0) {
 			return nil, fmt.Errorf("tool begin requires callId, name and input")

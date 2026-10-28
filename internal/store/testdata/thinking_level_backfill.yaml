@@ -4,7 +4,7 @@ cases:
   - {name: retained_opencode, harness: opencode, adapter: 2, indexer: 17, format: 1, stale: true}
   - {name: retained_pi, harness: pi, adapter: 2, indexer: 17, format: 1, stale: true}
   - {name: cursor_unchanged, harness: cursor, adapter: 1, indexer: 18, format: 1, stale: false}
-  - {name: strike_unchanged, harness: strike, adapter: 1, indexer: 17, format: 1, stale: false}
+  - {name: strike_unchanged, harness: strike, adapter: 2, indexer: 18, format: 1, stale: false}
   - {name: native_codex, harness: codex, adapter: 2, indexer: 18, format: 2, native: true, stale: true}
   - {name: native_opencode, harness: opencode, adapter: 3, indexer: 18, format: 2, native: true, stale: true}
   - {name: native_claude, harness: claude-code, adapter: 2, indexer: 19, format: 2, native: true, stale: true}

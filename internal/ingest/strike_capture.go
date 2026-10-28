@@ -117,11 +117,17 @@ func (idx *StrikeIndexer) captureDecodedStrike(ctx context.Context, s Discovered
 				fail(fmt.Errorf("event lacks its type"))
 				return
 			}
+			if env.Type == strikeEventSessionHeader {
+				// The schema marker Strike writes as the first line carries
+				// no data object; it is session metadata, never content.
+				ignored = append(ignored, IgnoredSourceRecord{Kind: string(env.Type), Reason: IgnoredRecordMetadata})
+				return
+			}
 			if len(env.Data) == 0 || bytes.Equal(bytes.TrimSpace(env.Data), []byte("null")) {
 				fail(fmt.Errorf("event requires data object"))
 				return
 			}
-			event, err = decodeStrikeEventData(env.Data)
+			event, err = decodeStrikeEvent(env.Type, env.Data)
 			if err != nil {
 				fail(err)
 				return

@@ -43,7 +43,7 @@ cases:
   - {name: ignored without reason rejected, operation: yaml, find: 'reason: Entryless control; unexpected conversation content remains a validation error.', replace: 'reason: ""', error: requires a reason}
   - {name: missing supported harness rejected, operation: yaml, find: '  pi:', replace: '  gemini-cli:', error: 'has no section'}
   - {name: unsupported adapter rejected, operation: yaml, find: 'harnesses:', replace: "harnesses:\n  gemini-cli: {}", error: no supported adapter}
-  - {name: wrong baseline revision rejected, operation: yaml, find: 'indexer_version: 17', replace: 'indexer_version: 999', error: baseline versions differ}
+  - {name: wrong baseline revision rejected, operation: yaml, find: 'indexer_version: 21', replace: 'indexer_version: 999', error: baseline versions differ}
   - {name: wrong native revision rejected, operation: yaml, find: 'native_versions: {adapter_version: 3, indexer_version: 20', replace: 'native_versions: {adapter_version: 3, indexer_version: 999', error: managed-generation versions differ}
   - {name: native reasoning namespace stays separate from media, operation: lookup, harness: codex, context: native-generation, namespace: reasoning_content, kind: input_image, status: retained-unknown, preview: no}
   - {name: native token count is ignored metadata, operation: native-event-behavior, kind: token_count}

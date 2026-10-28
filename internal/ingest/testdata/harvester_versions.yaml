@@ -11,9 +11,9 @@ cases:
   - name: canonical_registry
     harnesses: [claude-code, opencode, codex, cursor, strike, pi]
     adapter: 1
-    adapterOverrides: {claude-code: 3, codex: 2, pi: 3, opencode: 3}
+    adapterOverrides: {claude-code: 3, codex: 2, pi: 3, opencode: 3, strike: 2}
     indexer: 15
-    indexerOverrides: {claude-code: 21, codex: 18, cursor: 18, strike: 17, opencode: 18, pi: 18}
+    indexerOverrides: {claude-code: 21, codex: 18, cursor: 18, strike: 18, opencode: 18, pi: 18}
     nativeTargets:
       claude-code: {adapter_version: 3, indexer_version: 22, index_version: 2}
       codex: {adapter_version: 3, indexer_version: 20, index_version: 2}

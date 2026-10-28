@@ -118,6 +118,11 @@ func prepareUnknownJSONL(harness Harness, raw []byte, line int, traversal *unkno
 		return nil
 	}
 	if harness == HarnessStrike {
+		if strikeKind, known := knownStrikeEventKind(kind); known && slices.Contains(strikeEntrylessEventKinds(), strikeKind) {
+			// Entryless events never project their payload, so it holds no
+			// content block to retain; session.header has no data at all.
+			return raw, nil, false, nil
+		}
 		var event map[string]json.RawMessage
 		if err := json.Unmarshal(fields["data"], &event); err != nil {
 			return nil, nil, false, err

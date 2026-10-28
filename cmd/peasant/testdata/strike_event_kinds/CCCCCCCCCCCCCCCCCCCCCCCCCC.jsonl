@@ -1,0 +1,55 @@
+{"type":"session.header","schemaVersion":1,"time":"2026-01-02T03:00:01Z"}
+{"type":"model.selected","time":"2026-01-02T03:00:02Z","data":{"provider":"synthetic","model":"synthetic-model"}}
+{"type":"user.message","time":"2026-01-02T03:00:03Z","data":{"sessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","turnId":"turn-1","text":"Synthetic request covering every lifecycle event."}}
+{"type":"turn.started","time":"2026-01-02T03:00:04Z","data":{"sessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","turnId":"turn-1"}}
+{"type":"agent.selected","time":"2026-01-02T03:00:05Z","data":{"agent":"build"}}
+{"type":"effort.selected","time":"2026-01-02T03:00:06Z","data":{"effort":"high"}}
+{"type":"autonomy.selected","time":"2026-01-02T03:00:07Z","data":{"autonomy":"supervised"}}
+{"type":"permission.mode","time":"2026-01-02T03:00:08Z","data":{"mode":"default"}}
+{"type":"fast.selected","time":"2026-01-02T03:00:09Z","data":{"fast":true}}
+{"type":"context.controls","time":"2026-01-02T03:00:10Z","data":{"mode":"auto"}}
+{"type":"session.meta","time":"2026-01-02T03:00:11Z","data":{"prUrl":"https://example.invalid/pr/1","prNumber":1,"prState":"open"}}
+{"type":"prompt.effective","time":"2026-01-02T03:00:12Z","data":{"hash":"synthetic-hash"}}
+{"type":"permission.asked","time":"2026-01-02T03:00:13Z","data":{"requestId":"req-1","permission":"edit","patterns":["synthetic/*"]}}
+{"type":"permission.resolved","time":"2026-01-02T03:00:14Z","data":{"requestId":"req-1","decision":"once"}}
+{"type":"permission.decided","time":"2026-01-02T03:00:15Z","data":{"requestId":"req-1","decision":"once"}}
+{"type":"admission.decided","time":"2026-01-02T03:00:16Z","data":{"requestId":"req-1","decision":"admit"}}
+{"type":"question.asked","time":"2026-01-02T03:00:17Z","data":{"requestId":"q-1","questions":[{"question":"Synthetic question?","options":[{"label":"yes"}]}]}}
+{"type":"question.resolved","time":"2026-01-02T03:00:18Z","data":{"requestId":"q-1"}}
+{"type":"turn.steered","time":"2026-01-02T03:00:19Z","data":{"mode":"queue","text":"synthetic steer"}}
+{"type":"verification.started","time":"2026-01-02T03:00:20Z","data":{"scope":"child","gateCount":1}}
+{"type":"verification.completed","time":"2026-01-02T03:00:21Z","data":{"scope":"child","report":{"passed":true}}}
+{"type":"harness.progress","time":"2026-01-02T03:00:22Z","data":{"name":"synthetic","payload":{"iteration":1}}}
+{"type":"phase.changed","time":"2026-01-02T03:00:23Z","data":{"workflow":"synthetic","phase":"plan","index":1}}
+{"type":"plan.handoff","time":"2026-01-02T03:00:24Z","data":{"approvalSource":"user","title":"synthetic plan"}}
+{"type":"artifact.updated","time":"2026-01-02T03:00:25Z","data":{"name":"synthetic-artifact"}}
+{"type":"ledger.updated","time":"2026-01-02T03:00:26Z","data":{"name":"synthetic-ledger"}}
+{"type":"phase.grant_approved","time":"2026-01-02T03:00:27Z","data":{"phase":"build"}}
+{"type":"files.invalidated","time":"2026-01-02T03:00:28Z","data":{"paths":["synthetic.txt"]}}
+{"type":"path.overlap","time":"2026-01-02T03:00:29Z","data":{"path":"synthetic.txt","warning":"synthetic overlap"}}
+{"type":"engine.error","time":"2026-01-02T03:00:30Z","data":{"message":"synthetic engine error","code":"queue_full"}}
+{"type":"child.started","time":"2026-01-02T03:00:31Z","data":{"sessionId":"DDDDDDDDDDDDDDDDDDDDDDDDDD","parentSessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","depth":1,"agent":"explore","name":"helper"}}
+{"type":"child.completed","time":"2026-01-02T03:00:32Z","data":{"sessionId":"DDDDDDDDDDDDDDDDDDDDDDDDDD","parentSessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","status":"completed","summary":"synthetic summary","handoff":{"summary":"synthetic"}}}
+{"type":"child.escalated","time":"2026-01-02T03:00:33Z","data":{"sessionId":"DDDDDDDDDDDDDDDDDDDDDDDDDD","parentSessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","action":"finalizing"}}
+{"type":"delegation.changed","time":"2026-01-02T03:00:34Z","data":{"delegationId":"del-1","state":"running"}}
+{"type":"wait.started","time":"2026-01-02T03:00:35Z","data":{"waitId":"w-1"}}
+{"type":"wait.resolved","time":"2026-01-02T03:00:36Z","data":{"waitId":"w-1"}}
+{"type":"agent.contract.timeout","time":"2026-01-02T03:00:37Z","data":{"messageId":"m-1"}}
+{"type":"team.roster","time":"2026-01-02T03:00:38Z","data":{"sessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","leadId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","members":[{"sessionId":"DDDDDDDDDDDDDDDDDDDDDDDDDD","name":"helper"}]}}
+{"type":"provider.retrying","time":"2026-01-02T03:00:39Z","data":{"nextAttempt":2,"message":"synthetic retry"}}
+{"type":"tool.retrying","time":"2026-01-02T03:00:40Z","data":{"callId":"call-x","message":"synthetic tool retry"}}
+{"type":"tool.loop_detected","time":"2026-01-02T03:00:41Z","data":{"name":"synthetic"}}
+{"type":"scheduler.queued","time":"2026-01-02T03:00:42Z","data":{"position":1}}
+{"type":"scheduler.admitted","time":"2026-01-02T03:00:43Z","data":{}}
+{"type":"scheduler.canceled","time":"2026-01-02T03:00:44Z","data":{}}
+{"type":"compaction.started","time":"2026-01-02T03:00:45Z","data":{}}
+{"type":"compaction.completed","time":"2026-01-02T03:00:46Z","data":{"summary":"synthetic compaction"}}
+{"type":"session.rewound","time":"2026-01-02T03:00:47Z","data":{"turns":1}}
+{"type":"hook.matched","time":"2026-01-02T03:00:48Z","data":{"name":"synthetic-hook"}}
+{"type":"diagnostic.bundle","time":"2026-01-02T03:00:49Z","data":{"path":"synthetic-bundle"}}
+{"type":"context.fit_warning","time":"2026-01-02T03:00:50Z","data":{"message":"synthetic fit"}}
+{"type":"session.budget_warning","time":"2026-01-02T03:00:51Z","data":{"message":"synthetic budget"}}
+{"type":"agent.message","time":"2026-01-02T03:00:52Z","data":{"from":"lead","to":"helper","body":"synthetic teammate message","teamId":"CCCCCCCCCCCCCCCCCCCCCCCCCC"}}
+{"type":"text.delta","time":"2026-01-02T03:00:53Z","data":{"sessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","turnId":"turn-1","providerRequestId":"req-1","text":"Synthetic answer."}}
+{"type":"usage.reported","time":"2026-01-02T03:00:54Z","data":{"sessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","turnId":"turn-1","providerRequestId":"req-1","input":{"n":120,"known":true},"output":{"n":30,"known":true},"cacheRead":{"n":80,"known":true},"cacheCreation":{"n":15,"known":true},"used":{"n":150,"known":true},"source":"actual"}}
+{"type":"turn.completed","time":"2026-01-02T03:00:55Z","data":{"sessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","turnId":"turn-1","stopReason":"end_turn"}}
