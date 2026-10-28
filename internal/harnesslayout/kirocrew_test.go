@@ -106,7 +106,7 @@ func TestKiroCrewCaptureJoinsTranscriptsAndCrewLogs(t *testing.T) {
 		t.Fatalf("archive shape = %+v", archive)
 	}
 	threads := shapes["threads"][0]
-	if threads.Records != 2 || threads.Kinds["user"] != 1 || threads.Kinds["assistant"] != 1 || !hasField(threads, "$.threads.{mid}[].role") {
+	if threads.Records != 2 || threads.Kinds["user"] != 1 || threads.Kinds["assistant"] != 1 || !hasField(threads, "$.threads[\"{mid}\"][].role") {
 		t.Fatalf("threads shape = %+v", threads)
 	}
 	if sessionMap := shapes["session-map"][0]; sessionMap.Records != 1 || sessionMap.Kinds["acp"] != 1 || !hasField(sessionMap, "$.sid") {
