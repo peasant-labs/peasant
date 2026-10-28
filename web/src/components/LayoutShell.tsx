@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { ServerCapabilitiesProvider } from '@/contexts/ServerCapabilitiesContext';
@@ -58,8 +58,13 @@ function PageEnter() {
  */
 export function LayoutShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? '/';
+  // Static export renders the shell at its fallback route. Start with that
+  // same unbounded shell during hydration, then apply the actual route. React
+  // does not repair a server/client class mismatch on the existing layout.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
   const route = parseTranscriptRoute(pathname);
-  const viewport = route.kind === 'canonical' || route.kind === 'legacy';
+  const viewport = hydrated && (route.kind === 'canonical' || route.kind === 'legacy');
   return (
     <WebSocketProvider>
       <ServerCapabilitiesProvider>
