@@ -790,7 +790,17 @@ func LoadForBrowsing(path string, fs ingest.FileSystem, git ingest.GitResolver) 
 	return load(path, fs, git, false)
 }
 
+// LoadForHarnessOnly supplies a selected native harness's documented default
+// before the ordinary strict ingestion validation runs.
+func LoadForHarnessOnly(path string, fs ingest.FileSystem, git ingest.GitResolver, harness defaults.Harness) (*Config, error) {
+	return loadWithSourceFallback(path, fs, git, true, &harness)
+}
+
 func load(path string, fs ingest.FileSystem, git ingest.GitResolver, selectionRequired bool) (*Config, error) {
+	return loadWithSourceFallback(path, fs, git, selectionRequired, nil)
+}
+
+func loadWithSourceFallback(path string, fs ingest.FileSystem, git ingest.GitResolver, selectionRequired bool, harnessOnly *defaults.Harness) (*Config, error) {
 	if path == "" {
 		return LoadDefaults(context.Background(), git), nil
 	}
@@ -811,14 +821,14 @@ func load(path string, fs ingest.FileSystem, git ingest.GitResolver, selectionRe
 				if err != nil {
 					return nil, fmt.Errorf("config: read migrated %q: %w", path, err)
 				}
-				return parse(data, selectionRequired)
+				return parseWithSourceFallback(data, selectionRequired, harnessOnly)
 			}
 			return LoadDefaults(context.Background(), git), nil
 		}
 		return nil, fmt.Errorf("config: read %q: %w", path, err)
 	}
 
-	return parse(data, selectionRequired)
+	return parseWithSourceFallback(data, selectionRequired, harnessOnly)
 }
 
 // LoadDefaults returns a Config populated with sensible production defaults.
@@ -844,11 +854,29 @@ func Parse(data []byte) (*Config, error) {
 	return parse(data, true)
 }
 
+// ParseForHarnessOnly is the non-writing counterpart used by dry runs.
+func ParseForHarnessOnly(data []byte, harness defaults.Harness) (*Config, error) {
+	return parseWithSourceFallback(data, true, &harness)
+}
+
 func parse(data []byte, selectionRequired bool) (*Config, error) {
+	return parseWithSourceFallback(data, selectionRequired, nil)
+}
+
+func parseWithSourceFallback(data []byte, selectionRequired bool, harnessOnly *defaults.Harness) (*Config, error) {
 	cfg := BaseConfig()
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse YAML: %w", err)
+	}
+	if harnessOnly != nil {
+		fallback, known := defaults.SourcePathFor(*harnessOnly)
+		if !known {
+			return nil, fmt.Errorf("config: harness-only source %q has no documented default path", *harnessOnly)
+		}
+		if provider, ok := cfg.Sources.Provider(*harnessOnly); ok && len(provider.Paths) == 0 {
+			provider.Paths = []string{fallback.String()}
+		}
 	}
 
 	if err := validate(cfg, selectionRequired); err != nil {

@@ -19,7 +19,11 @@ import (
 // loadRunConfig loads the config harvest and push run with, applying the
 // --data-dir override once. A dry run reads the file without migrating it.
 func loadRunConfig(cmd *cobra.Command, path string, dryRun bool) (*config.Config, error) {
-	cfg, err := loadRunConfigFile(path, dryRun)
+	return loadRunConfigForHarnessOnly(cmd, path, dryRun, nil)
+}
+
+func loadRunConfigForHarnessOnly(cmd *cobra.Command, path string, dryRun bool, harness *defaults.Harness) (*config.Config, error) {
+	cfg, err := loadRunConfigFile(path, dryRun, harness)
 	if err != nil {
 		return nil, err
 	}
@@ -27,13 +31,19 @@ func loadRunConfig(cmd *cobra.Command, path string, dryRun bool) (*config.Config
 	return cfg, nil
 }
 
-func loadRunConfigFile(path string, dryRun bool) (*config.Config, error) {
+func loadRunConfigFile(path string, dryRun bool, harness *defaults.Harness) (*config.Config, error) {
 	if !dryRun {
+		if harness != nil {
+			return config.LoadForHarnessOnly(path, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, *harness)
+		}
 		return loadConfig(path)
 	}
 	if path != "" {
 		data, err := os.ReadFile(path)
 		if err == nil {
+			if harness != nil {
+				return config.ParseForHarnessOnly(data, *harness)
+			}
 			return config.Parse(data)
 		}
 		if !errors.Is(err, os.ErrNotExist) {

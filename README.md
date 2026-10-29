@@ -168,8 +168,8 @@ are replayed once through the ordinary push candidate path.
 | `--include-active` | Also ingest sessions still being written |
 | `--session <ids>` | Filter to specific session IDs (repeatable, comma-separated). Overrides the selection index. |
 | `--since <duration>` | Filter to sessions from the last N period (e.g. `2w`, `3m`, `7d`) |
-| `--source-harness <h>` | Override source harness (`claude-code`, `opencode`, `codex`, `cursor`, `strike`) |
-| `--source-path <path>` | Override source path for the provider (replaces config, not additive) |
+| `--source-harness <h>` | Discover only this harness using its configured or default path (`claude-code`, `opencode`, `codex`, `cursor`, `strike`, `pi`) |
+| `--source-path <path>` | Override the named harness's source paths (requires `--source-harness`; replaces config, not additive) |
 | `--output <path>` | Override output base path |
 | `--json` | Output as JSON instead of human-readable |
 | `--verbose` | Show file-level detail with subagent expansion |
