@@ -13,6 +13,10 @@ Release, which holds the signed artifacts and checksums.
   A configured custom output path is preserved. Existing copies are not moved;
   installations that previously used `--data-dir` can run `harvest --force`
   with that same data directory once to recreate them in the corrected location.
+### Changed
+- The local web commands accept decimal TCP ports from 1 to 65535 and reject
+  invalid values before starting a server. Base-prefixed values such as `0x50`
+  are refused; `080` means port 80.
 
 ## [0.13.5] - 2026-10-29
 

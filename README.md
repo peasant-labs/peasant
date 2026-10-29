@@ -184,7 +184,7 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 
 | Flag | Description |
 |------|-------------|
-| `--port <n>` | Port to listen on (default 8690) |
+| `--port <n>` | Port to listen on, 1-65535 (default 8690) |
 | `--foreground` | Run in foreground instead of forking to background |
 | `--no-browser` | Do not auto-open browser |
 | `--dev` | Proxy to Next.js dev server on localhost:3000 (implies --foreground) |
@@ -233,7 +233,7 @@ session.
 | Flag | Description |
 |------|-------------|
 | `--session <id>` | The session to record and open (required) |
-| `--port <n>` | Port of the web dashboard (default 8690, as for `peasant web start`) |
+| `--port <n>` | Port of the web dashboard, 1-65535 (default 8690, as for `peasant web start`) |
 | `--hook` | Print the Claude Code hook response `{"continue":false,"stopReason":"..."}` as one line on stdout instead, with the same lines in `stopReason`. Nothing goes to stderr, and the exit status is 0 on every outcome |
 
 ### `peasant tui` flags (deprecated)

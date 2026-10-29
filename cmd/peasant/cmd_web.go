@@ -81,7 +81,7 @@ func BuildWebCommand() *cobra.Command {
 			}, spawn, webNoBrowser)
 		},
 	}
-	webStartCmd.Flags().IntVar(&webPort, "port", defaults.DefaultPort, "Port to listen on")
+	portFlagVar(webStartCmd.Flags(), &webPort, defaults.DefaultPort, "Port to listen on (1-65535)")
 	webStartCmd.Flags().BoolVar(&webDev, "dev", false, "Dev mode: proxy to Next.js dev server (implies --foreground)")
 	webStartCmd.Flags().BoolVar(&webFg, "foreground", false, "Run in foreground (no background fork)")
 	webStartCmd.Flags().BoolVar(&webNoBrowser, "no-browser", false, "Don't auto-open browser")
@@ -96,7 +96,7 @@ func BuildWebCommand() *cobra.Command {
 			return stopWeb(webPort)
 		},
 	}
-	webStopCmd.Flags().IntVar(&webPort, "port", defaults.DefaultPort, "Port the server is listening on")
+	portFlagVar(webStopCmd.Flags(), &webPort, defaults.DefaultPort, "Port the server is listening on (1-65535)")
 
 	webCmd.AddCommand(webStartCmd, webStopCmd)
 
