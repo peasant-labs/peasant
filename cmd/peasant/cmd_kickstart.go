@@ -62,11 +62,17 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 		pathResolver:       ingest.NewPhysicalPathResolver(),
 		repositoryResolver: ingest.NewGitRepositoryIdentityResolver(),
 		run: func(model ftue.WizardModel) error {
+			if err := requireTerminal("kickstart"); err != nil {
+				return err
+			}
 			_, err := tea.NewProgram(model).Run()
 			return err
 		},
 		runFlow: runKickstartFlow,
 		runModel: func(model tea.Model) error {
+			if err := requireTerminal("kickstart"); err != nil {
+				return err
+			}
 			_, err := tea.NewProgram(model, tea.WithFPS(progressProgramFPS)).Run()
 			return err
 		},
@@ -171,6 +177,7 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 		},
 	}
 
+	withCleanTerminalError(cmd)
 	cmd.Flags().BoolVar(&reset, "reset", false, "Remove config, credentials, database, ingested data, and state (full reset); asks for confirmation")
 	cmd.Flags().BoolVar(&confirmReset, "confirm", false, "With --reset: skip the confirmation prompt (for scripts/CI)")
 	return cmd

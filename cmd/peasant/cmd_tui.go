@@ -37,7 +37,7 @@ func BuildTUICommand() *cobra.Command {
 	}
 	tuiCmd.Flags().StringVar(&mockDataStore, "mock-data-store", "", "Use mock data store (comma-separated: web,tui,api or dashboard,sessions,trends,metrics,qualitySessions)")
 
-	return tuiCmd
+	return withCleanTerminalError(tuiCmd)
 }
 
 // runTUI launches the terminal UI with the appropriate data provider.
@@ -82,6 +82,9 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 		return fmt.Errorf("failed to fetch sessions: %w", err)
 	}
 
+	if err := requireTerminal("tui"); err != nil {
+		return err
+	}
 	p := tea.NewProgram(tui.NewApp(sessions))
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("failed to run TUI: %w", err)

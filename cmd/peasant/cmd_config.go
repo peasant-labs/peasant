@@ -61,6 +61,9 @@ func defaultConfigCommandDeps() configCommandDeps {
 			return ftue.OpenClaudeSettings()
 		},
 		run: func(model tea.Model) (tea.Model, error) {
+			if err := requireTerminal("config"); err != nil {
+				return nil, err
+			}
 			return tea.NewProgram(model).Run()
 		},
 	}
@@ -73,7 +76,7 @@ func BuildConfigCommand() *cobra.Command {
 }
 
 func buildConfigCommand(deps configCommandDeps) *cobra.Command {
-	return &cobra.Command{
+	return withCleanTerminalError(&cobra.Command{
 		Use:     "config",
 		Aliases: []string{"settings"},
 		Short:   "Edit peasant configuration",
@@ -189,7 +192,7 @@ func buildConfigCommand(deps configCommandDeps) *cobra.Command {
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "saved settings to %s\n", configPath)
 			return nil
 		},
-	}
+	})
 }
 
 // configScreenModel adapts the concrete Screen update contract to tea.Model and
