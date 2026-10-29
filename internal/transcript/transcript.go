@@ -426,9 +426,25 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		parentsWithTools[parentIdx] = true
 	}
 	representedTextParents := make(map[int]bool)
+	hydratedCarrierText := make(map[int]*string)
 	for _, e := range entries {
 		if e.ParentIndex != nil && !representedTextParents[*e.ParentIndex] {
-			if representedClaudeTextBlock(e, depthZeroEntries[*e.ParentIndex]) {
+			parent := depthZeroEntries[*e.ParentIndex]
+			// Managed tool carriers retain their prose in text children rather
+			// than their tool-argument channel. Display the first plain block
+			// on that carrier, preserving its model, time and folded tools.
+			// Work on the local entry copy so stored evidence stays unchanged.
+			if parentsWithTools[parent.EntryIndex] && parent.EntryType == schema.EntryTypeToolUse && parent.ToolCallID == nil &&
+				(parent.ContentPreview == nil || *parent.ContentPreview == "") {
+				represented := parent
+				represented.ContentPreview = e.ContentPreview
+				if representedClaudeTextBlock(e, represented) {
+					parent = represented
+					depthZeroEntries[parent.EntryIndex] = parent
+					hydratedCarrierText[parent.EntryIndex] = parent.ContentPreview
+				}
+			}
+			if representedClaudeTextBlock(e, parent) {
 				suppress[e.EntryIndex] = true
 				// The carrier represents one occurrence, not every equal block.
 				// Two native "ok" blocks must still display twice in total.
@@ -449,6 +465,9 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 	turns := make([]ingest.Turn, 0, len(entries))
 	turnObservations := make(map[int]entryModelObservation)
 	for _, e := range entries {
+		if content, hydrated := hydratedCarrierText[e.EntryIndex]; hydrated && e.Depth == 0 {
+			e.ContentPreview = content
+		}
 		_, pi := evidence[e.EntryIndex]
 		if suppress[e.EntryIndex] || ingest.IsPiCarrier(e) || ingest.IsRetainedUnknownCarrier(e) || (pi && e.Depth > 0 && e.ParentIndex != nil && (e.EntryType == schema.EntryTypeThinking || e.EntryType == schema.EntryTypeText)) {
 			continue

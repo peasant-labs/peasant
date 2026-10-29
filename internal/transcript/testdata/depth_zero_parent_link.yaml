@@ -99,3 +99,29 @@ cases:
     expectedTurns:
       - {index: 0, role: assistant, toolCalls: 0}
       - {index: 1, role: assistant, toolCalls: 0}
+
+  - name: empty_claude_carrier_preserves_child_model
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, depth: 0, entryType: tool_use, sourceRef: parent-record}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "child prose", sourceRef: child-record, extra: '{"model_id":"anthropic/claude-opus-4-8"}'}
+      - {index: 2, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, entryType: tool_use, toolCallId: read-id, sourceRef: tool-record}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 1}
+      - {index: 1, role: assistant, toolCalls: 0}
+
+  - name: empty_claude_carrier_preserves_child_thinking
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, depth: 0, entryType: tool_use, sourceRef: parent-record}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "child prose", sourceRef: child-record, extra: '{"thinking_level":"high"}'}
+      - {index: 2, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, entryType: tool_use, toolCallId: read-id, sourceRef: tool-record}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 1}
+      - {index: 1, role: assistant, toolCalls: 0}
+
+  - name: empty_other_harness_carrier_does_not_adopt_text
+    entries:
+      - {index: 0, harness: opencode, role: assistant, depth: 0, entryType: tool_use, sourceRef: parent-record}
+      - {index: 1, harness: opencode, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "child prose", sourceRef: child-record}
+      - {index: 2, harness: opencode, role: assistant, depth: 1, parentIndex: 0, entryType: tool_use, toolCallId: read-id, sourceRef: tool-record}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 1}
