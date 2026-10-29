@@ -142,7 +142,18 @@ describes what the branchless rows save.
 ## Reset and standalone boundaries
 
 `--reset` removes Peasant configuration, credentials, database, ingested data, and state before
-starting again. Without `--reset`, kickstart loads the resolved `--config` or `--config-dir` file and
+starting again. It lists those paths and asks for confirmation first. Without a terminal it refuses
+and removes nothing; pass `--confirm` to reset from a script. `--confirm` without `--reset` is
+rejected. After a confirmed reset kickstart starts the setup wizard, which needs a terminal, so
+`--reset --confirm` from a script removes the data and then exits 1 with the no-terminal error.
+At the prompt only `y` or `yes` (any case, surrounding blanks ignored) resets; anything else,
+including `y` followed by more words, keeps everything. `peasant prune` reads its prompt the same way.
+Known limits: `--reset` removes each target in turn and stops at the first one it cannot remove, so
+on a partly read-only data directory it can leave a partial reset. The error names the target that failed, and the ones before it are already gone.
+It also takes no harvest run lock, so do not run it while a harvest or `peasant web` is writing the
+same data directory.
+
+Without `--reset`, kickstart loads the resolved `--config` or `--config-dir` file and
 changes that configuration. It preserves unrelated settings, custom source paths, and other loaded
 values. Kickstart does not rebuild the file from defaults or silently write a different path.
 

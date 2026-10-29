@@ -184,6 +184,9 @@ commands:
       - name: reset
         type: bool
         default: "false"
+      - name: confirm
+        type: bool
+        default: "false"
 
   - name: Config
     use: config
