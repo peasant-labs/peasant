@@ -1,0 +1,26 @@
+requiredNames:
+  - standalone_assistant_text_is_shown_once
+  - a_second_text_block_is_not_lost
+  - tool_round_trip_and_standalone_conclusion
+cases:
+  - name: standalone_assistant_text_is_shown_once
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"the export now resumes"}]}}
+    content: ["the export now resumes"]
+    depths: [0]
+    toolCalls: 0
+  - name: a_second_text_block_is_not_lost
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"first paragraph"},{"type":"text","text":"second paragraph"}]}}
+    content: ["first paragraph", "second paragraph"]
+    depths: [0, 1]
+    toolCalls: 0
+  - name: tool_round_trip_and_standalone_conclusion
+    source: |
+      {"type":"user","message":{"role":"user","content":"inspect the export"}}
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"reading the export"},{"type":"tool_use","id":"read-export","name":"Read","input":{"file_path":"export.go"}}]}}
+      {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-export","content":"package export"}]}}
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"the export now resumes"}]}}
+    content: ["inspect the export", "reading the export", "the export now resumes"]
+    depths: [0, 0, 0]
+    toolCalls: 1

@@ -20,6 +20,10 @@ var depthZeroParentLinkManifestYAML []byte
 
 type depthZeroParentLinkEntry struct {
 	Index         int    `yaml:"index"`
+	Harness       string `yaml:"harness,omitempty"`
+	PartType      string `yaml:"partType,omitempty"`
+	SourceRef     string `yaml:"sourceRef,omitempty"`
+	Extra         string `yaml:"extra,omitempty"`
 	Role          string `yaml:"role"`
 	Depth         int    `yaml:"depth"`
 	ParentIndex   *int   `yaml:"parentIndex,omitempty"`
@@ -94,12 +98,22 @@ func depthZeroParentLinkEntries(fixtureCase depthZeroParentLinkCase) []schema.Se
 	entries := make([]schema.SessionEntry, 0, len(fixtureCase.Entries))
 	for _, source := range fixtureCase.Entries {
 		entry := schema.SessionEntry{
-			EntryIndex:  source.Index,
-			Role:        schema.Role(source.Role),
-			Depth:       source.Depth,
-			ParentIndex: source.ParentIndex,
-			EntryType:   schema.EntryType(source.EntryType),
-			IsError:     source.IsError,
+			EntryIndex:     source.Index,
+			Harness:        schema.Harness(source.Harness),
+			SourceEntryRef: schema.SourceEntryRef(source.SourceRef),
+			Role:           schema.Role(source.Role),
+			Depth:          source.Depth,
+			ParentIndex:    source.ParentIndex,
+			EntryType:      schema.EntryType(source.EntryType),
+			IsError:        source.IsError,
+		}
+		if source.PartType != "" {
+			partType := source.PartType
+			entry.PartType = &partType
+		}
+		if source.Extra != "" {
+			extra := source.Extra
+			entry.Extra = &extra
 		}
 		if source.ParentEntryID != "" {
 			parentEntryID := source.ParentEntryID

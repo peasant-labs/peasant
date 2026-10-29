@@ -242,6 +242,35 @@ func unjoinedOmissionPlaceholder(entry schema.SessionEntry, toolUseIDs map[strin
 	return entry.ToolCallID == nil || !toolUseIDs[*entry.ToolCallID]
 }
 
+// representedClaudeTextBlock identifies a decomposed block whose entire text
+// its assistant carrier already displays. A source-referenced block bypasses
+// consecutive dedup; unrelated children and their own evidence must survive.
+func representedClaudeTextBlock(child, parent schema.SessionEntry) bool {
+	if child.Harness != schema.HarnessClaudeCode || parent.Harness != child.Harness {
+		return false
+	}
+	if child.Depth != 1 || parent.Depth != 0 {
+		return false
+	}
+	if child.Role != schema.RoleAssistant || parent.Role != schema.RoleAssistant {
+		return false
+	}
+	if child.EntryType != schema.EntryTypeText || child.PartType == nil || *child.PartType != "text" {
+		return false
+	}
+	if child.HasToolUse || child.HasThinking || child.ToolCallID != nil {
+		return false
+	}
+	if child.ContentPreview == nil || parent.ContentPreview == nil {
+		return false
+	}
+	if *child.ContentPreview == "" || *child.ContentPreview != *parent.ContentPreview || modelObservation(child).present {
+		return false
+	}
+	level, rawLevel := thinkingLevelObservation(child)
+	return level == "" && rawLevel == ""
+}
+
 func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra) []ingest.Turn {
 	if len(entries) == 0 {
 		return nil
@@ -373,15 +402,15 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 	// Fallback for pre-v10 sessions: depth-0 user/tool wrappers whose children
 	// are tool_result. A provider may attach tool_use and tool_result children
 	// directly to one assistant parent, which must remain visible.
-	depthZeroRoles := make(map[int]schema.Role)
+	depthZeroEntries := make(map[int]schema.SessionEntry)
 	for _, e := range entries {
 		if e.Depth == 0 {
-			depthZeroRoles[e.EntryIndex] = e.Role
+			depthZeroEntries[e.EntryIndex] = e
 		}
 	}
 	for _, e := range entries {
 		if e.Depth == 1 && e.EntryType == schema.EntryTypeToolResult && e.ParentIndex != nil {
-			role := depthZeroRoles[*e.ParentIndex]
+			role := depthZeroEntries[*e.ParentIndex].Role
 			if role == schema.RoleUser || role == schema.RoleTool {
 				suppress[*e.ParentIndex] = true
 			}
@@ -397,6 +426,11 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		parentsWithTools[parentIdx] = true
 	}
 	for _, e := range entries {
+		if e.ParentIndex != nil {
+			if representedClaudeTextBlock(e, depthZeroEntries[*e.ParentIndex]) {
+				suppress[e.EntryIndex] = true
+			}
+		}
 		if e.Depth == 1 && e.ParentIndex != nil && parentsWithTools[*e.ParentIndex] {
 			if e.EntryType == schema.EntryTypeText || e.EntryType == schema.EntryTypeThinking {
 				suppress[e.EntryIndex] = true
