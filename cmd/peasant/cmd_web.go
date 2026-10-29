@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -93,6 +94,9 @@ func BuildWebCommand() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop the web dashboard server",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// A failed stop is never a usage mistake; the usage block
+			// would bury the reason.
+			cmd.SilenceUsage = true
 			return stopWeb(webPort)
 		},
 	}
@@ -441,12 +445,27 @@ func stopWeb(port int) error {
 			}
 		}
 	}
-	if readErr != nil {
+	if errors.Is(readErr, fs.ErrNotExist) {
 		return fmt.Errorf("cannot contact server and no PID file at %s: %w", pidFile, readErr)
+	}
+	if readErr != nil {
+		return fmt.Errorf("cannot contact server and cannot read its PID file %s: %w", pidFile, readErr)
 	}
 	pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
 	if parseErr != nil {
 		return fmt.Errorf("invalid PID in %s: %w", pidFile, parseErr)
+	}
+	// The file can outlive its server (a crash, a reboot) and the PID be
+	// reused by anything. Signal only the detached server for this port. A
+	// process could still exit and its PID be reused between this check and
+	// the signal below; process inspection does not make signalling atomic.
+	isServer, probeErr := isPeasantWebServer(pid, port)
+	if probeErr != nil {
+		return fmt.Errorf("cannot tell whether PID %d from %s is the peasant web server on port %d (%v), so nothing was signalled and the file was kept", pid, pidFile, port, probeErr)
+	}
+	if !isServer {
+		os.Remove(pidFile)
+		return fmt.Errorf("stale PID file %s: PID %d is not a peasant web server on port %d, so nothing was signalled; the file was removed. If a server is still running, find it with your process list and stop it there", pidFile, pid, port)
 	}
 	proc, findErr := os.FindProcess(pid)
 	if findErr != nil {
