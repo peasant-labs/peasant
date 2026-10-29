@@ -11,6 +11,11 @@ required_names:
   - user mirror dispatches nothing
   - agent mirror dispatches nothing
   - reasoning mirror dispatches nothing
+  - sub-agent activity emits control
+  - patch apply end emits control
+  - thread settings applied emits control
+  - web search end emits control
+  - repeated control id keeps both positions
   - item start pends its identity
   - opened turn completion is balanced
   - opened task completion is balanced
@@ -29,14 +34,18 @@ cases:
       - agent_reasoning
       - item_completed
       - item_started
+      - patch_apply_end
+      - sub_agent_activity
       - task_complete
       - task_started
       - thread_rolled_back
+      - thread_settings_applied
       - token_count
       - turn_aborted
       - turn_complete
       - turn_started
       - user_message
+      - web_search_end
   - name: candidate admission census membership
     census: native-only
     want:
@@ -62,6 +71,28 @@ cases:
   - name: reasoning mirror dispatches nothing
     event: agent_reasoning
     want_diagnostics: []
+  - name: sub-agent activity emits control
+    event: sub_agent_activity
+    want_diagnostics: []
+    want_nodes: [sub_agent_activity]
+  - name: patch apply end emits control
+    event: patch_apply_end
+    want_diagnostics: []
+    want_nodes: [patch_apply_end]
+  - name: thread settings applied emits control
+    event: thread_settings_applied
+    want_diagnostics: []
+    want_nodes: [thread_settings_applied]
+  - name: web search end emits control
+    event: web_search_end
+    want_diagnostics: []
+    want_nodes: [web_search_end]
+  - name: repeated control id keeps both positions
+    events:
+      - {event: web_search_end, payload: {id: same, query: first}}
+      - {event: web_search_end, payload: {id: same, query: second}}
+    want_diagnostics: []
+    want_nodes: [web_search_end, web_search_end]
   - name: item start pends its identity
     event: item_started
     payload: {id: "item-1"}

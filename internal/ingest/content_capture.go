@@ -87,6 +87,8 @@ func codexStrictEnvelopeKinds() []string {
 		codexTypeTurnContext,
 		codexTypeEventMsg,
 		codexTypeResponse,
+		codexTypeCompacted,
+		codexTypeWorldState,
 	}
 }
 
@@ -99,6 +101,10 @@ func codexStrictEventMsgKinds() []string {
 		"user_message",
 		"agent_message",
 		"agent_reasoning",
+		codexEventSubAgentActivity,
+		codexEventPatchApplyEnd,
+		codexEventThreadSettingsApplied,
+		codexEventWebSearchEnd,
 	}
 }
 
@@ -543,6 +549,7 @@ func (idx *CodexIndexer) IndexTranscriptForCapture(ctx context.Context, s Discov
 }
 func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s DiscoveredSession, data []byte) (TranscriptCaptureResult, error) {
 	var mirrors []string
+	responseTexts := make(map[string]bool)
 	ignored, err := validateRetainingJSONL(ctx, s, data, func(raw []byte) (*IgnoredSourceRecord, error) {
 		prepared, _, err := prepareCodexRecord(raw, UnknownSourcePosition{Line: 1}, false)
 		if err != nil {
@@ -563,6 +570,11 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 		// gate above: extending the vocabulary means extending the slice.
 		if !slices.Contains(codexStrictEnvelopeKinds(), env.Type) {
 			return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: env.Type}
+		}
+		if _, _, ok, err := codexControlRecordKind(env); err != nil {
+			return nil, err
+		} else if ok {
+			return nil, nil
 		}
 		switch env.Type {
 		case codexTypeSessionMeta:
@@ -606,7 +618,8 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			if err := json.Unmarshal(env.Payload, &payload); err != nil {
 				return nil, err
 			}
-			if _, ok := codexResponseItemEntry(s.SessionID, 0, env, len(raw), true, payload, nil); !ok {
+			responseEntry, ok := codexResponseItemEntry(s.SessionID, 0, env, len(raw), true, payload, nil)
+			if !ok {
 				return nil, &UnrepresentedRecordError{Harness: HarnessCodex, Kind: "response_item"}
 			}
 			// The payload slice governs reachability: entry-ok holds exactly
@@ -681,6 +694,10 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 					return nil, fmt.Errorf("tool output requires call_id and output")
 				}
 			}
+			if responseEntry.ContentPreview != nil && responseEntry.Role != RoleSystem &&
+				(payload.Type == codexResponseMessage || payload.Type == codexResponseReasoning) {
+				responseTexts[*responseEntry.ContentPreview] = true
+			}
 			return nil, nil
 		default:
 			// Unreachable: the envelope gate above refused every unlisted
@@ -698,14 +715,7 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
 	}
 	for _, mirror := range mirrors {
-		found := false
-		for _, entry := range entries {
-			if entry.ContentPreview != nil && *entry.ContentPreview == mirror {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !responseTexts[mirror] {
 			return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("conversation event has no equivalent response item"))
 		}
 	}
