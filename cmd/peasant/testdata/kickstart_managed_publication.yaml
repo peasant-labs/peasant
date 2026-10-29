@@ -28,9 +28,6 @@ cases:
       - role: assistant
         content: selected orchard reply
         depth: 0
-      - role: assistant
-        content: selected orchard reply
-        depth: 1
   - name: local-only
     localOnly: true
     skip: true
