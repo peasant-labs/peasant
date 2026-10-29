@@ -1,7 +1,27 @@
 # Display-title cases for the Claude discovery hint path. Each case is one root
 # transcript whose leading user records mix harness-injected markup with real
 # user prose. The expected title is what discovery must show for that session.
-declared_rows: 15
+required_names:
+  - "a system reminder alone leaves no title"
+  - "a local command caveat alone leaves no title"
+  - "local command stdout alone leaves no title"
+  - "local command stderr alone leaves no title"
+  - "a command name alone leaves no title"
+  - "a command message alone leaves no title"
+  - "a task notification alone leaves no title"
+  - "a teammate message alone leaves no title"
+  - "an environment context block alone leaves no title"
+  - "a command with arguments is titled by the argument prose"
+  - "a caveat and its stdout are skipped for the following prose"
+  - "a skill body is skipped for the following prose"
+  - "a bare command is skipped for the following prose"
+  - "a truncated wrapper is skipped for the following prose"
+  - "injected records only leave no title"
+  - "a plain-text isMeta notice is skipped for the following prose"
+  - "several leading isMeta records including textless ones are skipped"
+  - "plain-text isMeta records only leave no title"
+  - "explicit isMeta false keeps notice-like user prose"
+  - "absent isMeta keeps notice-like user prose"
 cases:
   - name: a system reminder alone leaves no title
     lines:
@@ -70,3 +90,31 @@ cases:
       - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"<command-name>/effort</command-name>\n<command-message>effort</command-message>"}}'
       - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"Base directory for this skill: /workspace/.claude/skills/epoch"}}'
     expected_title: ''
+  - name: a plain-text isMeta notice is skipped for the following prose
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","isMeta":true,"message":{"role":"user","content":"Your claude.ai usage limit has reset. Continue the task you were working on."}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"Profile the generation validator"}}'
+    expected_title: 'Profile the generation validator'
+    expected_cwd: /workspace
+    expected_branch: main
+    match_first_user: true
+  - name: several leading isMeta records including textless ones are skipped
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","isMeta":true,"message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","isMeta":true,"message":{"role":"user","content":""}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","isMeta":true,"message":{"role":"user","content":"[Image: original 2880x1960, displayed at 2000x1361. Multiply coordinates by 1.44 to map to original image.]"}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"Fix the stale verify header"}}'
+    expected_title: 'Fix the stale verify header'
+  - name: plain-text isMeta records only leave no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","isMeta":true,"message":{"role":"user","content":"Draw as the engineer who has to live with the decision, not as a decorator."}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","isMeta":true,"message":{"role":"user","content":"Your claude.ai usage limit has reset. Continue the task you were working on."}}'
+    expected_title: ''
+  - name: explicit isMeta false keeps notice-like user prose
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","isMeta":false,"message":{"role":"user","content":"Your claude.ai usage limit has reset. Why does this keep showing up?"}}'
+    expected_title: 'Your claude.ai usage limit has reset. Why does this keep showing up?'
+  - name: absent isMeta keeps notice-like user prose
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"[Image: original 100x100] why is this my message?"}}'
+    expected_title: '[Image: original 100x100] why is this my message?'

@@ -48,6 +48,7 @@ type claudeRetainedExpectation struct {
 type claudeCacheUpgrade struct {
 	Name         string `yaml:"name"`
 	ProofVersion int    `yaml:"proof_version"`
+	StaleTitle   string `yaml:"stale_title"`
 }
 
 // TestPipelineClaudeIdentityOwnership protects the discovery-to-scheduling-to-
@@ -359,6 +360,9 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 				t.Run(upgrade.Name, func(t *testing.T) {
 					record := records[artifact.SourcePath]
 					record.ProofVersion = upgrade.ProofVersion
+					if upgrade.StaleTitle != "" {
+						record.Title = upgrade.StaleTitle
+					}
 					if err := database.SaveClaudeEvidence(ctx, []ingest.ClaudeTranscriptEvidence{record}, nil); err != nil {
 						t.Fatal(err)
 					}
@@ -367,6 +371,13 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 					}
 					if adapter.ReminedCount() != 1 {
 						t.Fatalf("prior proof re-mines = %d", adapter.ReminedCount())
+					}
+					updated, err := database.LoadClaudeEvidence(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if updated[artifact.SourcePath].Title != artifact.Title {
+						t.Fatalf("cache refresh title = %q, want %q", updated[artifact.SourcePath].Title, artifact.Title)
 					}
 					if _, err := adapter.Discover(ctx, cfg); err != nil {
 						t.Fatal(err)

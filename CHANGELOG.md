@@ -8,6 +8,9 @@ Release, which holds the signed artifacts and checksums.
 ## [Unreleased]
 
 ### Fixed
+- Claude discovery skips harness-injected `isMeta` notices when choosing session titles. Existing cached transcripts are read again once to refresh their titles.
+
+### Fixed
 - `--data-dir` now keeps default transcript copies beside its database under
   `<data-dir>/peasant/peasant-sync`, including web publication and reindexing.
   A configured custom output path is preserved. Existing copies are not moved;

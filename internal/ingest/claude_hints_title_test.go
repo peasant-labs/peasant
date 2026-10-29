@@ -17,19 +17,21 @@ var claudeHintsTitleYAML []byte
 const (
 	claudeHintsTitleRoot     = "/claude"
 	claudeHintsTitleSession  = "11111111-1111-4111-8111-111111111111"
-	claudeHintsTitleRows     = 15
 	claudeHintsTitleFilePath = claudeHintsTitleRoot + "/-workspace/" + claudeHintsTitleSession + ".jsonl"
 )
 
 type claudeHintsTitleFixtures struct {
-	DeclaredRows int                    `yaml:"declared_rows"`
-	Cases        []claudeHintsTitleCase `yaml:"cases"`
+	RequiredNames []string               `yaml:"required_names"`
+	Cases         []claudeHintsTitleCase `yaml:"cases"`
 }
 
 type claudeHintsTitleCase struct {
-	Name          string   `yaml:"name"`
-	Lines         []string `yaml:"lines"`
-	ExpectedTitle string   `yaml:"expected_title"`
+	Name           string   `yaml:"name"`
+	Lines          []string `yaml:"lines"`
+	ExpectedTitle  string   `yaml:"expected_title"`
+	ExpectedCWD    string   `yaml:"expected_cwd"`
+	ExpectedBranch string   `yaml:"expected_branch"`
+	MatchFirstUser bool     `yaml:"match_first_user"`
 }
 
 func loadClaudeHintsTitleFixtures(t *testing.T) claudeHintsTitleFixtures {
@@ -38,11 +40,7 @@ func loadClaudeHintsTitleFixtures(t *testing.T) claudeHintsTitleFixtures {
 	if err := testutil.DecodeFixtureYAML(claudeHintsTitleYAML, &fixtures); err != nil {
 		t.Fatalf("decode Claude display-title fixtures: %v", err)
 	}
-	if fixtures.DeclaredRows != claudeHintsTitleRows || len(fixtures.Cases) != claudeHintsTitleRows {
-		t.Fatalf("Claude display-title fixture row guard failed: declared=%d actual=%d expected=%d",
-			fixtures.DeclaredRows, len(fixtures.Cases), claudeHintsTitleRows)
-	}
-	seen := make(map[string]struct{}, len(fixtures.Cases))
+	seen := make(map[string]bool, len(fixtures.Cases))
 	for _, fixture := range fixtures.Cases {
 		if fixture.Name == "" || len(fixture.Lines) == 0 {
 			t.Fatalf("Claude display-title fixture has an incomplete case: %#v", fixture)
@@ -50,17 +48,20 @@ func loadClaudeHintsTitleFixtures(t *testing.T) claudeHintsTitleFixtures {
 		if _, exists := seen[fixture.Name]; exists {
 			t.Fatalf("duplicate Claude display-title fixture case %q", fixture.Name)
 		}
-		seen[fixture.Name] = struct{}{}
+		seen[fixture.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("Claude display titles", "case", fixtures.RequiredNames, seen); err != nil {
+		t.Fatal(err)
 	}
 	return fixtures
 }
 
 // discoverClaudeHintsTitle runs the production discovery path over one root
 // transcript and returns the display title it derived.
-func discoverClaudeHintsTitle(t *testing.T, lines []string) string {
+func discoverClaudeHintsTitle(t *testing.T, fixture claudeHintsTitleCase) ingest.DiscoveredSession {
 	t.Helper()
 	fs := testutil.NewMemFS()
-	body := strings.Join(lines, "\n") + "\n"
+	body := strings.Join(fixture.Lines, "\n") + "\n"
 	if err := fs.WriteFile(claudeHintsTitleFilePath, []byte(body), 0o644); err != nil {
 		t.Fatalf("write the transcript fixture: %v", err)
 	}
@@ -76,7 +77,30 @@ func discoverClaudeHintsTitle(t *testing.T, lines []string) string {
 	if string(sessions[0].SessionID) != claudeHintsTitleSession {
 		t.Fatalf("discovered session %q, want %q", sessions[0].SessionID, claudeHintsTitleSession)
 	}
-	return sessions[0].Title
+	got := sessions[0]
+	if fixture.ExpectedCWD != "" && got.CWD != fixture.ExpectedCWD {
+		t.Fatalf("cwd = %q, want %q", got.CWD, fixture.ExpectedCWD)
+	}
+	if fixture.ExpectedBranch != "" && got.Branch != fixture.ExpectedBranch {
+		t.Fatalf("branch = %q, want %q", got.Branch, fixture.ExpectedBranch)
+	}
+	if fixture.MatchFirstUser {
+		entries, err := ingest.NewClaudeIndexer(fs).IndexTranscript(context.Background(), got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		firstUser := ""
+		for _, entry := range entries {
+			if entry.Role == ingest.RoleUser && entry.ContentPreview != nil {
+				firstUser = *entry.ContentPreview
+				break
+			}
+		}
+		if firstUser == "" || firstUser != got.Title {
+			t.Fatalf("discovery title %q disagrees with first indexed user text %q", got.Title, firstUser)
+		}
+	}
+	return got
 }
 
 // TestClaudeAdapter_DisplayTitleSkipsInjectedTurns proves the discovery display
@@ -87,7 +111,7 @@ func TestClaudeAdapter_DisplayTitleSkipsInjectedTurns(t *testing.T) {
 	for _, fixture := range fixtures.Cases {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
-			got := discoverClaudeHintsTitle(t, fixture.Lines)
+			got := discoverClaudeHintsTitle(t, fixture).Title
 			if got != fixture.ExpectedTitle {
 				t.Fatalf("display title = %q, want %q", got, fixture.ExpectedTitle)
 			}
