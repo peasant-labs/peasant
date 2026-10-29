@@ -106,9 +106,10 @@ cases:
     delivery:
       records: |
         {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"first"}]}}}
-        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
+        {"timestamp":"2024-01-02T18:10:02Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
       content: [answer]
       retained: ['"final"', '"final"']
+      timestamps: [1704219002000]
       turns: 1
       submissions: 0
   - name: delivery-scalar-does-not-open-admission
@@ -2146,3 +2147,23 @@ cases:
               ordinal: 4
               thinkingLevel: ""
               thinkingLevelRaw: ""
+
+  - name: delivery-authoritative-mirror-replaces-timestamp
+    delivery:
+      records: |
+        {"timestamp":"2024-01-02T18:10:01Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"mirror body"}]}}
+        {"timestamp":"2024-01-02T18:10:02Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","content":[{"type":"output_text","text":"final body"}]}}}
+      content: [final body]
+      timestamps: [1704219002000]
+      turns: 1
+      submissions: 0
+
+  - name: delivery-latest-body-without-timestamp-clears-earlier-time
+    delivery:
+      records: |
+        {"timestamp":"2024-01-02T18:10:01Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"earlier body"}]}}
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","content":[{"type":"output_text","text":"undated final body"}]}}}
+      content: [undated final body]
+      timestamps: [null]
+      turns: 1
+      submissions: 0

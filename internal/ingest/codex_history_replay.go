@@ -1441,6 +1441,7 @@ func (state *codexReplayState) applyItemBody(threadID string, segment codexDecod
 		node.CallID = callID
 		node.TurnID = turnID
 		node.Payload = record.Payload
+		node.TimestampMs = record.TimestampMs
 		if bodyChangedMetadata(record.Metadata) {
 			node.Metadata = record.Metadata
 		}

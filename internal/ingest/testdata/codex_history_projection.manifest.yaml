@@ -8,6 +8,8 @@ requiredNames:
   - delivery-object-correlation
   - delivery-malformed-correlation-object
   - delivery-wrong-required-item-field
+  - delivery-authoritative-mirror-replaces-timestamp
+  - delivery-latest-body-without-timestamp-clears-earlier-time
   - delivery-repeated-item-completion
   - delivery-scalar-does-not-open-admission
   - delivery-correlation-opens-admission
