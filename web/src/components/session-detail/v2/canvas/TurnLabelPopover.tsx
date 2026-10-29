@@ -2,9 +2,10 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Tag, Loader2, Check } from 'lucide-react';
+import { Tag, Loader2, Check, ChevronLeft } from 'lucide-react';
 import { TranscriptLabelPopover, type SavedLabel } from '@peasant-labs/fairtrade/ui';
 import { cn } from '@/lib/utils';
+import './TurnLabelPopover.css';
 import {
   entryApplicableTypes,
   permissibleValues,
@@ -175,6 +176,7 @@ function OutcomeFlagPopover({
           : `Saving the turn ${entryIndex} outcome/flag label failed with a non-Error rejection from saveTurnLabels in TurnLabelPopover.handleSave.`,
       );
       setOpen(false);
+      triggerRef.current?.focus();
     } finally {
       setSaving(false);
     }
@@ -193,15 +195,12 @@ function OutcomeFlagPopover({
           setOpen((o) => !o);
         }}
         className={cn(
-          'inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] leading-none',
-          'text-ink-4 hover:text-ink border border-transparent hover:border-rule',
-          'opacity-0 group-hover:opacity-100 focus-mono transition-colors',
-          open && 'opacity-100',
+          'btn btn-ghost btn-sm peasant-turn-label-trigger focus-mono',
           className,
         )}
       >
-        <Tag size={11} strokeWidth={1.75} />
-        Label
+        <Tag aria-hidden="true" />
+        label
       </button>
       {/* `TranscriptLabelPopover`'s `.txn-label-scrim` is `position:absolute;
           inset:0` — the design system's own canonical usage mounts it as a
@@ -226,11 +225,11 @@ function OutcomeFlagPopover({
         document.body,
       )}
       {!open && error && (
-        <span role="alert" className="ml-1.5 text-[11px] text-danger">
-          {error} —{' '}
+        <span role="alert" className="peasant-turn-label-error">
+          {error}{' '}
           <button
             type="button"
-            className="underline hover:no-underline focus-mono"
+            className="btn btn-ghost btn-sm focus-mono"
             onClick={() => {
               setError(null);
               setOpen(true);
@@ -336,6 +335,7 @@ function MoreLabelsPopover({
         id,
       });
       setOpen(false);
+      triggerRef.current?.focus();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save label');
       setSaving(false);
@@ -355,19 +355,16 @@ function MoreLabelsPopover({
         aria-controls={open ? popId : undefined}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          'inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] leading-none',
-          'text-ink-4 hover:text-ink border border-transparent hover:border-rule',
-          'opacity-0 group-hover:opacity-100 focus-mono transition-colors',
-          open && 'opacity-100',
+          'btn btn-ghost btn-sm peasant-turn-label-trigger focus-mono',
           className,
         )}
       >
-        <Tag size={11} strokeWidth={1.75} />
+        <Tag aria-hidden="true" />
         more
       </button>
       {open && (
         <div
-          className="pop-card"
+          className="pop-card peasant-turn-label-popover"
           role="dialog"
           aria-label="More labels"
           id={popId}
@@ -375,8 +372,8 @@ function MoreLabelsPopover({
         >
           {activeType == null ? (
             <div className="flex flex-col">
-              <p className="px-3 pt-2.5 pb-1.5 text-[11px] uppercase tracking-wide text-ink-4">
-                More labels
+              <p className="px-3 pt-2.5 pb-1.5 text-[length:var(--fs-label)] font-mono text-ink-4">
+                more labels
               </p>
               {applicable.map((t) => (
                 <button
@@ -385,9 +382,9 @@ function MoreLabelsPopover({
                   onClick={() => setActiveType(t)}
                   className="flex flex-col gap-0.5 px-3 py-2 text-left hover:bg-surface-hover focus-mono transition-colors"
                 >
-                  <span className="text-[12.5px] text-ink">{t.displayName}</span>
+                  <span className="text-[length:var(--fs-body)] text-ink">{t.displayName}</span>
                   {t.description && (
-                    <span className="text-[11px] text-ink-3 line-clamp-2">
+                    <span className="text-[length:var(--fs-body)] text-ink-3 line-clamp-2">
                       {t.description}
                     </span>
                   )}
@@ -401,11 +398,12 @@ function MoreLabelsPopover({
                   type="button"
                   onClick={() => setActiveType(null)}
                   disabled={saving}
-                  className="text-[11px] text-ink-4 hover:text-ink focus-mono disabled:opacity-50"
+                  className="inline-flex items-center gap-[var(--sp-1)] text-[length:var(--fs-label)] font-mono text-ink-4 hover:text-ink focus-mono disabled:opacity-50"
                 >
-                  ‹ Back
+                  <ChevronLeft aria-hidden="true" className="size-[var(--ic-sm)]" />
+                  back
                 </button>
-                <span className="text-[12.5px] text-ink font-medium truncate">
+                <span className="text-[length:var(--fs-body)] text-ink font-medium truncate">
                   {activeType.displayName}
                 </span>
               </div>
@@ -423,7 +421,7 @@ function MoreLabelsPopover({
                 >
                   <label
                     htmlFor={freeTextId}
-                    className="text-[11px] text-ink-3"
+                    className="text-[length:var(--fs-body)] text-ink-3"
                   >
                     Type a label, then press Enter or Save.
                   </label>
@@ -435,15 +433,15 @@ function MoreLabelsPopover({
                     disabled={saving}
                     onChange={(e) => setFreeText(e.target.value)}
                     placeholder="e.g. good handoff"
-                    className="w-full border border-rule bg-surface px-2 py-1 text-[12.5px] text-ink placeholder:text-ink-4 focus-mono disabled:opacity-50"
+                    className="w-full border border-rule bg-surface px-2 py-1 text-[length:var(--fs-body)] text-ink placeholder:text-ink-4 focus-mono disabled:opacity-50"
                   />
                   <button
                     type="submit"
                     disabled={saving || freeText.trim() === ''}
-                    className="inline-flex items-center justify-center gap-1.5 self-end border border-rule px-2.5 py-1 text-[12px] text-ink hover:bg-surface-hover focus-mono transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
+                    className="inline-flex items-center justify-center gap-1.5 self-end border border-rule px-2.5 py-1 text-[length:var(--fs-label)] text-ink hover:bg-surface-hover focus-mono transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
                   >
-                    {saving && <Loader2 size={12} className="animate-spin text-ink-3" />}
-                    {saving ? 'Saving' : 'Save'}
+                    {saving && <Loader2 aria-hidden="true" className="size-[var(--ic-sm)] animate-spin motion-reduce:animate-none text-ink-3" />}
+                    {saving ? 'saving' : 'save'}
                   </button>
                 </form>
               ) : (
@@ -453,16 +451,16 @@ function MoreLabelsPopover({
                     type="button"
                     disabled={saving}
                     onClick={() => confirm(activeType, value)}
-                    className="flex items-center justify-between px-3 py-2 text-left text-[12.5px] text-ink hover:bg-surface-hover focus-mono transition-colors disabled:opacity-50"
+                    className="flex items-center justify-between px-3 py-2 text-left text-[length:var(--fs-body)] text-ink hover:bg-surface-hover focus-mono transition-colors disabled:opacity-50"
                   >
                     <span className="font-mono">{value}</span>
-                    {saving && <Loader2 size={12} className="animate-spin text-ink-3" />}
-                    {!saving && <Check size={12} className="text-ink-4 opacity-0" />}
+                    {saving && <Loader2 aria-hidden="true" className="size-[var(--ic-sm)] animate-spin motion-reduce:animate-none text-ink-3" />}
+                    {!saving && <Check aria-hidden="true" className="size-[var(--ic-sm)] text-ink-4 opacity-0" />}
                   </button>
                 ))
               )}
               {error && (
-                <p className="px-3 py-2 text-[11px] text-danger border-t border-rule">
+                <p className="px-3 py-2 text-[length:var(--fs-body)] text-danger border-t border-rule">
                   {error}
                 </p>
               )}
