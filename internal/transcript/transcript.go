@@ -425,10 +425,14 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 	for parentIdx := range foldedToolCalls {
 		parentsWithTools[parentIdx] = true
 	}
+	representedTextParents := make(map[int]bool)
 	for _, e := range entries {
-		if e.ParentIndex != nil {
+		if e.ParentIndex != nil && !representedTextParents[*e.ParentIndex] {
 			if representedClaudeTextBlock(e, depthZeroEntries[*e.ParentIndex]) {
 				suppress[e.EntryIndex] = true
+				// The carrier represents one occurrence, not every equal block.
+				// Two native "ok" blocks must still display twice in total.
+				representedTextParents[*e.ParentIndex] = true
 			}
 		}
 		if e.Depth == 1 && e.ParentIndex != nil && parentsWithTools[*e.ParentIndex] {

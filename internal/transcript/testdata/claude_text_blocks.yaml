@@ -1,6 +1,7 @@
 requiredNames:
   - standalone_assistant_text_is_shown_once
   - a_second_text_block_is_not_lost
+  - two_identical_text_blocks_are_shown_twice
   - tool_round_trip_and_standalone_conclusion
 cases:
   - name: standalone_assistant_text_is_shown_once
@@ -24,3 +25,9 @@ cases:
     content: ["inspect the export", "reading the export", "the export now resumes"]
     depths: [0, 0, 0]
     toolCalls: 1
+  - name: two_identical_text_blocks_are_shown_twice
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"},{"type":"text","text":"ok"}]}}
+    content: ["ok", "ok"]
+    depths: [0, 1]
+    toolCalls: 0
