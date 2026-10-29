@@ -3,9 +3,9 @@ cases:
     current_hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     has_metrics: true
     has_compute_version: true
-    metric_compute_version: 8
+    metric_compute_version: 9
     state_hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-    state_compute_version: 8
+    state_compute_version: 9
     state_classifier_version: current
     state_metrics_output_hash: matching
     has_state: true
@@ -16,9 +16,9 @@ cases:
     current_hash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
     has_metrics: true
     has_compute_version: true
-    metric_compute_version: 8
+    metric_compute_version: 9
     state_hash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
-    state_compute_version: 8
+    state_compute_version: 9
     state_classifier_version: current
     state_metrics_output_hash: matching
     has_state: true
@@ -29,9 +29,9 @@ cases:
     current_hash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
     has_metrics: true
     has_compute_version: true
-    metric_compute_version: 9
+    metric_compute_version: 10
     state_hash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-    state_compute_version: 8
+    state_compute_version: 9
     state_classifier_version: current
     state_metrics_output_hash: matching
     has_state: true
@@ -42,7 +42,7 @@ cases:
     current_hash: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
     has_metrics: true
     has_compute_version: true
-    metric_compute_version: 8
+    metric_compute_version: 9
     state_hash: ""
     state_compute_version: 0
     state_classifier_version: ""
@@ -59,7 +59,7 @@ cases:
     has_compute_version: false
     metric_compute_version: 0
     state_hash: 1111111111111111111111111111111111111111111111111111111111111111
-    state_compute_version: 8
+    state_compute_version: 9
     state_classifier_version: current
     state_metrics_output_hash: stale
     has_state: true
@@ -72,7 +72,7 @@ cases:
     has_compute_version: false
     metric_compute_version: 0
     state_hash: 2222222222222222222222222222222222222222222222222222222222222222
-    state_compute_version: 8
+    state_compute_version: 9
     state_classifier_version: current
     state_metrics_output_hash: matching
     has_state: true
@@ -85,9 +85,9 @@ cases:
     current_hash: 3333333333333333333333333333333333333333333333333333333333333333
     has_metrics: true
     has_compute_version: true
-    metric_compute_version: 8
+    metric_compute_version: 9
     state_hash: 3333333333333333333333333333333333333333333333333333333333333333
-    state_compute_version: 8
+    state_compute_version: 9
     state_classifier_version: current
     state_metrics_output_hash: stale
     has_state: true

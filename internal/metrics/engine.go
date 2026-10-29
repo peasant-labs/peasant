@@ -18,7 +18,7 @@ import (
 
 // CurrentComputeVersion is the compute_version written by this build.
 // Increment when MetricFunc logic changes to trigger recomputation.
-const CurrentComputeVersion = 8
+const CurrentComputeVersion = 9
 
 // MetricFunc computes a partial SessionMetrics update from session entries.
 // It receives the session's entries and existing metrics, and returns a
