@@ -7,6 +7,14 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.13.5] - 2026-10-29
+
+### Fixed
+- Transcript search highlights matches and reveals results inside nested output.
+- Mermaid diagrams accept safe line breaks, and tool disclosures start their
+  transitions from the beginning.
+- Fixed-width readers adapt to the space available beside the sidebars.
+
 ## [0.13.4] - 2026-10-28
 
 ### Changed
@@ -935,6 +943,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.13.5]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.5
 [0.13.4]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.4
 [0.13.3]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.3
 [0.11.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.11.1
