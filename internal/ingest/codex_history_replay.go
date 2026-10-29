@@ -188,8 +188,11 @@ type codexHistoryRecord struct {
 	ByteStart        int64
 	ByteEndExclusive int64
 	EnvelopeType     string
-	Payload          json.RawMessage
-	Metadata         json.RawMessage
+	// TimestampMs is the envelope's own timestamp, nil when absent or
+	// unparseable.
+	TimestampMs *int64
+	Payload     json.RawMessage
+	Metadata    json.RawMessage
 	// Partial marks a trailing record without a terminating newline. It is
 	// deferred and never interpreted.
 	Partial bool
@@ -261,6 +264,9 @@ func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 				record.EnvelopeType = env.Type
 				record.Payload = env.Payload
 				record.Metadata = env.Metadata
+				if ms := parseTimestampMillis(env.Timestamp); ms > 0 {
+					record.TimestampMs = &ms
+				}
 				if explicit, present := codexExplicitRecordOrdinal(env.Payload); present {
 					switch {
 					case explicit < 0:
@@ -1636,6 +1642,7 @@ func (state *codexReplayState) emitNode(threadID string, segment codexDecodedSeg
 		ByteStart:        record.ByteStart,
 		ByteEndExclusive: record.ByteEndExclusive,
 		EnvelopeType:     record.EnvelopeType,
+		TimestampMs:      record.TimestampMs,
 		NativeType:       nativeType,
 		NativeRole:       role,
 		ItemID:           itemID,

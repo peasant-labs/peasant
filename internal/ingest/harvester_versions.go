@@ -34,7 +34,7 @@ var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 // exist. When a harness is absent from the baseline it is also absent here.
 var GenerationRepairTargets = map[Harness]HarvesterVersions{
 	HarnessClaudeCode: {AdapterVersion: 3, IndexerVersion: 22, IndexVersion: 2},
-	HarnessCodex:      {AdapterVersion: 3, IndexerVersion: 20, IndexVersion: 2},
+	HarnessCodex:      {AdapterVersion: 3, IndexerVersion: 21, IndexVersion: 2},
 	HarnessOpenCode:   {AdapterVersion: 4, IndexerVersion: 19, IndexVersion: 2},
 }
 

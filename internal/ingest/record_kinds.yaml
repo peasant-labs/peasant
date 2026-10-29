@@ -263,7 +263,7 @@ harnesses:
     adapter_version: 2
     indexer_version: 18
     index_version: 1
-    native_versions: {adapter_version: 3, indexer_version: 20, index_version: 2}
+    native_versions: {adapter_version: 3, indexer_version: 21, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no

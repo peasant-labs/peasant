@@ -47,6 +47,7 @@ baseline.
 | OpenCode | 3 → 4 | 18 → 19 | 2 (unchanged) | The thinking-level back-fill advances both targets so native sessions re-extract and re-index with their recorded thinking-level history. |
 | Claude Code | unchanged at 3 | 20 → 21 | 2 (unchanged) | The control-record payload retention change above applies to the managed producer too, so settled managed sessions re-index. |
 | Claude Code | unchanged at 3 | 21 → 22 | 2 (unchanged) | The plain-prompt carrier change above applies to the managed producer too, so settled managed sessions re-index with one user turn per content-block prompt. |
+| Codex | unchanged at 3 | 20 → 21 | 2 (unchanged) | Native history replay now stamps each block with its rollout envelope timestamp (#683); settled sessions re-index so stored turns stop reading 0001-01-01. Metadata extraction is unchanged, so the adapter stays. The format-1 baseline does not use this replay and is unchanged. |
 
 OpenCode's private managed-projection version 3 and prior-evidence version 2 are
 not indexformat versions and do not change the representation targets above.

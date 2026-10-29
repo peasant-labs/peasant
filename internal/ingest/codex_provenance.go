@@ -611,6 +611,9 @@ type codexBlockClassifier struct {
 	// thinkingLevel is the governing turn_context effort for the node being
 	// classified. It is stamped on assistant blocks only.
 	thinkingLevel thinkingLevelMapping
+	// nodeTimestampMs is the envelope timestamp of the node being
+	// classified, stamped on each block it yields.
+	nodeTimestampMs *int64
 }
 
 // emit appends one classified block to the active stream. While the current
@@ -619,6 +622,10 @@ type codexBlockClassifier struct {
 // captured segment it came from, and never enters a main or earlier
 // conversational partition.
 func (c *codexBlockClassifier) emit(block ClassifiedBlock) {
+	if block.TimestampMs == nil && c.nodeTimestampMs != nil {
+		ms := *c.nodeTimestampMs
+		block.TimestampMs = &ms
+	}
 	if block.Role == schema.RoleAssistant {
 		block.ThinkingLevel = c.thinkingLevel.Level
 		block.ThinkingLevelRaw = c.thinkingLevel.Raw
@@ -672,6 +679,7 @@ func (c *codexBlockClassifier) classifyNode(node CodexCapturedNode) error {
 	default:
 		return fmt.Errorf("ingest.ClassifyCodexBlocks: captured node %q carries ownership %q outside the closed capture set; the block cannot be placed; replay the native history through the supported capture", node.NativeKey, node.Ownership)
 	}
+	c.nodeTimestampMs = node.TimestampMs
 	metadata := decodeCodexEnvelopeMetadata(node.Metadata)
 	// A node whose captured ownership or per-record envelope proves it inherited
 	// is held as inherited local evidence, never emitted as a main or earlier
