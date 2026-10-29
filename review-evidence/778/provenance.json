@@ -1,0 +1,13 @@
+{
+  "sourceCommit": "0c1f46452b4ed71f9e2d03018a8946566ed418e8",
+  "sourceTree": "135582331749de86c2bcccbbaa34d2fcb9641309",
+  "fairtrade": "0.0.54",
+  "binarySha256": "d2455bac31d93379a0294dfc2237507c93916685342c165c2c4f23e150206b9f",
+  "version": "peasant v0.13.6-dev.28+0c1f46452",
+  "normalBuild": "GOTOOLCHAIN=go1.25.8 make build",
+  "syntheticPreview": "http://localhost:8691",
+  "inspectedImages": 16,
+  "allDiagramBoundsInsideViewBox": true,
+  "rootOverflow": false,
+  "pageErrors": []
+}

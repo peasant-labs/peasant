@@ -1,0 +1,982 @@
+{
+  "sourceCommit": "0c1f46452b4ed71f9e2d03018a8946566ed418e8",
+  "url": "http://localhost:8691/projects/b0b03c1c3d806d20af4a12a5dac12fe7da9a74913e2b701915609afdc9190d63/5d625d28-937e-4d9f-bd1a-1a44890d6112/?turn=83",
+  "reducedMotion": true,
+  "coarseTouchOn390": true,
+  "results": [
+    {
+      "theme": "light",
+      "width": 1440,
+      "page": {
+        "width": 1440,
+        "scrollWidth": 1440,
+        "theme": "light",
+        "text": "skip to session views\nsessions\nactivity-export-demo\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nnot published\npublish\nuser turns\n#1\n2m\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable ordering, support cancellation, and test resume boundaries. This is a synthetic demonstration project.\n#2\n2m\nCheck the current export instructions and document the existing behavior before choosing an implementation.\n#3\n2m\nLocate the unbounded read and trace how the response gets written.\n#4\n2m\nCheck the repository query and find a stable ordering"
+      },
+      "diagram": {
+        "width": 765,
+        "scrollWidth": 765,
+        "height": 846,
+        "scrollHeight": 846,
+        "tabIndex": 0,
+        "role": "region",
+        "label": "diagram",
+        "overflowX": "auto",
+        "svg": {
+          "width": 540.265625,
+          "height": 822.390625
+        },
+        "textFonts": [
+          {
+            "text": "yes",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "no",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "disconnect",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "disconnect",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Validate resumecursor",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Read boundedpage",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Escape and streamCSV",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Advance compositecursor",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "More rows?",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Finish response",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Cancel work",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          }
+        ],
+        "labels": []
+      },
+      "geometry": {
+        "viewport": {
+          "x": -91,
+          "y": -91.5,
+          "right": 449.265625,
+          "bottom": 730.9000244140625
+        },
+        "items": [
+          {
+            "text": "yes",
+            "kind": "text",
+            "x": 34.28892230987549,
+            "y": 237.49982738494873,
+            "right": 58.74232769012451,
+            "bottom": 257.50005626678467
+          },
+          {
+            "text": "no",
+            "kind": "text",
+            "x": 86.0311450958252,
+            "y": 628.8998517990112,
+            "right": 104.3751049041748,
+            "bottom": 648.9000806808472
+          },
+          {
+            "text": "disconnect",
+            "kind": "text",
+            "x": 353.9135932922363,
+            "y": 237.49982738494873,
+            "right": 435.6176567077637,
+            "bottom": 257.50005626678467
+          },
+          {
+            "text": "disconnect",
+            "kind": "text",
+            "x": 264.6401557922364,
+            "y": 339.09983348846436,
+            "right": 346.34421920776373,
+            "bottom": 359.1000623703003
+          },
+          {
+            "text": "Validate resumecursor",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 14.60000228881836,
+            "right": 303.265625,
+            "bottom": 71.00000381469727
+          },
+          {
+            "text": "Validate resumecursor",
+            "kind": "text",
+            "x": 165.90554809570312,
+            "y": 27.599830627441406,
+            "right": 288.6257019042969,
+            "bottom": 65.2000617980957
+          },
+          {
+            "text": "Read boundedpage",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 116.20000839233398,
+            "right": 303.265625,
+            "bottom": 172.6000099182129
+          },
+          {
+            "text": "Read boundedpage",
+            "kind": "text",
+            "x": 172.0618667602539,
+            "y": 129.19983673095706,
+            "right": 282.4693832397461,
+            "bottom": 166.80006790161136
+          },
+          {
+            "text": "Escape and streamCSV",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 217.79999923706055,
+            "right": 303.265625,
+            "bottom": 274.20000076293945
+          },
+          {
+            "text": "Escape and streamCSV",
+            "kind": "text",
+            "x": 153.49134063720703,
+            "y": 230.79982757568365,
+            "right": 301.03990936279297,
+            "bottom": 268.40005874633795
+          },
+          {
+            "text": "Advance compositecursor",
+            "kind": "node",
+            "x": 73.015625,
+            "y": 319.40000534057623,
+            "right": 225.015625,
+            "bottom": 375.80000686645513
+          },
+          {
+            "text": "Advance compositecursor",
+            "kind": "text",
+            "x": 74.77259063720703,
+            "y": 332.3998336791993,
+            "right": 223.25867462158203,
+            "bottom": 370.0000648498536
+          },
+          {
+            "text": "More rows?",
+            "kind": "node",
+            "x": 12.5,
+            "y": 418.4000244140625,
+            "right": 179.5,
+            "bottom": 585.4000244140625
+          },
+          {
+            "text": "More rows?",
+            "kind": "text",
+            "x": 51.29636764526367,
+            "y": 494.39985275268555,
+            "right": 139.70363235473633,
+            "bottom": 514.4000816345215
+          },
+          {
+            "text": "Finish response",
+            "kind": "node",
+            "x": 19.5,
+            "y": 689.4000244140625,
+            "right": 171.5,
+            "bottom": 730.4000244140625
+          },
+          {
+            "text": "Finish response",
+            "kind": "text",
+            "x": 34.882118225097656,
+            "y": 702.3998527526855,
+            "right": 156.11788940429688,
+            "bottom": 722.4000816345215
+          },
+          {
+            "text": "Cancel work",
+            "kind": "node",
+            "x": 296.765625,
+            "y": 418.4000244140626,
+            "right": 448.765625,
+            "bottom": 459.4000244140626
+          },
+          {
+            "text": "Cancel work",
+            "kind": "text",
+            "x": 326.3744697570801,
+            "y": 431.39985275268555,
+            "right": 419.1567802429199,
+            "bottom": 451.4000816345215
+          }
+        ],
+        "outside": []
+      },
+      "pan": null,
+      "errors": [],
+      "warnings": [],
+      "failed": [],
+      "passed": true
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "page": {
+        "width": 390,
+        "scrollWidth": 390,
+        "theme": "light",
+        "text": "skip to session views\nsessions\nactivity-export-demo\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nnot published\npublish\nlinked turn is no longer available\n\nTurn 83 is absent from this transcript, so the viewer opened at the top. Remove the stale turn target and copy a fresh link. remove stale turn target\n\nplanning\nturns 1–49\nuser turn 1\nuser\n#1\n7h ago\nlabel\nmore\n\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable ordering, support cancellation, and test resume boundaries. This is a synthetic demonstration project.\n\nassistant turn 1"
+      },
+      "diagram": {
+        "width": 324,
+        "scrollWidth": 564,
+        "height": 846,
+        "scrollHeight": 846,
+        "tabIndex": 0,
+        "role": "region",
+        "label": "diagram",
+        "overflowX": "auto",
+        "svg": {
+          "width": 540.265625,
+          "height": 822.390625
+        },
+        "textFonts": [
+          {
+            "text": "yes",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "no",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "disconnect",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "disconnect",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Validate resumecursor",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Read boundedpage",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Escape and streamCSV",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Advance compositecursor",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "More rows?",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Finish response",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Cancel work",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          }
+        ],
+        "labels": []
+      },
+      "geometry": {
+        "viewport": {
+          "x": -91,
+          "y": -91.5,
+          "right": 449.265625,
+          "bottom": 730.9000244140625
+        },
+        "items": [
+          {
+            "text": "yes",
+            "kind": "text",
+            "x": 34.28892230987549,
+            "y": 237.49982738494873,
+            "right": 58.74232769012451,
+            "bottom": 257.50005626678467
+          },
+          {
+            "text": "no",
+            "kind": "text",
+            "x": 86.0311450958252,
+            "y": 628.8998517990112,
+            "right": 104.3751049041748,
+            "bottom": 648.9000806808472
+          },
+          {
+            "text": "disconnect",
+            "kind": "text",
+            "x": 353.9135932922363,
+            "y": 237.49982738494873,
+            "right": 435.6176567077637,
+            "bottom": 257.50005626678467
+          },
+          {
+            "text": "disconnect",
+            "kind": "text",
+            "x": 264.6401557922364,
+            "y": 339.09983348846436,
+            "right": 346.34421920776373,
+            "bottom": 359.1000623703003
+          },
+          {
+            "text": "Validate resumecursor",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 14.60000228881836,
+            "right": 303.265625,
+            "bottom": 71.00000381469727
+          },
+          {
+            "text": "Validate resumecursor",
+            "kind": "text",
+            "x": 165.90554809570312,
+            "y": 27.599830627441406,
+            "right": 288.6257019042969,
+            "bottom": 65.2000617980957
+          },
+          {
+            "text": "Read boundedpage",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 116.20000839233398,
+            "right": 303.265625,
+            "bottom": 172.6000099182129
+          },
+          {
+            "text": "Read boundedpage",
+            "kind": "text",
+            "x": 172.0618667602539,
+            "y": 129.19983673095706,
+            "right": 282.4693832397461,
+            "bottom": 166.80006790161136
+          },
+          {
+            "text": "Escape and streamCSV",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 217.79999923706055,
+            "right": 303.265625,
+            "bottom": 274.20000076293945
+          },
+          {
+            "text": "Escape and streamCSV",
+            "kind": "text",
+            "x": 153.49134063720703,
+            "y": 230.79982757568365,
+            "right": 301.03990936279297,
+            "bottom": 268.40005874633795
+          },
+          {
+            "text": "Advance compositecursor",
+            "kind": "node",
+            "x": 73.015625,
+            "y": 319.40000534057623,
+            "right": 225.015625,
+            "bottom": 375.80000686645513
+          },
+          {
+            "text": "Advance compositecursor",
+            "kind": "text",
+            "x": 74.77259063720703,
+            "y": 332.3998336791993,
+            "right": 223.25867462158203,
+            "bottom": 370.0000648498536
+          },
+          {
+            "text": "More rows?",
+            "kind": "node",
+            "x": 12.5,
+            "y": 418.4000244140625,
+            "right": 179.5,
+            "bottom": 585.4000244140625
+          },
+          {
+            "text": "More rows?",
+            "kind": "text",
+            "x": 51.29636764526367,
+            "y": 494.39985275268555,
+            "right": 139.70363235473633,
+            "bottom": 514.4000816345215
+          },
+          {
+            "text": "Finish response",
+            "kind": "node",
+            "x": 19.5,
+            "y": 689.4000244140625,
+            "right": 171.5,
+            "bottom": 730.4000244140625
+          },
+          {
+            "text": "Finish response",
+            "kind": "text",
+            "x": 34.882118225097656,
+            "y": 702.3998527526855,
+            "right": 156.11788940429688,
+            "bottom": 722.4000816345215
+          },
+          {
+            "text": "Cancel work",
+            "kind": "node",
+            "x": 296.765625,
+            "y": 418.4000244140626,
+            "right": 448.765625,
+            "bottom": 459.4000244140626
+          },
+          {
+            "text": "Cancel work",
+            "kind": "text",
+            "x": 326.3744697570801,
+            "y": 431.39985275268555,
+            "right": 419.1567802429199,
+            "bottom": 451.4000816345215
+          }
+        ],
+        "outside": []
+      },
+      "pan": {
+        "scrollLeft": 40,
+        "focused": true
+      },
+      "errors": [],
+      "warnings": [],
+      "failed": [],
+      "passed": true
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "page": {
+        "width": 1440,
+        "scrollWidth": 1440,
+        "theme": "dark",
+        "text": "skip to session views\nsessions\nactivity-export-demo\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nnot published\npublish\nuser turns\n#1\n2m\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable ordering, support cancellation, and test resume boundaries. This is a synthetic demonstration project.\n#2\n2m\nCheck the current export instructions and document the existing behavior before choosing an implementation.\n#3\n2m\nLocate the unbounded read and trace how the response gets written.\n#4\n2m\nCheck the repository query and find a stable ordering"
+      },
+      "diagram": {
+        "width": 765,
+        "scrollWidth": 765,
+        "height": 846,
+        "scrollHeight": 846,
+        "tabIndex": 0,
+        "role": "region",
+        "label": "diagram",
+        "overflowX": "auto",
+        "svg": {
+          "width": 540.265625,
+          "height": 822.390625
+        },
+        "textFonts": [
+          {
+            "text": "yes",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "no",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "disconnect",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "disconnect",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Validate resumecursor",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Read boundedpage",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Escape and streamCSV",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Advance compositecursor",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "More rows?",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Finish response",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Cancel work",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          }
+        ],
+        "labels": []
+      },
+      "geometry": {
+        "viewport": {
+          "x": -91,
+          "y": -91.5,
+          "right": 449.265625,
+          "bottom": 730.9000244140625
+        },
+        "items": [
+          {
+            "text": "yes",
+            "kind": "text",
+            "x": 34.28892230987549,
+            "y": 237.49982738494873,
+            "right": 58.74232769012451,
+            "bottom": 257.50005626678467
+          },
+          {
+            "text": "no",
+            "kind": "text",
+            "x": 86.0311450958252,
+            "y": 628.8998517990112,
+            "right": 104.3751049041748,
+            "bottom": 648.9000806808472
+          },
+          {
+            "text": "disconnect",
+            "kind": "text",
+            "x": 353.9135932922363,
+            "y": 237.49982738494873,
+            "right": 435.6176567077637,
+            "bottom": 257.50005626678467
+          },
+          {
+            "text": "disconnect",
+            "kind": "text",
+            "x": 264.6401557922364,
+            "y": 339.09983348846436,
+            "right": 346.34421920776373,
+            "bottom": 359.1000623703003
+          },
+          {
+            "text": "Validate resumecursor",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 14.60000228881836,
+            "right": 303.265625,
+            "bottom": 71.00000381469727
+          },
+          {
+            "text": "Validate resumecursor",
+            "kind": "text",
+            "x": 165.90554809570312,
+            "y": 27.599830627441406,
+            "right": 288.6257019042969,
+            "bottom": 65.2000617980957
+          },
+          {
+            "text": "Read boundedpage",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 116.20000839233398,
+            "right": 303.265625,
+            "bottom": 172.6000099182129
+          },
+          {
+            "text": "Read boundedpage",
+            "kind": "text",
+            "x": 172.0618667602539,
+            "y": 129.19983673095706,
+            "right": 282.4693832397461,
+            "bottom": 166.80006790161136
+          },
+          {
+            "text": "Escape and streamCSV",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 217.79999923706055,
+            "right": 303.265625,
+            "bottom": 274.20000076293945
+          },
+          {
+            "text": "Escape and streamCSV",
+            "kind": "text",
+            "x": 153.49134063720703,
+            "y": 230.79982757568365,
+            "right": 301.03990936279297,
+            "bottom": 268.40005874633795
+          },
+          {
+            "text": "Advance compositecursor",
+            "kind": "node",
+            "x": 73.015625,
+            "y": 319.40000534057623,
+            "right": 225.015625,
+            "bottom": 375.80000686645513
+          },
+          {
+            "text": "Advance compositecursor",
+            "kind": "text",
+            "x": 74.77259063720703,
+            "y": 332.3998336791993,
+            "right": 223.25867462158203,
+            "bottom": 370.0000648498536
+          },
+          {
+            "text": "More rows?",
+            "kind": "node",
+            "x": 12.5,
+            "y": 418.4000244140625,
+            "right": 179.5,
+            "bottom": 585.4000244140625
+          },
+          {
+            "text": "More rows?",
+            "kind": "text",
+            "x": 51.29636764526367,
+            "y": 494.39985275268555,
+            "right": 139.70363235473633,
+            "bottom": 514.4000816345215
+          },
+          {
+            "text": "Finish response",
+            "kind": "node",
+            "x": 19.5,
+            "y": 689.4000244140625,
+            "right": 171.5,
+            "bottom": 730.4000244140625
+          },
+          {
+            "text": "Finish response",
+            "kind": "text",
+            "x": 34.882118225097656,
+            "y": 702.3998527526855,
+            "right": 156.11788940429688,
+            "bottom": 722.4000816345215
+          },
+          {
+            "text": "Cancel work",
+            "kind": "node",
+            "x": 296.765625,
+            "y": 418.4000244140626,
+            "right": 448.765625,
+            "bottom": 459.4000244140626
+          },
+          {
+            "text": "Cancel work",
+            "kind": "text",
+            "x": 326.3744697570801,
+            "y": 431.39985275268555,
+            "right": 419.1567802429199,
+            "bottom": 451.4000816345215
+          }
+        ],
+        "outside": []
+      },
+      "pan": null,
+      "errors": [],
+      "warnings": [],
+      "failed": [],
+      "passed": true
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "page": {
+        "width": 390,
+        "scrollWidth": 390,
+        "theme": "dark",
+        "text": "skip to session views\nsessions\nactivity-export-demo\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nnot published\npublish\nlinked turn is no longer available\n\nTurn 83 is absent from this transcript, so the viewer opened at the top. Remove the stale turn target and copy a fresh link. remove stale turn target\n\nplanning\nturns 1–49\nuser turn 1\nuser\n#1\n7h ago\nlabel\nmore\n\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable ordering, support cancellation, and test resume boundaries. This is a synthetic demonstration project.\n\nassistant turn 1"
+      },
+      "diagram": {
+        "width": 324,
+        "scrollWidth": 564,
+        "height": 846,
+        "scrollHeight": 846,
+        "tabIndex": 0,
+        "role": "region",
+        "label": "diagram",
+        "overflowX": "auto",
+        "svg": {
+          "width": 540.265625,
+          "height": 822.390625
+        },
+        "textFonts": [
+          {
+            "text": "yes",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "no",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "disconnect",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "disconnect",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Validate resumecursor",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Read boundedpage",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Escape and streamCSV",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Advance compositecursor",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "More rows?",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Finish response",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          },
+          {
+            "text": "Cancel work",
+            "fontSize": "16px",
+            "font": "atkinsonHyperlegible, \"atkinsonHyperlegible Fallback\", ui-sans-serif, system-ui, -apple-system, sans-serif"
+          }
+        ],
+        "labels": []
+      },
+      "geometry": {
+        "viewport": {
+          "x": -91,
+          "y": -91.5,
+          "right": 449.265625,
+          "bottom": 730.9000244140625
+        },
+        "items": [
+          {
+            "text": "yes",
+            "kind": "text",
+            "x": 34.28892230987549,
+            "y": 237.49982738494873,
+            "right": 58.74232769012451,
+            "bottom": 257.50005626678467
+          },
+          {
+            "text": "no",
+            "kind": "text",
+            "x": 86.0311450958252,
+            "y": 628.8998517990112,
+            "right": 104.3751049041748,
+            "bottom": 648.9000806808472
+          },
+          {
+            "text": "disconnect",
+            "kind": "text",
+            "x": 353.9135932922363,
+            "y": 237.49982738494873,
+            "right": 435.6176567077637,
+            "bottom": 257.50005626678467
+          },
+          {
+            "text": "disconnect",
+            "kind": "text",
+            "x": 264.6401557922364,
+            "y": 339.09983348846436,
+            "right": 346.34421920776373,
+            "bottom": 359.1000623703003
+          },
+          {
+            "text": "Validate resumecursor",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 14.60000228881836,
+            "right": 303.265625,
+            "bottom": 71.00000381469727
+          },
+          {
+            "text": "Validate resumecursor",
+            "kind": "text",
+            "x": 165.90554809570312,
+            "y": 27.599830627441406,
+            "right": 288.6257019042969,
+            "bottom": 65.2000617980957
+          },
+          {
+            "text": "Read boundedpage",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 116.20000839233398,
+            "right": 303.265625,
+            "bottom": 172.6000099182129
+          },
+          {
+            "text": "Read boundedpage",
+            "kind": "text",
+            "x": 172.0618667602539,
+            "y": 129.19983673095706,
+            "right": 282.4693832397461,
+            "bottom": 166.80006790161136
+          },
+          {
+            "text": "Escape and streamCSV",
+            "kind": "node",
+            "x": 151.265625,
+            "y": 217.79999923706055,
+            "right": 303.265625,
+            "bottom": 274.20000076293945
+          },
+          {
+            "text": "Escape and streamCSV",
+            "kind": "text",
+            "x": 153.49134063720703,
+            "y": 230.79982757568365,
+            "right": 301.03990936279297,
+            "bottom": 268.40005874633795
+          },
+          {
+            "text": "Advance compositecursor",
+            "kind": "node",
+            "x": 73.015625,
+            "y": 319.40000534057623,
+            "right": 225.015625,
+            "bottom": 375.80000686645513
+          },
+          {
+            "text": "Advance compositecursor",
+            "kind": "text",
+            "x": 74.77259063720703,
+            "y": 332.3998336791993,
+            "right": 223.25867462158203,
+            "bottom": 370.0000648498536
+          },
+          {
+            "text": "More rows?",
+            "kind": "node",
+            "x": 12.5,
+            "y": 418.4000244140625,
+            "right": 179.5,
+            "bottom": 585.4000244140625
+          },
+          {
+            "text": "More rows?",
+            "kind": "text",
+            "x": 51.29636764526367,
+            "y": 494.39985275268555,
+            "right": 139.70363235473633,
+            "bottom": 514.4000816345215
+          },
+          {
+            "text": "Finish response",
+            "kind": "node",
+            "x": 19.5,
+            "y": 689.4000244140625,
+            "right": 171.5,
+            "bottom": 730.4000244140625
+          },
+          {
+            "text": "Finish response",
+            "kind": "text",
+            "x": 34.882118225097656,
+            "y": 702.3998527526855,
+            "right": 156.11788940429688,
+            "bottom": 722.4000816345215
+          },
+          {
+            "text": "Cancel work",
+            "kind": "node",
+            "x": 296.765625,
+            "y": 418.4000244140626,
+            "right": 448.765625,
+            "bottom": 459.4000244140626
+          },
+          {
+            "text": "Cancel work",
+            "kind": "text",
+            "x": 326.3744697570801,
+            "y": 431.39985275268555,
+            "right": 419.1567802429199,
+            "bottom": 451.4000816345215
+          }
+        ],
+        "outside": []
+      },
+      "pan": {
+        "scrollLeft": 40,
+        "focused": true
+      },
+      "errors": [],
+      "warnings": [],
+      "failed": [],
+      "passed": true
+    }
+  ]
+}

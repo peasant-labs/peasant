@@ -141,7 +141,7 @@
         "variant": "tabular-nums"
       }
     ],
-    "text": "sessions\n\npublish sessions automatically, with secrets hidden. set up\n, opens the docs in a new tab\n\nfilters\nbrowse by: sessions\nsessions on this computer\nsession\n\nReview a database migration\nclaude-code\n, 1.6k tokens\napi, 3 turns, 2m, 5h a",
+    "text": "sessions\n\npublish sessions automatically, with secrets hidden. set up\n, opens the docs in a new tab\n\nfilters\nbrowse by: sessions\nsessions on this computer\nsession\n\nReview a database migration\nclaude-code\n, 1.6k tokens\napi, 3 turns, 2m, 6h a",
     "errors": []
   },
   {
@@ -210,7 +210,7 @@
         "variant": "tabular-nums"
       }
     ],
-    "text": "skip to session views\nnot published\npublish\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nclaude code\nclaude-sonnet-4\n1h 23m\n84\nturns\n28\nprompts\n28\ntools\n9k\ntokens\nplanning\nturns 1–49\nuser turn 1\nuser\n#1\n6h",
+    "text": "skip to session views\nnot published\npublish\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nclaude code\nclaude-sonnet-4\n1h 23m\n84\nturns\n28\nprompts\n28\ntools\n9k\ntokens\nplanning\nturns 1–49\nuser turn 1\nuser\n#1\n7h",
     "errors": []
   },
   {
@@ -355,7 +355,7 @@
         "variant": "tabular-nums"
       }
     ],
-    "text": "sessions\n\npublish sessions automatically, with secrets hidden. set up\n, opens the docs in a new tab\n\nfilters\nbrowse by: sessions\nsessions on this computer\nsession\n\nReview a database migration\nclaude-code\n, 1.6k tokens\napi, 3 turns, 2m, 5h a",
+    "text": "sessions\n\npublish sessions automatically, with secrets hidden. set up\n, opens the docs in a new tab\n\nfilters\nbrowse by: sessions\nsessions on this computer\nsession\n\nReview a database migration\nclaude-code\n, 1.6k tokens\napi, 3 turns, 2m, 6h a",
     "errors": []
   },
   {
@@ -424,7 +424,7 @@
         "variant": "tabular-nums"
       }
     ],
-    "text": "skip to session views\nnot published\npublish\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nclaude code\nclaude-sonnet-4\n1h 23m\n84\nturns\n28\nprompts\n28\ntools\n9k\ntokens\nplanning\nturns 1–49\nuser turn 1\nuser\n#1\n6h",
+    "text": "skip to session views\nnot published\npublish\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nclaude code\nclaude-sonnet-4\n1h 23m\n84\nturns\n28\nprompts\n28\ntools\n9k\ntokens\nplanning\nturns 1–49\nuser turn 1\nuser\n#1\n7h",
     "errors": []
   }
 ]
