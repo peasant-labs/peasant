@@ -17,7 +17,9 @@ The `.deb` gives you a real package entry: clean removal and proper version-orde
 upgrades via the dpkg database.
 
 ```bash
-VERSION=0.1.0                       # the release you want, without the leading "v"
+# To pin a release, set VERSION to its tag without the leading v instead.
+VERSION=$(curl -fsSL https://api.github.com/repos/peasant-labs/peasant/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+: "${VERSION:?could not read the latest release; choose a tag from the releases page}"
 ARCH=$(dpkg --print-architecture)   # amd64 or arm64
 
 # Download the package and the checksums
@@ -56,7 +58,9 @@ ingested data, or state.
 No package database entry; you manage the binary yourself.
 
 ```bash
-VERSION=0.1.0
+# To pin a release, set VERSION to its tag without the leading v instead.
+VERSION=$(curl -fsSL https://api.github.com/repos/peasant-labs/peasant/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+: "${VERSION:?could not read the latest release; choose a tag from the releases page}"
 ARCH=amd64    # or arm64
 
 curl -fLO "https://github.com/peasant-labs/peasant/releases/download/v${VERSION}/peasant_${VERSION}_linux_${ARCH}.tar.gz"
