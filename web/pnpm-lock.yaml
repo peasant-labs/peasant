@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@peasant-labs/fairtrade':
-        specifier: 0.0.49
-        version: 0.0.49(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
+        specifier: 0.0.50
+        version: 0.0.50(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
       '@peasant-labs/schema':
         specifier: 0.36.0
         version: 0.36.0
@@ -631,8 +631,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@peasant-labs/fairtrade@0.0.49':
-    resolution: {integrity: sha512-kLIxQrUThwTWQwYlSA1VUmmjSwaSDGbvoGfrgOFyMyAvwfWZsx6g6jLkzmDAO10sDdjOujjB3/xE9m4LeHvPDg==}
+  '@peasant-labs/fairtrade@0.0.50':
+    resolution: {integrity: sha512-vYp22Y9q9zV5+XPSEL8edS8ezgVcmnpyS2E515+bty+LgXLBYDi9JwywuXKyO9JKmzP3Z4zOaoQnBy0BLoub/Q==}
     engines: {node: '>=26'}
     peerDependencies:
       '@xyflow/react': ^12.0.0
@@ -2951,7 +2951,7 @@ snapshots:
   '@next/swc-win32-x64-msvc@15.5.19':
     optional: true
 
-  '@peasant-labs/fairtrade@0.0.49(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)':
+  '@peasant-labs/fairtrade@0.0.50(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)':
     dependencies:
       '@peasant-labs/schema': 0.36.0
       '@tanstack/react-table': 8.21.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
