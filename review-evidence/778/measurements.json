@@ -1,0 +1,430 @@
+[
+  {
+    "name": "home",
+    "path": "/",
+    "status": 200,
+    "turnCounts": [],
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1440,
+    "h1": [
+      "sessions"
+    ],
+    "words": 0,
+    "role": [],
+    "tabs": [],
+    "tnum": [
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      }
+    ],
+    "text": "sessions\n\npublish sessions automatically, with secrets hidden. set up\n, opens the docs in a new tab\n\nfilters\nbrowse by: sessions\nsessions on this computer\nsession\tproject\tturns\tduration\twhen\tstatus\n\nReview a database migration\nclaude-code\n,",
+    "errors": []
+  },
+  {
+    "name": "redaction",
+    "path": "/settings?section=redaction",
+    "status": 200,
+    "turnCounts": [],
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1440,
+    "h1": [
+      "settings"
+    ],
+    "words": 0,
+    "role": [],
+    "tabs": [],
+    "tnum": [],
+    "text": "settings\naccount\nautomatic publishing\nredaction\nprojects\nsources\nadvanced\nredaction\nhidden before anything leaves\nsecrets\napi keys, tokens, passwords and other credentials.\nshows as CREDENTIAL\npii\nemails, phone numbers, card numbers and ip ",
+    "errors": []
+  },
+  {
+    "name": "long-transcript",
+    "path": "/projects/b0b03c1c3d806d20af4a12a5dac12fe7da9a74913e2b701915609afdc9190d63/5d625d28-937e-4d9f-bd1a-1a44890d6112/",
+    "status": 200,
+    "turnCounts": [
+      84,
+      84
+    ],
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1440,
+    "h1": [
+      "Build a resumable activity export. Stream CSV in bounded pages, preserve stable"
+    ],
+    "words": 0,
+    "role": [
+      {
+        "height": 24,
+        "border": "1px"
+      },
+      {
+        "height": 24,
+        "border": "1px"
+      }
+    ],
+    "tabs": [
+      {
+        "h": 47,
+        "w": 1060.03125
+      }
+    ],
+    "tnum": [
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      }
+    ],
+    "text": "skip to session views\nsessions\nactivity-export-demo\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nnot published\npublish\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nclaude",
+    "errors": []
+  },
+  {
+    "name": "home",
+    "path": "/",
+    "status": 200,
+    "turnCounts": [
+      3,
+      3,
+      3,
+      84
+    ],
+    "theme": "light",
+    "width": 390,
+    "scroll": 390,
+    "h1": [
+      "sessions"
+    ],
+    "words": 0,
+    "role": [],
+    "tabs": [],
+    "tnum": [
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      }
+    ],
+    "text": "sessions\n\npublish sessions automatically, with secrets hidden. set up\n, opens the docs in a new tab\n\nfilters\nbrowse by: sessions\nsessions on this computer\nsession\n\nReview a database migration\nclaude-code\n, 1.6k tokens\napi, 3 turns, 2m, 5h a",
+    "errors": []
+  },
+  {
+    "name": "redaction",
+    "path": "/settings?section=redaction",
+    "status": 200,
+    "turnCounts": [],
+    "theme": "light",
+    "width": 390,
+    "scroll": 390,
+    "h1": [
+      "settings"
+    ],
+    "words": 0,
+    "role": [],
+    "tabs": [],
+    "tnum": [],
+    "text": "settings\naccount\nautomatic publishing\nredaction\nprojects\nsources\nadvanced\nredaction\nhidden before anything leaves\nsecrets\napi keys, tokens, passwords and other credentials.\nshows as CREDENTIAL\npii\nemails, phone numbers, card numbers and ip ",
+    "errors": []
+  },
+  {
+    "name": "long-transcript",
+    "path": "/projects/b0b03c1c3d806d20af4a12a5dac12fe7da9a74913e2b701915609afdc9190d63/5d625d28-937e-4d9f-bd1a-1a44890d6112/",
+    "status": 200,
+    "turnCounts": [
+      84
+    ],
+    "theme": "light",
+    "width": 390,
+    "scroll": 390,
+    "h1": [
+      "Build a resumable activity export. Stream CSV in bounded pages, preserve stable"
+    ],
+    "words": 0,
+    "role": [
+      {
+        "height": 24,
+        "border": "1px"
+      },
+      {
+        "height": 24,
+        "border": "1px"
+      }
+    ],
+    "tabs": [
+      {
+        "h": 44,
+        "w": 374
+      }
+    ],
+    "tnum": [
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      }
+    ],
+    "text": "skip to session views\nnot published\npublish\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nclaude code\nclaude-sonnet-4\n1h 23m\n84\nturns\n28\nprompts\n28\ntools\n9k\ntokens\nplanning\nturns 1–49\nuser turn 1\nuser\n#1\n6h",
+    "errors": []
+  },
+  {
+    "name": "home",
+    "path": "/",
+    "status": 200,
+    "turnCounts": [],
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1440,
+    "h1": [
+      "sessions"
+    ],
+    "words": 0,
+    "role": [],
+    "tabs": [],
+    "tnum": [
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      }
+    ],
+    "text": "sessions\n\npublish sessions automatically, with secrets hidden. set up\n, opens the docs in a new tab\n\nfilters\nbrowse by: sessions\nsessions on this computer\nsession\tproject\tturns\tduration\twhen\tstatus\n\nReview a database migration\nclaude-code\n,",
+    "errors": []
+  },
+  {
+    "name": "redaction",
+    "path": "/settings?section=redaction",
+    "status": 200,
+    "turnCounts": [],
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1440,
+    "h1": [
+      "settings"
+    ],
+    "words": 0,
+    "role": [],
+    "tabs": [],
+    "tnum": [],
+    "text": "settings\naccount\nautomatic publishing\nredaction\nprojects\nsources\nadvanced\nredaction\nhidden before anything leaves\nsecrets\napi keys, tokens, passwords and other credentials.\nshows as CREDENTIAL\npii\nemails, phone numbers, card numbers and ip ",
+    "errors": []
+  },
+  {
+    "name": "long-transcript",
+    "path": "/projects/b0b03c1c3d806d20af4a12a5dac12fe7da9a74913e2b701915609afdc9190d63/5d625d28-937e-4d9f-bd1a-1a44890d6112/",
+    "status": 200,
+    "turnCounts": [
+      84,
+      84
+    ],
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1440,
+    "h1": [
+      "Build a resumable activity export. Stream CSV in bounded pages, preserve stable"
+    ],
+    "words": 0,
+    "role": [
+      {
+        "height": 24,
+        "border": "1px"
+      },
+      {
+        "height": 24,
+        "border": "1px"
+      }
+    ],
+    "tabs": [
+      {
+        "h": 47,
+        "w": 1060.03125
+      }
+    ],
+    "tnum": [
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      }
+    ],
+    "text": "skip to session views\nsessions\nactivity-export-demo\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nnot published\npublish\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nclaude",
+    "errors": []
+  },
+  {
+    "name": "home",
+    "path": "/",
+    "status": 200,
+    "turnCounts": [
+      3,
+      3,
+      3,
+      84
+    ],
+    "theme": "dark",
+    "width": 390,
+    "scroll": 390,
+    "h1": [
+      "sessions"
+    ],
+    "words": 0,
+    "role": [],
+    "tabs": [],
+    "tnum": [
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      }
+    ],
+    "text": "sessions\n\npublish sessions automatically, with secrets hidden. set up\n, opens the docs in a new tab\n\nfilters\nbrowse by: sessions\nsessions on this computer\nsession\n\nReview a database migration\nclaude-code\n, 1.6k tokens\napi, 3 turns, 2m, 5h a",
+    "errors": []
+  },
+  {
+    "name": "redaction",
+    "path": "/settings?section=redaction",
+    "status": 200,
+    "turnCounts": [],
+    "theme": "dark",
+    "width": 390,
+    "scroll": 390,
+    "h1": [
+      "settings"
+    ],
+    "words": 0,
+    "role": [],
+    "tabs": [],
+    "tnum": [],
+    "text": "settings\naccount\nautomatic publishing\nredaction\nprojects\nsources\nadvanced\nredaction\nhidden before anything leaves\nsecrets\napi keys, tokens, passwords and other credentials.\nshows as CREDENTIAL\npii\nemails, phone numbers, card numbers and ip ",
+    "errors": []
+  },
+  {
+    "name": "long-transcript",
+    "path": "/projects/b0b03c1c3d806d20af4a12a5dac12fe7da9a74913e2b701915609afdc9190d63/5d625d28-937e-4d9f-bd1a-1a44890d6112/",
+    "status": 200,
+    "turnCounts": [
+      84
+    ],
+    "theme": "dark",
+    "width": 390,
+    "scroll": 390,
+    "h1": [
+      "Build a resumable activity export. Stream CSV in bounded pages, preserve stable"
+    ],
+    "words": 0,
+    "role": [
+      {
+        "height": 24,
+        "border": "1px"
+      },
+      {
+        "height": 24,
+        "border": "1px"
+      }
+    ],
+    "tabs": [
+      {
+        "h": 44,
+        "w": 374
+      }
+    ],
+    "tnum": [
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      },
+      {
+        "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+        "variant": "tabular-nums"
+      }
+    ],
+    "text": "skip to session views\nnot published\npublish\nBuild a resumable activity export. Stream CSV in bounded pages, preserve stable\nclaude code\nclaude-sonnet-4\n1h 23m\n84\nturns\n28\nprompts\n28\ntools\n9k\ntokens\nplanning\nturns 1–49\nuser turn 1\nuser\n#1\n6h",
+    "errors": []
+  }
+]
