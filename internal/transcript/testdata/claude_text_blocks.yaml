@@ -2,6 +2,8 @@ requiredNames:
   - standalone_assistant_text_is_shown_once
   - a_second_text_block_is_not_lost
   - two_identical_text_blocks_are_shown_twice
+  - repeated_text_with_tools_keeps_both_blocks
+  - distinct_text_with_tools_keeps_both_blocks
   - tool_round_trip_and_standalone_conclusion
 cases:
   - name: standalone_assistant_text_is_shown_once
@@ -31,3 +33,15 @@ cases:
     content: ["ok", "ok"]
     depths: [0, 1]
     toolCalls: 0
+  - name: repeated_text_with_tools_keeps_both_blocks
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"},{"type":"tool_use","id":"read-export","name":"Read","input":{"file_path":"export.go"}},{"type":"text","text":"ok"}]}}
+    content: ["ok", "ok"]
+    depths: [0, 1]
+    toolCalls: 1
+  - name: distinct_text_with_tools_keeps_both_blocks
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"before reading"},{"type":"tool_use","id":"read-export","name":"Read","input":{"file_path":"export.go"}},{"type":"text","text":"after reading"}]}}
+    content: ["before reading", "after reading"]
+    depths: [0, 1]
+    toolCalls: 1

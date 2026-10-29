@@ -436,7 +436,10 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 			}
 		}
 		if e.Depth == 1 && e.ParentIndex != nil && parentsWithTools[*e.ParentIndex] {
-			if e.EntryType == schema.EntryTypeText || e.EntryType == schema.EntryTypeThinking {
+			// A Claude carrier contains only its first text block. Its other
+			// text blocks remain conversation even when tools share the record.
+			legacyTextSummary := e.EntryType == schema.EntryTypeText && e.Harness != schema.HarnessClaudeCode
+			if legacyTextSummary || e.EntryType == schema.EntryTypeThinking {
 				suppress[e.EntryIndex] = true
 			}
 		}
