@@ -275,7 +275,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 					return fmt.Errorf("peasant online URL is not set — run 'peasant village login' to re-link your account")
 				}
 
-				cfg, err := loadRunConfig(cfgPath, dryRun)
+				cfg, err := loadRunConfig(cmd, cfgPath, dryRun)
 				if err != nil {
 					return fmt.Errorf("load config: %w", err)
 				}

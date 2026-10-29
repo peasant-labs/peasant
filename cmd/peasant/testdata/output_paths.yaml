@@ -1,0 +1,20 @@
+sourceFixture: claude-fixture
+sessionID: 6a46bcd8-b365-4608-be7d-5601e2fdd805
+requiredNames:
+  - runtime-default-follows-data-dir
+  - runtime-custom-path-is-preserved
+  - harvest-default-follows-data-dir
+  - harvest-custom-path-is-preserved
+  - dry-run-default-follows-data-dir
+  - dry-run-custom-path-is-preserved
+  - editing-does-not-persist-runtime-override
+  - absent-data-dir-keeps-default
+cases:
+  - {name: runtime-default-follows-data-dir, loader: runtime, override: true, expected: override}
+  - {name: runtime-custom-path-is-preserved, loader: runtime, override: true, custom: true, expected: custom}
+  - {name: harvest-default-follows-data-dir, loader: harvest, override: true, expected: override}
+  - {name: harvest-custom-path-is-preserved, loader: harvest, override: true, custom: true, expected: custom}
+  - {name: dry-run-default-follows-data-dir, loader: dry-run, override: true, expected: override}
+  - {name: dry-run-custom-path-is-preserved, loader: dry-run, override: true, custom: true, expected: custom}
+  - {name: editing-does-not-persist-runtime-override, loader: editing, override: true, expected: default}
+  - {name: absent-data-dir-keeps-default, loader: runtime, expected: default}

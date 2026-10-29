@@ -659,7 +659,7 @@ Requires either --session for a single session or --session-from-file for a batc
 			}
 			defer cleanup()
 
-			cfg, err := loadConfig(resolveConfigPath(cmd))
+			cfg, err := loadCommandConfig(cmd, resolveConfigPath(cmd))
 			if err != nil {
 				return err
 			}

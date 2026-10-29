@@ -16,7 +16,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func loadRunConfig(path string, dryRun bool) (*config.Config, error) {
+// loadRunConfig loads the config harvest and push run with, applying the
+// --data-dir override once. A dry run reads the file without migrating it.
+func loadRunConfig(cmd *cobra.Command, path string, dryRun bool) (*config.Config, error) {
+	cfg, err := loadRunConfigFile(path, dryRun)
+	if err != nil {
+		return nil, err
+	}
+	applyDataDirOverride(cmd, cfg)
+	return cfg, nil
+}
+
+func loadRunConfigFile(path string, dryRun bool) (*config.Config, error) {
 	if !dryRun {
 		return loadConfig(path)
 	}

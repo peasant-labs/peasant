@@ -58,7 +58,7 @@ func BuildReclaimCommand() *cobra.Command {
 			"The database path is printed after a successful run.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath := resolveConfigPath(cmd)
-			cfg, err := loadConfig(cfgPath)
+			cfg, err := loadCommandConfig(cmd, cfgPath)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}

@@ -248,7 +248,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	git := &ingest.ExecGitResolver{}
 
 	// 2. Load config.
-	cfg, err := loadRunConfig(configPath, flags.dryRun)
+	cfg, err := loadRunConfig(cmd, configPath, flags.dryRun)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

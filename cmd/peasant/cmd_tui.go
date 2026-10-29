@@ -49,6 +49,8 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 	if err != nil {
 		return fmt.Errorf("tui startup: load config %q: %w; the TUI stopped before opening stored history; fix the reported configuration field and retry", cfgPath, err)
 	}
+	// Apply --data-dir once, right after loading, like every runtime loader.
+	applyDataDirOverride(cmd, cfg)
 	visibility := sessionvisibility.New(cfg.Selection)
 
 	// Apply CLI overrides

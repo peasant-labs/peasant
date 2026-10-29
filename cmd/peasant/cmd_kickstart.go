@@ -619,7 +619,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 		defer slog.SetDefault(origLogger)
 
-		cfg, err := loadConfig(configPath)
+		cfg, err := loadCommandConfig(cmd, configPath)
 		if err != nil {
 			return nil, fmt.Errorf("load config: %w", err)
 		}

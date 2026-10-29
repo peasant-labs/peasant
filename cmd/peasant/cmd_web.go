@@ -128,10 +128,13 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	defer cancel()
 
 	// Load config
+	// Browsing remains independent of the ingestion selector. Apply only the
+	// runtime path override after the browsing loader validates other settings.
 	cfg, err := config.LoadForBrowsing(cfgPath, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{})
 	if err != nil {
 		return fmt.Errorf("web startup: load config %q: %w; the server stopped before opening stored history; fix the reported configuration field and retry", cfgPath, err)
 	}
+	applyDataDirOverride(cmd, cfg)
 	visibility := sessionvisibility.New(cfg.Selection)
 
 	// Apply CLI overrides for mock data store
