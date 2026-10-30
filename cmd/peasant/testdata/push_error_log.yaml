@@ -1,0 +1,20 @@
+# The push error log states the same counts the run's summary printed. Each
+# case is one run with an upload that failed and a session that was not
+# ready. With a plan, the not-ready session is not an error: it is counted
+# apart and its line is labelled. Without a plan the log is unchanged.
+cases:
+  - name: plan_counts_not_ready_apart
+    plan: true
+    contains:
+      - "transcripts: 0 new, 0 updated, 1 error(s), 0 skipped, 0 held, 1 not sent because not ready (not errors)\n"
+      - "host-a/sess-not-ready\tnot sent (not ready): "
+      - "host-a/sess-fail\tupload: village returned 400"
+    omits:
+      - "sess-fail\tnot sent"
+
+  - name: no_plan_keeps_the_old_line
+    plan: false
+    contains:
+      - "transcripts: 0 new, 0 updated, 2 error(s), 0 skipped, 0 held\n"
+    omits:
+      - "not sent"

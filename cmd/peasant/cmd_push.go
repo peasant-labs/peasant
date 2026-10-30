@@ -922,7 +922,10 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				if profileRunSpan != nil {
 					outcome := perf.OutcomeOK
 					annotationFailed := annSummary != nil && (annSummary.Errors > 0 || len(annSummary.Unpublishable) > 0)
-					if transcErr != nil || annErr != nil || result == nil || result.Errors > 0 || annotationFailed {
+					// The same counts the summary prints: with a plan, a session
+					// that is not ready was not sent, which is not a failure.
+					transcriptFailed := result == nil || runCounts(result, plan).Errors > 0
+					if transcErr != nil || annErr != nil || transcriptFailed || annotationFailed {
 						outcome = perf.OutcomeFailed
 						// Command errors can carry paths or remote response bodies.
 						// Record a fixed diagnostic, never their raw text.
@@ -1052,8 +1055,8 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				// On any upload failure, dump per-session error detail to a log file
 				// (the summary only shows a count) and point the user at it. The path
 				// is announced on STDERR so it never pollutes --json/stdout.
-				if !dryRun && (result.Errors > 0 || annErr != nil) {
-					if logPath, logErr := writePushErrorLog(result, annSummary, annErr, creds.VillageURL, stateDirOverride(cmd)); logErr != nil {
+				if !dryRun && (runCounts(result, plan).Errors > 0 || annErr != nil) {
+					if logPath, logErr := writePushErrorLog(result, runCounts(result, plan), annSummary, annErr, creds.VillageURL, stateDirOverride(cmd)); logErr != nil {
 						fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not write push error log: %v\n", logErr)
 					} else {
 						fmt.Fprintf(cmd.ErrOrStderr(), "error details written to %s\n", logPath)
@@ -2019,7 +2022,11 @@ func (l outputLevel) String() string {
 // bodies) and any annotation error to a timestamped log under the XDG state
 // directory, returning the file path. The default summary only shows an error
 // count, so this gives the user the full detail without re-running with --verbose.
-func writePushErrorLog(result *push.PushResult, annSummary *push.AnnotationPushSummary, annErr error, villageURL string, stateDirOv string) (string, error) {
+//
+// counts are the run's runCounts, the ones its summary printed. With a plan a
+// session that is not ready was not sent: the log counts it apart from the
+// errors and labels its line, so the log and the summary agree.
+func writePushErrorLog(result *push.PushResult, counts pushCounts, annSummary *push.AnnotationPushSummary, annErr error, villageURL string, stateDirOv string) (string, error) {
 	logDir := filepath.Join(defaults.ResolveStateDirPathWith(stateDirOv).String(), "logs")
 	if err := os.MkdirAll(logDir, defaults.PrivateDirPerm); err != nil {
 		return "", fmt.Errorf("create log directory %s: %w", logDir, err)
@@ -2031,8 +2038,12 @@ func writePushErrorLog(result *push.PushResult, annSummary *push.AnnotationPushS
 	fmt.Fprintf(&b, "peasant push error log — %s\n", now.Format(time.RFC3339))
 	fmt.Fprintf(&b, "village: %s\n", villageURL)
 	if result != nil {
-		fmt.Fprintf(&b, "transcripts: %d new, %d updated, %d error(s), %d skipped, %d held\n",
-			result.New, result.Updated, result.Errors, result.Skipped, result.Held)
+		fmt.Fprintf(&b, "transcripts: %d new, %d updated, %d error(s), %d skipped, %d held",
+			counts.New, counts.Updated, counts.Errors, counts.Skipped, counts.Held)
+		if counts.fromPlan {
+			fmt.Fprintf(&b, ", %d not sent because not ready (not errors)", counts.NotReady)
+		}
+		b.WriteString("\n")
 	}
 	if annSummary != nil {
 		fmt.Fprintf(&b, "annotations: %d created, %d updated, %d skipped, %d error(s)\n",
@@ -2043,7 +2054,11 @@ func writePushErrorLog(result *push.PushResult, annSummary *push.AnnotationPushS
 	if result != nil {
 		for _, sr := range result.Sessions {
 			if sr.Status == push.PushStatusError && sr.Error != nil {
-				fmt.Fprintf(&b, "%s/%s\t%s\n", sr.HostSlug, sr.SessionID, sr.Error.Error())
+				label := ""
+				if _, notReady := push.NotReadyReasonOf(sr.Error); notReady && counts.fromPlan {
+					label = "not sent (not ready): "
+				}
+				fmt.Fprintf(&b, "%s/%s\t%s%s\n", sr.HostSlug, sr.SessionID, label, sr.Error.Error())
 			}
 		}
 	}

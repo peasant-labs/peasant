@@ -16,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -95,8 +96,15 @@ type selectedRun struct {
 	WantErrContains       []string           `yaml:"wantErrContains"`
 	WantOutputContains    []string           `yaml:"wantOutputContains"`
 	WantOutputOmits       []string           `yaml:"wantOutputOmits"`
-	WantKeys              []string           `yaml:"wantKeys"`
-	Golden                string             `yaml:"golden"`
+	// WantFileContains maps a file under the world directory to text it must
+	// hold after the run; WantFileOmits to text it must not.
+	WantFileContains map[string][]string `yaml:"wantFileContains"`
+	WantFileOmits    map[string][]string `yaml:"wantFileOmits"`
+	// WantProfileOutcome is the outcome of the push run span in the profile
+	// the run wrote to profile.json under the world directory.
+	WantProfileOutcome string   `yaml:"wantProfileOutcome"`
+	WantKeys           []string `yaml:"wantKeys"`
+	Golden             string   `yaml:"golden"`
 }
 
 type selectedCase struct {
@@ -307,6 +315,7 @@ func (w *selectedWorld) push(t *testing.T, args []string, stdin string, tty bool
 	root.SetIn(strings.NewReader(stdin))
 	expanded := make([]string, 0, len(args))
 	for _, arg := range args {
+		arg = strings.ReplaceAll(arg, "{dir}", w.dir)
 		expanded = append(expanded, strings.ReplaceAll(arg, "{repo}", w.repo))
 	}
 	root.SetArgs(append([]string{"--data-dir", w.dir, "--config-dir", w.dir, "--state-dir", w.dir, "push", "--config", w.cfgPath}, expanded...))
@@ -363,6 +372,47 @@ func TestPushCmd_SelectedSessions(t *testing.T) {
 				for _, forbidden := range run.WantOutputOmits {
 					if strings.Contains(output, forbidden) {
 						t.Errorf("output carries %q\n%s", forbidden, context)
+					}
+				}
+				for name, wants := range run.WantFileContains {
+					raw, err := os.ReadFile(filepath.Join(w.dir, name))
+					if err != nil {
+						t.Fatalf("read %s: %v\n%s", name, err, context)
+					}
+					for _, want := range wants {
+						if !strings.Contains(string(raw), want) {
+							t.Errorf("%s misses %q\n%s", name, want, raw)
+						}
+					}
+				}
+				for name, forbidden := range run.WantFileOmits {
+					raw, err := os.ReadFile(filepath.Join(w.dir, name))
+					if err != nil {
+						t.Fatalf("read %s: %v\n%s", name, err, context)
+					}
+					for _, text := range forbidden {
+						if strings.Contains(string(raw), text) {
+							t.Errorf("%s carries %q\n%s", name, text, raw)
+						}
+					}
+				}
+				if run.WantProfileOutcome != "" {
+					raw, err := os.ReadFile(filepath.Join(w.dir, "profile.json"))
+					if err != nil {
+						t.Fatalf("read profile: %v\n%s", err, context)
+					}
+					var profile perf.ProfileDocument
+					if err := json.Unmarshal(raw, &profile); err != nil {
+						t.Fatalf("decode profile: %v", err)
+					}
+					outcome := ""
+					for _, span := range profile.Spans {
+						if span.Stage == perf.StagePushRun {
+							outcome = string(span.Outcome)
+						}
+					}
+					if outcome != run.WantProfileOutcome {
+						t.Errorf("profile run outcome = %q, want %q\n%s", outcome, run.WantProfileOutcome, context)
 					}
 				}
 				if run.WantPrompt != nil {

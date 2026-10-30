@@ -1934,7 +1934,7 @@ func TestWritePushErrorLog(t *testing.T) {
 	}
 	annErr := fmt.Errorf("annotations endpoint unreachable")
 
-	path, err := writePushErrorLog(result, nil, annErr, "https://api.village.example", stateHome)
+	path, err := writePushErrorLog(result, countsOfResult(result), nil, annErr, "https://api.village.example", stateHome)
 	if err != nil {
 		t.Fatalf("writePushErrorLog: %v", err)
 	}
