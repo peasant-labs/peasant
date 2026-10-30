@@ -1,0 +1,462 @@
+[
+  {
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "turns": 84,
+    "systemRows": 0,
+    "phases": [
+      {
+        "text": " Planningturns 1–49",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Implementationturns 50–153",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Testingturns 154–170",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Planningturns 175–223",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      }
+    ],
+    "ordinaryRules": [
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "avatars": [
+      {
+        "border": "1px",
+        "height": 24
+      },
+      {
+        "border": "1px",
+        "height": 24
+      },
+      {
+        "border": "1px",
+        "height": 24
+      }
+    ],
+    "active": [
+      {
+        "boxShadow": "rgb(138, 95, 31) 2px 0px 0px 0px inset",
+        "border": "0px"
+      }
+    ],
+    "styles": [
+      "http://localhost:8691/_next/static/css/67a3d9a6012f5eaa.css",
+      "http://localhost:8691/_next/static/css/f3820d96a99c3010.css",
+      "http://localhost:8691/_next/static/css/008a05b0ad6b854a.css",
+      "http://localhost:8691/_next/static/css/e7fc5a0346b24cc8.css"
+    ],
+    "errors": []
+  },
+  {
+    "theme": "light",
+    "width": 390,
+    "scrollWidth": 390,
+    "turns": 84,
+    "systemRows": 0,
+    "phases": [
+      {
+        "text": " Planningturns 1–49",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Implementationturns 50–153",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Testingturns 154–170",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Planningturns 175–223",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      }
+    ],
+    "ordinaryRules": [
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "avatars": [
+      {
+        "border": "1px",
+        "height": 24
+      },
+      {
+        "border": "1px",
+        "height": 24
+      },
+      {
+        "border": "1px",
+        "height": 24
+      }
+    ],
+    "active": [
+      {
+        "boxShadow": "rgb(138, 95, 31) 2px 0px 0px 0px inset",
+        "border": "0px"
+      }
+    ],
+    "styles": [
+      "http://localhost:8691/_next/static/css/67a3d9a6012f5eaa.css",
+      "http://localhost:8691/_next/static/css/f3820d96a99c3010.css",
+      "http://localhost:8691/_next/static/css/008a05b0ad6b854a.css",
+      "http://localhost:8691/_next/static/css/e7fc5a0346b24cc8.css"
+    ],
+    "errors": []
+  },
+  {
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "turns": 84,
+    "systemRows": 0,
+    "phases": [
+      {
+        "text": " Planningturns 1–49",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Implementationturns 50–153",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Testingturns 154–170",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Planningturns 175–223",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      }
+    ],
+    "ordinaryRules": [
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "avatars": [
+      {
+        "border": "1px",
+        "height": 24
+      },
+      {
+        "border": "1px",
+        "height": 24
+      },
+      {
+        "border": "1px",
+        "height": 24
+      }
+    ],
+    "active": [
+      {
+        "boxShadow": "rgb(214, 174, 102) 2px 0px 0px 0px inset",
+        "border": "0px"
+      }
+    ],
+    "styles": [
+      "http://localhost:8691/_next/static/css/67a3d9a6012f5eaa.css",
+      "http://localhost:8691/_next/static/css/f3820d96a99c3010.css",
+      "http://localhost:8691/_next/static/css/008a05b0ad6b854a.css",
+      "http://localhost:8691/_next/static/css/e7fc5a0346b24cc8.css"
+    ],
+    "errors": []
+  },
+  {
+    "theme": "dark",
+    "width": 390,
+    "scrollWidth": 390,
+    "turns": 84,
+    "systemRows": 0,
+    "phases": [
+      {
+        "text": " Planningturns 1–49",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Implementationturns 50–153",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Testingturns 154–170",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Planningturns 175–223",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      }
+    ],
+    "ordinaryRules": [
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "avatars": [
+      {
+        "border": "1px",
+        "height": 24
+      },
+      {
+        "border": "1px",
+        "height": 24
+      },
+      {
+        "border": "1px",
+        "height": 24
+      }
+    ],
+    "active": [
+      {
+        "boxShadow": "rgb(214, 174, 102) 2px 0px 0px 0px inset",
+        "border": "0px"
+      }
+    ],
+    "styles": [
+      "http://localhost:8691/_next/static/css/67a3d9a6012f5eaa.css",
+      "http://localhost:8691/_next/static/css/f3820d96a99c3010.css",
+      "http://localhost:8691/_next/static/css/008a05b0ad6b854a.css",
+      "http://localhost:8691/_next/static/css/e7fc5a0346b24cc8.css"
+    ],
+    "errors": []
+  }
+]

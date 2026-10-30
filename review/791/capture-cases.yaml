@@ -1,0 +1,9 @@
+themes: [light, dark]
+viewports:
+  - { width: 1440, height: 1000 }
+  - { width: 390, height: 844 }
+cases:
+  - { name: home, path: / }
+  - { name: redaction, path: '/settings?section=redaction' }
+  - name: long-transcript
+    path: /projects/b0b03c1c3d806d20af4a12a5dac12fe7da9a74913e2b701915609afdc9190d63/5d625d28-937e-4d9f-bd1a-1a44890d6112/

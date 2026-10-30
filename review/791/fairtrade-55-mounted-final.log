@@ -1,0 +1,25 @@
+[storybook-static] (node:65228) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[storybook-static] (Use `node --trace-warnings ...` to show where the warning was created)
+[storybook-static] (node:65231) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[storybook-static] (Use `node --trace-warnings ...` to show where the warning was created)
+[app-preview] (node:65246) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[app-preview] (Use `node --trace-warnings ...` to show where the warning was created)
+[app-preview] (node:65247) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[app-preview] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 4 tests using 2 workers
+
+(node:65256) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:65255) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [dark] › scripts/journey/transcript-reading.journey.mjs:809:46 › transcript separator ownership phone (4.0s)
+(node:65320) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  2 [dark] › scripts/journey/transcript-reading.journey.mjs:809:46 › transcript separator ownership desktop (4.4s)
+(node:65327) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  3 [light] › scripts/journey/transcript-reading.journey.mjs:809:46 › transcript separator ownership desktop (2.7s)
+  ✓  4 [light] › scripts/journey/transcript-reading.journey.mjs:809:46 › transcript separator ownership phone (2.8s)
+
+  4 passed (9.8s)

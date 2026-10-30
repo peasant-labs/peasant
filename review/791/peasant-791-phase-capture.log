@@ -1,0 +1,154 @@
+[
+  {
+    "theme": "light",
+    "width": 1440,
+    "turns": 84,
+    "phases": [
+      {
+        "text": " Planningturns 1–49",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Implementationturns 50–153",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Testingturns 154–170",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Planningturns 175–223",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      }
+    ],
+    "systemRows": 0,
+    "active": [
+      {
+        "boxShadow": "rgb(138, 95, 31) 2px 0px 0px 0px inset",
+        "border": "0px"
+      }
+    ]
+  },
+  {
+    "theme": "light",
+    "width": 390,
+    "turns": 84,
+    "phases": [
+      {
+        "text": " Planningturns 1–49",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Implementationturns 50–153",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Testingturns 154–170",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Planningturns 175–223",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      }
+    ],
+    "systemRows": 0,
+    "active": [
+      {
+        "boxShadow": "rgb(138, 95, 31) 2px 0px 0px 0px inset",
+        "border": "0px"
+      }
+    ]
+  },
+  {
+    "theme": "dark",
+    "width": 1440,
+    "turns": 84,
+    "phases": [
+      {
+        "text": " Planningturns 1–49",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Implementationturns 50–153",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Testingturns 154–170",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Planningturns 175–223",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      }
+    ],
+    "systemRows": 0,
+    "active": [
+      {
+        "boxShadow": "rgb(214, 174, 102) 2px 0px 0px 0px inset",
+        "border": "0px"
+      }
+    ]
+  },
+  {
+    "theme": "dark",
+    "width": 390,
+    "turns": 84,
+    "phases": [
+      {
+        "text": " Planningturns 1–49",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Implementationturns 50–153",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Testingturns 154–170",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      },
+      {
+        "text": " Planningturns 175–223",
+        "parent": "txn-turnrow",
+        "directRules": 0,
+        "borderBottom": "1px"
+      }
+    ],
+    "systemRows": 0,
+    "active": [
+      {
+        "boxShadow": "rgb(214, 174, 102) 2px 0px 0px 0px inset",
+        "border": "0px"
+      }
+    ]
+  }
+]

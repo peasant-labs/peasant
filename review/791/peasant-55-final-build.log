@@ -1,0 +1,65 @@
+✓ Lockfile passes supply-chain policies (verified 1m ago)
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +1 -1
++-
+Progress: resolved 1, reused 1, downloaded 0, added 1, done
+
+dependencies:
+- @peasant-labs/fairtrade 0.0.54
++ @peasant-labs/fairtrade 0.0.55
+
+Done in 454ms using pnpm v11.24.0
+$ next build
+   ▲ Next.js 15.5.19
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 5.8s
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/15) ...
+   Generating static pages (3/15) 
+   Generating static pages (7/15) 
+   Generating static pages (11/15) 
+ ✓ Generating static pages (15/15)
+   Finalizing page optimization ...
+   Collecting build traces ...
+   Exporting (0/2) ...
+ ✓ Exporting (2/2)
+
+Route (app)                                 Size  First Load JS
+┌ ○ /                                    12.1 kB         405 kB
+├ ○ /_not-found                            132 B         104 kB
+├ ○ /analytics                            115 kB         497 kB
+├ ○ /dev/changes-harness                 2.43 kB         256 kB
+├ ○ /dev/visual-harness                  5.91 kB         450 kB
+├ ○ /icon.svg                                0 B            0 B
+├ ● /map/[[...segments]]                 10.7 kB         476 kB
+├   └ /map
+├ ● /projects/[[...segments]]            21.8 kB         489 kB
+├   └ /projects
+├ ● /review/[[...segments]]              3.12 kB         466 kB
+├   └ /review
+├ ● /sessions/[[...segments]]            3.15 kB         398 kB
+├   └ /sessions
+├ ○ /settings                            16.1 kB         382 kB
+├ ○ /share                               21.2 kB         402 kB
+└ ○ /village                              9.6 kB         361 kB
++ First Load JS shared by all             104 kB
+  ├ chunks/1581e093-df44a9a2e7ddb4bb.js  54.2 kB
+  ├ chunks/5941-1bc5866d13b535b5.js      46.7 kB
+  └ other shared chunks (total)          3.29 kB
+
+
+○  (Static)  prerendered as static content
+●  (SSG)     prerendered as static HTML (uses generateStaticParams)
+
+# `next build` (output: export) CLEANS web/out/ and deletes the tracked
+# web/out/.gitkeep placeholder. Re-create it so the worktree stays clean
+# (goreleaser refuses a dirty tree) and the //go:embed all:web/out
+# tracked-file invariant holds (go install / nix). The real index.html +
+# _next/** the build wrote are gitignored.
+$ node scripts/provider-build-provenance-guidance.test.mjs && node scripts/provider-build-provenance.mjs
+provider build provenance guidance: exact final Schema release guidance is protected
+provider build provenance: projects=[/_next/static/chunks/1643-d05f7d7dc47cca2c.js] transcript=[/_next/static/chunks/1643-d05f7d7dc47cca2c.js] Map=[/_next/static/chunks/1643-d05f7d7dc47cca2c.js] Changes=[/_next/static/chunks/1643-d05f7d7dc47cca2c.js]
+provider build provenance: eight harnesses, official Strike SVG/policy, and fail-closed validation found in web/out and ./peasant (c0e767775797826523fc410ceea975f0a4d66598ee5a415fd56039afa2eba159)
