@@ -75,7 +75,7 @@ export function TimeStrip({
   return (
     <section
       className={cn(
-        'flex items-center gap-4 border border-rule bg-surface px-4 py-2',
+        'flex flex-col items-stretch gap-4 border border-rule bg-surface px-4 py-2 sm:flex-row sm:items-center',
         className,
       )}
       aria-label="Project timeline"
@@ -140,16 +140,16 @@ export function TimeStrip({
       </div>
 
       {/* Branches — the future sits at the right edge, beyond "now". */}
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
         {defaultBranch && (
-          <span className="font-mono text-[length:var(--fs-label)] text-ink-3">{defaultBranch}</span>
+          <span className="max-w-full font-mono text-[length:var(--fs-label)] text-ink-3 [overflow-wrap:anywhere]">{defaultBranch}</span>
         )}
         {shownBranches.map((b) => (
           <button
             key={b.name}
             type="button"
             aria-label={`Review branch ${b.name}`}
-            className="border border-rule px-2 py-0.5 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-2 hover:bg-surface-hover focus-mono cursor-pointer"
+            className="max-w-full border border-rule px-2 py-0.5 text-left font-mono tabular-nums text-[length:var(--fs-label)] text-ink-2 [overflow-wrap:anywhere] hover:bg-surface-hover focus-mono cursor-pointer"
             onClick={() => onBranchClick?.(b.name)}
           >
             {b.name}

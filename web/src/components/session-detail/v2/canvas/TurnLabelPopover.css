@@ -18,6 +18,25 @@
   }
 }
 
+.peasant-turn-label-popover {
+  left: auto;
+  right: 0;
+  width: 16rem;
+}
+
+@media (width < 768px) {
+  .peasant-turn-label-popover {
+    position: fixed;
+    top: 50%;
+    left: var(--sp-4);
+    right: var(--sp-4);
+    width: auto;
+    max-height: calc(100dvh - var(--sp-4) * 2);
+    overflow-y: auto;
+    transform: translateY(-50%);
+  }
+}
+
 /* --control-h-sm rises to the canonical comfortable target on coarse input. */
 .peasant-turn-label-popover button,
 .peasant-turn-label-popover input {

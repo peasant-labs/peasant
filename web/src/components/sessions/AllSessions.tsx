@@ -45,7 +45,7 @@ const PAGE_SIZE = 25;
  * them steady keeps the tabular figures aligned down the page.
  */
 const GRID =
-  'grid grid-cols-[minmax(0,2fr)_minmax(0,4fr)_minmax(0,1.5fr)_88px_112px] items-center gap-5 px-5';
+  'grid min-w-[48rem] grid-cols-[minmax(0,2fr)_minmax(0,4fr)_minmax(0,1.5fr)_88px_112px] items-center gap-5 px-5';
 
 function sessionDate(iso: string): string {
   const ms = Date.parse(iso);
@@ -230,7 +230,7 @@ export function AllSessions({
           no sessions match &ldquo;{query.trim()}&rdquo;.
         </p>
       ) : (
-        <div className="border border-rule bg-surface">
+        <div className="min-w-0 overflow-x-auto border border-rule bg-surface">
           <div className={`${GRID} py-2 border-b border-rule`}>
             <span className="v2-eyebrow">project</span>
             <span className="v2-eyebrow">session</span>

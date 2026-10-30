@@ -283,7 +283,7 @@ function ReviewError({
     <div className="gmp-root gmp-changes-root">
       <div className="gmp-changes-body gmp-error-body" role="alert">
         <p className="gmp-diff-state gmp-diff-error mono">{label}</p>
-        {detail && <p className="gmp-diff-state mono">{detail}</p>}
+        {detail && <p className="gmp-diff-state mono [overflow-wrap:anywhere]">{detail}</p>}
         <button type="button" className="btn btn-secondary btn-sm" onClick={onRetry}>
           retry
         </button>

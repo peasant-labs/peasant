@@ -368,7 +368,6 @@ function MoreLabelsPopover({
           role="dialog"
           aria-label="More labels"
           id={popId}
-          style={{ left: 'auto', right: 0, width: '16rem' }}
         >
           {activeType == null ? (
             <div className="flex flex-col">
