@@ -1147,18 +1147,28 @@ func (p *Pipeline) pushSession(
 	// The comparison with the receipt is local, so the forecast makes it too: a
 	// session the village already holds unchanged is forecast as skipped, the
 	// status the real run gives it, rather than as an update it would not send.
+	//
+	// A session the real run would ask UpdateHold about is asked here too,
+	// through the same updateHeldReason, so the forecast holds what the real
+	// run holds. The question is a read; nothing is written.
 	if p.runCfg.DryRun {
 		status := PushStatusNew
 		if sess.PushedAt != nil {
 			status = PushStatusUpdated
 		}
-		comparable := sess.PushedAt != nil && previous != nil
-		if comparable && !p.runCfg.Force && !p.changesVisibility() {
+		held := false
+		if !p.runCfg.Force && sess.PushedAt != nil && previous != nil {
 			if operation, opErr := schema.CanonicalizePublishRequest(request); opErr == nil {
-				if fingerprint, fpErr := schema.FingerprintPublishOperation(operation); fpErr == nil && alreadyHeld(previous.Receipt, operation, fingerprint) {
-					status = PushStatusSkipped
+				if fingerprint, fpErr := schema.FingerprintPublishOperation(operation); fpErr == nil {
+					held = alreadyHeld(previous.Receipt, operation, fingerprint)
 				}
 			}
+		}
+		if held && !p.changesVisibility() {
+			status = PushStatusSkipped
+		}
+		if reason := p.updateHeldReason(ctx, sess.SessionID, held, publishedBefore); reason != "" {
+			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusHeld, HeldReason: reason}
 		}
 		return SessionPushResult{
 			SessionID:            sess.SessionID,
@@ -1255,10 +1265,8 @@ func (p *Pipeline) pushSession(
 	// An update is asked about here, where the run knows it is one and has
 	// sent nothing yet, so a run asks once per session it updates and never
 	// for a session it skips as unchanged.
-	if !held && publishedBefore && p.runCfg.UpdateHold != nil {
-		if reason := p.runCfg.UpdateHold(ctx, sess.SessionID); reason != "" {
-			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusHeld, HeldReason: reason}
-		}
+	if reason := p.updateHeldReason(ctx, sess.SessionID, held, publishedBefore); reason != "" {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusHeld, HeldReason: reason}
 	}
 	var (
 		receipt    schema.AuthoritativePublishResponse
@@ -1394,6 +1402,18 @@ func (p *Pipeline) pushSession(
 		Status:               status,
 		RequiredCapabilities: scan.Required,
 	}
+}
+
+// updateHeldReason is the one place a run decides whether to hold an update:
+// a session it would send again (not already held unchanged) that was
+// published before is asked about through the run's UpdateHold. The real run
+// and the dry-run forecast both call it, so they hold the same sessions. It
+// returns "" when the update goes ahead.
+func (p *Pipeline) updateHeldReason(ctx context.Context, sessionID string, held, publishedBefore bool) string {
+	if held || !publishedBefore || p.runCfg.UpdateHold == nil {
+		return ""
+	}
+	return p.runCfg.UpdateHold(ctx, sessionID)
 }
 
 // alreadyHeld reports whether the village already holds what this operation

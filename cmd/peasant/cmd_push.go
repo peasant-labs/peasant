@@ -575,8 +575,8 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				if explicitCollective {
 					// --collective is the developer's own publish action, so
 					// the rules are not consulted and a paused rule does not
-					// hold a session it names. Resolving the names is the one
-					// read a dry run makes: an unknown name fails here, in the
+					// hold a session it names. Resolving the names is a read a
+					// dry run makes too: an unknown name fails here, in the
 					// plan, rather than at upload. The lookup client has no
 					// request observer yet, so a refusal below still exits as
 					// nothing attempted.
@@ -1099,7 +1099,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 	cmd.Flags().StringVar(&repository, "repository", "", "Only push sessions carrying this Git repository's canonical project identity (a path). Peasant first uses the normalized checkout upstream remote when there is one it can normalize, then the normalized origin remote, so separate clones using the same remote share an identity. If neither is usable — including when there is no origin remote or a remote is a local path or file:// URL — identity instead comes from the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which identity was used is printed when the push runs. Default: every configured session")
 	cmd.Flags().StringArrayVar(&sessionIDs, pushSessionFlag, nil, "Push only this session (repeatable; combines with --sessions-from). The selection is an AND with --repository, --source-harness, the saved selection and readiness; a session that fails one is reported, never sent. The subagent sessions of each named main session travel with it. Skips the push wizard. A real run refuses an id the local store does not hold")
 	clicontract.RegisterSessionsFrom(cmd)
-	cmd.Flags().StringArrayVar(&collectiveRefs, pushCollectiveFlag, nil, "Share each sent transcript with this collective: a name, UUID or page URL, as in village pull (repeatable; needs --session or --sessions-from). Publishes private and unlicensed and skips your auto-publish rules for the named sessions, so it asks for confirmation once unless --yes is given. Resolving the names is the one read a --dry-run makes")
+	cmd.Flags().StringArrayVar(&collectiveRefs, pushCollectiveFlag, nil, "Share each sent transcript with this collective: a name, UUID or page URL, as in village pull (repeatable; needs --session or --sessions-from). Publishes private and unlicensed and skips your auto-publish rules for the named sessions, so it asks for confirmation once unless --yes is given. A --dry-run reads the collective list to resolve the names, and the visibility of any transcript it would update, and writes nothing")
 	cmd.Flags().BoolVar(&withoutSubagents, pushWithoutSubagentsFlag, false, "Leave out the subagent sessions of the named main sessions; the plan counts them under subagentsOmitted")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a peasant online server that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach peasant online. Default: no budget. Git hooks always pass one.")
 
@@ -2402,11 +2402,11 @@ func printPushSummary(w io.Writer, result *push.PushResult, counts pushCounts, d
 	if dryRun {
 		wouldPush := counts.New + counts.Updated
 		if counts.fromPlan {
-			fmt.Fprintf(w, "Dry run summary: %d would push (%d new, %d updated), %d unchanged, %d held, %d failed, %d not ready, %d excluded, %d unknown (no HTTP calls made)\n",
+			fmt.Fprintf(w, "Dry run summary: %d would push (%d new, %d updated), %d unchanged, %d held, %d failed, %d not ready, %d excluded, %d unknown (nothing uploaded)\n",
 				wouldPush, counts.New, counts.Updated, counts.Skipped, counts.Held, counts.Errors, counts.NotReady, counts.Excluded, counts.UnknownSession)
 		} else {
-			fmt.Fprintf(w, "Dry run summary: %d would push, %d unchanged (0 errors — no HTTP calls made)\n",
-				wouldPush, counts.Skipped)
+			fmt.Fprintf(w, "Dry run summary: %d would push, %d unchanged, %d held, %d error(s) (nothing uploaded)\n",
+				wouldPush, counts.Skipped, counts.Held, counts.Errors)
 		}
 		if required := requiredCapabilitiesAcross(result); len(required) > 0 {
 			fmt.Fprintf(w, "Dry run: receiver support was not checked; this selection requires: %s\n", strings.Join(required, ", "))

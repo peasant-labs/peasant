@@ -279,6 +279,13 @@ cases:
     seeds:
       - { id: 0d0d0d0d-0000-4000-8000-00000000000d, kind: ready, published: true, public: true }
     runs:
+      # The dry run asks the same visibility question the real run asks, so
+      # its plan holds the session the real run holds.
+      - args: [--dry-run, --json, --yes, --force, --session, 0d0d0d0d-0000-4000-8000-00000000000d, --collective, research]
+        wantStdoutJSON: true
+        wantPublished: []
+        wantPlan:
+          - { id: 0d0d0d0d-0000-4000-8000-00000000000d, verdict: held, reason: transcript_is_public }
       - args: [--json, --yes, --force, --session, 0d0d0d0d-0000-4000-8000-00000000000d, --collective, research]
         wantStdoutJSON: true
         wantPublished: []
