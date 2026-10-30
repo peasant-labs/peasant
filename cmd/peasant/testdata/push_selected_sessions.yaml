@@ -497,6 +497,40 @@ cases:
         wantStdoutJSON: true
         wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
 
+  - name: nested_subagent_pulled_with_root
+    # A subagent session's own subagent session travels too, listed under
+    # the requested session at the root of the tree.
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+      - { id: 5b5b5b5b-0000-4000-8000-0000000000b1, kind: ready, parent: 5a5a5a5a-0000-4000-8000-0000000000a1 }
+    runs:
+      - args: [--dry-run, --json, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPlan:
+          - id: 0a0a0a0a-0000-4000-8000-00000000000a
+            verdict: will_publish
+            subagents:
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: will_publish, selectedBy: parent }
+              - { id: 5b5b5b5b-0000-4000-8000-0000000000b1, verdict: will_publish, selectedBy: parent }
+      - args: [--json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a, 5a5a5a5a-0000-4000-8000-0000000000a1, 5b5b5b5b-0000-4000-8000-0000000000b1]
+
+  - name: without_subagents_omits_the_whole_tree
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+      - { id: 5b5b5b5b-0000-4000-8000-0000000000b1, kind: ready, parent: 5a5a5a5a-0000-4000-8000-0000000000a1 }
+    runs:
+      - args: [--dry-run, --json, --without-subagents, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish, subagentsOmitted: 2 }
+      - args: [--json, --yes, --without-subagents, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+
   - name: subagent_named_alone
     seeds:
       - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }

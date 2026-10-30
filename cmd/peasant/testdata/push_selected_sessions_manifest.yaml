@@ -32,3 +32,5 @@ requiredNames:
   - without_subagents_flag
   - subagent_named_alone
   - plan_lists_subagents_under_parent
+  - nested_subagent_pulled_with_root
+  - without_subagents_omits_the_whole_tree

@@ -136,8 +136,10 @@ document gains these keys beside the ones it always had:
 Each plan entry has `session_id`, `verdict`, `selectedBy` (`request`, or
 `parent` for a subagent session that travels with its main session) and, when
 there is one, `reason`, `detail`, `title`, `next` and `shares`. A main
-session's subagent sessions are listed in its `subagents`; with
-`--without-subagents` the entry counts them in `subagentsOmitted` instead. Each
+session's subagent sessions are listed in its `subagents`, the whole tree of
+them, a subagent session's own subagent sessions included, each with
+`selectedBy: parent`; with `--without-subagents` the entry counts the whole
+tree in `subagentsOmitted` instead. Each
 share names `collective_id`, `step` (`add_collective`) and `would` (`share`);
 a real run adds `outcome` and, for a skipped or failed share, `reason`.
 

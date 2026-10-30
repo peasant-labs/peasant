@@ -69,8 +69,8 @@ func resolveExplicitSelection(cmd *cobra.Command) (explicitSelection, bool, erro
 }
 
 // selectedSession is one session the run is pinned to. Parent is the
-// requested main session that pulled a subagent session in, and "" for a
-// session named directly.
+// requested session at the root of the subagent tree that pulled a subagent
+// session in, and "" for a session named directly.
 type selectedSession struct {
 	ID     string
 	Parent string
@@ -80,8 +80,8 @@ type selectedSession struct {
 // travel with them.
 type expandedSelection struct {
 	sessions []selectedSession
-	// omitted counts the subagent sessions --without-subagents left out, by
-	// parent.
+	// omitted counts the subagent sessions --without-subagents left out, the
+	// whole tree, by the requested session at its root.
 	omitted map[string]int
 }
 
@@ -100,11 +100,20 @@ type childSessionReader interface {
 	ChildSessionsForParent(ctx context.Context, parentID string) ([]store.ChildSessionRow, error)
 }
 
-// expandSubagents adds each requested session's subagent sessions after it. A
-// subagent session is its own transcript, and its parent's publication refers
-// to it, so without it the parent's references point at transcripts the
-// readers cannot open. A session named directly is never pulled in a second
-// time under a parent, and naming a subagent session never pulls its parent.
+// maxSubagentDepth bounds how deep a subagent tree is followed. A tree deeper
+// than this is refused rather than published in part.
+const maxSubagentDepth = 64
+
+// expandSubagents adds each requested session's subagent sessions after it,
+// the whole tree of them: a subagent session's own subagent sessions too,
+// breadth first. A subagent session is its own transcript, and its parent's
+// publication refers to it, so without it the parent's references point at
+// transcripts the readers cannot open. Each descendant is listed under the
+// requested session that pulled it in. A session named directly is never
+// pulled in a second time under a parent, and its own tree is expanded under
+// it; naming a subagent session never pulls its parent. The walk keeps a seen
+// set, so a cycle in the stored parent links ends it, and it refuses a tree
+// deeper than maxSubagentDepth.
 func expandSubagents(ctx context.Context, db childSessionReader, requested []string, withoutSubagents bool) (expandedSelection, error) {
 	direct := make(map[string]bool, len(requested))
 	for _, id := range requested {
@@ -112,23 +121,34 @@ func expandSubagents(ctx context.Context, db childSessionReader, requested []str
 	}
 	out := expandedSelection{omitted: map[string]int{}}
 	seen := map[string]bool{}
-	for _, id := range requested {
-		out.sessions = append(out.sessions, selectedSession{ID: id})
-		seen[id] = true
-		children, err := db.ChildSessionsForParent(ctx, id)
-		if err != nil {
-			return expandedSelection{}, fmt.Errorf("village push: read the subagent sessions of %s: %w; nothing was uploaded", id, err)
-		}
-		for _, child := range children {
-			if direct[child.SessionID] || seen[child.SessionID] {
-				continue
+	for _, root := range requested {
+		out.sessions = append(out.sessions, selectedSession{ID: root})
+		seen[root] = true
+		level := []string{root}
+		for depth := 1; len(level) > 0; depth++ {
+			var next []string
+			for _, id := range level {
+				children, err := db.ChildSessionsForParent(ctx, id)
+				if err != nil {
+					return expandedSelection{}, fmt.Errorf("village push: read the subagent sessions of %s: %w; nothing was uploaded", id, err)
+				}
+				for _, child := range children {
+					if direct[child.SessionID] || seen[child.SessionID] {
+						continue
+					}
+					if depth > maxSubagentDepth {
+						return expandedSelection{}, fmt.Errorf("village push: the subagent sessions of %s nest deeper than %d levels; nothing was uploaded; name the sessions to publish with --session, or pass --without-subagents", root, maxSubagentDepth)
+					}
+					seen[child.SessionID] = true
+					next = append(next, child.SessionID)
+					if withoutSubagents {
+						out.omitted[root]++
+						continue
+					}
+					out.sessions = append(out.sessions, selectedSession{ID: child.SessionID, Parent: root})
+				}
 			}
-			if withoutSubagents {
-				out.omitted[id]++
-				continue
-			}
-			seen[child.SessionID] = true
-			out.sessions = append(out.sessions, selectedSession{ID: child.SessionID, Parent: id})
+			level = next
 		}
 	}
 	return out, nil
