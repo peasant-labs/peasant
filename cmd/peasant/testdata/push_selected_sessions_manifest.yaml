@@ -40,3 +40,6 @@ requiredNames:
   - inherited_subagent_still_needs_readiness
   - subagent_of_unready_parent_keeps_own_selection
   - not_ready_session_is_not_an_error_anywhere
+  - refused_upload_exits_1_on_named_sessions
+  - refused_upload_exits_1_without_named_sessions
+  - not_ready_session_keeps_exit_0_without_named_sessions

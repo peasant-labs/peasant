@@ -115,9 +115,12 @@ type selectedCase struct {
 	SelectedOnly []string       `yaml:"selectedOnly"`
 	// SelectedBranches makes the saved selection admit only these branches of
 	// the repo clone.
-	SelectedBranches []string      `yaml:"selectedBranches"`
-	PausedRule       bool          `yaml:"pausedRule"`
-	FailShare        string        `yaml:"failShare"`
+	SelectedBranches []string `yaml:"selectedBranches"`
+	PausedRule       bool     `yaml:"pausedRule"`
+	FailShare        string   `yaml:"failShare"`
+	// RefusePublish makes peasant online refuse the upload of these sessions
+	// with 422.
+	RefusePublish    []string      `yaml:"refusePublish"`
 	ConfigVisibility string        `yaml:"configVisibility"`
 	Runs             []selectedRun `yaml:"runs"`
 }
@@ -171,6 +174,9 @@ func newSelectedWorld(t *testing.T, tc selectedCase) *selectedWorld {
 		hooksGit(t, repo, "", "remote", "add", "origin", remote)
 	}
 	w.village = testutil.NewCollectiveVillage(t, selectedPushCollectives...)
+	for _, id := range tc.RefusePublish {
+		w.village.RefusePublish(schema.SessionID(id))
+	}
 	if tc.FailShare != "" {
 		w.village.FailShare(selectedCollectiveID(t, tc.FailShare))
 	}

@@ -180,7 +180,7 @@ counts add up to the number of entries:
 
 `not_ready`, `excluded` and `unknown_session` appear only with a plan. A push
 that names no sessions keeps the counts it always printed, and there a session
-that is not ready counts in `errors`. The text summary prints the same counts, and the push error log and the `--profile-output` outcome read them too: with a plan, a session that is not ready was not sent, which is not an error, so it alone writes no error log and does not fail the profile.
+that is not ready counts in `errors`. The text summary prints the same counts, and the push error log and the `--profile-output` outcome read them too: with a plan, a session that is not ready was not sent, which is not an error, so it alone writes no error log and does not fail the profile. The exit status reads the same counts: a run that reached peasant online exits 1 when `errors` is above zero (an upload error, an upload peasant online refused, or a failed share), and a session that is `not_ready`, `excluded` or `unchanged` never makes it exit 1. A push that names no sessions decides the same way from its `sessions`, leaving out those that were not ready.
 The `sessions` list still holds only the sessions the run sent or tried to
 send, so it can be shorter than the plan.
 

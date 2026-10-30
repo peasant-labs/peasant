@@ -15,6 +15,7 @@
 # pausedRule: hooks.yaml holds a rule covering repo with no hook event, which
 #   holds every session it covers.
 # failShare: sharing with that collective fails on the double.
+# refusePublish: peasant online refuses these sessions' uploads with 422.
 #
 # Each run: args after `push --config <world config>`, {repo} is the repo
 # path. tty says whether stdin is a terminal. wantRequests is the exact
@@ -169,6 +170,51 @@ cases:
         wantOutputContains: ["0 error(s)", "1 not ready"]
         wantOutputOmits: ["error details written to"]
         wantProfileOutcome: ok
+
+  - name: refused_upload_exits_1_on_named_sessions
+    # peasant online refused one session's upload (its own secret check). The
+    # run talked to peasant online and part of it may be published, so it
+    # exits 1, as the help documents.
+    refusePublish: [5a5a5a5a-0000-4000-8000-0000000000a1]
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+    runs:
+      - args: [--json, --yes, --force, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        wantExit: 1
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantErrContains: ["1 session(s) could not be published"]
+        wantPlan:
+          - id: 0a0a0a0a-0000-4000-8000-00000000000a
+            verdict: will_publish
+            subagents:
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: failed, selectedBy: parent }
+
+  - name: refused_upload_exits_1_without_named_sessions
+    # The same refusal on a push that names no sessions.
+    refusePublish: [0b0b0b0b-0000-4000-8000-00000000000b]
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    runs:
+      - args: [--json, --yes]
+        wantExit: 1
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantErrContains: ["1 session(s) could not be published"]
+
+  - name: not_ready_session_keeps_exit_0_without_named_sessions
+    # A session that is not ready was never sent: a push that names no
+    # sessions and sends the rest exits 0.
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0c1c1c1c-0000-4000-8000-00000000001c, kind: no_model_reply }
+    runs:
+      - args: [--json, --yes]
+        wantExit: 0
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
 
   - name: model_gap_needs_a_forced_harvest
     # An assistant reply without a model is an ingest gap. A plain harvest

@@ -135,7 +135,10 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 			"one distinction it cannot read out of prose: whether anything was published at all.\n\n" +
 			"  0  the run succeeded.\n" +
 			"  1  the run failed after it had started talking to peasant online, so part of the work\n" +
-			"     may be published and recorded as published.\n" +
+			"     may be published and recorded as published. That includes a run that sent some\n" +
+			"     sessions and could not send one: an upload error, an upload peasant online refused,\n" +
+			"     or a failed share. A session that is not ready, left out or unchanged is not a\n" +
+			"     failure.\n" +
 			"  3  the run failed BEFORE it sent peasant online anything to write — a missing or expired\n" +
 			"     login, an unreadable config, a store that would not open, a repository scope that\n" +
 			"     would not resolve, a named session the store does not hold, an unknown collective\n" +
@@ -1070,7 +1073,14 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				// Return the fatal errors (transcript before annotation, then
 				// sharing). The budget check below turns them into the budget's own
 				// explanation when the cap is what ended the run.
-				return errors.Join(firstPushStageError(transcErr, annErr), shareFailure)
+				// A real run that reached peasant online and could not send a
+				// session failed, even though the others went out: exit 1 says
+				// part of the work may be published.
+				var sessionsFailed error
+				if !dryRun && run.reachedVillage() {
+					sessionsFailed = failedSessionsError(result, plan)
+				}
+				return errors.Join(firstPushStageError(transcErr, annErr), shareFailure, sessionsFailed)
 			}(ctx)
 
 			// A budget that ran out is reported as itself: the raw "context
@@ -1683,6 +1693,49 @@ func annotationSelectionForRun(selection push.AnnotationSelection, chooserNarrow
 		return selection.WithinPublishedSessions(published)
 	}
 	return selection
+}
+
+// failedSessions counts the sessions a run tried to send and could not: an
+// upload error, an upload peasant online refused, or a local check that
+// failed. A push that names its sessions reads its plan's errors count, the
+// one its summary prints. Any other push reads its sessions, leaving out the
+// ones that were not ready: a session that is not ready was never sent, and
+// neither it nor an excluded, held or unchanged session is a failure.
+func failedSessions(result *push.PushResult, plan *jsonPushPlan) int {
+	if result == nil {
+		return 0
+	}
+	if plan != nil {
+		return countsOfPlan(plan.Plan).Errors
+	}
+	failed := 0
+	for _, session := range result.Sessions {
+		if session.Status != push.PushStatusError {
+			continue
+		}
+		if _, notReady := push.NotReadyReasonOf(session.Error); !notReady {
+			failed++
+		}
+	}
+	return failed
+}
+
+// pushSessionsFailedError is the error of a run that reached peasant online
+// and could not send some of its sessions. It exits 1.
+type pushSessionsFailedError struct{ failed int }
+
+func (e *pushSessionsFailedError) Error() string {
+	return fmt.Sprintf("village push: %d session(s) could not be published; the others in this run were sent, so part of the work may be published; the per-session errors are in the command's output and the push error log; fix them and re-run the push", e.failed)
+}
+
+// failedSessionsError is the error of a run with failed sessions, nil when
+// none failed.
+func failedSessionsError(result *push.PushResult, plan *jsonPushPlan) error {
+	failed := failedSessions(result, plan)
+	if failed == 0 {
+		return nil
+	}
+	return &pushSessionsFailedError{failed: failed}
 }
 
 // firstPushStageError retains the existing transcript-before-annotation error

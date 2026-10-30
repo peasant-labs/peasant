@@ -77,6 +77,24 @@ func TestPushCmd_JSONIsNeverPublicConsent(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(schema.VillageUser{ID: testutil.VillageFixtureAccountID})
 					return
 				}
+				if id, isTranscript := strings.CutPrefix(r.URL.Path, "/api/v1/transcripts/"); r.Method == http.MethodPatch && isTranscript {
+					// The owner update a public publish sends after the
+					// upload: answer it as peasant online does, so the
+					// consented run succeeds.
+					var update schema.OwnerTranscriptUpdateRequest
+					if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+						t.Errorf("decode owner update: %v", err)
+					}
+					var visibility schema.TranscriptUpdateVisibility
+					if update.Visibility != nil {
+						visibility = *update.Visibility
+					}
+					_ = json.NewEncoder(w).Encode(schema.OwnerTranscriptUpdateResponse{
+						TranscriptID: schema.TranscriptID(id), TranscriptURL: "https://village.example/transcripts/" + id,
+						Tags: []string{}, Visibility: visibility, UpdatedAt: 1,
+					})
+					return
+				}
 				if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 					_, _ = w.Write([]byte(`{}`))
 					return

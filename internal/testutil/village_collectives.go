@@ -68,6 +68,7 @@ type CollectiveVillage struct {
 	ownerUpdates         int
 	ownerVisibilities    []schema.TranscriptUpdateVisibility
 	failPublish          bool
+	refusePublish        map[schema.SessionID]bool
 	failShare            map[schema.VillageUUID]bool
 	conflictShare        map[schema.VillageUUID]bool
 	failShareRead        bool
@@ -168,6 +169,18 @@ func (v *CollectiveVillage) FailShare(id schema.VillageUUID) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.failShare[id] = true
+}
+
+// RefusePublish makes the publish of one session answer 422, as peasant
+// online does when it refuses the content, for example on its own secret
+// check. Other sessions publish normally.
+func (v *CollectiveVillage) RefusePublish(sessionID schema.SessionID) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.refusePublish == nil {
+		v.refusePublish = map[schema.SessionID]bool{}
+	}
+	v.refusePublish[sessionID] = true
 }
 
 // FailPublish makes every publish answer 500, so Village keeps the content
@@ -660,6 +673,11 @@ func (v *CollectiveVillage) publish(w http.ResponseWriter, r *http.Request) {
 	transcript := schema.TranscriptID(request.Identity.SessionID)
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	// A refused upload is not stored, so it is not among the publishes.
+	if v.refusePublish[request.Identity.SessionID] {
+		http.Error(w, `{"error":"the transcript was refused: it appears to contain a secret"}`, http.StatusUnprocessableEntity)
+		return
+	}
 	v.publishes = append(v.publishes, request)
 	if v.failPublish {
 		http.Error(w, `{"error":"Failed to store the transcript"}`, http.StatusInternalServerError)

@@ -49,7 +49,10 @@ one distinction it cannot read out of prose: whether anything was published at a
 
   0  the run succeeded.
   1  the run failed after it had started talking to peasant online, so part of the work
-     may be published and recorded as published.
+     may be published and recorded as published. That includes a run that sent some
+     sessions and could not send one: an upload error, an upload peasant online refused,
+     or a failed share. A session that is not ready, left out or unchanged is not a
+     failure.
   3  the run failed BEFORE it sent peasant online anything to write — a missing or expired
      login, an unreadable config, a store that would not open, a repository scope that
      would not resolve, a named session the store does not hold, an unknown collective
