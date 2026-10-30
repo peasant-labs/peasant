@@ -1,9 +1,8 @@
 # Install Peasant and run Kickstart from a coding agent
 
-**Proposal:** let a developer install Peasant and complete its initial setup
-without assembling commands or leaving the coding-agent workflow. This must work
-when `peasant` is not installed. A native installer/setup window is the preferred
-destination; that integration and GUI are new work, not shipped behavior.
+**Proposal:** install Peasant and complete Kickstart from a coding agent, including
+machines without Peasant. Prefer a native installer/setup window; this integration
+and GUI are new work, not shipped behavior.
 
 ## What exists
 
@@ -21,38 +20,44 @@ Kickstart currently needs an interactive terminal. Bare `peasant` does not start
 it automatically, and running it through a noninteractive agent shell does not
 complete setup. `peasant harvest` is an import command, not a headless wizard.
 
-The existing Claude plugin checks for `peasant` on `PATH`; it opens recordings
-or configures separately requested auto-publication. It cannot install Peasant
-on a fresh machine.
+The existing Claude plugin requires `peasant` on `PATH`; it opens recordings or
+configures separately requested auto-publication. It cannot bootstrap installation.
 
 ## Proposed flow
 
-1. **Start inside the agent.** Offer one explicit **install and set up peasant**
-   action. A deterministic bootstrap checks for an existing installation and
-   identifies the target machine's OS and architecture. Do not silently install
-   on a remote agent host when the user expects their laptop.
-2. **Approve installation.** Show the official distribution, artifact/version,
-   destination, privileges, and changes before proceeding. Use a fixed installer
-   or supported package-manager operation, checking the artifact against the
-   distribution's published verification material. Never let a model invent a
-   download-and-execute command or run an arbitrary repository installer. Respect
-   host approval policy; report unsupported platforms and failed verification.
-3. **Complete canonical Kickstart.** Launch the existing interactive command
-   where the host provides a usable terminal. Otherwise report the terminal
-   requirement and offer an honest handoff. A proposed native setup window should
-   reuse Kickstart's settings, selection matcher, validation, atomic save,
-   retention, and ingest engine; it must not create a second setup implementation.
-4. **Review and finish.** Let the user choose import scope and review local
-   effects. Account connection remains optional and requires an explicit choice.
-   Never install hooks, log in, or publish silently. Saving an auto-publish
-   preference installs no hook and publishes nothing. Preserve existing data and
-   settings; installation is not a reset. Report installation, save, and import
-   failures separately, with a retry.
+```mermaid
+flowchart TD
+    A["User chooses install and set up"] --> B{"Peasant installed?"}
+    B -- no --> C["Approve official OS/architecture installation"]
+    C --> D["Verify artifact and install"]
+    B -- yes --> E["Canonical Kickstart"]
+    D --> E
+    E --> F["Existing terminal setup<br/>or proposed native window"]
+    F --> G["Choose import scope and review"]
+    G --> H["Confirm save and import locally"]
+    H --> I["Ready: nothing published"]
+```
 
-Provider integrations should only launch this approved bootstrap. Use each
-host's supported explicit action and permission surface; respect disabled hooks
-and unavailable terminal access. Do not promise the same installation experience
-in Claude Code, Codex, Cursor, OpenCode, or Gemini until tested in that host.
+Bootstrap identifies the target machine, OS, and architecture; never silently
+install on a remote agent host instead of the user's laptop. Before approval,
+show the official artifact/version, destination, privileges, and effects. Use a
+fixed installer or package-manager operation and published verification material.
+Reject failed verification and unsupported platforms; never execute a
+model-generated download command or arbitrary repository installer.
+
+Use the existing interactive command when a terminal is available; otherwise
+report that requirement and offer a handoff. A proposed native window must reuse
+Kickstart's settings, selection matcher, validation, atomic save, retention,
+and ingest engine.
+
+Keep account connection optional. Never install hooks, log in, or publish
+silently; an auto-publish preference installs no hook and publishes nothing.
+Preserve existing data/settings: installation is not a reset. Report installation,
+save, and import failures separately with retries.
+
+Each provider needs a tested, explicit action and permission surface. Respect
+host approvals, disabled hooks, and unavailable terminals; do not promise identical
+installation in Claude Code, Codex, Cursor, OpenCode, or Gemini.
 
 ## Implementation boundary
 
