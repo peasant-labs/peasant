@@ -1,76 +1,68 @@
-# Open the current session from the agent
+# Install Peasant and run Kickstart from a coding agent
 
-Research proposal; provider documentation checked 2026-10-29. These flows are
-**not shipped**. Existing `peasant open` launches the default browser.
+**Proposal:** let a developer install Peasant and complete its initial setup
+without assembling commands or leaving the coding-agent workflow. This must work
+when `peasant` is not installed. A native installer/setup window is the preferred
+destination; that integration and GUI are new work, not shipped behavior.
 
-## Recommendation
+## What exists
 
-Provide an explicit **open in peasant** action backed by a fixed Go operation:
-verify the host's exact session identity, import only that recording, and open
-it locally. Prefer a small native window reusing Fairtrade's existing viewer;
-use a provider panel where available. Keep the browser destination working.
-Show provider, title, time, and **not published** state.
+Peasant has [official release artifacts](https://github.com/peasant-labs/peasant/releases)
+and platform installation guides: [macOS](../install/macos.md),
+[Linux](../install/ubuntu.md), [Windows](../install/windows.md), and
+[Nix](../install/nix.md). Release archives/packages have published checksums.
 
-A launcher needs a provider handoff or an honest session chooser. Skills can
-explain setup; model-authored commands and IDs cannot authorize execution. MCP
-is only a possible transport after identity binding and explicit invocation are
-proven. Installation must disclose and obtain approval for helper/identity hooks;
-never substitute model-generated downloads or unattended installation. Respect
-disabled hooks; do not fall back to model execution.
+Once installed, [`peasant kickstart`](../KICKSTART.md) discovers recordings,
+lets the user choose projects, branches, and sessions, buffers settings for
+review, then saves configuration, applies the chosen Claude retention setting,
+and imports the selected recordings locally. It publishes nothing.
 
-## Provider limits
+Kickstart currently needs an interactive terminal. Bare `peasant` does not start
+it automatically, and running it through a noninteractive agent shell does not
+complete setup. `peasant harvest` is an import command, not a headless wizard.
 
-Start with verifiable local recordings. These primitives still need mounted
-proof of identity, invocation order, concurrency, and completion behavior.
+The existing Claude plugin checks for `peasant` on `PATH`; it opens recordings
+or configures separately requested auto-publication. It cannot install Peasant
+on a fresh machine.
 
-| Provider | Available context and remaining proof |
-|---|---|
-| Claude Code | Skills expose `CLAUDE_SESSION_ID`; hooks provide `session_id`, `transcript_path`, `cwd`. Reuse user-typed `UserPromptExpansion` interception. The installed shim requires Peasant, extracts JSON with shell text processing, and guesses the newest CWD transcript when ID is missing. Replace those shortcomings in the strict entry. [Skills](https://code.claude.com/docs/en/skills#available-string-substitutions), [hooks](https://code.claude.com/docs/en/hooks#userpromptexpansion). |
-| Codex | Hooks provide `session_id`, nullable transcript path, and CWD; subagent hooks identify the parent. Prove reserved-command interception/expansion order; explicit skills alone do not authenticate later tool calls. Honor hook trust review. Null paths/hosted sessions are unavailable. [Hooks](https://learn.chatgpt.com/docs/hooks), [skills](https://learn.chatgpt.com/docs/build-skills), [trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks), [MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli). |
-| Cursor | `beforeSubmitPrompt` can intercept submission; hooks expose conversation ID, nullable transcript path, workspace roots. Verify ID agreement with Peasant's adapter; disabled transcripts/cloud sessions are unavailable. [Hooks](https://cursor.com/docs/hooks), [skills](https://cursor.com/help/customization/skills). |
-| OpenCode | Tool context supplies session/message IDs, directory, worktree outside model arguments. Prove a directly authorized plugin command/button; model access is insufficient. Shell preprocessing supplies prompt content, not proven session identity. [Tools](https://opencode.ai/docs/custom-tools/#context), [commands](https://opencode.ai/docs/commands/#shell-output), [plugins](https://opencode.ai/docs/plugins/). |
-| Gemini CLI | Hooks expose session ID, absolute transcript path, CWD; `BeforeAgent` can block submission. TOML shell commands feed a prompt, not model-free completion. **Implement ingestion first**: Peasant recognizes the name but lacks a configured/registered adapter. [Hooks](https://geminicli.com/docs/hooks/reference/), [commands](https://geminicli.com/docs/cli/custom-commands/). |
+## Proposed flow
 
-## Identity, consent, and security
+1. **Start inside the agent.** Offer one explicit **install and set up peasant**
+   action. A deterministic bootstrap checks for an existing installation and
+   identifies the target machine's OS and architecture. Do not silently install
+   on a remote agent host when the user expects their laptop.
+2. **Approve installation.** Show the official distribution, artifact/version,
+   destination, privileges, and changes before proceeding. Use a fixed installer
+   or supported package-manager operation, checking the artifact against the
+   distribution's published verification material. Never let a model invent a
+   download-and-execute command or run an arbitrary repository installer. Respect
+   host approval policy; report unsupported platforms and failed verification.
+3. **Complete canonical Kickstart.** Launch the existing interactive command
+   where the host provides a usable terminal. Otherwise report the terminal
+   requirement and offer an honest handoff. A proposed native setup window should
+   reuse Kickstart's settings, selection matcher, validation, atomic save,
+   retention, and ingest engine; it must not create a second setup implementation.
+4. **Review and finish.** Let the user choose import scope and review local
+   effects. Account connection remains optional and requires an explicit choice.
+   Never install hooks, log in, or publish silently. Saving an auto-publish
+   preference installs no hook and publishes nothing. Preserve existing data and
+   settings; installation is not a reset. Report installation, save, and import
+   failures separately, with a retry.
 
-- Require a user-invoked host action/approved button. Transcript text containing
-  `/peasant` is not authorization. Never accept model-authored IDs, paths, URLs,
-  source roots, or action strings; never interpolate untrusted content into shell.
-- Parse hook JSON in Go. Use the canonical adapter registry and native ID formats,
-  preserving root/helper distinctions. Verify configured recording roots, ownership,
-  file type, and ID agreement; prevent symlink escape and validation/read replacement.
-- Import exactly one session through existing identity, ingest, redaction,
-  projection, and store paths. Prove minimal first-run configuration without
-  importing all history or widening saved selection. Local import grants no
-  publication consent and does not promise a redacted local original.
-- Reuse exact-session readiness: loopback only, correct service/data directory,
-  destination constructed from verified project/session. No model-returned URL.
-- Keep login, publication, retention, licensing, hook installation, and automatic
-  publishing separate. Preserve `/peasant auto` as its own explicit flow.
-- Missing, rotated, disabled, conflicting, unsupported, or remote recordings fail
-  with recovery. Never guess from newest file, CWD, focus, or model output. Offer
-  **choose a session** when exact identity is unavailable; bind concurrent chats
-  per session/connection. Preserve explicitly named legacy convenience flows.
+Provider integrations should only launch this approved bootstrap. Use each
+host's supported explicit action and permission surface; respect disabled hooks
+and unavailable terminal access. Do not promise the same installation experience
+in Claude Code, Codex, Cursor, OpenCode, or Gemini until tested in that host.
 
-Hook fields are not cryptographic attestations; this boundary does not defend
-against processes with the user's full OS permissions.
+## Implementation boundary
 
-## Implementation order
+Build the official bootstrap first, then the agent entry and terminal handoff;
+add a native wizard only by adapting the existing engine. Validate fresh-machine
+installation, existing installs, cancellation, verification failure, missing TTY,
+and save/import retries with no unintended login, hooks, or publication.
 
-1. Factor “prepare this session locally” from its destination; preserve CLI/browser
-   behavior. Start with strict Claude parsing and named YAML fixtures covering
-   identity, one-session import, hostile paths/content, cancellation, and zero
-   publication/credential/retention/hook/unrelated-config effects. Add no onboarding API.
-2. Prove the native viewer's real data/chrome, keyboard access, both themes, and
-   browser-free opening; measure cold/warm latency before claiming speed.
-3. Prove Codex, Cursor, OpenCode handoffs individually. Add Gemini ingestion and
-   required Bestiary/Schema releases separately before offering its entry.
-
-Source map: [open/readiness](../../cmd/peasant/cmd_open.go),
-[fixtures](../../cmd/peasant/testdata/open-output.yaml),
-[harvest](../../cmd/peasant/cmd_harvest.go),
-[configuration](../../internal/config/config.go) (`BaseConfig`, `SaveAtomic`, canonical matcher),
-[registry](../../internal/defaults/provider.go), [adapters/identity](../../internal/ingest),
-[setup](../KICKSTART.md), [service](../../cmd/peasant/cmd_web.go),
-[browser](../../internal/browser/open.go). Provider packaging belongs in
-peasant-plugins; inspect `plugins/peasant/{hooks/hooks.json,SKILL.md,scripts/open-session.sh}`.
+Start with [release packaging](../../.goreleaser.yml),
+[Kickstart wiring](../../cmd/peasant/cmd_kickstart_mount.go),
+[terminal checks](../../cmd/peasant/terminal.go), and
+[canonical settings](../../internal/tui/settings). Existing plugin code lives in
+peasant-plugins under `plugins/peasant/{SKILL.md,scripts/open-session.sh}`.
