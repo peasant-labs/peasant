@@ -50,7 +50,9 @@ is refused with the line or array index of the fault. An input that names no id
 at all is refused: a list that selects nothing never widens to every session.
 
 `--sessions-from` replaces the other ways to choose sessions. It cannot be
-combined with `--session` or `--all`.
+combined with `--session` or `--all`, except on `village push`, where
+`--session` adds to the list: the repeated `--session` ids come first, then the
+list, each id once.
 
 ```sh
 peasant sessions list --json --limit 20 | peasant export sessions --sessions-from - --output-dir out --json
@@ -118,13 +120,47 @@ Every command that has `--yes` also accepts `-y`.
 a public push is refused before any request to peasant online, exits 3, and
 names `--yes` in the document's `refusal` field.
 
+## The `village push` plan
+
+When `village push` is given `--session` or `--sessions-from`, its `--json`
+document gains these keys beside the ones it always had:
+
+| key | meaning |
+|---|---|
+| `dry_run` | Whether the run was a dry run. |
+| `collectives` | The collectives `--collective` named, as `{id, name}`. |
+| `visibility` | The visibility the run publishes at. |
+| `needsConfirmation` | Whether the same run without `--dry-run` would ask before it publishes, because `--collective` skips the auto-publish rules and `--yes` is absent. |
+| `plan` | One entry per requested session, in request order. |
+
+Each plan entry has `session_id`, `verdict`, `selectedBy` (`request`, or
+`parent` for a subagent session that travels with its main session) and, when
+there is one, `reason`, `detail`, `title`, `next` and `shares`. A main
+session's subagent sessions are listed in its `subagents`; with
+`--without-subagents` the entry counts them in `subagentsOmitted` instead. Each
+share names `collective_id`, `step` (`add_collective`) and `would` (`share`);
+a real run adds `outcome` and, for a skipped or failed share, `reason`.
+
+Verdicts: `will_publish`, `will_update`, `unchanged`, `held`, `excluded`,
+`not_ready`, `unknown_session`, `failed`. Reasons: `not_in_store`,
+`outside_repository`, `harness_mismatch`, `branch_selection_excluded`,
+`needs_ingest`, `cohort_not_ready`, `latest_attempt_kept`,
+`unchanged_content`, `transcript_is_public`, `no_metrics`. Both sets are
+closed.
+
+`village push` reports every refusal it makes before its first request to
+peasant online with exit status 3, a refusal of how it was called included:
+an unreadable `--sessions-from` list, a session id the store does not hold, an
+unknown collective, or a `--collective` confirmation it cannot ask for. Under
+`--json` the refusal is also in the document's `refusal` field.
+
 ## Which commands follow the contract today
 
 | command | follows |
 |---|---|
 | `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused` |
 | `redact` | `--sessions-from` |
-| `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y` |
+| `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`, with a per-session `plan` (below) |
 | `upgrade` | `-y` |
 
 `sessions list --json` prints a bare array, which has no place for `warnings`.

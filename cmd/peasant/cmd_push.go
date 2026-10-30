@@ -120,6 +120,12 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 			"automatically. --last-good publishes the last-good full transcript instead, as an\n" +
 			"explicit hand-run choice; it is refused together with --auto-publish-event and\n" +
 			"--require-auto-publish-rule, and no generated hook file carries it.\n\n" +
+			"Named sessions — --session and --sessions-from push only the sessions they name, with the\n" +
+			"subagent sessions of each named main session (--without-subagents leaves those out). Every\n" +
+			"other narrowing and readiness still applies, and --dry-run --json prints a plan with one entry\n" +
+			"per named session saying what the run would do and why. --collective shares each sent\n" +
+			"transcript with the collectives it names, publishing private and unlicensed without\n" +
+			"consulting the auto-publish rules for those sessions, so the push asks once before it runs.\n\n" +
 			"Exit status — a caller that branches on it, including a generated Git hook, needs the\n" +
 			"one distinction it cannot read out of prose: whether anything was published at all.\n\n" +
 			"  0  the run succeeded.\n" +
@@ -127,7 +133,9 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 			"     may be published and recorded as published.\n" +
 			"  3  the run failed BEFORE a single peasant online request was made — a missing or expired\n" +
 			"     login, an unreadable config, a store that would not open, a repository scope that\n" +
-			"     would not resolve. Nothing was published and nothing was recorded as published.",
+			"     would not resolve, a named session the store does not hold, an unknown collective,\n" +
+			"     or a confirmation that could not be asked. Nothing was published and nothing was\n" +
+			"     recorded as published.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past argument validation, every failure here is a RUNTIME error
 			// (auth gate, unreachable village, pipeline) — not a usage error. Cobra
