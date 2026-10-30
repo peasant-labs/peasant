@@ -1,0 +1,7 @@
+# Required-name manifest for testdata/entry_extra_redaction.yaml.
+requiredNames:
+  - email_after_unicode_escape
+  - email_after_newline_escape
+  - email_after_quote_escape
+  - untouched_extra_keeps_its_bytes
+  - model_id_survives

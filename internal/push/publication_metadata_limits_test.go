@@ -151,9 +151,15 @@ type metadataLimitRedactor struct {
 }
 
 func (r *metadataLimitRedactor) RedactJSON(value any) any {
+	// The mapper also redacts each entry's Extra string by string; this
+	// double rewrites only the assembled document.
+	document, isDocument := value.(map[string]any)
+	if !isDocument {
+		return value
+	}
 	r.called = true
 	if r.contentBytes > 0 {
-		entry := value.(map[string]any)["entries"].([]any)[0].(map[string]any)
+		entry := document["entries"].([]any)[0].(map[string]any)
 		entry["contentPreview"] = strings.Repeat("x", r.contentBytes)
 		entry["extra"] = "{}"
 	}

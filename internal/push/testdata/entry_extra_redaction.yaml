@@ -1,0 +1,31 @@
+# An entry's Extra is a JSON document carried in a string. Publication
+# redaction must redact it as a document: a text rule that matches next to a
+# JSON escape would otherwise cut into the escape and leave invalid JSON, which
+# every later reader refuses. Each case is one stored Extra, given as the JSON
+# text exactly as the store holds it, run through both seams that carry
+# entries (RedactEntries, then MapMetadata) with the standard redactor.
+#
+# want is the decoded Extra after both seams. sameBytes asserts the stored
+# text survives byte for byte.
+cases:
+  - name: email_after_unicode_escape
+    # The stored shape that failed: an attribution trailer whose angle
+    # brackets the writer escaped as \u003c and \u003e.
+    extra: '{"attachment":{"type":"remote_session_change","commit":"Co-Authored-By: An Agent \u003cnoreply@example.com\u003e","pr":"x"}}'
+    want: '{"attachment":{"type":"remote_session_change","commit":"Co-Authored-By: An Agent <<EMAIL>>","pr":"x"}}'
+
+  - name: email_after_newline_escape
+    extra: '{"rendered":[{"content":"first line\nalice@example.com"}]}'
+    want: '{"rendered":[{"content":"first line\n<EMAIL>"}]}'
+
+  - name: email_after_quote_escape
+    extra: '{"note":"say \"bob@example.com\" twice"}'
+    want: '{"note":"say \"<EMAIL>\" twice"}'
+
+  - name: untouched_extra_keeps_its_bytes
+    extra: '{"isSidechain":false,"rendered":[{"content":"\u003csystem-reminder\u003e\nnothing private\n\u003c/system-reminder\u003e"}],"n":12345678901234567890}'
+    sameBytes: true
+
+  - name: model_id_survives
+    extra: '{"model_id":"claude-opus-4-6","commit":"by \u003ccarol@example.com\u003e"}'
+    want: '{"model_id":"claude-opus-4-6","commit":"by <<EMAIL>>"}'
