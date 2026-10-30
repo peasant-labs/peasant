@@ -534,11 +534,20 @@ func explainOne(id string, in planInputs, rows map[string]ingest.PushSessionRow,
 		entry.Detail = "the session has no computed metrics yet; run `peasant harvest --session " + id + "`, then retry"
 		return entry
 	}
+	// The checks run in the order the run narrows (push.NarrowCandidates): the
+	// candidate query's harness filter, the auto-publish rules, the saved
+	// selection, then the repository scope, so a session two of them exclude
+	// is reported with the one the run applied.
+	pinnedOut := in.runCfg.PinnedSessionIDs != nil && !in.runCfg.PinnedSessionIDs[id]
 	switch {
 	case !harnessAdmitted(row, in.runCfg, in.cfg):
 		entry.Verdict, entry.Reason = PlanExcluded, ReasonHarnessMismatch
-	case in.runCfg.Repository != nil && !in.runCfg.Repository.Admits(row.ProjectHash):
-		entry.Verdict, entry.Reason = PlanExcluded, ReasonOutsideRepository
+	case pinnedOut && in.autoPublish.held[id] != "":
+		entry.Verdict, entry.Detail = PlanHeld, in.autoPublish.held[id]
+	case pinnedOut:
+		// A rule-required run sends only sessions a rule binds.
+		entry.Verdict = PlanExcluded
+		entry.Detail = "no auto-publish rule binds it, and this run publishes only sessions a rule binds"
 	case in.runCfg.Selection != nil && in.runCfg.Selection.Decision(ingest.SessionID(id)) != ingest.BranchMatchYes:
 		entry.Verdict, entry.Reason = PlanExcluded, ReasonBranchSelectionExcl
 		if inherited {
@@ -546,13 +555,13 @@ func explainOne(id string, in planInputs, rows map[string]ingest.PushSessionRow,
 			// left out or is not ready, so there is no decision to inherit.
 			entry.Detail = "its own branch is outside the saved selection, and it follows its parent " + root + "'s selection only when this run sends that parent; the parent is not sent"
 		}
-	case in.autoPublish.held[id] != "":
-		entry.Verdict, entry.Detail = PlanHeld, in.autoPublish.held[id]
+	case in.runCfg.Repository != nil && !in.runCfg.Repository.Admits(row.ProjectHash):
+		entry.Verdict, entry.Reason = PlanExcluded, ReasonOutsideRepository
 	default:
-		// Pinned out by the auto-publish rules: a rule-required run sends
-		// only sessions a rule binds.
-		entry.Verdict = PlanExcluded
-		entry.Detail = "no auto-publish rule binds it, and this run publishes only sessions a rule binds"
+		// Every filter admits it, yet the run reports nothing for it: the run
+		// stopped before it reached the session.
+		entry.Verdict = PlanFailed
+		entry.Detail = "the run stopped before it reached this session, for example at its time budget or on an earlier error; nothing was sent for it; retry the push"
 	}
 	return entry
 }

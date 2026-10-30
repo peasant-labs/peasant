@@ -1,0 +1,7 @@
+# Required-name manifest for testdata/push_plan_unsent.yaml.
+requiredNames:
+  - rules_pin_out_names_the_rule
+  - rule_hold_is_held
+  - unreached_session_is_failed_not_a_rule
+  - selection_reported_before_repository
+  - repository_when_selection_admits

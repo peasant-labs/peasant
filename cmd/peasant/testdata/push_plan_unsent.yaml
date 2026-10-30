@@ -1,0 +1,31 @@
+# explainOne for a known, pushable session the run reported nothing for.
+# The plan must name the filter the run applied, in the run's own narrowing
+# order (rules, saved selection, repository), and must not blame the
+# auto-publish rules for a session no rule pinned out.
+#
+# pinned: the auto-publish rules pinned these sessions (absent: no rules).
+# held: a rule held the session with this text.
+# selected: the saved selection admits the session (absent: no selection).
+# inRepository: the --repository scope admits it (absent: no scope).
+cases:
+  - name: rules_pin_out_names_the_rule
+    pinned: []
+    want: { verdict: excluded, detailContains: "no auto-publish rule binds it" }
+
+  - name: rule_hold_is_held
+    pinned: []
+    held: "the rule is paused"
+    want: { verdict: held, detailContains: "the rule is paused" }
+
+  - name: unreached_session_is_failed_not_a_rule
+    want: { verdict: failed, detailContains: "stopped before it reached this session", detailOmits: "auto-publish" }
+
+  - name: selection_reported_before_repository
+    selected: false
+    inRepository: false
+    want: { verdict: excluded, reason: branch_selection_excluded }
+
+  - name: repository_when_selection_admits
+    selected: true
+    inRepository: false
+    want: { verdict: excluded, reason: outside_repository }
