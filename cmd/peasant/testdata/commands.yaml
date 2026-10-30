@@ -122,6 +122,10 @@ commands:
       - { name: require-auto-publish-rule, type: bool, default: "false" }
       - { name: auto-publish-event, type: string, default: "" }
       - { name: last-good, type: bool, default: "false" }
+      - { name: session, type: stringArray, default: "[]" }
+      - { name: sessions-from, type: string, default: "" }
+      - { name: collective, type: stringArray, default: "[]" }
+      - { name: without-subagents, type: bool, default: "false" }
     exit_cases:
       - args: ["--help"]
         expect_error: false

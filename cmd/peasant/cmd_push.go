@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -50,6 +51,9 @@ func BuildPushCommand() *cobra.Command {
 type pushCommandDependencies struct {
 	newVillageClient func(string, string, *http.Client) *village.VillageClient
 	uploadTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	// isTTY reports whether standard input is a terminal a prompt can be
+	// answered on. Defaults to the process's own stdin.
+	isTTY func() bool
 }
 
 func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
@@ -58,6 +62,9 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 	}
 	if deps.uploadTimeout == nil {
 		deps.uploadTimeout = context.WithTimeout
+	}
+	if deps.isTTY == nil {
+		deps.isTTY = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 	}
 	var (
 		dryRun                 bool
@@ -81,6 +88,9 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 		concurrency            int
 		repository             string
 		timeout                time.Duration
+		sessionIDs             []string
+		collectiveRefs         []string
+		withoutSubagents       bool
 	)
 
 	cmd := &cobra.Command{
@@ -168,6 +178,36 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				defer traceFile.discard()
 			}
 			nonInteractive := nonInteractiveFlag || yesFlag
+			isTTY := deps.isTTY()
+
+			// An explicit selection and --collective are checked before any
+			// request, the waiting-request lookup included. Every refusal
+			// here exits as nothing attempted, matching the exit statuses
+			// above, usage refusals included.
+			selection, explicit, selectionErr := resolveExplicitSelection(cmd)
+			if selectionErr != nil {
+				return &pushNothingAttemptedError{cause: selectionErr}
+			}
+			explicitCollective := len(collectiveRefs) > 0
+			collectiveDecision := clicontract.ConfirmSkippedDryRun
+			if explicitCollective {
+				if err := refuseExplicitCollectiveFlags(cmd, explicit, visibility); err != nil {
+					return &pushNothingAttemptedError{cause: err}
+				}
+				// Publishing past the auto-publish rules needs one
+				// confirmation. A run that cannot show the prompt is refused
+				// here, before the collectives are even looked up.
+				collectiveDecision = clicontract.PromptPolicy{DryRun: dryRun, JSON: jsonOutput, AssumeYes: nonInteractive, IsTTY: isTTY}.Decide()
+				if collectiveDecision == clicontract.ConfirmRefusedNoTTY {
+					refusal := collectiveConfirmationRefusal(cmd)
+					if jsonOutput {
+						if err := printPushRefusalJSON(cmd.OutOrStdout(), refusal.Error()); err != nil {
+							return err
+						}
+					}
+					return &pushNothingAttemptedError{cause: refusal}
+				}
+			}
 
 			// An overall time budget for the whole command. The village client's
 			// own timeout is PER REQUEST and one push issues several in sequence,
@@ -429,6 +469,35 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 					runCfg.Selection = selection
 				}
 
+				// --session and --sessions-from pin the run to the sessions they
+				// name, with the subagent sessions of each. The selection is an
+				// AND: every other narrowing still applies, and the plan reports
+				// what each one decided.
+				var expanded expandedSelection
+				var knownSessions map[string]bool
+				if explicit {
+					var expandErr error
+					expanded, expandErr = expandSubagents(ctx, db, selection.IDs, withoutSubagents)
+					if expandErr != nil {
+						return expandErr
+					}
+					var unknown []string
+					unknown, knownSessions, expandErr = unknownSessions(ctx, db, selection.IDs)
+					if expandErr != nil {
+						return expandErr
+					}
+					if len(unknown) > 0 && !dryRun {
+						refusal := unknownSessionRefusal(unknown)
+						if jsonOutput {
+							if err := printPushRefusalJSON(cmd.OutOrStdout(), refusal.Error()); err != nil {
+								return err
+							}
+						}
+						return refusal
+					}
+					runCfg.FilterSessionIDs = expanded.ids()
+				}
+
 				// Home paths and PII are stripped from metadata on the way out even
 				// for a session imported before redaction existed, or under a level
 				// this version no longer offers. The resolution and its wording are
@@ -461,8 +530,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				// selectable in the wizard; the flag does NOT imply
 				// --non-interactive, so the public-consent prompt below still
 				// applies.
-				isTTY := term.IsTerminal(int(os.Stdin.Fd()))
-				if pushWizardEnabled(dryRun, jsonOutput, isTTY, nonInteractive, lastGood) {
+				if pushWizardEnabled(dryRun, jsonOutput, isTTY, nonInteractive, lastGood, explicit) {
 					wizQuery := push.PushCandidateQuery{
 						Force:          force,
 						SourceProvider: sourceHarness,
@@ -493,12 +561,64 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				if event != "" && (!requireAutoPublishRule || !event.IsValid()) {
 					return fmt.Errorf("village push: --auto-publish-event requires --require-auto-publish-rule and a supported hook event; nothing was uploaded")
 				}
-				autoPublish, planErr := planAutoPublish(ctx, cmd, db, cfg, runCfg, requireAutoPublishRule, event)
-				if planErr != nil {
-					return planErr
+				var autoPublish autoPublishPlan
+				var collectiveIDs []schema.VillageUUID
+				var collectiveNames []string
+				if explicitCollective {
+					// --collective is the developer's own publish action, so
+					// the rules are not consulted and a paused rule does not
+					// hold a session it names. Resolving the names is the one
+					// read a dry run makes: an unknown name fails here, in the
+					// plan, rather than at upload. The lookup client has no
+					// request observer yet, so a refusal below still exits as
+					// nothing attempted.
+					lookup := run.sharedClient
+					if lookup == nil {
+						lookup = deps.newVillageClient(creds.VillageURL, creds.APIKey, village.NewPooledHTTPClient(creds.VillageURL, 1))
+					}
+					var refErr error
+					collectiveIDs, collectiveNames, refErr = resolveCollectiveRefs(ctx, lookup, collectiveRefs)
+					if refErr != nil {
+						refusal := fmt.Errorf("village push: %w", refErr)
+						if jsonOutput {
+							if err := printPushRefusalJSON(cmd.OutOrStdout(), refusal.Error()); err != nil {
+								return err
+							}
+						}
+						return refusal
+					}
+					autoPublish = explicitSharePlan(expanded.ids(), collectiveIDs)
+					runCfg.PinnedSessionIDs = autoPublish.pinned
+					cfg, runCfg = push.CollectiveAudience(cfg, runCfg)
+					if collectiveDecision == clicontract.ConfirmAsk {
+						candidates, queryErr := push.QueryPushCandidates(ctx, db, push.PushCandidateQuery{
+							Force: runCfg.Force, SourceProvider: runCfg.SourceProvider, Method: cfg.Push.Method, Sources: cfg.Push.Sources,
+						})
+						if queryErr != nil {
+							return fmt.Errorf("village push: read the sessions to confirm: %w; nothing was uploaded", queryErr)
+						}
+						kept, _ := push.NarrowCandidates(candidates, runCfg)
+						confirmed, promptErr := promptCollectiveConfirmation(cmd.InOrStdin(), cmd.ErrOrStderr(), len(kept), collectiveNames)
+						if promptErr != nil {
+							return promptErr
+						}
+						if !confirmed {
+							fmt.Fprintln(cmd.ErrOrStderr(), "village push: not confirmed; nothing was published")
+							return nil
+						}
+					}
+				} else {
+					var planErr error
+					autoPublish, planErr = planAutoPublish(ctx, cmd, db, cfg, runCfg, requireAutoPublishRule, event)
+					if planErr != nil {
+						return planErr
+					}
+					runCfg.PinnedSessionIDs = autoPublish.pinned
 				}
-				runCfg.PinnedSessionIDs = autoPublish.pinned
-				if autoPublish.bound() {
+				if autoPublish.publicHeld == nil {
+					autoPublish.publicHeld = &sync.Map{}
+				}
+				if !explicitCollective && autoPublish.bound() {
 					if len(autoPublish.collectives) > 0 {
 						if flagErr := refuseAudienceFlagsUnderRules(cmd); flagErr != nil {
 							return flagErr
@@ -756,6 +876,29 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 					shared, shareErr = push.RuleShare{Store: db, Village: pipeline.CollectiveSharer(client), Creds: creds, Retry: run.repositoryCommand() + " --force"}.Run(runCtx, result, autoPublish.collectives)
 				}
 
+				// The per-session plan of an explicit selection: one entry per
+				// requested session, each restating what the run decided.
+				var plan *jsonPushPlan
+				if explicit && result != nil {
+					entries, explainErr := explainRequested(ctx, db, planInputs{
+						selection: expanded, known: knownSessions, result: result, runCfg: runCfg, cfg: cfg,
+						autoPublish: autoPublish, collectives: collectiveIDs, refs: collectiveRefs, shared: shared, dryRun: dryRun,
+					})
+					if explainErr != nil {
+						return explainErr
+					}
+					plan = &jsonPushPlan{
+						DryRun:            dryRun,
+						Collectives:       []planCollective{},
+						Visibility:        string(config.EffectiveVisibility(runCfg.Visibility, cfg).Effective),
+						NeedsConfirmation: explicitCollective && !nonInteractive,
+						Plan:              entries,
+					}
+					for i, id := range collectiveIDs {
+						plan.Collectives = append(plan.Collectives, planCollective{ID: id, Name: collectiveNames[i]})
+					}
+				}
+
 				// Close the profile run span over the measured stages. A failed
 				// stage marks the run failed; an empty run that reached no error
 				// is still an honestly measured ok run.
@@ -836,7 +979,10 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				// same fact a third time.
 				if result.EmptyReason != "" {
 					if jsonOutput {
-						return printPushJSON(cmd.OutOrStdout(), result, annSummary, annErr)
+						return printPushJSONWithPlan(cmd.OutOrStdout(), result, annSummary, annErr, plan)
+					}
+					if plan != nil && level != outputQuiet {
+						printPushPlan(cmd.OutOrStdout(), plan)
 					}
 					// EmptyReason is the final result line — kept even under --quiet.
 					// When the rules held every session, the reasons were printed
@@ -856,7 +1002,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 
 				// Print results, routed by the resolved verbosity (--json unaffected).
 				if jsonOutput {
-					if err := printPushJSON(cmd.OutOrStdout(), result, annSummary, annErr); err != nil {
+					if err := printPushJSONWithPlan(cmd.OutOrStdout(), result, annSummary, annErr, plan); err != nil {
 						return err
 					}
 				} else if level == outputQuiet {
@@ -870,6 +1016,9 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 					printQuietUnpublishableNotice(cmd.ErrOrStderr(), annSummary, run.repositoryCommand())
 				} else {
 					printPushSummary(cmd.OutOrStdout(), result, dryRun, level == outputVerbose)
+					if plan != nil {
+						printPushPlan(cmd.OutOrStdout(), plan)
+					}
 					// Errors-by-type table: typed-category breakdown that complements
 					// the per-session writePushErrorLog. Default + verbose only;
 					// suppressed under --quiet (handled by the branch above). --json
@@ -940,6 +1089,10 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 	cmd.Flags().StringVar(&profileTrace, "profile-trace", "", "Write an optional JSONL trace of profile events to this file (mode 0600). Requires --profile-output and a distinct regular-file destination with an existing parent. JSON records an opaque trace reference, not the path; the actual path is printed to stderr unless --quiet.")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, raise it to about 2x NumCPU and confirm throughput with --timing.")
 	cmd.Flags().StringVar(&repository, "repository", "", "Only push sessions carrying this Git repository's canonical project identity (a path). Peasant first uses the normalized checkout upstream remote when there is one it can normalize, then the normalized origin remote, so separate clones using the same remote share an identity. If neither is usable — including when there is no origin remote or a remote is a local path or file:// URL — identity instead comes from the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which identity was used is printed when the push runs. Default: every configured session")
+	cmd.Flags().StringArrayVar(&sessionIDs, pushSessionFlag, nil, "Push only this session (repeatable; combines with --sessions-from). The selection is an AND with --repository, --source-harness, the saved selection and readiness; a session that fails one is reported, never sent. The subagent sessions of each named main session travel with it. Skips the push wizard. A real run refuses an id the local store does not hold")
+	clicontract.RegisterSessionsFrom(cmd)
+	cmd.Flags().StringArrayVar(&collectiveRefs, pushCollectiveFlag, nil, "Share each sent transcript with this collective: a name, UUID or page URL, as in village pull (repeatable; needs --session or --sessions-from). Publishes private and unlicensed and skips your auto-publish rules for the named sessions, so it asks for confirmation once unless --yes is given. Resolving the names is the one read a --dry-run makes")
+	cmd.Flags().BoolVar(&withoutSubagents, pushWithoutSubagentsFlag, false, "Leave out the subagent sessions of the named main sessions; the plan counts them under subagentsOmitted")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a peasant online server that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach peasant online. Default: no budget. Git hooks always pass one.")
 
 	return cmd
@@ -1561,6 +1714,9 @@ func buildAnnotationSelection(ids, hashes []string) push.AnnotationSelection {
 
 // jsonPushResult is the JSON-safe output for peasant push --json.
 type jsonPushResult struct {
+	// jsonPushPlan is set only when the run names its sessions. Its keys are
+	// additive: a document without it is unchanged.
+	*jsonPushPlan
 	New      int               `json:"new"`
 	Updated  int               `json:"updated"`
 	Skipped  int               `json:"skipped"`
@@ -1629,21 +1785,64 @@ type jsonPushSession struct {
 	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 }
 
+// jsonPushPlan is the plan of a push that names its sessions: one entry per
+// requested session, with the collectives it shares with.
+type jsonPushPlan struct {
+	DryRun            bool             `json:"dry_run"`
+	Collectives       []planCollective `json:"collectives"`
+	Visibility        string           `json:"visibility"`
+	NeedsConfirmation bool             `json:"needsConfirmation"`
+	Plan              []planEntry      `json:"plan"`
+}
+
 // printPushJSON outputs the push result as JSON including annotation summary.
 func printPushJSON(w io.Writer, result *push.PushResult, annSummary *push.AnnotationPushSummary, annErr error) error {
+	return printPushJSONWithPlan(w, result, annSummary, annErr, nil)
+}
+
+// printPushPlan prints the plan of a push that names its sessions, one line
+// per session and one per subagent session under it.
+func printPushPlan(w io.Writer, plan *jsonPushPlan) {
+	fmt.Fprintln(w, "\nPlan:")
+	var line func(entry planEntry, indent string)
+	line = func(entry planEntry, indent string) {
+		text := indent + entry.SessionID + "  " + string(entry.Verdict)
+		if entry.Reason != "" {
+			text += " (" + string(entry.Reason) + ")"
+		}
+		if entry.SubagentsOmitted > 0 {
+			text += fmt.Sprintf(", %d subagent session(s) left out", entry.SubagentsOmitted)
+		}
+		fmt.Fprintln(w, text)
+		if entry.Next != "" {
+			fmt.Fprintln(w, indent+"  next: "+entry.Next)
+		}
+		for _, sub := range entry.Subagents {
+			line(sub, indent+"  ")
+		}
+	}
+	for _, entry := range plan.Plan {
+		line(entry, "  ")
+	}
+}
+
+// printPushJSONWithPlan is printPushJSON with the plan of a push that names
+// its sessions. A nil plan prints the document printPushJSON always printed.
+func printPushJSONWithPlan(w io.Writer, result *push.PushResult, annSummary *push.AnnotationPushSummary, annErr error, plan *jsonPushPlan) error {
 	meta := clicontract.NewMeta()
 	if result.EmptyReason != "" {
 		meta.EmptyCode = result.EmptyCode
 		meta.EmptyReason = result.EmptyReason
 	}
 	out := jsonPushResult{
-		New:      result.New,
-		Updated:  result.Updated,
-		Skipped:  result.Skipped,
-		Errors:   result.Errors,
-		Held:     result.Held,
-		Sessions: []jsonPushSession{},
-		Meta:     meta,
+		jsonPushPlan: plan,
+		New:          result.New,
+		Updated:      result.Updated,
+		Skipped:      result.Skipped,
+		Errors:       result.Errors,
+		Held:         result.Held,
+		Sessions:     []jsonPushSession{},
+		Meta:         meta,
 	}
 	for _, sr := range result.Sessions {
 		js := jsonPushSession{
@@ -2286,8 +2485,11 @@ func buildPushWizardSessions(
 // and a session with a latest attempt is not even selectable in the wizard
 // (it reads as NeedsIngest). The flag does not imply --non-interactive: the
 // public-consent prompt still applies.
-func pushWizardEnabled(dryRun, jsonOutput, isTTY, nonInteractive, lastGood bool) bool {
-	return !dryRun && !jsonOutput && isTTY && !nonInteractive && !lastGood
+//
+// A run that names its sessions (--session, --sessions-from) skips it too: the
+// selection is already made.
+func pushWizardEnabled(dryRun, jsonOutput, isTTY, nonInteractive, lastGood, explicitSessions bool) bool {
+	return !dryRun && !jsonOutput && isTTY && !nonInteractive && !lastGood && !explicitSessions
 }
 
 // runPushWizard is a thin TTY wrapper over buildPushWizardSessions: it builds the
