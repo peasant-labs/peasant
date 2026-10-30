@@ -321,7 +321,7 @@ func TestPublicationMetadataLimits(t *testing.T) {
 				if len(metadata) != c.DocumentBytes {
 					t.Fatal("preflight input did not reach fixture byte target")
 				}
-				request, err := buildAuthoritativeRequestWithPolicy(metadata, content, limit)
+				request, err := buildAuthoritativeRequestWithPolicy(metadata, content, limit, defaults.Version)
 				if !c.Accepted {
 					if err == nil || !strings.Contains(err.Error(), c.ErrorContains) || !reflect.DeepEqual(request, schema.AuthoritativePublishRequest{}) {
 						t.Fatalf("preflight input refusal=%v want %q and no request", err, c.ErrorContains)
@@ -358,7 +358,7 @@ func TestPublicationMetadataLimits(t *testing.T) {
 				if len(metadata) >= c.DocumentBytes || len(metadata) > limit {
 					t.Fatalf("final preflight recipe input bytes=%d must fit before promotion", len(metadata))
 				}
-				actual, err := buildAuthoritativeRequestWithPolicy(metadata, content, limit)
+				actual, err := buildAuthoritativeRequestWithPolicy(metadata, content, limit, defaults.Version)
 				if !c.Accepted {
 					if err == nil || !strings.Contains(err.Error(), c.ErrorContains) || !reflect.DeepEqual(actual, schema.AuthoritativePublishRequest{}) {
 						t.Fatalf("final preflight refusal=%v want %q and no request", err, c.ErrorContains)

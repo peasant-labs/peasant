@@ -12,8 +12,8 @@ importers:
         specifier: 0.0.57
         version: 0.0.57(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
       '@peasant-labs/schema':
-        specifier: 0.36.0
-        version: 0.36.0
+        specifier: 0.38.0
+        version: 0.38.0
       '@xyflow/react':
         specifier: ^12.10.1
         version: 12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -642,12 +642,12 @@ packages:
       '@xyflow/react':
         optional: true
 
-  '@peasant-labs/schema@0.36.0':
-    resolution: {integrity: sha512-9vx3YiUuxkqqR9ED7cybQ5KTkZNo8M9co6EvT4sqMLsq8DF0k9cIyL2I2HEsq8/EVdBPSYdP2lkOa+prLKN2RQ==}
-    engines: {node: '>=26'}
-
   '@peasant-labs/schema@0.37.0':
     resolution: {integrity: sha512-BS0MiSltWF/Y1z9ZTCUi0kZ3VbtxHQhZCeCn+A8GNrHAXphlqZSHOVsI34rELzmc9hjOtz9iGL15FPDoQ0h/rQ==}
+    engines: {node: '>=26'}
+
+  '@peasant-labs/schema@0.38.0':
+    resolution: {integrity: sha512-xxMf5Nzji2H2vpSZsIIs0bzyRqvQosrSdB/ft1aImhSqSMG99kxoj8J9Fr+b5yamsujEikrGC3QZ/NwDNb5ccQ==}
     engines: {node: '>=26'}
 
   '@playwright/test@1.63.0':
@@ -2975,12 +2975,12 @@ snapshots:
       - redux
       - supports-color
 
-  '@peasant-labs/schema@0.36.0':
+  '@peasant-labs/schema@0.37.0':
     dependencies:
       yaml: 2.9.0
       zod: 4.4.3
 
-  '@peasant-labs/schema@0.37.0':
+  '@peasant-labs/schema@0.38.0':
     dependencies:
       yaml: 2.9.0
       zod: 4.4.3

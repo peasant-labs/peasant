@@ -9,7 +9,7 @@ import (
 // wantVillageAPIVersion is the single-update-point expectation for the Village
 // API contract generation exposed by Peasant's schema module pin. Bump it here
 // only after reviewing both the current and retained compatibility surfaces.
-const wantVillageAPIVersion = "0.31.0"
+const wantVillageAPIVersion = "0.33.0"
 
 // TestPinnedContractVersion_MatchesExpected fails if the schema module peasant
 // depends on reports a different Village API contract version than expected.
