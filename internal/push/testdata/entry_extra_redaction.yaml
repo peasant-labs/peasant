@@ -61,3 +61,15 @@ cases:
   - name: artifactory_password_quote_boundary
     extra: '{"password":"AP6abcdefgh12345"}'
     absent: AP6abcdefgh12345
+
+  - name: number_literal_is_not_text
+    # The digits of a float cost read as a card number to a text rule; a JSON
+    # number is never text, so the Extra keeps its bytes.
+    extra: '{"modelUsage":{"x":{"costUSD":2.0868480000000003,"inputTokens":50652}},"n":-1.5e3}'
+    sameBytes: true
+
+  - name: context_rule_beside_numbers_keeps_them
+    extra: '{"module":"github.com/acme/secretproj","costUSD":2.0868480000000003,"count":7}'
+    want: '{"module":"<GO_IMPORT>","costUSD":2.0868480000000003,"count":7}'
+    absent: github.com/acme/secretproj
+

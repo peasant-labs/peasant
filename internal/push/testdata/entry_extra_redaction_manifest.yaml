@@ -10,3 +10,5 @@ requiredNames:
   - npm_homepage_field_beside_others
   - artifactory_token_quote_boundary
   - artifactory_password_quote_boundary
+  - number_literal_is_not_text
+  - context_rule_beside_numbers_keeps_them

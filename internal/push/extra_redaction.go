@@ -2,7 +2,10 @@ package push
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/redact"
@@ -37,19 +40,30 @@ func redactEntryExtra(redactor redact.JSONRedactor, extra *string) (_ *string, o
 	// "repository" key and its URL. A token on its own cannot show them that,
 	// so the serialized document is also passed through the rules as text, as
 	// it always was. Every email, path and secret is already a placeholder
-	// here, so that pass no longer cuts into an escape. Its result is taken
-	// when it changed something and is still JSON; when it changed something
-	// and broke the document, the entry is refused rather than published with
-	// what the rule matched.
-	text, isText := redactor.RedactJSON(redacted).(string)
+	// here, so that pass no longer cuts into an escape.
+	//
+	// Number literals are masked for that pass and put back after it. The
+	// redactor never treats a JSON number as text (RedactJSON passes numbers
+	// through), and a text rule would otherwise read the digits of a float
+	// such as a cost as a card number and break the document.
+	//
+	// The pass's result is taken when it changed something and is still JSON
+	// with every number in place; when it broke the document, the entry is
+	// refused rather than published with what the rule matched.
+	masked, numbers, err := maskJSONNumbers(redacted)
+	if err != nil {
+		return nil, false, fmt.Errorf("redact entry Extra for publication: %w", err)
+	}
+	text, isText := redactor.RedactJSON(masked).(string)
 	if !isText {
 		return nil, false, fmt.Errorf("redact entry Extra for publication: a rule changed the document into another type; nothing was uploaded; correct the rule so it rewrites text in place")
 	}
-	if text != redacted {
-		if !json.Valid([]byte(text)) {
+	if text != masked {
+		restored, restoreErr := restoreJSONNumbers(text, numbers)
+		if restoreErr != nil || !json.Valid([]byte(restored)) {
 			return nil, false, fmt.Errorf("redact entry Extra for publication: a rule that matches JSON context rewrote this entry's Extra into a document that is no longer JSON; nothing was uploaded, because publishing it unredacted would send what the rule matched; leave the session out of the push, or report the rule")
 		}
-		redacted = text
+		redacted = restored
 	}
 	modelID, present, err := observedModelFromExtra(extra)
 	if err != nil {
@@ -84,4 +98,73 @@ func redactEntryExtras(redactor redact.JSONRedactor, entries []schema.SessionEnt
 		}
 	}
 	return out, nil
+}
+
+// jsonNumberMask stands in for every number literal during the text pass. A
+// single digit matches no rule.
+const jsonNumberMask = "0"
+
+// jsonNumberSpans returns the byte range of each number literal in doc, in
+// order. doc must be valid JSON.
+func jsonNumberSpans(doc string) ([][2]int, error) {
+	decoder := json.NewDecoder(strings.NewReader(doc))
+	decoder.UseNumber()
+	var spans [][2]int
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			return spans, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if number, ok := token.(json.Number); ok {
+			end := int(decoder.InputOffset())
+			spans = append(spans, [2]int{end - len(number), end})
+		}
+	}
+}
+
+// maskJSONNumbers replaces every number literal in doc with jsonNumberMask and
+// returns the literals it replaced, in order.
+func maskJSONNumbers(doc string) (string, []string, error) {
+	spans, err := jsonNumberSpans(doc)
+	if err != nil {
+		return "", nil, err
+	}
+	var out strings.Builder
+	numbers := make([]string, 0, len(spans))
+	last := 0
+	for _, span := range spans {
+		out.WriteString(doc[last:span[0]])
+		out.WriteString(jsonNumberMask)
+		numbers = append(numbers, doc[span[0]:span[1]])
+		last = span[1]
+	}
+	out.WriteString(doc[last:])
+	return out.String(), numbers, nil
+}
+
+// restoreJSONNumbers puts the masked number literals back, in order. It
+// refuses a document whose numbers a rule added, removed or rewrote.
+func restoreJSONNumbers(doc string, numbers []string) (string, error) {
+	spans, err := jsonNumberSpans(doc)
+	if err != nil {
+		return "", err
+	}
+	if len(spans) != len(numbers) {
+		return "", fmt.Errorf("the document holds %d numbers after redaction, want %d", len(spans), len(numbers))
+	}
+	var out strings.Builder
+	last := 0
+	for i, span := range spans {
+		if doc[span[0]:span[1]] != jsonNumberMask {
+			return "", fmt.Errorf("a rule rewrote a masked number")
+		}
+		out.WriteString(doc[last:span[0]])
+		out.WriteString(numbers[i])
+		last = span[1]
+	}
+	out.WriteString(doc[last:])
+	return out.String(), nil
 }
