@@ -12,7 +12,8 @@
    the library. No welcome, separate import confirmation, or ready screen.
 
 Existing configured installations open the library directly. Keep existing
-selection and data. There is no account, privacy questionnaire, or publishing step.
+selection and data. Keep other settings, including retention, unchanged unless
+explicitly edited. There is no account, privacy questionnaire, or publishing step.
 
 ```mermaid
 flowchart LR
