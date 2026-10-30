@@ -145,8 +145,11 @@ Verdicts: `will_publish`, `will_update`, `unchanged`, `held`, `excluded`,
 `not_ready`, `unknown_session`, `failed`. Reasons: `not_in_store`,
 `outside_repository`, `harness_mismatch`, `branch_selection_excluded`,
 `needs_ingest`, `cohort_not_ready`, `latest_attempt_kept`,
-`unchanged_content`, `transcript_is_public`, `no_metrics`. Both sets are
-closed.
+`unchanged_content`, `transcript_is_public`, `no_metrics`, `no_model_reply`.
+Both sets are closed. `needs_ingest` names the forced harvest that re-indexes
+the session; `no_model_reply` is a session that never reached a model (it
+holds no assistant reply, only setup or local commands), so its source names
+no model, which peasant online requires, and no harvest can clear it.
 
 With a plan, the counts are the tally of the plan and nothing else. Every
 entry, each subagent session included, adds one to exactly one count, so the

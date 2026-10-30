@@ -957,8 +957,13 @@ func (p *Pipeline) pushSession(
 	if err == nil {
 		err = ValidatePublicationInput(input)
 	}
-	if err != nil {
+	if reason, _ := NotReadyReasonOf(err); reason == NotReadyNoModelReply {
+		// No ingest can clear it, so the refusal names no ingest to retry.
+		err = fmt.Errorf("%w; after run-level capability negotiation and before redaction, content construction, or upload; the ordinary local run audit still records this failed session", err)
+	} else if err != nil {
 		err = fmt.Errorf("%w; after run-level capability negotiation and before redaction, content construction, or upload; the ordinary local run audit still records this failed session; retry normal ingest in this command context: %s", err, p.ingestCommand("--session "+shellQuote(sess.SessionID)))
+	}
+	if err != nil {
 		return SessionPushResult{
 			SessionID: sess.SessionID,
 			HostSlug:  sess.HostSlug,

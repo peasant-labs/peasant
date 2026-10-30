@@ -21,4 +21,5 @@ reasons:
   - unchanged_content
   - transcript_is_public
   - no_metrics
+  - no_model_reply
 rejected: ["x", "", "WILL_PUBLISH", "Unchanged"]

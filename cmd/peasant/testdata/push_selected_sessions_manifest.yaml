@@ -8,6 +8,8 @@ requiredNames:
   - source_harness_and_session_are_and
   - branch_selection_excludes
   - needs_ingest_not_sent
+  - no_model_reply_is_not_ready_with_its_own_reason
+  - model_gap_needs_a_forced_harvest
   - latest_attempt_refused_without_last_good
   - latest_attempt_sent_with_last_good
   - unchanged_not_shared

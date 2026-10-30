@@ -42,8 +42,10 @@ var selectedPushCollectives = []testutil.VillageCollective{
 type selectedSeed struct {
 	ID string `yaml:"id"`
 	// Kind is ready (a verified capture), needs_ingest (a stored row with no
-	// verified capture), or latest_attempt (a last-good capture with a newer
-	// incomplete attempt kept beside it).
+	// verified capture), latest_attempt (a last-good capture with a newer
+	// incomplete attempt kept beside it), no_model_reply (a verified capture
+	// with no model and no assistant reply), or model_gap (a verified capture
+	// with an assistant reply but no model).
 	Kind string `yaml:"kind"`
 	// Where is repo or other: the git repository the session was recorded in.
 	Where string `yaml:"where"`
@@ -62,6 +64,8 @@ type selectedPlanWant struct {
 	SelectedBy       string             `yaml:"selectedBy"`
 	SubagentsOmitted int                `yaml:"subagentsOmitted"`
 	NextContains     string             `yaml:"nextContains"`
+	DetailContains   string             `yaml:"detailContains"`
+	DetailOmits      string             `yaml:"detailOmits"`
 	ShareOutcomes    []string           `yaml:"shareOutcomes"`
 	Subagents        []selectedPlanWant `yaml:"subagents"`
 }
@@ -244,6 +248,19 @@ func (w *selectedWorld) seed(t *testing.T, seed selectedSeed, order int64) {
 	switch seed.Kind {
 	case "ready", "latest_attempt":
 		testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
+	case "no_model_reply", "model_gap":
+		// A verified capture whose source names no model: with only a user
+		// entry the session never reached a model; with an assistant reply
+		// the model is an ingest gap.
+		entry.Metadata.Model = ""
+		role := schema.RoleUser
+		if seed.Kind == "model_gap" {
+			role = schema.RoleAssistant
+		}
+		text := "recorded text"
+		testutil.SeedReadyPublication(t, db, entry.Metadata, []schema.SessionEntry{{
+			SessionID: schema.SessionID(seed.ID), Harness: schema.HarnessClaudeCode, EntryType: schema.EntryTypeText, Role: role, ContentPreview: &text,
+		}})
 	case "needs_ingest":
 		if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
 			t.Fatal(err)
@@ -456,6 +473,13 @@ func assertSelectedPlan(t *testing.T, where string, got []any, want []selectedPl
 		omitted, _ := entry["subagentsOmitted"].(float64)
 		if int(omitted) != w.SubagentsOmitted {
 			t.Errorf("%s subagentsOmitted = %v, want %d\n%s", label, omitted, w.SubagentsOmitted, context)
+		}
+		detail, _ := entry["detail"].(string)
+		if w.DetailContains != "" && !strings.Contains(detail, w.DetailContains) {
+			t.Errorf("%s detail = %q, want it to contain %q\n%s", label, detail, w.DetailContains, context)
+		}
+		if w.DetailOmits != "" && strings.Contains(detail, w.DetailOmits) {
+			t.Errorf("%s detail = %q, want it not to contain %q\n%s", label, detail, w.DetailOmits, context)
 		}
 		next, _ := entry["next"].(string)
 		if w.NextContains != "" && !strings.Contains(next, w.NextContains) {

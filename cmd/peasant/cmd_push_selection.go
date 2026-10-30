@@ -269,12 +269,14 @@ const (
 	ReasonUnchangedContent    PlanReason = "unchanged_content"
 	ReasonTranscriptIsPublic  PlanReason = "transcript_is_public"
 	ReasonNoMetrics           PlanReason = "no_metrics"
+	ReasonNoModelReply        PlanReason = "no_model_reply"
 )
 
 // AllPlanReasons is the closed set of plan reasons.
 var AllPlanReasons = []PlanReason{
 	ReasonNotInStore, ReasonOutsideRepository, ReasonHarnessMismatch, ReasonBranchSelectionExcl, ReasonNeedsIngest,
 	ReasonCohortNotReady, ReasonLatestAttemptKept, ReasonUnchangedContent, ReasonTranscriptIsPublic, ReasonNoMetrics,
+	ReasonNoModelReply,
 }
 
 // NewPlanReason parses a reason, refusing any value outside the set.
@@ -468,9 +470,14 @@ func explainOne(id string, in planInputs, rows map[string]ingest.PushSessionRow,
 				case push.NotReadyLatestAttemptKept:
 					entry.Reason = ReasonLatestAttemptKept
 					entry.Detail = "a newer incomplete attempt is kept beside the last-good transcript; re-index the complete source, or publish the last-good with --last-good"
+				case push.NotReadyNoModelReply:
+					entry.Reason = ReasonNoModelReply
+					entry.Detail = "the session never reached a model: it holds no assistant reply, only setup or local commands, so its source names no model; peasant online requires one and re-indexing cannot add it; leave the session out of the push"
 				default:
 					entry.Reason = ReasonNeedsIngest
-					entry.Detail = "run `peasant harvest --session " + id + "` for this session, then retry"
+					// --force: a plain harvest skips a source it has
+					// already indexed and reports the session unchanged.
+					entry.Detail = "run `peasant harvest --session " + id + " --force` to re-index this session from its source, then retry"
 				}
 				return entry
 			}

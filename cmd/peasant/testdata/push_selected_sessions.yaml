@@ -137,6 +137,34 @@ cases:
         wantPlan:
           - { id: 0e0e0e0e-0000-4000-8000-00000000000e, verdict: not_ready, reason: needs_ingest }
 
+  - name: no_model_reply_is_not_ready_with_its_own_reason
+    # A session that never reached a model (only setup or local commands)
+    # names no model, and no re-index can add one: the plan says so instead
+    # of pointing at harvest.
+    seeds:
+      - { id: 0c1c1c1c-0000-4000-8000-00000000001c, kind: no_model_reply }
+    runs:
+      - args: [--dry-run, --json, --session, 0c1c1c1c-0000-4000-8000-00000000001c]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0c1c1c1c-0000-4000-8000-00000000001c, verdict: not_ready, reason: no_model_reply, detailContains: "never reached a model", detailOmits: "harvest" }
+      - args: [--json, --yes, --session, 0c1c1c1c-0000-4000-8000-00000000001c]
+        wantStdoutJSON: true
+        wantPublished: []
+        wantPlan:
+          - { id: 0c1c1c1c-0000-4000-8000-00000000001c, verdict: not_ready, reason: no_model_reply, detailOmits: "harvest" }
+
+  - name: model_gap_needs_a_forced_harvest
+    # An assistant reply without a model is an ingest gap. A plain harvest
+    # reports an already-indexed source unchanged, so the hint forces it.
+    seeds:
+      - { id: 0d1d1d1d-0000-4000-8000-00000000001d, kind: model_gap }
+    runs:
+      - args: [--dry-run, --json, --session, 0d1d1d1d-0000-4000-8000-00000000001d]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0d1d1d1d-0000-4000-8000-00000000001d, verdict: not_ready, reason: needs_ingest, detailContains: "peasant harvest --session 0d1d1d1d-0000-4000-8000-00000000001d --force" }
+
   - name: latest_attempt_refused_without_last_good
     seeds:
       - { id: 0f0f0f0f-0000-4000-8000-00000000000f, kind: latest_attempt }

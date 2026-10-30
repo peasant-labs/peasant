@@ -61,6 +61,11 @@ const (
 	// attempt beside its last-good generation. It is published only with an
 	// explicit --last-good.
 	NotReadyLatestAttemptKept NotReadyReason = "latest_attempt_kept"
+	// NotReadyNoModelReply is a session that never reached a model: it holds
+	// no assistant reply, only setup or local commands, so its source names no
+	// model. A publication requires one and a re-index cannot add it, so the
+	// session stays unpublishable.
+	NotReadyNoModelReply NotReadyReason = "no_model_reply"
 )
 
 // NotReadyError is the refusal ValidatePublicationInput returns. It carries
@@ -100,10 +105,24 @@ func ValidatePublicationInput(input ingest.PublicationInputBundle) error {
 			"incomplete captures require positional omission placeholders or validated retained unknown payloads with complete source coordinates, and carry partial diagnostics; "+
 			"run peasant ingest with the stored source available and retry", ErrMetadataMissing)}
 	}
+	if input.Metadata.Model == "" && !hasModelReply(input.Entries) {
+		return &NotReadyError{Reason: NotReadyNoModelReply, err: fmt.Errorf("load publication input from peasant.db: %w; the session holds no assistant reply, only setup or local commands, so its source names no model and re-indexing cannot add one; nothing uploaded; leave the session out of the push", ErrNoModel)}
+	}
 	if input.Metadata.Model == "" {
 		return &NotReadyError{Reason: NotReadyNeedsIngest, err: fmt.Errorf("load publication input from peasant.db: %w; nothing uploaded; run peasant ingest with source model evidence and retry", ErrNoModel)}
 	}
 	return nil
+}
+
+// hasModelReply reports whether any entry is an assistant reply, the only
+// entry a model writes.
+func hasModelReply(entries []schema.SessionEntry) bool {
+	for _, entry := range entries {
+		if entry.Role == schema.RoleAssistant {
+			return true
+		}
+	}
+	return false
 }
 
 // LoadPublicationMetadata prepares list candidates for one lightweight store
