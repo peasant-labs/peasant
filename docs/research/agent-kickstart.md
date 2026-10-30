@@ -1,8 +1,9 @@
-# Install Peasant and run Kickstart from a coding agent
+# Install Peasant and run Kickstart
 
-**Proposal:** install Peasant and complete Kickstart from a coding agent, including
-machines without Peasant. Prefer a native installer/setup window; this integration
-and GUI are new work, not shipped behavior.
+**Proposal:** a simple website download popup followed by local setup. The popup,
+native setup window, and agent installation handoff are new work, not shipped behavior.
+
+[Rendered flow and interactive mockup](https://peasant-kickstart-proposal.handysoftwarestudios.chatgpt.site).
 
 ## What exists
 
@@ -25,17 +26,15 @@ configures separately requested auto-publication. It cannot bootstrap installati
 
 ## Proposed flow
 
+On the website, **Install Peasant** opens a small OS download popup. After
+installation, project selection happens in the local Peasant app; a coding agent
+can hand off to the same setup.
+
 ```mermaid
 flowchart TD
-    A["User chooses install and set up"] --> B{"Peasant installed?"}
-    B -- no --> C["Approve official OS/architecture installation"]
-    C --> D["Verify artifact and install"]
-    B -- yes --> E["Canonical Kickstart"]
-    D --> E
-    E --> F["Existing terminal setup<br/>or proposed native window"]
-    F --> G["Choose import scope and review"]
-    G --> H["Confirm save and import locally"]
-    H --> I["Ready: nothing published"]
+    A["Website: Install Peasant"] --> B["OS download popup"]
+    B --> C["Local Kickstart: choose projects"]
+    C --> D["Ready: nothing published"]
 ```
 
 Bootstrap identifies the target machine, OS, and architecture; never silently
