@@ -1,0 +1,136 @@
+{
+  "source": "710ad57192a5a9ba9d65a29c7b18013ead4748d2",
+  "tree": "f91d7a523e669cfdce0366ba825d9a98e68f01f1",
+  "reviewedHead": "f4f6c7095d1be5eb4693e0dbcc2713c91527693b",
+  "reviewedTree": "f91d7a523e669cfdce0366ba825d9a98e68f01f1",
+  "sourceTreeEqual": true,
+  "binarySha256": "370e5c46a5fb2387499cda5fa268c2b7fb8477cff942376d3c00c32a9f99ba7f",
+  "version": "peasant v0.13.6-dev.4+710ad5719",
+  "fairtrade": "0.0.57",
+  "buildCommand": "GOTOOLCHAIN=go1.25.8 make build",
+  "assets": [
+    {
+      "path": "/_next/static/css/167e41ca30a44252.css",
+      "sha256": "0a9c19e6e0b47dce4490780e8b9e292be98962100a70af939a2103fa6bcfba2d",
+      "markers": [
+        "home-filters-menu"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    },
+    {
+      "path": "/_next/static/css/ddc2349e1aff46ce.css",
+      "sha256": "03aed0226185d7e325cedcc495d7947f55a0c3624f065aa45206f28c8c299fe1",
+      "markers": [
+        "gmp-diff-state"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    },
+    {
+      "path": "/_next/static/css/9d074add385ccaa3.css",
+      "sha256": "544e74950aa5c8c371261f17253d52ab4471ad620d49bad071cc013fe6497b46",
+      "markers": [
+        "gmp-diff-state"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    },
+    {
+      "path": "/_next/static/chunks/7918-45dc6729fe5899ca.js",
+      "sha256": "6e4f61501f2a2e16a149c997ba3055a6671e67950d3311008477e037cf0ef961",
+      "markers": [
+        "gmp-diff-state"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    },
+    {
+      "path": "/_next/static/chunks/app/page-cf64f177dbeb55c6.js",
+      "sha256": "abaae37f0c79cf68c64534e9af92490c5b4f38eb6c51bcffad35b4ca3d523775",
+      "markers": [
+        "home-filters-menu"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    },
+    {
+      "path": "/_next/static/chunks/app/review/[[...segments]]/page-e204b2c0b505e8c6.js",
+      "sha256": "304fd71fceca87aa9e051f017c0f9d02c264590fa861069a9f09cde4f4bfba39",
+      "markers": [
+        "retry file diffs",
+        "gmp-diff-state"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    }
+  ],
+  "runtime": [
+    {
+      "port": 8691,
+      "pid": 8011,
+      "cwd": "/private/tmp/peasant-responsive-merged-build",
+      "args": [
+        "--data-dir",
+        "/tmp/peasant-ui-preview/data",
+        "--config-dir",
+        "/tmp/peasant-ui-preview/config",
+        "--state-dir",
+        "/tmp/peasant-ui-preview/state",
+        "web",
+        "start",
+        "--port",
+        "8691",
+        "--foreground",
+        "--no-browser"
+      ],
+      "log": "/tmp/peasant-full-audit/final-server.log",
+      "source": "710ad57192a5a9ba9d65a29c7b18013ead4748d2",
+      "fairtrade": "0.0.57",
+      "binarySha256": "370e5c46a5fb2387499cda5fa268c2b7fb8477cff942376d3c00c32a9f99ba7f",
+      "version": "peasant v0.13.6-dev.4+710ad5719"
+    },
+    {
+      "port": 8698,
+      "pid": 8024,
+      "cwd": "/private/tmp/peasant-responsive-merged-build",
+      "args": [
+        "--config",
+        "/tmp/peasant-full-audit/mock/config/config.yaml",
+        "--data-dir",
+        "/tmp/peasant-full-audit/mock/data",
+        "--config-dir",
+        "/tmp/peasant-full-audit/mock/config",
+        "--state-dir",
+        "/tmp/peasant-full-audit/mock/state",
+        "web",
+        "start",
+        "--foreground",
+        "--no-browser",
+        "--port",
+        "8698",
+        "--mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations"
+      ],
+      "log": "/tmp/peasant-full-audit/mock-server-final.log",
+      "source": "710ad57192a5a9ba9d65a29c7b18013ead4748d2",
+      "fairtrade": "0.0.57",
+      "binarySha256": "370e5c46a5fb2387499cda5fa268c2b7fb8477cff942376d3c00c32a9f99ba7f",
+      "version": "peasant v0.13.6-dev.4+710ad5719"
+    }
+  ],
+  "numericGeometryRepeated": false,
+  "numericReason": "Identical source tree and font/layout CSS; native version stamp does not affect numeric or avatar layout. Existing reviewed geometry remains applicable.",
+  "layoutCssIdenticalToReviewedBuild": true
+}

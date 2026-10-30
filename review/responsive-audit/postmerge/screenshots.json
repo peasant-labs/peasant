@@ -1,0 +1,82 @@
+[
+  {
+    "file": "focused/changes-error-dark-1440.png",
+    "sha256": "e07aae463d75cfccd56455f99e58090d2e48a23a454c2a021107e4e62cb95374"
+  },
+  {
+    "file": "focused/changes-error-dark-390.png",
+    "sha256": "610dd54be06a4ce34afb025d57922ab93146e073442ba6e31a9e618135ae1769"
+  },
+  {
+    "file": "focused/changes-error-light-1440.png",
+    "sha256": "709a961b8200d86c9a06ed983a677c22265e0c0e3cd0e818978e0c49a6eca4d4"
+  },
+  {
+    "file": "focused/changes-error-light-390.png",
+    "sha256": "c1b9e1a9d5b5ba5036feb2c2de1e59b7198a1267412e4364fe192ce5f64dcf8a"
+  },
+  {
+    "file": "focused/changes-loaded-dark-1440.png",
+    "sha256": "3dccb3ccfebdbf47b43902ce2733583d571bc22c7a536158275cc2c7fd89c3e2"
+  },
+  {
+    "file": "focused/changes-loaded-dark-390.png",
+    "sha256": "93ed0c8109ff364509e2a226c4fc5070be90799451b282fdaa5ed02fd08d5648"
+  },
+  {
+    "file": "focused/changes-loaded-light-1440.png",
+    "sha256": "5e7ca329c2c5ae498870ba6d03b062c6ef709ada203ce845be07da76401b3ffa"
+  },
+  {
+    "file": "focused/changes-loaded-light-390.png",
+    "sha256": "0f205b52328be24c61fcf4fc2107a3e1da6b041e2b56ebf41a206235dbedcbbf"
+  },
+  {
+    "file": "focused/permalink-1-dark-1440.png",
+    "sha256": "85e135f075e1f84c42c278a12ecdce8cbd09c0da9f53152ee6b66381bd3e4ab8"
+  },
+  {
+    "file": "focused/permalink-1-dark-390.png",
+    "sha256": "a59b7af5866752572043d9e915b003ebf44810eec026cbd63c1e72f9ba017192"
+  },
+  {
+    "file": "focused/permalink-1-light-1440.png",
+    "sha256": "56cbf92a966943237d90c689d710d4effb6460458393ad7eb210c8605cb9e2c8"
+  },
+  {
+    "file": "focused/permalink-1-light-390.png",
+    "sha256": "c5b369b9d4da7c49425e403157dfaf50f6a25b37f61d4187bdcd4e30fbd41a85"
+  },
+  {
+    "file": "focused/permalink-222-dark-1440.png",
+    "sha256": "132a0e2d354d217249d3db7d6f779e39d3bb6bbf0984a0cd78bb15dc8730833a"
+  },
+  {
+    "file": "focused/permalink-222-dark-390.png",
+    "sha256": "1a1d4bd66663af198d056c63cde3c608ca48fad80b6efe425d6cc0b636b3afa2"
+  },
+  {
+    "file": "focused/permalink-222-light-1440.png",
+    "sha256": "c2fa765cf3efea32641bcc505ab938860ea3813f518dc7b961bb8ecd0324685c"
+  },
+  {
+    "file": "focused/permalink-222-light-390.png",
+    "sha256": "b99f06e1da868cefba625576597127f8beb9b9efbe78c42928d14be32c780c3d"
+  },
+  {
+    "file": "focused/turn-custom-label-dark-1440.png",
+    "sha256": "937b350a3034d1190c9994f19c0ef0f8905bb586ecee34c83ef896a6b79eb96b"
+  },
+  {
+    "file": "focused/turn-custom-label-dark-390.png",
+    "sha256": "b74bd21b59a2b5ccf39b4c7d270c647a0cb505cb9f889615efa4a7e23f89b163"
+  },
+  {
+    "file": "focused/turn-custom-label-light-1440.png",
+    "sha256": "a7fbf4f39842b9a3d1f976c01f6fd03af6be1871e91c68f6ba695580747cb636"
+  },
+  {
+    "file": "focused/turn-custom-label-light-390.png",
+    "sha256": "2cf9227f040061e5bbb7c3917ec6e5902449ed7c9893c7c58a73b9ba141ce974"
+  }
+]
