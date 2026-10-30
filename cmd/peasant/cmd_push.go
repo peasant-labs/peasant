@@ -568,6 +568,20 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				// private, then the authoritative owner update converges it to the
 				// requested public state. Do NOT move the redaction record inside this
 				// condition: the record belongs to every push.
+				//
+				// --json is an output format, never consent. A prompt would
+				// corrupt the one JSON document on stdout, so under --json the
+				// prompt is never shown: an explicit --yes/--non-interactive
+				// publishes, and anything else is refused here, before the
+				// client that makes the first peasant online request exists, so
+				// the refusal exits as "nothing attempted".
+				publicPush := !dryRun && effectiveVisibility == config.VisibilityPublic
+				if publicPush && jsonOutput && !nonInteractive {
+					if err := printPushRefusalJSON(cmd.OutOrStdout(), publicConsentJSONRefusal); err != nil {
+						return err
+					}
+					return errors.New("village push: " + publicConsentJSONRefusal)
+				}
 				if !dryRun && !jsonOutput && effectiveVisibility == config.VisibilityPublic {
 					consented, promptErr := promptPublicConsent(cmd.InOrStdin(), cmd.ErrOrStderr(), nonInteractive, isTTY)
 					if promptErr != nil {
@@ -1552,6 +1566,22 @@ type jsonPushResult struct {
 	EmptyReason string            `json:"empty_reason,omitempty"`
 	Sessions    []jsonPushSession `json:"sessions"`
 	Annotations *jsonAnnotResult  `json:"annotations,omitempty"`
+	// Refusal names why the push stopped before any peasant online request
+	// and how to proceed. Set only on a refused run, which exits 3.
+	Refusal string `json:"refusal,omitempty"`
+}
+
+// publicConsentJSONRefusal is the refusal a public push gets under --json
+// without --yes. It is printed inside the JSON document and returned as the
+// command's error, so a caller reading either one learns the fix.
+const publicConsentJSONRefusal = "a public push needs explicit consent, and --json is an output format, not consent; nothing was uploaded; re-run with --yes to publish publicly, or push privately"
+
+// printPushRefusalJSON writes the one JSON document of a push refused before
+// any peasant online request: zero counts, no sessions, and the refusal.
+func printPushRefusalJSON(w io.Writer, refusal string) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(jsonPushResult{Sessions: []jsonPushSession{}, Refusal: refusal})
 }
 
 // jsonAnnotResult is the JSON-safe annotation push summary.

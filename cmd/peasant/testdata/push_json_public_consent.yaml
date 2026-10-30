@@ -1,0 +1,44 @@
+# --json is an output format and never stands in for public consent. Each case
+# runs the production push over one publishable session against a local
+# peasant online that records every request. Every case also asserts that
+# stdout is exactly one JSON document and that no consent prompt was printed.
+#
+# configVisibility is push.visibility in the config file; args are appended to
+# --json. stdin is what the command reads, so a case can prove that an answer
+# waiting on stdin is never taken as consent under --json.
+cases:
+  - name: json_public_without_yes_refuses
+    configVisibility: private
+    args: ["--visibility", "public"]
+    wantExit: 3
+    wantRefusal: true
+    wantRequests: false
+
+  - name: json_public_from_config_default_refuses
+    configVisibility: public
+    args: []
+    wantExit: 3
+    wantRefusal: true
+    wantRequests: false
+
+  - name: json_public_with_yes_publishes
+    configVisibility: private
+    args: ["--visibility", "public", "--yes"]
+    wantRefusal: false
+    wantRequests: true
+    wantPublishAttempt: true
+
+  - name: json_private_unchanged
+    configVisibility: private
+    args: []
+    wantRefusal: false
+    wantRequests: true
+    wantPublishAttempt: true
+
+  - name: json_never_prints_prompt
+    configVisibility: public
+    args: []
+    stdin: "y\n"
+    wantExit: 3
+    wantRefusal: true
+    wantRequests: false

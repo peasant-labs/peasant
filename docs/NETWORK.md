@@ -38,6 +38,7 @@ Peasant is a local-first tool. All ingestion, indexing, and analysis happens on 
 - `--force` flag skips the wizard (for scripting)
 - Non-TTY environments skip the wizard automatically
 - `--non-interactive` (or `--yes`) skips the wizard deliberately. **This is what an installed Git hook runs**, so a hook-triggered push shows no wizard and asks nothing — see [Hook-triggered push](#6-hook-triggered-push), where installing the hook is the consent step instead.
+- A public push needs explicit consent: answering `y` at the prompt, or `--yes`/`--non-interactive`. `--json` is an output format, never consent: a public push under `--json` without `--yes` is refused before any request to peasant online, exits 3, and carries the refusal in the JSON document's `refusal` field.
 
 **What is sent:**
 
