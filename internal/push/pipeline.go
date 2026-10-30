@@ -1138,10 +1138,21 @@ func (p *Pipeline) pushSession(
 	// receiver. It reports the derived requirements, not a receiver's answer.
 	// The forecast status mirrors the real classify: a previously-pushed session
 	// would be an update, otherwise a new upload.
+	//
+	// The comparison with the receipt is local, so the forecast makes it too: a
+	// session the village already holds unchanged is forecast as skipped, the
+	// status the real run gives it, rather than as an update it would not send.
 	if p.runCfg.DryRun {
 		status := PushStatusNew
 		if sess.PushedAt != nil {
 			status = PushStatusUpdated
+		}
+		if !p.runCfg.Force && sess.PushedAt != nil && previous != nil && !p.changesVisibility() {
+			if operation, opErr := schema.CanonicalizePublishRequest(request); opErr == nil {
+				if fingerprint, fpErr := schema.FingerprintPublishOperation(operation); fpErr == nil && alreadyHeld(previous.Receipt, operation, fingerprint) {
+					status = PushStatusSkipped
+				}
+			}
 		}
 		return SessionPushResult{
 			SessionID:            sess.SessionID,
