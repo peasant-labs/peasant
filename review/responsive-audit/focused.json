@@ -1,0 +1,614 @@
+[
+  {
+    "name": "permalink-1",
+    "theme": "light",
+    "width": 1440,
+    "inert": [
+      {
+        "class": "txn-app txn-light txn-ledger txn-app-condensed",
+        "top": 0
+      },
+      {
+        "class": "txn-center",
+        "top": 0
+      },
+      {
+        "class": "txn-streamwrap",
+        "top": 0
+      }
+    ],
+    "streamTop": 198,
+    "gap": 0,
+    "phaseRules": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "roleBorders": [
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "scroll": 1440
+  },
+  {
+    "name": "diagram-readability",
+    "theme": "light",
+    "width": 1440,
+    "labels": [
+      {
+        "text": "yes",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "no",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "disconnect",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "disconnect",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Validate resumecursor",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Read boundedpage",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Escape and streamCSV",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Advance compositecursor",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "More rows?",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Finish response",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Cancel work",
+        "font": 16,
+        "inside": true
+      }
+    ],
+    "client": 765,
+    "scroll": 765
+  },
+  {
+    "name": "permalink-222",
+    "theme": "light",
+    "width": 1440,
+    "inert": [
+      {
+        "class": "txn-app txn-light txn-ledger txn-app-condensed",
+        "top": 0
+      },
+      {
+        "class": "txn-center",
+        "top": 0
+      },
+      {
+        "class": "txn-streamwrap",
+        "top": 0
+      }
+    ],
+    "streamTop": 14456,
+    "gap": 0,
+    "phaseRules": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "roleBorders": [
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "scroll": 1440
+  },
+  {
+    "name": "diff-error-bounds",
+    "theme": "light",
+    "width": 513.171875,
+    "wrap": "anywhere",
+    "inside": true,
+    "text": "GET /api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go failed (503): Synthetic diff read failure; retry this file."
+  },
+  {
+    "name": "diff-error-retry",
+    "theme": "light",
+    "width": 1440,
+    "reads": [
+      {
+        "url": "http://localhost:8698/api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go",
+        "status": 503
+      },
+      {
+        "url": "http://localhost:8698/api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go",
+        "status": 200
+      }
+    ]
+  },
+  {
+    "name": "permalink-1",
+    "theme": "light",
+    "width": 390,
+    "inert": [
+      {
+        "class": "txn-app txn-light txn-ledger txn-app-condensed",
+        "top": 0
+      },
+      {
+        "class": "txn-center",
+        "top": 0
+      },
+      {
+        "class": "txn-streamwrap",
+        "top": 0
+      }
+    ],
+    "streamTop": 266,
+    "gap": 0,
+    "phaseRules": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "roleBorders": [
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "scroll": 390
+  },
+  {
+    "name": "diagram-readability",
+    "theme": "light",
+    "width": 390,
+    "labels": [
+      {
+        "text": "yes",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "no",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "disconnect",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "disconnect",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Validate resumecursor",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Read boundedpage",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Escape and streamCSV",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Advance compositecursor",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "More rows?",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Finish response",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Cancel work",
+        "font": 16,
+        "inside": true
+      }
+    ],
+    "client": 324,
+    "scroll": 564
+  },
+  {
+    "name": "permalink-222",
+    "theme": "light",
+    "width": 390,
+    "inert": [
+      {
+        "class": "txn-app txn-light txn-ledger txn-app-condensed",
+        "top": 0
+      },
+      {
+        "class": "txn-center",
+        "top": 0
+      },
+      {
+        "class": "txn-streamwrap",
+        "top": 0
+      }
+    ],
+    "streamTop": 18523,
+    "gap": 0,
+    "phaseRules": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "roleBorders": [
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "scroll": 390
+  },
+  {
+    "name": "diff-error-bounds",
+    "theme": "light",
+    "width": 340,
+    "wrap": "anywhere",
+    "inside": true,
+    "text": "GET /api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go failed (503): Synthetic diff read failure; retry this file."
+  },
+  {
+    "name": "diff-error-retry",
+    "theme": "light",
+    "width": 390,
+    "reads": [
+      {
+        "url": "http://localhost:8698/api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go",
+        "status": 503
+      },
+      {
+        "url": "http://localhost:8698/api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go",
+        "status": 200
+      }
+    ]
+  },
+  {
+    "name": "permalink-1",
+    "theme": "dark",
+    "width": 1440,
+    "inert": [
+      {
+        "class": "txn-app txn-ledger txn-app-condensed",
+        "top": 0
+      },
+      {
+        "class": "txn-center",
+        "top": 0
+      },
+      {
+        "class": "txn-streamwrap",
+        "top": 0
+      }
+    ],
+    "streamTop": 198,
+    "gap": 0,
+    "phaseRules": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "roleBorders": [
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "scroll": 1440
+  },
+  {
+    "name": "diagram-readability",
+    "theme": "dark",
+    "width": 1440,
+    "labels": [
+      {
+        "text": "yes",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "no",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "disconnect",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "disconnect",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Validate resumecursor",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Read boundedpage",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Escape and streamCSV",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Advance compositecursor",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "More rows?",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Finish response",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Cancel work",
+        "font": 16,
+        "inside": true
+      }
+    ],
+    "client": 765,
+    "scroll": 765
+  },
+  {
+    "name": "permalink-222",
+    "theme": "dark",
+    "width": 1440,
+    "inert": [
+      {
+        "class": "txn-app txn-ledger txn-app-condensed",
+        "top": 0
+      },
+      {
+        "class": "txn-center",
+        "top": 0
+      },
+      {
+        "class": "txn-streamwrap",
+        "top": 0
+      }
+    ],
+    "streamTop": 14456,
+    "gap": 0,
+    "phaseRules": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "roleBorders": [
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "scroll": 1440
+  },
+  {
+    "name": "diff-error-bounds",
+    "theme": "dark",
+    "width": 513.171875,
+    "wrap": "anywhere",
+    "inside": true,
+    "text": "GET /api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go failed (503): Synthetic diff read failure; retry this file."
+  },
+  {
+    "name": "diff-error-retry",
+    "theme": "dark",
+    "width": 1440,
+    "reads": [
+      {
+        "url": "http://localhost:8698/api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go",
+        "status": 503
+      },
+      {
+        "url": "http://localhost:8698/api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go",
+        "status": 200
+      }
+    ]
+  },
+  {
+    "name": "permalink-1",
+    "theme": "dark",
+    "width": 390,
+    "inert": [
+      {
+        "class": "txn-app txn-ledger txn-app-condensed",
+        "top": 0
+      },
+      {
+        "class": "txn-center",
+        "top": 0
+      },
+      {
+        "class": "txn-streamwrap",
+        "top": 0
+      }
+    ],
+    "streamTop": 266,
+    "gap": 0,
+    "phaseRules": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "roleBorders": [
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "scroll": 390
+  },
+  {
+    "name": "diagram-readability",
+    "theme": "dark",
+    "width": 390,
+    "labels": [
+      {
+        "text": "yes",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "no",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "disconnect",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "disconnect",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Validate resumecursor",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Read boundedpage",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Escape and streamCSV",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Advance compositecursor",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "More rows?",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Finish response",
+        "font": 16,
+        "inside": true
+      },
+      {
+        "text": "Cancel work",
+        "font": 16,
+        "inside": true
+      }
+    ],
+    "client": 324,
+    "scroll": 564
+  },
+  {
+    "name": "permalink-222",
+    "theme": "dark",
+    "width": 390,
+    "inert": [
+      {
+        "class": "txn-app txn-ledger txn-app-condensed",
+        "top": 0
+      },
+      {
+        "class": "txn-center",
+        "top": 0
+      },
+      {
+        "class": "txn-streamwrap",
+        "top": 0
+      }
+    ],
+    "streamTop": 18523,
+    "gap": 0,
+    "phaseRules": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "roleBorders": [
+      "1px",
+      "1px",
+      "1px"
+    ],
+    "scroll": 390
+  },
+  {
+    "name": "diff-error-bounds",
+    "theme": "dark",
+    "width": 340,
+    "wrap": "anywhere",
+    "inside": true,
+    "text": "GET /api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go failed (503): Synthetic diff read failure; retry this file."
+  },
+  {
+    "name": "diff-error-retry",
+    "theme": "dark",
+    "width": 390,
+    "reads": [
+      {
+        "url": "http://localhost:8698/api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go",
+        "status": 503
+      },
+      {
+        "url": "http://localhost:8698/api/v1/review/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/diff?branch=feat%2Fqueue-retry&file=internal%2Fqueue%2Fconsumer.go",
+        "status": 200
+      }
+    ]
+  }
+]

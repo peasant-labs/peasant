@@ -1,0 +1,7071 @@
+[
+  {
+    "name": "not-published",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": null,
+    "bar": "not published\npublish",
+    "buttons": []
+  },
+  {
+    "name": "up-to-date",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": null,
+    "bar": "published to 2 collectives\npublish",
+    "buttons": []
+  },
+  {
+    "name": "new-turns",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": null,
+    "bar": "needs update\npublish",
+    "buttons": []
+  },
+  {
+    "name": "auto-publish-on",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": null,
+    "bar": "auto-publish on, Acme Platform\npublish",
+    "buttons": []
+  },
+  {
+    "name": "unpublished-outside-ingestion-selection",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": null,
+    "bar": "not published\npublish",
+    "buttons": []
+  },
+  {
+    "name": "connect-to-village",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 378.84375,
+      "w": 720,
+      "h": 242.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 240,
+      "client": 240
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nconnect this computer to peasant online once to publish.\n\ncontinue with github\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "continue with GitHub",
+        "h": 36,
+        "w": 232.96875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "waiting-for-github",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 403.84375,
+      "w": 720,
+      "h": 192.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 190,
+      "client": 190
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwaiting for github in your browser\n\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "scanning",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 195.953125,
+      "w": 720,
+      "h": 608.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 606,
+      "client": 606
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\nscanning 84 turns…\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\nscanning…",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "scanning…",
+        "h": 36,
+        "w": 105.640625
+      }
+    ]
+  },
+  {
+    "name": "scan-failed",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 154.953125,
+      "w": 720,
+      "h": 690.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 688,
+      "client": 688
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\nthe scan failed, so publish is off. the local scan could not read this session: open the Peasant log for the cause.\ndetails\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "not-in-a-collective",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 337.34375,
+      "w": 720,
+      "h": 325.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 323,
+      "client": 323
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nyou are not in a collective yet.\ncreate or join one on peasant online \n\nnothing leaves your machine until you publish.\ncancel\npublish",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish",
+        "h": 36,
+        "w": 87.9375
+      }
+    ]
+  },
+  {
+    "name": "ready-to-publish",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 193.953125,
+      "w": 720,
+      "h": 612.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 610,
+      "client": 610
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "publishing",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 226.25,
+      "w": 720,
+      "h": 547.5,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 546,
+      "client": 546
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\npublish this repo automatically on git push\n\npublishing to 2 collectives\n\nsending your redacted transcript to peasant online.\ncancel\npublish to 2 collectives",
+    "bar": "publishing to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 260.359375
+      }
+    ]
+  },
+  {
+    "name": "published-done",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "waits-for-approval",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 315.5,
+      "w": 720,
+      "h": 369,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 367,
+      "client": 367
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\nML Reading Group shows it once its owner approves.\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "stopped-at-a-step",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 137.75,
+      "w": 720,
+      "h": 724.5,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 723,
+      "client": 723
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sharing it with Acme Company: sharing with this collective failed, so it cannot read the transcript.\ndetails\ncancel\nretry",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "update-with-new-turns",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 113.953125,
+      "w": 720,
+      "h": 772.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 770,
+      "client": 770
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\n87 members\nML Reading Group\nadding, waits for approval\n21 members\nadd a collective\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nadds ML Reading Group · removes nothing\n\nnothing leaves your machine until you update.\ncancel\nupdate and add 1 collective",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove ML Reading Group",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "update and add 1 collective",
+        "h": 36,
+        "w": 264.90625
+      }
+    ]
+  },
+  {
+    "name": "update-keeps-audience",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Platform\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "connect-completes",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 193.953125,
+      "w": 720,
+      "h": 612.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 610,
+      "client": 610
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "published-while-signed-out",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 118.65625,
+      "w": 720,
+      "h": 762.6875,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 761,
+      "client": 761
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nadd a collective\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nnothing leaves your machine until you update.\ncancel\nupdate",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add Acme Company",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "update",
+        "h": 36,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "manage-opens",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 127.453125,
+      "w": 720,
+      "h": 745.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 743,
+      "client": 743
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\nno new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nnothing leaves your machine until you update.\ncancel\nupdate",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "update",
+        "h": 36,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "update-adds-collective",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "update-removes-collective",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "manage-removes-collective",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "partial-publish-removes-reader",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "stopped-rescan-fails",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 178.75,
+      "w": 720,
+      "h": 642.5,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 641,
+      "client": 641
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\nthe scan failed, so publish is off. the local scan could not read this session: open the Peasant log for the cause.\ndetails\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "skipped-collective",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 149.75,
+      "w": 720,
+      "h": 700.5,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 699,
+      "client": 699
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sharing it with Acme Company.\ndetails\ncancel\nretry",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "held-until-ingest",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 128.953125,
+      "w": 720,
+      "h": 742.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 740,
+      "client": 740
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while waiting for this session’s ingest to finish: the session is held until ingest completes; nothing was sent.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "content-step-failed",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 140.953125,
+      "w": 720,
+      "h": 718.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 716,
+      "client": 716
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sending the content: sending the content failed.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "collectives-read-failed",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 288.34375,
+      "w": 720,
+      "h": 423.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 421,
+      "client": 421
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nyour collectives can’t load: can’t reach peasant online right now.\nretry\ndetails\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "retry loading your collectives",
+        "h": 28,
+        "w": 92.25
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish",
+        "h": 36,
+        "w": 87.9375
+      }
+    ]
+  },
+  {
+    "name": "audience-unknown",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 61.359375,
+      "w": 720,
+      "h": 877.28125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 875,
+      "client": 875
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nstopped while reading who can read it online.\ncancel\nretry",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "signed-out-on-push",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 378.84375,
+      "w": 720,
+      "h": 242.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 240,
+      "client": 240
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nconnect this computer to peasant online once to publish.\n\ncontinue with github\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "continue with GitHub",
+        "h": 36,
+        "w": 232.96875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "login-start-failed",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 266.34375,
+      "w": 720,
+      "h": 467.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 465,
+      "client": 465
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\npublish this repo automatically on git push\nstopped while starting the github sign-in: can’t reach peasant online right now.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "already-authenticated",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 193.953125,
+      "w": 720,
+      "h": 612.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 610,
+      "client": 610
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "publication-read-failed",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 117.453125,
+      "w": 720,
+      "h": 765.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 763,
+      "client": 763
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while reading whether this is published: the local publication store could not be read; inspect the Peasant log.\ndetails\ncancel\nretry",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "transcript-missing",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 121.453125,
+      "w": 720,
+      "h": 757.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 755,
+      "client": 755
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while reading whether this is published: peasant online no longer holds this transcript: run peasant village push --force for this session.\ndetails\ncancel",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "removes-final-collective",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "updated, no collective can read it\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "only-curated-collective-waits",
+    "theme": "light",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 315.5,
+      "w": 720,
+      "h": 369,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 367,
+      "client": 367
+    },
+    "body": "submitted to ML Reading Group\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\nML Reading Group shows it once its owner approves.\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "not-published",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": null,
+    "bar": "not published\npublish",
+    "buttons": []
+  },
+  {
+    "name": "up-to-date",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": null,
+    "bar": "published to 2 collectives\npublish",
+    "buttons": []
+  },
+  {
+    "name": "new-turns",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": null,
+    "bar": "needs update\npublish",
+    "buttons": []
+  },
+  {
+    "name": "auto-publish-on",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": null,
+    "bar": "auto-publish on, Acme Platform\npublish",
+    "buttons": []
+  },
+  {
+    "name": "unpublished-outside-ingestion-selection",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": null,
+    "bar": "not published\npublish",
+    "buttons": []
+  },
+  {
+    "name": "connect-to-village",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 535,
+      "w": 390,
+      "h": 309,
+      "cx": 0,
+      "cy": 267.5,
+      "scroll": 308,
+      "client": 308
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nconnect this computer to peasant online once to publish.\n\ncontinue with github\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "continue with GitHub",
+        "h": 44,
+        "w": 232.96875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "waiting-for-github",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 617,
+      "w": 390,
+      "h": 227,
+      "cx": 0,
+      "cy": 308.5,
+      "scroll": 226,
+      "client": 226
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwaiting for github in your browser\n\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "scanning",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 34.25,
+      "w": 390,
+      "h": 809.75,
+      "cx": 0,
+      "cy": 17.125,
+      "scroll": 809,
+      "client": 809
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\nscanning 84 turns…\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\nscanning…",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "scanning…",
+        "h": 44,
+        "w": 105.640625
+      }
+    ]
+  },
+  {
+    "name": "scan-failed",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\nthe scan failed, so publish is off. the local scan could not read this session: open the Peasant log for the cause.\ndetails\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "not-in-a-collective",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 414,
+      "w": 390,
+      "h": 430,
+      "cx": 0,
+      "cy": 207,
+      "scroll": 429,
+      "client": 429
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nyou are not in a collective yet.\ncreate or join one on peasant online \n\nnothing leaves your machine until you publish.\ncancel\npublish",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish",
+        "h": 44,
+        "w": 87.9375
+      }
+    ]
+  },
+  {
+    "name": "ready-to-publish",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "publishing",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 175.03125,
+      "w": 390,
+      "h": 668.96875,
+      "cx": 0,
+      "cy": 87.515625,
+      "scroll": 668,
+      "client": 668
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\npublish this repo automatically on git push\n\npublishing to 2 collectives\n\nsending your redacted transcript to peasant online.\ncancel\npublish to 2 collectives",
+    "bar": "publishing to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 260.359375
+      }
+    ]
+  },
+  {
+    "name": "published-done",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "waits-for-approval",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 375,
+      "w": 390,
+      "h": 469,
+      "cx": 0,
+      "cy": 187.5,
+      "scroll": 468,
+      "client": 468
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\nML Reading Group shows it once its owner approves.\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "stopped-at-a-step",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sharing it with Acme Company: sharing with this collective failed, so it cannot read the transcript.\ndetails\ncancel\nretry",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "update-with-new-turns",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\n87 members\nML Reading Group\nadding, waits for approval\n21 members\nadd a collective\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nadds ML Reading Group · removes nothing\n\nnothing leaves your machine until you update.\ncancel\nupdate and add 1 collective",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove ML Reading Group",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "update and add 1 collective",
+        "h": 44,
+        "w": 264.90625
+      }
+    ]
+  },
+  {
+    "name": "update-keeps-audience",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Platform\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "connect-completes",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "published-while-signed-out",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nadd a collective\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nnothing leaves your machine until you update.\ncancel\nupdate",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add Acme Company",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "update",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "manage-opens",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\nno new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nnothing leaves your machine until you update.\ncancel\nupdate",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "update",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "update-adds-collective",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "update-removes-collective",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "manage-removes-collective",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "partial-publish-removes-reader",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "stopped-rescan-fails",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\nthe scan failed, so publish is off. the local scan could not read this session: open the Peasant log for the cause.\ndetails\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "skipped-collective",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sharing it with Acme Company.\ndetails\ncancel\nretry",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "held-until-ingest",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while waiting for this session’s ingest to finish: the session is held until ingest completes; nothing was sent.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "content-step-failed",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sending the content: sending the content failed.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "collectives-read-failed",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 274,
+      "w": 390,
+      "h": 570,
+      "cx": 0,
+      "cy": 137,
+      "scroll": 569,
+      "client": 569
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nyour collectives can’t load: can’t reach peasant online right now.\nretry\ndetails\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "retry loading your collectives",
+        "h": 44,
+        "w": 92.25
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish",
+        "h": 44,
+        "w": 87.9375
+      }
+    ]
+  },
+  {
+    "name": "audience-unknown",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nstopped while reading who can read it online.\ncancel\nretry",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "signed-out-on-push",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 535,
+      "w": 390,
+      "h": 309,
+      "cx": 0,
+      "cy": 267.5,
+      "scroll": 308,
+      "client": 308
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nconnect this computer to peasant online once to publish.\n\ncontinue with github\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "continue with GitHub",
+        "h": 44,
+        "w": 232.96875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "login-start-failed",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 294,
+      "w": 390,
+      "h": 550,
+      "cx": 0,
+      "cy": 147,
+      "scroll": 549,
+      "client": 549
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\npublish this repo automatically on git push\nstopped while starting the github sign-in: can’t reach peasant online right now.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "already-authenticated",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "publication-read-failed",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while reading whether this is published: the local publication store could not be read; inspect the Peasant log.\ndetails\ncancel\nretry",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "transcript-missing",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while reading whether this is published: peasant online no longer holds this transcript: run peasant village push --force for this session.\ndetails\ncancel",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "removes-final-collective",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "updated, no collective can read it\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "only-curated-collective-waits",
+    "theme": "light",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 375,
+      "w": 390,
+      "h": 469,
+      "cx": 0,
+      "cy": 187.5,
+      "scroll": 468,
+      "client": 468
+    },
+    "body": "submitted to ML Reading Group\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\nML Reading Group shows it once its owner approves.\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "not-published",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": null,
+    "bar": "not published\npublish",
+    "buttons": []
+  },
+  {
+    "name": "up-to-date",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": null,
+    "bar": "published to 2 collectives\npublish",
+    "buttons": []
+  },
+  {
+    "name": "new-turns",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": null,
+    "bar": "needs update\npublish",
+    "buttons": []
+  },
+  {
+    "name": "auto-publish-on",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": null,
+    "bar": "auto-publish on, Acme Platform\npublish",
+    "buttons": []
+  },
+  {
+    "name": "unpublished-outside-ingestion-selection",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": null,
+    "bar": "not published\npublish",
+    "buttons": []
+  },
+  {
+    "name": "connect-to-village",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 378.84375,
+      "w": 720,
+      "h": 242.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 240,
+      "client": 240
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nconnect this computer to peasant online once to publish.\n\ncontinue with github\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "continue with GitHub",
+        "h": 36,
+        "w": 232.96875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "waiting-for-github",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 403.84375,
+      "w": 720,
+      "h": 192.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 190,
+      "client": 190
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwaiting for github in your browser\n\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "scanning",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 321.34375,
+      "w": 720,
+      "h": 357.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 355,
+      "client": 355
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\nscanning 84 turns…\n\nwho can read it\n\nno collective can read it yet.\n\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\nscanning…",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "scanning…",
+        "h": 36,
+        "w": 105.640625
+      }
+    ]
+  },
+  {
+    "name": "scan-failed",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 154.953125,
+      "w": 720,
+      "h": 690.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 688,
+      "client": 688
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\nthe scan failed, so publish is off. the local scan could not read this session: open the Peasant log for the cause.\ndetails\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "not-in-a-collective",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 337.34375,
+      "w": 720,
+      "h": 325.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 323,
+      "client": 323
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nyou are not in a collective yet.\ncreate or join one on peasant online \n\nnothing leaves your machine until you publish.\ncancel\npublish",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish",
+        "h": 36,
+        "w": 87.9375
+      }
+    ]
+  },
+  {
+    "name": "ready-to-publish",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 193.953125,
+      "w": 720,
+      "h": 612.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 610,
+      "client": 610
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "publishing",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 226.25,
+      "w": 720,
+      "h": 547.5,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 546,
+      "client": 546
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\npublish this repo automatically on git push\n\npublishing to 2 collectives\n\nsending your redacted transcript to peasant online.\ncancel\npublish to 2 collectives",
+    "bar": "publishing to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 260.359375
+      }
+    ]
+  },
+  {
+    "name": "published-done",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "waits-for-approval",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 315.5,
+      "w": 720,
+      "h": 369,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 367,
+      "client": 367
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\nML Reading Group shows it once its owner approves.\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "stopped-at-a-step",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 137.75,
+      "w": 720,
+      "h": 724.5,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 723,
+      "client": 723
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sharing it with Acme Company: sharing with this collective failed, so it cannot read the transcript.\ndetails\ncancel\nretry",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "update-with-new-turns",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 113.953125,
+      "w": 720,
+      "h": 772.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 770,
+      "client": 770
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\n87 members\nML Reading Group\nadding, waits for approval\n21 members\nadd a collective\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nadds ML Reading Group · removes nothing\n\nnothing leaves your machine until you update.\ncancel\nupdate and add 1 collective",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove ML Reading Group",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "update and add 1 collective",
+        "h": 36,
+        "w": 264.90625
+      }
+    ]
+  },
+  {
+    "name": "update-keeps-audience",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Platform\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "connect-completes",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 193.953125,
+      "w": 720,
+      "h": 612.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 610,
+      "client": 610
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "published-while-signed-out",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 118.65625,
+      "w": 720,
+      "h": 762.6875,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 761,
+      "client": 761
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nadd a collective\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nnothing leaves your machine until you update.\ncancel\nupdate",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add Acme Company",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "update",
+        "h": 36,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "manage-opens",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 127.453125,
+      "w": 720,
+      "h": 745.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 743,
+      "client": 743
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\nno new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nnothing leaves your machine until you update.\ncancel\nupdate",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "update",
+        "h": 36,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "update-adds-collective",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "update-removes-collective",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "manage-removes-collective",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "partial-publish-removes-reader",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "stopped-rescan-fails",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 178.75,
+      "w": 720,
+      "h": 642.5,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 641,
+      "client": 641
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\nthe scan failed, so publish is off. the local scan could not read this session: open the Peasant log for the cause.\ndetails\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "skipped-collective",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 149.75,
+      "w": 720,
+      "h": 700.5,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 699,
+      "client": 699
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sharing it with Acme Company.\ndetails\ncancel\nretry",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "held-until-ingest",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 128.953125,
+      "w": 720,
+      "h": 742.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 740,
+      "client": 740
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while waiting for this session’s ingest to finish: the session is held until ingest completes; nothing was sent.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "content-step-failed",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 140.953125,
+      "w": 720,
+      "h": 718.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 716,
+      "client": 716
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sending the content: sending the content failed.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "collectives-read-failed",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 288.34375,
+      "w": 720,
+      "h": 423.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 421,
+      "client": 421
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nyour collectives can’t load: can’t reach peasant online right now.\nretry\ndetails\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "retry loading your collectives",
+        "h": 28,
+        "w": 92.25
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish",
+        "h": 36,
+        "w": 87.9375
+      }
+    ]
+  },
+  {
+    "name": "audience-unknown",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 61.359375,
+      "w": 720,
+      "h": 877.28125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 875,
+      "client": 875
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nstopped while reading who can read it online.\ncancel\nretry",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "signed-out-on-push",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 378.84375,
+      "w": 720,
+      "h": 242.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 240,
+      "client": 240
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nconnect this computer to peasant online once to publish.\n\ncontinue with github\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "continue with GitHub",
+        "h": 36,
+        "w": 232.96875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "login-start-failed",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 266.34375,
+      "w": 720,
+      "h": 467.3125,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 465,
+      "client": 465
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\npublish this repo automatically on git push\nstopped while starting the github sign-in: can’t reach peasant online right now.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "already-authenticated",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 193.953125,
+      "w": 720,
+      "h": 612.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 610,
+      "client": 610
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 36,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "publication-read-failed",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 117.453125,
+      "w": 720,
+      "h": 765.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 763,
+      "client": 763
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while reading whether this is published: the local publication store could not be read; inspect the Peasant log.\ndetails\ncancel\nretry",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 36,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "transcript-missing",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 121.453125,
+      "w": 720,
+      "h": 757.09375,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 755,
+      "client": 755
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while reading whether this is published: peasant online no longer holds this transcript: run peasant village push --force for this session.\ndetails\ncancel",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "re-scan",
+        "h": 28,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 28,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 28,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 28,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "removes-final-collective",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 335.5,
+      "w": 720,
+      "h": 329,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 327,
+      "client": 327
+    },
+    "body": "updated, no collective can read it\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "only-curated-collective-waits",
+    "theme": "dark",
+    "width": 1440,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 1440,
+    "dialog": {
+      "x": 360,
+      "y": 315.5,
+      "w": 720,
+      "h": 369,
+      "cx": 0,
+      "cy": 0,
+      "scroll": 367,
+      "client": 367
+    },
+    "body": "submitted to ML Reading Group\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\nML Reading Group shows it once its owner approves.\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 36,
+        "w": 36
+      },
+      {
+        "text": "copy link",
+        "h": 28,
+        "w": 28
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 28,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 36,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "not-published",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": null,
+    "bar": "not published\npublish",
+    "buttons": []
+  },
+  {
+    "name": "up-to-date",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": null,
+    "bar": "published to 2 collectives\npublish",
+    "buttons": []
+  },
+  {
+    "name": "new-turns",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": null,
+    "bar": "needs update\npublish",
+    "buttons": []
+  },
+  {
+    "name": "auto-publish-on",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": null,
+    "bar": "auto-publish on, Acme Platform\npublish",
+    "buttons": []
+  },
+  {
+    "name": "unpublished-outside-ingestion-selection",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": null,
+    "bar": "not published\npublish",
+    "buttons": []
+  },
+  {
+    "name": "connect-to-village",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 535,
+      "w": 390,
+      "h": 309,
+      "cx": 0,
+      "cy": 267.5,
+      "scroll": 308,
+      "client": 308
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nconnect this computer to peasant online once to publish.\n\ncontinue with github\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "continue with GitHub",
+        "h": 44,
+        "w": 232.96875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "waiting-for-github",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 617,
+      "w": 390,
+      "h": 227,
+      "cx": 0,
+      "cy": 308.5,
+      "scroll": 226,
+      "client": 226
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwaiting for github in your browser\n\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "scanning",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 426,
+      "w": 390,
+      "h": 418,
+      "cx": 0,
+      "cy": 213,
+      "scroll": 417,
+      "client": 417
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\nscanning 84 turns…\n\nwho can read it\n\nno collective can read it yet.\n\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\nscanning…",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "scanning…",
+        "h": 44,
+        "w": 105.640625
+      }
+    ]
+  },
+  {
+    "name": "scan-failed",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\nthe scan failed, so publish is off. the local scan could not read this session: open the Peasant log for the cause.\ndetails\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "not-in-a-collective",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 414,
+      "w": 390,
+      "h": 430,
+      "cx": 0,
+      "cy": 207,
+      "scroll": 429,
+      "client": 429
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nyou are not in a collective yet.\ncreate or join one on peasant online \n\nnothing leaves your machine until you publish.\ncancel\npublish",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish",
+        "h": 44,
+        "w": 87.9375
+      }
+    ]
+  },
+  {
+    "name": "ready-to-publish",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "publishing",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 175.03125,
+      "w": 390,
+      "h": 668.96875,
+      "cx": 0,
+      "cy": 87.515625,
+      "scroll": 668,
+      "client": 668
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\npublish this repo automatically on git push\n\npublishing to 2 collectives\n\nsending your redacted transcript to peasant online.\ncancel\npublish to 2 collectives",
+    "bar": "publishing to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 260.359375
+      }
+    ]
+  },
+  {
+    "name": "published-done",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "waits-for-approval",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 375,
+      "w": 390,
+      "h": 469,
+      "cx": 0,
+      "cy": 187.5,
+      "scroll": 468,
+      "client": 468
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\nML Reading Group shows it once its owner approves.\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "stopped-at-a-step",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sharing it with Acme Company: sharing with this collective failed, so it cannot read the transcript.\ndetails\ncancel\nretry",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "update-with-new-turns",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\n87 members\nML Reading Group\nadding, waits for approval\n21 members\nadd a collective\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nadds ML Reading Group · removes nothing\n\nnothing leaves your machine until you update.\ncancel\nupdate and add 1 collective",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove ML Reading Group",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "update and add 1 collective",
+        "h": 44,
+        "w": 264.90625
+      }
+    ]
+  },
+  {
+    "name": "update-keeps-audience",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Platform\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "connect-completes",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "published-while-signed-out",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nadd a collective\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nnothing leaves your machine until you update.\ncancel\nupdate",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add Acme Company",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "update",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "manage-opens",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 100.8125,
+      "w": 390,
+      "h": 743.1875,
+      "cx": 0,
+      "cy": 50.40625,
+      "scroll": 742,
+      "client": 742
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\nno new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nAcme Company\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nnothing leaves your machine until you update.\ncancel\nupdate",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "update",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "update-adds-collective",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Platform and Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 2 collectives\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "update-removes-collective",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "manage-removes-collective",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "partial-publish-removes-reader",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "published to Acme Company\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "stopped-rescan-fails",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\nthe scan failed, so publish is off. the local scan could not read this session: open the Peasant log for the cause.\ndetails\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "skipped-collective",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\n12 members\nAcme Company\nsuggested · github org acme, adding\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sharing it with Acme Company.\ndetails\ncancel\nretry",
+    "bar": "published to 1 collective\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "held-until-ingest",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while waiting for this session’s ingest to finish: the session is held until ingest completes; nothing was sent.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "content-step-failed",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while sending the content: sending the content failed.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "collectives-read-failed",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 274,
+      "w": 390,
+      "h": 570,
+      "cx": 0,
+      "cy": 137,
+      "scroll": 569,
+      "client": 569
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nyour collectives can’t load: can’t reach peasant online right now.\nretry\ndetails\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "retry loading your collectives",
+        "h": 44,
+        "w": 92.25
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish",
+        "h": 44,
+        "w": 87.9375
+      }
+    ]
+  },
+  {
+    "name": "audience-unknown",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "update “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat changed\n\n6 new turns since you published\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\n\nremoving a collective takes the transcript back from it.\n\npublish this repo automatically on git push\n\nleave access as it is and update just sends the new turns.\n\nstopped while reading who can read it online.\ncancel\nretry",
+    "bar": "needs update\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "signed-out-on-push",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 535,
+      "w": 390,
+      "h": 309,
+      "cx": 0,
+      "cy": 267.5,
+      "scroll": 308,
+      "client": 308
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nconnect this computer to peasant online once to publish.\n\ncontinue with github\nnothing leaves your machine until you publish.\ncancel",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "continue with GitHub",
+        "h": 44,
+        "w": 232.96875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "login-start-failed",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 294,
+      "w": 390,
+      "h": 550,
+      "cx": 0,
+      "cy": 147,
+      "scroll": 549,
+      "client": 549
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\npublish this repo automatically on git push\nstopped while starting the github sign-in: can’t reach peasant online right now.\ndetails\ncancel\nretry",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "already-authenticated",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nAcme Company\nsuggested · github org acme\n87 members\nadd a collective\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nnothing leaves your machine until you publish.\ncancel\npublish to 2 collectives",
+    "bar": "not published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "remove Acme Platform",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "remove Acme Company",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "publish to 2 collectives",
+        "h": 44,
+        "w": 238.359375
+      }
+    ]
+  },
+  {
+    "name": "publication-read-failed",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while reading whether this is published: the local publication store could not be read; inspect the Peasant log.\ndetails\ncancel\nretry",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      },
+      {
+        "text": "retry",
+        "h": 44,
+        "w": 92.25
+      }
+    ]
+  },
+  {
+    "name": "transcript-missing",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 32,
+      "w": 390,
+      "h": 812,
+      "cx": 0,
+      "cy": 16,
+      "scroll": 811,
+      "client": 811
+    },
+    "body": "publish “Build a resumable activity export. Stream CSV in bounded pages, preserve stable”\n\nwhat leaves your machine\n\nre-scan\n\n10 matches, all redacted\nshow 4 examples\n\nwho can read it\n\nno collective can read it yet.\n\nadd a collective\nAcme Platform\nsuggested · repo acme/ingest-api is linked\n12 members\nadd\nAcme Company\nsuggested · github org acme\n87 members\nadd\nML Reading Group\ncurated · waits for the owner’s approval\n21 members\nadd\npublish this repo automatically on git push\nstopped while reading whether this is published: peasant online no longer holds this transcript: run peasant village push --force for this session.\ndetails\ncancel",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "re-scan",
+        "h": 44,
+        "w": 109.9375
+      },
+      {
+        "text": "show 4 examples",
+        "h": 44,
+        "w": 165.921875
+      },
+      {
+        "text": "add Acme Platform",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add Acme Company",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "add ML Reading Group",
+        "h": 44,
+        "w": 74.546875
+      },
+      {
+        "text": "cancel",
+        "h": 44,
+        "w": 79.09375
+      }
+    ]
+  },
+  {
+    "name": "removes-final-collective",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 439,
+      "w": 390,
+      "h": 405,
+      "cx": 0,
+      "cy": 219.5,
+      "scroll": 404,
+      "client": 404
+    },
+    "body": "updated, no collective can read it\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  },
+  {
+    "name": "only-curated-collective-waits",
+    "theme": "dark",
+    "width": 390,
+    "fixture": "publish-popup-states.yaml",
+    "browserOnlyResponses": true,
+    "errors": [],
+    "blocked": [],
+    "scroll": 390,
+    "dialog": {
+      "x": 0,
+      "y": 375,
+      "w": 390,
+      "h": 469,
+      "cx": 0,
+      "cy": 187.5,
+      "scroll": 468,
+      "client": 468
+    },
+    "body": "submitted to ML Reading Group\nvillage.peasantlabs.org/transcripts/3f9c0a17-5b2e-4c1d-9a8f-6d0e2b7ce21a\nopen\n\nML Reading Group shows it once its owner approves.\n\npull request #42 is open for acme/ingest-api. comment /peasant attach on it to link this transcript.\n\ncopy\n/peasant attach\ndone",
+    "bar": "published\npublish",
+    "buttons": [
+      {
+        "text": "close dialog",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy link",
+        "h": 44,
+        "w": 44
+      },
+      {
+        "text": "copy /peasant attach",
+        "h": 44,
+        "w": 202.125
+      },
+      {
+        "text": "done",
+        "h": 44,
+        "w": 61.40625
+      }
+    ]
+  }
+]

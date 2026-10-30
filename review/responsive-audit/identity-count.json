@@ -1,0 +1,574 @@
+[
+  {
+    "name": "nine-approved-readers",
+    "theme": "light",
+    "width": 1440,
+    "browserFixture": "identity-count.yaml",
+    "bar": {
+      "x": 988.015625,
+      "y": 16,
+      "width": 351.984375,
+      "height": 36,
+      "cy": 34
+    },
+    "state": {
+      "x": 988.015625,
+      "y": 24.203125,
+      "width": 252.046875,
+      "height": 19.59375,
+      "cy": 34
+    },
+    "icon": {
+      "x": 988.015625,
+      "y": 27,
+      "width": 14,
+      "height": 14,
+      "cy": 34
+    },
+    "label": {
+      "x": 1010.015625,
+      "y": 24.203125,
+      "width": 230.046875,
+      "height": 19.59375,
+      "cy": 34
+    },
+    "action": {
+      "x": 1252.0625,
+      "y": 16,
+      "width": 87.9375,
+      "height": 36,
+      "cy": 34
+    },
+    "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "fontSize": "14px",
+    "numericVariant": "normal",
+    "digits": [
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875
+    ],
+    "layoutWidth": 1440,
+    "scrollWidth": 1440
+  },
+  {
+    "name": "ten-approved-readers",
+    "theme": "light",
+    "width": 1440,
+    "browserFixture": "identity-count.yaml",
+    "bar": {
+      "x": 979.15625,
+      "y": 16,
+      "width": 360.84375,
+      "height": 36,
+      "cy": 34
+    },
+    "state": {
+      "x": 979.15625,
+      "y": 24.203125,
+      "width": 260.90625,
+      "height": 19.59375,
+      "cy": 34
+    },
+    "icon": {
+      "x": 979.15625,
+      "y": 27,
+      "width": 14,
+      "height": 14,
+      "cy": 34
+    },
+    "label": {
+      "x": 1001.15625,
+      "y": 24.203125,
+      "width": 238.90625,
+      "height": 19.59375,
+      "cy": 34
+    },
+    "action": {
+      "x": 1252.0625,
+      "y": 16,
+      "width": 87.9375,
+      "height": 36,
+      "cy": 34
+    },
+    "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "fontSize": "14px",
+    "numericVariant": "normal",
+    "digits": [
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875
+    ],
+    "layoutWidth": 1440,
+    "scrollWidth": 1440
+  },
+  {
+    "name": "long-handle",
+    "theme": "light",
+    "width": 1440,
+    "account": {
+      "x": 12,
+      "y": 940,
+      "width": 135,
+      "height": 36,
+      "cy": 958
+    },
+    "avatar": {
+      "x": 24,
+      "y": 944,
+      "width": 28,
+      "height": 28,
+      "cy": 958
+    },
+    "label": {
+      "x": 64,
+      "y": 947.5,
+      "width": 83,
+      "height": 21,
+      "cy": 958
+    },
+    "text": "S@synthetic-developer-with-a-long-handle"
+  },
+  {
+    "name": "nine-approved-readers",
+    "theme": "light",
+    "width": 390,
+    "browserFixture": "identity-count.yaml",
+    "bar": {
+      "x": 12,
+      "y": 64,
+      "width": 351.984375,
+      "height": 44,
+      "cy": 86
+    },
+    "state": {
+      "x": 12,
+      "y": 76.203125,
+      "width": 252.046875,
+      "height": 19.59375,
+      "cy": 86
+    },
+    "icon": {
+      "x": 12,
+      "y": 79,
+      "width": 14,
+      "height": 14,
+      "cy": 86
+    },
+    "label": {
+      "x": 34,
+      "y": 76.203125,
+      "width": 230.046875,
+      "height": 19.59375,
+      "cy": 86
+    },
+    "action": {
+      "x": 276.046875,
+      "y": 64,
+      "width": 87.9375,
+      "height": 44,
+      "cy": 86
+    },
+    "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "fontSize": "14px",
+    "numericVariant": "normal",
+    "digits": [
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875
+    ],
+    "layoutWidth": 390,
+    "scrollWidth": 390
+  },
+  {
+    "name": "ten-approved-readers",
+    "theme": "light",
+    "width": 390,
+    "browserFixture": "identity-count.yaml",
+    "bar": {
+      "x": 12,
+      "y": 64,
+      "width": 360.84375,
+      "height": 44,
+      "cy": 86
+    },
+    "state": {
+      "x": 12,
+      "y": 76.203125,
+      "width": 260.90625,
+      "height": 19.59375,
+      "cy": 86
+    },
+    "icon": {
+      "x": 12,
+      "y": 79,
+      "width": 14,
+      "height": 14,
+      "cy": 86
+    },
+    "label": {
+      "x": 34,
+      "y": 76.203125,
+      "width": 238.90625,
+      "height": 19.59375,
+      "cy": 86
+    },
+    "action": {
+      "x": 284.90625,
+      "y": 64,
+      "width": 87.9375,
+      "height": 44,
+      "cy": 86
+    },
+    "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "fontSize": "14px",
+    "numericVariant": "normal",
+    "digits": [
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875
+    ],
+    "layoutWidth": 390,
+    "scrollWidth": 390
+  },
+  {
+    "name": "long-handle",
+    "theme": "light",
+    "width": 390,
+    "account": {
+      "x": 12,
+      "y": 776,
+      "width": 185,
+      "height": 44,
+      "cy": 798
+    },
+    "avatar": {
+      "x": 24,
+      "y": 784,
+      "width": 28,
+      "height": 28,
+      "cy": 798
+    },
+    "label": {
+      "x": 64,
+      "y": 787.5,
+      "width": 133,
+      "height": 21,
+      "cy": 798
+    },
+    "text": "S@synthetic-developer-with-a-long-handle"
+  },
+  {
+    "name": "nine-approved-readers",
+    "theme": "dark",
+    "width": 1440,
+    "browserFixture": "identity-count.yaml",
+    "bar": {
+      "x": 988.015625,
+      "y": 16,
+      "width": 351.984375,
+      "height": 36,
+      "cy": 34
+    },
+    "state": {
+      "x": 988.015625,
+      "y": 24.203125,
+      "width": 252.046875,
+      "height": 19.59375,
+      "cy": 34
+    },
+    "icon": {
+      "x": 988.015625,
+      "y": 27,
+      "width": 14,
+      "height": 14,
+      "cy": 34
+    },
+    "label": {
+      "x": 1010.015625,
+      "y": 24.203125,
+      "width": 230.046875,
+      "height": 19.59375,
+      "cy": 34
+    },
+    "action": {
+      "x": 1252.0625,
+      "y": 16,
+      "width": 87.9375,
+      "height": 36,
+      "cy": 34
+    },
+    "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "fontSize": "14px",
+    "numericVariant": "normal",
+    "digits": [
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875
+    ],
+    "layoutWidth": 1440,
+    "scrollWidth": 1440
+  },
+  {
+    "name": "ten-approved-readers",
+    "theme": "dark",
+    "width": 1440,
+    "browserFixture": "identity-count.yaml",
+    "bar": {
+      "x": 979.15625,
+      "y": 16,
+      "width": 360.84375,
+      "height": 36,
+      "cy": 34
+    },
+    "state": {
+      "x": 979.15625,
+      "y": 24.203125,
+      "width": 260.90625,
+      "height": 19.59375,
+      "cy": 34
+    },
+    "icon": {
+      "x": 979.15625,
+      "y": 27,
+      "width": 14,
+      "height": 14,
+      "cy": 34
+    },
+    "label": {
+      "x": 1001.15625,
+      "y": 24.203125,
+      "width": 238.90625,
+      "height": 19.59375,
+      "cy": 34
+    },
+    "action": {
+      "x": 1252.0625,
+      "y": 16,
+      "width": 87.9375,
+      "height": 36,
+      "cy": 34
+    },
+    "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "fontSize": "14px",
+    "numericVariant": "normal",
+    "digits": [
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875
+    ],
+    "layoutWidth": 1440,
+    "scrollWidth": 1440
+  },
+  {
+    "name": "long-handle",
+    "theme": "dark",
+    "width": 1440,
+    "account": {
+      "x": 12,
+      "y": 940,
+      "width": 135,
+      "height": 36,
+      "cy": 958
+    },
+    "avatar": {
+      "x": 24,
+      "y": 944,
+      "width": 28,
+      "height": 28,
+      "cy": 958
+    },
+    "label": {
+      "x": 64,
+      "y": 947.5,
+      "width": 83,
+      "height": 21,
+      "cy": 958
+    },
+    "text": "S@synthetic-developer-with-a-long-handle"
+  },
+  {
+    "name": "nine-approved-readers",
+    "theme": "dark",
+    "width": 390,
+    "browserFixture": "identity-count.yaml",
+    "bar": {
+      "x": 12,
+      "y": 64,
+      "width": 351.984375,
+      "height": 44,
+      "cy": 86
+    },
+    "state": {
+      "x": 12,
+      "y": 76.203125,
+      "width": 252.046875,
+      "height": 19.59375,
+      "cy": 86
+    },
+    "icon": {
+      "x": 12,
+      "y": 79,
+      "width": 14,
+      "height": 14,
+      "cy": 86
+    },
+    "label": {
+      "x": 34,
+      "y": 76.203125,
+      "width": 230.046875,
+      "height": 19.59375,
+      "cy": 86
+    },
+    "action": {
+      "x": 276.046875,
+      "y": 64,
+      "width": 87.9375,
+      "height": 44,
+      "cy": 86
+    },
+    "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "fontSize": "14px",
+    "numericVariant": "normal",
+    "digits": [
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875
+    ],
+    "layoutWidth": 390,
+    "scrollWidth": 390
+  },
+  {
+    "name": "ten-approved-readers",
+    "theme": "dark",
+    "width": 390,
+    "browserFixture": "identity-count.yaml",
+    "bar": {
+      "x": 12,
+      "y": 64,
+      "width": 360.84375,
+      "height": 44,
+      "cy": 86
+    },
+    "state": {
+      "x": 12,
+      "y": 76.203125,
+      "width": 260.90625,
+      "height": 19.59375,
+      "cy": 86
+    },
+    "icon": {
+      "x": 12,
+      "y": 79,
+      "width": 14,
+      "height": 14,
+      "cy": 86
+    },
+    "label": {
+      "x": 34,
+      "y": 76.203125,
+      "width": 238.90625,
+      "height": 19.59375,
+      "cy": 86
+    },
+    "action": {
+      "x": 284.90625,
+      "y": 64,
+      "width": 87.9375,
+      "height": 44,
+      "cy": 86
+    },
+    "font": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "fontSize": "14px",
+    "numericVariant": "normal",
+    "digits": [
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875,
+      8.84783935546875
+    ],
+    "layoutWidth": 390,
+    "scrollWidth": 390
+  },
+  {
+    "name": "long-handle",
+    "theme": "dark",
+    "width": 390,
+    "account": {
+      "x": 12,
+      "y": 776,
+      "width": 185,
+      "height": 44,
+      "cy": 798
+    },
+    "avatar": {
+      "x": 24,
+      "y": 784,
+      "width": 28,
+      "height": 28,
+      "cy": 798
+    },
+    "label": {
+      "x": 64,
+      "y": 787.5,
+      "width": 133,
+      "height": 21,
+      "cy": 798
+    },
+    "text": "S@synthetic-developer-with-a-long-handle"
+  }
+]

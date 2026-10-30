@@ -1,0 +1,107 @@
+{
+  "source": "f4f6c7095d1be5eb4693e0dbcc2713c91527693b",
+  "tree": "f91d7a523e669cfdce0366ba825d9a98e68f01f1",
+  "binarySha256": "548b38d69d0be1b2bb5d46ed8d6625328d622ee287dd3a8d9ddfb2acd3d8f044",
+  "version": "peasant v0.13.6-dev.10+f4f6c7095",
+  "fairtrade": "0.0.57",
+  "fairtradeGitHead": "17d15986222e68908e1f550f4f85d9c4d12b9848",
+  "assets": [
+    {
+      "path": "/_next/static/css/167e41ca30a44252.css",
+      "sha256": "0a9c19e6e0b47dce4490780e8b9e292be98962100a70af939a2103fa6bcfba2d",
+      "markers": [
+        "home-filters-menu"
+      ]
+    },
+    {
+      "path": "/_next/static/css/ddc2349e1aff46ce.css",
+      "sha256": "03aed0226185d7e325cedcc495d7947f55a0c3624f065aa45206f28c8c299fe1",
+      "markers": [
+        "gmp-diff-state"
+      ]
+    },
+    {
+      "path": "/_next/static/css/9d074add385ccaa3.css",
+      "sha256": "544e74950aa5c8c371261f17253d52ab4471ad620d49bad071cc013fe6497b46",
+      "markers": [
+        "gmp-diff-state"
+      ]
+    },
+    {
+      "path": "/_next/static/chunks/7918-45dc6729fe5899ca.js",
+      "sha256": "6e4f61501f2a2e16a149c997ba3055a6671e67950d3311008477e037cf0ef961",
+      "markers": [
+        "gmp-diff-state"
+      ]
+    },
+    {
+      "path": "/_next/static/chunks/app/page-5fa4ef0a4321a483.js",
+      "sha256": "18a133a4c2550d021ac2d1e623f92eebd355980b4b94216df31f5345df9f50bd",
+      "markers": [
+        "home-filters-menu"
+      ]
+    },
+    {
+      "path": "/_next/static/chunks/app/review/[[...segments]]/page-42acd424729e4815.js",
+      "sha256": "444fd4773070cc44507959aab41ba1c294f17a75e914ede8bef454f8ef94e674",
+      "markers": [
+        "retry file diffs",
+        "gmp-diff-state"
+      ]
+    }
+  ],
+  "buildCommand": "GOTOOLCHAIN=go1.25.8 make build",
+  "runtime": [
+    {
+      "port": 8691,
+      "pid": 79867,
+      "cwd": "/private/tmp/peasant-responsive-057-build",
+      "args": [
+        "--data-dir",
+        "/tmp/peasant-ui-preview/data",
+        "--config-dir",
+        "/tmp/peasant-ui-preview/config",
+        "--state-dir",
+        "/tmp/peasant-ui-preview/state",
+        "web",
+        "start",
+        "--port",
+        "8691",
+        "--foreground",
+        "--no-browser"
+      ],
+      "log": "/tmp/peasant-full-audit/final-server.log",
+      "source": "f4f6c7095d1be5eb4693e0dbcc2713c91527693b",
+      "fairtrade": "0.0.57",
+      "binarySha256": "548b38d69d0be1b2bb5d46ed8d6625328d622ee287dd3a8d9ddfb2acd3d8f044",
+      "version": "peasant v0.13.6-dev.10+f4f6c7095"
+    },
+    {
+      "port": 8698,
+      "pid": 79874,
+      "cwd": "/private/tmp/peasant-responsive-057-build",
+      "args": [
+        "--config",
+        "/tmp/peasant-full-audit/mock/config/config.yaml",
+        "--data-dir",
+        "/tmp/peasant-full-audit/mock/data",
+        "--config-dir",
+        "/tmp/peasant-full-audit/mock/config",
+        "--state-dir",
+        "/tmp/peasant-full-audit/mock/state",
+        "web",
+        "start",
+        "--foreground",
+        "--no-browser",
+        "--port",
+        "8698",
+        "--mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations"
+      ],
+      "log": "/tmp/peasant-full-audit/mock-server-final.log",
+      "source": "f4f6c7095d1be5eb4693e0dbcc2713c91527693b",
+      "fairtrade": "0.0.57",
+      "binarySha256": "548b38d69d0be1b2bb5d46ed8d6625328d622ee287dd3a8d9ddfb2acd3d8f044",
+      "version": "peasant v0.13.6-dev.10+f4f6c7095"
+    }
+  ]
+}
