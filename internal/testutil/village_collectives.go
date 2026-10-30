@@ -109,6 +109,16 @@ type CollectiveVillage struct {
 	pullListCalls int
 	skipGateCalls int
 	contentCalls  map[schema.TranscriptID]int
+	// requests records every request as "METHOD path", in arrival order.
+	requests []string
+}
+
+// Requests returns every request the double received, as "METHOD path", in
+// arrival order, so a test can prove which reads and writes a run made.
+func (v *CollectiveVillage) Requests() []string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return append([]string(nil), v.requests...)
 }
 
 // NewCollectiveVillage starts a CollectiveVillage that knows the collectives,
@@ -484,6 +494,9 @@ func (v *CollectiveVillage) Audience(transcript schema.TranscriptID) map[schema.
 func (v *CollectiveVillage) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	path := r.URL.Path
+	v.mu.Lock()
+	v.requests = append(v.requests, r.Method+" "+path)
+	v.mu.Unlock()
 	switch {
 	case r.Method == http.MethodGet && path == "/api/v1/collectives/search":
 		v.mu.Lock()
