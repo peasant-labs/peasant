@@ -148,6 +148,27 @@ Verdicts: `will_publish`, `will_update`, `unchanged`, `held`, `excluded`,
 `unchanged_content`, `transcript_is_public`, `no_metrics`. Both sets are
 closed.
 
+With a plan, the counts are the tally of the plan and nothing else. Every
+entry, each subagent session included, adds one to exactly one count, so the
+counts add up to the number of entries:
+
+| count | the entries with verdict |
+|---|---|
+| `new` | `will_publish` |
+| `updated` | `will_update` |
+| `skipped` | `unchanged` |
+| `held` | `held` |
+| `errors` | `failed`: the run tried the session and could not send it |
+| `not_ready` | `not_ready`: the session is not ready to publish; its `reason` and `detail` say why |
+| `excluded` | `excluded`: the run's own narrowing left the session out |
+| `unknown_session` | `unknown_session` |
+
+`not_ready`, `excluded` and `unknown_session` appear only with a plan. A push
+that names no sessions keeps the counts it always printed, and there a session
+that is not ready counts in `errors`. The text summary prints the same counts.
+The `sessions` list still holds only the sessions the run sent or tried to
+send, so it can be shorter than the plan.
+
 `village push` reports every refusal it makes before its first request to
 peasant online with exit status 3, a refusal of how it was called included:
 an unreadable `--sessions-from` list, a session id the store does not hold, an

@@ -310,6 +310,67 @@ type planEntry struct {
 	Subagents        []planEntry `json:"subagents,omitempty"`
 }
 
+// pushCounts is the summary of a push: how many sessions ended in each
+// outcome. A push that names its sessions derives it from its plan, so the
+// counts and the plan cannot disagree; any other push reads the pipeline's
+// counters.
+type pushCounts struct {
+	New, Updated, Skipped, Errors, Held int
+	// NotReady, Excluded and UnknownSession are counted only from a plan.
+	NotReady, Excluded, UnknownSession int
+	// fromPlan says the counts are a plan's tally.
+	fromPlan bool
+}
+
+// countsOfResult is the summary of a push that does not name its sessions.
+func countsOfResult(result *push.PushResult) pushCounts {
+	return pushCounts{New: result.New, Updated: result.Updated, Skipped: result.Skipped, Errors: result.Errors, Held: result.Held}
+}
+
+// countsOfPlan tallies a plan: every entry, a subagent session under its
+// parent included, adds one to exactly the count of its verdict, so the
+// counts add up to the number of entries.
+func countsOfPlan(entries []planEntry) pushCounts {
+	c := pushCounts{fromPlan: true}
+	var add func(entry planEntry)
+	add = func(entry planEntry) {
+		switch entry.Verdict {
+		case PlanWillPublish:
+			c.New++
+		case PlanWillUpdate:
+			c.Updated++
+		case PlanUnchanged:
+			c.Skipped++
+		case PlanHeld:
+			c.Held++
+		case PlanFailed:
+			c.Errors++
+		case PlanNotReady:
+			c.NotReady++
+		case PlanExcluded:
+			c.Excluded++
+		case PlanUnknown:
+			c.UnknownSession++
+		}
+		for _, sub := range entry.Subagents {
+			add(sub)
+		}
+	}
+	for _, entry := range entries {
+		add(entry)
+	}
+	return c
+}
+
+// runCounts is the summary a push prints: the plan's tally when it has a
+// plan, otherwise the pipeline's counters.
+func runCounts(result *push.PushResult, plan *jsonPushPlan) pushCounts {
+	if plan != nil {
+		return countsOfPlan(plan.Plan)
+	}
+	return countsOfResult(result)
+}
+
 // planCollective is a collective the run shares with, by id and name.
 type planCollective struct {
 	ID   schema.VillageUUID `json:"id"`

@@ -1014,7 +1014,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 						return err
 					}
 				} else if level == outputQuiet {
-					printPushResultLine(cmd.OutOrStdout(), result, dryRun)
+					printPushResultLine(cmd.OutOrStdout(), runCounts(result, plan), dryRun)
 					// --quiet suppresses the annotation summary, but content
 					// that will NEVER be published is not a summary detail: a
 					// hook would otherwise report a clean push on every commit
@@ -1023,7 +1023,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 					// command that shows which and how to clear them.
 					printQuietUnpublishableNotice(cmd.ErrOrStderr(), annSummary, run.repositoryCommand())
 				} else {
-					printPushSummary(cmd.OutOrStdout(), result, dryRun, level == outputVerbose)
+					printPushSummary(cmd.OutOrStdout(), result, runCounts(result, plan), dryRun, level == outputVerbose)
 					if plan != nil {
 						printPushPlan(cmd.OutOrStdout(), plan)
 					}
@@ -1801,6 +1801,12 @@ type jsonPushPlan struct {
 	Visibility        string           `json:"visibility"`
 	NeedsConfirmation bool             `json:"needsConfirmation"`
 	Plan              []planEntry      `json:"plan"`
+	// The plan's verdicts that the counts every push prints have no key
+	// for. With new, updated, skipped, errors and held they count every
+	// plan entry, subagent sessions included, exactly once.
+	NotReady       int `json:"not_ready"`
+	Excluded       int `json:"excluded"`
+	UnknownSession int `json:"unknown_session"`
 }
 
 // printPushJSON outputs the push result as JSON including annotation summary.
@@ -1842,13 +1848,19 @@ func printPushJSONWithPlan(w io.Writer, result *push.PushResult, annSummary *pus
 		meta.EmptyCode = result.EmptyCode
 		meta.EmptyReason = result.EmptyReason
 	}
+	counts := runCounts(result, plan)
+	if plan != nil {
+		counted := *plan
+		counted.NotReady, counted.Excluded, counted.UnknownSession = counts.NotReady, counts.Excluded, counts.UnknownSession
+		plan = &counted
+	}
 	out := jsonPushResult{
 		jsonPushPlan: plan,
-		New:          result.New,
-		Updated:      result.Updated,
-		Skipped:      result.Skipped,
-		Errors:       result.Errors,
-		Held:         result.Held,
+		New:          counts.New,
+		Updated:      counts.Updated,
+		Skipped:      counts.Skipped,
+		Errors:       counts.Errors,
+		Held:         counts.Held,
 		Sessions:     []jsonPushSession{},
 		Meta:         meta,
 	}
@@ -2346,17 +2358,18 @@ func resolveOutputLevel(quiet, verbose bool) (outputLevel, error) {
 // printPushResultLine prints the single terse result line used in --quiet mode.
 // It omits the multi-line "Summary:" block and per-session detail, keeping only
 // the final tally so scripts get a confirmation without noise.
-func printPushResultLine(w io.Writer, result *push.PushResult, dryRun bool) {
+func printPushResultLine(w io.Writer, counts pushCounts, dryRun bool) {
 	if dryRun {
-		fmt.Fprintf(w, "pushed 0 (dry run): %d would push\n", result.New+result.Updated)
+		fmt.Fprintf(w, "pushed 0 (dry run): %d would push\n", counts.New+counts.Updated)
 	} else {
-		fmt.Fprintf(w, "pushed %d session(s), %d error(s)\n", result.New+result.Updated, result.Errors)
+		fmt.Fprintf(w, "pushed %d session(s), %d error(s)\n", counts.New+counts.Updated, counts.Errors)
 	}
 }
 
 // printPushSummary outputs the human-readable push summary.
-// Per-session detail rows are only printed when verbose=true.
-func printPushSummary(w io.Writer, result *push.PushResult, dryRun bool, verbose bool) {
+// Per-session detail rows are only printed when verbose=true. The counts are
+// runCounts: a plan's tally when the push names its sessions.
+func printPushSummary(w io.Writer, result *push.PushResult, counts pushCounts, dryRun bool, verbose bool) {
 	if verbose {
 		for _, sr := range result.Sessions {
 			var statusLabel string
@@ -2387,15 +2400,23 @@ func printPushSummary(w io.Writer, result *push.PushResult, dryRun bool, verbose
 	}
 
 	if dryRun {
-		wouldPush := result.New + result.Updated
-		fmt.Fprintf(w, "Dry run summary: %d would push, %d unchanged (0 errors — no HTTP calls made)\n",
-			wouldPush, result.Skipped)
+		wouldPush := counts.New + counts.Updated
+		if counts.fromPlan {
+			fmt.Fprintf(w, "Dry run summary: %d would push (%d new, %d updated), %d unchanged, %d held, %d failed, %d not ready, %d excluded, %d unknown (no HTTP calls made)\n",
+				wouldPush, counts.New, counts.Updated, counts.Skipped, counts.Held, counts.Errors, counts.NotReady, counts.Excluded, counts.UnknownSession)
+		} else {
+			fmt.Fprintf(w, "Dry run summary: %d would push, %d unchanged (0 errors — no HTTP calls made)\n",
+				wouldPush, counts.Skipped)
+		}
 		if required := requiredCapabilitiesAcross(result); len(required) > 0 {
 			fmt.Fprintf(w, "Dry run: receiver support was not checked; this selection requires: %s\n", strings.Join(required, ", "))
 		}
+	} else if counts.fromPlan {
+		fmt.Fprintf(w, "Summary: %d new, %d updated, %d error(s), %d skipped, %d held, %d not ready, %d excluded, %d unknown\n",
+			counts.New, counts.Updated, counts.Errors, counts.Skipped, counts.Held, counts.NotReady, counts.Excluded, counts.UnknownSession)
 	} else {
 		fmt.Fprintf(w, "Summary: %d new, %d updated, %d error(s), %d skipped, %d held\n",
-			result.New, result.Updated, result.Errors, result.Skipped, result.Held)
+			counts.New, counts.Updated, counts.Errors, counts.Skipped, counts.Held)
 	}
 }
 
