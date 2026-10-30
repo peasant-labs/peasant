@@ -1,0 +1,87 @@
+requiredNames:
+  - opening-child-file-fetches-and-caches
+  - failed-file-read-can-retry
+  - scope-change-before-queued-read-skips-get
+  - old-scope-completion-does-not-fill-new-branch
+  - unmount-before-queued-read-skips-get
+projectHash: eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b
+branch: feat/queue-retry
+nextBranch: fix/api-timeout
+file: internal/queue/consumer.go
+expectedText: retries := 5
+error: synthetic diff read is unavailable
+review:
+  repoFound: true
+  defaultBranch: main
+  changes: []
+  recentCommits: []
+  sessions: []
+detail:
+  branch: feat/queue-retry
+  baseRef: 9f8e7d6c5b4a3210
+  defaultBranch: main
+  files:
+    - path: internal/queue/consumer.go
+      status: M
+      linesAdded: 64
+      linesRemoved: 22
+  slice:
+    nodes: []
+    structureEdges: []
+    activityEdges: []
+  newEdges: []
+  removedEdges: []
+  newNodes: []
+  removedNodes: []
+  violations: []
+  work: []
+  unrecordedCommits: []
+  unusual: []
+  frictions: []
+  insights: []
+  linesAdded: 312
+  linesRemoved: 87
+  outputTokens: 48230
+  costUsd: 2.74
+diff:
+  branch: feat/queue-retry
+  file: internal/queue/consumer.go
+  status: M
+  binary: false
+  truncated: false
+  hunks:
+    - oldStart: 10
+      oldLines: 5
+      newStart: 10
+      newLines: 6
+      header: func process()
+      lines:
+        - kind: context
+          text: func process() error {
+        - kind: del
+          text: "\tretries := 3"
+        - kind: add
+          text: "\tretries := 5"
+        - kind: add
+          text: "\tbackoff := time.Second"
+        - kind: context
+          text: "\tfor i := 0; i < retries; i++ {"
+        - kind: context
+          text: "\t\tif err := attempt(); err == nil {"
+      sessionTitle: Add retry backoff to the queue worker
+cases:
+  - name: opening-child-file-fetches-and-caches
+    action: open
+    status: 200
+  - name: failed-file-read-can-retry
+    action: retry
+    status: 503
+  - name: scope-change-before-queued-read-skips-get
+    action: scope-before
+    status: 200
+  - name: old-scope-completion-does-not-fill-new-branch
+    action: scope-after
+    status: 200
+  - name: unmount-before-queued-read-skips-get
+    action: unmount-before
+    status: 200
