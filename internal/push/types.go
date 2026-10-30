@@ -3,6 +3,7 @@ package push
 import (
 	"context"
 
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
@@ -199,6 +200,10 @@ type PushResult struct {
 	Held int
 	// EmptyReason is set when there are no sessions to push and explains why.
 	EmptyReason string
+	// EmptyCode is EmptyReason in the closed set a --json document carries.
+	// It is "" when the push sent something, or when the cause could not be
+	// determined.
+	EmptyCode clicontract.EmptyCode
 	// BaseCandidateCount is the number of candidate sessions the base query
 	// (QueryPushCandidates) returned BEFORE branch-aware selection filtering.
 	// Callers use it to distinguish "selection excluded everything" (base > 0,

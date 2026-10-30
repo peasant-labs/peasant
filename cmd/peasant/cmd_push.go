@@ -23,6 +23,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -1558,14 +1559,16 @@ func buildAnnotationSelection(ids, hashes []string) push.AnnotationSelection {
 
 // jsonPushResult is the JSON-safe output for peasant push --json.
 type jsonPushResult struct {
-	New         int               `json:"new"`
-	Updated     int               `json:"updated"`
-	Skipped     int               `json:"skipped"`
-	Errors      int               `json:"errors"`
-	Held        int               `json:"held"`
-	EmptyReason string            `json:"empty_reason,omitempty"`
-	Sessions    []jsonPushSession `json:"sessions"`
-	Annotations *jsonAnnotResult  `json:"annotations,omitempty"`
+	New      int               `json:"new"`
+	Updated  int               `json:"updated"`
+	Skipped  int               `json:"skipped"`
+	Errors   int               `json:"errors"`
+	Held     int               `json:"held"`
+	Sessions []jsonPushSession `json:"sessions"`
+	// Meta carries warnings (always an array), and empty_code beside
+	// empty_reason when nothing was pushed, flat in the document.
+	clicontract.Meta
+	Annotations *jsonAnnotResult `json:"annotations,omitempty"`
 	// Refusal names why the push stopped before any peasant online request
 	// and how to proceed. Set only on a refused run, which exits 3.
 	Refusal string `json:"refusal,omitempty"`
@@ -1581,7 +1584,7 @@ const publicConsentJSONRefusal = "a public push needs explicit consent, and --js
 func printPushRefusalJSON(w io.Writer, refusal string) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(jsonPushResult{Sessions: []jsonPushSession{}, Refusal: refusal})
+	return enc.Encode(jsonPushResult{Sessions: []jsonPushSession{}, Meta: clicontract.NewMeta(), Refusal: refusal})
 }
 
 // jsonAnnotResult is the JSON-safe annotation push summary.
@@ -1626,13 +1629,19 @@ type jsonPushSession struct {
 
 // printPushJSON outputs the push result as JSON including annotation summary.
 func printPushJSON(w io.Writer, result *push.PushResult, annSummary *push.AnnotationPushSummary, annErr error) error {
+	meta := clicontract.NewMeta()
+	if result.EmptyReason != "" {
+		meta.EmptyCode = result.EmptyCode
+		meta.EmptyReason = result.EmptyReason
+	}
 	out := jsonPushResult{
-		New:         result.New,
-		Updated:     result.Updated,
-		Skipped:     result.Skipped,
-		Errors:      result.Errors,
-		Held:        result.Held,
-		EmptyReason: result.EmptyReason,
+		New:      result.New,
+		Updated:  result.Updated,
+		Skipped:  result.Skipped,
+		Errors:   result.Errors,
+		Held:     result.Held,
+		Sessions: []jsonPushSession{},
+		Meta:     meta,
 	}
 	for _, sr := range result.Sessions {
 		js := jsonPushSession{

@@ -366,8 +366,10 @@ cases:
         "skipped": 0,
         "errors": 0,
         "held": 0,
+        "sessions": [],
+        "warnings": [],
+        "empty_code": "store_has_no_sessions",
         "empty_reason": "Nothing to push. Run 'peasant ingest' first to import your sessions.",
-        "sessions": null,
         "annotations": {
           "total": 0,
           "created": 0,

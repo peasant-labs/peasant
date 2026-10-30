@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
@@ -269,7 +270,8 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 
 	// 5. Handle empty-result states.
 	if len(sessions) == 0 {
-		return &PushResult{BaseCandidateCount: baseCount, EmptyReason: p.emptyReason(ctx, baseCount)}, nil
+		code, reason := p.emptyReason(ctx, baseCount)
+		return &PushResult{BaseCandidateCount: baseCount, EmptyCode: code, EmptyReason: reason}, nil
 	}
 
 	result = &PushResult{BaseCandidateCount: baseCount}
@@ -394,8 +396,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	}
 	if result.Skipped > 0 && result.New == 0 && result.Updated == 0 && result.Errors == 0 && result.Held == 0 {
 		if p.runCfg.Repository != nil {
-			result.EmptyReason = p.emptyReason(ctx, baseCount)
+			result.EmptyCode, result.EmptyReason = p.emptyReason(ctx, baseCount)
 		} else {
+			result.EmptyCode = clicontract.EmptyNothingChanged
 			result.EmptyReason = "All selected sessions already pushed with unchanged content and publication settings."
 		}
 	}
@@ -628,7 +631,10 @@ func ApplySelection(sessions []ingest.PushSessionRow, sel *SessionSelection) (ke
 // make its sessions "recorded", and that it could push without --repository,
 // which is the containment the flag exists to provide. The three states a scope
 // can actually be in are read off the scope's own recorded sessions instead.
-func (p *Pipeline) emptyReason(ctx context.Context, baseCount int) string {
+//
+// The code beside the reason is the same answer in the closed set a --json
+// document carries, so a program can branch on it without reading the prose.
+func (p *Pipeline) emptyReason(ctx context.Context, baseCount int) (clicontract.EmptyCode, string) {
 	if p.runCfg.Repository != nil {
 		all, allErr := p.allPushable(ctx)
 		return p.scopedEmptyReason(all, allErr, baseCount)
@@ -637,15 +643,15 @@ func (p *Pipeline) emptyReason(ctx context.Context, baseCount int) string {
 	// "already pushed, use --force" there would be the opposite of the truth and
 	// would point at a flag that cannot widen a selection.
 	if p.runCfg.Selection != nil && baseCount > 0 {
-		return p.renderEmpty(
+		return clicontract.EmptyFiltersExcludedAll, p.renderEmpty(
 			"No sessions match the configured selection. Widen the selection in your config (or run 'peasant kickstart') to include the projects and branches you want pushed.",
 			fmt.Sprintf("%d candidate session(s) were eligible before it. --force re-pushes already-pushed sessions; it cannot widen a selection.", baseCount))
 	}
 	all, allErr := p.allPushable(ctx)
 	if allErr != nil || len(all) == 0 {
-		return "Nothing to push. Run 'peasant ingest' first to import your sessions."
+		return clicontract.EmptyStoreHasNoSessions, "Nothing to push. Run 'peasant ingest' first to import your sessions."
 	}
-	return "All sessions already pushed. Use --force to re-push."
+	return clicontract.EmptyNothingChanged, "All sessions already pushed. Use --force to re-push."
 }
 
 // allPushable reads every session that could ever be pushed, reporting a read
@@ -688,10 +694,13 @@ func (p *Pipeline) renderEmpty(summary string, detail ...string) string {
 // each: nothing recorded here (ingest), recorded but excluded by another
 // narrowing (widen that narrowing), and recorded and already published (--force,
 // or new work). None of them is ever answered by dropping the scope.
-func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, baseCount int) string {
+//
+// A read failure carries no code: none of the closed set is true of it, and
+// the reason says the cause could not be determined.
+func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, baseCount int) (clicontract.EmptyCode, string) {
 	scope := p.runCfg.Repository
 	if allErr != nil {
-		return p.renderEmpty(
+		return "", p.renderEmpty(
 			fmt.Sprintf(
 				"Nothing was pushed for scope %s: the recorded sessions could not be read to say why. Check the analytics store, then re-run '%s'.",
 				scope.Summary(), p.manualPushCommand("--dry-run")),
@@ -706,7 +715,7 @@ func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, 
 	stale := p.staleIdentityNote(all)
 	recorded := ApplyRepositoryScope(all, scope)
 	if len(recorded) == 0 {
-		return p.renderEmpty(
+		return clicontract.EmptyFiltersExcludedAll, p.renderEmpty(
 			joinSentences(
 				fmt.Sprintf("No sessions are recorded for scope %s.", scope.Summary()),
 				stale,
@@ -720,7 +729,7 @@ func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, 
 	// doing rather than as an empty repository.
 	selected, _ := ApplySelection(recorded, p.runCfg.Selection)
 	if len(selected) == 0 {
-		return p.renderEmpty(
+		return clicontract.EmptyFiltersExcludedAll, p.renderEmpty(
 			joinSentences(
 				fmt.Sprintf(
 					"No sessions match the configured selection inside scope %s: %d session(s) are recorded for this repository and the selection excluded every one of them. Widen the selection in your config (or run 'peasant kickstart').",
@@ -730,7 +739,7 @@ func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, 
 			"--force re-pushes already-pushed sessions; it cannot widen a selection, and it cannot widen a repository scope.",
 			priorCandidateNote(baseCount))
 	}
-	return p.renderEmpty(
+	return clicontract.EmptyNothingChanged, p.renderEmpty(
 		joinSentences(
 			fmt.Sprintf(
 				"No new sessions to push for scope %s: %d session(s) are recorded for it and none changed since they were published. Re-push them with '%s'.",
