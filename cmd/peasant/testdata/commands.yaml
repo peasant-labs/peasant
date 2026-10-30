@@ -243,9 +243,10 @@ commands:
       - use: sessions
         flags:
           - { name: session, type: string, default: "" }
-          - { name: session-from-file, type: string, default: "" }
+          - { name: sessions-from, type: string, default: "" }
           - { name: output-dir, type: string, default: "." }
           - { name: last-good, type: bool, default: "false" }
+          - { name: json, type: bool, default: "false" }
       - use: annotations
         flags:
           - { name: session, type: string, default: "" }
