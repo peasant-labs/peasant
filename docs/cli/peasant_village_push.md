@@ -70,7 +70,7 @@ peasant village push [flags]
       --timing                        Measure and report per-phase push timing (connection setup/server split, redaction, annotation batches) to stderr, plus a per-upload JSONL log under the state dir. Off by default.
       --verbose                       Show per-session detail
       --visibility string             Override visibility for this run (private, public). Also changes every already-published session the run selects, including ones shared with collectives on peasant online, which otherwise keep the visibility they have there
-      --yes                           (alias for --non-interactive)
+  -y, --yes                           (alias for --non-interactive)
 ```
 
 ### Options inherited from parent commands

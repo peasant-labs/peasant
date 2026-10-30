@@ -1,0 +1,132 @@
+# The CLI contract for scripts and agents
+
+This page describes what a peasant command promises a program that drives it: a
+shell script, a CI job, or a coding agent. The rules are implemented once, in
+`internal/clicontract`, and a command follows them by calling that package.
+
+Not every command follows every rule yet. The table at the end lists which
+commands do today.
+
+## The five rules
+
+1. **`--json` prints one document.** With `--json`, stdout holds one JSON
+   document and nothing else.
+2. **stdout is data only.** Notes, progress and warnings go to stderr. With
+   `--json`, every warning is also inside the document, in `warnings`.
+3. **`--sessions-from <file|->` takes a list of sessions.** It reads session
+   ids from a file, or from standard input when the value is `-`.
+4. **`--dry-run` never prompts and never writes.** A command that has no safe
+   dry run does not offer the flag.
+5. **An empty result is a success with a reason.** It exits 0 and the document
+   carries a typed reason. A failure exits non-zero.
+
+## Exit statuses
+
+| status | meaning |
+|---|---|
+| 0 | The command succeeded. An empty result is a success. |
+| 1 | The command failed after it had started its work. |
+| 2 | The command refused how it was called: flags that cannot be combined, a `--sessions-from` input it cannot read, or a confirmation it cannot ask for. Nothing was attempted. Fix the call; retrying it unchanged fails again. |
+| 3 | `village push` failed before it made a single request to peasant online. Nothing was published and nothing was recorded as published. |
+
+Status 2 is raised by the refusals that `internal/clicontract` owns. An unknown
+flag or a flag with a missing value is reported by the flag parser and still
+exits 1.
+
+## Session ids in: `--sessions-from`
+
+`--sessions-from` reads a file, or standard input when the value is `-`. It
+accepts three shapes and picks one from the first character that is not a
+space:
+
+- **One id per line.** Blank lines and lines that start with `#` are skipped.
+- **A JSON array of ids**, for example `["a1b2...", "c3d4..."]`.
+- **A JSON array of objects.** Each object gives its `id` key, or else its
+  `session_id` key. This is the array `peasant sessions list --json` prints, so
+  its output can be piped straight in.
+
+A repeated id is used once, at its first position. An input in any other shape
+is refused with the line or array index of the fault. An input that names no id
+at all is refused: a list that selects nothing never widens to every session.
+
+`--sessions-from` replaces the other ways to choose sessions. It cannot be
+combined with `--session` or `--all`.
+
+```sh
+peasant sessions list --json --limit 20 | peasant export sessions --sessions-from - --output-dir out --json
+```
+
+## Warnings and empty results out
+
+Every JSON document from a command that follows rule 2 carries these fields at
+its top level:
+
+| field | type | when |
+|---|---|---|
+| `warnings` | array | Always. It is `[]` when there are none, never `null`. |
+| `empty_code` | string | Only when the result is empty. |
+| `empty_reason` | string | Only when the result is empty. A sentence saying why and what to do next. |
+
+Each warning is an object:
+
+| field | meaning |
+|---|---|
+| `code` | One of the warning codes below. |
+| `message` | What happened, in a sentence. |
+| `session_id` | The session the warning is about, when it is about one. |
+
+The same warning is printed on stderr as `warning: session <id>: <message>` or
+`warning: <message>`.
+
+Warning codes:
+
+| code | meaning |
+|---|---|
+| `session_refused` | A session the command was asked for and did not process. |
+| `index_stale` | A result read from an index that is behind its sources. |
+| `index_maintenance_pending` | Index maintenance is due and has not run. |
+| `filter_ignored` | A filter the command accepted and did not apply. |
+
+Empty codes:
+
+| code | meaning |
+|---|---|
+| `store_has_no_sessions` | The local store holds no session. |
+| `filters_excluded_all` | Sessions exist, and the filters, selection or scope excluded every one. |
+| `input_list_was_empty` | The input list named nothing to act on. |
+| `nothing_changed` | There was nothing new to do. |
+| `not_fetched_yet` | A local copy of state from peasant online has not been fetched yet. |
+
+Both sets are closed. A new code is added to the set before any command prints
+it.
+
+## Prompts
+
+A command that would ask for confirmation decides in this order:
+
+1. With `--dry-run`, it does not ask, and it changes nothing.
+2. With `--yes`, it proceeds without asking.
+3. With `--json`, or with no terminal to answer, it refuses with exit status 2
+   and a message naming `--yes`. Under `--json` a prompt would corrupt the
+   document on stdout, so it is never shown.
+4. Otherwise it asks.
+
+Every command that has `--yes` also accepts `-y`.
+
+`village push` has its own public-consent rule. A public push needs `--yes`
+(or `--non-interactive`) or a `y` at its prompt. Under `--json` without `--yes`
+a public push is refused before any request to peasant online, exits 3, and
+names `--yes` in the document's `refusal` field.
+
+## Which commands follow the contract today
+
+| command | follows |
+|---|---|
+| `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused` |
+| `redact` | `--sessions-from` |
+| `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y` |
+| `upgrade` | `-y` |
+
+`sessions list --json` prints a bare array, which has no place for `warnings`.
+`export annotations`, `annotate prune` and `annotate sample` still take
+`--session-from-file`, a path only.
