@@ -930,7 +930,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 	cmd.Flags().BoolVar(&requireAutoPublishRule, "require-auto-publish-rule", false, "Publish only sessions currently bound by an active auto-publish rule (used by rule-installed hooks)")
 	cmd.Flags().BoolVar(&lastGood, "last-good", false, "Publish the last-good full transcript when a newer incomplete attempt is kept beside it. A hand-run choice: it skips the push wizard (the wizard previews the newer attempt, while this flag publishes the last-good authority) and does not imply --non-interactive, so the public-consent prompt still applies. It is refused together with --auto-publish-event/--require-auto-publish-rule and is never written into a hook file, so an automatic publication never sends stale last-good content. The store resolves the last-good authority server-side, so no session or generation identifier is accepted")
 	cmd.Flags().BoolVar(&nonInteractiveFlag, "non-interactive", false, "Run without the interactive wizard or public-consent prompt (for CI/scripts)")
-	cmd.Flags().BoolVar(&yesFlag, "yes", false, "(alias for --non-interactive)")
+	clicontract.AddYesFlag(cmd, &yesFlag, "(alias for --non-interactive)")
 	cmd.Flags().StringArrayVar(&annotationIDs, "annotation-id", nil, "Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.")
 	cmd.Flags().StringArrayVar(&annotationHash, "annotation-hash", nil, "Only push annotations with these content hashes (repeatable; default: all).")
 	cmd.Flags().BoolVar(&timing, "timing", false, "Measure and report per-phase push timing (connection setup/server split, redaction, annotation batches) to stderr, plus a per-upload JSONL log under the state dir. Off by default.")
