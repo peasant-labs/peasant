@@ -611,7 +611,9 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				}
 
 				if dryRun {
-					if level != outputQuiet {
+					// Under --json stdout carries the one document and nothing
+					// else; the document's own counts say it was a forecast.
+					if level != outputQuiet && !jsonOutput {
 						fmt.Fprintf(cmd.OutOrStdout(), "Dry run — no uploads will be made\n\n")
 					}
 				} else if !jsonOutput && level != outputQuiet {

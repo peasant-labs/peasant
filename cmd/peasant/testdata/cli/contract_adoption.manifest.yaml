@@ -6,6 +6,7 @@ requiredNames:
   - export_json_2_redirect_parses
   - redact_sessions_from_dry_run
   - push_json_has_warnings_array
+  - push_dry_run_json_is_one_document
   - push_empty_has_code
   - contract_help_golden
   - y_shorthand_registered
