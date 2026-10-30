@@ -139,7 +139,17 @@ there is one, `reason`, `detail`, `title`, `next` and `shares`. A main
 session's subagent sessions are listed in its `subagents`, the whole tree of
 them, a subagent session's own subagent sessions included, each with
 `selectedBy: parent`; with `--without-subagents` the entry counts the whole
-tree in `subagentsOmitted` instead. Each
+tree in `subagentsOmitted` instead.
+
+A subagent session pulled in with a named session follows that session's
+saved-selection decision rather than its own branch: subagent sessions often
+run on auto-named worktree branches, or after a branch switch, that the saved
+selection never chose to exclude. The inheritance holds only while the named
+session passes the selection and is ready, so the run sends it; the subagent
+session's own readiness and every other filter still apply. Its entry carries
+`selectionInheritedFrom: <named session id>` only where its own branch would
+have been excluded. A subagent session named on its own keeps its own
+selection check. Each
 share names `collective_id`, `step` (`add_collective`) and `would` (`share`);
 a real run adds `outcome` and, for a skipped or failed share, `reason`.
 

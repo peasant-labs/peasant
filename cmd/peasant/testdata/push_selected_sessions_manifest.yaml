@@ -34,3 +34,8 @@ requiredNames:
   - plan_lists_subagents_under_parent
   - nested_subagent_pulled_with_root
   - without_subagents_omits_the_whole_tree
+  - worktree_branch_subagent_inherits_parent_selection
+  - branch_switch_subagent_inherits_parent_selection
+  - subagent_named_alone_keeps_own_selection
+  - inherited_subagent_still_needs_readiness
+  - subagent_of_unready_parent_keeps_own_selection

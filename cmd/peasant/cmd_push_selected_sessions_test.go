@@ -55,19 +55,24 @@ type selectedSeed struct {
 	Published bool `yaml:"published"`
 	// Public makes its published transcript public on the Village double.
 	Public bool `yaml:"public"`
+	// Branch is the git branch the session recorded; main when empty.
+	Branch string `yaml:"branch"`
 }
 
 type selectedPlanWant struct {
-	ID               string             `yaml:"id"`
-	Verdict          string             `yaml:"verdict"`
-	Reason           string             `yaml:"reason"`
-	SelectedBy       string             `yaml:"selectedBy"`
-	SubagentsOmitted int                `yaml:"subagentsOmitted"`
-	NextContains     string             `yaml:"nextContains"`
-	DetailContains   string             `yaml:"detailContains"`
-	DetailOmits      string             `yaml:"detailOmits"`
-	ShareOutcomes    []string           `yaml:"shareOutcomes"`
-	Subagents        []selectedPlanWant `yaml:"subagents"`
+	ID               string `yaml:"id"`
+	Verdict          string `yaml:"verdict"`
+	Reason           string `yaml:"reason"`
+	SelectedBy       string `yaml:"selectedBy"`
+	SubagentsOmitted int    `yaml:"subagentsOmitted"`
+	NextContains     string `yaml:"nextContains"`
+	DetailContains   string `yaml:"detailContains"`
+	// SelectionInheritedFrom is the exact selectionInheritedFrom the entry
+	// must carry; empty asserts the key is absent.
+	SelectionInheritedFrom string             `yaml:"selectionInheritedFrom"`
+	DetailOmits            string             `yaml:"detailOmits"`
+	ShareOutcomes          []string           `yaml:"shareOutcomes"`
+	Subagents              []selectedPlanWant `yaml:"subagents"`
 }
 
 type selectedRun struct {
@@ -97,13 +102,16 @@ type selectedRun struct {
 type selectedCase struct {
 	Name string `yaml:"name"`
 	// Kind is run (the default) or wizard (asserts pushWizardEnabled directly).
-	Kind             string         `yaml:"kind"`
-	Seeds            []selectedSeed `yaml:"seeds"`
-	SelectedOnly     []string       `yaml:"selectedOnly"`
-	PausedRule       bool           `yaml:"pausedRule"`
-	FailShare        string         `yaml:"failShare"`
-	ConfigVisibility string         `yaml:"configVisibility"`
-	Runs             []selectedRun  `yaml:"runs"`
+	Kind         string         `yaml:"kind"`
+	Seeds        []selectedSeed `yaml:"seeds"`
+	SelectedOnly []string       `yaml:"selectedOnly"`
+	// SelectedBranches makes the saved selection admit only these branches of
+	// the repo clone.
+	SelectedBranches []string      `yaml:"selectedBranches"`
+	PausedRule       bool          `yaml:"pausedRule"`
+	FailShare        string        `yaml:"failShare"`
+	ConfigVisibility string        `yaml:"configVisibility"`
+	Runs             []selectedRun `yaml:"runs"`
 }
 
 func loadSelectedPushCases(t *testing.T) []selectedCase {
@@ -167,6 +175,10 @@ func newSelectedWorld(t *testing.T, tc selectedCase) *selectedWorld {
 	body := "version: 1\noutput:\n  basePath: " + filepath.Join(w.dir, "peasant-sync") + "\npush:\n  method: all\n  visibility: " + visibility + "\n"
 	if len(tc.SelectedOnly) > 0 {
 		body += "selection:\n  mode: selected\n  harnesses:\n    claude-code:\n      sessions: [" + strings.Join(tc.SelectedOnly, ", ") + "]\n"
+	}
+	if len(tc.SelectedBranches) > 0 {
+		body += "selection:\n  mode: selected\n  harnesses:\n    claude-code:\n      projects:\n        - name: " + filepath.Base(w.repo) +
+			"\n          clonePaths: [" + w.repo + "]\n          branches: [" + strings.Join(tc.SelectedBranches, ", ") + "]\n"
 	}
 	w.cfgPath = writeCfg(t, w.dir, "selected.yaml", body)
 
@@ -239,7 +251,11 @@ func (w *selectedWorld) seed(t *testing.T, seed selectedSeed, order int64) {
 		t.Fatal(err)
 	}
 	remote, _ := (&ingest.ExecGitResolver{}).RemoteURL(t.Context(), dir)
-	entry := makeCmdStoreEntry(t, seed.ID, "github.com-acme-tools", remote, "main", 1700000000000+order*60000, dir)
+	branch := seed.Branch
+	if branch == "" {
+		branch = "main"
+	}
+	entry := makeCmdStoreEntry(t, seed.ID, "github.com-acme-tools", remote, branch, 1700000000000+order*60000, dir)
 	entry.Metadata.Project.Hash = hash
 	if seed.Parent != "" {
 		parent := schema.SessionID(seed.Parent)
@@ -473,6 +489,10 @@ func assertSelectedPlan(t *testing.T, where string, got []any, want []selectedPl
 		omitted, _ := entry["subagentsOmitted"].(float64)
 		if int(omitted) != w.SubagentsOmitted {
 			t.Errorf("%s subagentsOmitted = %v, want %d\n%s", label, omitted, w.SubagentsOmitted, context)
+		}
+		inheritedFrom, _ := entry["selectionInheritedFrom"].(string)
+		if inheritedFrom != w.SelectionInheritedFrom {
+			t.Errorf("%s selectionInheritedFrom = %q, want %q\n%s", label, inheritedFrom, w.SelectionInheritedFrom, context)
 		}
 		detail, _ := entry["detail"].(string)
 		if w.DetailContains != "" && !strings.Contains(detail, w.DetailContains) {

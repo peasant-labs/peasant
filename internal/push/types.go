@@ -76,6 +76,16 @@ type PipelineConfig struct {
 	// computed from the complete stored-session cohort. nil means no selection
 	// filter (push everything otherwise eligible).
 	Selection *SessionSelection
+	// InheritSelection maps each subagent session a push pulled in with a
+	// named session to the named session at the root of its tree. Such a
+	// session follows its root's selection decision: when the root passes
+	// the saved selection, the subagent session is not checked against the
+	// selection itself, because subagent sessions often run on branches the
+	// developer never chose to exclude, such as an auto-named worktree
+	// branch. The inheritance holds only while the root is sent by the same
+	// run and is ready to publish; every other filter and the subagent
+	// session's own readiness still apply. nil inherits nothing.
+	InheritSelection map[string]string
 	// Repository is an additional AND filter supplied by --repository. It uses
 	// ingestion's canonical project identity and can only narrow the configured
 	// selection. nil means no repository narrowing.
@@ -94,6 +104,47 @@ type PipelineConfig struct {
 	// incomplete attempt is kept beside it. It is never set by a hook: the
 	// flag is refused together with the hook's auto-publish flags.
 	LastGood bool
+}
+
+// SelectionInheritedFrom reports the root a session's selection is inherited
+// from: it was pulled in with that root, the saved selection excludes it on
+// its own, and the root passes the selection. It is false for a session the
+// selection admits on its own, so it names only the sessions the inheritance
+// actually lets through.
+func (c PipelineConfig) SelectionInheritedFrom(sessionID string) (string, bool) {
+	root, pulled := c.InheritSelection[sessionID]
+	if !pulled || c.Selection == nil {
+		return "", false
+	}
+	own := c.Selection.Decision(ingest.SessionID(sessionID))
+	if own == ingest.BranchMatchYes || c.Selection.Decision(ingest.SessionID(root)) != ingest.BranchMatchYes {
+		return "", false
+	}
+	return root, true
+}
+
+// selectionDecision is the saved-selection decision a run applies to a
+// session: its own, or yes when it inherits its root's.
+func (c PipelineConfig) selectionDecision(sessionID ingest.SessionID) ingest.BranchMatch {
+	if _, inherited := c.SelectionInheritedFrom(string(sessionID)); inherited {
+		return ingest.BranchMatchYes
+	}
+	return c.Selection.Decision(sessionID)
+}
+
+// inheritingSelection returns the selection with each inherited session admitted, as
+// SelectionInheritedFrom decides.
+func (c PipelineConfig) inheritingSelection() *SessionSelection {
+	if c.Selection == nil || len(c.InheritSelection) == 0 {
+		return c.Selection
+	}
+	out := NewSessionSelection(c.Selection.decisions)
+	for sessionID := range c.InheritSelection {
+		if _, inherited := c.SelectionInheritedFrom(sessionID); inherited {
+			out.decisions[ingest.SessionID(sessionID)] = ingest.BranchMatchYes
+		}
+	}
+	return out
 }
 
 // SessionSelection is the immutable branch-aware decision set prepared at the

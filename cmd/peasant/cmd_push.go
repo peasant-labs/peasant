@@ -123,7 +123,11 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 			"Named sessions — --session and --sessions-from push only the sessions they name, with the\n" +
 			"subagent sessions of each named main session, nested ones included (--without-subagents\n" +
 			"leaves the whole tree out). Every\n" +
-			"other narrowing and readiness still applies, and --dry-run --json prints a plan with one entry\n" +
+			"other narrowing and readiness still applies, with one exception: a subagent session pulled in\n" +
+			"with a named session follows that session's saved-selection decision instead of its own branch,\n" +
+			"as long as the named session is sent by the same run (subagent sessions often run on worktree\n" +
+			"branches you never chose to exclude). A subagent session named on its own keeps its own\n" +
+			"check. --dry-run --json prints a plan with one entry\n" +
 			"per named session saying what the run would do and why. --collective shares each sent\n" +
 			"transcript with the collectives it names, publishing private and unlicensed without\n" +
 			"consulting the auto-publish rules for those sessions, so the push asks once before it runs.\n\n" +
@@ -481,7 +485,9 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				// --session and --sessions-from pin the run to the sessions they
 				// name, with the subagent sessions of each. The selection is an
 				// AND: every other narrowing still applies, and the plan reports
-				// what each one decided.
+				// what each one decided. A subagent session pulled in with a
+				// named session follows that session's saved-selection decision
+				// rather than its own (see push.PipelineConfig.InheritSelection).
 				var expanded expandedSelection
 				var knownSessions map[string]bool
 				if explicit {
@@ -505,6 +511,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 						return refusal
 					}
 					runCfg.FilterSessionIDs = expanded.ids()
+					runCfg.InheritSelection = expanded.inheritance()
 				}
 
 				// Home paths and PII are stripped from metadata on the way out even
@@ -1098,7 +1105,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 	cmd.Flags().StringVar(&profileTrace, "profile-trace", "", "Write an optional JSONL trace of profile events to this file (mode 0600). Requires --profile-output and a distinct regular-file destination with an existing parent. JSON records an opaque trace reference, not the path; the actual path is printed to stderr unless --quiet.")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, raise it to about 2x NumCPU and confirm throughput with --timing.")
 	cmd.Flags().StringVar(&repository, "repository", "", "Only push sessions carrying this Git repository's canonical project identity (a path). Peasant first uses the normalized checkout upstream remote when there is one it can normalize, then the normalized origin remote, so separate clones using the same remote share an identity. If neither is usable — including when there is no origin remote or a remote is a local path or file:// URL — identity instead comes from the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which identity was used is printed when the push runs. Default: every configured session")
-	cmd.Flags().StringArrayVar(&sessionIDs, pushSessionFlag, nil, "Push only this session (repeatable; combines with --sessions-from). The selection is an AND with --repository, --source-harness, the saved selection and readiness; a session that fails one is reported, never sent. The subagent sessions of each named main session travel with it, nested ones included. Skips the push wizard. A real run refuses an id the local store does not hold")
+	cmd.Flags().StringArrayVar(&sessionIDs, pushSessionFlag, nil, "Push only this session (repeatable; combines with --sessions-from). The selection is an AND with --repository, --source-harness, the saved selection and readiness; a session that fails one is reported, never sent. The subagent sessions of each named main session travel with it, nested ones included, and follow its saved-selection decision. Skips the push wizard. A real run refuses an id the local store does not hold")
 	clicontract.RegisterSessionsFrom(cmd)
 	cmd.Flags().StringArrayVar(&collectiveRefs, pushCollectiveFlag, nil, "Share each sent transcript with this collective: a name, UUID or page URL, as in village pull (repeatable; needs --session or --sessions-from). Publishes private and unlicensed and skips your auto-publish rules for the named sessions, so it asks for confirmation once unless --yes is given. A --dry-run reads the collective list to resolve the names, and the visibility of any transcript it would update, and writes nothing")
 	cmd.Flags().BoolVar(&withoutSubagents, pushWithoutSubagentsFlag, false, "Leave out the subagent sessions of the named main sessions, the whole tree; the plan counts them under subagentsOmitted")

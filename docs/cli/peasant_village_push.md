@@ -35,7 +35,11 @@ explicit hand-run choice; it is refused together with --auto-publish-event and
 Named sessions — --session and --sessions-from push only the sessions they name, with the
 subagent sessions of each named main session, nested ones included (--without-subagents
 leaves the whole tree out). Every
-other narrowing and readiness still applies, and --dry-run --json prints a plan with one entry
+other narrowing and readiness still applies, with one exception: a subagent session pulled in
+with a named session follows that session's saved-selection decision instead of its own branch,
+as long as the named session is sent by the same run (subagent sessions often run on worktree
+branches you never chose to exclude). A subagent session named on its own keeps its own
+check. --dry-run --json prints a plan with one entry
 per named session saying what the run would do and why. --collective shares each sent
 transcript with the collectives it names, publishing private and unlicensed without
 consulting the auto-publish rules for those sessions, so the push asks once before it runs.
@@ -76,7 +80,7 @@ peasant village push [flags]
       --quiet                         Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line
       --repository string             Only push sessions carrying this Git repository's canonical project identity (a path). Peasant first uses the normalized checkout upstream remote when there is one it can normalize, then the normalized origin remote, so separate clones using the same remote share an identity. If neither is usable — including when there is no origin remote or a remote is a local path or file:// URL — identity instead comes from the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which identity was used is printed when the push runs. Default: every configured session
       --require-auto-publish-rule     Publish only sessions currently bound by an active auto-publish rule (used by rule-installed hooks)
-      --session stringArray           Push only this session (repeatable; combines with --sessions-from). The selection is an AND with --repository, --source-harness, the saved selection and readiness; a session that fails one is reported, never sent. The subagent sessions of each named main session travel with it, nested ones included. Skips the push wizard. A real run refuses an id the local store does not hold
+      --session stringArray           Push only this session (repeatable; combines with --sessions-from). The selection is an AND with --repository, --source-harness, the saved selection and readiness; a session that fails one is reported, never sent. The subagent sessions of each named main session travel with it, nested ones included, and follow its saved-selection decision. Skips the push wizard. A real run refuses an id the local store does not hold
       --sessions-from string          Read session ids from a file, or from standard input when the value is -. Accepts one id per line, a JSON array of ids, or the JSON array that a --json listing prints
       --source-harness string         Filter to a specific harness (claude-code, gemini-cli, codex, opencode, cursor, strike, pi)
       --timeout duration              Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a peasant online server that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach peasant online. Default: no budget. Git hooks always pass one.

@@ -94,6 +94,18 @@ func (e expandedSelection) ids() []string {
 	return out
 }
 
+// inheritance maps each subagent session pulled in with a named session to
+// that named session, the root whose saved-selection decision it follows.
+func (e expandedSelection) inheritance() map[string]string {
+	out := map[string]string{}
+	for _, s := range e.sessions {
+		if s.Parent != "" {
+			out[s.ID] = s.Parent
+		}
+	}
+	return out
+}
+
 // childSessionReader is the store read that names a session's subagent
 // sessions.
 type childSessionReader interface {
@@ -320,16 +332,20 @@ type planShare struct {
 // planEntry is one requested session in the --json plan. Subagent sessions
 // that travel with a main session are listed under it.
 type planEntry struct {
-	SessionID        string      `json:"session_id"`
-	Verdict          PlanVerdict `json:"verdict"`
-	Reason           PlanReason  `json:"reason,omitempty"`
-	Detail           string      `json:"detail,omitempty"`
-	Title            string      `json:"title,omitempty"`
-	SelectedBy       string      `json:"selectedBy"`
-	Next             string      `json:"next,omitempty"`
-	Shares           []planShare `json:"shares,omitempty"`
-	SubagentsOmitted int         `json:"subagentsOmitted,omitempty"`
-	Subagents        []planEntry `json:"subagents,omitempty"`
+	SessionID  string      `json:"session_id"`
+	Verdict    PlanVerdict `json:"verdict"`
+	Reason     PlanReason  `json:"reason,omitempty"`
+	Detail     string      `json:"detail,omitempty"`
+	Title      string      `json:"title,omitempty"`
+	SelectedBy string      `json:"selectedBy"`
+	Next       string      `json:"next,omitempty"`
+	Shares     []planShare `json:"shares,omitempty"`
+	// SelectionInheritedFrom names the parent whose saved-selection decision
+	// let this subagent session through, set only where its own branch would
+	// have been excluded.
+	SelectionInheritedFrom string      `json:"selectionInheritedFrom,omitempty"`
+	SubagentsOmitted       int         `json:"subagentsOmitted,omitempty"`
+	Subagents              []planEntry `json:"subagents,omitempty"`
 }
 
 // pushCounts is the summary of a push: how many sessions ended in each
@@ -464,8 +480,12 @@ func explainOne(id string, in planInputs, rows map[string]ingest.PushSessionRow,
 		entry.Verdict, entry.Reason = PlanUnknown, ReasonNotInStore
 		return entry
 	}
+	root, inherited := in.runCfg.SelectionInheritedFrom(id)
 	if sr, considered := results[id]; considered {
 		entry.Title = sr.Title
+		if inherited {
+			entry.SelectionInheritedFrom = root
+		}
 		switch sr.Status {
 		case push.PushStatusNew:
 			entry.Verdict = PlanWillPublish
@@ -521,6 +541,11 @@ func explainOne(id string, in planInputs, rows map[string]ingest.PushSessionRow,
 		entry.Verdict, entry.Reason = PlanExcluded, ReasonOutsideRepository
 	case in.runCfg.Selection != nil && in.runCfg.Selection.Decision(ingest.SessionID(id)) != ingest.BranchMatchYes:
 		entry.Verdict, entry.Reason = PlanExcluded, ReasonBranchSelectionExcl
+		if inherited {
+			// The parent passed the saved selection but is not sent: it was
+			// left out or is not ready, so there is no decision to inherit.
+			entry.Detail = "its own branch is outside the saved selection, and it follows its parent " + root + "'s selection only when this run sends that parent; the parent is not sent"
+		}
 	case in.autoPublish.held[id] != "":
 		entry.Verdict, entry.Detail = PlanHeld, in.autoPublish.held[id]
 	default:

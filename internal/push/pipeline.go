@@ -513,6 +513,7 @@ func (p *Pipeline) getTargetSessions(ctx context.Context, parentSpanID string) (
 
 	selectionSpan := rec.StartChildSpan(perf.StagePushSelection, parentSpanID, nil)
 	kept, withheld := NarrowCandidates(base, p.runCfg)
+	kept = p.dropInheritedWithUnreadyRoot(ctx, kept)
 	p.noticeWithheld(withheld)
 	selectionSpan.End(perf.OutcomeOK, nil)
 	return kept, baseCount, nil
@@ -565,8 +566,63 @@ func NarrowCandidates(sessions []ingest.PushSessionRow, runCfg PipelineConfig) (
 	if runCfg.PinnedSessionIDs != nil {
 		sessions = keepSessions(sessions, runCfg.PinnedSessionIDs)
 	}
-	kept, withheld = ApplySelection(sessions, runCfg.Selection)
-	return ApplyRepositoryScope(kept, runCfg.Repository), ApplyRepositoryScope(withheld, runCfg.Repository)
+	kept, withheld = ApplySelection(sessions, runCfg.inheritingSelection())
+	kept = ApplyRepositoryScope(kept, runCfg.Repository)
+	return dropInheritedWithoutRoot(kept, runCfg), ApplyRepositoryScope(withheld, runCfg.Repository)
+}
+
+// dropInheritedWithoutRoot removes each session admitted only by its root's
+// selection when the root itself is not among the sessions kept: a subagent
+// session inherits the selection of a parent the run sends, never of one it
+// leaves out.
+func dropInheritedWithoutRoot(kept []ingest.PushSessionRow, runCfg PipelineConfig) []ingest.PushSessionRow {
+	if len(runCfg.InheritSelection) == 0 {
+		return kept
+	}
+	present := make(map[string]bool, len(kept))
+	for _, session := range kept {
+		present[session.SessionID] = true
+	}
+	out := make([]ingest.PushSessionRow, 0, len(kept))
+	for _, session := range kept {
+		if root, inherited := runCfg.SelectionInheritedFrom(session.SessionID); inherited && !present[root] {
+			continue
+		}
+		out = append(out, session)
+	}
+	return out
+}
+
+// dropInheritedWithUnreadyRoot removes each session admitted only by its
+// root's selection when the root is not ready to publish. The root's readiness
+// is the same check its own upload makes; it is read once per root.
+func (p *Pipeline) dropInheritedWithUnreadyRoot(ctx context.Context, kept []ingest.PushSessionRow) []ingest.PushSessionRow {
+	if len(p.runCfg.InheritSelection) == 0 {
+		return kept
+	}
+	rows := make(map[string]ingest.PushSessionRow, len(kept))
+	for _, session := range kept {
+		rows[session.SessionID] = session
+	}
+	ready := map[string]bool{}
+	out := make([]ingest.PushSessionRow, 0, len(kept))
+	for _, session := range kept {
+		root, inherited := p.runCfg.SelectionInheritedFrom(session.SessionID)
+		if !inherited {
+			out = append(out, session)
+			continue
+		}
+		rootReady, known := ready[root]
+		if !known {
+			input, _, err := p.readPublicationInput(ctx, rows[root])
+			rootReady = err == nil && ValidatePublicationInput(input) == nil
+			ready[root] = rootReady
+		}
+		if rootReady {
+			out = append(out, session)
+		}
+	}
+	return out
 }
 
 // keepSessions returns the sessions keep names, in order, in a new slice.
