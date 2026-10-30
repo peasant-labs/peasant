@@ -74,6 +74,19 @@ func ResolveSessionsFrom(cmd *cobra.Command) (ids []string, set bool, err error)
 		}
 	}
 
+	return ReadSessionsFrom(cmd)
+}
+
+// ReadSessionsFrom is ResolveSessionsFrom without the conflict check: it reads
+// the ids --sessions-from names and refuses an unreadable or empty list. It is
+// for a command whose own rules let --sessions-from combine with another
+// selector, such as village push, where --session adds to the list.
+func ReadSessionsFrom(cmd *cobra.Command) (ids []string, set bool, err error) {
+	flag := cmd.Flags().Lookup(SessionsFromFlag)
+	if flag == nil || !flag.Changed {
+		return nil, false, nil
+	}
+
 	source := flag.Value.String()
 	var r io.Reader
 	name := source
