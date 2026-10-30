@@ -184,10 +184,11 @@ that is not ready counts in `errors`. The text summary prints the same counts.
 The `sessions` list still holds only the sessions the run sent or tried to
 send, so it can be shorter than the plan.
 
-`village push` reports every refusal it makes before its first request to
-peasant online with exit status 3, a refusal of how it was called included:
+`village push` reports every refusal it makes before it sends peasant online
+anything to write with exit status 3, a refusal of how it was called included:
 an unreadable `--sessions-from` list, a session id the store does not hold, an
-unknown collective, or a `--collective` confirmation it cannot ask for. Under
+unknown collective (found by the one read, `GET /api/v1/collectives`, that
+resolves the names), or a `--collective` confirmation it cannot ask for. Under
 `--json` the refusal is also in the document's `refusal` field.
 
 ## Which commands follow the contract today

@@ -136,11 +136,11 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 			"  0  the run succeeded.\n" +
 			"  1  the run failed after it had started talking to peasant online, so part of the work\n" +
 			"     may be published and recorded as published.\n" +
-			"  3  the run failed BEFORE a single peasant online request was made — a missing or expired\n" +
+			"  3  the run failed BEFORE it sent peasant online anything to write — a missing or expired\n" +
 			"     login, an unreadable config, a store that would not open, a repository scope that\n" +
-			"     would not resolve, a named session the store does not hold, an unknown collective,\n" +
-			"     or a confirmation that could not be asked. Nothing was published and nothing was\n" +
-			"     recorded as published.",
+			"     would not resolve, a named session the store does not hold, an unknown collective\n" +
+			"     (found by the one read that resolves --collective names), or a confirmation that\n" +
+			"     could not be asked. Nothing was published and nothing was recorded as published.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Past argument validation, every failure here is a RUNTIME error
 			// (auth gate, unreachable village, pipeline) — not a usage error. Cobra

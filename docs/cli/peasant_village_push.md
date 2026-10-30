@@ -50,11 +50,11 @@ one distinction it cannot read out of prose: whether anything was published at a
   0  the run succeeded.
   1  the run failed after it had started talking to peasant online, so part of the work
      may be published and recorded as published.
-  3  the run failed BEFORE a single peasant online request was made — a missing or expired
+  3  the run failed BEFORE it sent peasant online anything to write — a missing or expired
      login, an unreadable config, a store that would not open, a repository scope that
-     would not resolve, a named session the store does not hold, an unknown collective,
-     or a confirmation that could not be asked. Nothing was published and nothing was
-     recorded as published.
+     would not resolve, a named session the store does not hold, an unknown collective
+     (found by the one read that resolves --collective names), or a confirmation that
+     could not be asked. Nothing was published and nothing was recorded as published.
 
 ```
 peasant village push [flags]
