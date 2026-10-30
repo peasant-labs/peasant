@@ -1147,7 +1147,8 @@ func (p *Pipeline) pushSession(
 		if sess.PushedAt != nil {
 			status = PushStatusUpdated
 		}
-		if !p.runCfg.Force && sess.PushedAt != nil && previous != nil && !p.changesVisibility() {
+		comparable := sess.PushedAt != nil && previous != nil
+		if comparable && !p.runCfg.Force && !p.changesVisibility() {
 			if operation, opErr := schema.CanonicalizePublishRequest(request); opErr == nil {
 				if fingerprint, fpErr := schema.FingerprintPublishOperation(operation); fpErr == nil && alreadyHeld(previous.Receipt, operation, fingerprint) {
 					status = PushStatusSkipped

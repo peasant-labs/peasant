@@ -2497,7 +2497,9 @@ func buildPushWizardSessions(
 // A run that names its sessions (--session, --sessions-from) skips it too: the
 // selection is already made.
 func pushWizardEnabled(dryRun, jsonOutput, isTTY, nonInteractive, lastGood, explicitSessions bool) bool {
-	return !dryRun && !jsonOutput && isTTY && !nonInteractive && !lastGood && !explicitSessions
+	interactive := isTTY && !jsonOutput && !nonInteractive
+	selectionPending := !dryRun && !lastGood && !explicitSessions
+	return interactive && selectionPending
 }
 
 // runPushWizard is a thin TTY wrapper over buildPushWizardSessions: it builds the
