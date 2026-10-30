@@ -715,7 +715,14 @@ func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, 
 	stale := p.staleIdentityNote(all)
 	recorded := ApplyRepositoryScope(all, scope)
 	if len(recorded) == 0 {
-		return clicontract.EmptyFiltersExcludedAll, p.renderEmpty(
+		// The prose is the scope's, but the code names the cause: a store
+		// with no session at all has nothing for any filter to exclude, and
+		// the same store reports the same code without --repository.
+		code := clicontract.EmptyFiltersExcludedAll
+		if len(all) == 0 {
+			code = clicontract.EmptyStoreHasNoSessions
+		}
+		return code, p.renderEmpty(
 			joinSentences(
 				fmt.Sprintf("No sessions are recorded for scope %s.", scope.Summary()),
 				stale,

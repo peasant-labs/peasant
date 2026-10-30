@@ -31,8 +31,10 @@ const (
 	// config, a store that would not open, a repository scope that would not
 	// resolve. Nothing was published, and nothing was recorded as published.
 	//
-	// It is 3 rather than 2 because 2 is conventionally a usage error, which
-	// Cobra already handles before a command runs.
+	// It is kept distinct from 2, ExitUsage, the refusal of a command line
+	// that asks for something the command will not do. village push reports
+	// its own refusals with this status, usage refusals included, because its
+	// callers branch on whether anything reached the village.
 	ExitNothingAttempted ExitCode = 3
 )
 
