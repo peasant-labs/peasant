@@ -29,6 +29,8 @@ type entryExtraRedactionCase struct {
 	Extra     string `yaml:"extra"`
 	Want      string `yaml:"want"`
 	SameBytes bool   `yaml:"sameBytes"`
+	Absent    string `yaml:"absent"`
+	Refused   bool   `yaml:"refused"`
 }
 
 func loadEntryExtraRedactionCases(t *testing.T) []entryExtraRedactionCase {
@@ -73,6 +75,12 @@ func TestEntryExtraRedactedAsDocument(t *testing.T) {
 				EntryType: schema.EntryTypeText, Role: schema.RoleAssistant, ContentPreview: &preview, Extra: &extra,
 			}
 			entries, err := push.RedactEntries(redactor, []schema.SessionEntry{entry})
+			if tc.Refused {
+				if err == nil {
+					t.Fatalf("RedactEntries published the entry, want it refused; Extra %s", *entries[0].Extra)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("RedactEntries: %v", err)
 			}
@@ -111,6 +119,12 @@ func assertExtra(t *testing.T, seam string, got *string, tc entryExtraRedactionC
 	}
 	if _, _, err := ingest.DecodePiExtra(got); err != nil {
 		t.Fatalf("%s left an Extra the entry reader refuses: %v\n%s", seam, err, *got)
+	}
+	if tc.Absent != "" && strings.Contains(*got, tc.Absent) {
+		t.Fatalf("%s published %q: %s", seam, tc.Absent, *got)
+	}
+	if tc.Want == "" && !tc.SameBytes {
+		return
 	}
 	if tc.SameBytes {
 		if *got != tc.Extra {

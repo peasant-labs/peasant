@@ -17,7 +17,9 @@ import (
 // address "u003cname@example.com", and replacing it leaves "\<EMAIL>", which
 // is no longer JSON. Every later reader of the entry then refuses it. Here
 // each string token is decoded, redacted, and re-encoded only when a rule
-// changed it, so the document stays valid and every other byte is kept.
+// changed it, so the document stays valid and every other byte is kept. The
+// result then goes through the rules as text once more, for the rules that
+// match the JSON around a value, and fails closed if that pass breaks it.
 //
 // ok is false when Extra is not valid JSON: such a value is left for the text
 // pass, which is all the redaction it can have. A recorded model id survives
@@ -29,6 +31,25 @@ func redactEntryExtra(redactor redact.JSONRedactor, extra *string) (_ *string, o
 	redacted, err := ingest.RedactRetainedJSON(*extra, redactor, 0)
 	if err != nil {
 		return nil, false, fmt.Errorf("redact entry Extra for publication: %w", err)
+	}
+	// Some rules match the JSON around a value, not the value: go_import_path
+	// needs the quotes of "github.com/org/repo", and npm_repo_url spans a
+	// "repository" key and its URL. A token on its own cannot show them that,
+	// so the serialized document is also passed through the rules as text, as
+	// it always was. Every email, path and secret is already a placeholder
+	// here, so that pass no longer cuts into an escape. Its result is taken
+	// when it changed something and is still JSON; when it changed something
+	// and broke the document, the entry is refused rather than published with
+	// what the rule matched.
+	text, isText := redactor.RedactJSON(redacted).(string)
+	if !isText {
+		return nil, false, fmt.Errorf("redact entry Extra for publication: a rule changed the document into another type; nothing was uploaded; correct the rule so it rewrites text in place")
+	}
+	if text != redacted {
+		if !json.Valid([]byte(text)) {
+			return nil, false, fmt.Errorf("redact entry Extra for publication: a rule that matches JSON context rewrote this entry's Extra into a document that is no longer JSON; nothing was uploaded, because publishing it unredacted would send what the rule matched; leave the session out of the push, or report the rule")
+		}
+		redacted = text
 	}
 	modelID, present, err := observedModelFromExtra(extra)
 	if err != nil {

@@ -5,3 +5,8 @@ requiredNames:
   - email_after_quote_escape
   - untouched_extra_keeps_its_bytes
   - model_id_survives
+  - go_import_bare_value
+  - npm_repo_field
+  - npm_homepage_field_beside_others
+  - artifactory_token_quote_boundary
+  - artifactory_password_quote_boundary
