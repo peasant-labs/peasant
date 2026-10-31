@@ -220,6 +220,15 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					slog.Debug("content backfill deferred to forced index replacement", "session_id", id)
 					continue
 				}
+				var incomplete *StoredContentIncompleteError
+				if errors.As(err, &incomplete) && state.IndexerVersion < p.versionTargets()[state.Harness].IndexerVersion {
+					// Content-only recovery refuses to certify this input, but the
+					// session's producer is stale, so the index stage of this same
+					// run replaces it. "The capture stays incomplete" would be false
+					// by the end of the run; if that stage fails, it reports why.
+					slog.Debug("content backfill deferred to stale producer index", "session_id", id)
+					continue
+				}
 				var torn *TornRetainedPairError
 				if errors.As(err, &torn) {
 					// The saved pair no longer matches the row. Report it in the
