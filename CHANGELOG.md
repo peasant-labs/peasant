@@ -37,6 +37,12 @@ Release, which holds the signed artifacts and checksums.
 - `--sessions-from` accepts a `sessions review --json` document and takes only
   its clean sessions. Each session left out is a `session_refused` warning, and
   a document with no clean session is refused.
+- `village share` offers transcripts you already published to collectives, named
+  by UUID, page URL, `--session` or `--sessions-from`, without pushing again. It
+  asks once; `--yes` confirms in advance, and with `--json` or no terminal and no
+  `--yes` it refuses, exits 3 and shares nothing. A collective that already has a
+  share, live, rejected or taken back, is not asked again. `--dry-run --json`
+  prints the plan. It uploads nothing and changes no visibility or license.
 
 ### Changed
 - **Exit code:** `peasant harvest --json` now exits 1 when a session fails,

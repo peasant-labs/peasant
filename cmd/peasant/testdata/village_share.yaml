@@ -1,0 +1,220 @@
+# peasant village share through the production command, a real store and the
+# Village double.
+#
+# Sessions {a}, {b} and {c} are the seeds, and a transcript's identifier on the
+# double is its session's. `published` seeds a receipt through a plain private
+# push; {unpublished} is a seed with no receipt. {stranger} is a transcript the
+# double does not hold. Collectives: research (open), review (curated), twin
+# (two collectives share the name), {outsider} (a UUID the caller is not in).
+#
+# `shares` are decisions Village already holds. `wantPosts` is the exact number
+# of mutating requests the run made, 0 unless the case shares. A step names its
+# transcript, its collective, and its outcome.
+cases:
+  - name: share_one_transcript_one_collective
+    args: ["{a}", --collective, research, --yes]
+    wantPosts: 1
+    wantReceipts: 1
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: succeeded}
+  - name: share_pending_approval
+    args: ["{a}", --collective, review, --yes]
+    wantPosts: 1
+    wantSteps:
+      - {transcript: "{a}", collective: review, outcome: pending_approval}
+  - name: two_collectives_one_call
+    args: ["{a}", --collective, research, --collective, review, --yes]
+    wantPosts: 1
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: succeeded}
+      - {transcript: "{a}", collective: review, outcome: pending_approval}
+  - name: already_held_is_skipped
+    shares:
+      - {transcript: "{a}", collective: research, status: approved}
+    args: ["{a}", --collective, research, --yes]
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: skipped, reasonContains: already holds this transcript}
+  - name: rejected_is_not_asked_again
+    shares:
+      - {transcript: "{a}", collective: research, status: rejected}
+    args: ["{a}", --collective, research, --yes]
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: skipped, reasonContains: rejected this transcript}
+  - name: taken_back_is_not_asked_again
+    shares:
+      - {transcript: "{a}", collective: research, status: retracted}
+    args: ["{a}", --collective, research, --yes]
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: skipped, reasonContains: taken back}
+  - name: unchanged_session_by_receipt
+    args: [--session, "{a}", --collective, research, --yes]
+    wantPosts: 1
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: succeeded, session: "{a}"}
+  - name: session_without_receipt_fails_that_target_only
+    args: [--session, "{unpublished}", --session, "{a}", --collective, research, --yes]
+    wantExit: 1
+    wantPosts: 1
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: succeeded}
+    wantErrors:
+      - {ref: "{unpublished}", contains: "peasant village push --session {unpublished}"}
+  - name: not_owner_403
+    refuseShare: ["{a}"]
+    args: ["{a}", "{b}", --collective, research, --yes]
+    wantExit: 1
+    wantPosts: 2
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: failed, reasonContains: You do not own this transcript}
+      - {transcript: "{b}", collective: research, outcome: succeeded}
+  - name: missing_transcript_read_fails_that_target_only
+    args: ["{stranger}", "{b}", --collective, research, --yes]
+    wantExit: 1
+    wantPosts: 1
+    wantSteps:
+      - {transcript: "{stranger}", collective: research, outcome: failed, reasonContains: Transcript not found}
+      - {transcript: "{b}", collective: research, outcome: succeeded}
+  # A 409 that the share history cannot explain stays a failure. The read-back
+  # that reports a 409 as held is conflict_409_reads_as_held in
+  # internal/push/testdata/share_existing.yaml.
+  - name: conflict_with_no_history_stays_a_failure
+    conflictShare: research
+    args: ["{a}", --collective, research, --yes]
+    wantExit: 1
+    wantPosts: 1
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: failed, reasonContains: at the same moment}
+  - name: same_transcript_named_twice_shares_once
+    args: ["{a}", --session, "{a}", --collective, research, --yes]
+    wantPosts: 1
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: succeeded, session: "{a}"}
+  - name: sessions_from_stdin_with_yes
+    stdin: "{a}\n{b}\n"
+    args: [--sessions-from, "-", --collective, research, --yes]
+    wantPosts: 2
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: succeeded, session: "{a}"}
+      - {transcript: "{b}", collective: research, outcome: succeeded, session: "{b}"}
+  - name: sessions_from_stdin_leaves_no_answer_for_the_prompt
+    tty: true
+    stdin: "{a}\n"
+    args: [--sessions-from, "-", --collective, research]
+    text: true
+    wantPrompt: "[y/N]"
+    wantOutput: nothing was shared
+  - name: non_member_collective_fails_before_mutation
+    args: ["{a}", --collective, "{outsider}", --yes]
+    wantExit: 3
+    wantErr: is not one you belong to
+  - name: ambiguous_collective_name_fails
+    args: ["{a}", --collective, research, --collective, twin, --yes]
+    wantExit: 3
+    wantErr: is ambiguous
+  - name: lookalike_url_refused
+    args: ["https://peasant.example/users/{a}", "{b}", --collective, research, --yes]
+    wantExit: 1
+    wantPosts: 1
+    wantSteps:
+      - {transcript: "{b}", collective: research, outcome: succeeded}
+    wantErrors:
+      - {ref: "https://peasant.example/users/{a}", contains: is not a village transcript URL}
+  - name: dry_run_sends_nothing
+    shares:
+      - {transcript: "{b}", collective: research, status: approved}
+    args: ["{a}", --session, "{b}", --collective, research, --dry-run]
+    wantNeedsConfirmation: true
+    wantStoreUnchanged: true
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: not_attempted, reasonContains: "dry run: would share"}
+      - {transcript: "{b}", collective: research, outcome: skipped, reasonContains: already holds this transcript}
+  - name: dry_run_with_yes_needs_no_confirmation
+    tty: true
+    stdin: "y\n"
+    args: ["{a}", --collective, research, --dry-run, --yes]
+    wantNeedsConfirmation: false
+    wantNoPrompt: true
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: not_attempted}
+  - name: prompts_without_yes
+    tty: true
+    stdin: "n\n"
+    args: ["{a}", "{b}", --collective, research]
+    text: true
+    wantPrompt: "Share 2 transcripts with research? Its members will be able to read them. [y/N]"
+    wantOutput: nothing was shared
+  - name: prompt_accepts_y
+    tty: true
+    stdin: "y\n"
+    args: ["{a}", --collective, research, --collective, review]
+    text: true
+    wantPosts: 1
+    wantPrompt: "Share 1 transcript with research, review? Their members will be able to read it. [y/N]"
+    wantOutput: "research: succeeded"
+  - name: prompt_on_end_of_input_shares_nothing
+    tty: true
+    args: ["{a}", --collective, research]
+    text: true
+    wantPrompt: "[y/N]"
+    wantOutput: nothing was shared
+  - name: yes_and_y_skip_prompt
+    tty: true
+    stdin: "n\n"
+    args: ["{a}", --collective, research, --yes]
+    alsoArgs: ["{b}", --collective, research, -y]
+    wantPosts: 2
+    wantNoPrompt: true
+    wantSteps:
+      - {transcript: "{b}", collective: research, outcome: succeeded}
+  - name: no_tty_without_yes_refuses
+    stdin: "y\n"
+    args: ["{a}", --collective, research]
+    text: true
+    wantExit: 3
+    wantNoRequests: true
+    wantErr: --yes
+  - name: json_without_yes_refuses_on_a_terminal
+    tty: true
+    stdin: "y\n"
+    args: ["{a}", --collective, research]
+    wantExit: 3
+    wantNoRequests: true
+    wantErr: --yes
+    wantRefusal: true
+  - name: everything_decided_asks_nothing
+    tty: true
+    shares:
+      - {transcript: "{a}", collective: research, status: rejected}
+    args: ["{a}", --collective, research]
+    text: true
+    wantNoPrompt: true
+    wantOutput: nothing was asked
+  - name: json_golden
+    shares:
+      - {transcript: "{b}", collective: research, status: approved}
+    args: ["--session", "{a}", "{b}", "--session", "{unpublished}", --collective, review, --collective, research, --yes]
+    wantExit: 1
+    wantPosts: 2
+    golden: testdata/village_share_output.json
+  - name: not_logged_in_exit_3
+    loggedOut: true
+    args: ["{a}", --collective, research, --yes]
+    wantExit: 3
+    wantNoRequests: true
+    wantErr: not logged in
+  - name: no_transcript_named_exit_3
+    args: [--collective, research, --yes]
+    wantExit: 3
+    wantNoRequests: true
+    wantErr: no transcript was named
+  - name: no_collective_named_exit_3
+    args: ["{a}", --yes]
+    wantExit: 3
+    wantNoRequests: true
+    wantErr: no collective was named
+  - name: auto_publish_rules_are_not_read
+    brokenRules: true
+    args: ["{a}", --collective, research, --yes]
+    wantPosts: 1
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: succeeded}

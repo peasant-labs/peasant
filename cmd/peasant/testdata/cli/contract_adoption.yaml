@@ -176,6 +176,7 @@ cases:
     # finding nothing.
     yesCommands:
       - [village, push]
+      - [village, share]
       - [upgrade]
 
   - name: export_review_document_takes_only_clean

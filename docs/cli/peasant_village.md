@@ -37,5 +37,6 @@ peasant village [flags]
 * [peasant village login](peasant_village_login.md)	 - Log in to peasant online via GitHub
 * [peasant village logout](peasant_village_logout.md)	 - Log out from peasant online
 * [peasant village push](peasant_village_push.md)	 - Push ingested transcripts to peasant online
+* [peasant village share](peasant_village_share.md)	 - Offer transcripts you already published to a collective
 * [peasant village transcripts](peasant_village_transcripts.md)	 - Pull, list, and view transcripts from peasant online
 

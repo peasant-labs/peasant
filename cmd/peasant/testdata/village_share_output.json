@@ -1,0 +1,32 @@
+{
+  "dry_run": false,
+  "collectives": [
+    { "id": "aaaaaaaa-0000-4000-8000-000000000002", "name": "review" },
+    { "id": "aaaaaaaa-0000-4000-8000-000000000001", "name": "research" }
+  ],
+  "transcripts": [
+    {
+      "transcript_id": "{b}",
+      "visibility": "shared",
+      "steps": [
+        { "step": "add_collective", "collectiveId": "aaaaaaaa-0000-4000-8000-000000000002", "outcome": "pending_approval" },
+        { "step": "add_collective", "collectiveId": "aaaaaaaa-0000-4000-8000-000000000001", "outcome": "skipped",
+          "reason": "the collective already holds this transcript or its share waits for approval" }
+      ]
+    },
+    {
+      "transcript_id": "{a}",
+      "session_id": "{a}",
+      "url": "https://village.example/transcripts/{a}",
+      "visibility": "private",
+      "steps": [
+        { "step": "add_collective", "collectiveId": "aaaaaaaa-0000-4000-8000-000000000002", "outcome": "pending_approval" },
+        { "step": "add_collective", "collectiveId": "aaaaaaaa-0000-4000-8000-000000000001", "outcome": "succeeded" }
+      ]
+    }
+  ],
+  "errors": [
+    { "ref": "{unpublished}", "message": "no publication receipt for this account; run `peasant village push --session {unpublished}`" }
+  ],
+  "warnings": []
+}
