@@ -1,0 +1,7 @@
+7a7a7a7a-0000-4000-8000-00000000000a entry 0 user credential_assignment secret_key=**** (len 32-63)
+7a7a7a7a-0000-4000-8000-00000000000a entry 2 tool credential_file_output credentials.json: content=****
+7a7a7a7a-0000-4000-8000-00000000000a entry 3 tool credential_file_output 2 secret-named lines=****
+7a7a7a7a-0000-4000-8000-00000000000a entry 4 user foreign_email a***@univ.example.edu
+7a7a7a7a-0000-4000-8000-00000000000a entry 5 user shareable_document_link docs.google.com/document/****
+7a7a7a7a-0000-4000-8000-00000000000a entry 6 tool redaction_residue residue_bearer_token: ****
+1 session(s) reviewed: 0 clean, 1 with findings, 0 errors, 6 findings

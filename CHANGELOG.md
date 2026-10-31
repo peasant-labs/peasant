@@ -12,6 +12,15 @@ Release, which holds the signed artifacts and checksums.
   `subagent`, `skill`, `mcp`, `compact`, `clear`, `model-switch`, `background`
   and `partial`, and every named facet must hold. `--min-turns` and `--max-turns`
   bound the `turns` column. Each `--json` row now states `facets`.
+- `peasant sessions review` checks named sessions for what redaction leaves
+  behind, in memory and writing nothing: credentials in formats no rule knows,
+  tool results that printed a credential file, other people's email addresses,
+  link-shareable documents, and the redaction module's advisory hits. A finding
+  shows a masked preview, never the matched text. It exits 4 on findings and 1
+  when a session could not be reviewed.
+- `--sessions-from` accepts a `sessions review --json` document and takes only
+  its clean sessions. Each session left out is a `session_refused` warning, and
+  a document with no clean session is refused.
 
 ### Changed
 - `sessions list` shows main sessions only by default, so a script that counts

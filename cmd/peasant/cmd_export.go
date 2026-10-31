@@ -690,10 +690,10 @@ stay written.`,
 			refusals := map[string]int{}
 			refuse := func(sid string, reason string, message string) {
 				refusals[reason]++
+				warnings.Warn(clicontract.Warning{Code: clicontract.WarningSessionRefused, SessionID: sid, Message: message})
+			}
 			for _, warning := range sessionList.Warnings() {
 				warnings.Warn(warning)
-			}
-				warnings.Warn(clicontract.Warning{Code: clicontract.WarningSessionRefused, SessionID: sid, Message: message})
 			}
 			exportedSessions := []exportedSession{}
 			var succeeded, failed, repairable int

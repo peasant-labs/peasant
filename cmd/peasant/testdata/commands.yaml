@@ -159,6 +159,13 @@ commands:
           - use: remove
           - use: list
           - use: set
+      - use: review
+        flags:
+          - { name: session, type: stringArray, default: "[]" }
+          - { name: sessions-from, type: string, default: "" }
+          - { name: level, type: string, default: "" }
+          - { name: owner-email, type: stringArray, default: "[]" }
+          - { name: json, type: bool, default: "false" }
 
   - name: TUI
     use: tui
