@@ -137,7 +137,7 @@ func runSessionsPrompts(cmd *cobra.Command, sid schema.SessionID, maxChars int, 
 	if store.CaptureTextBounded(capture, found) {
 		warnings.Warn(clicontract.Warning{
 			Code:      clicontract.WarningCaptureBounded,
-			Message:   "this capture stores bounded previews, so a long prompt may be cut; run `peasant harvest --force` to recapture the session from its source",
+			Message:   fmt.Sprintf("this capture stores bounded previews, so a long prompt may be cut; run `peasant harvest index --session %s` to repair it", sid),
 			SessionID: string(sid),
 		})
 	}
