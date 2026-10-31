@@ -35,6 +35,11 @@ func acquire(path string, deadline time.Time) (ReleaseFunc, error) {
 				return file.Close()
 			}, nil
 		}
+		// Only a conflicting lock means "still held"; any other failure
+		// (a bad handle, an I/O error) is returned instead of retried.
+		if err != windows.ERROR_LOCK_VIOLATION && err != windows.ERROR_IO_PENDING {
+			return nil, err
+		}
 		if wait := time.Until(deadline); wait <= 0 {
 			return nil, errDeadline
 		} else if wait < 2*time.Millisecond {

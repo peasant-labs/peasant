@@ -44,7 +44,7 @@ func BuildPruneCommand() *cobra.Command {
 			}
 
 			// Require at least one filter.
-			if !filter.All && !unselected && len(filter.SessionIDs) == 0 && filter.ProjectHash == nil &&
+			if !filter.All && !unselected && len(filter.SessionIDs) == 0 && filter.Project == nil &&
 				filter.Harness == nil && filter.Before == nil && filter.After == nil {
 				return fmt.Errorf("at least one filter is required (--session, --project, --harness, --before, --after, --all, or --unselected)")
 			}
@@ -52,7 +52,7 @@ func BuildPruneCommand() *cobra.Command {
 			// --unselected is mutually exclusive with all other filter flags.
 			// Mixing them is ambiguous: --unselected overrides the filter anyway.
 			if unselected && (filter.All || len(filter.SessionIDs) > 0 ||
-				filter.ProjectHash != nil || filter.Harness != nil ||
+				filter.Project != nil || filter.Harness != nil ||
 				filter.Before != nil || filter.After != nil) {
 				return fmt.Errorf("--unselected cannot be combined with other filter flags (--all, --session, --project, --harness, --before, --after)")
 			}
@@ -187,7 +187,7 @@ func BuildPruneCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringSliceVar(&sessionIDs, "session", nil, "Session IDs to prune (repeatable)")
-	cmd.Flags().StringVar(&project, "project", "", "Prune sessions by project hash")
+	cmd.Flags().StringVar(&project, "project", "", "Prune sessions of one project: its hash, path, directory name or git remote (owner/repo, host/owner/repo or a clone URL)")
 	cmd.Flags().StringVar(&harness, "harness", "", "Prune sessions by harness (claude-code, gemini-cli, codex, opencode)")
 	cmd.Flags().StringVar(&before, "before", "", "Prune sessions started before this date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&after, "after", "", "Prune sessions started after this date (YYYY-MM-DD)")
@@ -238,6 +238,9 @@ func unselectedPruneSessions(
 // buildPruneFilter constructs a PruneFilter from CLI flag values.
 func buildPruneFilter(sessionIDStrs []string, project, harness, before, after string, all bool) (ingest.PruneFilter, error) {
 	filter := ingest.PruneFilter{All: all}
+	if all && (len(sessionIDStrs) > 0 || project != "" || harness != "" || before != "" || after != "") {
+		return filter, fmt.Errorf("--all cannot be combined with --session, --project, --harness, --before or --after: --all selects every session and would ignore the filter; nothing was deleted; drop --all to prune only the filtered sessions")
+	}
 
 	for _, raw := range sessionIDStrs {
 		sid, err := ingest.NewSessionID(raw)
@@ -248,7 +251,7 @@ func buildPruneFilter(sessionIDStrs []string, project, harness, before, after st
 	}
 
 	if project != "" {
-		filter.ProjectHash = &project
+		filter.Project = &project
 	}
 
 	if harness != "" {
