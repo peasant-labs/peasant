@@ -24,6 +24,10 @@ Do not post transcripts, tokens, credentials, personal paths, or other sensitive
    `go test -race ./...`) locally before you push. Use `make e2e` when changing
    the Village integration; see [`TESTING.md`](TESTING.md) for its additional
    prerequisites.
+   The gate's `gofmt` check (`make fmt-check`) uses the active toolchain's `gofmt`, and gofmt output
+   changes between Go releases. If your local Go is newer than the `go` version in `go.mod`
+   (1.25.8, which CI pins), run `GOTOOLCHAIN=go1.25.8 make check`. A `toolchain` line in `go.mod`
+   would not help here, because Go only switches *up* to a newer toolchain, never down.
 5. Open a pull request explaining the user impact, implementation, and exact validation performed.
 
 Generated files should be changed through their generators. Run `make docs-cli` after changing the

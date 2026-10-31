@@ -20,6 +20,7 @@ type codexDeliveryFixtureCase struct {
 	Submissions int64    `yaml:"submissions"`
 	Turns       int      `yaml:"turns"`
 	Refusal     string   `yaml:"refusal"`
+	Timestamps  []*int64 `yaml:"timestamps"`
 }
 
 func TestCodexDeliveryCandidateFixtures(t *testing.T) {
@@ -57,6 +58,7 @@ func TestCodexDeliveryCandidateFixtures(t *testing.T) {
 				t.Fatal(err)
 			}
 			var content, retained, redacted []string
+			var timestamps []*int64
 			engine, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
 			if err != nil {
 				t.Fatal(err)
@@ -65,6 +67,7 @@ func TestCodexDeliveryCandidateFixtures(t *testing.T) {
 				if !ingest.IsRetainedUnknownCarrier(entry) {
 					if entry.ContentPreview != nil {
 						content = append(content, *entry.ContentPreview)
+						timestamps = append(timestamps, entry.TimestampMs)
 					}
 					if entry.ToolCallID != nil || entry.ParentEntryID != nil {
 						t.Fatal("delivery invented a tool parent")
@@ -88,6 +91,24 @@ func TestCodexDeliveryCandidateFixtures(t *testing.T) {
 			}
 			if !slices.Equal(content, row.Content) || !slices.Equal(retained, row.Retained) {
 				t.Fatalf("content/evidence = %q / %q, want %q / %q", content, retained, row.Content, row.Retained)
+			}
+			if row.Timestamps != nil {
+				if len(timestamps) != len(row.Timestamps) {
+					t.Fatalf("timestamps = %v, want %v", timestamps, row.Timestamps)
+				}
+				for i, want := range row.Timestamps {
+					got := timestamps[i]
+					var actual, expected any
+					if got != nil {
+						actual = *got
+					}
+					if want != nil {
+						expected = *want
+					}
+					if actual != expected {
+						t.Fatalf("timestamp[%d] = %v, want %v", i, actual, expected)
+					}
+				}
 			}
 			if row.Redacted != nil && !slices.Equal(redacted, row.Redacted) {
 				t.Fatalf("redacted delivery = %q, want %q", redacted, row.Redacted)

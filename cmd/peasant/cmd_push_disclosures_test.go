@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -667,7 +668,10 @@ func runPushForDisclosures(t *testing.T, testCase pushDisclosureCase) string {
 		args = append(args, "--quiet")
 	}
 	stdout, stderr, err := executePushCmdSeparate(t, dir, args)
-	if err != nil {
+	// The village refuses the upload, so the run reports that session failed
+	// and exits 1; any other error stopped the scenario early.
+	var sessionsFailed *pushSessionsFailedError
+	if err != nil && !errors.As(err, &sessionsFailed) {
 		t.Fatalf("disclosure command failed before completing its preflight scenario: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 	if !preflightReached.Load() {

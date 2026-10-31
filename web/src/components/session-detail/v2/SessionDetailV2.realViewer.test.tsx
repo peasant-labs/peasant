@@ -158,6 +158,9 @@ function TestDetail() {
 }
 
 beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.dataset.turn === undefined ? 0 : Number(this.dataset.turn) * 20 + 12;
+  });
   routerReplace.mockClear();
   activeTurnCallbacks.length = 0;
   window.localStorage.clear();
@@ -194,9 +197,11 @@ describe('packed Fairtrade viewer mounted through Peasant', () => {
       const scrolls: string[] = [];
       const history: string[] = [];
       vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, optionsOrX: ScrollToOptions | number) {
-        if (this.classList.contains('txn-stream') && typeof optionsOrX === 'object' && optionsOrX !== null && optionsOrX.top === 0) scrolls.push('top');
+        if (!this.classList.contains('txn-stream') || typeof optionsOrX !== 'object' || optionsOrX === null) return;
+        const top = optionsOrX.top ?? 0;
+        scrolls.push(top === 0 ? 'top' : `turn:${top / 20}`);
       } as typeof HTMLElement.prototype.scrollTo);
-      vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) { scrolls.push(`turn:${this.dataset.turn}`); });
+      vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) { scrolls.push(`unexpected-ancestor-scroll:${this.dataset.turn}`); });
       vi.spyOn(window.history, 'pushState').mockImplementation(() => { history.push('push'); });
       vi.spyOn(window.history, 'replaceState').mockImplementation(() => { history.push('replace'); });
 
@@ -229,9 +234,11 @@ describe('packed Fairtrade viewer mounted through Peasant', () => {
       const scrolls: string[] = [];
       const history: string[] = [];
       vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, optionsOrX: ScrollToOptions | number) {
-        if (this.classList.contains('txn-stream') && typeof optionsOrX === 'object' && optionsOrX !== null && optionsOrX.top === 0) scrolls.push('top');
+        if (!this.classList.contains('txn-stream') || typeof optionsOrX !== 'object' || optionsOrX === null) return;
+        const top = optionsOrX.top ?? 0;
+        scrolls.push(top === 0 ? 'top' : `turn:${top / 20}`);
       } as typeof HTMLElement.prototype.scrollTo);
-      vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) { scrolls.push(`turn:${this.dataset.turn}`); });
+      vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) { scrolls.push(`unexpected-ancestor-scroll:${this.dataset.turn}`); });
       vi.spyOn(window.history, 'pushState').mockImplementation(() => { history.push('push'); });
       vi.spyOn(window.history, 'replaceState').mockImplementation(() => { history.push('replace'); });
       const view = render(<TestDetail />);

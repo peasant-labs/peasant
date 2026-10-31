@@ -446,9 +446,9 @@ func (m SessionModel) renderDetail() string {
 		b.WriteString(fmt.Sprintf("  %s  %d files, %d lines\n", DimStyle.Render("Changes:"), derefInt(q.FilesTouched), derefInt(q.LinesChanged)))
 		b.WriteString(fmt.Sprintf("  %s  %d loops (%s tokens wasted)\n",
 			DimStyle.Render("Retries:"), derefInt(q.RetryLoops), formatNumber(derefInt(q.RetryTokensWasted))))
-		b.WriteString(fmt.Sprintf("  %s  %.0f%%\n", DimStyle.Render("Signal Density:"), derefFloat(q.SignalDensity)*100))
+		b.WriteString(fmt.Sprintf("  %s  %.0f%%\n", DimStyle.Render("Signal Density:"), derefFloat(q.SignalDensity)))
 		b.WriteString(fmt.Sprintf("  %s  %d within session\n", DimStyle.Render("Reverts:"), derefInt(q.WithinSessionReverts)))
-		b.WriteString(fmt.Sprintf("  %s  %.0f / 100\n", DimStyle.Render("Spec Score:"), derefFloat(q.SpecQualityScore)*100))
+		b.WriteString(fmt.Sprintf("  %s  %.0f / 100\n", DimStyle.Render("Spec Score:"), derefFloat(q.SpecQualityScore)))
 		b.WriteString(fmt.Sprintf("  %s  %.0f%%\n", DimStyle.Render("Exploration:"), derefFloat(q.ExplorationRatio)*100))
 		b.WriteString(fmt.Sprintf("  %s  %d directories\n", DimStyle.Render("Scope Breadth:"), derefInt(q.ScopeBreadth)))
 		b.WriteString(fmt.Sprintf("  %s  %d turns\n", DimStyle.Render("Discovery:"), derefInt(q.DiscoveryTurns)))

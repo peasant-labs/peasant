@@ -1,0 +1,80 @@
+# The counts of a village push that names its sessions are the tally of its
+# plan. Each case gives a plan (verdicts only, subagent sessions nested under
+# their parent) and pipeline counters that deliberately disagree with it; the
+# printed counts must follow the plan, and every entry must be counted exactly
+# once.
+cases:
+  - name: every_verdict_has_one_count
+    plan:
+      - {verdict: will_publish}
+      - {verdict: will_update}
+      - {verdict: unchanged}
+      - {verdict: held}
+      - {verdict: failed}
+      - {verdict: not_ready}
+      - {verdict: excluded}
+      - {verdict: unknown_session}
+    pipeline: {new: 0, updated: 0, skipped: 0, errors: 0, held: 0}
+    want: {new: 1, updated: 1, skipped: 1, errors: 1, held: 1, not_ready: 1, excluded: 1, unknown_session: 1}
+
+  - name: subagents_counted_once_each
+    plan:
+      - verdict: will_update
+        subagents:
+          - {verdict: will_publish}
+          - {verdict: will_update}
+      - verdict: excluded
+        subagents:
+          - {verdict: excluded}
+          - {verdict: excluded}
+    pipeline: {new: 1, updated: 2, skipped: 0, errors: 0, held: 0}
+    want: {new: 1, updated: 2, skipped: 0, errors: 0, held: 0, not_ready: 0, excluded: 3, unknown_session: 0}
+
+  - name: not_ready_is_not_an_error
+    # The pipeline counts a not-ready session as an error; the plan gives it
+    # its own count, so errors holds only the sessions that failed.
+    plan:
+      - {verdict: not_ready}
+      - {verdict: not_ready}
+      - {verdict: failed}
+    pipeline: {new: 0, updated: 0, skipped: 0, errors: 3, held: 0}
+    want: {new: 0, updated: 0, skipped: 0, errors: 1, held: 0, not_ready: 2, excluded: 0, unknown_session: 0}
+
+  - name: excluded_sessions_never_sent_are_counted
+    # Sessions the run's narrowing removed never reach the pipeline, so its
+    # counters miss them; the plan counts them.
+    plan:
+      - {verdict: will_update}
+      - {verdict: excluded}
+      - {verdict: unknown_session}
+    pipeline: {new: 0, updated: 1, skipped: 0, errors: 0, held: 0}
+    want: {new: 0, updated: 1, skipped: 0, errors: 0, held: 0, not_ready: 0, excluded: 1, unknown_session: 1}
+
+  - name: mixed_selection_with_failed_parent_and_subagents
+    # The shape of a real mixed selection: a failed main session whose
+    # subagent sessions the branch selection excludes, a failed subagent
+    # under a failed parent, sessions that are not ready, and updates with
+    # subagent sessions, one of them new.
+    plan:
+      - verdict: failed
+        subagents:
+          - {verdict: excluded}
+          - {verdict: excluded}
+      - verdict: failed
+        subagents:
+          - {verdict: failed}
+      - {verdict: not_ready}
+      - verdict: will_update
+        subagents:
+          - {verdict: will_publish}
+      - {verdict: will_update}
+      - {verdict: excluded}
+    pipeline: {new: 1, updated: 2, skipped: 0, errors: 4, held: 0}
+    want: {new: 1, updated: 2, skipped: 0, errors: 3, held: 0, not_ready: 1, excluded: 3, unknown_session: 0}
+
+  - name: no_plan_keeps_pipeline_counters
+    # A push that names no sessions has no plan: its counts are the
+    # pipeline's, and the plan-only keys are absent.
+    noPlan: true
+    pipeline: {new: 2, updated: 3, skipped: 4, errors: 5, held: 6}
+    want: {new: 2, updated: 3, skipped: 4, errors: 5, held: 6}

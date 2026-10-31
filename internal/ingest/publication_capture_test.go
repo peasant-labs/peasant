@@ -435,6 +435,21 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				if err := os.WriteFile(path, data, 0600); err != nil {
 					t.Fatal(err)
 				}
+				if c.ReindexChangeSource {
+					// The case is an edit made after the harvest. A reindex
+					// sees a file source change by its mtime being after the
+					// stored ingest time, and Linux stamps mtimes from a
+					// coarse clock that can lag the ingest timestamp taken
+					// just before, so state the edit's time explicitly (#735).
+					stored, err := database.LoadPublicationInput(ctx, id)
+					if err != nil || stored.Metadata.Timestamp.Ingested == nil {
+						t.Fatalf("read the stored ingest time: %v", err)
+					}
+					edited := time.UnixMilli(*stored.Metadata.Timestamp.Ingested).Add(time.Second)
+					if err := os.Chtimes(path, edited, edited); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 			if c.ReindexRemoveProof {
 				conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)

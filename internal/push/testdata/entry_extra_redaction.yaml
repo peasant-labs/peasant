@@ -1,0 +1,75 @@
+# An entry's Extra is a JSON document carried in a string. Publication
+# redaction must redact it as a document: a text rule that matches next to a
+# JSON escape would otherwise cut into the escape and leave invalid JSON, which
+# every later reader refuses. Each case is one stored Extra, given as the JSON
+# text exactly as the store holds it, run through both seams that carry
+# entries (RedactEntries, then MapMetadata) with the standard redactor.
+#
+# want is the decoded Extra after both seams. sameBytes asserts the stored
+# text survives byte for byte. absent is a literal that must appear nowhere in
+# the published Extra. refused asserts the entry is refused instead: a rule
+# that matches JSON context broke the document, so nothing is published.
+#
+# Rules that match the JSON around a value rather than the value (the quotes
+# of a Go import path, a package.json key with its URL, a quote as a token
+# boundary) each have a case, so a redaction that sees only decoded tokens
+# cannot weaken them silently.
+cases:
+  - name: email_after_unicode_escape
+    # The stored shape that failed: an attribution trailer whose angle
+    # brackets the writer escaped as \u003c and \u003e.
+    extra: '{"attachment":{"type":"remote_session_change","commit":"Co-Authored-By: An Agent \u003cnoreply@example.com\u003e","pr":"x"}}'
+    want: '{"attachment":{"type":"remote_session_change","commit":"Co-Authored-By: An Agent <<EMAIL>>","pr":"x"}}'
+
+  - name: email_after_newline_escape
+    extra: '{"rendered":[{"content":"first line\nalice@example.com"}]}'
+    want: '{"rendered":[{"content":"first line\n<EMAIL>"}]}'
+
+  - name: email_after_quote_escape
+    extra: '{"note":"say \"bob@example.com\" twice"}'
+    want: '{"note":"say \"<EMAIL>\" twice"}'
+
+  - name: untouched_extra_keeps_its_bytes
+    extra: '{"isSidechain":false,"rendered":[{"content":"\u003csystem-reminder\u003e\nnothing private\n\u003c/system-reminder\u003e"}],"n":12345678901234567890}'
+    sameBytes: true
+
+  - name: model_id_survives
+    extra: '{"model_id":"claude-opus-4-6","commit":"by \u003ccarol@example.com\u003e"}'
+    want: '{"model_id":"claude-opus-4-6","commit":"by <<EMAIL>>"}'
+
+  - name: go_import_bare_value
+    # go_import_path needs the quotes around the value.
+    extra: '{"module":"github.com/acme/secretproj"}'
+    want: '{"module":"<GO_IMPORT>"}'
+    absent: github.com/acme/secretproj
+
+  - name: npm_repo_field
+    # npm_repo_url spans the key and its URL. Its replacement breaks the
+    # document, so the entry is refused, never published with the URL.
+    extra: '{"repository":"https://github.com/acme/secretproj"}'
+    refused: true
+
+  - name: npm_homepage_field_beside_others
+    extra: '{"name":"x","homepage":"https://github.com/acme/secretproj#readme","version":"1.0.0"}'
+    refused: true
+
+  - name: artifactory_token_quote_boundary
+    # artifactory_api_token accepts a quote as its boundary.
+    extra: '{"token":"AKCp8abcdefghij1234"}'
+    absent: AKCp8abcdefghij1234
+
+  - name: artifactory_password_quote_boundary
+    extra: '{"password":"AP6abcdefgh12345"}'
+    absent: AP6abcdefgh12345
+
+  - name: number_literal_is_not_text
+    # The digits of a float cost read as a card number to a text rule; a JSON
+    # number is never text, so the Extra keeps its bytes.
+    extra: '{"modelUsage":{"x":{"costUSD":2.0868480000000003,"inputTokens":50652}},"n":-1.5e3}'
+    sameBytes: true
+
+  - name: context_rule_beside_numbers_keeps_them
+    extra: '{"module":"github.com/acme/secretproj","costUSD":2.0868480000000003,"count":7}'
+    want: '{"module":"<GO_IMPORT>","costUSD":2.0868480000000003,"count":7}'
+    absent: github.com/acme/secretproj
+

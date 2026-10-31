@@ -78,9 +78,13 @@ type claudeJSONLLine struct {
 	Type      claudeRecordType `json:"type"`
 	CWD       string           `json:"cwd"`
 	GitBranch string           `json:"gitBranch"`
-	AgentID   string           `json:"agentId"`
-	UUID      string           `json:"uuid"`
-	Timestamp string           `json:"timestamp"`
+	// IsMeta is Claude Code's marker for a user-role record the harness
+	// injected. The indexer reclassifies it as system (claudeIndexLine.IsMeta),
+	// so discovery must not take a title from it either.
+	IsMeta    bool   `json:"isMeta"`
+	AgentID   string `json:"agentId"`
+	UUID      string `json:"uuid"`
+	Timestamp string `json:"timestamp"`
 	// Effort is the assistant line's top-level resolved effort. Attachment
 	// carries the nested attachment of an attachment record (the ultracode
 	// mode enter/exit evidence). ThinkingMetadata is the legacy per-line
@@ -905,8 +909,10 @@ func applyClaudeHints(hints *claudeSessionHints, raw []byte) {
 	// (system-reminder blocks, command and local-command wrappers, skill
 	// bodies) and caps the length, so the raw markup no longer leaks into the
 	// title. A turn that cleans to nothing, or that cannot be cleaned safely,
-	// leaves the hint empty and the next user line becomes the candidate.
-	if hints.title == "" && line.Type == claudeRecordTypeUser && line.Message.Role == "user" {
+	// leaves the hint empty and the next user line becomes the candidate. An
+	// isMeta record is never a candidate: the harness wrote it, whatever its
+	// text, and the indexer stores it as a system entry.
+	if hints.title == "" && line.Type == claudeRecordTypeUser && line.Message.Role == "user" && !line.IsMeta {
 		if text := extractTextFromContent(line.Message.Content); text != "" {
 			hints.title = simpleTitle(text, defaults.HarnessClaudeCode)
 		}

@@ -1,18 +1,20 @@
 # Installing Peasant on Arch Linux
 
-Peasant `v0.1.0` is distributed to Arch through the official static Linux release
+Peasant is distributed to Arch through the official static Linux release
 tarball. The planned AUR package **`peasant-bin`** remains disabled until a separately
 approved later final release. (The `-bin` suffix is required by AUR policy for
 packages that ship prebuilt artifacts.)
 
-> **Availability:** `peasant-bin` is not published for `v0.1.0`. Release candidates
+> **Availability:** `peasant-bin` is not published to the AUR yet. Release candidates
 > (`-rcN`) will never be pushed to the AUR. Use the current tarball path below until
 > AUR publication is explicitly enabled for a later final release.
 
 ## Current path: raw binary tarball
 
 ```bash
-VERSION=0.1.0
+# To pin a release, set VERSION to its tag without the leading v instead.
+VERSION=$(curl -fsSL https://api.github.com/repos/peasant-labs/peasant/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+: "${VERSION:?could not read the latest release; choose a tag from the releases page}"
 ARCH=amd64    # or arm64
 
 curl -fLO "https://github.com/peasant-labs/peasant/releases/download/v${VERSION}/peasant_${VERSION}_linux_${ARCH}.tar.gz"

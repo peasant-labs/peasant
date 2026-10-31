@@ -4,3 +4,14 @@ requiredNames:
   - overlay_does_not_adopt_a_linked_depth_zero_entry
   - overlay_still_adopts_a_depth_one_child
   - unpaired_tool_result_is_not_a_served_turn
+  - claude_represented_text_block_is_not_a_subagent_turn
+  - claude_unrepresented_text_block_stays_visible
+  - another_harness_child_text_is_not_suppressed
+  - an_untyped_claude_child_is_not_assumed_to_be_a_content_block
+  - a_claude_child_without_its_parent_is_not_suppressed
+  - a_claude_child_model_observation_is_preserved
+  - a_deeper_claude_child_is_not_a_message_content_block
+  - a_claude_child_thinking_observation_is_preserved
+  - empty_claude_carrier_preserves_child_model
+  - empty_claude_carrier_preserves_child_thinking
+  - empty_other_harness_carrier_does_not_adopt_text

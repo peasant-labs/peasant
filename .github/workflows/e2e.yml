@@ -57,7 +57,7 @@ env:
   #      the fail-closed assertion in this workflow turns that into a red gate.
   # Bump this ref and the schema module pin together; keep release-e2e.yml and
   # internal/e2e/testdata/workflows/e2e_contract.yaml in lockstep.
-  VILLAGE_REF: dfd139d30d7374e3fc74d0430beda93b67052931
+  VILLAGE_REF: a1311206ab80fe917a70c6d0cc39c4be2c68ce76
 
 permissions:
   contents: read

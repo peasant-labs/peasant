@@ -61,19 +61,19 @@ type batchCreateAnnotationsErrorResponse = schema.BatchCreateAnnotationsErrorRes
 // store is unavailable, and 500 on other errors.
 func (h *annotationHandler) handleGetAnnotations(w http.ResponseWriter, r *http.Request) {
 	if h.annotationStore == nil {
-		http.Error(w, `{"error":"annotation store not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "annotation store not available")
 		return
 	}
 
 	sessionID := r.URL.Query().Get("session_id")
 	if sessionID == "" {
-		http.Error(w, `{"error":"missing required query param: session_id"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing required query param: session_id")
 		return
 	}
 
 	rows, err := h.annotationStore.GetAnnotationsForSession(r.Context(), sessionID)
 	if err != nil {
-		http.Error(w, `{"error":"failed to fetch annotations"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to fetch annotations")
 		return
 	}
 
@@ -81,13 +81,13 @@ func (h *annotationHandler) handleGetAnnotations(w http.ResponseWriter, r *http.
 	// ingest-generated rule labels — so fetch and append those too.
 	entryRows, err := h.annotationStore.GetEntryAnnotationsForSession(r.Context(), sessionID)
 	if err != nil {
-		http.Error(w, `{"error":"failed to fetch annotations"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to fetch annotations")
 		return
 	}
 	rows = append(rows, entryRows...)
 	associationRows, err := h.annotationStore.GetAssociationAnnotationsForSession(r.Context(), sessionID)
 	if err != nil {
-		http.Error(w, `{"error":"failed to fetch annotations"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to fetch annotations")
 		return
 	}
 	rows = append(rows, associationRows...)
@@ -96,7 +96,7 @@ func (h *annotationHandler) handleGetAnnotations(w http.ResponseWriter, r *http.
 
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	if err := json.NewEncoder(w).Encode(summaries); err != nil {
-		http.Error(w, `{"error":"failed to marshal annotations"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to marshal annotations")
 	}
 }
 
@@ -105,7 +105,7 @@ func (h *annotationHandler) handleGetAnnotations(w http.ResponseWriter, r *http.
 // Returns []schema.AnnotationTypeSummary with family and class resolved via JOIN.
 func (h *annotationHandler) handleGetAnnotationTypes(w http.ResponseWriter, r *http.Request) {
 	if h.annotationStore == nil {
-		http.Error(w, `{"error":"annotation store not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "annotation store not available")
 		return
 	}
 
@@ -114,7 +114,7 @@ func (h *annotationHandler) handleGetAnnotationTypes(w http.ResponseWriter, r *h
 
 	rows, err := h.annotationStore.ListAnnotationTypesWithFamily(r.Context(), statusFilter, originFilter)
 	if err != nil {
-		http.Error(w, `{"error":"failed to fetch annotation types"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to fetch annotation types")
 		return
 	}
 
@@ -123,7 +123,7 @@ func (h *annotationHandler) handleGetAnnotationTypes(w http.ResponseWriter, r *h
 		var permissibleValues []string
 		if row.ValueConstraint != "" && row.ValueDomainKind == schema.DomainEnumerated {
 			if err := json.Unmarshal([]byte(row.ValueConstraint), &permissibleValues); err != nil {
-				http.Error(w, `{"error":"failed to parse annotation type value constraint"}`, http.StatusInternalServerError)
+				writeJSONError(w, http.StatusInternalServerError, "failed to parse annotation type value constraint")
 				return
 			}
 		}
@@ -161,7 +161,7 @@ func (h *annotationHandler) handleGetAnnotationTypes(w http.ResponseWriter, r *h
 
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	if err := json.NewEncoder(w).Encode(summaries); err != nil {
-		http.Error(w, `{"error":"failed to marshal annotation types"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to marshal annotation types")
 	}
 }
 
@@ -171,26 +171,26 @@ func (h *annotationHandler) handleGetAnnotationTypes(w http.ResponseWriter, r *h
 // Returns 201 with {"id": <new annotation DB id>} on success.
 func (h *annotationHandler) handleCreateAnnotation(w http.ResponseWriter, r *http.Request) {
 	if h.annotationStore == nil {
-		http.Error(w, `{"error":"annotation store not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "annotation store not available")
 		return
 	}
 
 	var req createAnnotationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.SessionID == "" {
-		http.Error(w, `{"error":"missing required field: sessionId"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing required field: sessionId")
 		return
 	}
 	if req.TypeID == "" {
-		http.Error(w, `{"error":"missing required field: typeId"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing required field: typeId")
 		return
 	}
 	if req.Value == "" {
-		http.Error(w, `{"error":"missing required field: value"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing required field: value")
 		return
 	}
 
@@ -198,14 +198,14 @@ func (h *annotationHandler) handleCreateAnnotation(w http.ResponseWriter, r *htt
 
 	// Validate value against the annotation type.
 	if err := h.typeReader.ValidateValue(ctx, req.TypeID, req.Value); err != nil {
-		http.Error(w, `{"error":"invalid annotation value: `+err.Error()+`"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid annotation value: "+err.Error())
 		return
 	}
 
 	// Resolve annotation type UUID.
 	annotationTypeID, err := h.annotationStore.GetAnnotationTypeID(ctx, req.TypeID)
 	if err != nil || annotationTypeID == "" {
-		http.Error(w, `{"error":"annotation type not found"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "annotation type not found")
 		return
 	}
 
@@ -216,11 +216,11 @@ func (h *annotationHandler) handleCreateAnnotation(w http.ResponseWriter, r *htt
 	}
 	annotatorID, err := h.annotationStore.GetAnnotatorIDByName(ctx, annotatorName)
 	if err != nil {
-		http.Error(w, `{"error":"failed to resolve annotator"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to resolve annotator")
 		return
 	}
 	if annotatorID == "" {
-		http.Error(w, `{"error":"annotator not found: `+annotatorName+`"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "annotator not found: "+annotatorName)
 		return
 	}
 
@@ -237,7 +237,7 @@ func (h *annotationHandler) handleCreateAnnotation(w http.ResponseWriter, r *htt
 
 	newID, err := h.annotationStore.CreateAnnotation(ctx, params)
 	if err != nil {
-		http.Error(w, `{"error":"failed to create annotation"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to create annotation")
 		return
 	}
 
@@ -276,18 +276,18 @@ func (h *annotationHandler) handleCreateAnnotation(w http.ResponseWriter, r *htt
 // On success, returns 201 with all created annotation UUIDs in request order.
 func (h *annotationHandler) handleBatchCreateAnnotations(w http.ResponseWriter, r *http.Request) {
 	if h.annotationStore == nil {
-		http.Error(w, `{"error":"annotation store not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "annotation store not available")
 		return
 	}
 
 	var req batchCreateAnnotationsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if len(req.Annotations) == 0 {
-		http.Error(w, `{"error":"annotations array must not be empty"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "annotations array must not be empty")
 		return
 	}
 
@@ -360,7 +360,7 @@ func (h *annotationHandler) handleBatchCreateAnnotations(w http.ResponseWriter, 
 		}
 		annotatorID, err := h.annotationStore.GetAnnotatorIDByName(ctx, annotatorName)
 		if err != nil {
-			http.Error(w, `{"error":"failed to resolve annotator"}`, http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "failed to resolve annotator")
 			return
 		}
 		if annotatorID == "" {
@@ -406,7 +406,7 @@ func (h *annotationHandler) handleBatchCreateAnnotations(w http.ResponseWriter, 
 	// All validation passed — commit the batch atomically.
 	ids, err := h.annotationStore.BatchCreateAnnotations(ctx, params)
 	if err != nil {
-		http.Error(w, `{"error":"failed to create annotations"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to create annotations")
 		return
 	}
 

@@ -165,6 +165,7 @@ function HomeView() {
         <div className="home-toolbar-menus">
           {browse === 'sessions' && !search && <ChoiceMenu
             ariaLabel="filters"
+            className="home-filters-menu"
             align="end"
             closeOnChoose={false}
             onOpen={() => { if (home.projectError == null) void home.loadProjects(); }}

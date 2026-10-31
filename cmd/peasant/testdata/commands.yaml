@@ -69,7 +69,7 @@ commands:
         output_contains: ["harvest"]
       - args: ["--source-harness=nosuchprovider"]
         expect_error: true
-        error_contains: ["--source-harness requires --source-path"]
+        error_contains: ["unknown harness"]
 
   - name: Web
     use: web
@@ -122,6 +122,10 @@ commands:
       - { name: require-auto-publish-rule, type: bool, default: "false" }
       - { name: auto-publish-event, type: string, default: "" }
       - { name: last-good, type: bool, default: "false" }
+      - { name: session, type: stringArray, default: "[]" }
+      - { name: sessions-from, type: string, default: "" }
+      - { name: collective, type: stringArray, default: "[]" }
+      - { name: without-subagents, type: bool, default: "false" }
     exit_cases:
       - args: ["--help"]
         expect_error: false
@@ -184,6 +188,9 @@ commands:
       - name: reset
         type: bool
         default: "false"
+      - name: confirm
+        type: bool
+        default: "false"
 
   - name: Config
     use: config
@@ -240,9 +247,10 @@ commands:
       - use: sessions
         flags:
           - { name: session, type: string, default: "" }
-          - { name: session-from-file, type: string, default: "" }
+          - { name: sessions-from, type: string, default: "" }
           - { name: output-dir, type: string, default: "." }
           - { name: last-good, type: bool, default: "false" }
+          - { name: json, type: bool, default: "false" }
       - use: annotations
         flags:
           - { name: session, type: string, default: "" }

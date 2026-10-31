@@ -188,8 +188,11 @@ type codexHistoryRecord struct {
 	ByteStart        int64
 	ByteEndExclusive int64
 	EnvelopeType     string
-	Payload          json.RawMessage
-	Metadata         json.RawMessage
+	// TimestampMs is the envelope's own timestamp, nil when absent or
+	// unparseable.
+	TimestampMs *int64
+	Payload     json.RawMessage
+	Metadata    json.RawMessage
 	// Partial marks a trailing record without a terminating newline. It is
 	// deferred and never interpreted.
 	Partial bool
@@ -199,7 +202,7 @@ type codexHistoryRecord struct {
 }
 
 func codexNativeEnvelopeKinds() []string {
-	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, "compacted"}
+	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, codexTypeCompacted, codexTypeWorldState}
 }
 
 // recognizedCodexEnvelopeType reports whether an envelope type advances the
@@ -261,6 +264,9 @@ func parseCodexHistoryRecords(data []byte) []codexHistoryRecord {
 				record.EnvelopeType = env.Type
 				record.Payload = env.Payload
 				record.Metadata = env.Metadata
+				if ms := parseTimestampMillis(env.Timestamp); ms > 0 {
+					record.TimestampMs = &ms
+				}
 				if explicit, present := codexExplicitRecordOrdinal(env.Payload); present {
 					switch {
 					case explicit < 0:
@@ -1041,6 +1047,9 @@ func (state *codexReplayState) replayRecord(threadID string, segment codexDecode
 		return state.replayEventMessage(threadID, segment, record, payload, ownership, mode)
 	case "compacted":
 		return state.replayCompaction(threadID, segment, record, payload, ownership)
+	case codexTypeWorldState:
+		_, _, err := state.emitNode(threadID, segment, record, ownership, codexTypeWorldState, string(RoleSystem), "", "", "")
+		return err
 	default:
 		return nil
 	}
@@ -1163,6 +1172,10 @@ const (
 	codexNativeEventTaskComplete     codexNativeEventType = "task_complete"
 	codexNativeEventThreadRolledBack codexNativeEventType = "thread_rolled_back"
 	codexNativeEventTurnAborted      codexNativeEventType = "turn_aborted"
+	codexNativeEventSubAgentActivity codexNativeEventType = codexEventSubAgentActivity
+	codexNativeEventPatchApplyEnd    codexNativeEventType = codexEventPatchApplyEnd
+	codexNativeEventSettingsApplied  codexNativeEventType = codexEventThreadSettingsApplied
+	codexNativeEventWebSearchEnd     codexNativeEventType = codexEventWebSearchEnd
 )
 
 // codexNativeEventHandler is one arm of the native event_msg dispatch: the
@@ -1188,6 +1201,10 @@ var codexNativeEventDispatch = map[codexNativeEventType]codexNativeEventHandler{
 	codexNativeEventTaskComplete:     (*codexReplayState).replayTurnCompleted,
 	codexNativeEventThreadRolledBack: (*codexReplayState).replayThreadRolledBack,
 	codexNativeEventTurnAborted:      (*codexReplayState).replayTurnAborted,
+	codexNativeEventSubAgentActivity: (*codexReplayState).replayControlEvent,
+	codexNativeEventPatchApplyEnd:    (*codexReplayState).replayControlEvent,
+	codexNativeEventSettingsApplied:  (*codexReplayState).replayControlEvent,
+	codexNativeEventWebSearchEnd:     (*codexReplayState).replayControlEvent,
 }
 
 // codexNativeOnlyEventTypes are the declared native event types the
@@ -1228,6 +1245,11 @@ func (state *codexReplayState) replayEventMessage(threadID string, segment codex
 // mirror response items and must not duplicate the native item stream.
 func (state *codexReplayState) replayMirroredEvent(_ string, _ codexDecodedSegment, _ codexHistoryRecord, _ codexHistoryReplayPayload, _ CodexOwnership, _ CodexHistoryMode) error {
 	return nil
+}
+
+func (state *codexReplayState) replayControlEvent(threadID string, segment codexDecodedSegment, record codexHistoryRecord, payload codexHistoryReplayPayload, ownership CodexOwnership, _ CodexHistoryMode) error {
+	_, _, err := state.emitNode(threadID, segment, record, ownership, payload.Type, string(RoleSystem), "", "", "")
+	return err
 }
 
 // replayItemStarted records that an item lifecycle opened an identity the
@@ -1419,6 +1441,7 @@ func (state *codexReplayState) applyItemBody(threadID string, segment codexDecod
 		node.CallID = callID
 		node.TurnID = turnID
 		node.Payload = record.Payload
+		node.TimestampMs = record.TimestampMs
 		if bodyChangedMetadata(record.Metadata) {
 			node.Metadata = record.Metadata
 		}
@@ -1636,6 +1659,7 @@ func (state *codexReplayState) emitNode(threadID string, segment codexDecodedSeg
 		ByteStart:        record.ByteStart,
 		ByteEndExclusive: record.ByteEndExclusive,
 		EnvelopeType:     record.EnvelopeType,
+		TimestampMs:      record.TimestampMs,
 		NativeType:       nativeType,
 		NativeRole:       role,
 		ItemID:           itemID,
@@ -1645,7 +1669,7 @@ func (state *codexReplayState) emitNode(threadID string, segment codexDecodedSeg
 		Payload:          record.Payload,
 		Metadata:         record.Metadata,
 	})
-	if codexOwnershipIsOwn(ownership) {
+	if codexOwnershipIsOwn(ownership) && !isCodexNativeControlKind(nativeType) {
 		state.turns = appendTurnNode(state.turns, len(state.nodes)-1)
 	}
 	return len(state.nodes) - 1, false, nil
@@ -1716,6 +1740,9 @@ func codexResponseNativeType(payloadType string) (string, bool) {
 // lifecycle event carries its native identity inside the nested item body, so
 // that id is read as well as the legacy top-level id.
 func codexNativeKey(threadID string, segment codexDecodedSegment, record codexHistoryRecord, nativeType string) string {
+	if isCodexNativeControlKind(nativeType) {
+		return fmt.Sprintf("codex|%s|pos|%s|%d|%s", threadID, segment.descriptor.PhysicalSourceID, record.ByteStart, nativeType)
+	}
 	if record.Payload != nil {
 		var payload struct {
 			ID     string `json:"id"`

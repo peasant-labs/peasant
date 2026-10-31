@@ -352,6 +352,10 @@ Rules:
   extraction: the adapter verifies the actual captured bytes. Managed captures
   can retain previously proved relationships after native files rotate only
   under the retained-transcript identity and digest checks.
+- A discovery evidence version change invalidates cached hints as well as identity
+  proof. After a title interpretation fix, the next discovery reads each cached
+  Claude transcript once; unchanged files then reuse the cache. Switching between
+  builds with different proof versions re-reads those files on each switch.
 - Discovery deletes the records of transcripts that are gone, but only under the
   source paths that the run walked.
 - The cache is best effort. A missing or failing cache makes discovery mine every

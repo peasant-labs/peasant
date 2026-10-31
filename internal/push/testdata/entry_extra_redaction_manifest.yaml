@@ -1,0 +1,14 @@
+# Required-name manifest for testdata/entry_extra_redaction.yaml.
+requiredNames:
+  - email_after_unicode_escape
+  - email_after_newline_escape
+  - email_after_quote_escape
+  - untouched_extra_keeps_its_bytes
+  - model_id_survives
+  - go_import_bare_value
+  - npm_repo_field
+  - npm_homepage_field_beside_others
+  - artifactory_token_quote_boundary
+  - artifactory_password_quote_boundary
+  - number_literal_is_not_text
+  - context_rule_beside_numbers_keeps_them

@@ -32,6 +32,15 @@
 }
 .choice-menu-note { margin: 0; }
 
+@media (width < 768px) {
+  .home-filters-menu .choice-menu-pop[data-align='end'] {
+    left: 0;
+    right: auto;
+    min-width: 0;
+    width: min(22rem, calc(100vw - var(--sp-4) * 2));
+  }
+}
+
 /* the auto-publish tip: one line on a wide screen, the dismiss button at its
    end. The button's glyph sits as far in from the right edge as the lead icon
    sits from the left, and both centre on the first line of the copy. */

@@ -1,0 +1,38 @@
+# expandSubagents over stored parent links. edges maps a session to its
+# subagent sessions as the store returns them. chain, when set, adds a
+# straight line of that many subagent sessions below the first requested
+# session (c1 under it, c2 under c1, ...). want lists the selection in order
+# as id:root (root "" for a requested session); omitted counts, by root, what
+# --without-subagents left out. wantError is a substring of the refusal.
+cases:
+  - name: tree_is_walked_breadth_first_under_its_root
+    requested: [p]
+    edges: { p: [s1, s2], s1: [g1], g1: [gg1] }
+    want: ["p:", "s1:p", "s2:p", "g1:p", "gg1:p"]
+
+  - name: cycle_in_parent_links_ends_the_walk
+    requested: [p]
+    edges: { p: [s1], s1: [s2], s2: [s1, p] }
+    want: ["p:", "s1:p", "s2:p"]
+
+  - name: named_descendant_keeps_its_own_tree
+    requested: [p, s1]
+    edges: { p: [s1, s2], s1: [g1] }
+    want: ["p:", "s2:p", "s1:", "g1:s1"]
+
+  - name: without_subagents_counts_the_whole_tree
+    requested: [p]
+    withoutSubagents: true
+    edges: { p: [s1, s2], s1: [g1] }
+    want: ["p:"]
+    omitted: { p: 3 }
+
+  - name: tree_at_the_depth_bound_is_walked
+    requested: [p]
+    chain: 64
+    wantCount: 65
+
+  - name: tree_deeper_than_the_bound_is_refused
+    requested: [p]
+    chain: 65
+    wantError: "nest deeper than 64 levels"

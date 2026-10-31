@@ -118,7 +118,7 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 		if request.Answers.Destination != ftue.DestinationVillage || len(ids) == 0 {
 			return []ftue.PersistedEffect{{Stage: ftue.StagePublication, Status: ftue.StatusSkipped, Detail: "local-only destination"}}, nil, nil
 		}
-		cfg, err := loadConfig(configPath)
+		cfg, err := loadCommandConfig(cmd, configPath)
 		if err != nil {
 			return nil, retrySessions(ftue.StagePublication, ids), fmt.Errorf("load saved kickstart config for publication: %w", err)
 		}

@@ -1,0 +1,57 @@
+requiredNames:
+  - managed_tool_carrier_keeps_text_model_and_time
+  - standalone_assistant_text_is_shown_once
+  - a_second_text_block_is_not_lost
+  - two_identical_text_blocks_are_shown_twice
+  - repeated_text_with_tools_keeps_both_blocks
+  - distinct_text_with_tools_keeps_both_blocks
+  - tool_round_trip_and_standalone_conclusion
+cases:
+  - name: standalone_assistant_text_is_shown_once
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"the export now resumes"}]}}
+    content: ["the export now resumes"]
+    depths: [0]
+    toolCalls: 0
+  - name: a_second_text_block_is_not_lost
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"first paragraph"},{"type":"text","text":"second paragraph"}]}}
+    content: ["first paragraph", "second paragraph"]
+    depths: [0, 1]
+    toolCalls: 0
+  - name: tool_round_trip_and_standalone_conclusion
+    source: |
+      {"type":"user","message":{"role":"user","content":"inspect the export"}}
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"reading the export"},{"type":"tool_use","id":"read-export","name":"Read","input":{"file_path":"export.go"}}]}}
+      {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-export","content":"package export"}]}}
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"the export now resumes"}]}}
+    content: ["inspect the export", "reading the export", "the export now resumes"]
+    depths: [0, 0, 0]
+    toolCalls: 1
+  - name: two_identical_text_blocks_are_shown_twice
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"},{"type":"text","text":"ok"}]}}
+    content: ["ok", "ok"]
+    depths: [0, 1]
+    toolCalls: 0
+  - name: repeated_text_with_tools_keeps_both_blocks
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"},{"type":"tool_use","id":"read-export","name":"Read","input":{"file_path":"export.go"}},{"type":"text","text":"ok"}]}}
+    content: ["ok", "ok"]
+    depths: [0, 1]
+    toolCalls: 1
+  - name: distinct_text_with_tools_keeps_both_blocks
+    source: |
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"before reading"},{"type":"tool_use","id":"read-export","name":"Read","input":{"file_path":"export.go"}},{"type":"text","text":"after reading"}]}}
+    content: ["before reading", "after reading"]
+    depths: [0, 1]
+    toolCalls: 1
+
+  - name: managed_tool_carrier_keeps_text_model_and_time
+    source: |
+      {"type":"assistant","timestamp":"2026-10-29T07:01:00Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"reading the export"},{"type":"tool_use","id":"read-export","name":"Read","input":{"file_path":"export.go"}}]}}
+    content: ["reading the export"]
+    depths: [0]
+    toolCalls: 1
+    firstModel: claude-sonnet-4
+    firstTimestamp: "2026-10-29T07:01:00Z"

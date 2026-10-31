@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { createHash } from 'node:crypto';
+import { mutateCompiledAsset } from './lib/compiled-mutation.mjs';
 import { zCollectiveFetchReport, zCollectiveObservationResponse, zLocalContributionHistoryResponse } from '@peasant-labs/schema';
 
 const f = parse(readFileSync(new URL('./testdata/collective-observations.yaml', import.meta.url), 'utf8'));
@@ -337,12 +338,10 @@ if (!mutationMode) {
     await page.route('**/_next/static/chunks/**/*.js', async route => {
       const response = await route.fetch();
       const original = await response.text();
-      if (!route.request().url().includes(mutation.asset) || !original.includes(mutation.find)) {
+      const changed = route.request().url().includes(mutation.asset) ? mutateCompiledAsset(original, mutation) : null;
+      if (changed == null) {
         await route.fulfill({ response }); return;
       }
-      if (original.split(mutation.find).length !== 2) throw new Error(`Mutation ${mutation.name} anchor is not unique; update its fixture before claiming rejection`);
-      const changed = original.replace(mutation.find, mutation.replace);
-      new Function(changed); // Compile only: a syntax error is not an observed semantic rejection.
       const sha = text => createHash('sha256').update(text).digest('hex');
       changes.push({ url: route.request().url(), originalHash: sha(original), mutatedHash: sha(changed) });
       await route.fulfill({ response, body: changed });

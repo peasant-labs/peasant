@@ -188,13 +188,13 @@ func (m TrendsModel) renderContent() string {
 	renderBarChart(&b, days, barMax, labelWidth, defaults.ColorPastelLilac,
 		func(d *dayStats) float64 {
 			if d.signalDensityN > 0 {
-				return d.signalDensityS / float64(d.signalDensityN) * 100
+				return d.signalDensityS / float64(d.signalDensityN)
 			}
 			return 0
 		},
 		func(d *dayStats) string {
 			if d.signalDensityN > 0 {
-				avg := d.signalDensityS / float64(d.signalDensityN) * 100
+				avg := d.signalDensityS / float64(d.signalDensityN)
 				return fmt.Sprintf("  %.0f%%", avg)
 			}
 			return ""
@@ -222,13 +222,13 @@ func (m TrendsModel) renderContent() string {
 	renderBarChart(&b, days, barMax, labelWidth, defaults.ColorPastelMint,
 		func(d *dayStats) float64 {
 			if d.specScoreN > 0 {
-				return d.specScoreS / float64(d.specScoreN) * 100
+				return d.specScoreS / float64(d.specScoreN)
 			}
 			return 0
 		},
 		func(d *dayStats) string {
 			if d.specScoreN > 0 {
-				avg := d.specScoreS / float64(d.specScoreN) * 100
+				avg := d.specScoreS / float64(d.specScoreN)
 				return fmt.Sprintf("  %.0f", avg)
 			}
 			return ""
