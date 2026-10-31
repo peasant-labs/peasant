@@ -1,0 +1,236 @@
+# transcripts are Claude Code source records, harvested for real, so these
+# sessions are native: their entries live in the generation rows. legacy sessions
+# are stored through the mirror writer. arrange steps edit the store afterwards,
+# for states a harvest cannot reach cheaply.
+transcripts:
+  - { id: plain, records: [{ user: hello }, { assistant: ok }] }
+  - id: mcp
+    records:
+      - { user: hello }
+      - { assistant: ok, tools: [{ name: mcp__github__list_issues, input: { q: x } }] }
+      - { assistant: done }
+  - id: mcpx
+    records:
+      - { user: hello }
+      - { assistant: ok, tools: [{ name: mcpx_foo, input: { q: x } }] }
+      - { assistant: done }
+  - id: task
+    records:
+      - { user: hello }
+      - { assistant: ok, tools: [{ name: Task, input: { prompt: p } }] }
+      - { assistant: done }
+  - id: agent
+    records:
+      - { user: hello }
+      - { assistant: ok, tools: [{ name: Agent, input: { prompt: p } }] }
+      - { assistant: done }
+  - id: taskcreate
+    records:
+      - { user: hello }
+      - { assistant: ok, tools: [{ name: TaskCreate, input: { subject: s } }] }
+      - { assistant: done }
+  - id: skilltool
+    records:
+      - { user: hello }
+      - { assistant: ok, tools: [{ name: Skill, input: { skill: s } }] }
+      - { assistant: done }
+  - id: command
+    records:
+      - { user: "<command-message>tidy</command-message>\n<command-name>/tidy</command-name>\n<command-args>go</command-args>" }
+      - { assistant: ok }
+  - id: clear
+    records:
+      - { user: "<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>" }
+      - { user: hello }
+      - { assistant: ok }
+  - id: clearmessagefirst
+    records:
+      - { user: hello }
+      - { assistant: ok }
+      - { user: "<command-message>clear</command-message>\n<command-name>/clear</command-name>" }
+      - { assistant: ok }
+  - id: clearquoted
+    records:
+      - { user: "what does <command-name>/clear</command-name> do?" }
+      - { assistant: ok }
+      - { user: "what does /clear do?" }
+      - { assistant: ok }
+  - id: compactcommand
+    records:
+      - { user: hello }
+      - { assistant: ok }
+      - { user: "<command-name>/compact</command-name>\n<command-message>compact</command-message>" }
+      - { assistant: ok }
+  - id: compact
+    records:
+      - { user: hello }
+      - { assistant: ok }
+      - { compactBoundary: true }
+      - { assistant: ok }
+  - id: models
+    records:
+      - { user: hello }
+      - { assistant: ok, model: model-one }
+      - { user: again }
+      - { assistant: ok, model: model-two }
+  - id: syntheticmodel
+    records:
+      - { user: hello }
+      - { assistant: ok, model: model-one }
+      - { user: again }
+      - { assistant: ok, model: "<synthetic>" }
+  - id: background
+    records:
+      - { user: hello }
+      - { assistant: ok, tools: [{ name: Bash, input: { command: sleep, run_in_background: true } }] }
+      - { assistant: done }
+  - id: backgroundfalse
+    records:
+      - { user: hello }
+      - { assistant: ok, tools: [{ name: Bash, input: { command: sleep, run_in_background: false } }] }
+      - { assistant: done }
+  - id: backgroundtext
+    records:
+      - { user: hello }
+      - { assistant: ok, tools: [{ name: Bash, input: { command: "echo run_in_background true" } }] }
+      - { assistant: done }
+  - { id: backgroundbroken, records: [{ user: hello }, { assistant: ok }] }
+  - id: both
+    records:
+      - { user: hello }
+      - { assistant: ok, tools: [{ name: mcp__a__b, input: {} }, { name: Task, input: { prompt: p } }] }
+      - { assistant: done }
+  - { id: partial, records: [{ user: hello }, { assistant: ok }] }
+  - { id: olderpartial, records: [{ user: hello }, { assistant: ok }] }
+  - { id: oldertool, records: [{ user: hello }, { assistant: ok }] }
+  - { id: partitiontool, records: [{ user: hello }, { assistant: ok }] }
+  - { id: stalemirror, records: [{ user: hello }, { assistant: ok }] }
+  - { id: metricsdiffer, records: [{ user: hello }, { assistant: ok }] }
+  - { id: nostats, records: [{ user: hello }, { assistant: ok }] }
+  - { id: spawner, records: [{ user: hello }, { assistant: ok }] }
+  - { id: spawned, records: [{ user: hello }, { assistant: ok }] }
+legacy:
+  - { id: legacy-plain, turns: 7, entries: [{ role: user, preview: hello }] }
+  - id: legacy-all
+    turns: 9
+    entries:
+      - { role: user, preview: "/tidy", extra: '{"command_name":"/tidy"}' }
+      - { role: assistant, type: tool_use, tools: "Read,mcp__a__b,Task", input: '{"run_in_background": true}' }
+      - { role: system, type: system, part: compact-boundary }
+      - { role: system, type: system, preview: "<command-name>/clear</command-name>" }
+      - { role: assistant, extra: '{"model_id":"model-one"}' }
+      - { role: assistant, extra: '{"model_id":"model-two"}' }
+  - id: legacy-synthetic
+    turns: 3
+    entries:
+      - { role: assistant, extra: '{"model_id":"model-one"}' }
+      - { role: assistant, extra: '{"model_id":"<synthetic>"}' }
+  - { id: legacy-codex-compact, turns: 3, entries: [{ role: system, type: system, part: compacted }] }
+  - { id: legacy-opencode-compact, turns: 3, entries: [{ role: system, type: system, part: compaction }] }
+arrange:
+  - { step: active_partial, session: partial }
+  - { step: older_partial, session: olderpartial }
+  - { step: older_generation_tool, session: oldertool }
+  - { step: earlier_partition_tool, session: partitiontool }
+  - { step: stale_mirror, session: stalemirror }
+  - { step: metrics_turns_differ, session: metricsdiffer }
+  - { step: remove_captured_stats, session: nostats }
+  - { step: unparsable_tool_input, session: backgroundbroken }
+  - { step: child_of, session: spawned, parent: spawner }
+cases:
+  - name: facet_each_detects
+    wantFacets:
+      mcp: [mcp]
+      task: [subagent]
+      agent: [subagent]
+      skilltool: [skill]
+      command: [skill]
+      compact: [compact]
+      clear: [clear]
+      models: [model-switch]
+      background: [background]
+      partial: [partial]
+  - name: facet_absent_negative
+    wantFacets: { plain: [] }
+  - name: facets_and_semantics
+    args: [--has, "mcp,subagent"]
+    want: [both, legacy-all]
+  - name: facets_repeated_flag
+    args: [--has, mcp, --has, subagent]
+    want: [both, legacy-all]
+  - name: mcp_prefix_only
+    args: [--has, mcp]
+    want: [both, legacy-all, mcp]
+    wantFacets: { mcpx: [] }
+  - name: turns_bounds_inclusive
+    args: [--min-turns, "7", --max-turns, "7", --include-subagents]
+    want: [legacy-plain]
+  - name: native_vs_legacy_turns
+    args: [--min-turns, "2", --max-turns, "2", --has, partial]
+    want: [partial]
+    wantAlso:
+      - args: [--min-turns, "2", --max-turns, "2"]
+        contains: [metricsdiffer]
+      - args: [--min-turns, "50"]
+        lacks: [metricsdiffer]
+      - args: [--min-turns, "9", --max-turns, "9"]
+        contains: [legacy-all]
+  - name: turns_missing_count_is_zero
+    args: [--max-turns, "0"]
+    want: [nostats]
+  - name: partial_from_generation
+    args: [--has, partial]
+    want: [partial]
+    wantFacets: { olderpartial: [] }
+  - name: native_reads_active_generation_only
+    wantFacets: { oldertool: [] }
+  - name: native_reads_main_partition_only
+    wantFacets: { partitiontool: [] }
+  - name: native_ignores_a_stale_mirror
+    wantFacets: { stalemirror: [] }
+  - name: json_facets_field
+    wantFacets: { both: [subagent, mcp], legacy-all: [subagent, skill, mcp, compact, clear, model-switch, background] }
+  - name: main_only_combination
+    args: [--has, subagent]
+    wantAbsent: [spawned]
+    wantContains: [spawner]
+  - name: subagent_child_without_tool_call
+    wantFacets: { spawner: [subagent], spawned: [] }
+  - name: clear_from_system_entry
+    args: [--has, clear]
+    want: [clear, clearmessagefirst, legacy-all]
+  - name: clear_quoted_text_is_not_clear
+    wantFacets: { clearquoted: [] }
+  - name: compact_command_alone_is_not_compact
+    wantFacets: { compactcommand: [] }
+  - name: task_prefix_tool_is_not_subagent
+    wantFacets: { taskcreate: [] }
+  - name: synthetic_model_is_not_a_switch
+    wantFacets: { syntheticmodel: [] }
+  - name: background_false_is_not_background
+    wantFacets: { backgroundfalse: [] }
+  - name: background_text_is_not_background
+    wantFacets: { backgroundtext: [] }
+  - name: background_unparsable_input_is_skipped
+    args: [--has, background]
+    want: [background, legacy-all]
+    wantFacets: { backgroundbroken: [] }
+  - name: limit_applies_after_facets
+    args: [--has, clear, --limit, "2"]
+    want: [clear, clearmessagefirst]
+  - name: count_footer_uses_same_predicates
+    table: true
+    args: [--has, clear, --min-turns, "1", --limit, "1"]
+    wantOutput: "1 of 3 sessions"
+  - name: legacy_synthetic_model_is_not_a_switch
+    wantFacets: { legacy-synthetic: [] }
+  - name: compaction_markers_of_other_harnesses
+    wantFacets: { legacy-codex-compact: [compact], legacy-opencode-compact: [compact] }
+  - name: legacy_facets
+    wantFacets: { legacy-plain: [], legacy-all: [subagent, skill, mcp, compact, clear, model-switch, background] }
+refusals:
+  - { name: turns_bounds_conflict, args: [--min-turns, "6", --max-turns, "5"], wantError: above --max-turns }
+  - { name: min_turns_negative, args: [--min-turns=-1], wantError: --min-turns }
+  - { name: max_turns_negative, args: [--max-turns=-1], wantError: --max-turns }
+  - { name: has_unknown_lists_set, args: [--has, "mcp,bogus"], wantError: "subagent, skill, mcp, compact, clear, model-switch, background, partial" }
+  - { name: has_empty_item, args: [--has, "mcp,,skill"], wantError: --has }
