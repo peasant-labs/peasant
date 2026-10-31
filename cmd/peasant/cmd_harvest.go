@@ -878,7 +878,11 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 	ctx := cmd.Context()
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 
-	db, err := store.Open(dbPath)
+	// verify only reads: on a read-only data dir open the database read-only.
+	db, err := openReadOnlyIfUnwritable(cmd)
+	if err == nil && db == nil {
+		db, err = store.Open(dbPath)
+	}
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}

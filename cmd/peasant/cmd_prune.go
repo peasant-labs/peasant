@@ -75,7 +75,11 @@ func BuildPruneCommand() *cobra.Command {
 				filter = ingest.PruneFilter{All: true}
 			}
 
-			db, cleanup, err := openDB(cmd)
+			openStore := openDB
+			if dryRun {
+				openStore = openDBForRead
+			}
+			db, cleanup, err := openStore(cmd)
 			if err != nil {
 				return err
 			}

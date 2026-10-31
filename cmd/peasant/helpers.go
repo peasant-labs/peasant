@@ -93,6 +93,9 @@ func openDB(cmd *cobra.Command) (*store.Store, func(), error) {
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		return nil, func() {}, fmt.Errorf("create data directory: %w", err)
 	}
+	if ok, path := dataDirWritable(dataDir, dbPath); !ok {
+		return nil, func() {}, errDataDirNotWritable(path)
+	}
 	db, err := store.Open(dbPath,
 		append(contentIndexFormats(), store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()))...)
 	if err != nil {

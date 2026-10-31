@@ -45,7 +45,7 @@ func buildSessionsListCommand() *cobra.Command {
 		Short: "List sessions",
 		Long:  "List ingested sessions with optional filtering. Outputs a table by default or JSON with --json.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			db, cleanup, err := openDB(cmd)
+			db, cleanup, err := openDBForRead(cmd)
 			if err != nil {
 				return err
 			}

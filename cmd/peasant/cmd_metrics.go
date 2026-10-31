@@ -45,8 +45,12 @@ func BuildMetricsCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			// Open store.
-			db, cleanup, err := openDB(cmd)
+			// Open store; a dry run only reads it.
+			openStore := openDB
+			if dryRun {
+				openStore = openDBForRead
+			}
+			db, cleanup, err := openStore(cmd)
 			if err != nil {
 				return err
 			}

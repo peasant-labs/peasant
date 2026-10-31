@@ -28,7 +28,7 @@ func runVerifyContent(cmd *cobra.Command, repair bool) error {
 	}
 
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-	db, closeStore, err := openVerifyContentStore(cmd, string(ownedRoot), dbPath)
+	db, closeStore, err := openVerifyContentStore(cmd, string(ownedRoot), dbPath, repair)
 	if err != nil {
 		return err
 	}
@@ -43,7 +43,21 @@ func runVerifyContent(cmd *cobra.Command, repair bool) error {
 
 // openVerifyContentStore opens the analytics store for content
 // verification with a writer so flagged search indexes can be rebuilt.
-func openVerifyContentStore(cmd *cobra.Command, ownedRoot, dbPath string) (*store.Store, func(), error) {
+func openVerifyContentStore(cmd *cobra.Command, ownedRoot, dbPath string, repair bool) (*store.Store, func(), error) {
+	// A check without --repair only reads: on a read-only data dir it opens
+	// the existing database read-only. --repair writes, so it names the
+	// directory instead of failing inside SQLite.
+	readOnly, err := openReadOnlyIfUnwritable(cmd)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	if readOnly != nil {
+		if repair {
+			_ = readOnly.Close()
+			return nil, func() {}, errDataDirNotWritable(string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd))))
+		}
+		return readOnly, func() { _ = readOnly.Close() }, nil
+	}
 	dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		return nil, func() {}, fmt.Errorf("create data directory: %w", err)
