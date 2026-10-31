@@ -252,39 +252,9 @@ func (s RuleShare) Run(ctx context.Context, pushed *PushResult, collectives map[
 	return results, nil
 }
 
-// undecided splits the collectives into the ones to ask and a skipped step for
-// each one that already has a share of the transcript, live or decided.
+// undecided is UndecidedCollectives over this rule's Village.
 func (s RuleShare) undecided(ctx context.Context, transcript schema.TranscriptID, collectives []schema.VillageUUID) ([]schema.VillageUUID, []schema.SyncPushStepResult, error) {
-	var ask []schema.VillageUUID
-	var skipped []schema.SyncPushStepResult
-	for _, id := range collectives {
-		collective := id
-		// The latest event of the share history says what the collective, or
-		// the developer, last did with this transcript there.
-		latest, err := s.Village.LatestShareStatus(ctx, transcript, id)
-		if err != nil {
-			return nil, nil, err
-		}
-		if observed, ok := s.Village.(*observedSharer); ok && latest != "" {
-			if err := observed.observePair(ctx, transcript, id); err != nil {
-				return nil, nil, err
-			}
-		}
-		reason := ""
-		switch latest {
-		case "":
-			ask = append(ask, id)
-			continue
-		case schema.VillageShareStatusApproved, schema.VillageShareStatusPending:
-			reason = "the collective already holds this transcript or its share waits for approval"
-		case schema.VillageShareStatusRejected:
-			reason = "the collective's owner rejected this transcript, and a rule does not submit it again; share it again on peasant online if you want to"
-		default:
-			reason = "this transcript was taken back from the collective, and a rule does not share it again; share it again on peasant online if you want to"
-		}
-		skipped = append(skipped, schema.SyncPushStepResult{Step: schema.SyncPushStepAddCollective, CollectiveID: &collective, Outcome: schema.SyncPushStepSkipped, Reason: reason})
-	}
-	return ask, skipped, nil
+	return UndecidedCollectives(ctx, s.Village, transcript, collectives)
 }
 
 // recorded records a failed session as its latest failed attempt, under the

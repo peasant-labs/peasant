@@ -1,0 +1,126 @@
+# ShareExisting and UndecidedCollectives against a fake CollectiveSharer.
+#
+# `before` is the latest share status of each collective before the run, and
+# `after` the status a read answers once a share was sent. A collective named in
+# neither has no history. `sendStatus` is the status the share request answers,
+# 0 for success.
+#
+# A case states `steps`, in the order the collectives were given, and `sends`,
+# the requests made, each listing the collectives it carried.
+#
+# `rule_share_unchanged_after_extraction` runs its `ruleStatuses` through
+# RuleShare.Run as well, and each must give the same skipped step.
+requiredNames:
+  - share_one_transcript_one_collective
+  - share_pending_approval
+  - two_collectives_one_call
+  - already_held_is_skipped
+  - pending_is_skipped
+  - rejected_is_not_asked_again
+  - taken_back_is_not_asked_again
+  - revoked_is_not_asked_again
+  - conflict_409_reads_as_held
+  - dry_run_sends_nothing
+  - steps_keep_the_order_given
+  - refused_403_fails_with_the_village_text
+  - missing_404_names_no_receipt
+  - history_read_failure_sends_nothing
+  - rule_share_unchanged_after_extraction
+cases:
+  - name: share_one_transcript_one_collective
+    collectives: [one]
+    after: {one: approved}
+    sends: [[one]]
+    steps:
+      - {collective: one, outcome: succeeded}
+  - name: share_pending_approval
+    collectives: [one]
+    after: {one: pending}
+    sends: [[one]]
+    steps:
+      - {collective: one, outcome: pending_approval}
+  - name: two_collectives_one_call
+    collectives: [one, two]
+    after: {one: approved, two: pending}
+    sends: [[one, two]]
+    steps:
+      - {collective: one, outcome: succeeded}
+      - {collective: two, outcome: pending_approval}
+  - name: already_held_is_skipped
+    collectives: [one]
+    before: {one: approved}
+    sends: []
+    steps:
+      - {collective: one, outcome: skipped, reason: "the collective already holds this transcript or its share waits for approval"}
+  - name: pending_is_skipped
+    collectives: [one]
+    before: {one: pending}
+    sends: []
+    steps:
+      - {collective: one, outcome: skipped, reason: "the collective already holds this transcript or its share waits for approval"}
+  - name: rejected_is_not_asked_again
+    collectives: [one]
+    before: {one: rejected}
+    sends: []
+    steps:
+      - {collective: one, outcome: skipped, reason: "the collective's owner rejected this transcript, and a rule does not submit it again; share it again on peasant online if you want to"}
+  - name: taken_back_is_not_asked_again
+    collectives: [one]
+    before: {one: retracted}
+    sends: []
+    steps:
+      - {collective: one, outcome: skipped, reason: "this transcript was taken back from the collective, and a rule does not share it again; share it again on peasant online if you want to"}
+  - name: revoked_is_not_asked_again
+    collectives: [one]
+    before: {one: revoked}
+    sends: []
+    steps:
+      - {collective: one, outcome: skipped, reason: "this transcript was taken back from the collective, and a rule does not share it again; share it again on peasant online if you want to"}
+  - name: conflict_409_reads_as_held
+    collectives: [one]
+    after: {one: approved}
+    sendStatus: 409
+    sends: [[one]]
+    steps:
+      - {collective: one, outcome: skipped, reason: "the collective already shares this transcript"}
+  - name: dry_run_sends_nothing
+    collectives: [one, two]
+    before: {two: approved}
+    dryRun: true
+    sends: []
+    steps:
+      - {collective: one, outcome: not_attempted, reason: "dry run: would share"}
+      - {collective: two, outcome: skipped, reason: "the collective already holds this transcript or its share waits for approval"}
+  - name: steps_keep_the_order_given
+    collectives: [one, two, three]
+    before: {two: rejected}
+    after: {one: approved, two: rejected, three: approved}
+    sends: [[one, three]]
+    steps:
+      - {collective: one, outcome: succeeded}
+      - {collective: two, outcome: skipped, reason: "the collective's owner rejected this transcript, and a rule does not submit it again; share it again on peasant online if you want to"}
+      - {collective: three, outcome: succeeded}
+  - name: refused_403_fails_with_the_village_text
+    collectives: [one]
+    sendStatus: 403
+    sends: [[one]]
+    steps:
+      - {collective: one, outcome: failed, reasonContains: "You do not own this transcript"}
+  - name: missing_404_names_no_receipt
+    collectives: [one]
+    sendStatus: 404
+    sends: [[one]]
+    steps:
+      - {collective: one, outcome: failed, reason: "Peasant online answered that this account has no such transcript: it was deleted, or it is not yours; nothing was shared"}
+  - name: history_read_failure_sends_nothing
+    collectives: [one]
+    readFails: true
+    sends: []
+    wantError: "history unavailable"
+  - name: rule_share_unchanged_after_extraction
+    collectives: [one]
+    before: {one: approved}
+    ruleStatuses: [approved, pending, rejected, retracted, revoked]
+    sends: []
+    steps:
+      - {collective: one, outcome: skipped, reason: "the collective already holds this transcript or its share waits for approval"}
