@@ -1,0 +1,26 @@
+# Required-name manifest for detectors.yaml: deletion protection by NAME.
+requiredNames:
+  - clean_session
+  - known_key_is_redacted_not_reported
+  - unknown_format_assignment
+  - low_entropy_value_ignored
+  - code_expression_is_not_a_value
+  - placeholder_is_not_a_value
+  - credentials_json_tool_result
+  - failed_read_of_credentials_is_not_output
+  - write_of_credentials_is_not_output
+  - env_listing_tool_result
+  - env_listing_of_numbers_ignored
+  - owner_email_ignored
+  - foreign_email_in_prompt
+  - foreign_email_in_tool_result
+  - redacted_email_not_reported
+  - git_remote_is_not_an_email
+  - shareable_link_each_host
+  - private_link_ignored
+  - residue_passthrough
+  - git_remote_is_not_also_an_email_residue
+  - assignment_is_not_also_residue
+  - link_is_not_also_residue
+  - repeated_finding_reported_once
+  - preview_max_length
