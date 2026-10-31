@@ -280,42 +280,21 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("PATCH "+defaults.RouteSettings.String(), settingsRoutes.handleUpdateSetting)
 
 	// Static assets or dev proxy
-	var fallback http.Handler
 	if s.cfg.DevMode && s.cfg.DevProxyAddr != "" {
 		proxyURL, err := url.Parse("http://" + s.cfg.DevProxyAddr)
 		if err != nil {
 			return fmt.Errorf("invalid dev proxy address: %w", err)
 		}
-		fallback = httputil.NewSingleHostReverseProxy(proxyURL)
+		proxy := httputil.NewSingleHostReverseProxy(proxyURL)
+		mux.Handle("/", proxy)
 	} else if s.cfg.WebAssets != nil {
-		fallback = &spaHandler{fs: http.FS(s.cfg.WebAssets)}
+		mux.Handle("/", &spaHandler{fs: http.FS(s.cfg.WebAssets)})
 	} else {
-		fallback = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set(defaults.HeaderContentType, defaults.ContentHTML.String())
 			w.Write(webDashboardNotBundledHTML)
 		})
 	}
-	mux.Handle("/", fallback)
-
-	// Any other path under /api/ is a client mistake: answer it as the API
-	// does, with a JSON 404, rather than letting the dashboard fallback return
-	// its HTML page with 200. OPTIONS keeps reaching the fallback as before,
-	// so preflight handling does not change here.
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions {
-			fallback.ServeHTTP(w, r)
-			return
-		}
-		if allow := allowedAPIMethods(mux, r); len(allow) > 0 {
-			w.Header().Set(defaults.HeaderAllow, strings.Join(allow, ", "))
-			writeJSONError(w, http.StatusMethodNotAllowed, fmt.Sprintf("%s does not serve %s; it serves %s", r.URL.Path, r.Method, strings.Join(allow, ", ")))
-			return
-		}
-		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("no API route serves %s %s; check the path against the routes this server version exposes", r.Method, r.URL.Path))
-	})
-	// A bare /api keeps the dashboard page, as before the /api/ handler
-	// existed, instead of the mux's redirect to /api/.
-	mux.Handle("/api", fallback)
 
 	s.server = &http.Server{
 		Handler: requestLogger(localRequestGuard(mux)),
@@ -981,22 +960,4 @@ func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return hj.Hijack()
 	}
 	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
-}
-
-// apiRouteMethods are the methods allowedAPIMethods probes.
-var apiRouteMethods = []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}
-
-// allowedAPIMethods lists the methods a registered API route serves for the
-// request's path, or none when only the /api/ catch-all matches it. The
-// catch-all wins over the mux's own 405 because it matches every method.
-func allowedAPIMethods(mux *http.ServeMux, r *http.Request) []string {
-	var allow []string
-	for _, method := range apiRouteMethods {
-		probe := r.Clone(r.Context())
-		probe.Method = method
-		if _, pattern := mux.Handler(probe); pattern != "/api/" && pattern != "/" && pattern != "" {
-			allow = append(allow, method)
-		}
-	}
-	return allow
 }

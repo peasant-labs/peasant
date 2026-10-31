@@ -6,9 +6,6 @@ const HeaderContentType = "Content-Type"
 // HeaderCacheControl is the HTTP Cache-Control header key.
 const HeaderCacheControl = "Cache-Control"
 
-// HeaderAllow lists the methods a route serves, on a 405 response.
-const HeaderAllow = "Allow"
-
 // CacheControlNoStore is the Cache-Control value that forbids any caching of a
 // response. Used for per-process answers (e.g. the UI capabilities
 // advertisement) whose value can change across a server restart with different
