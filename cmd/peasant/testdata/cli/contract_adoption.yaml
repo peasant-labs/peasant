@@ -70,6 +70,7 @@ cases:
     wantStderrContains:
       - "warning: session 99999999-9999-4999-8999-999999999999:"
       - "2 of 3 sessions exported, 1 refused"
+    wantExit: 1
 
   - name: export_json_2_redirect_parses
     kind: run
@@ -89,6 +90,7 @@ cases:
     wantWarnings:
       - code: session_refused
         sessionID: 88888888-8888-4888-8888-888888888888
+    wantExit: 1
 
   - name: export_missing_source_is_usage_error
     kind: run

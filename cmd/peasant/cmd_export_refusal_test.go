@@ -31,7 +31,8 @@ type exportRefusalCase struct {
 
 // TestExportSessionsReportsWhatItRefused drives the real command over stored
 // sessions, with and without --json. The run must say how many sessions were
-// exported, how many refused and why, and still write the sessions it could.
+// exported, how many refused and why, fail when it refused any, and still write
+// the sessions it could.
 func TestExportSessionsReportsWhatItRefused(t *testing.T) {
 	t.Parallel()
 	var fixture struct {

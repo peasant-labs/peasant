@@ -24,6 +24,9 @@ refused session is also reported on stderr with the reason stored for it and the
 command that repairs it, and a run over more than one session ends with a
 one-line summary on stderr: exported, refused, and why.
 
+The command exits 1 when it refuses any session. The sessions it did export
+stay written.
+
 ```
 peasant export sessions [flags]
 ```

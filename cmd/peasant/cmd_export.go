@@ -653,7 +653,10 @@ With --json, stdout holds one JSON document: the sessions exported, the refusal
 count by reason, and a warnings array naming every session that was refused. A
 refused session is also reported on stderr with the reason stored for it and the
 command that repairs it, and a run over more than one session ends with a
-one-line summary on stderr: exported, refused, and why.`,
+one-line summary on stderr: exported, refused, and why.
+
+The command exits 1 when it refuses any session. The sessions it did export
+stay written.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionIDs, err := resolveExportSessionIDs(cmd)
 			if err != nil {
@@ -756,9 +759,19 @@ one-line summary on stderr: exported, refused, and why.`,
 				}
 			}
 
-			if succeeded == 0 && failed > 0 {
+			if failed > 0 {
 				// The report above is complete, so the flag usage would only bury it.
 				cmd.SilenceUsage = true
+			}
+			if succeeded > 0 && failed > 0 {
+				return fmt.Errorf(
+					"export sessions: %d of %d session(s) refused\n"+
+						"What went wrong: the other sessions were exported, but these were not.\n"+
+						"Fix: check the warnings above for why each was refused and what repairs it.",
+					failed, len(sessionIDs),
+				)
+			}
+			if succeeded == 0 && failed > 0 {
 				return fmt.Errorf(
 					"export sessions: all %d session(s) failed to export\n"+
 						"What went wrong: no sessions were successfully exported.\n"+
