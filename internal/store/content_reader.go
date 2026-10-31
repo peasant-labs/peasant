@@ -36,8 +36,86 @@ func nullString(s string) any {
 // content is shown without a completeness gate.
 var ErrContentCaptureIncomplete = errors.New("session capture is incomplete; bounded previews are not authoritative")
 
+// ErrContentIntegrity is the category of every refusal caused by stored content
+// that contradicts its own capture proof, as opposed to a capture that was never
+// completed. Only a forced index replaces such content; an ordinary one reads the
+// capture as settled and leaves it alone.
+var ErrContentIntegrity = errors.New("capture manifest, chunks or semantic entries are inconsistent; complete transcript cannot be trusted")
+
 func contentIntegrityError() error {
-	return fmt.Errorf("store full content read: capture manifest, chunks or semantic entries are inconsistent; complete transcript cannot be trusted; run harvest index --force from stored artifacts to repair")
+	return fmt.Errorf("store full content read: %w; run peasant harvest index --force to repair it from stored artifacts", ErrContentIntegrity)
+}
+
+// Why a capture with no stored failure code was refused.
+const (
+	refusalNoCapture       = "no_capture"
+	refusalCaptureUnproven = "capture_unproven"
+)
+
+// refusalDetailLimit bounds the stored explanation a refusal repeats.
+const refusalDetailLimit = 200
+
+// ContentCaptureRefusal says why a full read refused one session and what lifts
+// the refusal. Everything in it is derived from the stored capture and index
+// state at the moment of the refusal; nothing is recorded. It unwraps to
+// ErrContentCaptureIncomplete, so its category is unchanged.
+type ContentCaptureRefusal struct {
+	SessionID ingest.SessionID
+	// Reason names the refusal: the stored failure code, or the code for a
+	// capture that records none.
+	Reason string
+	// Detail is the stored explanation, without any remedy it was written with.
+	Detail string
+	// Repairable reports that an index run of this build can replace the
+	// capture. When false, this build reads the same input and refuses it again.
+	Repairable bool
+}
+
+func (e *ContentCaptureRefusal) Error() string {
+	reason := e.Reason
+	if e.Detail != "" {
+		reason += " (" + e.Detail + ")"
+	}
+	if !e.Repairable {
+		return fmt.Sprintf("%v: stored reason %s; this build refuses the same input again, so no harvest lifts this; upgrade Peasant", ErrContentCaptureIncomplete, reason)
+	}
+	return fmt.Sprintf("%v: stored reason %s; run peasant harvest index --session %s to repair it; that run reports why if it cannot", ErrContentCaptureIncomplete, reason, e.SessionID)
+}
+
+func (e *ContentCaptureRefusal) Unwrap() error { return ErrContentCaptureIncomplete }
+
+// contentCaptureRefusal builds the refusal for a capture a full read may not
+// serve. A failure reading the index state is returned as itself: the refusal
+// must not claim a repair it could not establish.
+func contentCaptureRefusal(conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionContentCapture, found bool) error {
+	state, err := readIndexStateOnConn(conn, id)
+	if err != nil {
+		return err
+	}
+	refusal := &ContentCaptureRefusal{SessionID: id, Reason: refusalCaptureUnproven, Repairable: true}
+	switch {
+	case !found:
+		refusal.Reason = refusalNoCapture
+	case c.FailureCode != ingest.ContentCaptureNoFailure:
+		refusal.Reason = string(c.FailureCode)
+	}
+	refusal.Detail = storedRefusalDetail(c.FailureMessage)
+	if state != nil {
+		refusal.Repairable = !ingest.StoredRefusalIsFinal(state)
+	}
+	return refusal
+}
+
+// storedRefusalDetail keeps the first clause of a stored failure message: the
+// cause. What follows it is the remedy the message was written with, which may
+// name a command that does not repair this session.
+func storedRefusalDetail(message string) string {
+	detail, _, _ := strings.Cut(message, ";")
+	detail = strings.TrimSpace(strings.ToValidUTF8(detail, ""))
+	if len(detail) > refusalDetailLimit {
+		detail = strings.ToValidUTF8(detail[:refusalDetailLimit], "")
+	}
+	return detail
 }
 
 // readCapture returns the stored capture, or NOTHING.
@@ -461,7 +539,7 @@ func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opt
 		// record's place, so it is read whole here. Every other incompleteness
 		// is refused exactly as before.
 		if !found || !PublishableWithOmissions(c) {
-			return page, fmt.Errorf("store full content read: %w; run harvest index --force with stored artifacts before viewing, exporting or publishing full content", ErrContentCaptureIncomplete)
+			return page, fmt.Errorf("store full content read: %w", contentCaptureRefusal(conn, id, c, found))
 		}
 		shimmed, shimErr := shimmedOnConn(conn, string(id))
 		if shimErr != nil {
@@ -602,7 +680,16 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 		if ctx.Err() != nil {
 			cause = ctx.Err()
 		}
-		return nil, capture, fmt.Errorf("store complete content read: verification or hydration failed; no complete transcript returned: %w; retry or run harvest index --force from stored artifacts to repair", cause)
+		// A refusal and an integrity failure each name their own repair, and
+		// cancellation has none, so only the remaining causes are told what to run.
+		var refusal *ContentCaptureRefusal
+		if errors.As(cause, &refusal) {
+			return nil, capture, fmt.Errorf("store complete content read: no complete transcript returned: %w", cause)
+		}
+		if errors.Is(cause, ErrContentIntegrity) || ctx.Err() != nil {
+			return nil, capture, fmt.Errorf("store complete content read: verification or hydration failed; no complete transcript returned: %w", cause)
+		}
+		return nil, capture, fmt.Errorf("store complete content read: verification or hydration failed; no complete transcript returned: %w; run peasant harvest index --force --session %s to repair it", cause, id)
 	}
 	if softMaxBytes < 0 {
 		return fail(fmt.Errorf("negative page budget; use zero defaults or a positive override"))
@@ -620,7 +707,7 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 	invalidAuthority := !found || !PublishableWithOmissions(capture)
 	invalidCaptureProof := capture.FullCaptureSHA256 == "" || capture.SessionID != id
 	if invalidAuthority || invalidCaptureProof {
-		return fail(ErrContentCaptureIncomplete)
+		return fail(contentCaptureRefusal(conn, id, capture, found))
 	}
 	shimmed, shimErr := shimmedOnConn(conn, string(id))
 	if shimErr != nil {

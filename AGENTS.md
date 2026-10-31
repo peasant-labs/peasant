@@ -301,12 +301,12 @@ the server serves the newly built assets before you trust a screenshot or a comp
   route-only section; its routes still resolve by URL. Do not add a `/push` alternate route.
 - The local chrome is fairtrade's `AppSidebar` (`web/src/components/LocalSidebar.tsx`), at
   fairtrade's default width, in fairtrade's own order: the `peasant` home link (the wheat mark
-  alone; the name is its accessible name), the shortcuts (search on ⌘K, the docs opened in a new
-  tab, community marked soon, then a `collectives` link that opens online, the local app's one
-  link to online), the registry's nav sections, and the footer with the account row while this
-  computer is signed in, then the settings gear (fairtrade turns the registry's `settings` entry
-  into it) and the theme toggle. The switcher never lists online or local. A settings page keeps
-  that same nav, the gear current; its sections are fairtrade's in-page section bar
+  alone; the name is its accessible name), the registry's nav sections, then the shortcuts near
+  the footer (search on ⌘K, the docs opened in a new tab, then a `collectives` link that opens
+  online, the local app's one link to online), and the footer with the account row while this
+  computer is signed in, the settings gear (fairtrade turns the registry's `settings` entry into
+  it) and the theme toggle. Community is hidden; the switcher never lists online or local. A
+  settings page keeps that same nav, the gear current; its sections are fairtrade's in-page section bar
   (`SettingsLayout`) in the page body, never sidebar groups. Every page that is not full-bleed
   (a transcript, a map canvas) sits in fairtrade's `.asb-page` frame with one `.iu-page-title`
   heading at the hero size.

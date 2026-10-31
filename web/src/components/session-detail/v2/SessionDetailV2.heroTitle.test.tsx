@@ -204,6 +204,7 @@ describe('SessionDetailV2 — the mounted hero heading', () => {
       await waitFor(() => expect(view.container.querySelector('.txn-title')).toBeInTheDocument());
       const heading = view.container.querySelector('.txn-title');
       expect(heading?.textContent).toBe(row.expectedTitle);
+      expect(heading?.tagName).toBe('H1');
       // The recorded prompt is still in the transcript; it must never be the
       // heading, so the heading itself may carry no markup delimiter.
       expect(heading?.textContent ?? '').not.toContain('<');

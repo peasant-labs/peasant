@@ -49,7 +49,7 @@ func TestHandleSyncRedactionsRefusesUnpublishableCapture(t *testing.T) {
 	for _, tc := range cases {
 		seen[tc.Name] = true
 	}
-	if err := testutil.RequireFixtureNames("Share publication validation", "case", strings.Fields("incomplete-capture missing-model database-unavailable"), seen); err != nil {
+	if err := testutil.RequireFixtureNames("Share publication validation", "case", strings.Fields("incomplete-capture missing-model no-model-reply database-unavailable"), seen); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range cases {
@@ -68,6 +68,11 @@ func TestHandleSyncRedactionsRefusesUnpublishableCapture(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "missing-model":
+				input.Metadata.Model = ""
+				reply := input.Entries[0]
+				reply.EntryIndex, reply.Role = reply.EntryIndex+1, schema.RoleAssistant
+				testutil.SeedReadyPublication(t, db, &input.Metadata, append(input.Entries, reply))
+			case "no-model-reply":
 				input.Metadata.Model = ""
 				testutil.SeedReadyPublication(t, db, &input.Metadata, input.Entries)
 			case "close":

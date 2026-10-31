@@ -435,12 +435,15 @@ func (g Generation) Validate() error {
 		}
 	}
 
+	// Build the main-entry set once: rebuilding it per title ref made
+	// validation O(entries × title refs) on long sessions (#672).
+	mainRefs := g.Main.entryRefs()
 	for i := range g.TitleRefs {
 		ref := g.TitleRefs[i]
 		if err := ref.Validate(); err != nil {
 			return fmt.Errorf("indexformat.Generation.Validate id %q titleRefs[%d]: ref is invalid; a title cannot be attributed; emit a bounded opaque ref: %w", g.ID, i, err)
 		}
-		if _, ok := g.Main.entryRefs()[ref]; !ok {
+		if _, ok := mainRefs[ref]; !ok {
 			return fmt.Errorf("indexformat.Generation.Validate id %q: title ref %q is not a main entry; a title must be seeded by a main owned block; move the ref or drop it", g.ID, ref)
 		}
 	}
@@ -804,12 +807,13 @@ func (s ReadSnapshot) validateGeneration() error {
 			return fmt.Errorf("indexformat.ReadSnapshot.Validate: content ref %q does not appear in any partition; the snapshot is not self-contained; attach content only to refs this snapshot emits", ref)
 		}
 	}
+	mainRefs := s.Main.entryRefs()
 	for i := range s.TitleRefs {
 		ref := s.TitleRefs[i]
 		if err := ref.Validate(); err != nil {
 			return fmt.Errorf("indexformat.ReadSnapshot.Validate titleRefs[%d]: ref is invalid; a title cannot be attributed; emit a bounded opaque ref: %w", i, err)
 		}
-		if _, ok := s.Main.entryRefs()[ref]; !ok {
+		if _, ok := mainRefs[ref]; !ok {
 			return fmt.Errorf("indexformat.ReadSnapshot.Validate: title ref %q is not a main entry; a title must be seeded by a main owned block; move the ref or drop it", ref)
 		}
 	}

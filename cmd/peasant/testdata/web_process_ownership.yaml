@@ -1,0 +1,11 @@
+requiredNames: [detached server, equals port, another port, no foreground, unrelated process, server tokens after another command, empty process, duplicate port, disabled foreground]
+cases:
+  - {name: detached server, args: [peasant, web, start, --foreground, --port, '18693', --no-browser], want: true}
+  - {name: equals port, args: [peasant, web, start, --foreground, --port=18693], want: true}
+  - {name: another port, args: [peasant, web, start, --foreground, --port, '18694'], want: false}
+  - {name: no foreground, args: [peasant, web, start, --port, '18693'], want: false}
+  - {name: unrelated process, args: [sleep, '300'], want: false}
+  - {name: server tokens after another command, args: [peasant, harvest, --source-path, web, start, --foreground, --port, '18693'], want: false}
+  - {name: empty process, args: [], want: false}
+  - {name: duplicate port, args: [peasant, web, start, --foreground, --port, '18693', --port, '18694'], want: false}
+  - {name: disabled foreground, args: [peasant, web, start, --foreground, --port, '18693', --foreground=false], want: false}

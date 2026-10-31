@@ -1,0 +1,30 @@
+# Every name here must stay in sessions_list_facets.yaml.
+required:
+  - facet_each_detects
+  - facet_absent_negative
+  - facets_and_semantics
+  - facets_repeated_flag
+  - mcp_prefix_only
+  - turns_bounds_inclusive
+  - native_vs_legacy_turns
+  - turns_missing_count_is_zero
+  - partial_from_generation
+  - native_reads_active_generation_only
+  - native_reads_main_partition_only
+  - native_ignores_a_stale_mirror
+  - json_facets_field
+  - main_only_combination
+  - subagent_child_without_tool_call
+  - clear_from_system_entry
+  - clear_quoted_text_is_not_clear
+  - compact_command_alone_is_not_compact
+  - task_prefix_tool_is_not_subagent
+  - synthetic_model_is_not_a_switch
+  - background_false_is_not_background
+  - background_text_is_not_background
+  - background_unparsable_input_is_skipped
+  - limit_applies_after_facets
+  - count_footer_uses_same_predicates
+  - legacy_synthetic_model_is_not_a_switch
+  - compaction_markers_of_other_harnesses
+  - legacy_facets

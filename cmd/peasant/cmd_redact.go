@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -64,9 +65,20 @@ func BuildRedactCommand() *cobra.Command {
 		Short: "Redact local transcripts",
 		Long:  "Apply redaction to locally stored transcripts. Sessions already redacted at the current level are skipped unless content has changed (stale).",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --sessions-from replaces --session and --all; the resolver
+			// refuses a combination and an empty list, so a list never widens.
+			fromIDs, fromSet, fromErr := clicontract.ResolveSessionsFrom(cmd)
+			if fromErr != nil {
+				cmd.SilenceUsage = true
+				return fromErr
+			}
+			if fromSet {
+				sessionIDs = fromIDs
+			}
+
 			// Require at least one filter.
 			if !all && len(sessionIDs) == 0 {
-				return fmt.Errorf("at least one filter is required (--session or --all)")
+				return fmt.Errorf("at least one filter is required (--session, --sessions-from or --all)")
 			}
 
 			// Load config for default redaction level.
@@ -225,6 +237,7 @@ func BuildRedactCommand() *cobra.Command {
 
 	cmd.Flags().StringSliceVar(&sessionIDs, "session", nil, "Session IDs to redact (repeatable)")
 	cmd.Flags().BoolVar(&all, "all", false, "Redact all sessions")
+	clicontract.RegisterSessionsFrom(cmd)
 	// The help text is derived from the offered set rather than written out, so a
 	// level removed from the menu cannot keep being advertised here. This flag was
 	// the single loudest place minimal and maximum were offered to users.

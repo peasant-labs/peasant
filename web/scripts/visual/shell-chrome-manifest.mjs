@@ -18,8 +18,8 @@ export const SHELL_CHROME_FIXTURE = join(HERE, 'testdata', 'shell-chrome.yaml')
 
 /** The names the manifest must carry. A row deleted from the fixture fails the loader. */
 export const REQUIRED_NAMES = Object.freeze({
-  show: Object.freeze(['brand', 'home', 'search', 'theme', 'settings']),
-  hide: Object.freeze(['connection-pill', 'share-button', 'section-nav', 'header-row', 'online-switcher']),
+  show: Object.freeze(['brand', 'home', 'search', 'docs', 'collectives', 'theme', 'settings']),
+  hide: Object.freeze(['community', 'connection-pill', 'share-button', 'section-nav', 'header-row', 'online-switcher']),
   routes: Object.freeze(['/village', '/analytics', '/review', '/map']),
   paletteForbid: Object.freeze(['proj-changes:', 'proj-map:']),
   paletteRequire: Object.freeze(['nav:/', 'action:theme']),
@@ -31,7 +31,7 @@ export const REQUIRED_NAMES = Object.freeze({
  * @typedef {{ mount: string, project?: boolean }} RouteItem
  * @typedef {{ forbid: string[], require: string[] }} PaletteRules
  * @typedef {{ stopped: string, stillStopped: string, back: string }} Announcements
- * @typedef {{ show: Record<string, ShowItem>, hide: Record<string, HideItem>, routes: Record<string, RouteItem>, palette: PaletteRules, announcements: Announcements }} ShellChromeManifest
+ * @typedef {{ show: Record<string, ShowItem>, hide: Record<string, HideItem>, navigationOrder: string[], routes: Record<string, RouteItem>, palette: PaletteRules, announcements: Announcements }} ShellChromeManifest
  */
 
 const fail = (what) => {
@@ -76,7 +76,9 @@ export function loadShellChromeManifest(source = readFileSync(SHELL_CHROME_FIXTU
   const document = YAML.parseDocument(source, { strict: true, uniqueKeys: true })
   if (document.errors.length) fail(`invalid YAML: ${document.errors.map((error) => error.message).join('; ')}`)
   const root = record(document.toJS(), 'root')
-  exactKeys(root, ['show', 'hide', 'routes', 'palette', 'announcements'], ['show', 'hide', 'routes', 'palette', 'announcements'], 'root')
+  exactKeys(root, ['show', 'hide', 'navigationOrder', 'routes', 'palette', 'announcements'], ['show', 'hide', 'navigationOrder', 'routes', 'palette', 'announcements'], 'root')
+  stringList(root.navigationOrder, 'navigationOrder')
+  requireNames(Object.fromEntries(root.navigationOrder.map((name) => [name, true])), ['sections', 'shortcuts'], 'navigationOrder')
 
   const show = record(root.show, 'show')
   requireNames(show, REQUIRED_NAMES.show, 'show')
@@ -190,6 +192,15 @@ export function chromeFailures(manifest, context) {
       if (actual !== expected) failures.push(`${name}: named ${JSON.stringify(actual)} in the ${context.theme} theme, expected ${JSON.stringify(expected)}`)
     }
     if (item.icon && !element.querySelector('svg')) failures.push(`${name}: has no leading glyph`)
+  }
+
+  const navigationOrder = [...chrome.querySelectorAll('.asb-scroll > nav')].map((nav) => nav.getAttribute('aria-label'))
+  if (JSON.stringify(navigationOrder) !== JSON.stringify(manifest.navigationOrder)) {
+    failures.push(`navigation order: expected ${manifest.navigationOrder.join(', ')}, received ${navigationOrder.join(', ')}`)
+  }
+  const scroller = chrome.querySelector('.asb-scroll')
+  if (scroller?.nextElementSibling !== chrome.querySelector('.asb-panel > .asb-foot')) {
+    failures.push('footer: must follow the navigation')
   }
 
   const chromeText = textOf(chrome)

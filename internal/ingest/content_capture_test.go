@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -23,7 +24,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/content_capture.yaml
@@ -125,26 +125,41 @@ func captureFixtureSource(t *testing.T, fixture captureFixture, fs *testutil.Mem
 
 func loadCaptureFixtures(t *testing.T) []captureFixture {
 	t.Helper()
+	fixtures, err := decodeCaptureFixtures(contentCaptureFixtures)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fixtures
+}
+
+func decodeCaptureFixtures(data []byte) ([]captureFixture, error) {
 	var document struct {
 		Required []string         `yaml:"required_names"`
 		Cases    []captureFixture `yaml:"cases"`
 	}
-	if err := yaml.Unmarshal(contentCaptureFixtures, &document); err != nil {
-		t.Fatal(err)
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
+		return nil, err
 	}
 	names := make(map[string]bool)
 	for _, fixture := range document.Cases {
 		if names[fixture.Name] {
-			t.Fatalf("duplicate fixture %s", fixture.Name)
+			return nil, fmt.Errorf("duplicate fixture %s", fixture.Name)
 		}
 		names[fixture.Name] = true
 	}
 	for _, name := range document.Required {
 		if !names[name] {
-			t.Fatalf("missing required fixture %s", name)
+			return nil, fmt.Errorf("missing required fixture %s", name)
 		}
 	}
-	return document.Cases
+	return document.Cases, nil
+}
+
+func TestCaptureFixtureRejectsUnknownField(t *testing.T) {
+	_, err := decodeCaptureFixtures([]byte("required_names: [case]\ncases:\n  - name: case\n    want_extra_kesy: [kind]\n"))
+	if err == nil {
+		t.Fatal("unknown fixture field was accepted")
+	}
 }
 
 func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
@@ -180,7 +195,7 @@ func TestAuthoritativeCaptureFileAndBytes(t *testing.T) {
 				}
 				if fixture.Control {
 					// Control records carry no conversation text; their entry
-					// shape is asserted by TestClaudeControlRecordEntryShape.
+					// shape is asserted by TestControlRecordEntryShape.
 					return
 				}
 				found := false
@@ -508,10 +523,10 @@ func TestNativeOpenCodeUnknownSurvivesManagedProjection(t *testing.T) {
 	}
 }
 
-// TestClaudeControlRecordEntryShape certifies a Claude control record and
+// TestControlRecordEntryShape certifies a represented control record and
 // asserts the observable entry it produces: its provider kind, role, retained
 // payload and preview. The fixture declares one case per represented kind.
-func TestClaudeControlRecordEntryShape(t *testing.T) {
+func TestControlRecordEntryShape(t *testing.T) {
 	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		if !fixture.Control {
@@ -539,6 +554,14 @@ func TestClaudeControlRecordEntryShape(t *testing.T) {
 			if fixture.WantRole != "" && entry.Role != ingest.Role(fixture.WantRole) {
 				t.Fatalf("role = %q, want %q", entry.Role, fixture.WantRole)
 			}
+			if fixture.Harness == ingest.HarnessCodex {
+				if entry.EntryType != ingest.EntryTypeSystem {
+					t.Fatalf("entry type = %q, want %q", entry.EntryType, ingest.EntryTypeSystem)
+				}
+				if entry.RawByteLength == nil || *entry.RawByteLength == 0 {
+					t.Fatalf("raw byte length = %v, want a recorded source length", entry.RawByteLength)
+				}
+			}
 			if fixture.WantPartType != "" && (entry.PartType == nil || *entry.PartType != fixture.WantPartType) {
 				t.Fatalf("part type = %v, want %q", entry.PartType, fixture.WantPartType)
 			}
@@ -561,11 +584,11 @@ func TestClaudeControlRecordEntryShape(t *testing.T) {
 	}
 }
 
-// TestClaudeControlRecordTolerantPreviewBound drives the bounded-preview index
+// TestControlRecordTolerantPreviewBound drives the bounded-preview index
 // path for control records whose generated preview can exceed the preview
 // bound. The preview must obey the bound and the retained payload must fall
 // back to its identity object once it exceeds the payload cap.
-func TestClaudeControlRecordTolerantPreviewBound(t *testing.T) {
+func TestControlRecordTolerantPreviewBound(t *testing.T) {
 	t.Parallel()
 	for _, fixture := range loadCaptureFixtures(t) {
 		if !fixture.Control || !fixture.Tolerant {

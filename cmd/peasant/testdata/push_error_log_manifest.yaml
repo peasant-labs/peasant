@@ -1,0 +1,4 @@
+# Required-name manifest for testdata/push_error_log.yaml.
+requiredNames:
+  - plan_counts_not_ready_apart
+  - no_plan_keeps_the_old_line

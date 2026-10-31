@@ -6,6 +6,26 @@ const (
 	ConfigStalenessThresholdSec = 60
 )
 
+// SourcePathFor returns the documented default source directory for a harness.
+func SourcePathFor(harness Harness) (SourcePath, bool) {
+	switch harness {
+	case HarnessClaudeCode:
+		return DefaultClaudePath, true
+	case HarnessOpenCode:
+		return DefaultOpenCodePath, true
+	case HarnessCodex:
+		return DefaultCodexPath, true
+	case HarnessCursor:
+		return DefaultCursorPath, true
+	case HarnessStrike:
+		return DefaultStrikePath, true
+	case HarnessPi:
+		return DefaultPiPath, true
+	default:
+		return "", false
+	}
+}
+
 // SourcePath is a typed default source directory path.
 type SourcePath string
 

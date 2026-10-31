@@ -221,6 +221,7 @@ function groupedSyncPayload(sessions) {
         turnCount: session.turnCount,
         model: 'visual-model',
         syncStatus: 'new',
+        previouslyPushed: false,
       },
     },
     helperGroups: (session.helperGroups || []).map((group) => ({ ...group, purpose: 'helper_review' })),
@@ -299,6 +300,7 @@ function helperMembersPayload(fixture, scope) {
         turnCount: row.turnCount,
         model: 'visual-model',
         syncStatus: row.syncStatus,
+        previouslyPushed: row.syncStatus === 'synced' || row.syncStatus === 'updated',
       },
     },
     helperGroups: (row.helperGroups || []).map((group) => ({ ...group, purpose: 'helper_review' })),
@@ -569,11 +571,11 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
     // The two groups are independent scopes, and the nested selection must stay
     // an explicit transcript id with no owner or parent widening.
     await page.evaluate(() => { const b = document.querySelector('.swz-body'); if (b) b.scrollTop = 0 })
-    const ownerTrigger = '[data-group-id="hg_visual_owner1"] .helper-group-trigger'
+    const ownerTrigger = '[data-group-id="hg_visual_owner1"] button[aria-expanded]'
     await wait(page, ownerTrigger, 'share helper group trigger', false)
     await page.$eval(ownerTrigger, (el) => el.click())
     await wait(page, '[data-thread-id="sess-visual-helper-001"]', 'share helper member', false)
-    const nestedTrigger = '[data-thread-id="sess-visual-helper-001"] .helper-group-trigger'
+    const nestedTrigger = '[data-thread-id="sess-visual-helper-001"] [data-group-id="hg_visual_child1"] button[aria-expanded]'
     await wait(page, nestedTrigger, 'share nested helper trigger', false)
     await page.$eval(nestedTrigger, (el) => el.click())
     await wait(page, '[data-thread-id="sess-visual-helper-003"]', 'share nested helper member', false)

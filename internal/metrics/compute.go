@@ -74,11 +74,26 @@ func computeTokens(_ context.Context, _ ingest.SessionID, entries []schema.Sessi
 // computeTurns counts user+assistant depth=0 turns, tool calls, and subagent entries.
 func computeTurns(_ context.Context, _ ingest.SessionID, entries []schema.SessionEntry, _ *ingest.SessionMetrics) *ingest.SessionMetrics {
 	var turnCount, toolCalls, subagents int
+	// Claude's full-depth carrier summarizes its tool blocks. Count the
+	// blocks, not that summary again; flat legacy calls have no such children.
+	claudeToolParents := make(map[int]bool)
+	for _, entry := range entries {
+		if entry.Harness != schema.HarnessClaudeCode || entry.Depth != 1 || entry.ParentIndex == nil {
+			continue
+		}
+		if entry.EntryType == schema.EntryTypeToolUse && entry.HasToolUse {
+			claudeToolParents[*entry.ParentIndex] = true
+		}
+	}
 
 	for i := range entries {
 		// Count depth=0 user and assistant entries as turns.
 		if entries[i].Depth == 0 && (entries[i].Role == ingest.RoleUser || entries[i].Role == ingest.RoleAssistant) {
 			turnCount++
+		}
+		if entries[i].Harness == schema.HarnessClaudeCode && entries[i].Depth == 0 &&
+			entries[i].ToolCallID == nil && claudeToolParents[entries[i].EntryIndex] {
+			continue
 		}
 		if entries[i].HasToolUse {
 			// Count individual tools from CSV if available.

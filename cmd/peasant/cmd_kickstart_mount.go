@@ -311,7 +311,7 @@ func openKickstartStore(cmd *cobra.Command, ownedRoot string) (*store.Store, fun
 // fallback the post-consent ingest runner uses, so the reader and the writer
 // resolve one tree.
 func resolveKickstartOutputRoot(cmd *cobra.Command, cfg *config.Config) (ingest.ResolvedPath, error) {
-	outputPath := cfg.Output.BasePath
+	outputPath := effectiveOutputBasePath(cmd, cfg)
 	if outputPath == "" {
 		outputPath = string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
 	}

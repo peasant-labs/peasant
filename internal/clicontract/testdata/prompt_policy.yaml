@@ -1,0 +1,28 @@
+# PromptPolicy.Decide cases. want is a ConfirmDecision, validated against the
+# closed set before it is compared. The rule is checked in order: dry run,
+# then --yes, then --json or no terminal, then ask.
+cases:
+  - name: dry_run_never_asks
+    policy: {dryRun: true}
+    want: skipped_dry_run
+  - name: dry_run_never_asks_with_tty
+    policy: {dryRun: true, isTTY: true}
+    want: skipped_dry_run
+  - name: dry_run_never_asks_with_yes
+    policy: {dryRun: true, assumeYes: true}
+    want: skipped_dry_run
+  - name: dry_run_never_asks_with_tty_and_yes
+    policy: {dryRun: true, assumeYes: true, isTTY: true, json: true}
+    want: skipped_dry_run
+  - name: yes_wins
+    policy: {assumeYes: true, json: true}
+    want: assumed_yes
+  - name: json_refused
+    policy: {json: true, isTTY: true}
+    want: refused_no_tty
+  - name: no_tty_refused
+    policy: {}
+    want: refused_no_tty
+  - name: tty_asks
+    policy: {isTTY: true}
+    want: ask

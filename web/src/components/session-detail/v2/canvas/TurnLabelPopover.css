@@ -1,0 +1,57 @@
+/* Local annotation actions stay discoverable for touch and keyboard input.
+   Only a fine pointer with hover may defer them until the turn is active. */
+.peasant-turn-label-trigger {
+  min-inline-size: var(--target-min);
+  min-block-size: var(--control-h-sm);
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .peasant-turn-label-trigger {
+    opacity: 0;
+  }
+  .group:hover .peasant-turn-label-trigger,
+  .group:focus-within .peasant-turn-label-trigger,
+  .peasant-turn-label-trigger:focus,
+  .peasant-turn-label-trigger[aria-expanded="true"] {
+    opacity: 1;
+  }
+}
+
+.peasant-turn-label-popover {
+  left: auto;
+  right: 0;
+  width: 16rem;
+}
+
+@media (width < 768px) {
+  .peasant-turn-label-popover {
+    position: fixed;
+    top: 50%;
+    left: var(--sp-4);
+    right: var(--sp-4);
+    width: auto;
+    max-height: calc(100dvh - var(--sp-4) * 2);
+    overflow-y: auto;
+    transform: translateY(-50%);
+  }
+}
+
+/* --control-h-sm rises to the canonical comfortable target on coarse input. */
+.peasant-turn-label-popover button,
+.peasant-turn-label-popover input {
+  min-block-size: var(--control-h-sm);
+  min-inline-size: var(--target-min);
+}
+
+.peasant-turn-label-error {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1);
+  max-inline-size: var(--measure-prose);
+  margin-inline-start: var(--sp-2);
+  color: var(--danger);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}

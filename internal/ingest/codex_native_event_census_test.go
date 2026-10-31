@@ -29,6 +29,7 @@ type codexNativeEventCensusFixture struct {
 		Mode            CodexHistoryMode       `yaml:"mode"`
 		WantDiagnostics []string               `yaml:"want_diagnostics"`
 		WantPendedItems []string               `yaml:"want_pending"`
+		WantNodes       []string               `yaml:"want_nodes"`
 	} `yaml:"cases"`
 }
 
@@ -100,7 +101,7 @@ func TestCodexNativeEventProductionCensus(t *testing.T) {
 			case row.Admission != "":
 				assertCodexNativeEventAdmission(t, row.Admission, row.Event)
 			case row.Event != "" || len(row.Events) != 0:
-				assertCodexNativeEventDispatch(t, row.Mode, row.Event, row.Payload, row.Events, row.WantDiagnostics, row.WantPendedItems)
+				assertCodexNativeEventDispatch(t, row.Mode, row.Event, row.Payload, row.Events, row.WantDiagnostics, row.WantPendedItems, row.WantNodes)
 			default:
 				t.Fatal("fixture case states no census, admission or dispatch expectation")
 			}
@@ -173,7 +174,7 @@ func assertCodexNativeEventAdmission(t *testing.T, admission, event string) {
 // production dispatch. A fixture states the diagnostics the arm must report and
 // the identities it must pend; an arm that stops acting, or an event that falls
 // through to the default, turns the case red.
-func assertCodexNativeEventDispatch(t *testing.T, mode CodexHistoryMode, event string, payload map[string]any, sequence []codexNativeEventCase, wantDiagnostics, wantPended []string) {
+func assertCodexNativeEventDispatch(t *testing.T, mode CodexHistoryMode, event string, payload map[string]any, sequence []codexNativeEventCase, wantDiagnostics, wantPended, wantNodes []string) {
 	t.Helper()
 	events := sequence
 	if event != "" {
@@ -185,13 +186,12 @@ func assertCodexNativeEventDispatch(t *testing.T, mode CodexHistoryMode, event s
 	if mode == "" {
 		mode = CodexHistoryModeLegacy
 	}
-	// The witnessed arms report diagnostics and pended identities; only an arm
-	// that emits a captured node needs a ref registry.
-	state := newCodexReplayState(nil)
+	state := newCodexReplayState(NewCodexRefRegistry(nil))
 	for i, step := range events {
 		decoded := codexNativeEventPayload(t, step.Payload)
 		decoded.Type = step.Event
-		record := codexHistoryRecord{LineIndex: int64(i), Ordinal: int64(i + 1), HasOrdinal: true}
+		record := codexHistoryRecord{LineIndex: int64(i), ByteStart: int64(i + 1), Ordinal: int64(i + 1), HasOrdinal: true, EnvelopeType: codexTypeEventMsg}
+		record.Payload, _ = json.Marshal(decoded)
 		if err := state.replayEventMessage("census", codexDecodedSegment{}, record, decoded, CodexOwnershipOwn, mode); err != nil {
 			t.Fatalf("event %q: %v", step.Event, err)
 		}
@@ -212,7 +212,16 @@ func assertCodexNativeEventDispatch(t *testing.T, mode CodexHistoryMode, event s
 	if !slices.Equal(pended, wantPended) {
 		t.Errorf("pended identities %v, want %v", pended, wantPended)
 	}
-	if len(state.nodes) != 0 {
-		t.Errorf("event dispatch emitted %d captured nodes", len(state.nodes))
+	gotNodes := make([]string, 0, len(state.nodes))
+	seenKeys := make(map[string]bool)
+	for _, node := range state.nodes {
+		gotNodes = append(gotNodes, node.NativeType)
+		if seenKeys[node.NativeKey] {
+			t.Errorf("control node native key %q was reused for another occurrence", node.NativeKey)
+		}
+		seenKeys[node.NativeKey] = true
+	}
+	if !slices.Equal(gotNodes, wantNodes) {
+		t.Errorf("event dispatch nodes %v, want %v", gotNodes, wantNodes)
 	}
 }
