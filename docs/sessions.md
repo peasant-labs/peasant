@@ -2,9 +2,9 @@
 
 `peasant sessions` inspects the sessions peasant has ingested into the local
 analytics database. It is the terminal-first counterpart to the web dashboard:
-`list` answers *"what sessions do I have?"* and `context` answers *"what
-happened around this point in one session?"* — both rendered for humans in the
-terminal.
+`list` answers *"what sessions do I have?"*, `context` answers *"what happened
+around this point in one session?"*, and `prompts` answers *"what did the person
+ask for?"*.
 
 > **`sessions context` vs `export sessions`:** `sessions context` produces
 > **human-readable terminal rendering** of a window of a transcript. `peasant
@@ -122,6 +122,64 @@ depth-0 turn. For a depth-0 entry it is empty. A harness message graph, when one
 exists, is carried on the entry `parent_entry_id` link instead: OpenCode records
 a depth-0 message's parent message there. Renderers decide nesting by `depth`.
 
+## `peasant sessions prompts`
+
+Print only what the person typed in one session, in entry order. Use it to read
+a session's requests before you publish it, without the harness text that
+`context` and `export` include.
+
+```bash
+peasant sessions prompts <session-id>
+peasant sessions prompts <session-id> --max-chars 200
+peasant sessions prompts <session-id> --include-commands
+peasant sessions prompts <session-id> --json | jq -r '.prompts[].text'
+```
+
+Flags:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--max-chars <n>` | `0` | Cut each prompt to `n` characters, on a character boundary (`0` = no cut). A cut prompt has `truncated: true` |
+| `--include-commands` | — | In the text view, print a command entry's stored text instead of `/name args`. The JSON `command` field is always present |
+| `--json` | — | Emit one JSON document instead of text |
+
+The selection is the stored fields: `role = user`, `depth = 0` and
+`entry_type = text`. The command adds no classification of its own. An entry
+that a harness injected is left out only when ingest stored it as system
+content. If a wrapper still reaches `role = user`, such as an IDE note from
+Claude Code, the command lists it; the fix belongs in the indexer.
+
+A slash-command or skill invocation stays in the list with `command` set, and
+its `text` is `/name args`.
+
+```json
+{
+  "warnings": [],
+  "sessionId": "11111111-2222-4333-8444-555555555555",
+  "parentSessionId": null,
+  "promptCount": 2,
+  "prompts": [
+    { "entryIndex": 0, "timestamp": "2026-10-29T10:00:00Z", "text": "fix the widget", "truncated": false, "command": null },
+    { "entryIndex": 9, "timestamp": "2026-10-29T10:12:00Z", "text": "/review 12", "truncated": false,
+      "command": { "name": "review", "args": "12" } }
+  ],
+  "note": ""
+}
+```
+
+- A subagent session has no human prompts. Its first user entry is the parent
+  agent's instruction. The command lists the entries it finds, sets
+  `parentSessionId`, and says so in `note`.
+- A session with no prompts exits 0 with `prompts: []`, the empty code
+  `no_matching_entries`, and a `note` that says why.
+- A session whose capture is a bounded preview gets the warning
+  `capture_bounded`: a long prompt may be cut. Text is otherwise whole, not the
+  2,000-byte preview that `context` shows.
+- A session that is not indexed is an error, exit 1, with the same text as
+  `sessions context`.
+
+The output is local and is not redacted.
+
 ## `peasant sessions tag`
 
 Session tags are free-form labels you can attach to sessions and then filter on
@@ -137,7 +195,8 @@ peasant sessions tag list <session-id>           # show a session's tags
 ## See also
 
 - [`docs/cli/peasant_sessions_list.md`](cli/peasant_sessions_list.md),
-  [`docs/cli/peasant_sessions_context.md`](cli/peasant_sessions_context.md) —
+  [`docs/cli/peasant_sessions_context.md`](cli/peasant_sessions_context.md),
+  [`docs/cli/peasant_sessions_prompts.md`](cli/peasant_sessions_prompts.md) —
   auto-generated flag references
 - [Annotation CLI reference](cli/peasant_annotate.md) — commands for creating and importing
   annotations

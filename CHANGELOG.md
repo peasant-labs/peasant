@@ -12,6 +12,10 @@ Release, which holds the signed artifacts and checksums.
   `subagent`, `skill`, `mcp`, `compact`, `clear`, `model-switch`, `background`
   and `partial`, and every named facet must hold. `--min-turns` and `--max-turns`
   bound the `turns` column. Each `--json` row now states `facets`.
+- `sessions prompts <session-id>` prints only what the person typed in a
+  session, with `--json`, `--max-chars` and `--include-commands`. It reads both
+  stored representations, and it warns with `capture_bounded` when a session's
+  stored text is a bounded preview.
 
 ### Changed
 - `sessions list` shows main sessions only by default, so a script that counts

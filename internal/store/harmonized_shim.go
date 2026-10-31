@@ -20,6 +20,24 @@ import (
 // (session_id, entry_index)), so the shim reads partition 0 as well. Earlier
 // partitions serve only the snapshot builders.
 
+// sqlShimBodyRows selects the columns scanBodyRow reads, from the mapping and
+// body tables. A caller adds its own WHERE clause.
+const sqlShimBodyRows = `SELECT
+    b.body_id, b.session_id, b.body_digest, b.entry_index, b.harness, b.entry_type, b.role,
+    b.timestamp_ms, b.content_preview, b.tokens_in, b.tokens_out,
+    b.has_tool_use, b.tool_kind, b.tool_names_csv,
+    b.has_thinking, b.is_error, b.stop_reason, b.raw_byte_length,
+    b.tool_call_id, b.entry_id, b.parent_entry_id, b.depth, b.parent_index,
+    b.tool_input, b.tool_output,
+    b.model_id, b.tokens_reasoning, b.cache_read, b.cache_write,
+    b.extra, b.extra_verbatim, b.part_type, b.source_entry_ref,
+    b.prov_origin, b.prov_actor, b.prov_delivery, b.prov_ownership,
+    b.prov_evidence, b.prov_input_modality, b.prov_submission_ref
+FROM session_generation_entries m
+JOIN session_entry_bodies b
+  ON b.session_id = m.session_id AND b.body_digest = m.body_digest
+JOIN sessions s ON s.session_id = m.session_id`
+
 // shimmedOnConn reports whether a session's entries read through the shim: a
 // harmonized active generation exists, so the mirror rows are gone and the
 // body rows serve through legacyShape.
@@ -102,21 +120,7 @@ func shimBodyRecordsOnConn(conn *sqlite.Conn, sessionID string, minIndex, maxInd
 // serve without the active pointer ever being consulted. A your-range variant
 // filters by entry index; a nil bound leaves that side open.
 func shimBodyRecordsForGenerationOnConn(conn *sqlite.Conn, sessionID, generationID string, minIndex, maxIndex *int) ([]EntryRecord, error) {
-	query := `SELECT
-    b.body_id, b.session_id, b.body_digest, b.entry_index, b.harness, b.entry_type, b.role,
-    b.timestamp_ms, b.content_preview, b.tokens_in, b.tokens_out,
-    b.has_tool_use, b.tool_kind, b.tool_names_csv,
-    b.has_thinking, b.is_error, b.stop_reason, b.raw_byte_length,
-    b.tool_call_id, b.entry_id, b.parent_entry_id, b.depth, b.parent_index,
-    b.tool_input, b.tool_output,
-    b.model_id, b.tokens_reasoning, b.cache_read, b.cache_write,
-    b.extra, b.extra_verbatim, b.part_type, b.source_entry_ref,
-    b.prov_origin, b.prov_actor, b.prov_delivery, b.prov_ownership,
-    b.prov_evidence, b.prov_input_modality, b.prov_submission_ref
-FROM session_generation_entries m
-JOIN session_entry_bodies b
-  ON b.session_id = m.session_id AND b.body_digest = m.body_digest
-JOIN sessions s ON s.session_id = m.session_id
+	query := sqlShimBodyRows + `
 WHERE m.session_id = ? AND m.partition_id = 0`
 	args := []any{sessionID}
 	if generationID == "" {

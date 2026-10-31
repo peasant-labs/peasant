@@ -88,6 +88,7 @@ Warning codes:
 | `index_stale` | A result read from an index that is behind its sources. |
 | `index_maintenance_pending` | Index maintenance is due and has not run. |
 | `filter_ignored` | A filter the command accepted and did not apply. |
+| `capture_bounded` | A session whose stored text is a bounded preview, or whose capture lacks content, so a read of it is not whole. |
 
 Empty codes:
 
@@ -98,6 +99,7 @@ Empty codes:
 | `input_list_was_empty` | The input list named nothing to act on. |
 | `nothing_changed` | There was nothing new to do. |
 | `not_fetched_yet` | A local copy of state from peasant online has not been fetched yet. |
+| `no_matching_entries` | Stored sessions were read, and no entry met the command's selection. |
 
 Both sets are closed. A new code is added to the set before any command prints
 it.
@@ -197,6 +199,7 @@ resolves the names), or a `--collective` confirmation it cannot ask for. Under
 |---|---|
 | `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, `refused` and `refusal_reasons` counts in the document, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused: 1 strict_capture_refused; peasant harvest index re-indexes 1 of them`. It exits 1 when it refuses any session, and the sessions it did export stay written |
 | `redact` | `--sessions-from` |
+| `sessions prompts` | `--json` with `warnings`, `empty_code` and `empty_reason`; a refused call exits 2 before the store opens |
 | `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`, with a per-session `plan` (below) |
 | `upgrade` | `-y` |
 
