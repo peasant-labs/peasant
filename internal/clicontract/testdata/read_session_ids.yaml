@@ -1,7 +1,9 @@
 # ReadSessionIDs cases. input is the exact bytes read; wantIDs is the parsed
 # list in order. wantErrContains names text the error must carry (the line or
 # index of the fault). wantNoIDs asserts the error is ErrNoSessionIDs: an input
-# that names nothing is refused, never read as "all sessions".
+# that names nothing is refused, never read as "all sessions". wantDropped is
+# what a review document left out, as id and status; wantNoClean asserts the
+# refusal of a document with no clean session.
 cases:
   - name: newline_text
     input: |
@@ -70,3 +72,81 @@ cases:
   - name: non_string_element_refused
     input: '["a", 7]'
     wantErrContains: index 1
+
+  - name: session_id_camel_key_in_array
+    input: '[{"sessionId": "s-1"}, {"sessionId": "s-2", "note": "no status"}]'
+    wantIDs: [s-1, s-2]
+
+  - name: session_id_snake_key_keeps_its_own_status
+    input: '[{"session_id": "s-1", "status": "findings"}]'
+    wantIDs: [s-1]
+
+  - name: review_document_takes_only_clean
+    input: |
+      {
+        "level": "standard",
+        "summary": {"sessions": 3, "clean": 1, "withFindings": 1, "errors": 1, "findings": 1},
+        "sessions": [
+          {"sessionId": "bad-1", "status": "findings", "reason": "", "findings": [{"kind": "foreign_email"}]},
+          {"sessionId": "ok-1", "status": "clean", "reason": "", "findings": []},
+          {"sessionId": "bad-2", "status": "error", "reason": "unreadable", "findings": []}
+        ],
+        "warnings": []
+      }
+    wantIDs: [ok-1]
+    wantDropped:
+      - { id: bad-1, status: findings }
+      - { id: bad-2, status: error }
+
+  - name: review_document_nothing_clean_refused
+    input: '{"sessions": [{"sessionId": "bad-1", "status": "findings"}, {"sessionId": "bad-2", "status": "error"}]}'
+    wantNoIDs: true
+    wantNoClean: true
+
+  - name: review_entries_keep_the_rule_without_the_document
+    input: '[{"sessionId": "bad-1", "status": "findings"}, {"sessionId": "ok-1", "status": "clean"}]'
+    wantIDs: [ok-1]
+    wantDropped:
+      - { id: bad-1, status: findings }
+
+  - name: review_entries_keep_the_rule_beside_another_id_key
+    input: '[{"id": "bad-1", "sessionId": "bad-1", "status": "error"}, {"id": "ok-1"}]'
+    wantIDs: [ok-1]
+    wantDropped:
+      - { id: bad-1, status: error }
+
+  - name: review_entries_unknown_status_refused
+    input: '[{"sessionId": "s-1", "status": "fine"}]'
+    wantErrContains: index 0
+
+  - name: id_both_clean_and_not_clean_is_not_clean
+    input: '{"sessions": [{"sessionId": "s-1", "status": "clean"}, {"sessionId": "s-1", "status": "findings"}, {"sessionId": "s-2", "status": "clean"}]}'
+    wantIDs: [s-2]
+    wantDropped:
+      - { id: s-1, status: findings }
+
+  - name: review_document_empty_sessions_refused
+    input: '{"sessions": [], "warnings": []}'
+    wantNoIDs: true
+
+  - name: review_document_unknown_status_refused
+    input: '{"sessions": [{"sessionId": "s-1", "status": "clean"}, {"sessionId": "s-2", "status": "pending"}]}'
+    wantErrContains: index 1
+
+  - name: review_document_missing_status_refused
+    input: '{"sessions": [{"sessionId": "s-1"}]}'
+    wantErrContains: index 0
+
+  - name: review_document_needs_session_id_camel_key
+    input: '{"sessions": [{"session_id": "s-1", "status": "clean"}]}'
+    wantErrContains: index 0
+
+  - name: object_without_sessions_refused
+    input: '{"id": "s-1"}'
+    wantErrContains: line 1
+
+  - name: object_with_content_after_it_refused
+    input: |
+      {"sessions": [{"sessionId": "s-1", "status": "clean"}]}
+      {"sessions": [{"sessionId": "s-2", "status": "findings"}]}
+    wantErrContains: line 2

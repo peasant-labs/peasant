@@ -717,3 +717,46 @@ cases:
               - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: will_publish, selectedBy: parent }
               - { id: 5a5a5a5a-0000-4000-8000-0000000000a2, verdict: will_publish, selectedBy: parent }
           - { id: 0b0b0b0b-0000-4000-8000-00000000000b, verdict: will_publish }
+
+  - name: review_document_sends_only_clean
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --sessions-from, "-"]
+        stdin: '{"sessions": [{"sessionId": "0a0a0a0a-0000-4000-8000-00000000000a", "status": "clean"}, {"sessionId": "0b0b0b0b-0000-4000-8000-00000000000b", "status": "findings"}]}'
+        wantStdoutJSON: true
+        wantRequests: []
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish }
+        wantOutputContains: ['"code": "session_refused"', '"session_id": "0b0b0b0b-0000-4000-8000-00000000000b"', 'warning: session 0b0b0b0b-0000-4000-8000-00000000000b']
+      - args: [--json, --yes, --sessions-from, "-"]
+        stdin: '{"sessions": [{"sessionId": "0a0a0a0a-0000-4000-8000-00000000000a", "status": "clean"}, {"sessionId": "0b0b0b0b-0000-4000-8000-00000000000b", "status": "findings"}]}'
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantOutputContains: ['"code": "session_refused"']
+
+  - name: review_document_nothing_clean_refused
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    runs:
+      - args: [--yes, --sessions-from, "-"]
+        stdin: '{"sessions": [{"sessionId": "0a0a0a0a-0000-4000-8000-00000000000a", "status": "error"}, {"sessionId": "0b0b0b0b-0000-4000-8000-00000000000b", "status": "findings"}]}'
+        wantExit: 3
+        wantRequests: []
+        wantPublished: []
+        wantErrContains: ["names no clean session", "0a0a0a0a-0000-4000-8000-00000000000a (error)", "0b0b0b0b-0000-4000-8000-00000000000b (findings)"]
+
+  - name: session_flag_is_not_reported_as_dropped
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --session, 0b0b0b0b-0000-4000-8000-00000000000b, --sessions-from, "-"]
+        stdin: '{"sessions": [{"sessionId": "0a0a0a0a-0000-4000-8000-00000000000a", "status": "clean"}, {"sessionId": "0b0b0b0b-0000-4000-8000-00000000000b", "status": "findings"}]}'
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0b0b0b0b-0000-4000-8000-00000000000b, verdict: will_publish }
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish }
+        wantOutputOmits: [session_refused]

@@ -32,7 +32,11 @@ const (
 
 // explicitSelection is what --session and --sessions-from named, in the order
 // given, without duplicates.
-type explicitSelection struct{ IDs []string }
+type explicitSelection struct {
+	IDs []string
+	// Warnings names the sessions a review document left out of the list.
+	Warnings []clicontract.Warning
+}
 
 // resolveExplicitSelection merges --session and --sessions-from: the
 // repeated --session values first, then the list, de-duplicated in order.
@@ -49,7 +53,7 @@ func resolveExplicitSelection(cmd *cobra.Command) (explicitSelection, bool, erro
 	}
 	seen := map[string]bool{}
 	var ids []string
-	for _, raw := range append(append([]string{}, named...), fromList...) {
+	for _, raw := range append(append([]string{}, named...), fromList.IDs...) {
 		id := strings.TrimSpace(raw)
 		if id == "" {
 			return explicitSelection{}, true, clicontract.NewUsageError(fmt.Sprintf(
@@ -65,7 +69,10 @@ func resolveExplicitSelection(cmd *cobra.Command) (explicitSelection, bool, erro
 		seen[id] = true
 		ids = append(ids, id)
 	}
-	return explicitSelection{IDs: ids}, true, nil
+	// --session is the developer's own choice, so a session named there is not
+	// reported as left out, even when the document it also appears in dropped it.
+	warnings := slices.DeleteFunc(fromList.Warnings(), func(w clicontract.Warning) bool { return seen[w.SessionID] })
+	return explicitSelection{IDs: ids, Warnings: warnings}, true, nil
 }
 
 // selectedSession is one session the run is pinned to. Parent is the
