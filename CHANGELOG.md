@@ -22,6 +22,15 @@ Release, which holds the signed artifacts and checksums.
   `--no-redact` for harvest only). Scheduled runs are local and never publish.
   `--dry-run` prints the units. `uninstall` removes only the units peasant
   wrote. Redact runs as `ExecStopPost=`, so it runs after a failed harvest too.
+- `peasant sessions review` checks named sessions for what redaction leaves
+  behind, in memory and writing nothing: credentials in formats no rule knows,
+  tool results that printed a credential file, other people's email addresses,
+  link-shareable documents, and the redaction module's advisory hits. A finding
+  shows a masked preview, never the matched text. It exits 4 on findings and 1
+  when a session could not be reviewed.
+- `--sessions-from` accepts a `sessions review --json` document and takes only
+  its clean sessions. Each session left out is a `session_refused` warning, and
+  a document with no clean session is refused.
 
 ### Changed
 - **Exit code:** `peasant harvest --json` now exits 1 when a session fails,

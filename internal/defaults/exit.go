@@ -6,13 +6,15 @@ import "strconv"
 // caller that branches on a status has to be able to read the meaning of every
 // value from one place.
 //
-// The set is deliberately small. Two distinctions are worth a status of their
-// own, both for a caller that cannot read prose. A generated Git hook needs to
+// The set is deliberately small. Three distinctions are worth a status of their
+// own, each for a caller that cannot read prose. A generated Git hook needs to
 // know whether a failed command sent anything to the village at all. Without
 // it, a hook reporting "whatever finished is on the village and is recorded as
 // published" says exactly the same thing after an expired login, where nothing
 // was ever sent. A program driving the CLI needs to know whether it invoked a
-// command wrongly (ExitUsage), which retrying the same call will not fix.
+// command wrongly (ExitUsage), which retrying the same call will not fix. A
+// script gating a publish on `sessions review` needs to tell findings from a
+// session it could not read (ExitFindings).
 type ExitCode int
 
 const (
@@ -36,6 +38,9 @@ const (
 	// its own refusals with this status, usage refusals included, because its
 	// callers branch on whether anything reached the village.
 	ExitNothingAttempted ExitCode = 3
+	// ExitFindings means the review ran to the end and found residue. It is 4:
+	// 2 is a usage error and 3 is ExitNothingAttempted.
+	ExitFindings ExitCode = 4
 )
 
 // Int returns the status in the form os.Exit takes.

@@ -835,3 +835,26 @@ func TestFileStatus_IsValid(t *testing.T) {
 		}
 	}
 }
+
+// TestExecGitRepository_UserEmail reads the repository's own git identity and
+// treats an unset key as no identity.
+func TestExecGitRepository_UserEmail(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	repo := NewExecGitRepository(dir)
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "--quiet")
+	run("config", "user.email", "owner@example.org")
+	if got := repo.UserEmail(t.Context()); got != "owner@example.org" {
+		t.Errorf("UserEmail = %q", got)
+	}
+	missing := NewExecGitRepository(filepath.Join(dir, "gone"))
+	if got := missing.UserEmail(t.Context()); got != "" {
+		t.Errorf("UserEmail outside a directory = %q, want empty", got)
+	}
+}
