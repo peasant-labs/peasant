@@ -1,0 +1,139 @@
+{
+  "assets": [
+    {
+      "path": "/_next/static/chunks/7918-45dc6729fe5899ca.js",
+      "sha256": "6e4f61501f2a2e16a149c997ba3055a6671e67950d3311008477e037cf0ef961",
+      "markers": [
+        "gmp-diff-state"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    },
+    {
+      "path": "/_next/static/chunks/app/page-6e96bf692bd8fd36.js",
+      "sha256": "ca003ce9cf789bdc381b6fe88fcc06415c9551f218145b52b8a49abd1e41f2a7",
+      "markers": [
+        "home-filters-menu"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    },
+    {
+      "path": "/_next/static/chunks/app/review/[[...segments]]/page-4b2a4bae6f92f928.js",
+      "sha256": "94089350493903ce06d1cf5f29cc96b324706e439ca9de191f930d7ded3c41a0",
+      "markers": [
+        "gmp-diff-state",
+        "retry file diffs"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    },
+    {
+      "path": "/_next/static/css/167e41ca30a44252.css",
+      "sha256": "0a9c19e6e0b47dce4490780e8b9e292be98962100a70af939a2103fa6bcfba2d",
+      "markers": [
+        "home-filters-menu"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    },
+    {
+      "path": "/_next/static/css/9d074add385ccaa3.css",
+      "sha256": "544e74950aa5c8c371261f17253d52ab4471ad620d49bad071cc013fe6497b46",
+      "markers": [
+        "gmp-diff-state"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    },
+    {
+      "path": "/_next/static/css/ddc2349e1aff46ce.css",
+      "sha256": "03aed0226185d7e325cedcc495d7947f55a0c3624f065aa45206f28c8c299fe1",
+      "markers": [
+        "gmp-diff-state"
+      ],
+      "verifiedPorts": [
+        8691,
+        8698
+      ]
+    }
+  ],
+  "readOnlyAPI": [
+    {
+      "port": 8691,
+      "path": "/api/v1/health",
+      "status": 200,
+      "keys": [
+        "status"
+      ]
+    },
+    {
+      "port": 8691,
+      "path": "/api/v1/settings",
+      "status": 200,
+      "keys": [
+        "settings",
+        "autoPublish"
+      ]
+    },
+    {
+      "port": 8691,
+      "path": "/api/v1/sync/sessions",
+      "status": 200,
+      "keys": [
+        "sessions"
+      ],
+      "sessions": 4
+    },
+    {
+      "port": 8698,
+      "path": "/api/v1/health",
+      "status": 200,
+      "keys": [
+        "status"
+      ]
+    },
+    {
+      "port": 8698,
+      "path": "/api/v1/settings",
+      "status": 200,
+      "keys": [
+        "settings",
+        "autoPublish"
+      ]
+    },
+    {
+      "port": 8698,
+      "path": "/api/v1/sync/sessions",
+      "status": 200,
+      "keys": [
+        "sessions"
+      ],
+      "sessions": 0
+    }
+  ],
+  "priorCSSComparison": [
+    {
+      "path": "/_next/static/css/167e41ca30a44252.css",
+      "matchesPriorInspectedCSS": true
+    },
+    {
+      "path": "/_next/static/css/ddc2349e1aff46ce.css",
+      "matchesPriorInspectedCSS": true
+    },
+    {
+      "path": "/_next/static/css/9d074add385ccaa3.css",
+      "matchesPriorInspectedCSS": true
+    }
+  ]
+}

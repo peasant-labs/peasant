@@ -1,0 +1,890 @@
+$ vitest run
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+ RUN  v2.1.9 /private/tmp/peasant-agent-command-merged-build/web
+
+ ✓ src/lib/api/grouped.test.ts (25 tests) 30ms
+ ✓ src/contexts/__tests__/WebSocketContext.test.tsx (29 tests) 161ms
+ ✓ src/lib/api/map.test.ts (37 tests) 30ms
+ ✓ src/components/session-detail/v2/lib/scopeTurns.test.ts (56 tests) 6ms
+ ✓ src/app/review/[[...segments]]/ReviewSurface.test.tsx (26 tests) 280ms
+ ✓ src/app/share/ShareWizardClient.test.tsx (12 tests) 287ms
+stderr | src/components/session-detail/v2/SessionDetailV2.test.tsx > SessionDetailV2 — the "showing every step" prelude is gone > keeps the copy link action in the more menu and always shows the session figures
+An update to Rr inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/session-detail/v2/SessionDetailV2.test.tsx (16 tests) 220ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.realViewer.test.tsx (5 tests) 319ms
+ ✓ src/components/dev/DevAnnotateOverlay.test.tsx (31 tests) 329ms
+ ✓ src/app/review/[[...segments]]/lifted-surface.test.tsx (15 tests) 382ms
+stderr | src/app/share/ShareWizardClient.helper-groups.test.tsx > mounted Share helper-group chooser > selects exactly one eligible helper member and pushes only its transcript id
+Each child in a list should have a unique "key" prop.
+
+Check the render method of `SessionPicker`. See https://react.dev/link/warning-keys for more information.
+
+stderr | src/app/settings/SettingsPageClient.test.tsx > settings page writes > a write in flight is pending
+An update to $s inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to $s inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to $s inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/app/review/[[...segments]]/ReviewPageClient.test.tsx (43 tests) 986ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.schemaContract.test.tsx (6 tests) 49ms
+ ✓ src/components/share/RedactionStep.test.tsx (27 tests) 1291ms
+ ✓ src/app/map/[[...segments]]/MapShell.test.tsx (34 tests) 1218ms
+ ✓ src/app/page.test.tsx (21 tests) 1191ms
+   ✓ HomePage — the changes-first picker > mounts the fixture-backed changes picker with review clarity and filtering 445ms
+ ✓ src/app/review/[[...segments]]/changeGraphLayout.test.ts (25 tests) 12ms
+ ✓ src/app/review/[[...segments]]/ReviewRouter.test.tsx (12 tests) 274ms
+ ✓ src/app/map/[[...segments]]/MapShell.realCodeMap.test.tsx (22 tests) 1611ms
+ ✓ src/components/map/layout.test.ts (29 tests) 4ms
+ ✓ src/app/settings/SettingsPageClient.test.tsx (40 tests) 1875ms
+ ✓ src/app/map/lib/mapData.test.ts (32 tests) 9ms
+ ✓ src/lib/village/observations.test.ts (20 tests) 39ms
+ ✓ src/app/share/ShareWizardClient.helper-groups.test.tsx (7 tests) 1223ms
+ ✓ src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx (12 tests) 850ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.qualityMedianBridge.test.tsx (4 tests) 35ms
+ ✓ src/components/LocalOfflineNotice.test.tsx (25 tests) 774ms
+ ✓ src/app/map/[[...segments]]/MapRail.test.tsx (11 tests) 199ms
+ ✓ src/components/command/CommandPalette.test.tsx (20 tests) 2277ms
+   ✓ CommandPalette > retries failed search discovery on the same surface and shows the results 388ms
+ ✓ src/components/map/MapCanvas.test.tsx (12 tests) 135ms
+ ✓ src/app/page.tokens.test.tsx (13 tests) 1116ms
+ ✓ src/components/map/MapSquareNode.test.tsx (44 tests) 125ms
+ ✓ src/lib/sessions/helperGroups.test.ts (23 tests) 11ms
+ ✓ src/components/session-detail/v2/canvas/TurnLabelPopover.test.tsx (15 tests) 322ms
+ ✓ src/types/messages.test.ts (29 tests) 3ms
+ ✓ src/app/map/lib/codeMapRouteState.test.ts (20 tests) 34ms
+ ✓ src/app/review/[[...segments]]/ChangeGraph.test.tsx (16 tests) 433ms
+ ✓ src/lib/quality/utils.test.ts (28 tests) 3ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.sessionExtras.test.tsx (12 tests) 1021ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.heroTitle.test.tsx (6 tests) 278ms
+ ✓ src/lib/quality/types.test.ts (21 tests) 14ms
+ ✓ src/components/sessions/GroupedLocalSessions.test.tsx (7 tests) 299ms
+ ✓ src/app/share/ShareWizardClient.mounted.test.tsx (5 tests) 389ms
+   ✓ mounted Share production boundary > decodes, joins, groups, tri-state selects eligible IDs, and submits them through PushStep 362ms
+ ✓ src/components/LocalSidebar.test.tsx (24 tests) 520ms
+ ✓ src/lib/api/annotations.test.ts (15 tests) 6ms
+ ✓ src/lib/navigation/useProjectIdentity.test.ts (8 tests) 360ms
+ ✓ src/hooks/useSessionExtras.test.tsx (4 tests) 142ms
+ ✓ src/components/session-detail/v2/publish/manualPublishWithoutPreference.test.tsx (2 tests) 760ms
+   ✓ manual publish with an unreadable automatic-publishing preference > keeps publish available, shows the offer unavailable with its reason, and creates no rule 557ms
+stderr | src/app/page.root-list.test.tsx > root page list reads > ignores session broadcasts and refreshes the loaded list on focus
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/components/map/keyboard.test.ts (21 tests) 3ms
+ ✓ src/app/share/ShareWizardClient.redaction-flow.test.tsx (17 tests) 2362ms
+stderr | src/app/share/ShareWizardClient.wire-decode.test.tsx > mounted Share chooser wire decoding > mounts the chooser for the unmutated baseline payloads
+Each child in a list should have a unique "key" prop.
+
+Check the render method of `SessionPicker`. See https://react.dev/link/warning-keys for more information.
+
+ ✓ src/app/share/ShareWizardClient.wire-decode.test.tsx (6 tests) 245ms
+ ✓ src/app/review/[[...segments]]/caption.test.ts (13 tests) 8ms
+ ✓ src/lib/share/redactionScan.test.tsx (11 tests) 217ms
+ ✓ src/lib/navigation/projectRoutes.test.ts (33 tests) 34ms
+ ✓ src/lib/adapters/changes.test.ts (9 tests) 3ms
+ ✓ src/app/share/ShareWizardClient.linked-sessions.test.tsx (2 tests) 121ms
+ ✓ src/app/page.root-list.test.tsx (29 tests) 3897ms
+   ✓ root page publish filters > next-page 406ms
+   ✓ root page publish filters > child-search-keeps-publish-label 390ms
+ ✓ src/app/projects/[[...segments]]/ProjectsRouter.test.tsx (12 tests) 309ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.relationshipNavigation.test.tsx (9 tests) 56ms
+ ✓ src/components/sessions/GroupedSessionsSection.test.tsx (6 tests) 193ms
+ ✓ src/test/font-import-guard.test.ts (5 tests) 31ms
+ ✓ src/app/sessions/[[...segments]]/SessionsRouter.test.tsx (6 tests) 152ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.lineage.test.tsx (4 tests) 75ms
+ ✓ src/app/review/[[...segments]]/ChangeTreemap.test.tsx (9 tests) 163ms
+ ✓ src/components/session-detail/v2/lib/useEntryLabels.test.ts (8 tests) 127ms
+ ✓ src/components/sessions/AllSessions.test.tsx (10 tests) 180ms
+ ✓ src/components/LayoutShell.capabilities.test.tsx (15 tests) 505ms
+ ✓ src/lib/api/session-extras.test.ts (24 tests) 15ms
+ ✓ src/hooks/useTourState.test.ts (11 tests) 18ms
+ ✓ src/app/review/[[...segments]]/signals.test.ts (8 tests) 10ms
+ ✓ src/app/review/[[...segments]]/changeTreemapLayout.test.ts (9 tests) 4ms
+ ✓ src/schemaRuntimeArchitecture.test.ts (7 tests) 17ms
+ ✓ src/components/AppShellGeometry.test.ts (5 tests) 3ms
+ ✓ src/lib/nav/sections.test.ts (11 tests) 14ms
+ ✓ src/components/session-detail/v2/panels/DetectedPullRequests.test.tsx (4 tests) 53ms
+ ✓ src/app/analytics/AnalyticsPageClient.test.tsx (6 tests) 72ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.strike.test.tsx (1 test) 222ms
+ ✓ src/components/share/PushStep.test.tsx (3 tests) 125ms
+ ✓ src/app/review/[[...segments]]/ReviewSurface.diff.mounted.test.tsx (5 tests) 291ms
+ ✓ src/components/share/SessionPicker.test.tsx (1 test) 482ms
+   ✓ SessionPicker large-history interactions > preserves leaf and ancestor tri-state semantics without remeasuring the rail on selection changes 482ms
+ ✓ src/components/map/intensity.test.ts (39 tests) 4ms
+ ✓ src/components/map/TimeStrip.test.tsx (8 tests) 74ms
+ ✓ src/lib/home/rootStats.test.ts (5 tests) 2ms
+ ✓ src/components/session-detail/v2/publish/publishModel.test.ts (18 tests) 4ms
+ ✓ src/lib/share/push.test.ts (5 tests) 6ms
+ ✓ src/app/map/[[...segments]]/MapRouter.test.tsx (7 tests) 183ms
+stderr | src/hooks/useMockConfig.test.ts > useMockConfig > fetches mock config on mount
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/hooks/useTheme.test.tsx (6 tests) 28ms
+ ✓ src/components/session-detail/v2/SessionDetailV2.notIndexed.test.tsx (3 tests) 136ms
+stderr | src/hooks/useMockConfig.test.ts > useMockConfig > refetch function triggers new fetch
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to TestComponent inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/app/share/testdata/helper-groups-fixture.test.ts (8 tests) 39ms
+ ✓ src/lib/share/redactions.test.ts (17 tests) 13ms
+ ✓ src/contexts/ServerCapabilitiesContext.test.tsx (13 tests) 628ms
+ ✓ src/hooks/useMockConfig.test.ts (7 tests) 293ms
+ ✓ src/app/review/[[...segments]]/timelineNavigation.test.ts (20 tests) 125ms
+ ✓ src/app/review/[[...segments]]/changeRecap.test.ts (7 tests) 7ms
+ ✓ src/lib/share/group.test.ts (4 tests) 2ms
+ ✓ src/lib/share/hierarchy.test.ts (1 test) 3ms
+ ✓ src/lib/api/validated-local.test.ts (9 tests) 19ms
+ ✓ src/components/session-detail/v2/lib/relationshipLink.test.ts (12 tests) 54ms
+ ✓ src/components/session-detail/v2/lib/transcriptGit.test.ts (4 tests) 2ms
+ ✓ src/lib/adapters/analytics.test.ts (4 tests) 5ms
+ ✓ src/lib/skeleton.test.tsx (5 tests) 27ms
+ ✓ src/lib/api/discovery.test.ts (5 tests) 2ms
+ ✓ src/lib/share/scanFailure.test.ts (14 tests) 3ms
+ ✓ src/test/fixtures/localReviewClarity.test.ts (4 tests) 7ms
+ ✓ src/app/review/[[...segments]]/ReviewRouter.strike.test.tsx (1 test) 90ms
+ ✓ src/components/MultiSelectPopover.test.tsx (4 tests) 194ms
+ ✓ src/contexts/__tests__/PublishContext.test.tsx (3 tests) 51ms
+ ✓ src/app/map/[[...segments]]/CodeMapComposition.test.tsx (1 test) 245ms
+ ✓ src/components/session-detail/v2/waterfall.test.ts (5 tests) 2ms
+ ✓ src/lib/home/publishState.test.ts (2 tests) 1ms
+ ✓ src/components/Term.test.tsx (4 tests) 22ms
+ ✓ src/lib/api/ingest.test.ts (1 test) 4ms
+ ✓ src/components/picker/ProjectPicker.test.tsx (2 tests) 110ms
+ ✓ src/app/map/lib/codeMapRouteState.errors.test.ts (2 tests) 3ms
+ ✓ src/lib/share/checkingStage.test.ts (9 tests) 2ms
+ ✓ src/lib/share/publishFailure.test.ts (11 tests) 3ms
+ ✓ src/components/session-detail/v2/turnNav.test.ts (5 tests) 1ms
+ ✓ src/test/strictYaml.test.ts (1 test) 4ms
+ ✓ src/components/settings/VillageAccountRow.test.tsx (2 tests) 23ms
+ ✓ src/lib/share/sessionLabel.test.ts (7 tests) 4ms
+ ✓ src/components/picker/projectListState.test.ts (5 tests) 1ms
+ ✓ src/app/page.unknown-address.test.tsx (1 test) 38ms
+ ✓ src/components/session-detail/v2/panels/TurnTouchedFiles.test.tsx (1 test) 19ms
+ ✓ src/app/not-found.test.tsx (1 test) 35ms
+stderr | src/app/page.pages.test.tsx > mounted bounded Home > selection-error-account-change-refreshes-loaded-content
+An update to RootSessionList inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to HomeView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to HomeView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to HomeView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to HomeView inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/app/page.pages.test.tsx > mounted bounded Home > selection-error-account-change-refreshes-loaded-content
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ForwardRef(LinkComponent) inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/app/page.pages.test.tsx (20 tests) 7069ms
+   ✓ mounted bounded Home > first-page-and-next-page 422ms
+   ✓ mounted bounded Home > loaded-refresh-keeps-content-on-failure 775ms
+   ✓ mounted bounded Home > lazy-children-and-child-more 394ms
+   ✓ mounted bounded Home > collapsed-late-child-is-ignored 342ms
+   ✓ mounted bounded Home > selection-error-keeps-loaded-content 344ms
+   ✓ mounted bounded Home > collapse-cancels-expanded-refresh 411ms
+   ✓ mounted bounded Home > collapsed-ancestor-skips-descendant-refresh 319ms
+   ✓ mounted bounded Home > successful-refresh-invalidates-collapsed-family 401ms
+   ✓ mounted bounded Home > successful-refresh-invalidates-collapsed-descendant 628ms
+   ✓ mounted bounded Home > canonical-missing-parent-commits-refreshed-roots 459ms
+   ✓ mounted bounded Home > generic-child404-retains-visible-content 567ms
+   ✓ mounted bounded Home > publish-settlement-refreshes-loaded-window 645ms
+   ✓ mounted bounded Home > publish-during-refresh-queues-one-loaded-window 514ms
+stderr | src/app/share/publishPopupStates.mounted.test.tsx > stale local index > says the repair did not take when the scan still refuses the re-indexed session, with the run notes, and never retries on its own
+An update to rd inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/app/share/publishPopupStates.mounted.test.tsx > prerequisite recovery through the actual popup action > publication-read-failed restarts its intended operation without a push
+An update to ResolvedProjectViewer inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/app/share/publishPopupStates.mounted.test.tsx (90 tests) 19363ms
+   ✓ mounted category review boundary > all-labels guards publication and recovers through explicit re-scan 589ms
+   ✓ mounted category review boundary > unknown-empty-group guards publication and recovers through explicit re-scan 416ms
+   ✓ mounted category review boundary > unknown-item guards publication and recovers through explicit re-scan 504ms
+   ✓ mounted category review boundary > group-mismatch guards publication and recovers through explicit re-scan 381ms
+   ✓ mounted category review boundary > malformed guards publication and recovers through explicit re-scan 585ms
+   ✓ mounted category review boundary > wrong-total guards publication and recovers through explicit re-scan 397ms
+   ✓ mounted category review boundary > empty-positive guards publication and recovers through explicit re-scan 497ms
+   ✓ mounted category review boundary > wrong-group-count guards publication and recovers through explicit re-scan 387ms
+   ✓ mounted category review boundary > wrong-rule-count guards publication and recovers through explicit re-scan 501ms
+   ✓ mounted category review boundary > cached-unknown guards publication and recovers through explicit re-scan 381ms
+   ✓ mounted category review boundary > cached-malformed guards publication and recovers through explicit re-scan 371ms
+   ✓ mounted category review boundary > mock-unknown guards publication and recovers through explicit re-scan 505ms
+   ✓ mounted category review boundary > mock-inactive-unknown guards publication and recovers through explicit re-scan 429ms
+   ✓ mounted category review boundary > adaptation-rejection guards publication and recovers through explicit re-scan 558ms
+   ✓ stale local index > re-indexes this one session when asked, names the step and what is slow, scans again and publishes 1211ms
+   ✓ publish state 'connect-completes' on /projects/[name]/[id] > mounts the bar and the popup the case expects 2138ms
+   ✓ publish state 'published-while-signed-out' on /projects/[name]/[id] > mounts the bar and the popup the case expects 2183ms
+
+ Test Files  125 passed (125)
+      Tests  1669 passed (1669)
+   Start at  17:25:35
+   Duration  21.30s (transform 4.08s, setup 4.11s, collect 46.73s, tests 60.89s, environment 24.18s, prepare 4.20s)

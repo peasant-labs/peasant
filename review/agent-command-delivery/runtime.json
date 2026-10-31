@@ -1,0 +1,123 @@
+{
+  "source": "7cd91de3c94308e8dd2a59a095de683ae6248aee",
+  "tree": "96598d54a71df6cb0abcd73efef0c22305b5b889",
+  "binarySha256": "957e67c8af1a49a0c5586694f1595bdbb60b6dd7f61ad25e0ce4cbd664bc11cc",
+  "version": "peasant v0.13.6-dev.23+7cd91de3c",
+  "previousRuntime": [
+    {
+      "port": 8691,
+      "pid": 8011,
+      "cwd": "/private/tmp/peasant-responsive-merged-build",
+      "args": [
+        "--data-dir",
+        "/tmp/peasant-ui-preview/data",
+        "--config-dir",
+        "/tmp/peasant-ui-preview/config",
+        "--state-dir",
+        "/tmp/peasant-ui-preview/state",
+        "web",
+        "start",
+        "--port",
+        "8691",
+        "--foreground",
+        "--no-browser"
+      ],
+      "log": "/tmp/peasant-full-audit/final-server.log",
+      "source": "710ad57192a5a9ba9d65a29c7b18013ead4748d2",
+      "fairtrade": "0.0.57",
+      "binarySha256": "370e5c46a5fb2387499cda5fa268c2b7fb8477cff942376d3c00c32a9f99ba7f",
+      "version": "peasant v0.13.6-dev.4+710ad5719"
+    },
+    {
+      "port": 8698,
+      "pid": 8024,
+      "cwd": "/private/tmp/peasant-responsive-merged-build",
+      "args": [
+        "--config",
+        "/tmp/peasant-full-audit/mock/config/config.yaml",
+        "--data-dir",
+        "/tmp/peasant-full-audit/mock/data",
+        "--config-dir",
+        "/tmp/peasant-full-audit/mock/config",
+        "--state-dir",
+        "/tmp/peasant-full-audit/mock/state",
+        "web",
+        "start",
+        "--foreground",
+        "--no-browser",
+        "--port",
+        "8698",
+        "--mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations"
+      ],
+      "log": "/tmp/peasant-full-audit/mock-server-final.log",
+      "source": "710ad57192a5a9ba9d65a29c7b18013ead4748d2",
+      "fairtrade": "0.0.57",
+      "binarySha256": "370e5c46a5fb2387499cda5fa268c2b7fb8477cff942376d3c00c32a9f99ba7f",
+      "version": "peasant v0.13.6-dev.4+710ad5719"
+    }
+  ],
+  "runtime": [
+    {
+      "port": 8691,
+      "pid": 73315,
+      "cwd": "/private/tmp/peasant-agent-command-merged-build",
+      "args": [
+        "--data-dir",
+        "/tmp/peasant-ui-preview/data",
+        "--config-dir",
+        "/tmp/peasant-ui-preview/config",
+        "--state-dir",
+        "/tmp/peasant-ui-preview/state",
+        "web",
+        "start",
+        "--port",
+        "8691",
+        "--foreground",
+        "--no-browser"
+      ],
+      "log": "/tmp/peasant-full-audit/final-server.log",
+      "source": "7cd91de3c94308e8dd2a59a095de683ae6248aee",
+      "fairtrade": "0.0.57",
+      "binarySha256": "957e67c8af1a49a0c5586694f1595bdbb60b6dd7f61ad25e0ce4cbd664bc11cc",
+      "version": "peasant v0.13.6-dev.23+7cd91de3c",
+      "schema": "0.39.0"
+    },
+    {
+      "port": 8698,
+      "pid": 73318,
+      "cwd": "/private/tmp/peasant-agent-command-merged-build",
+      "args": [
+        "--config",
+        "/tmp/peasant-full-audit/mock/config/config.yaml",
+        "--data-dir",
+        "/tmp/peasant-full-audit/mock/data",
+        "--config-dir",
+        "/tmp/peasant-full-audit/mock/config",
+        "--state-dir",
+        "/tmp/peasant-full-audit/mock/state",
+        "web",
+        "start",
+        "--foreground",
+        "--no-browser",
+        "--port",
+        "8698",
+        "--mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations"
+      ],
+      "log": "/tmp/peasant-full-audit/mock-server-final.log",
+      "source": "7cd91de3c94308e8dd2a59a095de683ae6248aee",
+      "fairtrade": "0.0.57",
+      "binarySha256": "957e67c8af1a49a0c5586694f1595bdbb60b6dd7f61ad25e0ce4cbd664bc11cc",
+      "version": "peasant v0.13.6-dev.23+7cd91de3c",
+      "schema": "0.39.0"
+    }
+  ],
+  "argsIdentical": true,
+  "configFilesUnchanged": {
+    "/tmp/peasant-ui-preview/config/peasant/long-demo.yaml": "209559034a44eb60ff8ea7e19af32bd408df3552ac9dec3aea5ebb5533bc6ca4",
+    "/tmp/peasant-full-audit/mock/config/config.yaml": "a50fa86933913814021159576f95051732ef2382dd6dbc77b66799c0e012673f"
+  },
+  "dataStatePathsPreserved": true,
+  "build": "GOTOOLCHAIN=go1.25.8 make build",
+  "buildPassed": true,
+  "frontendTests": 1669
+}

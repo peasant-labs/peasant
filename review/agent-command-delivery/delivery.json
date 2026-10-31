@@ -1,0 +1,218 @@
+{
+  "source": "7cd91de3c94308e8dd2a59a095de683ae6248aee",
+  "tree": "96598d54a71df6cb0abcd73efef0c22305b5b889",
+  "mergedDocumentPR": 805,
+  "documentMerge": "1913d87bd33928c02361772f38932742ec606741",
+  "documentContentUnchangedFromMergedPR": true,
+  "documentSHA256": "59632b1692a6f3ef10a0540da94ddc9995e6a02fcc70b36a364cb517c6ec0c8a",
+  "sourceEquals805Tree": false,
+  "additionalUpstreamAfter805": "7cd91de3 is peer PR707 sync-status selection reporting/API test change; no web source change. Source frozen here, not chasing later peers.",
+  "binarySha256": "957e67c8af1a49a0c5586694f1595bdbb60b6dd7f61ad25e0ce4cbd664bc11cc",
+  "version": "peasant v0.13.6-dev.23+7cd91de3c",
+  "normalBuild": {
+    "command": "GOTOOLCHAIN=go1.25.8 make build",
+    "passed": true,
+    "providerGuardPassed": true,
+    "log": "/tmp/peasant-agent-command-merged-build.log"
+  },
+  "frontendTests": {
+    "files": 125,
+    "passed": 1669,
+    "log": "/tmp/peasant-agent-command-unit.log"
+  },
+  "runtime": [
+    {
+      "port": 8691,
+      "pid": 73315,
+      "cwd": "/private/tmp/peasant-agent-command-merged-build",
+      "args": [
+        "--data-dir",
+        "/tmp/peasant-ui-preview/data",
+        "--config-dir",
+        "/tmp/peasant-ui-preview/config",
+        "--state-dir",
+        "/tmp/peasant-ui-preview/state",
+        "web",
+        "start",
+        "--port",
+        "8691",
+        "--foreground",
+        "--no-browser"
+      ],
+      "log": "/tmp/peasant-full-audit/final-server.log",
+      "source": "7cd91de3c94308e8dd2a59a095de683ae6248aee",
+      "fairtrade": "0.0.57",
+      "binarySha256": "957e67c8af1a49a0c5586694f1595bdbb60b6dd7f61ad25e0ce4cbd664bc11cc",
+      "version": "peasant v0.13.6-dev.23+7cd91de3c",
+      "schema": "0.39.0"
+    },
+    {
+      "port": 8698,
+      "pid": 73318,
+      "cwd": "/private/tmp/peasant-agent-command-merged-build",
+      "args": [
+        "--config",
+        "/tmp/peasant-full-audit/mock/config/config.yaml",
+        "--data-dir",
+        "/tmp/peasant-full-audit/mock/data",
+        "--config-dir",
+        "/tmp/peasant-full-audit/mock/config",
+        "--state-dir",
+        "/tmp/peasant-full-audit/mock/state",
+        "web",
+        "start",
+        "--foreground",
+        "--no-browser",
+        "--port",
+        "8698",
+        "--mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations"
+      ],
+      "log": "/tmp/peasant-full-audit/mock-server-final.log",
+      "source": "7cd91de3c94308e8dd2a59a095de683ae6248aee",
+      "fairtrade": "0.0.57",
+      "binarySha256": "957e67c8af1a49a0c5586694f1595bdbb60b6dd7f61ad25e0ce4cbd664bc11cc",
+      "version": "peasant v0.13.6-dev.23+7cd91de3c",
+      "schema": "0.39.0"
+    }
+  ],
+  "argsIdentical": true,
+  "configFilesUnchanged": true,
+  "originalFixtureDataConfigStatePathsPreserved": true,
+  "criticalObservations": 16,
+  "allCapturesInspected": true,
+  "screenshots": [
+    {
+      "file": "desktop-dark-home.png",
+      "sha256": "25662f2172b898ce46d40a8fe6977f029c52ef25751e1530189cd426960f6796",
+      "inspected": true
+    },
+    {
+      "file": "desktop-dark-settings.png",
+      "sha256": "7d56231b41d45f083aa5d9759d15f99fd4c1ffc9bf98c8f16b595c756677d862",
+      "inspected": true
+    },
+    {
+      "file": "desktop-dark-turn-1.png",
+      "sha256": "4e7bd9970bcc2fed1d39026b518894db9e51e1d38acfb78b2735227b130aa455",
+      "inspected": true
+    },
+    {
+      "file": "desktop-dark-turn-222.png",
+      "sha256": "7fd6428afaef049963c7c954adf3a5720306c3d663f3a6005d39d858f2ada95a",
+      "inspected": true
+    },
+    {
+      "file": "desktop-light-home.png",
+      "sha256": "761ab95b63fd39cfa772f04d39ce7eddcbeaba9aad7b7527fe0ffccf4b4f1cb6",
+      "inspected": true
+    },
+    {
+      "file": "desktop-light-settings.png",
+      "sha256": "c8cd53241eb5cb39d579fd5f88f1d2600604638ca67d590cc50f1887190184e4",
+      "inspected": true
+    },
+    {
+      "file": "desktop-light-turn-1.png",
+      "sha256": "35eed7b741567371ce9264c9b157d5f703f758b1d9206c88be0d05a55360059e",
+      "inspected": true
+    },
+    {
+      "file": "desktop-light-turn-222.png",
+      "sha256": "39ea0654f46afd093273dab5683ad5e5cbdf28b40e4ca1e472b1b10f86a8eb0f",
+      "inspected": true
+    },
+    {
+      "file": "phone-dark-home.png",
+      "sha256": "916f272c85455164653aa473ab937c573e6efe0ecfa8cc513aa042d3ac4f776b",
+      "inspected": true
+    },
+    {
+      "file": "phone-dark-settings.png",
+      "sha256": "d6f9bac704b47c2671b451a1ed5c0aa1addcc2e61325a215bd7e24e607557f0a",
+      "inspected": true
+    },
+    {
+      "file": "phone-dark-turn-1.png",
+      "sha256": "933906f464d4f111c4c9d0597912e40edeea0d43585057aa620503b220523d68",
+      "inspected": true
+    },
+    {
+      "file": "phone-dark-turn-222.png",
+      "sha256": "15b8fe8a2cb92c21cc22490c368be5bef676670344ce979a9e70c2f7ea53fb82",
+      "inspected": true
+    },
+    {
+      "file": "phone-light-home.png",
+      "sha256": "ea885ebeeaee3b5af2fd2090d253163a92801c7892ef7b662b8c7007730d545f",
+      "inspected": true
+    },
+    {
+      "file": "phone-light-settings.png",
+      "sha256": "078743e8795e15439105996b8deda93ed5200ac9dd4e5364cc237be16938ea4e",
+      "inspected": true
+    },
+    {
+      "file": "phone-light-turn-1.png",
+      "sha256": "7b1f28d8d5e69f925e52cd2aea181b5b52f434d1e65c82d2d99a674ae830b9cc",
+      "inspected": true
+    },
+    {
+      "file": "phone-light-turn-222.png",
+      "sha256": "f89349df3ba3a1ec165d8b3d26ed7252f13c7f64e6d8050a57a9315b95ccb407",
+      "inspected": true
+    }
+  ],
+  "markedAssetObservations": 12,
+  "allMarkedAssetsMatchFreshBuild": true,
+  "observedBrowserAssets": 50,
+  "allObservedBrowserAssetsMatchFreshBuild": true,
+  "priorLayoutCSSUnchanged": true,
+  "readOnlyHealthSettingsSync": [
+    {
+      "port": 8691,
+      "path": "/api/v1/health",
+      "status": 200
+    },
+    {
+      "port": 8691,
+      "path": "/api/v1/settings",
+      "status": 200
+    },
+    {
+      "port": 8691,
+      "path": "/api/v1/sync/sessions",
+      "status": 200
+    },
+    {
+      "port": 8698,
+      "path": "/api/v1/health",
+      "status": 200
+    },
+    {
+      "port": 8698,
+      "path": "/api/v1/settings",
+      "status": 200
+    },
+    {
+      "port": 8698,
+      "path": "/api/v1/sync/sessions",
+      "status": 200
+    }
+  ],
+  "notes": [
+    "Home heading is sessions; initial expected home selector corrected in verification fixture, not product code.",
+    "Current source contains PR804 revert of718: unknown API paths retain SPA200; no JSON404 behavior claim.",
+    "Existing synthetic Mermaid diagram supports horizontal keyboard panning on phones; label fonts and SVG bounds pass.",
+    "No settings save, selection change, login, hook installation or publication performed.",
+    "No Firefox claim."
+  ],
+  "retirement": {
+    "featureRemoved": true,
+    "oldSource": "/private/tmp/peasant-responsive-merged-build",
+    "oldSourceOpenReferences": [],
+    "newStableBuildRetained": "/private/tmp/peasant-agent-command-merged-build",
+    "oldSourceRemoved": true,
+    "ignoredInspectorAncestors": true
+  },
+  "remoteFeatureBranchAbsent": true
+}

@@ -1,0 +1,9 @@
+cases:
+  - { name: desktop-light, theme: light, width: 1440, height: 1000 }
+  - { name: desktop-dark, theme: dark, width: 1440, height: 1000 }
+  - { name: phone-light, theme: light, width: 390, height: 844 }
+  - { name: phone-dark, theme: dark, width: 390, height: 844 }
+views:
+  - { name: home, route: /, heading: sessions }
+  - { name: settings, route: /settings/, heading: settings }
+turns: [1, 222]
