@@ -27,7 +27,7 @@ commands do today.
 | 0 | The command succeeded. An empty result is a success. |
 | 1 | The command failed after it had started its work. |
 | 2 | The command refused how it was called: flags that cannot be combined, a flag value outside its closed set, a `--sessions-from` input it cannot read, or a confirmation it cannot ask for. Nothing was attempted. Fix the call; retrying it unchanged fails again. |
-| 3 | `village push` failed before it made a single request to peasant online. Nothing was published and nothing was recorded as published. |
+| 3 | `village push` or `village share` stopped before it sent peasant online anything to change. Nothing was published or shared, and nothing was recorded as published. |
 
 Status 2 is raised by the refusals that `internal/clicontract` owns. An unknown
 flag or a flag with a missing value is reported by the flag parser and still
@@ -50,8 +50,8 @@ is refused with the line or array index of the fault. An input that names no id
 at all is refused: a list that selects nothing never widens to every session.
 
 `--sessions-from` replaces the other ways to choose sessions. It cannot be
-combined with `--session` or `--all`, except on `village push`, where
-`--session` adds to the list: the repeated `--session` ids come first, then the
+combined with `--session` or `--all`, except on `village push` and
+`village share`, where `--session` adds to the list: the repeated `--session` ids come first, then the
 list, each id once.
 
 ```sh
@@ -119,6 +119,41 @@ Every command that has `--yes` also accepts `-y`.
 (or `--non-interactive`) or a `y` at its prompt. Under `--json` without `--yes`
 a public push is refused before any request to peasant online, exits 3, and
 names `--yes` in the document's `refusal` field.
+
+`village share` has no consent exception and follows the same order, with one
+difference: its refusal exits 3, like the other `village share` stops, and under
+`--json` it names `--yes` in the document's `refusal` field. A run with nothing
+to ask, because every collective already has a share, shows no prompt.
+
+## The `village share` document
+
+`village share` offers transcripts you already published to collectives. It
+calls only the share route and reads, so it uploads nothing, changes no
+visibility or license, reads no auto-publish rule, and takes nothing back. Its
+`--json` document has these keys, with `warnings` and the empty fields beside
+them:
+
+| key | meaning |
+|---|---|
+| `dry_run` | Whether the run was a dry run. |
+| `needsConfirmation` | On a dry run only: whether the same run needs a confirmation, because `--yes` is absent. |
+| `collectives` | The collectives `--collective` named, as `{id, name}`. |
+| `transcripts` | One entry per transcript, with `transcript_id`, `steps`, and when known `session_id`, `url` and `visibility`. |
+| `errors` | One `{ref, message}` per reference or session that did not resolve to a transcript. |
+| `refusal` | Why a run stopped before it shared anything. Only on such a run. |
+
+Each step is the Local API's step object, with its camelCase `collectiveId`. A
+collective that already has a share is `skipped` with a reason: an approved or
+pending share is held, and a rejected or taken-back share is not asked again. A
+dry run reports `not_attempted` with the reason `dry run: would share`, makes
+only reads, and writes nothing. With nothing to ask, `empty_code` is
+`nothing_changed`.
+
+The command exits 0 when every step is `succeeded`, `pending_approval` or
+`skipped`, and also when a prompt is declined. It exits 1 when a step failed or a
+target did not resolve; the other targets still run. It exits 3 for a refused
+call, a confirmation it cannot ask for, a missing login, an unreadable store, or
+a `--collective` that is unknown, ambiguous, or not one you belong to.
 
 ## The `village push` plan
 
@@ -198,6 +233,7 @@ resolves the names), or a `--collective` confirmation it cannot ask for. Under
 | `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, `refused` and `refusal_reasons` counts in the document, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused: 1 strict_capture_refused; peasant harvest index re-indexes 1 of them`. It exits 1 when it refuses any session, and the sessions it did export stay written |
 | `redact` | `--sessions-from` |
 | `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`, with a per-session `plan` (below) |
+| `village share` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`; `--dry-run` |
 | `upgrade` | `-y` |
 
 `sessions list --json` prints a bare array, which has no place for `warnings`.

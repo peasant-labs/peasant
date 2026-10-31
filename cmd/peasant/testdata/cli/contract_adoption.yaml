@@ -176,4 +176,5 @@ cases:
     # finding nothing.
     yesCommands:
       - [village, push]
+      - [village, share]
       - [upgrade]

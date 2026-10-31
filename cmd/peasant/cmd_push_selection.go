@@ -247,6 +247,12 @@ func collectiveConfirmationRefusal(cmd *cobra.Command) error {
 func promptCollectiveConfirmation(r io.Reader, w io.Writer, sessions int, names []string) (bool, error) {
 	fmt.Fprintf(w, "Publish %d session(s) privately to %s? This skips your auto-publish rules for these sessions. [y/N] ",
 		sessions, strings.Join(names, ", "))
+	return readConfirmation(r)
+}
+
+// readConfirmation reads one answer. Anything but y or Y declines, end of
+// input included.
+func readConfirmation(r io.Reader) (bool, error) {
 	scanner := bufio.NewScanner(r)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
