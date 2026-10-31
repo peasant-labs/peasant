@@ -995,7 +995,13 @@ func (p Program) observeProgress(at time.Time) Program {
 	if p.deps.Progress == nil {
 		return p
 	}
-	p.progressView, _ = p.progressView.Update(ingestprogress.ObserveMsg{At: at, Snapshot: p.deps.Progress.Snapshot()})
+	observed := ingestprogress.ObserveMsg{At: at, Snapshot: p.deps.Progress.Snapshot()}
+	// A source that can say why the run has not started (another harvest
+	// holds the data dir's lock) shows it instead of a silent, empty list.
+	if waiting, ok := p.deps.Progress.(interface{ Waiting() string }); ok {
+		observed.Waiting = waiting.Waiting()
+	}
+	p.progressView, _ = p.progressView.Update(observed)
 	return p
 }
 
@@ -1362,6 +1368,11 @@ func (p Program) doneContent() string {
 		lines = append(lines, styles.Base.Render(fmt.Sprintf(
 			"local import completed: %d new, %d updated, %d unchanged, %d errors",
 			p.ingestRes.New, p.ingestRes.Updated, p.ingestRes.Unchanged, p.ingestRes.Errors)))
+		// Sessions the selection kept out are not unchanged; without this
+		// line they would drop out of every count on this screen.
+		if p.ingestRes.ExcludedBySelection > 0 {
+			lines = append(lines, styles.Base.Render(fmt.Sprintf("%d excluded by selection", p.ingestRes.ExcludedBySelection)))
+		}
 	} else {
 		lines = append(lines, styles.Muted.Render("local import was not run"))
 	}

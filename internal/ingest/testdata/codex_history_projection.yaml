@@ -1,4 +1,43 @@
 cases:
+  - name: world-state-known-control-envelope
+    phases:
+      - authority:
+          stableThreadID: 11111111-1111-4111-8111-111111111111
+          kind: detached_file
+          currentPointer: current
+          physicalSourceID: phys-current
+          historyModeRaw: legacy
+        sources:
+          current: |
+            {"timestamp":"2024-01-02T00:00:00Z","type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"legacy"}}
+            {"timestamp":"2024-01-02T00:00:01Z","type":"world_state","payload":{"full":true,"state":{"mode":"synthetic"}}}
+            {"timestamp":"2024-01-02T00:00:02Z","type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"request"}]}}
+        expected:
+          mode: legacy
+          completeness: complete
+          mainRefs: [e_1, e_2]
+          inheritedRefs: []
+          earlierRefs: []
+          diagnostics: []
+          nodes:
+            - ref: e_1
+              ordinal: 1
+              line: 1
+              envelopeType: world_state
+              nativeType: world_state
+              nativeRole: system
+              ownership: own
+              hasPayload: true
+            - ref: e_2
+              ordinal: 2
+              line: 2
+              envelopeType: response_item
+              nativeType: message
+              nativeRole: user
+              itemID: u1
+              ownership: own
+              hasPayload: true
+
   - name: delivery-scalar-redacts-retained-evidence
     delivery:
       records: |
@@ -67,9 +106,10 @@ cases:
     delivery:
       records: |
         {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"first"}]}}}
-        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
+        {"timestamp":"2024-01-02T18:10:02Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","delivery":"final","content":[{"type":"output_text","text":"answer"}]}}}
       content: [answer]
       retained: ['"final"', '"final"']
+      timestamps: [1704219002000]
       turns: 1
       submissions: 0
   - name: delivery-scalar-does-not-open-admission
@@ -2107,3 +2147,23 @@ cases:
               ordinal: 4
               thinkingLevel: ""
               thinkingLevelRaw: ""
+
+  - name: delivery-authoritative-mirror-replaces-timestamp
+    delivery:
+      records: |
+        {"timestamp":"2024-01-02T18:10:01Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"mirror body"}]}}
+        {"timestamp":"2024-01-02T18:10:02Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","content":[{"type":"output_text","text":"final body"}]}}}
+      content: [final body]
+      timestamps: [1704219002000]
+      turns: 1
+      submissions: 0
+
+  - name: delivery-latest-body-without-timestamp-clears-earlier-time
+    delivery:
+      records: |
+        {"timestamp":"2024-01-02T18:10:01Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"earlier body"}]}}
+        {"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a1","content":[{"type":"output_text","text":"undated final body"}]}}}
+      content: [undated final body]
+      timestamps: [null]
+      turns: 1
+      submissions: 0

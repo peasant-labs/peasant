@@ -52,6 +52,18 @@ func PartialPreviewNeeded(capture ingest.SessionContentCapture) bool {
 	return !PublishableWithOmissions(capture)
 }
 
+// CaptureTextBounded reports whether a session's stored text may stand for
+// less than its source held. found is whether a capture exists at all. Pass the
+// display-effective capture, so a latest attempt that failed is reported rather
+// than hidden behind the active capture. This is PartialPreviewNeeded plus the
+// format, because a complete capture may still be a preview-format one.
+func CaptureTextBounded(capture ingest.SessionContentCapture, found bool) bool {
+	if !found || capture.CaptureFormat != ingest.ContentCaptureFormatFull {
+		return true
+	}
+	return PartialPreviewNeeded(capture)
+}
+
 // FullCaptureWritable is the same rule on the way IN: which capture states the
 // full-content writer may certify. A full capture is written for a complete
 // session, and for the one incompleteness that still holds every entry — the

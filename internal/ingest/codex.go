@@ -27,9 +27,10 @@ import (
 // "response_item" (the OpenAI Responses API stream), and "event_msg" (UI
 // events including the periodic "token_count" totals).
 type CodexAdapter struct {
-	fs   FileSystem
-	git  GitResolver
-	salt salt.Salt
+	fs          FileSystem
+	git         GitResolver
+	salt        salt.Salt
+	diagnostics []DiscoveryDiagnostic
 }
 
 var _ SourceAdapter = (*CodexAdapter)(nil)
@@ -57,6 +58,7 @@ const codexRolloutFilePrefix = "rollout-"
 // rows. Titles come from sibling session_index.jsonl when present; project,
 // branch, and cwd come from the rollout's first line (session_meta).
 func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
+	a.diagnostics = nil
 	var sessions []DiscoveredSession
 
 	for _, basePath := range cfg.Paths {
@@ -71,7 +73,10 @@ func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discov
 				return ctx.Err()
 			}
 			if err != nil {
-				return nil // skip unreadable entries
+				// Keep walking, but name a directory permissions hid so the
+				// run does not just report fewer sessions.
+				a.noteUnreadable(path, err)
+				return nil
 			}
 			if d.Type()&os.ModeSymlink != 0 {
 				return nil
@@ -604,4 +609,17 @@ func parseCodexTranscriptMetadata(ctx context.Context, data []byte, meta *Unifie
 	}
 
 	return sessionMeta, nil
+}
+
+var _ DiscoveryDiagnosticReporter = (*CodexAdapter)(nil)
+
+// DiscoveryDiagnostics names the source locations the last Discover could not read.
+func (a *CodexAdapter) DiscoveryDiagnostics() []DiscoveryDiagnostic {
+	return append([]DiscoveryDiagnostic(nil), a.diagnostics...)
+}
+
+func (a *CodexAdapter) noteUnreadable(path string, err error) {
+	if d, ok := unreadableSourceDiagnostic(HarnessCodex, path, err); ok {
+		a.diagnostics = append(a.diagnostics, d)
+	}
 }

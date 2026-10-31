@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
@@ -39,8 +40,35 @@ func BuildDocgenCommand() *cobra.Command {
 			if err := doc.GenMarkdownTree(cmd.Root(), dir); err != nil {
 				return fmt.Errorf("generate docs: %w", err)
 			}
+			if err := appendContractLink(filepath.Join(dir, cmd.Root().Name()+".md")); err != nil {
+				return fmt.Errorf("generate docs: %w", err)
+			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "Generated CLI docs in %s\n", dir)
 			return nil
 		},
 	}
+}
+
+// cliContractSection closes the root reference page with a link to the
+// contract every command shares with scripts and agents. The generated pages
+// sit in docs/cli/, so the link is relative to that directory.
+const cliContractSection = `
+### Scripts and agents
+
+[The CLI contract](../cli-contract.md) describes what every command promises a
+program that drives it: one JSON document on stdout with --json, warnings
+inside that document, --sessions-from, prompts, and exit statuses.
+`
+
+// appendContractLink adds cliContractSection to the generated root page.
+func appendContractLink(rootPage string) error {
+	f, err := os.OpenFile(rootPage, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(cliContractSection); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }

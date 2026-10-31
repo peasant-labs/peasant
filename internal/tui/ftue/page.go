@@ -1861,6 +1861,9 @@ func (p *IngestPage) View(width, height int) string {
 		if p.result.Unchanged > 0 {
 			b.WriteString(DescriptionStyle.Render(fmt.Sprintf("\n  %d sessions skipped (unchanged)", p.result.Unchanged)))
 		}
+		if p.result.ExcludedBySelection > 0 {
+			b.WriteString(DescriptionStyle.Render(fmt.Sprintf("\n  %d sessions excluded by selection", p.result.ExcludedBySelection)))
+		}
 		b.WriteString(DescriptionStyle.Render(fmt.Sprintf("\n  Duration: %s", p.result.Duration.Round(100*time.Millisecond))))
 		if p.result.Errors > 0 {
 			b.WriteString(DescriptionStyle.Render(fmt.Sprintf("\n  %d session(s) had errors — run 'peasant ingest' to retry.", p.result.Errors)))
@@ -1880,7 +1883,11 @@ func (p *IngestPage) ingestCompletion() IngestCompletion {
 	} else {
 		body.WriteString("Ingestion complete!\n")
 	}
-	fmt.Fprintf(&body, "%d sessions imported (%d new, %d updated)\n%d sessions skipped (unchanged)\n%d errors\nDuration: %s\n", p.result.New+p.result.Updated, p.result.New, p.result.Updated, p.result.Unchanged, p.result.Errors, p.result.Duration.Round(100*time.Millisecond))
+	fmt.Fprintf(&body, "%d sessions imported (%d new, %d updated)\n%d sessions skipped (unchanged)\n", p.result.New+p.result.Updated, p.result.New, p.result.Updated, p.result.Unchanged)
+	if p.result.ExcludedBySelection > 0 {
+		fmt.Fprintf(&body, "%d sessions excluded by selection\n", p.result.ExcludedBySelection)
+	}
+	fmt.Fprintf(&body, "%d errors\nDuration: %s\n", p.result.Errors, p.result.Duration.Round(100*time.Millisecond))
 	for _, count := range p.result.ProviderCounts {
 		fmt.Fprintf(&body, "%s: %d new, %d updated\n", count.Harness, count.New, count.Updated)
 	}

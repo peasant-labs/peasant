@@ -200,13 +200,13 @@ func (m DashboardModel) computeMetrics() dashMetrics {
 	dm.retryWeekly = int(math.Round(float64(totalRetry) / float64(n) * 7))
 	dm.retryWasted = totalWasted
 	if signalN > 0 {
-		dm.signalDensity = signalSum / float64(signalN) * 100
+		dm.signalDensity = signalSum / float64(signalN)
 	}
 	if revertN > 0 {
 		dm.revertRate = float64(revertSum) / float64(revertN)
 	}
 	if specN > 0 {
-		dm.specScore = specSum / float64(specN) * 100
+		dm.specScore = specSum / float64(specN)
 	}
 
 	// Normalize daily arrays and compute trends.
@@ -226,7 +226,7 @@ func (m DashboardModel) computeMetrics() dashMetrics {
 	dm.retryDailyNorm, dm.retryTrend = normAndTrend(extractFloats(dayData, func(d dayAgg) float64 { return float64(d.retryLoops) }))
 	dm.signalDailyNorm, dm.signalTrend = normAndTrend(extractFloats(dayData, func(d dayAgg) float64 {
 		if d.signalCount > 0 {
-			return d.signalSum / float64(d.signalCount) * 100
+			return d.signalSum / float64(d.signalCount)
 		}
 		return 0
 	}))
@@ -238,7 +238,7 @@ func (m DashboardModel) computeMetrics() dashMetrics {
 	}))
 	dm.specDailyNorm, dm.specTrend = normAndTrend(extractFloats(dayData, func(d dayAgg) float64 {
 		if d.specCount > 0 {
-			return d.specSum / float64(d.specCount) * 100
+			return d.specSum / float64(d.specCount)
 		}
 		return 0
 	}))

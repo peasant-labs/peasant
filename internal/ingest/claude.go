@@ -21,6 +21,7 @@ import (
 
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
 type ClaudeAdapter struct {
+	diagnostics         []DiscoveryDiagnostic
 	fs                  FileSystem
 	git                 GitResolver
 	salt                salt.Salt
@@ -78,9 +79,13 @@ type claudeJSONLLine struct {
 	Type      claudeRecordType `json:"type"`
 	CWD       string           `json:"cwd"`
 	GitBranch string           `json:"gitBranch"`
-	AgentID   string           `json:"agentId"`
-	UUID      string           `json:"uuid"`
-	Timestamp string           `json:"timestamp"`
+	// IsMeta is Claude Code's marker for a user-role record the harness
+	// injected. The indexer reclassifies it as system (claudeIndexLine.IsMeta),
+	// so discovery must not take a title from it either.
+	IsMeta    bool   `json:"isMeta"`
+	AgentID   string `json:"agentId"`
+	UUID      string `json:"uuid"`
+	Timestamp string `json:"timestamp"`
 	// Effort is the assistant line's top-level resolved effort. Attachment
 	// carries the nested attachment of an attachment record (the ultracode
 	// mode enter/exit evidence). ThinkingMetadata is the legacy per-line
@@ -157,6 +162,7 @@ type claudeFileOpener interface {
 //
 // Per RFC Section 6.4, symlinks are skipped silently.
 func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
+	a.diagnostics = nil
 	var sessions []DiscoveredSession
 
 	// Mining a transcript is the expensive part of Claude discovery: it reads
@@ -194,7 +200,10 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 			}
 
 			if err != nil {
-				return nil // skip unreadable entries
+				// Keep walking, but name a directory permissions hid so the
+				// run does not just report fewer sessions.
+				a.noteUnreadable(path, err)
+				return nil
 			}
 
 			// Skip symlinks per RFC Section 6.4.
@@ -905,8 +914,10 @@ func applyClaudeHints(hints *claudeSessionHints, raw []byte) {
 	// (system-reminder blocks, command and local-command wrappers, skill
 	// bodies) and caps the length, so the raw markup no longer leaks into the
 	// title. A turn that cleans to nothing, or that cannot be cleaned safely,
-	// leaves the hint empty and the next user line becomes the candidate.
-	if hints.title == "" && line.Type == claudeRecordTypeUser && line.Message.Role == "user" {
+	// leaves the hint empty and the next user line becomes the candidate. An
+	// isMeta record is never a candidate: the harness wrote it, whatever its
+	// text, and the indexer stores it as a system entry.
+	if hints.title == "" && line.Type == claudeRecordTypeUser && line.Message.Role == "user" && !line.IsMeta {
 		if text := extractTextFromContent(line.Message.Content); text != "" {
 			hints.title = simpleTitle(text, defaults.HarnessClaudeCode)
 		}
@@ -1351,4 +1362,17 @@ func parseTimestampMillis(ts string) int64 {
 		}
 	}
 	return t.UnixMilli()
+}
+
+var _ DiscoveryDiagnosticReporter = (*ClaudeAdapter)(nil)
+
+// DiscoveryDiagnostics names the source locations the last Discover could not read.
+func (a *ClaudeAdapter) DiscoveryDiagnostics() []DiscoveryDiagnostic {
+	return append([]DiscoveryDiagnostic(nil), a.diagnostics...)
+}
+
+func (a *ClaudeAdapter) noteUnreadable(path string, err error) {
+	if d, ok := unreadableSourceDiagnostic(HarnessClaudeCode, path, err); ok {
+		a.diagnostics = append(a.diagnostics, d)
+	}
 }

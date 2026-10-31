@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -242,4 +243,38 @@ func resolveOptionalSessionIDs(cmd *cobra.Command) ([]string, error) {
 // if they do not already exist. It is a no-op if the directory already exists.
 func ensureOutputDir(path string) error {
 	return os.MkdirAll(path, 0o755)
+}
+
+// effectiveOutputBasePath returns the peasant-sync root for cmd. --data-dir
+// promises that "the DB + peasant-sync live under <data-dir>/peasant", so when
+// the flag is set and the config still carries the default output path (the
+// one derived from XDG_DATA_HOME), the root follows the flag. An
+// output.basePath the user configured elsewhere keeps winning.
+func effectiveOutputBasePath(cmd *cobra.Command, cfg *config.Config) string {
+	if override := dataDirOverride(cmd); override != "" && cfg.Output.BasePath == defaults.ResolveOutputBasePath().String() {
+		return filepath.Join(string(defaults.ResolveDataDirPathWith(override)), defaults.OutputSyncSubdir)
+	}
+	return cfg.Output.BasePath
+}
+
+// applyDataDirOverride applies --data-dir to a config a command runs with, once,
+// right after loading it, so every later reader (harvest, push, export, the web
+// server's publish and reindex routes) sees the same root. Never apply it to a
+// config that is saved back: the override belongs to this invocation, not to
+// config.yaml.
+func applyDataDirOverride(cmd *cobra.Command, cfg *config.Config) {
+	if cfg != nil {
+		cfg.Output.BasePath = effectiveOutputBasePath(cmd, cfg)
+	}
+}
+
+// loadCommandConfig loads the config a command runs with and applies the
+// --data-dir override. Use loadConfig for a config that is edited and saved.
+func loadCommandConfig(cmd *cobra.Command, cfgPath string) (*config.Config, error) {
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	applyDataDirOverride(cmd, cfg)
+	return cfg, nil
 }

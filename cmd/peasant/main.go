@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/spf13/cobra"
 )
@@ -136,6 +137,10 @@ func exitCodeFor(err error) defaults.ExitCode {
 	var nothingAttempted *pushNothingAttemptedError
 	if errors.As(err, &nothingAttempted) {
 		return defaults.ExitNothingAttempted
+	}
+	var usage *clicontract.UsageError
+	if errors.As(err, &usage) {
+		return defaults.ExitUsage
 	}
 	return defaults.ExitFailure
 }

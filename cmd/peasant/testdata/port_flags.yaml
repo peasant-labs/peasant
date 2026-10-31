@@ -1,0 +1,13 @@
+requiredNames: [zero, negative, above range, large port, hexadecimal, not a number, empty, first port, default port, last port, leading zero decimal]
+cases:
+  - {name: zero, raw: '0', valid: false}
+  - {name: negative, raw: '-1', valid: false}
+  - {name: above range, raw: '65536', valid: false}
+  - {name: large port, raw: '70000', valid: false}
+  - {name: hexadecimal, raw: '0x50', valid: false}
+  - {name: not a number, raw: 'port', valid: false}
+  - {name: empty, raw: '', valid: false}
+  - {name: first port, raw: '1', valid: true}
+  - {name: default port, raw: '8690', valid: true}
+  - {name: last port, raw: '65535', valid: true}
+  - {name: leading zero decimal, raw: '080', valid: true}

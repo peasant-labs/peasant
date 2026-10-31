@@ -1,6 +1,6 @@
 # Run release-validate's per-distribution snapshot matrix on release pull
 # requests before a tag is minted.
-.PHONY: build run clean web web-stub fmt lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
+.PHONY: build run clean web web-stub fmt fmt-check lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
 
 VERSION ?=
 
@@ -77,6 +77,15 @@ web-stub:
 	@mkdir -p web/out
 	@touch web/out/.gitkeep
 
+fmt-check:
+	@unformatted=$$(git ls-files -z -- '*.go' | xargs -0 "$$(go env GOROOT)/bin/gofmt" -l -e) || { \
+		echo "gofmt could not read every Go file (see errors above)"; exit 1; }; \
+	if [ -n "$$unformatted" ]; then \
+		echo "Go files not gofmt-clean (run make fmt):"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
 fmt:
 	@formatted=$$(go fmt ./...); \
 	if [ -n "$$formatted" ]; then \
@@ -90,7 +99,7 @@ lint: web-stub
 	# golangci-lint run ./...
 	./scripts/vet-go.sh
 
-check: fmt lint sqlite-source-audit
+check: fmt-check lint sqlite-source-audit
 	@set -e; \
 	export CHECK_START_NS="$(CHECK_START_NS)"; \
 	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
