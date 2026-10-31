@@ -41,6 +41,9 @@ Release, which holds the signed artifacts and checksums.
   agent id now raises a `claude_agent_id_collision` warning naming both, in the
   summary and in `discoveryDiagnostics`. The subagent is still not stored.
 - Claude discovery skips harness-injected `isMeta` notices when choosing session titles. Existing cached transcripts are read again once to refresh their titles.
+- `harvest verify --content` now fails on content whose `sessions` row is gone
+  and on saved transcripts that are deleted, truncated or no longer match the
+  database, and it names each session with the command that repairs it.
 - Two Claude or Codex source files that claim one session id now fail that
   session with a reason naming both files, instead of storing a row mixed from
   both while reporting 0 errors. Neither file is ingested until one is moved
