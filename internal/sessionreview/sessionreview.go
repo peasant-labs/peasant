@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/peasant-labs/redact"
@@ -277,8 +278,7 @@ func secretShapedValue(value string) bool {
 	if len(value) < minAssignmentValueLength || shannonEntropy(value) < minAssignmentEntropy {
 		return false
 	}
-	return strings.ContainsAny(value, "0123456789") &&
-		strings.IndexFunc(value, func(r rune) bool { return r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' }) >= 0
+	return strings.ContainsAny(value, "0123456789") && strings.IndexFunc(value, unicode.IsLetter) >= 0
 }
 
 func shannonEntropy(value string) float64 {
