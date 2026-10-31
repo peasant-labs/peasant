@@ -19,6 +19,10 @@ import (
 	"github.com/peasant-labs/redact"
 )
 
+// DiscoveryCodeClaudeAgentIDCollision is the DiscoveryDiagnostic code for a
+// Claude subagent left out because another session's subagent has its id.
+const DiscoveryCodeClaudeAgentIDCollision = "claude_agent_id_collision"
+
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
 type ClaudeAdapter struct {
 	diagnostics         []DiscoveryDiagnostic
@@ -309,10 +313,24 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		// child keeps its run directory in its source path, which is where the
 		// run id is recorded.
 		admitted := make(map[SessionID]ResolvedPath)
+		admittedParent := make(map[SessionID]SessionID)
 		for _, entry := range append(workflowEntries, subagentEntries...) {
 			if kept, taken := admitted[entry.subagentID]; taken {
 				slog.Debug("claude discovery: transcript left out, another transcript holds its agent id",
 					"session_id", entry.subagentID.String(), "left_out", entry.path, "kept", kept.String())
+				// The same agent under the same parent (a workflow copy) is
+				// expected. Under a different parent it is a distinct subagent
+				// whose transcript is not stored, so say so.
+				if admittedParent[entry.subagentID] != entry.parentID {
+					a.diagnostics = append(a.diagnostics, DiscoveryDiagnostic{
+						Provider: HarnessClaudeCode,
+						Code:     DiscoveryCodeClaudeAgentIDCollision,
+						Location: entry.path,
+						Summary:  "subagent left out: another session's subagent has the same agent id",
+						Detail: fmt.Sprintf("subagent %s of session %s was not ingested because %s (session %s) already holds that id; "+
+							"discovery keeps whichever transcript it reaches first, and subagent ids are not scoped to their parent yet", entry.subagentID, entry.parentID, kept, admittedParent[entry.subagentID]),
+					})
+				}
 				continue
 			}
 			info, err := a.fs.Stat(entry.path)
@@ -352,6 +370,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				Signal:        evidence.Signal,
 			}
 			admitted[entry.subagentID] = rp
+			admittedParent[entry.subagentID] = parentSID
 			sessions = append(sessions, ds)
 		}
 	}

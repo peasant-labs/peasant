@@ -37,6 +37,9 @@ Release, which holds the signed artifacts and checksums.
   no lock. Other commands that write the data directory, such as `prune`,
   `redact` and `kickstart --reset`, do not take this lock; do not run them
   during a harvest.
+- A Claude subagent left out because another session's subagent has the same
+  agent id now raises a `claude_agent_id_collision` warning naming both, in the
+  summary and in `discoveryDiagnostics`. The subagent is still not stored.
 - Claude discovery skips harness-injected `isMeta` notices when choosing session titles. Existing cached transcripts are read again once to refresh their titles.
 - Two Claude or Codex source files that claim one session id now fail that
   session with a reason naming both files, instead of storing a row mixed from
