@@ -53,6 +53,9 @@ type ContentVerifyReport struct {
 	OrphanOwnedDirs         int64
 	OrphanOwnedBytes        int64
 	UnflaggedOrphanSessions []schema.SessionID
+	// OwnerlessSessions hold content rows with no sessions row; verify
+	// fails on them because no sweep can reach them.
+	OwnerlessSessions []schema.SessionID
 }
 
 // VerifyContent checks every harmonized session's mapped objects with

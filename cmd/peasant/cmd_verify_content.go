@@ -76,6 +76,13 @@ func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyRepo
 	for _, id := range report.UnflaggedOrphanSessions {
 		fmt.Fprintf(out, "  - %s: run peasant harvest --force --session %s to re-index and sweep orphan content; peasant migrate also drains owned directory leftovers\n", id, id)
 	}
+	fmt.Fprintf(out, "sessions with content but no sessions row: %d\n", len(report.OwnerlessSessions))
+	if len(report.OwnerlessSessions) > 0 {
+		fmt.Fprintln(out, "  (their bodies are also counted in the orphan content totals above)")
+	}
+	for _, id := range report.OwnerlessSessions {
+		fmt.Fprintf(out, "  - %s: its sessions row is missing; run peasant harvest --force --session %s to re-index it from its transcript\n", id, id)
+	}
 	if report.IndexRebuilt {
 		fmt.Fprintln(out, "search index rebuilt: pending health flag cleared")
 	}
@@ -107,6 +114,9 @@ func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyRepo
 		}
 	} else if len(report.Damaged) > 0 {
 		fmt.Fprintln(out, "re-run with --repair to mark the damaged sessions for the repair activation")
+	}
+	if len(report.OwnerlessSessions) > 0 {
+		return fmt.Errorf("content verification failed: %d session(s) have content but no sessions row", len(report.OwnerlessSessions))
 	}
 	if len(report.Damaged) > 0 {
 		return fmt.Errorf("content verification failed: %d damaged session(s); re-run with --repair and harvest to heal them", len(report.Damaged))

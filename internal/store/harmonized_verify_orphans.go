@@ -23,9 +23,9 @@ func (s *Store) collectContentOrphans(ctx context.Context, report *ContentVerify
 	query := `SELECT session_id, sum(bodies), sum(blobs), sum(bytes) FROM (
 SELECT b.session_id, 1 bodies, 0 blobs,
  coalesce(length(CAST(b.content_preview AS BLOB)),0)+coalesce(length(CAST(b.tool_input AS BLOB)),0)+coalesce(length(CAST(b.tool_output AS BLOB)),0)+coalesce(length(CAST(b.extra AS BLOB)),0)+coalesce(length(CAST(b.extra_verbatim AS BLOB)),0) bytes
-FROM session_entry_bodies b WHERE NOT EXISTS (SELECT 1 FROM session_generation_entries m WHERE m.session_id=b.session_id AND m.body_digest=b.body_digest)
+FROM session_entry_bodies b WHERE NOT EXISTS (SELECT 1 FROM session_generation_entries m WHERE m.session_id=b.session_id AND m.body_digest=b.body_digest) OR NOT EXISTS (SELECT 1 FROM sessions s WHERE s.session_id=b.session_id)
 UNION ALL
-SELECT b.session_id, 0, 1, b.byte_length FROM session_content b WHERE NOT EXISTS (SELECT 1 FROM session_generation_content m WHERE m.session_id=b.session_id AND m.digest=b.digest)
+SELECT b.session_id, 0, 1, b.byte_length FROM session_content b WHERE NOT EXISTS (SELECT 1 FROM session_generation_content m WHERE m.session_id=b.session_id AND m.digest=b.digest) OR NOT EXISTS (SELECT 1 FROM sessions s WHERE s.session_id=b.session_id)
 ) GROUP BY session_id`
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
 		id, err := schema.NewSessionID(stmt.ColumnText(0))
@@ -65,17 +65,25 @@ SELECT b.session_id, 0, 1, b.byte_length FROM session_content b WHERE NOT EXISTS
 		}
 	}
 	for id := range owners {
-		var flagged bool
+		var flagged, found bool
 		if err := sqlitex.Execute(conn, `SELECT content_sweep_pending FROM sessions WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
 			flagged = stmt.ColumnInt(0) != 0
 			return nil
 		}}); err != nil {
 			return err
 		}
-		if !flagged {
+		if !found {
+			// Content whose sessions row is gone: no sweep can reach it, and
+			// the session reads as absent while its bodies remain.
+			report.OwnerlessSessions = append(report.OwnerlessSessions, id)
+		} else if !flagged {
 			report.UnflaggedOrphanSessions = append(report.UnflaggedOrphanSessions, id)
 		}
 	}
+	sort.Slice(report.OwnerlessSessions, func(i, j int) bool {
+		return report.OwnerlessSessions[i] < report.OwnerlessSessions[j]
+	})
 	sort.Slice(report.UnflaggedOrphanSessions, func(i, j int) bool {
 		return report.UnflaggedOrphanSessions[i] < report.UnflaggedOrphanSessions[j]
 	})
