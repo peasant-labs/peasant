@@ -129,8 +129,9 @@ func (s *Server) serveGroupedSearch(w http.ResponseWriter, r *http.Request, quer
 
 // handleHelperGroupMembers answers the registered local member operation. It
 // validates the opaque scope against the viewer and group, replays the exact
-// originating predicate with current authorization and selection, then pages
-// the group's saved helpers. It never widens the originating scope.
+// originating predicate with current authorization, origin scope and
+// readiness, then pages the group's saved helpers. It never widens the
+// originating scope.
 func (s *Server) handleHelperGroupMembers(w http.ResponseWriter, r *http.Request) {
 	request, ok := s.exactRequestGuard(w, r, exactRequestSpec{
 		operation: "helper group member",
@@ -202,12 +203,12 @@ func (s *Server) handleHelperGroupMembers(w http.ResponseWriter, r *http.Request
 }
 
 // writeGroupedScopeExpired is the ONE refusal for a member scope that is
-// missing, expired, restarted, group-mismatched, selection-changed or no longer
-// matching the replayed predicate. It never broadens and never returns an empty
-// success page, so the caller refreshes the originating list.
+// missing, expired, restarted, group-mismatched, browsing-revision-changed or no
+// longer matching the replayed predicate. It never broadens and never returns
+// an empty success page, so the caller refreshes the originating list.
 func (s *Server) writeGroupedScopeExpired(w http.ResponseWriter, groupID string) {
 	writeAPIError(w, http.StatusConflict,
-		fmt.Sprintf("Helper group %s could not be expanded because its member scope is missing, expired, or no longer matches the originating list in internal/api.handleHelperGroupMembers. No members were returned and the request was not broadened to the whole library: the scope is a short-lived lookup token, not an access grant, and Peasant restarted or the persisted selection changed. Refresh the originating grouped list and expand the group from the fresh response.", groupID),
+		fmt.Sprintf("Helper group %s could not be expanded because its member scope is missing, expired, or no longer matches the originating list in internal/api.handleHelperGroupMembers. No members were returned and the request was not broadened to the whole library: the scope is a short-lived lookup token, not an access grant, and Peasant restarted or its browsing revision changed. Refresh the originating grouped list and expand the group from the fresh response.", groupID),
 		"group_scope_expired")
 }
 

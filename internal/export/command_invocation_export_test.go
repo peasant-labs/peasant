@@ -115,7 +115,7 @@ func TestExportSession_CommandInvocationMatchesWebSocketPath(t *testing.T) {
 		t.Fatalf("ExportSession: %v", err)
 	}
 
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	session, err := provider.SessionByID(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("SessionByID: %v", err)

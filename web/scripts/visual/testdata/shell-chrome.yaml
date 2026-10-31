@@ -33,10 +33,16 @@ show:
     text: home
     icon: true
   search:
-    # fairtrade's own search item, the first shortcut under the brand; its key
+    # fairtrade's own search item, below the pages near the footer; its key
     # hint is a kbd.
     selector: '.asb-panel .asb-utils button.asb-search'
     text: search⌘K
+    icon: true
+  docs:
+    selector: '.asb-panel .asb-utils a.asb-app[href="https://peasantlabs.org/docs"]'
+    icon: true
+  collectives:
+    selector: '.asb-panel .asb-utils a.asb-item[href$="/collectives"][target="_blank"]'
     icon: true
   theme:
     # fairtrade's footer toggle, named for the theme it switches to.
@@ -50,7 +56,13 @@ show:
     text: settings
     icon: true
     page: src/app/settings/page.tsx
+# The page links lead; secondary shortcuts sit above the account/footer row.
+navigationOrder: [sections, shortcuts]
 hide:
+  community:
+    selector: '.asb-utils [href*="community"], .asb-utils [title^="community"]'
+    text:
+      - community soon
   connection-pill:
     selector: '.cx-pill'
     text:

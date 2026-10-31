@@ -7,7 +7,7 @@
  * grouped response that names an unknown value stops the surface instead of
  * being rendered as an approximating fold.
  *
- * The grouped list is the SAME authorized/selected route set the flat route
+ * The grouped list is the SAME authorized stored route set the flat route
  * serves; the member operation replays that route predicate from an opaque
  * short-lived scope. A scope that is missing, expired or no longer matches is
  * refused with an actionable 409 (`group_scope_expired`) and must refresh the
@@ -41,9 +41,12 @@ export const GROUP_SCOPE_EXPIRED_CODE = 'group_scope_expired';
 
 /**
  * The typed refusal for a member scope that is missing, expired, restarted,
- * group-mismatched, selection-changed, or no longer matching the originating
- * predicate. The only safe recovery is to refresh the originating list; the
- * member set is never widened to stand in for it.
+ * group-mismatched, or no longer matching the originating predicate. The only
+ * safe recovery is to refresh the originating list; the member set is never
+ * widened to stand in for it.
+ *
+ * A saved ingestion-selection change is not a browsing predicate and does not
+ * invalidate a member scope.
  */
 export class GroupScopeExpiredError extends Error {
   readonly groupId: string;
@@ -210,8 +213,8 @@ export async function fetchGroupedLocalSearch(
  * GET /api/v1/session-groups/{groupId}/members?scope=...&page=...&limit=...
  *
  * Only the opaque scope and paging are sent: the prefix route already fixed
- * every search/project/selection filter, so an extra narrowing or widening
- * filter would be refused by the server rather than guessed here.
+ * every search and project filter, so an extra narrowing or widening filter
+ * would be refused by the server rather than guessed here.
  */
 export async function fetchHelperGroupMembers(args: {
   groupId: string;

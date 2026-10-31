@@ -26,7 +26,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/selectionprojection"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
@@ -280,7 +279,7 @@ func validateKickstartStoredGateCaseSemantics(t *testing.T, testCase kickstartSt
 			testCase.Selection.Kind != kickstartStoredGateSelectSession ||
 			len(testCase.StoredRows) != 2 || len(testCase.ScannerRows) != 1 ||
 			testCase.ExpectedCandidateCount != 2 || testCase.ExpectedDescendantCount != 2 ||
-			testCase.ExpectedViewerProjects != 1 || testCase.ExpectedViewerSessions != 1 ||
+			testCase.ExpectedViewerProjects != 2 || testCase.ExpectedViewerSessions != 2 ||
 			len(testCase.ExpectedPushSessionIDs) != 1 || testCase.ExpectedPushSessionIDs[0] != testCase.Selection.SessionID {
 			t.Fatalf("stored gate fixture alignment case %q does not encode the required cross-surface outcome", testCase.Name)
 		}
@@ -316,7 +315,7 @@ func validateKickstartStoredGateCaseSemantics(t *testing.T, testCase kickstartSt
 			testCase.StoredRows[0].CanonicalPathKey != testCase.Selection.ClonePathKey || testCase.StoredRows[0].WorktreePathKey == "" ||
 			testCase.StoredRows[0].CanonicalPathKey == testCase.StoredRows[0].WorktreePathKey ||
 			testCase.ExpectedCandidateCount != 1 || testCase.ExpectedDescendantCount != 1 ||
-			testCase.ExpectedViewerProjects != 1 || testCase.ExpectedViewerSessions != 0 || len(testCase.ExpectedPushSessionIDs) != 0 {
+			testCase.ExpectedViewerProjects != 1 || testCase.ExpectedViewerSessions != 1 || len(testCase.ExpectedPushSessionIDs) != 0 {
 			t.Fatalf("stored gate fixture clone case %q does not preserve distinct parent and descendant carriers", testCase.Name)
 		}
 	case kickstartStoredGateUniqueName:
@@ -350,7 +349,7 @@ func validateKickstartStoredGateCaseSemantics(t *testing.T, testCase kickstartSt
 			testCase.StoredRows[0].WorktreePathKey != "" ||
 			testCase.StoredRows[0].SessionID == testCase.Selection.SessionID ||
 			testCase.ExpectedCandidateCount != 1 || testCase.ExpectedDescendantCount != 1 ||
-			testCase.ExpectedViewerProjects != 0 || testCase.ExpectedViewerSessions != 0 ||
+			testCase.ExpectedViewerProjects != 1 || testCase.ExpectedViewerSessions != 1 ||
 			len(testCase.ExpectedPushSessionIDs) != 0 {
 			t.Fatalf("stored gate fixture empty control %q does not encode the required no-effective-descendant outcome", testCase.Name)
 		}
@@ -789,21 +788,18 @@ func assertKickstartStoredGateCrossSurfaces(t *testing.T, testCase kickstartStor
 	if err != nil {
 		t.Fatalf("load stored gate config for cross-surface assertions: %v", err)
 	}
-	visibility, err := sessionvisibility.New(configured.Selection)
-	if err != nil {
-		t.Fatalf("build stored gate visibility policy: %v", err)
-	}
 	db, err := store.Open(world.DBPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open stored gate database for cross-surface assertions: %v", err)
 	}
 	defer db.Close()
 
+	// Browsing applies no saved selection: every stored row and project is
+	// listed, while the push chooser below still reports the saved selector.
 	viewer := codemap.NewService(
 		db,
 		func(path string) gitops.Repository { return gitops.NewExecGitRepository(path) },
 		codegraph.NewGraphBuilder(),
-		visibility,
 	)
 	summaries, err := viewer.ProjectSummaries(t.Context())
 	if err != nil {

@@ -14,8 +14,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/codemap"
-	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -94,7 +94,7 @@ var mapHandlerProjectHash = schema.ProjectHash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 var mapHandlerHiddenHash = schema.ProjectHash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 
 var requiredProjectSummariesErrorCaseNames = map[string]struct{}{
-	"persisted selection failure is typed":     {},
+	"discovery metadata failure stays untyped": {},
 	"unrelated provider failure stays untyped": {},
 }
 
@@ -130,7 +130,7 @@ func decodeProjectSummariesErrorFixture(source []byte) (projectSummariesErrorFix
 		if testCase.WantCode == nil {
 			return fixture, fmt.Errorf("project summaries error fixture cases[%d] %q is missing required wantCode", index, testCase.Name)
 		}
-		if testCase.ErrorKind != "selection" && testCase.ErrorKind != "generic" {
+		if testCase.ErrorKind != "discovery" && testCase.ErrorKind != "generic" {
 			return fixture, fmt.Errorf("project summaries error fixture cases[%d] %q has unsupported errorKind %q", index, testCase.Name, testCase.ErrorKind)
 		}
 	}
@@ -764,9 +764,13 @@ func TestMapErrorResponses_AreStableActionableAndSanitized(t *testing.T) {
 		t.Fatal("semantic row deletion unexpectedly validated")
 	}
 
-	_, selectionErr := sessionvisibility.New(config.SelectionConfig{Mode: "not-a-selection-mode"})
-	if selectionErr == nil {
-		t.Fatal("invalid selection config unexpectedly succeeded")
+	// A discovery metadata error (an unusable stored origin) is a real
+	// sessionvisibility.Error. It must be reported as a provider failure, never
+	// rewritten as a saved-selection problem now that browsing ignores the
+	// selector.
+	_, discoveryErr := sessionvisibility.Browsing().VisibleForDiscovery(sessionvisibility.Candidate{SessionID: "session-metadata", Origin: sessionorigin.Origin("teammate")})
+	if discoveryErr == nil || !sessionvisibility.IsError(discoveryErr) {
+		t.Fatalf("test setup: expected an unusable origin to produce a sessionvisibility.Error, got %v", discoveryErr)
 	}
 	for _, testCase := range fixture.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -776,8 +780,8 @@ func TestMapErrorResponses_AreStableActionableAndSanitized(t *testing.T) {
 			wrapped := func(cause error) error { return fmt.Errorf("store-secret: %w", cause) }
 			stub := &mapStubProvider{}
 			switch testCase.ErrorKind {
-			case "selection":
-				stub.graphErr = selectionErr
+			case "discovery":
+				stub.graphErr = discoveryErr
 			case "project":
 				stub.graphErr = wrapped(codemap.ErrProjectNotFound)
 			case "ambiguous":
@@ -792,8 +796,8 @@ func TestMapErrorResponses_AreStableActionableAndSanitized(t *testing.T) {
 				stub.changeErr = wrapped(codemap.ErrRepoNotFound)
 			case "provider":
 				stub.graphErr = fmt.Errorf("secret-database-password")
-			case "search-selection":
-				stub.searchErr = selectionErr
+			case "search-discovery":
+				stub.searchErr = discoveryErr
 			case "search-provider":
 				stub.searchErr = fmt.Errorf("secret-search-provider")
 			default:
@@ -844,16 +848,16 @@ func TestMapErrorResponses_AreStableActionableAndSanitized(t *testing.T) {
 }
 
 func TestProjectSummariesHandler_PreservesDiscoveryErrorClass(t *testing.T) {
-	_, selectionErr := sessionvisibility.New(config.SelectionConfig{Mode: "not-a-selection-mode"})
-	if selectionErr == nil {
-		t.Fatal("invalid selection config unexpectedly succeeded")
+	_, discoveryErr := sessionvisibility.Browsing().VisibleForDiscovery(sessionvisibility.Candidate{SessionID: "session-metadata", Origin: sessionorigin.Origin("teammate")})
+	if discoveryErr == nil || !sessionvisibility.IsError(discoveryErr) {
+		t.Fatalf("test setup: expected an unusable origin to produce a sessionvisibility.Error, got %v", discoveryErr)
 	}
 
 	for _, testCase := range loadProjectSummariesErrorFixture(t).Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			providerErr := fmt.Errorf("database unavailable")
-			if testCase.ErrorKind == "selection" {
-				providerErr = selectionErr
+			if testCase.ErrorKind == "discovery" {
+				providerErr = discoveryErr
 			}
 			stub := &mapStubProvider{summariesErr: providerErr}
 			base := startMapTestServer(t, stub)
@@ -879,17 +883,17 @@ func TestProjectSummariesHandler_PreservesDiscoveryErrorClass(t *testing.T) {
 }
 
 func TestProjectSummariesErrorFixtureRejectsSchemaAndCoverageDrift(t *testing.T) {
-	unknownField := bytes.Replace(projectSummariesErrorFixtureYAML, []byte("errorKind: selection"), []byte("errorKind: selection\n    unexpected: true"), 1)
+	unknownField := bytes.Replace(projectSummariesErrorFixtureYAML, []byte("errorKind: discovery"), []byte("errorKind: discovery\n    unexpected: true"), 1)
 	if _, err := decodeProjectSummariesErrorFixture(unknownField); err == nil {
 		t.Fatal("fixture loader accepted an unknown case field")
 	}
 
-	missingRequiredField := bytes.Replace(projectSummariesErrorFixtureYAML, []byte("    wantCode: selection_visibility\n"), nil, 1)
+	missingRequiredField := bytes.Replace(projectSummariesErrorFixtureYAML, []byte("    wantCode: \"\"\n"), nil, 1)
 	if _, err := decodeProjectSummariesErrorFixture(missingRequiredField); err == nil {
 		t.Fatal("fixture loader accepted a case missing wantCode")
 	}
 
-	renamedSemanticCase := bytes.Replace(projectSummariesErrorFixtureYAML, []byte("persisted selection failure is typed"), []byte("renamed selection behavior"), 1)
+	renamedSemanticCase := bytes.Replace(projectSummariesErrorFixtureYAML, []byte("discovery metadata failure stays untyped"), []byte("renamed discovery behavior"), 1)
 	if _, err := decodeProjectSummariesErrorFixture(renamedSemanticCase); err == nil {
 		t.Fatal("fixture loader accepted a renamed required semantic case")
 	}

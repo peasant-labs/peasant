@@ -14,15 +14,26 @@ const channels = vi.hoisted(() => vi.fn<(subscriptions: unknown) => { connected:
 vi.mock('@/contexts/WebSocketContext', () => ({ useChannel: channels }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-interface Fixture { name: string; roots: number; children: number; parentErrorCode?: string; cachedSessionId?: string; cachedProject?: string; accountAfterFailure?: string }
+interface Fixture { name: string; roots: number; children: number; parentErrorCode?: string; cachedSessionId?: string; cachedProject?: string; accountAfterFailure?: string; teammate?: { team: string; name: string }; assertTeammateLine?: boolean }
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-pages.yaml'), 'utf8')) as { requiredNames: string[]; cases: Fixture[]; publish: { request: unknown; response: unknown; loadedTokens: { parent: string | null; token: string }[]; failedRefreshTokens: { parent: string | null; token: string }[] } };
-const required = ['first-page-and-next-page', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-refresh-clears-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-recovery-survives-failed-retry', 'selection-recovery-survives-account-reset'];
+const required = ['first-page-and-next-page', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-error-keeps-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-error-retry-failure-keeps-loaded-content', 'selection-error-account-change-refreshes-loaded-content', 'claude-teammate-line', 'no-claude-teammate-line'];
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
 expect(fixture.cases.map(row => row.name).sort()).toEqual([...required].sort());
 
-function row(id: string, children = 0): LocalSyncSessionRow {
+// The mounted capture and this component suite read one fixture. Keep the
+// visual harness identity and the case identity tied to the same value so a
+// one-sided edit cannot publish a screenshot that proves a different name.
+const visualTeammate = (fixture as { visual?: { teammate?: { team: string; name: string } } }).visual?.teammate;
+if (!visualTeammate) throw new Error('home-pages.yaml visual.teammate must name the identity the mounted capture serves');
+expect(fixture.cases.find(row => row.name === 'claude-teammate-line')?.teammate).toEqual({ team: visualTeammate.team, name: visualTeammate.name });
+
+/** One fixture row; `teammate` is the identity the fixture case serves on it. */
+function row(id: string, children = 0, teammate?: { team: string; name: string }): LocalSyncSessionRow {
   return {
-    sync: { id, harness: 'claude-code', projectName: 'fixture-project', projectHash: ALPHA_HASH, hostSlug: 'fixture-host', startTime: '2026-06-01T10:00:00Z', durationMs: BigInt(60000), totalTokens: 10, turnCount: 2, model: 'fixture', syncStatus: 'new', previouslyPushed: false },
+    sync: {
+      id, harness: 'claude-code', projectName: 'fixture-project', projectHash: ALPHA_HASH, hostSlug: 'fixture-host', startTime: '2026-06-01T10:00:00Z', durationMs: BigInt(60000), totalTokens: 10, turnCount: 2, model: 'fixture', syncStatus: 'new', previouslyPushed: false,
+      ...(teammate ? { teammate: { team: teammate.team, name: teammate.name, evidence: 'native_dynamic_workflow' as const } } : {}),
+    },
     publication: { sessionId: id, state: 'unpublished', autoPublish: false, outsideSelection: false },
     title: `title ${id}`, preview: '', childCount: children,
   };
@@ -75,7 +86,7 @@ beforeEach(() => {
       signals.push(init?.signal as AbortSignal);
       if (delayFilter && url.searchParams.get('publication') === delayFilter && delayed) return delayed.promise;
       if (delayParent && url.searchParams.get('parentSessionId') === delayParent && delayed) return delayed.promise;
-      if (selectionFailure) return json({ error: 'saved selection could not be applied; run peasant kickstart', code: 'selection_visibility' }, 500);
+      if (selectionFailure) return json({ error: 'saved selection metadata could not be read', code: 'selection_visibility' }, 500);
       if (fail) return json({ error: 'temporary read failure; retry' }, 503);
       if (parentFailure && url.searchParams.has('parentSessionId')) return json({ error: 'parent read refused; choose a visible parent', code: parentFailure }, 404);
       const start = url.searchParams.get('pageToken') === 'after-first' ? 25 : url.searchParams.get('pageToken') === 'after-second' ? 50 : 0;
@@ -94,7 +105,7 @@ describe('mounted bounded Home', () => {
   for (const testCase of fixture.cases) {
     it(testCase.name, async () => {
       roots = Array.from({ length: testCase.roots }, (_, index) => row(`root-${index}`, index === 0 ? testCase.children : 0));
-      children = Array.from({ length: testCase.children }, (_, index) => row(`child-${index}`, index === 0 ? 1 : 0));
+      children = Array.from({ length: testCase.children }, (_, index) => row(`child-${index}`, index === 0 ? 1 : 0, index === 0 ? testCase.teammate : undefined));
       mount();
       await screen.findByRole('link', { name: 'title root-0' });
       expect(channels).not.toHaveBeenCalled();
@@ -104,6 +115,28 @@ describe('mounted bounded Home', () => {
       expect(screen.getByRole('link', { name: 'title root-0' }).getAttribute('href')).toContain('root-0');
       expect(choiceRows('status').find(row => row.getAttribute('aria-checked') === 'true')).toHaveTextContent('all');
 
+      if (testCase.assertTeammateLine) {
+        fireEvent.click(screen.getByRole('button', { name: 'subagents 1' }));
+        await screen.findByRole('link', { name: 'title child-0' });
+        const childCell = screen.getByRole('link', { name: 'title child-0' }).closest('.home-session') as HTMLElement;
+        if (testCase.teammate) {
+          // The line sits under the title and beside the facts that already
+          // render: the child title, its agent mark, its token count.
+          const line = childCell.querySelector('.home-session-teammate');
+          expect(line).toHaveTextContent(`teammate ${testCase.teammate.name} · ${testCase.teammate.team}`);
+          expect(childCell.querySelector('.home-session-title')).toHaveTextContent('title child-0');
+          expect(childCell.querySelector('.home-session-meta')).toHaveTextContent('tokens');
+          // The identity is its own line in the session cell, never folded into
+          // the phone block that carries the other columns' facts.
+          const phone = childCell.querySelector('.home-session-phone');
+          expect(phone).not.toBeNull();
+          expect(phone?.querySelector('.home-session-teammate')).toBeNull();
+          expect(line?.closest('.home-session-phone')).toBeNull();
+        } else {
+          expect(document.querySelector('.home-session-teammate')).toBeNull();
+        }
+        expect(screen.getByRole('link', { name: 'title root-0' })).toBeInTheDocument();
+      }
       if (testCase.name === 'first-page-and-next-page') {
         fireEvent.click(screen.getByRole('button', { name: 'next page' }));
         await screen.findByRole('link', { name: 'title root-25' });
@@ -181,54 +214,64 @@ describe('mounted bounded Home', () => {
         await screen.findByRole('link', { name: 'title child-0' });
         expect(pageRequests()).toHaveLength(3);
       }
-      if (testCase.name === 'selection-refresh-clears-loaded-content') {
+      if (testCase.name === 'selection-error-keeps-loaded-content') {
         selectionFailure = true;
         fireEvent(window, new Event('focus'));
         await screen.findByRole('button', { name: 'retry the session list' });
-        expect(screen.queryByRole('link', { name: 'title root-0' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('region', { name: 'sessions' })).not.toBeInTheDocument();
+        // The failed read keeps the loaded continuation and its rows on screen.
+        expect(screen.getByRole('link', { name: 'title root-0' })).toBeInTheDocument();
+        expect(screen.getByRole('region', { name: 'sessions' })).toBeInTheDocument();
+        expect(screen.queryByText(/peasant kickstart/)).not.toBeInTheDocument();
         selectionFailure = false;
         fireEvent.click(screen.getByRole('button', { name: 'retry the session list' }));
-        await screen.findByRole('link', { name: 'title root-0' });
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'retry the session list' })).not.toBeInTheDocument());
+        expect(screen.getByRole('link', { name: 'title root-0' })).toBeInTheDocument();
       }
-      if (testCase.name.startsWith('selection-recovery-survives-')) {
-        // Prime only the lazy module: its actual hooks must stay unmounted
-        // until the current-scope root read validates recovery.
-        await import('@/components/home/LegacyHomeBrowse');
-        channels.mockReturnValue({ connected: true, data: { sessions: [makeSession({ id: testCase.cachedSessionId!, project: testCase.cachedProject! })] }, error: null });
+      if (testCase.name === 'selection-error-retry-failure-keeps-loaded-content') {
         selectionFailure = true;
-        await act(async () => { fireEvent(window, new Event('focus')); });
+        fireEvent(window, new Event('focus'));
         await screen.findByRole('button', { name: 'retry the session list' });
-        expect(screen.getByText(/peasant kickstart/)).toBeInTheDocument();
-        await browseBy('every session');
-        expect(browseTrigger()).toHaveTextContent('browse by: every session');
-        expect(channels).not.toHaveBeenCalled();
+        expect(screen.getByRole('link', { name: 'title root-0' })).toBeInTheDocument();
 
+        // A retry that fails for an unrelated reason keeps the same loaded
+        // continuation; it does not swap the library for a selection state.
         selectionFailure = false;
         fail = true;
-        await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'retry the session list' })); });
-        expect(channels).not.toHaveBeenCalled();
-        expect(screen.getByText(/peasant kickstart/)).toBeInTheDocument();
-        expect(screen.queryByRole('region', { name: 'sessions' })).not.toBeInTheDocument();
-        expect(document.body.textContent).not.toContain(testCase.cachedProject);
-        expect(document.body.textContent).not.toContain(testCase.cachedSessionId);
-
-        if (testCase.accountAfterFailure) {
-          account = testCase.accountAfterFailure;
-          await act(async () => { fireEvent(window, new Event('focus')); });
-          expect(channels).not.toHaveBeenCalled();
-          expect(screen.getByText(/peasant kickstart/)).toBeInTheDocument();
-          expect(document.body.textContent).not.toContain(testCase.cachedSessionId);
-        }
+        fireEvent.click(screen.getByRole('button', { name: 'retry the session list' }));
+        await waitFor(() => expect(screen.getByText(/temporary read failure/)).toBeInTheDocument());
+        expect(screen.getByRole('link', { name: 'title root-0' })).toBeInTheDocument();
+        expect(screen.queryByText(/peasant kickstart/)).not.toBeInTheDocument();
 
         fail = false;
         roots = [row('revalidated-root')];
-        await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'retry the session list' })); });
-        await screen.findByRole('searchbox', { name: 'search sessions' });
-        await waitFor(() => expect(channels.mock.calls.length).toBeGreaterThan(0));
-        expect(screen.queryByText(/peasant kickstart/)).not.toBeInTheDocument();
-        await browseBy('sessions');
+        fireEvent.click(screen.getByRole('button', { name: 'retry the session list' }));
         await screen.findByRole('link', { name: 'title revalidated-root' });
+        expect(screen.queryByRole('link', { name: 'title root-0' })).not.toBeInTheDocument();
+      }
+      if (testCase.name === 'selection-error-account-change-refreshes-loaded-content') {
+        await import('@/components/home/LegacyHomeBrowse');
+        channels.mockReturnValue({ connected: true, data: { sessions: [makeSession({ id: 'cached-browse-session', project: 'cached-browse-project' })] }, error: null });
+        selectionFailure = true;
+        await act(async () => { fireEvent(window, new Event('focus')); });
+        await screen.findByRole('button', { name: 'retry the session list' });
+        expect(screen.getByRole('link', { name: 'title root-0' })).toBeInTheDocument();
+        expect(screen.queryByText(/peasant kickstart/)).not.toBeInTheDocument();
+
+        // The retained browse flows still mount while the session list reports a
+        // legacy selection error.
+        await browseBy('every session');
+        expect(browseTrigger()).toHaveTextContent('browse by: every session');
+        await waitFor(() => expect(channels).toHaveBeenCalled());
+
+        // An account change is a genuine boundary: it refreshes the list rather
+        // than continuing another account's loaded rows.
+        account = testCase.accountAfterFailure!;
+        roots = [row('second-account-root')];
+        selectionFailure = false;
+        await act(async () => { fireEvent(window, new Event('focus')); });
+        await browseBy('sessions');
+        await screen.findByRole('link', { name: 'title second-account-root' });
+        expect(screen.queryByRole('link', { name: 'title root-0' })).not.toBeInTheDocument();
       }
       if (testCase.name === 'overlapping-refresh-does-not-race') {
         delayed = deferred<Response>(); delayFilter = 'all';

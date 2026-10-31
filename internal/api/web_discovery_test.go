@@ -106,10 +106,7 @@ func TestMountedHTTPContractsWithStoredSelectionData(t *testing.T) {
 	selection := config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
 		defaults.HarnessClaudeCode.String(): {Projects: []config.ProjectSelection{{GitRemote: fixture.Sessions[0].Remote, ClonePaths: []string{paths[fixture.Sessions[0].Worktree]}, Branches: []string{fixture.Sessions[0].Branch}}}},
 	}}
-	policy, err := sessionvisibility.New(selection)
-	if err != nil {
-		t.Fatalf("create mounted API selection: %v", err)
-	}
+	policy := sessionvisibility.New(selection)
 	provider := NewStoreDataProvider(db, policy)
 	base := startDiscoveryHTTPServer(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{Selection: selection}, Provider: provider, RepositoryIdentityResolver: resolver})
 
@@ -162,8 +159,34 @@ func TestMountedHTTPContractsWithStoredSelectionData(t *testing.T) {
 	sessions := getMountedJSON(t, base+"/api/v1/sessions", http.StatusOK)
 	assertExactKeys(t, sessions, "sessions")
 	sessionRows := objectSlice(t, sessions["sessions"])
-	if len(sessionRows) != 1 || stringField(t, sessionRows[0], "id") != fixture.Sessions[0].ID {
-		t.Fatalf("sessions visibility changed: %+v", sessionRows)
+	sessionIDs := make([]string, 0, len(sessionRows))
+	for _, row := range sessionRows {
+		sessionIDs = append(sessionIDs, stringField(t, row, "id"))
+	}
+	// Stored sessions are listed newest-first. The fixture seeds them in
+	// ascending start order, so the transport order is its reverse.
+	wantSessionIDs := make([]string, 0, len(fixture.Sessions))
+	for i := len(fixture.Sessions) - 1; i >= 0; i-- {
+		wantSessionIDs = append(wantSessionIDs, fixture.Sessions[i].ID)
+	}
+	if !reflect.DeepEqual(sessionIDs, wantSessionIDs) {
+		t.Fatalf("sessions visibility or order changed: %v, want %v", sessionIDs, wantSessionIDs)
+	}
+	// The stored-session list and the ingest-selection metadata are independent:
+	// a row outside the saved selector is still listed, and its discovery status
+	// still tells the truth about future ingestion.
+	outside := fixture.Sessions[2].ID
+	foundOutside := false
+	for _, id := range sessionIDs {
+		if id == outside {
+			foundOutside = true
+		}
+	}
+	if !foundOutside {
+		t.Fatalf("stored session %s outside the saved selector is missing from the flat list", outside)
+	}
+	if got := stringField(t, byID[outside], "selectionStatus"); got != "unselected" {
+		t.Fatalf("discovery selectionStatus for %s = %q, want unselected", outside, got)
 	}
 	// sessionOrigin is the producer's declaration of who drove the session. It
 	// is always present on a stored row, because sessions.session_origin is NOT

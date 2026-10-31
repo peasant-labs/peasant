@@ -17,14 +17,14 @@ import (
 var mapGuardErrorsYAML []byte
 
 var requiredMapGuardFixtureNames = map[string]struct{}{
-	"selection visibility fails closed": {}, "missing project is stable": {},
+	"discovery metadata failure is a provider failure": {}, "missing project is stable": {},
 	"ambiguous legacy project is stable": {}, "malformed project identity is stable": {},
 	"missing node is stable": {}, "missing branch is stable": {},
 	"missing repository is stable": {}, "provider details are sanitized": {},
 	"missing guard hash is actionable": {}, "malformed guard hash is actionable": {},
-	"unavailable guard provider is actionable":       {},
-	"search selection visibility is operation aware": {},
-	"search provider failure is operation aware":     {},
+	"unavailable guard provider is actionable":             {},
+	"search discovery metadata failure is operation aware": {},
+	"search provider failure is operation aware":           {},
 }
 
 type mapGuardFixture struct {

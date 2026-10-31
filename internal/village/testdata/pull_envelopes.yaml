@@ -30,6 +30,31 @@ requiredNames:
   - refuse-legacy-owner-under-0.3.0
   - refuse-legacy-author-under-0.3.0
   - read-legacy-owner-under-0.2.0
+  - negotiate-requestable-default-0.2.0
+  - negotiate-requestable-patch-max
+  - negotiate-requestable-newer-minor-max
+  - negotiate-requestable-legacy-max
+  - negotiate-requestable-floor-above-request
+  - negotiate-current-patch-reads-as-minor
+  - served-0.2.0-legacy-listing
+  - served-0.2.0-anonymous-author
+  - served-0.3.0-public-owner
+  - served-0.3.0-annotations
+  - served-0.3.0-content
+  - served-0.3.0-refuses-legacy-strings
+  - served-0.3.x-patch-reads-as-0.3.0
+  - served-0.3.x-patch-refuses-legacy-strings
+  - served-0.2.0-overrides-negotiated-0.3.0
+  - absent-header-reads-as-0.2.0
+  - malformed-header-reads-as-absent
+  - served-unreadable-minor-refused
+  - served-unreadable-minor-refused-on-content
+  - refused-406-list
+  - refused-406-metadata
+  - refused-406-annotations
+  - refused-406-content
+  - negotiate-long-digit-floor-above-current-refused
+  - served-long-digit-patch-reads-as-0.3.0
 
 negotiate:
   - name: negotiate-released-village-0.2.0
@@ -69,10 +94,56 @@ negotiate:
     wantError: incompatible
   - name: negotiate-unadvertised-window
     wantError: too-old
+  # A village that advertises max serves the envelope a pull read requests in
+  # the Peasant-Pull-Contract header: the CLI's newest, or max when older. Its
+  # default (current) is what header-less clients get and does not matter here.
+  - name: negotiate-requestable-default-0.2.0
+    min: "0.2.0"
+    current: "0.2.0"
+    max: "0.3.0"
+    wantEnvelope: "0.3.0"
+  - name: negotiate-requestable-patch-max
+    min: "0.2.0"
+    current: "0.2.0"
+    max: "0.3.4"
+    wantEnvelope: "0.3.0"
+  - name: negotiate-requestable-newer-minor-max
+    min: "0.2.0"
+    current: "0.2.0"
+    max: "0.4.0"
+    wantEnvelope: "0.3.0"
+  - name: negotiate-requestable-legacy-max
+    min: "0.2.0"
+    current: "0.2.0"
+    max: "0.2.1"
+    wantEnvelope: "0.2.0"
+  # The village would refuse the request with 406, so negotiation refuses first.
+  - name: negotiate-requestable-floor-above-request
+    min: "0.4.0"
+    current: "0.4.0"
+    max: "0.5.0"
+    wantError: incompatible
+  # A patch bump is additive: a header-less village serving 0.3.2 is read as 0.3.0.
+  - name: negotiate-current-patch-reads-as-minor
+    min: "0.3.0"
+    current: "0.3.2"
+    wantEnvelope: "0.3.0"
+  # Version parts longer than an int still compare by value: this floor is one
+  # above the current patch, so the window is malformed and refused.
+  - name: negotiate-long-digit-floor-above-current-refused
+    min: "0.3.99999999999999999999999"
+    current: "0.3.99999999999999999999998"
+    wantError: incompatible
 
 # surface selects the pull GET that serves body: metadata
-# (/pull/transcripts/{id}), annotations (/pull/transcripts/{id}/annotations), or
-# list (/pull/transcripts). want lists the person read from each row in order.
+# (/pull/transcripts/{id}), annotations (/pull/transcripts/{id}/annotations),
+# list (/pull/transcripts), or content (/pull/transcripts/{id}/content). want
+# lists the person read from each row in order. envelope is the envelope
+# negotiated before the read. served is the Peasant-Pull-Contract response
+# header (absent when empty) and status the response status (200 when 0).
+# Every case also asserts the read sent the Peasant-Pull-Contract request header
+# with the newest pull contract this CLI reads. wantIncompatible asserts the
+# error is the incompatible-contract error.
 read:
   - name: read-current-profile-owner
     surface: metadata
@@ -157,3 +228,118 @@ read:
     body: '{"transcripts":[{"transcriptId":"TRANSCRIPT","ownerUserId":"0a000000-0000-4000-8000-000000000001","ownerUsername":"alice","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}],"page":1,"limit":50,"total":1}'
     want:
       - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+  # The response header names the envelope served, and the response is decoded
+  # as exactly that envelope, whatever was negotiated.
+  - name: served-0.2.0-legacy-listing
+    served: "0.2.0"
+    surface: list
+    body: '{"transcripts":[{"transcriptId":"TRANSCRIPT","ownerUserId":"0a000000-0000-4000-8000-000000000001","ownerUsername":"alice","projectName":"p","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0},{"transcriptId":"TRANSCRIPT","ownerUserId":"","ownerUsername":"anon","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}],"page":1,"limit":50,"total":2}'
+    want:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+      - {kind: anonymous}
+  - name: served-0.2.0-anonymous-author
+    served: "0.2.0"
+    surface: annotations
+    body: '[{"id":"a1","targetKind":"session","isPrimary":false,"annotatorKind":"human","annotatorName":"anon","typeId":"t","typeName":"t","value":"v","createdAt":0,"authorUserId":"","authorUsername":"anon"}]'
+    want:
+      - {kind: anonymous}
+  - name: served-0.3.0-public-owner
+    served: "0.3.0"
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","owner":{"kind":"profile","id":"0a000000-0000-4000-8000-000000000001","username":"alice","display_name":null,"avatar_url":null},"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+  - name: served-0.3.0-annotations
+    served: "0.3.0"
+    surface: annotations
+    body: '[{"id":"a1","targetKind":"session","isPrimary":false,"annotatorKind":"human","annotatorName":"anonymous","typeId":"t","typeName":"t","value":"v","createdAt":0,"author":{"kind":"anonymous"}}]'
+    want:
+      - {kind: anonymous}
+  - name: served-0.3.0-content
+    served: "0.3.0"
+    surface: content
+    body: '{"contractVersion":"0.1.1"}'
+  - name: served-0.3.0-refuses-legacy-strings
+    served: "0.3.0"
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","ownerUserId":"0a000000-0000-4000-8000-000000000001","ownerUsername":"alice","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    wantError: refusing to read an account string as a profile
+  # A patch bump is additive: 0.3.7 is decoded as 0.3.0 and its unknown fields
+  # are ignored.
+  - name: served-0.3.x-patch-reads-as-0.3.0
+    served: "0.3.7"
+    surface: list
+    body: '{"transcripts":[{"transcriptId":"TRANSCRIPT","owner":{"kind":"anonymous"},"addedInAPatch":{"any":"shape"},"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}],"page":1,"limit":50,"total":1,"pageCursor":"next"}'
+    want:
+      - {kind: anonymous}
+  - name: served-0.3.x-patch-refuses-legacy-strings
+    served: "0.3.7"
+    surface: annotations
+    body: '[{"id":"a1","targetKind":"session","isPrimary":false,"annotatorKind":"human","annotatorName":"bob","typeId":"t","typeName":"t","value":"v","createdAt":0,"authorUserId":"0a000000-0000-4000-8000-000000000002","authorUsername":"bob"}]'
+    wantError: refusing to read an account string as a profile
+  - name: served-0.2.0-overrides-negotiated-0.3.0
+    envelope: "0.3.0"
+    served: "0.2.0"
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","ownerUserId":"0a000000-0000-4000-8000-000000000001","ownerUsername":"alice","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+  # A village that predates the header sends none back. With nothing
+  # negotiated the response is read as 0.2.0; with a negotiated envelope it is
+  # read as that envelope (refuse-legacy-owner-under-0.3.0 above).
+  - name: absent-header-reads-as-0.2.0
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","ownerUserId":"","ownerUsername":"anon","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: anonymous}
+  - name: malformed-header-reads-as-absent
+    envelope: "0.2.0"
+    served: "v0.3"
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","ownerUserId":"0a000000-0000-4000-8000-000000000001","ownerUsername":"alice","visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: profile, id: 0a000000-0000-4000-8000-000000000001, username: alice}
+  - name: served-unreadable-minor-refused
+    served: "0.4.0"
+    surface: list
+    body: '{"transcripts":[],"page":1,"limit":50,"total":0}'
+    wantIncompatible: true
+    wantError: which this CLI does not read
+  - name: served-unreadable-minor-refused-on-content
+    served: "0.4.0"
+    surface: content
+    body: '{"contractVersion":"0.1.1"}'
+    wantIncompatible: true
+    wantError: which this CLI does not read
+  # A requested version below the village's floor is refused with 406 and a
+  # VillageErrorResponse, reported as the incompatible-contract error.
+  - name: refused-406-list
+    status: 406
+    surface: list
+    body: '{"error":"pull contract 0.3.0 is below the minimum this server serves"}'
+    wantIncompatible: true
+    wantError: upgrade the peasant CLI
+  - name: refused-406-metadata
+    status: 406
+    surface: metadata
+    body: '{"error":"pull contract 0.3.0 is below the minimum this server serves"}'
+    wantIncompatible: true
+    wantError: below the minimum this server serves
+  - name: refused-406-annotations
+    status: 406
+    surface: annotations
+    body: '{"error":"pull contract 0.3.0 is below the minimum this server serves"}'
+    wantIncompatible: true
+    wantError: upgrade the peasant CLI
+  - name: refused-406-content
+    status: 406
+    surface: content
+    body: '{"error":"pull contract 0.3.0 is below the minimum this server serves"}'
+    wantIncompatible: true
+    wantError: upgrade the peasant CLI
+  - name: served-long-digit-patch-reads-as-0.3.0
+    served: "0.3.99999999999999999999999"
+    surface: metadata
+    body: '{"transcriptId":"TRANSCRIPT","owner":{"kind":"anonymous"},"visibility":"group","publishedAt":0,"updatedAt":0,"annotationCount":0}'
+    want:
+      - {kind: anonymous}

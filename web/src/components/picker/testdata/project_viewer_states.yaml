@@ -1,32 +1,16 @@
-expectedCaseCount: 3
+# Project picker states, asserted through the production projectListState()
+# helper and mounted on Home, /map and /review.
+#
+# The saved ingestion selection is not a browsing filter. A restrictive, empty,
+# excluded, or stale selection returns the same recorded project library as
+# `mode: all`; the selection metadata below is carried for compatibility and
+# must not change the rendered projects. Only a store with no recorded projects
+# shows the genuine no-data teaching state.
+expectedCaseCount: 5
 cases:
-  - name: all hidden by saved selection
-    expectedState: selection-recovery
-    expectedParentLabel: null
-    forbiddenIdentities:
-      - hidden-alpha-project
-      - /work/private/hidden-alpha-project
-      - hidden-session-17
-    summary:
-      projects: []
-      selection:
-        active: true
-        hiddenProjects: 2
-        hiddenSessions: 5
-  - name: genuine no data
-    expectedState: no-data
-    expectedParentLabel: null
-    forbiddenIdentities: []
-    summary:
-      projects: []
-      selection:
-        active: false
-        hiddenProjects: 0
-        hiddenSessions: 0
-  - name: explicit session makes parent visible
+  - name: restrictive-saved-selection-keeps-recorded-projects
     expectedState: projects
     expectedParentLabel: alpha-project
-    forbiddenIdentities: []
     summary:
       projects:
         - projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -45,5 +29,83 @@ cases:
           openChanges: 0
       selection:
         active: true
+        hiddenProjects: 2
+        hiddenSessions: 5
+  - name: empty-saved-selection-keeps-recorded-projects
+    expectedState: projects
+    expectedParentLabel: alpha-project
+    summary:
+      projects:
+        - projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          project: /work/alpha-project
+          sessions: 1
+          recordedFiles: 3
+          totalFiles: 5
+          lastWorkMs: 1770000000000
+          openChanges: 1
+        - projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          project: /work/control-project
+          sessions: 2
+          recordedFiles: 4
+          totalFiles: 8
+          lastWorkMs: 1760000000000
+          openChanges: 0
+      selection:
+        active: true
+        hiddenProjects: 0
+        hiddenSessions: 0
+  - name: excluded-saved-selection-keeps-recorded-projects
+    expectedState: projects
+    expectedParentLabel: alpha-project
+    summary:
+      projects:
+        - projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          project: /work/alpha-project
+          sessions: 1
+          recordedFiles: 3
+          totalFiles: 5
+          lastWorkMs: 1770000000000
+          openChanges: 1
+        - projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          project: /work/control-project
+          sessions: 2
+          recordedFiles: 4
+          totalFiles: 8
+          lastWorkMs: 1760000000000
+          openChanges: 0
+      selection:
+        active: true
+        hiddenProjects: 1
+        hiddenSessions: 3
+  - name: stale-saved-selection-keeps-recorded-projects
+    expectedState: projects
+    expectedParentLabel: alpha-project
+    summary:
+      projects:
+        - projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          project: /work/alpha-project
+          sessions: 1
+          recordedFiles: 3
+          totalFiles: 5
+          lastWorkMs: 1770000000000
+          openChanges: 1
+        - projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          project: /work/control-project
+          sessions: 2
+          recordedFiles: 4
+          totalFiles: 8
+          lastWorkMs: 1760000000000
+          openChanges: 0
+      selection:
+        active: false
+        hiddenProjects: 0
+        hiddenSessions: 0
+  - name: genuine no data
+    expectedState: no-data
+    expectedParentLabel: null
+    summary:
+      projects: []
+      selection:
+        active: false
         hiddenProjects: 0
         hiddenSessions: 0

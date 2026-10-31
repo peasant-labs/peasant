@@ -16,7 +16,7 @@ remain errors, not successful unknown-kind captures.
 - **Namespace** separates discriminator domains. Equal record and block names
   are not the same key. **Match** is literal unless explicitly marked prefix.
 - **Status** is the closed set below, listed with what this build declares.
-  **represented** (interpreted entries or owning-entry state) — 264 rows;
+  **represented** (interpreted entries or owning-entry state) — 275 rows;
   **tracked-only** (stored non-conversation evidence outside interpreted
   transcript entries) — 7 rows; **ignored-control** (no row; the capture
   accounts for the kind and can still certify complete) — 35 rows;
@@ -142,11 +142,11 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | content_block | `tool_result` | literal | represented | yes | tool output |  | `content_capture.go captureContentBlockKinds; claude_indexer.go decomposeClaudeContentBlocks` |
 | native-generation | content_block | `tool_reference` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go captureContentBlockKinds; claude_indexer.go decomposeClaudeContentBlocks` |
 
-## codex (adapter 2, indexer 18)
+## codex (adapter 2, indexer 19)
 
 Baseline index format: 1.
 
-Managed generation: adapter 3, indexer 20, index format 2.
+Managed generation: adapter 3, indexer 21, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -156,6 +156,8 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | envelope | `turn_context` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | envelope | `event_msg` | literal | represented | no | state on owning entry; no independent row |  | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | envelope | `response_item` | literal | represented | no | state on owning entry; no independent row |  | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | envelope | `compacted` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | envelope | `world_state` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | event | `token_count` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | event | `task_started` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | event | `task_complete` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
@@ -163,6 +165,10 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | event | `user_message` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | event | `agent_message` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | event | `agent_reasoning` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `sub_agent_activity` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `patch_apply_end` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `thread_settings_applied` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | event | `web_search_end` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | response_item | `message` | literal | represented | yes | session entries |  | `content_capture.go codexStrictResponsePayloadKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | response_item | `reasoning` | literal | represented | yes | session entries |  | `content_capture.go codexStrictResponsePayloadKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | response_item | `function_call` | literal | represented | no | tool name and arguments |  | `content_capture.go codexStrictResponsePayloadKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
@@ -179,6 +185,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | envelope | `event_msg` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
 | native-generation | envelope | `response_item` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
 | native-generation | envelope | `compacted` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
+| native-generation | envelope | `world_state` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
 | native-generation | event | `token_count` | literal | ignored-control | no | none | Metadata event; no conversation row. | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
 | native-generation | event | `user_message` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
 | native-generation | event | `agent_message` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
@@ -191,6 +198,10 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | event | `task_complete` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
 | native-generation | event | `thread_rolled_back` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
 | native-generation | event | `turn_aborted` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `sub_agent_activity` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `patch_apply_end` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `thread_settings_applied` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
+| native-generation | event | `web_search_end` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
 | native-generation | response_item | `message` | literal | represented | yes | session entries |  | `codex_history_replay.go codexResponseNativeType` |
 | native-generation | response_item | `agent_message` | literal | represented | yes | session entries |  | `codex_history_replay.go codexResponseNativeType` |
 | native-generation | response_item | `reasoning` | literal | represented | yes | session entries |  | `codex_history_replay.go codexResponseNativeType` |

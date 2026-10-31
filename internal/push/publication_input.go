@@ -2,6 +2,7 @@ package push
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -49,6 +50,47 @@ func LoadPublicationInputSelected(ctx context.Context, reader ingest.Publication
 	return input, detail, nil
 }
 
+// NotReadyReason names why a session's stored capture cannot be published yet.
+type NotReadyReason string
+
+const (
+	// NotReadyNeedsIngest is a capture that is not a verified full capture, or
+	// that lacks the model evidence a publication requires: ingest it again.
+	NotReadyNeedsIngest NotReadyReason = "needs_ingest"
+	// NotReadyLatestAttemptKept is a session that keeps a newer incomplete
+	// attempt beside its last-good generation. It is published only with an
+	// explicit --last-good.
+	NotReadyLatestAttemptKept NotReadyReason = "latest_attempt_kept"
+	// NotReadyNoModelReply is a session that never reached a model: it holds
+	// no assistant reply, only setup or local commands, so its source names no
+	// model. A publication requires one and a re-index cannot add it, so the
+	// session stays unpublishable.
+	NotReadyNoModelReply NotReadyReason = "no_model_reply"
+)
+
+// NotReadyError is the refusal ValidatePublicationInput returns. It carries
+// the reason as a value, so a caller that reports a refusal per session reads
+// the decision instead of matching the message. The message and the wrapped
+// category are unchanged.
+type NotReadyError struct {
+	Reason NotReadyReason
+	err    error
+}
+
+func (e *NotReadyError) Error() string { return e.err.Error() }
+
+func (e *NotReadyError) Unwrap() error { return e.err }
+
+// NotReadyReasonOf returns the reason of a NotReadyError anywhere in err's
+// chain, and false when err is not one.
+func NotReadyReasonOf(err error) (NotReadyReason, bool) {
+	var notReady *NotReadyError
+	if errors.As(err, &notReady) {
+		return notReady.Reason, true
+	}
+	return "", false
+}
+
 // ValidatePublicationInput checks the publication policy shared by upload,
 // wizard preview and Share scan. The store checks database capture integrity.
 func ValidatePublicationInput(input ingest.PublicationInputBundle) error {
@@ -56,17 +98,31 @@ func ValidatePublicationInput(input ingest.PublicationInputBundle) error {
 	// before the generic not-ready text: the caller must know that the session
 	// is readable and publishable as last-good, and exactly how to proceed.
 	if input.LatestAttemptPending {
-		return fmt.Errorf("load publication input from peasant.db: %w; latest capture is an incomplete preview; re-index the complete source, or publish the last-good explicitly with --last-good; nothing uploaded", ErrMetadataMissing)
+		return &NotReadyError{Reason: NotReadyLatestAttemptKept, err: fmt.Errorf("load publication input from peasant.db: %w; latest capture is an incomplete preview; re-index the complete source, or publish the last-good explicitly with --last-good; nothing uploaded", ErrMetadataMissing)}
 	}
 	if input.Readiness != ingest.PublicationReady {
-		return fmt.Errorf("load publication input from peasant.db: %w; metadata and indexed entries are not a verified capture; nothing uploaded; "+
+		return &NotReadyError{Reason: NotReadyNeedsIngest, err: fmt.Errorf("load publication input from peasant.db: %w; metadata and indexed entries are not a verified capture; nothing uploaded; "+
 			"incomplete captures require positional omission placeholders or validated retained unknown payloads with complete source coordinates, and carry partial diagnostics; "+
-			"run peasant ingest with the stored source available and retry", ErrMetadataMissing)
+			"run peasant ingest with the stored source available and retry", ErrMetadataMissing)}
+	}
+	if input.Metadata.Model == "" && !hasModelReply(input.Entries) {
+		return &NotReadyError{Reason: NotReadyNoModelReply, err: fmt.Errorf("load publication input from peasant.db: %w; the session holds no assistant reply, only setup or local commands, so its source names no model and re-indexing cannot add one; nothing uploaded; leave the session out of the push", ErrNoModel)}
 	}
 	if input.Metadata.Model == "" {
-		return fmt.Errorf("load publication input from peasant.db: %w; nothing uploaded; run peasant ingest with source model evidence and retry", ErrNoModel)
+		return &NotReadyError{Reason: NotReadyNeedsIngest, err: fmt.Errorf("load publication input from peasant.db: %w; nothing uploaded; run peasant ingest with source model evidence and retry", ErrNoModel)}
 	}
 	return nil
+}
+
+// hasModelReply reports whether any entry is an assistant reply, the only
+// entry a model writes.
+func hasModelReply(entries []schema.SessionEntry) bool {
+	for _, entry := range entries {
+		if entry.Role == schema.RoleAssistant {
+			return true
+		}
+	}
+	return false
 }
 
 // LoadPublicationMetadata prepares list candidates for one lightweight store

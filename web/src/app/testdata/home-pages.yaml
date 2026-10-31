@@ -5,7 +5,7 @@ requiredNames:
   - lazy-children-and-child-more
   - account-change-clears-old-rows
   - collapsed-late-child-is-ignored
-  - selection-refresh-clears-loaded-content
+  - selection-error-keeps-loaded-content
   - overlapping-refresh-does-not-race
   - collapse-cancels-expanded-refresh
   - collapsed-ancestor-skips-descendant-refresh
@@ -15,8 +15,10 @@ requiredNames:
   - generic-child404-retains-visible-content
   - publish-settlement-refreshes-loaded-window
   - publish-during-refresh-queues-one-loaded-window
-  - selection-recovery-survives-failed-retry
-  - selection-recovery-survives-account-reset
+  - selection-error-retry-failure-keeps-loaded-content
+  - selection-error-account-change-refreshes-loaded-content
+  - claude-teammate-line
+  - no-claude-teammate-line
 publish:
   request: { sessionIds: [root-0], redactionLevel: standard }
   response: { errors: 0, new: 1, updated: 0, skipped: 0, sessions: [{ sessionId: root-0, status: new }] }
@@ -33,6 +35,10 @@ visual:
     - { name: desktop, width: 1440, height: 1100 }
     - { name: phone, width: 390, height: 844 }
   projectHash: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90
+  # The recorded teammate identity the mounted child row carries, so the Home
+  # capture proves the served row's identity line instead of a harness-only
+  # string.
+  teammate: { team: migration, name: tests, evidence: native_dynamic_workflow }
   projects:
     - { projectHash: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90, projectName: fixture-project }
     - { projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, projectName: unseen-project }
@@ -55,7 +61,7 @@ cases:
   - name: collapsed-late-child-is-ignored
     roots: 30
     children: 30
-  - name: selection-refresh-clears-loaded-content
+  - name: selection-error-keeps-loaded-content
     roots: 30
     children: 0
   - name: overlapping-refresh-does-not-race
@@ -87,14 +93,19 @@ cases:
   - name: publish-during-refresh-queues-one-loaded-window
     roots: 80
     children: 30
-  - name: selection-recovery-survives-failed-retry
+  - name: selection-error-retry-failure-keeps-loaded-content
     roots: 30
     children: 0
-    cachedSessionId: cached-selection-session
-    cachedProject: cached-selection-project
-  - name: selection-recovery-survives-account-reset
+  - name: selection-error-account-change-refreshes-loaded-content
     roots: 30
     children: 0
-    cachedSessionId: cached-selection-session
-    cachedProject: cached-selection-project
     accountAfterFailure: second-account
+  - name: claude-teammate-line
+    roots: 1
+    children: 1
+    teammate: { team: migration, name: tests }
+    assertTeammateLine: true
+  - name: no-claude-teammate-line
+    roots: 1
+    children: 1
+    assertTeammateLine: true

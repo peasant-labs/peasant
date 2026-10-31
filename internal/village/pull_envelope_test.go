@@ -29,17 +29,21 @@ type pullNegotiateFixture struct {
 	Name         string                     `yaml:"name"`
 	Min          schema.PushContractVersion `yaml:"min"`
 	Current      schema.PushContractVersion `yaml:"current"`
+	Max          schema.PushContractVersion `yaml:"max"`
 	WantEnvelope schema.PushContractVersion `yaml:"wantEnvelope"`
 	WantError    string                     `yaml:"wantError"`
 }
 
 type pullEnvelopeReadFixture struct {
-	Name      string                     `yaml:"name"`
-	Envelope  schema.PushContractVersion `yaml:"envelope"`
-	Surface   string                     `yaml:"surface"`
-	Body      string                     `yaml:"body"`
-	Want      []pullPersonExpect         `yaml:"want"`
-	WantError string                     `yaml:"wantError"`
+	Name             string                     `yaml:"name"`
+	Envelope         schema.PushContractVersion `yaml:"envelope"`
+	Served           string                     `yaml:"served"`
+	Status           int                        `yaml:"status"`
+	Surface          string                     `yaml:"surface"`
+	Body             string                     `yaml:"body"`
+	Want             []pullPersonExpect         `yaml:"want"`
+	WantError        string                     `yaml:"wantError"`
+	WantIncompatible bool                       `yaml:"wantIncompatible"`
 }
 
 type pullPersonExpect struct {
@@ -84,6 +88,9 @@ func TestNegotiatePull_WindowOverlapFixtures(t *testing.T) {
 			if c.Min != "" || c.Current != "" {
 				body += `,"minPullContractVersion":"` + c.Min.String() + `","pullContractVersion":"` + c.Current.String() + `"`
 			}
+			if c.Max != "" {
+				body += `,"pullContractMaxVersion":"` + c.Max.String() + `"`
+			}
 			srv := negotiateTestServer(t, body+"}")
 			envelope, err := village.NewVillageClient(srv.URL, testAPIKey, nil).NegotiatePull(context.Background())
 			switch c.WantError {
@@ -109,9 +116,11 @@ func TestNegotiatePull_WindowOverlapFixtures(t *testing.T) {
 	}
 }
 
-// Every pull GET reads a person in the negotiated envelope (either envelope
-// when none was negotiated); anything that is not a profile reads as anonymous
-// and keeps no identity.
+// Every pull GET asks for the newest pull contract this CLI reads and reads a
+// person in the envelope the response names, falling back to the negotiated
+// envelope, then 0.2.0, when the response names none; anything that is not a
+// profile reads as anonymous and keeps no identity. A 406 or an envelope this
+// CLI does not read is the incompatible-contract error.
 func TestPullGETs_ReadPersonFixtures(t *testing.T) {
 	id := mustTranscriptID(t)
 	for _, c := range loadPullEnvelopeFixtures(t).Read {
@@ -120,12 +129,21 @@ func TestPullGETs_ReadPersonFixtures(t *testing.T) {
 				"metadata":    "/api/v1/pull/transcripts/" + id.String(),
 				"annotations": "/api/v1/pull/transcripts/" + id.String() + "/annotations",
 				"list":        "/api/v1/pull/transcripts",
+				"content":     "/api/v1/pull/transcripts/" + id.String() + "/content",
 			}[c.Surface]
 			if route == "" {
 				t.Fatalf("unknown surface %q", c.Surface)
 			}
-			srv := pullTestServer(t, route, func(w http.ResponseWriter, _ *http.Request) {
+			var requested []string
+			srv := pullTestServer(t, route, func(w http.ResponseWriter, r *http.Request) {
+				requested = r.Header.Values(schema.PullContractHeader)
 				w.Header().Set("Content-Type", "application/json")
+				if c.Served != "" {
+					w.Header().Set(schema.PullContractHeader, c.Served)
+				}
+				if c.Status != 0 {
+					w.WriteHeader(c.Status)
+				}
 				_, _ = io.WriteString(w, strings.ReplaceAll(c.Body, "TRANSCRIPT", id.String()))
 			})
 			client := village.NewVillageClient(srv.URL, testAPIKey, nil)
@@ -153,6 +171,18 @@ func TestPullGETs_ReadPersonFixtures(t *testing.T) {
 						people = append(people, row.Owner)
 					}
 				}
+			case "content":
+				var body io.ReadCloser
+				if body, _, err = client.GetPullTranscriptContent(context.Background(), id, ""); err == nil {
+					_, err = io.ReadAll(body)
+					_ = body.Close()
+				}
+			}
+			if len(requested) != 1 || requested[0] != schema.PublicOwnerPullContractVersion.String() {
+				t.Errorf("%s read sent %s = %q, want exactly [%q]", c.Surface, schema.PullContractHeader, requested, schema.PublicOwnerPullContractVersion)
+			}
+			if c.WantIncompatible && !errors.Is(err, village.ErrPullContractIncompatible) {
+				t.Fatalf("want the incompatible-contract error; got %v", err)
 			}
 			if c.WantError != "" {
 				if err == nil || !strings.Contains(err.Error(), c.WantError) {

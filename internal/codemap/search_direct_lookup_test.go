@@ -12,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/codegraph"
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/gitops"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -205,7 +204,6 @@ func TestSearch_DirectLookup(t *testing.T) {
 				s,
 				func(string) gitops.Repository { return noRepo() },
 				codegraph.NewGraphBuilder(),
-				sessionvisibility.All(),
 			)
 			ctx := context.Background()
 			var payload *schema.SearchPayload

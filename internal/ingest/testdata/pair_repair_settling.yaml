@@ -3,7 +3,8 @@
 # Each case seeds one stored session, runs the production harvest twice, and
 # asserts what the pair reports. A repaired session must index once and fall
 # silent; an unrepairable one must report its cause once and fall silent, while
-# the stored copy keeps serving.
+# the stored copy keeps serving. The stored transcript is a different byte
+# string from the native source, so a rewrite of the stored copy is visible.
 required_names:
   - transcript_only_source_available
   - transcript_only_source_missing

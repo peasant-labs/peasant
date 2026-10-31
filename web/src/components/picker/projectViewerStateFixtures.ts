@@ -8,12 +8,20 @@ import {
   requireRecord,
   requireUniqueNames,
 } from '@/test/strictYaml';
-import { ProjectListState } from './SelectionRecoveryPanel';
+import { ProjectListState } from './projectListState';
 
+/**
+ * Named saved-selection shapes a project picker can be given. Every one that
+ * carries recorded projects must still render them: restrictive, empty,
+ * excluded, and stale saved selections all return the same ingested library as
+ * `mode: all`. Only a genuinely empty store has no projects to show.
+ */
 const REQUIRED_CASE_NAMES = [
-  'all hidden by saved selection',
+  'restrictive-saved-selection-keeps-recorded-projects',
+  'empty-saved-selection-keeps-recorded-projects',
+  'excluded-saved-selection-keeps-recorded-projects',
+  'stale-saved-selection-keeps-recorded-projects',
   'genuine no data',
-  'explicit session makes parent visible',
 ] as const;
 
 export type ProjectViewerStateCaseName = (typeof REQUIRED_CASE_NAMES)[number];
@@ -22,7 +30,6 @@ export interface ProjectViewerStateFixture {
   name: ProjectViewerStateCaseName;
   expectedState: ProjectListState;
   expectedParentLabel: string | null;
-  forbiddenIdentities: string[];
   summary: DecodedProjectSummariesPayload;
 }
 
@@ -96,7 +103,7 @@ function loadProjectViewerStateFixtures(): ProjectViewerStateFixture[] {
     const path = `project viewer state fixture.cases[${index}]`;
     requireExactRequiredFields(
       testCase,
-      ['name', 'expectedState', 'expectedParentLabel', 'forbiddenIdentities', 'summary'],
+      ['name', 'expectedState', 'expectedParentLabel', 'summary'],
       path,
     );
     const name = requiredString(testCase.name, `${path}.name`);
@@ -109,12 +116,6 @@ function loadProjectViewerStateFixtures(): ProjectViewerStateFixture[] {
     if (testCase.expectedParentLabel !== null && typeof testCase.expectedParentLabel !== 'string') {
       throw new Error(`${path}.expectedParentLabel must be a string or null`);
     }
-    if (!Array.isArray(testCase.forbiddenIdentities)) {
-      throw new Error(`${path}.forbiddenIdentities must be an array`);
-    }
-    const forbiddenIdentities = testCase.forbiddenIdentities.map((identity, identityIndex) =>
-      requiredString(identity, `${path}.forbiddenIdentities[${identityIndex}]`),
-    );
 
     const summary = requireRecord(testCase.summary, `${path}.summary`);
     requireExactRequiredFields(summary, ['projects', 'selection'], `${path}.summary`);
@@ -135,7 +136,6 @@ function loadProjectViewerStateFixtures(): ProjectViewerStateFixture[] {
       name: name as ProjectViewerStateCaseName,
       expectedState: testCase.expectedState as ProjectListState,
       expectedParentLabel: testCase.expectedParentLabel as string | null,
-      forbiddenIdentities,
       summary: {
         projects: summary.projects.map((project, projectIndex) =>
           projectSummary(project, `${path}.summary.projects[${projectIndex}]`),

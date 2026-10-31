@@ -1,0 +1,51 @@
+requiredNames:
+  - claude_carrier_does_not_duplicate_its_tool_blocks
+  - legacy_flat_claude_tools_keep_their_count
+  - other_harness_entries_keep_their_count
+  - a_real_flat_call_is_not_a_carrier
+  - claude_task_carrier_is_not_a_second_subagent
+  - missing_parent_keeps_the_tool_block
+cases:
+  - name: claude_carrier_does_not_duplicate_its_tool_blocks
+    entries:
+      - {index: 0, harness: claude-code, role: user}
+      - {index: 1, harness: claude-code, role: assistant, tools: "Read,Grep"}
+      - {index: 2, harness: claude-code, role: assistant, depth: 1, parent: 1, tools: Read, call: call-read}
+      - {index: 3, harness: claude-code, role: assistant, depth: 1, parent: 1, tools: Grep, call: call-grep}
+    turns: 2
+    tools: 2
+    subagents: 0
+  - name: legacy_flat_claude_tools_keep_their_count
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, tools: "Read,Grep"}
+    turns: 1
+    tools: 2
+    subagents: 0
+  - name: other_harness_entries_keep_their_count
+    entries:
+      - {index: 0, harness: opencode, role: assistant, tools: Read}
+      - {index: 1, harness: opencode, role: assistant, depth: 1, parent: 0, tools: Read, call: child-read}
+    turns: 1
+    tools: 2
+    subagents: 0
+  - name: a_real_flat_call_is_not_a_carrier
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, tools: Read, call: parent-read}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parent: 0, tools: Grep, call: child-grep}
+    turns: 1
+    tools: 2
+    subagents: 0
+  - name: claude_task_carrier_is_not_a_second_subagent
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, tools: "Task,Bash"}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parent: 0, tools: Task, call: call-task}
+      - {index: 2, harness: claude-code, role: assistant, depth: 1, parent: 0, tools: Bash, call: call-bash}
+    turns: 1
+    tools: 2
+    subagents: 1
+  - name: missing_parent_keeps_the_tool_block
+    entries:
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parent: 0, tools: Read, call: call-read}
+    turns: 0
+    tools: 1
+    subagents: 0

@@ -94,7 +94,8 @@ vi.mock('@peasant-labs/fairtrade/graph', () => ({
   },
 }));
 
-vi.mock('@peasant-labs/fairtrade/ui', () => ({
+vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@peasant-labs/fairtrade/ui')>()),
     computeAnalytics: (turns: unknown[], options?: Record<string, unknown>) => {
       captures.analytics.push({ turns, options });
       return { scorecard: options?.scorecard };

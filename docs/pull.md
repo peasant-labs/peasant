@@ -94,6 +94,17 @@ window. The explicit **NEGOTIATE** stage (`VillageClient.NegotiatePull`) runs
 **exactly once** per command (in the pipeline op, or once before the remote
 `list` GET), mirroring how push splits `negotiate()` from the transport client.
 
+Each of the four GETs sends the `Peasant-Pull-Contract` request header with the
+newest pull contract this CLI reads (0.3.0). A village that advertises
+`pullContractMaxVersion` serves the highest envelope it supports at or below
+that and names it in the same response header; the response is decoded as
+exactly that envelope, and any 0.3.z patch is read as 0.3.0. A response without
+the header comes from a village that predates it and is decoded as the envelope
+`NegotiatePull` settled (0.2.0 when nothing was negotiated). During a village
+rolling deploy, a response from an instance that predates the header can be
+decoded as a negotiated 0.3.0 and refused; the pull fails closed and a retry
+fixes it.
+
 ---
 
 ## 2. Happy-path pull — the nine stages
@@ -337,6 +348,7 @@ rejected rather than silently resolving the wrong UUID.
 | DB-TX fails **and** cleanup fails | error names orphan dir + instructs `--force` | `TestPullTranscript_CompensationFailure_NamesOrphan` |
 | an error is **never** reported as `up-to-date` | `classifyStatus` panics on nil; success reported directly by caller | `pipeline.go` `classifyStatus` doc; `TestPullTranscript_NotFound`, `TestPullTranscript_ContractError` |
 | village too old (no pull window) | `contract-error` (fail **closed**, unlike push) | `TestNegotiatePull_MissingWindow_AbortsActionably` (`internal/village/pull_test.go`) |
+| village refuses the requested pull contract (406), or serves one this CLI does not read | `contract-error`; the message says to upgrade the CLI | `TestPullGETs_ReadPersonFixtures` (`internal/village/testdata/pull_envelopes.yaml`) |
 | not pullable / not found | `not-found` (404, no existence leak) | `TestPullTranscript_NotFound`; village `TestPull_NotFound_Variants` |
 
 ### 6.5 Legacy pre-envelope blobs

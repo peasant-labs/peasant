@@ -200,7 +200,7 @@ func TestPiHarvestCommonModes(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+			provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 			session, err := provider.SessionByID(context.Background(), "11111111-2222-4333-8444-555555555555")
 			if err != nil {
 				t.Fatal(err)

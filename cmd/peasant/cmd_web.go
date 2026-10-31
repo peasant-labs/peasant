@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -81,7 +82,7 @@ func BuildWebCommand() *cobra.Command {
 			}, spawn, webNoBrowser)
 		},
 	}
-	webStartCmd.Flags().IntVar(&webPort, "port", defaults.DefaultPort, "Port to listen on")
+	portFlagVar(webStartCmd.Flags(), &webPort, defaults.DefaultPort, "Port to listen on (1-65535)")
 	webStartCmd.Flags().BoolVar(&webDev, "dev", false, "Dev mode: proxy to Next.js dev server (implies --foreground)")
 	webStartCmd.Flags().BoolVar(&webFg, "foreground", false, "Run in foreground (no background fork)")
 	webStartCmd.Flags().BoolVar(&webNoBrowser, "no-browser", false, "Don't auto-open browser")
@@ -93,10 +94,13 @@ func BuildWebCommand() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop the web dashboard server",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// A failed stop is never a usage mistake; the usage block
+			// would bury the reason.
+			cmd.SilenceUsage = true
 			return stopWeb(webPort)
 		},
 	}
-	webStopCmd.Flags().IntVar(&webPort, "port", defaults.DefaultPort, "Port the server is listening on")
+	portFlagVar(webStopCmd.Flags(), &webPort, defaults.DefaultPort, "Port the server is listening on (1-65535)")
 
 	webCmd.AddCommand(webStartCmd, webStopCmd)
 
@@ -124,18 +128,18 @@ func toMockConfigResponse(cfg *config.MockConfig) *api.MockConfigResponse {
 
 // runWebForeground runs the server in the current process.
 func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool, mockDataStore string, experimental bool) error {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
 
 	// Load config
-	cfg, err := config.Load(cfgPath, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{})
+	// Browsing remains independent of the ingestion selector. Apply only the
+	// runtime path override after the browsing loader validates other settings.
+	cfg, err := config.LoadForBrowsing(cfgPath, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{})
 	if err != nil {
-		return fmt.Errorf("web startup: load config %q: %w; the server stopped before exposing discovery with default selection, so fix config.yaml or run `peasant kickstart` and retry", cfgPath, err)
+		return fmt.Errorf("web startup: load config %q: %w; the server stopped before opening stored history; fix the reported configuration field and retry", cfgPath, err)
 	}
-	visibility, err := sessionvisibility.New(cfg.Selection)
-	if err != nil {
-		return fmt.Errorf("web startup: selection policy: %w", err)
-	}
+	applyDataDirOverride(cmd, cfg)
+	visibility := sessionvisibility.New(cfg.Selection)
 
 	// Apply CLI overrides for mock data store
 	if mockDataStore != "" {
@@ -441,12 +445,27 @@ func stopWeb(port int) error {
 			}
 		}
 	}
-	if readErr != nil {
+	if errors.Is(readErr, fs.ErrNotExist) {
 		return fmt.Errorf("cannot contact server and no PID file at %s: %w", pidFile, readErr)
+	}
+	if readErr != nil {
+		return fmt.Errorf("cannot contact server and cannot read its PID file %s: %w", pidFile, readErr)
 	}
 	pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
 	if parseErr != nil {
 		return fmt.Errorf("invalid PID in %s: %w", pidFile, parseErr)
+	}
+	// The file can outlive its server (a crash, a reboot) and the PID be
+	// reused by anything. Signal only the detached server for this port. A
+	// process could still exit and its PID be reused between this check and
+	// the signal below; process inspection does not make signalling atomic.
+	isServer, probeErr := isPeasantWebServer(pid, port)
+	if probeErr != nil {
+		return fmt.Errorf("cannot tell whether PID %d from %s is the peasant web server on port %d (%v), so nothing was signalled and the file was kept", pid, pidFile, port, probeErr)
+	}
+	if !isServer {
+		os.Remove(pidFile)
+		return fmt.Errorf("stale PID file %s: PID %d is not a peasant web server on port %d, so nothing was signalled; the file was removed. If a server is still running, find it with your process list and stop it there", pidFile, pid, port)
 	}
 	proc, findErr := os.FindProcess(pid)
 	if findErr != nil {

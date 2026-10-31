@@ -735,7 +735,7 @@ sequenceDiagram
 | `internal/codemap`, `internal/codegraph` | Code map and change review graphs. | api map and review routes |
 | `internal/config` | Settings, selection, redaction policy. | CLI, api, push |
 | `internal/defaults` | Paths, ports, limits, shared constants. | everywhere |
-| `internal/sessionvisibility`, `internal/selectionprojection` | Scope lists and pickers to the selection. The scope is not access control. | api, kickstart |
+| `internal/sessionvisibility`, `internal/selectionprojection` | Origin-only discovery scope for browsing; the saved selection is ingest/push metadata only and never narrows the library. Not access control. | api, kickstart |
 | `internal/export` | Redacted session and annotation export. | `peasant export` |
 | `internal/annotations` | Annotation type registry and validation. | api, `annotate` |
 | `internal/metrics` | Session metrics and classifiers. | ingest, `metrics` |

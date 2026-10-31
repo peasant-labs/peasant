@@ -9,7 +9,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/schema"
 )
 
@@ -343,21 +342,16 @@ func (h *Hub) sendSnapshots(ctx context.Context, conn *Conn, subs []ChannelSubsc
 }
 
 func topicError(sub ChannelSubscription, operation string, err error) ServerMessage {
+	// A browsing topic no longer depends on the saved selection, so a failure
+	// here is never reported as a selection-repair problem. The error text names
+	// the actionable cause.
 	message := operation + ": " + err.Error() + "; the previous data for only this topic was cleared to avoid showing stale results; retry after resolving the reported cause"
-	var data any
-	if sessionvisibility.IsError(err) {
-		data = struct {
-			Code string `json:"code"`
-		}{Code: "selection_visibility"}
-		message += "; run `peasant kickstart` to repair the persisted selection, then retry"
-	}
 	return ServerMessage{
 		Type:    MsgError,
 		Topic:   sub.Topic,
 		ID:      sub.ID,
 		Axis:    sub.Axis,
 		Message: message,
-		Data:    data,
 	}
 }
 

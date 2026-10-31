@@ -119,10 +119,7 @@ func TestManagedDetailReadCarriesStoredTotals(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
-			policy, err := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
-			if err != nil {
-				t.Fatal(err)
-			}
+			policy := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
 			ctx := context.Background()
 			row, err := db.SessionByID(ctx, sessionID)
 			if err != nil || row == nil {

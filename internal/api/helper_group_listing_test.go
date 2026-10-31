@@ -204,10 +204,7 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 		}
 	}
 	selection := helperGroupSelection(tc.Input)
-	policy, err := sessionvisibility.New(selection)
-	if err != nil {
-		t.Fatalf("selection policy: %v", err)
-	}
+	policy := sessionvisibility.New(selection)
 	provider := NewStoreDataProvider(db, policy)
 	base := startHelperGroupServer(t, ServerConfig{
 		Port:     0,

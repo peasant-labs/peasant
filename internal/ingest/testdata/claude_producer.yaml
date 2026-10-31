@@ -762,6 +762,19 @@ cases:
     wantRefusal: true
     wantRefusalLocatorFree: true
 
+  - name: retained-started-by-wrong-hash-refusal
+    # A recorded started_by whose content hash names other bytes is not owner
+    # proof when the native owner source is gone; a presence-only hash check
+    # would accept it.
+    sourcePath: /native/retained-agent-wrong-hash.jsonl
+    recordedSessionId: agent-abc123
+    recordedStartedBy: 11111111-1111-4111-8111-111111111111
+    recordedContentHashMismatch: true
+    transcript: |
+      {"type":"assistant","uuid":"a1","sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"message":{"role":"assistant","content":"agent reply"}}
+    wantRefusal: true
+    wantRefusalLocatorFree: true
+
   - name: refresh-free-schema-eleven
     metadataSchemaVersion: 11
     transcript: |

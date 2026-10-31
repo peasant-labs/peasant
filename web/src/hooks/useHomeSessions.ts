@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchHomeSessions, fetchHomeProjects, SYNC_HOME_PATH, type LocalSyncSessionPage, type SyncSessionsQuery, type LocalSyncProjectOption, type PageToken } from '@/lib/api/home';
-import { discoveryErrorCode, DiscoveryErrorCode, DiscoveryRequestError } from '@/lib/api/errors';
+import { DiscoveryErrorCode, DiscoveryRequestError } from '@/lib/api/errors';
 import { fetchVillageAuth } from '@/lib/api/settings';
 
 export interface HomePages {
@@ -33,8 +33,6 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
   const [projects, setProjects] = useState<LocalSyncProjectOption[] | null>(null);
   const [projectError, setProjectError] = useState<unknown>(null);
   const [projectsLoading, setProjectsLoading] = useState(false);
-  // A transport error or scope reset is not evidence that selection recovered.
-  const [selectionError, setSelectionError] = useState<unknown>(null);
   const scopeRestarted = useRef(false);
   const state = useRef(groups);
   const opened = useRef(expanded);
@@ -64,17 +62,14 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
   const requestQuery = useCallback((parent: string, pageToken: PageToken): SyncSessionsQuery => parent
     ? { maxItems: 25, pageToken, parentSessionId: parent }
     : { ...currentQuery.current, maxItems: 25, pageToken }, []);
+  // A failed read keeps the loaded window on screen and records the failure on
+  // its own continuation. It never resets the list: a saved ingestion selection
+  // is not a browsing boundary, and an error's code does not change that.
   const fail = useCallback((error: unknown, parent: string, retryToken?: PageToken) => {
-    if (discoveryErrorCode(error) === DiscoveryErrorCode.SelectionVisibility) {
-      setSelectionError(error);
-      reset();
-      update(new Map([[ROOT, { ...empty(), error }]]));
-    } else {
-      const next = new Map(state.current);
-      next.set(parent, { ...(next.get(parent) ?? empty()), loading: false, error, retryToken });
-      update(next);
-    }
-  }, [reset, update]);
+    const next = new Map(state.current);
+    next.set(parent, { ...(next.get(parent) ?? empty()), loading: false, error, retryToken });
+    update(next);
+  }, [update]);
   const load = useCallback(async function loadPage(parent = ROOT, pageToken: PageToken = '') {
     if (controllers.current.has(parent) || (parent === ROOT && refreshing.current)) return;
     const token = generation.current;
@@ -89,7 +84,6 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
       const result = new Map(state.current);
       const old = result.get(parent) ?? empty();
       result.set(parent, { pages: [...old.pages, page], loading: false, error: null });
-      if (parent === ROOT) setSelectionError(null);
       update(result);
     } catch (error) {
       if (generation.current === token && !controller.signal.aborted) {
@@ -182,7 +176,6 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
       }
       opened.current = nextExpanded;
       setExpanded(nextExpanded);
-      setSelectionError(null);
       update(next);
     } catch (error) {
       if (token === generation.current && !controller.signal.aborted) {
@@ -265,17 +258,14 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
       const options = await fetchHomeProjects(controller.signal);
       if (!controller.signal.aborted && token === generation.current) setProjects(options);
     } catch (error) {
-      if (!controller.signal.aborted && token === generation.current) {
-        if (discoveryErrorCode(error) === DiscoveryErrorCode.SelectionVisibility) fail(error, ROOT);
-        else setProjectError(error);
-      }
+      if (!controller.signal.aborted && token === generation.current) setProjectError(error);
     } finally {
       if (controllers.current.get('project-options') === controller) {
         controllers.current.delete('project-options');
         setProjectsLoading(false);
       }
     }
-  }, [projects, fail]);
+  }, [projects]);
   const hasRootPage = (groups.get(ROOT)?.pages.length ?? 0) > 0;
   useEffect(() => {
     if (hasRootPage && projects === null && !projectsLoading && projectError === null) void loadProjects();
@@ -285,5 +275,5 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
     if (group?.retryToken !== undefined) return load(parent, group.retryToken);
     return parent ? load(parent, group?.pages.at(-1)?.next ?? '') : refresh();
   };
-  return { groups: loadedQueryKey.current === queryKey ? groups : new Map<string, HomePages>([[ROOT, empty()]]), expanded, toggle, more, refresh, revision: generation.current, retry, projects: loadedQueryKey.current === queryKey ? projects : null, projectError, projectsLoading, loadProjects, selectionError };
+  return { groups: loadedQueryKey.current === queryKey ? groups : new Map<string, HomePages>([[ROOT, empty()]]), expanded, toggle, more, refresh, revision: generation.current, retry, projects: loadedQueryKey.current === queryKey ? projects : null, projectError, projectsLoading, loadProjects };
 }

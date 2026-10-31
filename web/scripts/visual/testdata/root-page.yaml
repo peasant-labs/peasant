@@ -8,7 +8,8 @@
 # syncStatus:       the sync row status (new | updated | synced)
 # autoPublish:      a managed hook publishes the session on push
 # audience:         how many collectives can read it (include=audience)
-# outsideSelection: the saved selection leaves it out, so the list hides it
+# outsideSelection: ingestion/push metadata only; the stored row stays browsable
+autoPublishTipCopy: publish sessions automatically, with secrets hidden.
 pattern:
   - { state: unpublished, syncStatus: new, autoPublish: false, audience: 0, outsideSelection: false }
   - { state: published, syncStatus: synced, autoPublish: false, audience: 2, outsideSelection: false }
@@ -18,12 +19,6 @@ pattern:
   - { state: unpublished, syncStatus: new, autoPublish: false, audience: 0, outsideSelection: true }
   - { state: published, syncStatus: synced, autoPublish: true, audience: 1, outsideSelection: false }
   - { state: unpublished, syncStatus: new, autoPublish: false, audience: 0, outsideSelection: false }
-
-# The selection the "selection notice" state reports on the project summary.
-selectionNotice: { active: true, hiddenProjects: 2, hiddenSessions: 5 }
-
-# The selection the "selection recovery" state reports: every project hidden.
-selectionRecovery: { active: true, hiddenProjects: 3, hiddenSessions: 12 }
 
 # The query typed into the search box for the search state.
 searchQuery: auth
@@ -36,8 +31,40 @@ family:
 # The real mock corpus has fixed historical dates, so its current-week trends
 # are empty. Supply this named trends payload on the real socket for captures.
 # Counts sum to the mock dashboard's 17 sessions; oldest week comes first.
-# The sessions strip instead counts selection-visible roots from the served
-# sync markers and publication selection, before local filters or disclosures.
+# The sessions strip instead counts recorded roots from the served sync markers
+# and publication rows, before local filters or disclosures.
 trends:
   name: eight-active-weeks-show-the-summary-and-weekly-bars
   weeklySessions: [1, 2, 1, 3, 2, 3, 2, 3]
+
+# The populated project pickers behind the same shell. Each case is mounted on
+# the real route from `route`; `home-projects` reaches its picker through the
+# actual browse-by choice, while the other two open their picker route directly.
+# Every case renders the mock server's recorded project library: `destination`
+# is the href prefix of one row, `linkPrefix` is that row's start of accessible
+# name, and `breadcrumb` is the trail the page shows (empty on Home).
+projectPages:
+  requiredNames: [home-projects, map-projects, review-projects]
+  cases:
+    - name: home-projects
+      route: /
+      view: home-project-browse
+      hero: sessions
+      browseView: project
+      destination: /sessions
+      linkPrefix: Open the sessions of
+      breadcrumb: []
+    - name: map-projects
+      route: /map/
+      view: map-picker
+      hero: map
+      destination: /map
+      linkPrefix: Open the map of
+      breadcrumb: [home, map]
+    - name: review-projects
+      route: /review/
+      view: review-picker
+      hero: changes
+      destination: /review
+      linkPrefix: Open the changes of
+      breadcrumb: [home, changes]

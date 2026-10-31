@@ -16,7 +16,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -157,27 +156,15 @@ func TestSearch_IncludesAllStoredMatches(t *testing.T) {
 			for i, session := range tc.Input.Sessions {
 				seedSearchVisibilitySession(t, s, session, int64(i+1))
 			}
-			policy, err := sessionvisibility.New(tc.Input.Selection)
-			if err != nil {
-				t.Fatalf("selection policy: %v", err)
-			}
+			// The fixture still carries saved-selection inputs so each case proves
+			// search ignores them: every stored match is ranked and returned.
 			svc := codemap.NewService(
 				s,
 				func(string) gitops.Repository { return noRepo() },
 				codegraph.NewGraphBuilder(),
-				policy,
 				codemap.WithPathIdentityResolver(selectionStatePathResolver{}),
 			)
 			payload, err := svc.Search(context.Background(), tc.Input.Query, tc.Input.Limit)
-			if tc.Classification == testcase.MustFail {
-				if err == nil || !sessionvisibility.IsError(err) || !strings.Contains(err.Error(), tc.Expected.ErrorContains) {
-					t.Fatalf("Search error = %v, want visibility error containing %q", err, tc.Expected.ErrorContains)
-				}
-				if payload != nil {
-					t.Fatalf("Search returned partial payload on visibility error: %+v", payload)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatalf("Search: %v", err)
 			}

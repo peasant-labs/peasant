@@ -360,30 +360,33 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 			// reads it again; only the full rebuild pass does, and only to
 			// report a saved copy whose bytes no longer match the row. Such a
 			// pair is NEVER mirrored: overwriting the database with the file's
-			// backup after a power loss would fire the identity trigger. The
-			// database still serves the session; the file is what needs repair.
+			// backup after a power loss would fire the identity trigger. Only a
+			// completed index still serves the session; the file is what needs
+			// repair either way.
 			if !p.config.RebuildAll {
 				continue
 			}
 			artifact, err := readArtifactPair(p.fs, output, metadataPath, target.session.SessionID)
 			if err != nil {
-				p.reportMetadataRefusal(string(target.session.SessionID), fmt.Errorf("%s", damagedPairText(target.session.SessionID)))
+				p.reportDamagedPair(target.session.SessionID, state)
 				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
 				continue
 			}
 			if artifact.ArtifactHash != *state.ArtifactHash {
-				p.reportMetadataRefusal(string(target.session.SessionID), fmt.Errorf("%s", damagedPairText(target.session.SessionID)))
+				p.reportDamagedPair(target.session.SessionID, state)
 				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
 			}
 			continue
 		}
 		artifact, err := readArtifactPair(p.fs, output, metadataPath, target.session.SessionID)
 		if err != nil {
-			// A torn or unreadable pair with no row cannot be recorded. The
-			// rebuild names it as a skipped saved copy; a plain index leaves it
-			// to the ordinary readers.
+			// A torn or unreadable pair with no recorded pair identity cannot be
+			// mirrored: there is nothing to mirror it against. A row may exist
+			// here without that identity, so this says nothing about whether an
+			// index has completed. The rebuild names the pair as a skipped saved
+			// copy; a plain index leaves it to the ordinary readers.
 			if p.config.RebuildAll {
-				p.reportMetadataRefusal(string(target.session.SessionID), fmt.Errorf("%s", damagedPairText(target.session.SessionID)))
+				p.reportDamagedPair(target.session.SessionID, state)
 				p.rebuildStale = append(p.rebuildStale, target.session.SessionID)
 			}
 			continue

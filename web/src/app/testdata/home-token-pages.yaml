@@ -11,7 +11,7 @@ requiredNames:
   - late-options-cannot-win-filter-reset
   - account-reset-reloads-project-options
   - project-options-error-retains-rows-and-retries
-  - project-options-selection-error-clears-content
+  - project-options-selection-error-retains-rows-and-retries
 projects:
   - { projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, projectName: alpha }
   - { projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, projectName: beta }
@@ -91,7 +91,7 @@ cases:
       '': { ids: [root-one], next: '' }
     optionsError: { status: 503, code: sync_page_unavailable }
     expectedTokens: ['']
-  - name: project-options-selection-error-clears-content
+  - name: project-options-selection-error-retains-rows-and-retries
     pages:
       '': { ids: [root-one], next: '' }
     optionsError: { status: 500, code: selection_visibility }

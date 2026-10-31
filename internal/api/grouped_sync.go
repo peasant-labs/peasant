@@ -7,12 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
-	"github.com/peasant-labs/peasant/internal/sessionorigin"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
 )
@@ -74,6 +71,9 @@ type syncGroupedReader interface {
 	syncSessionReader
 	GroupingEvidenceForSessions(ctx context.Context, sessionIDs []string) (map[string]store.GroupingEvidenceRow, error)
 	FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (map[string]string, error)
+	// ClaudeTeammates reads the recorded Claude Code teammate identity for the
+	// same page. A missing key means the session carries no recorded spawn edge.
+	ClaudeTeammates(ctx context.Context, sessionIDs []string) (map[string]schema.SessionTeammate, error)
 }
 
 // gatherGroupedSyncCandidates builds the registered GroupedRouteSync predicate.
@@ -100,30 +100,12 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 		return []GroupedCandidate{}, nil
 	}
 
-	// Every grouped route applies the persisted selection scope to its
-	// candidates (the grouped list contract). The legacy flat sync route is
-	// unchanged; the opt-in grouped view is where the chooser's selection
-	// boundary is enforced. Origin scope is deliberately NOT applied here: the
-	// sync route's predicate is the pushable set, and helper sessions are
-	// agent-driven by definition.
-	policy, err := syncSelectionPolicy(h.currentConfig())
-	if err != nil {
-		return nil, err
-	}
-	visibleEntries := make([]syncSessionEntry, 0, len(entries))
-	for _, entry := range entries {
-		visible, visErr := policy.Visible(syncVisibilityCandidate(entry.row))
-		if visErr != nil {
-			return nil, fmt.Errorf("api.syncHandler.gatherGroupedSyncCandidates: apply the persisted selection to pushable session %q: %w; no grouped rows were returned because a partial chooser list would expose an unverified set; run `peasant kickstart` to repair the selection, then retry", entry.row.SessionID, visErr)
-		}
-		if visible {
-			visibleEntries = append(visibleEntries, entry)
-		}
-	}
-	entries = visibleEntries
-	if len(entries) == 0 {
-		return []GroupedCandidate{}, nil
-	}
+	// The chooser lists the same pushable set the flat sync route lists. The
+	// saved kickstart selection is not a browsing predicate: it decides what
+	// Peasant ingests next and what an installed hook may publish, not which
+	// ingested sessions the chooser may show. Origin scope is deliberately NOT
+	// applied here: the sync route's predicate is the pushable set, and helper
+	// sessions are agent-driven by definition.
 
 	ids := make([]string, len(entries))
 	for i := range entries {
@@ -137,12 +119,16 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 	if err != nil {
 		return nil, fmt.Errorf("api.syncHandler.gatherGroupedSyncCandidates: read session previews for the sync chooser: %w; no grouped rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
 	}
+	teammates, err := reader.ClaudeTeammates(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("api.syncHandler.gatherGroupedSyncCandidates: read recorded teammate evidence for the sync chooser: %w; no grouped rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
+	}
 
 	candidates := make([]GroupedCandidate, 0, len(entries))
 	for _, entry := range entries {
 		row := entry.row
 		ev := evidence[row.SessionID]
-		summary, syncSummary, buildErr := buildSyncGroupedRow(entry, ev, previews[row.SessionID])
+		summary, syncSummary, buildErr := buildSyncGroupedRow(entry, ev, previews[row.SessionID], teammateFor(teammates, row.SessionID))
 		if buildErr != nil {
 			return nil, buildErr
 		}
@@ -166,9 +152,11 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 
 // buildSyncGroupedRow derives the matching SessionSummary/LocalSyncSummary pair
 // for one pushable row from the SAME database read, so the schema's mirror check
-// (identity, harness, project, tokens, turn count and optional input count) can
-// only hold or fail closed here rather than downstream.
-func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, preview string) (schema.SessionSummary, schema.LocalSyncSummary, error) {
+// (identity, harness, project, tokens, turn count, optional input count and the
+// teammate identity) can only hold or fail closed here rather than downstream.
+// The teammate is one read's answer, so both summaries carry the same pointer
+// and cannot disagree about it.
+func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, preview string, teammate *schema.SessionTeammate) (schema.SessionSummary, schema.LocalSyncSummary, error) {
 	row := entry.row
 	parentID, unresolved := syncParentMarkers(entry.identity)
 	projectHash, hashErr := schema.NewProjectHash(row.ProjectHash)
@@ -195,6 +183,7 @@ func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, p
 		Purpose:          ev.Purpose,
 		ParentSessionID:  parentID,
 		ParentUnresolved: unresolved,
+		Teammate:         teammate,
 	}
 	syncSummary := schema.LocalSyncSummary{
 		ID:                   row.SessionID,
@@ -213,6 +202,7 @@ func buildSyncGroupedRow(entry syncSessionEntry, ev store.GroupingEvidenceRow, p
 		PreviouslyPushed:     row.PushedAt != nil,
 		ParentSessionID:      parentID,
 		ParentUnresolved:     unresolved,
+		Teammate:             teammate,
 	}
 	return summary, syncSummary, nil
 }
@@ -225,41 +215,6 @@ func syncParentMarkers(identity store.ParentIdentityRow) (*string, *bool) {
 		return &identity.ParentIdentity, nil
 	}
 	return nil, nil
-}
-
-// syncSelectionPolicy returns the persisted selection projection the grouped
-// sync view applies. A nil configuration means no persisted selection, which is
-// the explicit all-data policy rather than a refusal.
-func syncSelectionPolicy(cfg *config.Config) (sessionvisibility.Policy, error) {
-	selection := config.SelectionConfig{Mode: config.SelectionModeAll}
-	if cfg != nil {
-		selection = cfg.Selection
-	}
-	policy, err := sessionvisibility.New(selection)
-	if err != nil {
-		return sessionvisibility.Policy{}, fmt.Errorf("api.syncSelectionPolicy: build the selection projection for the grouped sync chooser: %w; no grouped rows were returned because the saved selection cannot be applied; run `peasant kickstart` to repair it, then retry", err)
-	}
-	return policy, nil
-}
-
-// syncVisibilityCandidate projects one pushable sync row onto the selection
-// input. ClonePath uses the recorded session worktree, falling back to the
-// canonical project path the push reader already resolved.
-func syncVisibilityCandidate(row ingest.PushSessionRow) sessionvisibility.Candidate {
-	branch := ""
-	if row.GitBranch != nil {
-		branch = *row.GitBranch
-	}
-	return sessionvisibility.Candidate{
-		SessionID:       ingest.SessionID(row.SessionID),
-		Harness:         defaults.Harness(row.ModelHarness),
-		GitRemote:       row.GitRemote,
-		ProjectName:     row.ProjectName,
-		ClonePath:       ingest.ClonePath(row.ProjectPath),
-		GitBranch:       branch,
-		Origin:          sessionorigin.Origin(row.SessionOrigin),
-		ParentSessionID: ingest.SessionID(row.ParentID),
-	}
 }
 
 // serveGroupedSyncSessions answers GET /api/v1/sync/sessions?view=grouped. It

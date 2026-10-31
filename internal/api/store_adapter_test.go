@@ -55,12 +55,12 @@ func loadSelectionDiscoveryFixture(t *testing.T) selectionDiscoveryFixture {
 	if len(fixture.Sessions) < 2 || fixture.SelectedSession == fixture.HiddenSession {
 		t.Fatal("selection discovery fixture must contain distinct selected and hidden sessions")
 	}
-	selectedTokens := 0
+	totalTokens := 0
 	seenSelected, seenHidden := false, false
 	for _, session := range fixture.Sessions {
+		totalTokens += session.TokensIn + session.TokensOut
 		if session.ID == fixture.SelectedSession {
 			seenSelected = true
-			selectedTokens += session.TokensIn + session.TokensOut
 		}
 		if session.ID == fixture.HiddenSession {
 			seenHidden = true
@@ -69,8 +69,8 @@ func loadSelectionDiscoveryFixture(t *testing.T) selectionDiscoveryFixture {
 	if !seenSelected || !seenHidden {
 		t.Fatal("selection discovery fixture must include both referenced sessions")
 	}
-	if selectedTokens != fixture.Expected.VisibleTokens {
-		t.Fatalf("fixture visibleTokens = %d, selected rows total %d", fixture.Expected.VisibleTokens, selectedTokens)
+	if totalTokens != fixture.Expected.VisibleTokens {
+		t.Fatalf("fixture visibleTokens = %d, every stored row totals %d", fixture.Expected.VisibleTokens, totalTokens)
 	}
 	return fixture
 }
@@ -191,7 +191,7 @@ func seedStore(t *testing.T, s *store.Store, entries []ingest.StoreEntry) *api.S
 	if err := s.UpdateDailySummary(ctx, days); err != nil {
 		t.Fatalf("UpdateDailySummary: %v", err)
 	}
-	return api.NewStoreDataProvider(s, sessionvisibility.All())
+	return api.NewStoreDataProvider(s, sessionvisibility.Browsing())
 }
 
 // seedStoreWithFS retains the injectable filesystem boundary. Detail content
@@ -222,7 +222,7 @@ func seedStoreWithFS(t *testing.T, s *store.Store, entries []ingest.StoreEntry, 
 	if err := s.UpdateDailySummary(ctx, days); err != nil {
 		t.Fatalf("UpdateDailySummary: %v", err)
 	}
-	return api.NewStoreDataProviderWithFS(s, sessionvisibility.All(), fs)
+	return api.NewStoreDataProviderWithFS(s, sessionvisibility.Browsing(), fs)
 }
 
 // TestStoreDataProvider_AnnotationsForSessionIncludesAssociationTarget proves
@@ -293,7 +293,7 @@ func TestStoreDataProvider_AnnotationsForSessionIncludesAssociationTarget(t *tes
 	}
 }
 
-func TestStoreDataProvider_SelectedSessionScopesDiscoveryButNotDetail(t *testing.T) {
+func TestStoreDataProvider_SelectionDoesNotScopeDiscoveryOrDetail(t *testing.T) {
 	fixture := loadSelectionDiscoveryFixture(t)
 	s := openTestStore(t)
 	if fixture.Harness != defaults.HarnessClaudeCode.String() {
@@ -318,15 +318,14 @@ func TestStoreDataProvider_SelectedSessionScopesDiscoveryButNotDetail(t *testing
 		))
 	}
 	seedStore(t, s, entries)
-	policy, err := sessionvisibility.New(config.SelectionConfig{
+	// The saved selector admits only the first session; browsing must still show
+	// every ingested row.
+	policy := sessionvisibility.New(config.SelectionConfig{
 		Mode: config.SelectionModeSelected,
 		Harnesses: map[string]config.SelectionHarnessConfig{
 			harness.String(): {Sessions: []string{fixture.SelectedSession}},
 		},
 	})
-	if err != nil {
-		t.Fatalf("selection policy: %v", err)
-	}
 	provider := api.NewStoreDataProvider(s, policy)
 	ctx := context.Background()
 
@@ -334,31 +333,31 @@ func TestStoreDataProvider_SelectedSessionScopesDiscoveryButNotDetail(t *testing
 	if err != nil {
 		t.Fatalf("Sessions: %v", err)
 	}
-	if len(sessions) != fixture.Expected.VisibleSessions || string(sessions[0].ID) != fixture.SelectedSession {
-		t.Fatalf("Sessions = %+v, want only the explicit session", sessions)
+	if len(sessions) != fixture.Expected.VisibleSessions {
+		t.Fatalf("Sessions = %+v, want every stored session", sessions)
 	}
 	summaries, err := provider.SessionSummaries(ctx)
 	if err != nil || len(summaries) != fixture.Expected.VisibleSessions {
-		t.Fatalf("SessionSummaries = %+v, %v; want one visible row", summaries, err)
+		t.Fatalf("SessionSummaries = %+v, %v; want every stored row", summaries, err)
 	}
 	dashboard, err := provider.DashboardMetrics(ctx)
 	if err != nil || dashboard.TotalSessions != fixture.Expected.VisibleSessions || dashboard.TotalTokens != fixture.Expected.VisibleTokens {
-		t.Fatalf("DashboardMetrics = %+v, %v; want selected-session totals", dashboard, err)
+		t.Fatalf("DashboardMetrics = %+v, %v; want every stored session's totals", dashboard, err)
 	}
 	trends, err := provider.TrendsData(ctx)
 	if err != nil || trends.TotalSessions != fixture.Expected.VisibleSessions || trends.TotalTokens != fixture.Expected.VisibleTokens {
-		t.Fatalf("TrendsData = %+v, %v; want selected-session totals", trends, err)
+		t.Fatalf("TrendsData = %+v, %v; want every stored session's totals", trends, err)
 	}
 	quality, err := provider.QualitySessions(ctx, api.QualityFilter{})
 	if err != nil || len(quality) != fixture.Expected.VisibleSessions {
-		t.Fatalf("QualitySessions = %+v, %v; want one visible row", quality, err)
+		t.Fatalf("QualitySessions = %+v, %v; want every stored row", quality, err)
 	}
 	projects, err := provider.ProjectSummaries(ctx)
 	if err != nil || len(projects.Projects) != fixture.Expected.VisibleProjects || projects.Projects[0].Sessions != fixture.Expected.VisibleSessions {
-		t.Fatalf("ProjectSummaries = %+v, %v; want one project with one visible session", projects, err)
+		t.Fatalf("ProjectSummaries = %+v, %v; want one project carrying every stored session", projects, err)
 	}
 
-	// Direct access remains available even though the sibling is absent from discovery.
+	// Direct access remains available, exactly as it was under the old policy.
 	detail, err := provider.SessionByID(ctx, fixture.HiddenSession)
 	if err != nil || detail == nil {
 		t.Fatalf("SessionByID hidden sibling = %+v, %v; want retained direct access", detail, err)
@@ -558,7 +557,7 @@ func TestStoreDataProvider_SessionByID_Found(t *testing.T) {
 func TestStoreDataProvider_SessionByID_NotFound(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
-	provider := api.NewStoreDataProvider(s, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(s, sessionvisibility.Browsing())
 	ctx := context.Background()
 
 	sess, err := provider.SessionByID(ctx, "nonexistent-id")
@@ -634,7 +633,7 @@ func TestStoreDataProvider_DashboardMetrics(t *testing.T) {
 func TestStoreDataProvider_DashboardMetrics_Empty(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
-	provider := api.NewStoreDataProvider(s, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(s, sessionvisibility.Browsing())
 	ctx := context.Background()
 
 	dash, err := provider.DashboardMetrics(ctx)

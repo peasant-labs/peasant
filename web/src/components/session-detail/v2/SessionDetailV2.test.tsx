@@ -55,9 +55,7 @@ vi.mock('@peasant-labs/fairtrade/graph', () => ({
 // The viewer now mounts fairtrade's composite; the adapter must return a
 // turns-bearing VM because the host derives toolVMsByTurn from it. Partial
 // mock: other components in the tree import real primitives (Button etc.).
-// The mock renders both host extension slots used by this integration:
-// `streamPrelude` (in the transcript stream) and `headerActions` (in the
-// hero action row) — the restored "copy as markdown" home.
+// The mock exposes the host's stream, primary-action and utility slots.
 vi.mock(import('@peasant-labs/fairtrade/ui'), async (importOriginal) => {
   const actual = await importOriginal();
   const ReactModule = await import('react');
@@ -79,11 +77,14 @@ vi.mock(import('@peasant-labs/fairtrade/ui'), async (importOriginal) => {
         <div
           data-testid="package-breadcrumb"
           data-crumbs={JSON.stringify(
-            (props.breadcrumb ?? []).map((c) => [c.label, c.href ?? null]),
+            (props.breadcrumbContext ?? []).map((c) => [c.label, c.href ?? null]),
           )}
         />
         <div data-testid="package-header-actions">
           {props.headerActions as React.ReactNode}
+        </div>
+        <div data-testid="package-utility-actions">
+          {props.utilityActions as React.ReactNode}
         </div>
         <div data-testid="package-transcript-stream">
           {props.streamPrelude as React.ReactNode}
@@ -265,7 +266,7 @@ function crumbs(): [string, string | null][] {
 }
 
 describe('SessionDetailV2 — breadcrumb trail', () => {
-  it('walks sessions → this project\'s sessions → this session', () => {
+  it('passes navigable ancestors for the viewer to append its title', () => {
     currentSearchParams = new URLSearchParams();
     renderChangeScope();
 
@@ -273,15 +274,12 @@ describe('SessionDetailV2 — breadcrumb trail', () => {
     expect(trail.map(([label]) => label)).toEqual([
       'sessions',
       'alpha-project',
-      'sess-123',
     ]);
     // The root returns to Home's sessions; the project crumb returns to THAT
     // project's session list — never to the capability-gated map.
     expect(trail[0][1]).toBe('/');
     expect(trail[1][1]).toBe(`/sessions/${PROJECT_HASH}`);
     expect(trail.some(([, href]) => href?.startsWith('/map'))).toBe(false);
-    // The session you are on is the end of the trail, so it is not a link.
-    expect(trail[2][1]).toBeNull();
   });
 });
 
@@ -379,37 +377,37 @@ describe('SessionDetailV2 — the "showing every step" prelude is gone', () => {
     channelData = DETAIL;
   });
 
-  it('copies the conversation as Markdown from the header\'s more menu (not the removed prelude)', async () => {
+  it('copies the conversation from the utility slot, not the primary header', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
     render(<TestSessionDetail sessionId="sess-12345678" />);
 
     const headerActions = screen.getByTestId('package-header-actions');
-    // The header's secondary actions live in the more menu the publish bar
-    // carries; there is no standalone copy button any more.
-    expect(within(headerActions).queryByRole('button', { name: 'copy as markdown' })).not.toBeInTheDocument();
-    fireEvent.click(within(headerActions).getByRole('button', { name: 'more' }));
-    fireEvent.click(within(headerActions).getByRole('menuitem', { name: 'copy as markdown' }));
+    const utilities = screen.getByTestId('package-utility-actions');
+    expect(within(headerActions).queryByRole('button', { name: 'copy transcript' })).not.toBeInTheDocument();
+    expect(within(headerActions).queryByRole('button', { name: 'more' })).not.toBeInTheDocument();
+    fireEvent.click(within(utilities).getByRole('button', { name: 'copy transcript' }));
 
     expect(writeText).toHaveBeenCalledTimes(1);
     const md = writeText.mock.calls[0][0] as string;
     expect(md).toContain('## You');
     expect(md).toContain('q0'); // the DETAIL fixture's first user turn
-    expect(within(headerActions).getByRole('status')).toHaveTextContent('copied as markdown');
+    expect(await screen.findByText('copied as markdown')).toBeInTheDocument();
+    expect(within(headerActions).queryByText('copied as markdown')).not.toBeInTheDocument();
   });
 
-  it('keeps only the copy actions in the more menu and always shows the session figures', () => {
+  it('keeps the copy link action in the more menu and always shows the session figures', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
     const { container } = render(<TestSessionDetail sessionId="sess-12345678" />);
-    const headerActions = screen.getByTestId('package-header-actions');
+    const utilities = screen.getByTestId('package-utility-actions');
     const host = container.querySelector('[data-tour="transcript-view"]');
     // No class hides the figures under the title, and no menu item toggles them.
     expect(host?.className).not.toMatch(/metrics/);
 
-    fireEvent.click(within(headerActions).getByRole('button', { name: 'more' }));
-    expect(within(headerActions).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['copy as markdown', 'copy link']);
-    fireEvent.click(within(headerActions).getByRole('menuitem', { name: 'copy link' }));
+    fireEvent.click(within(utilities).getByRole('button', { name: 'more' }));
+    expect(within(utilities).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['copy link']);
+    fireEvent.click(within(utilities).getByRole('menuitem', { name: 'copy link' }));
     expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/projects/${PROJECT_HASH}/sess-12345678`);
   });
 
@@ -437,7 +435,7 @@ describe('SessionDetailV2 — the "showing every step" prelude is gone', () => {
   it('keeps the bounded transcript-view shell height class intact after the prelude removal', () => {
     const { container } = render(<TestSessionDetail sessionId="sess-12345678" />);
     expect(container.querySelector('[data-tour="transcript-view"]')).toHaveClass(
-      'h-[var(--app-body-height)]',
+      'h-full',
     );
   });
 

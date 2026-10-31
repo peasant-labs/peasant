@@ -31,7 +31,7 @@ cases:
   - {name: opencode declaration rename fails, harness: opencode, operation: rename-first, error: has no declaration}
   # The Codex native event inventory is not the first inventory of its harness:
   # these cases prove the census is checked there, in both directions.
-  - {name: codex native event declaration removal fails, harness: codex, operation: remove-first, context: native-generation, namespace: event, error: 'production native-generation/event/turn_aborted (literal) has no declaration'}
+  - {name: codex native event declaration removal fails, harness: codex, operation: remove-first, context: native-generation, namespace: event, error: 'production native-generation/event/web_search_end (literal) has no declaration'}
   - {name: codex native event census removal fails, harness: codex, operation: remove-production, context: native-generation, namespace: event, kind: thread_rolled_back, error: 'declaration native-generation/event/thread_rolled_back (literal) is absent from production dispatch'}
   - {name: codex native event outcome alteration is reported, harness: codex, operation: alter-outcome, context: native-generation, namespace: event, kind: item_completed, outcome: text, status: represented, preview: yes}
   - {name: codex native event rollback outcome is reported, harness: codex, operation: alter-outcome, context: native-generation, namespace: event, kind: thread_rolled_back, outcome: tool-result, status: represented, preview: yes}

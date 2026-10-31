@@ -23,18 +23,20 @@ import (
 )
 
 // selectionScopeReader says which named sessions the saved selection admits
-// into the local lists. The store-backed provider implements it.
+// for ingest/push metadata, never browsing. The store-backed provider implements it.
 type selectionScopeReader interface {
-	SelectionScopeByID(ctx context.Context, ids []string) (map[string]bool, error)
+	SelectionScopeByID(ctx context.Context, ids []string, resolver ingest.RepositoryIdentityResolver) (map[string]bool, error)
 }
 
 var _ selectionScopeReader = (*StoreDataProvider)(nil)
+var _ selectionScopeReader = (*ProgressiveProvider)(nil)
 
 // publishingHandler serves the reads the publish popup needs: the publication
 // state of sessions, and the Village collectives the user can publish to.
 type publishingHandler struct {
 	store     *store.Store
 	selection selectionScopeReader
+	resolver  ingest.RepositoryIdentityResolver
 	// configHome overrides the XDG config root the stored Village credential is
 	// read from. Empty keeps the process environment.
 	configHome string
@@ -75,8 +77,9 @@ func (h *publishingHandler) signedIn() *auth.Credentials {
 
 // handlePublications reports whether each named session is published on
 // Village for the signed-in account, from the receipts and attempts this
-// computer recorded. It ignores the saved selection: a session the lists leave
-// out is still returned, marked outsideSelection.
+// computer recorded. It reports the saved INGEST/PUSH selector on every row and
+// never withholds one: outsideSelection describes future hook/CLI publication
+// scope, not whether the row may be browsed.
 func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	query := r.URL.Query()
@@ -101,7 +104,7 @@ func (h *publishingHandler) handlePublications(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	scope, err := h.selection.SelectionScopeByID(r.Context(), ids)
+	scope, err := h.selection.SelectionScopeByID(r.Context(), ids, h.resolver)
 	if err != nil {
 		writeDiscoveryError(w, "failed to read the publication state", err)
 		return

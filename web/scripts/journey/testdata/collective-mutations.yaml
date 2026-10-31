@@ -3,11 +3,10 @@ cases:
   - name: typed-partial-report-discarded
     testName: web-catalog-updated-history-old-502
     asset: /app/village/
-    # The request options and the response check are semantic; the minified identifiers around
-    # them (request helper, schema namespace) move with the compiler. The injected guard names
-    # the response local, so a rename fails the expected-error check instead of passing silently.
-    find: '{method:"POST",signal:e});if(!'
-    replace: '{method:"POST",signal:e});if(!s.ok)throw Error("typed partial report discarded");if(!'
+    # Match the unique typed fetch response check, capturing minified locals instead
+    # of pinning names chosen by one compiler build. Missing/ambiguous matches refuse proof.
+    findRegex: '(?<answer>[$A-Z_a-z][$\w]*)=await (?<request>\(0,[$\w]+\.[$\w]+\)\([$\w]+,\{method:"POST",signal:[$\w]+\}\));if\(!(?<schema>[$\w]+\.[$\w]+)\.safeParse\(\k<answer>\.body\)'
+    replace: '$<answer>=await $<request>;if(!$<answer>.ok)throw Error("typed partial report discarded");if(!$<schema>.safeParse($<answer>.body)'
     expectedError: metadata fetch partial
   - name: village-back-in-nav
     testName: village-route-only-from-home

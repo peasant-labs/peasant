@@ -8,9 +8,9 @@
 #
 # sessions: the sync list, newest first. `count` > 1 expands one entry into that
 #   many sessions named `<id>-00`, `<id>-01`, ... A session with
-#   `publication: false` gets no publication row, and one with
-#   `outsideSelection: true` is marked outside the saved selection: the list
-#   shows neither, and neither may appear anywhere on the page.
+#   `publication: false` gets no publication row, so it has no publish state to
+#   show and is left out. `outsideSelection: true` is ingestion/push metadata:
+#   the row stays browsable and keeps its publish state.
 # expectedPages: the rows on each page of the table, first to last. Omitted,
 #   the whole list fits on the first page.
 # expectedLabels: the publish state each named row shows.
@@ -21,7 +21,7 @@ requiredNames:
   - not-published-counts
   - published-counts
   - auto-counts
-  - outside-selection-hidden
+  - outside-selection-still-browsable
   - next-page
   - pending-collectives-cannot-read
   - parent-visible-child-grouped
@@ -31,7 +31,7 @@ requiredNames:
   - unresolved-child-hidden
   - cache-only-child-grouped
   - filtered-parent-omits-child
-  - selection-hidden-parent-and-child
+  - selection-metadata-does-not-hide-family
   - fork-without-markers-top-level
   - paging-keeps-child-with-parent
   - child-search-keeps-publish-label
@@ -111,14 +111,16 @@ cases:
     expectedLabels:
       s-a: auto-publish on
 
-  - name: outside-selection-hidden
+  - name: outside-selection-still-browsable
     sessions:
       - { id: s-seen, project: alpha, syncStatus: new, state: unpublished }
-      - { id: s-hidden, project: beta, syncStatus: synced, state: published, outsideSelection: true }
+      - { id: s-outside, project: beta, syncStatus: synced, state: published, outsideSelection: true }
       - { id: s-unread, project: beta, syncStatus: new, state: unpublished, publication: false }
     filter: all
-    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
-    expectedRows: [s-seen]
+    expectedCounts: { all: 2, notPublished: 1, published: 1, auto: 0 }
+    expectedRows: [s-seen, s-outside]
+    expectedLabels:
+      s-outside: published
 
   - name: next-page
     sessions:
@@ -219,17 +221,23 @@ cases:
     expectedRows: [shown]
     expectedGroups: []
 
-  - name: selection-hidden-parent-and-child
+  - name: selection-metadata-does-not-hide-family
+    # The saved selection marks an ingested parent, its child, and a second
+    # child outside the selection. All three stay browsable; only the row with
+    # no publication record is left out because it has no publish state to show.
     sessions:
       - { id: shown, project: alpha, syncStatus: new, state: unpublished }
-      - { id: hidden-parent, project: beta, syncStatus: new, state: unpublished, outsideSelection: true }
-      - { id: visible-child, project: beta, syncStatus: new, state: unpublished, parentSessionId: hidden-parent }
-      - { id: hidden-child, project: alpha, syncStatus: new, state: unpublished, parentSessionId: shown, outsideSelection: true }
+      - { id: outside-parent, project: beta, syncStatus: new, state: unpublished, outsideSelection: true }
+      - { id: visible-child, project: beta, syncStatus: new, state: unpublished, parentSessionId: outside-parent }
+      - { id: outside-child, project: alpha, syncStatus: synced, state: published, parentSessionId: shown, outsideSelection: true }
       - { id: unread-child, project: alpha, syncStatus: new, state: unpublished, parentSessionId: shown, publication: false }
     filter: all
-    expectedCounts: { all: 1, notPublished: 1, published: 0, auto: 0 }
-    expectedRows: [shown]
-    expectedGroups: []
+    expectedCounts: { all: 2, notPublished: 2, published: 0, auto: 0 }
+    expectedRows: [shown, outside-parent]
+    expectedGroups: [shown, outside-parent]
+    steps:
+      - { expand: shown, children: [outside-child] }
+      - { expand: outside-parent, children: [outside-child, visible-child], groups: [shown, outside-parent] }
 
   - name: fork-without-markers-top-level
     sessions:

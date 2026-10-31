@@ -88,7 +88,7 @@ export interface TranscriptPublishOptions {
   turns: readonly { timestamp: string }[];
   /** Whether the page has the session's detail yet; nothing is scanned before it. */
   loaded: boolean;
-  /** The header's overflow actions, carried by the bar's more menu. */
+  /** The transcript's overflow actions, alongside publishing settings when available. */
   moreItems: MenuItem[];
   /** The route asked to open the popup on arrival (`?publish=open`). */
   openOnArrival: boolean;
@@ -99,8 +99,10 @@ export interface TranscriptPublishOptions {
 }
 
 export interface TranscriptPublish {
-  /** The header row's status, its one action, and the more menu. */
+  /** The header row's status and primary action. */
   bar: ReactNode;
+  /** The same overflow actions, placed by the viewer with other utilities. */
+  utilities: ReactNode;
   /** The publish popup, rendered beside the viewer. */
   dialog: ReactNode;
 }
@@ -613,7 +615,6 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       <PublishBar
         {...barModel({ publication: read.publication, audienceKnown: read.audienceKnown, newTurns, publishingTo })}
         onAction={openPopup}
-        moreItems={menuItems}
       />
     )
     : (
@@ -628,7 +629,6 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
             </button>}
           </>
         )}
-        <Menu icon={MoreHorizontal} ariaLabel="more" size="sm" align="end" items={menuItems} />
       </span>
     );
 
@@ -696,5 +696,6 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     />
   );
 
-  return { bar, dialog };
+  const utilities = <Menu icon={MoreHorizontal} ariaLabel="more" size="sm" align="end" items={menuItems} />;
+  return { bar, utilities, dialog };
 }

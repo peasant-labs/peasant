@@ -25,7 +25,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/codegraph"
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
 )
@@ -85,13 +84,10 @@ const (
 	searchMinQueryLen  = 2
 
 	// SearchDefaultLimit and SearchMaxLimit publish the flat search route's page
-	// bounds. A caller that must apply its own eligibility before paging — the
-	// grouped local search view applies the persisted selection matcher — walks
-	// ranked windows of at most SearchMaxLimit entries with SearchRankedWindow and
-	// pages the entries that survive, then applies SearchDefaultLimit when the
-	// request named no limit. Sharing the constants keeps the grouped page and the
-	// flat page in the same units, and walking windows rather than reading one
-	// window is what keeps a selected match ranked past the bound reachable.
+	// bounds. The grouped local search view pages ranked windows of at most
+	// SearchMaxLimit entries through SearchRankedWindow and applies
+	// SearchDefaultLimit when the request named no limit. Sharing the constants
+	// keeps the grouped page and the flat page in the same units.
 	SearchDefaultLimit = searchDefaultLimit
 	SearchMaxLimit     = searchMaxLimit
 )
@@ -110,21 +106,12 @@ type Service struct {
 	// nowMs stamps MapGraphPayload.GeneratedAtMs; injectable for tests.
 	nowMs func() int64
 
-	// onVisibilityQuery, if set, is called once per projectHasVisibleSession
-	// invocation — nil in production. It exists solely so tests can count
-	// calls into that seam and prove ResolveProject's not-found and
-	// hidden-match legacy-label branches both route through it the same
-	// number of times — closing the residual DB-query-count timing
-	// side-channel between those two failure paths.
-	onVisibilityQuery func()
-
 	// graphCache memoizes codegraph builds keyed by "repoPath@SHA". A commit
 	// SHA pins the entire tree, so a graph built at a resolved SHA never goes
 	// stale — safe to share across requests. Guarded by graphMu; cached
 	// graphs are treated as immutable after Build.
 	graphMu    sync.Mutex
 	graphCache map[string]*codegraph.Graph
-	visibility sessionvisibility.Policy
 }
 
 // ServiceOption customizes an internal codemap service dependency.
@@ -143,7 +130,7 @@ func WithPathIdentityResolver(resolver ingest.PathIdentityResolver) ServiceOptio
 // NewService wires the service. repoFor turns a project's canonical_cwd into
 // a gitops.Repository (production: gitops.NewExecGitRepository; tests:
 // testutil.StubGitRepository).
-func NewService(s *store.Store, repoFor func(path string) gitops.Repository, builder codegraph.Builder, visibility sessionvisibility.Policy, options ...ServiceOption) *Service {
+func NewService(s *store.Store, repoFor func(path string) gitops.Repository, builder codegraph.Builder, options ...ServiceOption) *Service {
 	service := &Service{
 		store:                s,
 		repoFor:              repoFor,
@@ -151,7 +138,6 @@ func NewService(s *store.Store, repoFor func(path string) gitops.Repository, bui
 		pathIdentityResolver: ingest.NewPhysicalPathResolver(),
 		nowMs:                func() int64 { return time.Now().UnixMilli() },
 		graphCache:           make(map[string]*codegraph.Graph),
-		visibility:           visibility,
 	}
 	for _, option := range options {
 		if option != nil {
@@ -271,11 +257,9 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.
 
 // SearchRankedWindow reads ONE page of the same ranked global full-text search
 // Search serves, addressed by a raw offset into the ranked stream rather than a
-// position inside an already-filtered set. A caller that must apply its own
-// eligibility to the ranked matches — the grouped local search view applies the
-// persisted selection matcher — walks successive windows and counts its page
-// limit only over the entries that survive, so an ineligible entry can never
-// displace an eligible one that ranks past the flat route's bound.
+// position inside an already-filtered set. The grouped local search view walks
+// successive windows and counts its page limit over the entries it keeps, so a
+// grouped page and the flat page stay in the same units.
 //
 // window must be within (0, SearchMaxLimit]; offset must be non-negative. The
 // ordering is the same deterministic (rank, session, entry) order Search uses,
@@ -285,7 +269,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.
 func (s *Service) SearchRankedWindow(ctx context.Context, query string, window, offset int) (*schema.SearchPayload, error) {
 	if window <= 0 || window > searchMaxLimit {
 		return nil, fmt.Errorf(
-			"codemap: ranked search window %d is outside the supported 1..%d range in codemap.Service.SearchRankedWindow; a caller iterating the ranked stream to apply its own eligibility cannot page a window the flat search contract does not allow, and no search results were read; clamp the window to the flat search bounds and retry",
+			"codemap: ranked search window %d is outside the supported 1..%d range in codemap.Service.SearchRankedWindow; a caller iterating the ranked stream cannot page a window the flat search contract does not allow, and no search results were read; clamp the window to the flat search bounds and retry",
 			window, searchMaxLimit,
 		)
 	}

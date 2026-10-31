@@ -16,9 +16,18 @@ const migrationV63 = `CREATE TABLE session_source_unavailability (
 
 var _ ingest.SourceAvailabilityStore = (*Store)(nil)
 
-// RecordSourceUnavailable returns true only for a newly recorded transition.
+// RecordSourceUnavailable returns true when the stored cause is newly
+// recorded or replaced by a different cause. A repeated cause returns false.
 // Absence of a row means no unavailability has been observed, not proof that
 // the original source is currently readable.
+//
+// This method records the cause it is handed and replaces any other one, in
+// either direction. Which observed cause outranks a stored one is not decided
+// here: the ordering is one-way, because a present-but-unusable source
+// supersedes a missing one and never the reverse, and the ingest caller
+// (settleUnavailableSource) owns it as the single place that applies it. A
+// caller that writes straight to this method can downgrade a more specific
+// stored cause and make every later harvest report it again.
 func (s *Store) RecordSourceUnavailable(ctx context.Context, sid ingest.SessionID, reason ingest.SourceUnavailabilityReason) (bool, error) {
 	validated, err := ingest.NewSourceUnavailabilityReason(string(reason))
 	if err != nil {
@@ -30,7 +39,7 @@ func (s *Store) RecordSourceUnavailable(ctx context.Context, sid ingest.SessionI
 	}
 	defer s.pool.Put(conn)
 	changed := false
-	err = sqlitex.ExecuteTransient(conn, `INSERT INTO session_source_unavailability (session_id, reason) VALUES (?, ?) ON CONFLICT(session_id) DO NOTHING RETURNING session_id`, &sqlitex.ExecOptions{
+	err = sqlitex.ExecuteTransient(conn, `INSERT INTO session_source_unavailability (session_id, reason) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET reason = excluded.reason WHERE reason IS NOT excluded.reason RETURNING session_id`, &sqlitex.ExecOptions{
 		Args: []any{string(sid), string(validated)}, ResultFunc: func(*sqlite.Stmt) error { changed = true; return nil },
 	})
 	if err != nil {

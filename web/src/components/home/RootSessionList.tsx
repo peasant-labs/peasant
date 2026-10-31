@@ -150,9 +150,11 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
   const start = pageRows.slice(0, current - 1).reduce((sum, items) => sum + items.length, 0);
   useEffect(() => {
     if (wanted === null) return;
-    if (pageRows.length >= wanted) setPaging((state) => ({ ...state, page: wanted, wanted: null }));
-    else if (!reading && !hasMore) setPaging((state) => ({ ...state, wanted: null }));
-  }, [wanted, pageRows.length, reading, hasMore]);
+    // Rows render before this effect settles the requested page. A newer click
+    // or scope change must win over that older request's completion.
+    if (pageRows.length >= wanted) setPaging((state) => state.scope === scope && state.wanted === wanted ? { ...state, page: wanted, wanted: null } : state);
+    else if (!reading && !hasMore) setPaging((state) => state.scope === scope && state.wanted === wanted ? { ...state, wanted: null } : state);
+  }, [scope, wanted, pageRows.length, reading, hasMore]);
   const choose = (next: number) => {
     if (next <= pageRows.length) {
       setPaging((state) => ({ ...state, page: next, wanted: null }));
@@ -256,11 +258,20 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
           ) : (
             <span className="home-session-title">{title.text}</span>
           );
+          // The recorded teammate identity is evidence the server read from the
+          // parent transcript, so it rides under the title as one small line and
+          // never replaces the title, agent, token, project, count, or state.
+          const teammate = row.sync.teammate ? (
+            <span className="home-session-teammate">
+              teammate {row.sync.teammate.name} · {row.sync.teammate.team}
+            </span>
+          ) : null;
           if (row.kind === 'child') {
             return (
               <div className="home-session-cell" style={{ paddingLeft: `calc(${row.depth} * (var(--sp-5) + var(--sp-4)))` }}>
                 <span id={`session-group-rows:${row.id}`} data-session-group-child={row.id} className="home-session">
                   {link}
+                  {teammate}
                   {meta}
                   {phone}
                 </span>
@@ -272,6 +283,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
             <div className="home-session-cell" data-session-family={row.id}>
               <span className="home-session" data-session-id={row.id}>
                 {link}
+                {teammate}
                 {meta}
                 {phone}
               </span>

@@ -21,6 +21,169 @@ Release, which holds the signed artifacts and checksums.
   sessions "not ingested" and left the copies as recorded. Redact now writes
   the redacted transcript and metadata by rename, so an interrupted run never
   leaves a truncated file.
+- `sessions list` selects sessions by what happened inside them. `--has` takes
+  `subagent`, `skill`, `mcp`, `compact`, `clear`, `model-switch`, `background`
+  and `partial`, and every named facet must hold. `--min-turns` and `--max-turns`
+  bound the `turns` column. Each `--json` row now states `facets`.
+- `sessions prompts <session-id>` prints only what the person typed in a
+  session, with `--json`, `--max-chars` and `--include-commands`. It reads both
+  stored representations, and it warns with `capture_bounded` when a session's
+  stored text is a bounded preview.
+
+### Changed
+- `sessions list` shows main sessions only by default, so a script that counts
+  its rows now sees fewer. `--include-subagents` lists every session, and
+  `--session <id>` still finds a subagent session. Each `--json` row now states
+  `parentSessionId`, `parentUnresolved` and `rootSessionId`.
+
+### Fixed
+- Only one writing harvest runs at a time per data directory. Two harvests
+  started together on one data dir used to race each other's index
+  replacement. Now `peasant harvest`, `harvest logs`, `harvest index` and
+  kickstart's import take a lock file (`harvest.lock` in the data
+  directory). A second one waits for the first to finish: the CLI logs
+  "another harvest is running on this data dir; waiting for it to finish",
+  kickstart shows the same reason on its progress screen, and Ctrl+C stops
+  the wait. The web server does not wait: after one 250ms attempt, its
+  ingest and re-index routes refuse with "another harvest is running"
+  (HTTP 409 `ingest_running` for re-indexing one session). A dry run takes
+  no lock. Other commands that write the data directory, such as `prune`,
+  `redact` and `kickstart --reset`, do not take this lock; do not run them
+  during a harvest.
+- Claude discovery skips harness-injected `isMeta` notices when choosing session titles. Existing cached transcripts are read again once to refresh their titles.
+- A session `export sessions` or publication refuses now states the reason stored for its capture and the one command that repairs it, `peasant harvest index --session <id>`, or says that this build cannot lift the refusal. Damaged content names `peasant harvest index --force`, the only run that replaces it.
+- `harvest --since` reports the stored sessions outside its window that still need index maintenance, which it used to skip without saying so. Run `peasant harvest index` to process them; this is what repairs sessions an older build stored as bounded previews.
+- A stale session the index stage repairs is no longer reported, in the same run, as a capture that stays incomplete.
+
+### Changed
+- `export sessions` exits 1 when it refuses any session, not only when it refuses all of them. The sessions it could export stay written. Its summary line counts refusals by reason, and `--json` carries the same counts in `refused` and `refusal_reasons`.
+
+### Fixed
+- `--data-dir` now keeps default transcript copies beside its database under
+  `<data-dir>/peasant/peasant-sync`, including web publication and reindexing.
+  A configured custom output path is preserved. Existing copies are not moved;
+  installations that previously used `--data-dir` can run `harvest --force`
+  with that same data directory once to recreate them in the corrected location.
+### Changed
+- The local web commands accept decimal TCP ports from 1 to 65535 and reject
+  invalid values before starting a server. Base-prefixed values such as `0x50`
+  are refused; `080` means port 80.
+- `peasant harvest --json`: `Summary.Unchanged` no longer counts sessions
+  the saved selection leaves out. They are counted in a new
+  `Summary.ExcludedBySelection` key, and each such session in `Sessions`
+  carries a new `excludedBySelection: true` key; its `status` stays
+  `"unchanged"`, so readers of `status` see no change. Scripts that add up
+  `Unchanged` to get the total must add `ExcludedBySelection`. The text
+  summary and kickstart's completion screen show "N excluded by
+  selection". The local web API's sync status is unchanged: its
+  `unchanged` count still includes excluded sessions.
+
+## [0.13.5] - 2026-10-29
+
+### Fixed
+- Transcript search highlights matches and reveals results inside nested output.
+- Mermaid diagrams accept safe line breaks, and tool disclosures start their
+  transitions from the beginning.
+- Fixed-width readers adapt to the space available beside the sidebars.
+
+## [0.13.4] - 2026-10-28
+
+### Changed
+- The transcript uses the shared bounded layout and identifies recorded pull
+  requests as unverified evidence. Their source opens the recorded command and
+  result without making a GitHub request or changing access.
+
+## [0.13.3] - 2026-10-28
+
+### Changed
+- The local transcript moves to Fairtrade 0.0.48. Model actions appear once per
+  user turn after the first prose, with the action list open and each output
+  closed. Compact mode collapses the lists. Thinking has its own boxed output,
+  and Bash input keeps one prompt without a repeated icon.
+
+### Fixed
+- Turn selection follows clicks and rapid keyboard navigation, the reading
+  width stays where it was set, and the outline follows the reading position.
+  System turns can be hidden with the filters. Action disclosures and sidebars
+  retain their contents while closing, and the condensed header exchanges
+  space with the timeline without a jump, respecting reduced motion.
+
+## [0.13.2] - 2026-10-27
+
+### Changed
+- The local transcript moves to Fairtrade 0.0.47. A turn's work is its own row
+  after the prose, opened from its summary line, and the tool and thinking
+  lines are inline detail rather than a footer on the turn. The timeline reads
+  amber for agent turns again, the reader centres in the space it has, and the
+  publish action reads `publish` in every state.
+
+### Fixed
+- Zen takes the app's own sidebar with it. The transcript fills the window
+  while zen is on, and the sidebar's collapse state is untouched, so leaving
+  zen restores exactly what the reader had.
+
+## [0.13.1] - 2026-10-26
+
+### Changed
+- The local transcript reads as a ledger on Fairtrade 0.0.46: each turn leads
+  with its role, number, time and copy link, its tool calls gather into one work
+  panel, and a system notice is one compact row. The session views and the
+  search trigger sit in a bottom bar under the body, the shortcut hint and the
+  position counter stay available there, and the reader can set the reading
+  width, enter zen, and copy a turn's anchor from the head. Provider identity
+  stays on the header's meta row.
+
+## [0.13.0] - 2026-10-26
+
+### Added
+- The session read carries the commits a session produced and the pull
+  requests its `gh pr create` calls detected, so the local web shows both
+  under a session instead of leaving them to the git history alone. A pulled
+  request is bound to the evidence that named it, an unknown-time commit stays
+  unattributed, and the session read advances to schema 0.34.1.
+- The local reads expose a recorded Claude teammate identity and its lineage.
+  A session qualifies only when a stored Claude Code child and its stored
+  parent both name the same team and agent, and the parent's recorded spawns
+  name that pair; the relation is read from the existing evidence cache with
+  no schema change, and the durable detail payload never carries it.
+- A native OpenCode fork is recorded as a `context_from` relationship. The
+  child already materialises the parent prefix, so the relation carries the
+  native evidence and an anchor rather than a copied prefix, and the snapshot
+  digest binds the pointer and the boundary.
+- The command pull-request detector unwraps shell wrappers around
+  `gh pr create`, so a request created through a wrapper script is detected and
+  its branches have pinned handling.
+
+### Changed
+- The local web moves to Fairtrade 0.0.46 and the ledger reading surface: a
+  turn reads as a role-led line, its tool calls group into one work panel, a
+  system notice is one compact row, and the session views sit in a bottom bar
+  with the reading-width control, zen, and the shared work grid.
+- Pulling asks peasant online for pull contract 0.3.0. Each pull read (the
+  list, a transcript's metadata, its annotations and its content) sends the
+  `Peasant-Pull-Contract` header, so a peasant online that serves 0.2.0 by
+  default serves this CLI the 0.3.0 envelope, where each person is shown as you
+  may see them. The response names the envelope it carries in the same header
+  and is read as exactly that envelope; any 0.3.x patch is read as 0.3.0. A
+  peasant online that predates the header is read as before.
+- When peasant online no longer serves the pull contract this CLI reads, it
+  answers 406 and the pull stops with the "pull-contract incompatible" error,
+  which says to upgrade the CLI. The same error stops a pull when peasant
+  online serves an envelope this CLI does not read.
+
+### Fixed
+- A Claude Code VS Code prompt stays one user turn. The extension writes
+  injected editor context and the typed prompt as two text blocks, and the
+  decomposition turned the prompt into a subagent turn while repeating the
+  context; a user record written as a content-block array now stores its whole
+  text on the one depth-0 carrier, and empty system control turns with a source
+  reference no longer render as empty headers.
+- A one-session re-index that leaves the stored evidence refused says so. The
+  response used to report done while the same stored copy stayed in place, so
+  the publish popup offered the same repair again; it now names the step that
+  is actually left.
+- An intact pair whose source refuses is settled once instead of repeating on
+  every ingest, and an unrepairable stored pair is settled rather than retried.
 
 ## [0.12.0] - 2026-10-24
 
@@ -851,6 +1014,9 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.13.5]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.5
+[0.13.4]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.4
+[0.13.3]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.3
 [0.11.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.11.1
 [0.11.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.11.0
 [0.10.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.10.0

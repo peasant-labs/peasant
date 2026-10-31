@@ -518,25 +518,26 @@ func TestResolveStoredTargetsIgnoresSelection(t *testing.T) {
 	}
 	api.MarkStoredSessionsIndexed(t, db)
 
-	policy, err := sessionvisibility.New(config.SelectionConfig{
+	policy := sessionvisibility.New(config.SelectionConfig{
 		Mode: config.SelectionModeSelected,
 		Harnesses: map[string]config.SelectionHarnessConfig{
 			"claude-code": {Projects: []config.ProjectSelection{{ClonePaths: []string{listedClone}}}},
 		},
 	})
-	if err != nil {
-		t.Fatalf("build stored-target selection policy: %v", err)
-	}
 	provider := api.NewStoreDataProvider(db, policy)
 
 	discovery, err := provider.SessionSummaries(t.Context())
 	if err != nil {
 		t.Fatalf("discovery summaries: %v", err)
 	}
+	foundOutsideSelection := false
 	for _, summary := range discovery {
 		if summary.ID == hiddenID {
-			t.Fatal("unselected session must stay out of discovery lists")
+			foundOutsideSelection = true
 		}
+	}
+	if !foundOutsideSelection {
+		t.Fatal("an ingested session outside the saved selector must still appear in discovery lists")
 	}
 
 	targets, err := provider.ResolveStoredTargets(t.Context(), []string{listedID, hiddenID, missingID})
@@ -551,7 +552,7 @@ func TestResolveStoredTargetsIgnoresSelection(t *testing.T) {
 		t.Fatal("listed session must resolve as a stored target")
 	}
 	if !byID[hiddenID].Found || byID[hiddenID].Summary == nil || byID[hiddenID].Summary.ID != hiddenID {
-		t.Fatal("stored-but-unselected session must resolve as a stored target: selection is not access")
+		t.Fatal("stored session must resolve as a stored target regardless of the saved selector")
 	}
 	if byID[missingID].Found || byID[missingID].Summary != nil {
 		t.Fatal("missing session must resolve to an explicit unavailable target")

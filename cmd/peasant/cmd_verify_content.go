@@ -18,7 +18,7 @@ import (
 // healing still needs that harvest to run.
 func runVerifyContent(cmd *cobra.Command, repair bool) error {
 	cfgPath := resolveConfigPath(cmd)
-	cfg, err := loadConfig(cfgPath)
+	cfg, err := loadCommandConfig(cmd, cfgPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

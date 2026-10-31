@@ -111,13 +111,16 @@ type PipelineSummary struct {
 	New                  int
 	Updated              int
 	Unchanged            int
-	Active               int
-	Errors               int
-	Indexed              int                           // sessions successfully indexed into session_entries
-	Computed             int                           // sessions whose metrics were (re)computed
-	StoreError           error                         // non-nil if DB insert failed; pipeline continued normally
-	HarvesterVersions    map[Harness]HarvesterVersions // current targets, not successful per-session producer stamps
-	MetadataVersion      int                           // CurrentSchemaVersion used this run
+	// ExcludedBySelection counts sessions the saved selection left out. They
+	// are not "unchanged": nothing has stored them.
+	ExcludedBySelection int
+	Active              int
+	Errors              int
+	Indexed             int                           // sessions successfully indexed into session_entries
+	Computed            int                           // sessions whose metrics were (re)computed
+	StoreError          error                         // non-nil if DB insert failed; pipeline continued normally
+	HarvesterVersions   map[Harness]HarvesterVersions // current targets, not successful per-session producer stamps
+	MetadataVersion     int                           // CurrentSchemaVersion used this run
 	// ReminedEvidenceRecords is how many cached discovery evidence records this
 	// run had to mine again. It is greater than zero on the first run after an
 	// upgrade that added a field the cached records do not carry, and zero on
@@ -155,6 +158,9 @@ type SessionResult struct {
 	Status     DiffStatus // Classified status from diff phase; does NOT change on processing error.
 	OutputPath string     // Final output directory (empty for dry-run, skipped, or error).
 	Error      error      // non-nil if processing failed; check Error before trusting Status.
+	// ExcludedBySelection marks a session the saved selection left out. Its
+	// Status stays DiffUnchanged for callers that only skip it.
+	ExcludedBySelection bool
 	// Prevent the same invocation's stale-index sweep from bypassing a failed
 	// reconciliation. This is execution state, not a serialized success marker.
 	mirrorPending bool
@@ -198,6 +204,11 @@ type PipelineConfig struct {
 	// Non-nil means only sessions in the map are processed.
 	// An empty non-nil map means NO sessions pass.
 	AllowedSessionIDs map[SessionID]bool
+	// AllowedSessionIDsIsSelection reports the sessions AllowedSessionIDs
+	// leaves out as excluded by selection rather than unchanged. Kickstart
+	// sets it, because its allowlist is the user's selection; a --session or
+	// single-session reindex scope is not, and keeps reporting unchanged.
+	AllowedSessionIDsIsSelection bool
 	// Since filters sessions by age: only sessions with ModTime (or CreatedAt)
 	// at or after this time are processed.
 	// nil means no time-based filter (backward compatible).
@@ -278,6 +289,11 @@ type indexedMeta struct {
 // Pipeline composes all ingest stages with dependency injection.
 // It is the concrete implementation of Discoverer, DiffResolver, and OrphanCleaner.
 type Pipeline struct {
+	// runLockPath is the WithRunLock lock file; empty takes no lock.
+	// runLockNoWait fails a held lock after one runLockPoll attempt (WithRunLockNoWait).
+	runLockPath   string
+	runLockNoWait bool
+
 	fs       FileSystem
 	git      GitResolver
 	adapters map[Harness]AdapterFactory
@@ -371,6 +387,29 @@ type Pipeline struct {
 	diagnostics          []DiagnosticEntry
 	diagnosticSessions   map[sessionDiagnostic]struct{}
 	diagnosticSet        map[DiagnosticEntry]struct{}
+	// The two maps below record what this harvest has already told the user
+	// about a session's unusable source. They share one mutex because both are
+	// written from the same lanes in the same run.
+	//
+	// unavailableSettledThisRun names sessions whose source-unavailability
+	// transition was recorded during this harvest. A later lane in the same
+	// run still owes its own report; a later harvest sees the stored row and
+	// owes nothing. It is not a selection signal: a recorded failure never
+	// decides whether a stored pair is indexed.
+	//
+	// laneCauseReportedThisRun is written and read only by the stored-content
+	// lane and the pair-repair lane. If one of them already reported a cause
+	// for a session, the other stays quiet for that same cause. A different
+	// cause still reports. The index lane does not use it.
+	sourceRunStateMu          sync.Mutex
+	unavailableSettledThisRun map[SessionID]struct{}
+	laneCauseReportedThisRun  map[laneCauseReport]struct{}
+	// unroutedRepairs are forced repairs whose source could not be routed to
+	// native re-ingestion. They are counted once as failed sessions. A session
+	// the process path already failed is not counted again.
+	unroutedRepairMu   sync.Mutex
+	unroutedRepairs    []SessionResult
+	unroutedRepairSeen map[SessionID]struct{}
 
 	// v2 analytics stages (all optional; nil = skip stage).
 	redactor               TextRedactor                  // REDACT stage: applied before writing metadata to disk
@@ -686,6 +725,8 @@ func (p *Pipeline) storedParentSet(ctx context.Context, entries []DiffEntry) map
 //  9. AUDIT: Write ingest_log entry (best-effort)
 func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) {
 	p.resetDiagnostics()
+	p.resetUnavailableSettledThisRun()
+	p.resetUnroutedRepairs()
 	p.locationCache = nil
 	p.seqCursorCache = nil
 	defer func() {
@@ -700,6 +741,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("pipeline start: %w", err)
 	}
+	unlock, err := p.lockRun(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	// REINDEX mode: alternative code path that scans peasant-sync output
 	// instead of discovering from source providers.
@@ -851,6 +897,20 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			Status:     status,
 		})
 	}
+	excludeBySelection := func(entry DiffEntry) {
+		excluded := SessionResult{
+			SessionID:           entry.Session.SessionID,
+			Harness:             entry.Session.Harness,
+			ParentUUID:          entry.Session.ParentUUID,
+			Status:              DiffUnchanged,
+			ExcludedBySelection: true,
+		}
+		if p.config.DryRun {
+			dryRunSessions = append(dryRunSessions, excluded)
+		}
+		sessionResults = append(sessionResults, excluded)
+		emitAdvance(prog, StageFilter, 1, len(diffResult.Sessions))
+	}
 
 	// Track which root sessions passed the selection filter so subagents
 	// can inherit their parent's fate (rejected parent → rejected children).
@@ -861,7 +921,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			emitAdvance(prog, StageFilter, 1, len(diffResult.Sessions))
 		}
 		// AllowedSessionIDs filter: skip sessions not in the allowed set.
-		if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[entry.Session.SessionID] {
+		if !p.includesSession(entry.Session.SessionID) {
+			if p.config.AllowedSessionIDsIsSelection {
+				excludeBySelection(entry)
+				continue
+			}
 			recordDryRun(entry, DiffUnchanged)
 			sessionResults = append(sessionResults, SessionResult{
 				SessionID:  entry.Session.SessionID,
@@ -876,14 +940,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		// Exact child denials take precedence over inherited parent admission.
 		// The callback is lookup-only over the cohort prepared after discovery.
 		if p.config.SessionExclusionFilter != nil && p.config.SessionExclusionFilter(entry.Session) {
-			recordDryRun(entry, DiffUnchanged)
-			sessionResults = append(sessionResults, SessionResult{
-				SessionID:  entry.Session.SessionID,
-				Harness:    entry.Session.Harness,
-				ParentUUID: entry.Session.ParentUUID,
-				Status:     DiffUnchanged,
-			})
-			advanceFilter()
+			excludeBySelection(entry)
 			continue
 		}
 
@@ -898,59 +955,34 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		if p.config.SessionFilter != nil {
 			if IndependentAdmissionHarness(entry.Session.Harness) {
 				if !p.config.SessionFilter(entry.Session) {
-					recordDryRun(entry, DiffUnchanged)
-					sessionResults = append(sessionResults, SessionResult{
-						SessionID:  entry.Session.SessionID,
-						Harness:    entry.Session.Harness,
-						ParentUUID: entry.Session.ParentUUID,
-						Status:     DiffUnchanged,
-					})
-					advanceFilter()
+					excludeBySelection(entry)
 					continue
 				}
 			} else if entry.Session.ParentUUID == nil {
 				if !p.config.SessionFilter(entry.Session) {
-					recordDryRun(entry, DiffUnchanged)
-					sessionResults = append(sessionResults, SessionResult{
-						SessionID:  entry.Session.SessionID,
-						Harness:    entry.Session.Harness,
-						ParentUUID: entry.Session.ParentUUID,
-						Status:     DiffUnchanged,
-					})
-					advanceFilter()
+					excludeBySelection(entry)
 					continue
 				}
 				filterPassedParents[entry.Session.SessionID] = true
 			} else if !filterPassedParents[*entry.Session.ParentUUID] {
-				recordDryRun(entry, DiffUnchanged)
-				sessionResults = append(sessionResults, SessionResult{
-					SessionID:  entry.Session.SessionID,
-					Harness:    entry.Session.Harness,
-					ParentUUID: entry.Session.ParentUUID,
-					Status:     DiffUnchanged,
-				})
-				advanceFilter()
+				excludeBySelection(entry)
 				continue
 			}
 		}
 
-		// Since filter: skip sessions older than the cutoff.
-		if p.config.Since != nil {
-			sessionTime := entry.Session.ModTime
-			if !entry.Session.CreatedAt.IsZero() {
-				sessionTime = entry.Session.CreatedAt
-			}
-			if sessionTime.Before(*p.config.Since) {
-				recordDryRun(entry, DiffUnchanged)
-				sessionResults = append(sessionResults, SessionResult{
-					SessionID:  entry.Session.SessionID,
-					Harness:    entry.Session.Harness,
-					ParentUUID: entry.Session.ParentUUID,
-					Status:     DiffUnchanged,
-				})
-				advanceFilter()
-				continue
-			}
+		// Since filter: skip sessions older than the cutoff. A discovered
+		// session's own start is the created time the harness recorded, or the
+		// file time when it recorded none.
+		if !p.withinRunAge(discoveredSessionStart(entry.Session)) {
+			recordDryRun(entry, DiffUnchanged)
+			sessionResults = append(sessionResults, SessionResult{
+				SessionID:  entry.Session.SessionID,
+				Harness:    entry.Session.Harness,
+				ParentUUID: entry.Session.ParentUUID,
+				Status:     DiffUnchanged,
+			})
+			advanceFilter()
+			continue
 		}
 
 		// A supported source the discovery hint could not prove unchanged is
@@ -1054,6 +1086,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		result.Summary.OriginResolve = p.originResolve
 		result.Summary.OriginResolveError = p.originResolveErr
 		for _, session := range dryRunSessions {
+			if session.ExcludedBySelection {
+				result.Summary.ExcludedBySelection++
+				continue
+			}
 			switch session.Status {
 			case DiffNew:
 				result.Summary.New++
@@ -1329,7 +1365,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			// before reading its pair: the run must not reconstruct or report
 			// refusals for a session it was never going to upgrade, and the
 			// report names the count instead.
-			if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[sid] {
+			if !p.includesSession(sid) {
 				selectionSkipped++
 				continue
 			}
@@ -1354,6 +1390,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 					missingInput++
 					continue
 				}
+			}
+			// An age filter leaves a session out exactly as a session filter does,
+			// so it is counted the same way: `harvest --since` must not skip stored
+			// maintenance without saying so.
+			if !p.withinRunAge(startMs) {
+				selectionSkipped++
+				continue
 			}
 			// The pair-repair pass owns a session whose saved pair is missing
 			// or damaged: its pair is not a readable index input, and that pass
@@ -1664,7 +1707,7 @@ func (p *Pipeline) indexLoop(
 		go func() {
 			defer parserWG.Done()
 			for work := range indexCh {
-				result := p.parseIndexMeta(ctx, work.meta, &activeParses, &maxActiveParses, logPrefix)
+				result := p.parseIndexMeta(ctx, work.meta, &activeParses, &maxActiveParses, logPrefix, writeLane)
 				result = p.admitNativeResult(ctx, result, gate)
 				if batch, complete := work.batch.completeWorkItem(); complete {
 					indexDoneCh <- batch
@@ -1960,7 +2003,7 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		go func() {
 			defer parsers.Done()
 			for im := range work {
-				result := p.parseIndexMeta(ctx, im, &activeParses, &maxActiveParses, logPrefix)
+				result := p.parseIndexMeta(ctx, im, &activeParses, &maxActiveParses, logPrefix, nil)
 				parsed <- p.admitNativeResult(ctx, result, gate)
 			}
 		}()
@@ -1983,7 +2026,7 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 	return indexed, logs, refused
 }
 
-func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activeParses *atomic.Int64, maxActiveParses *atomic.Int64, logPrefix string) (result indexParseResult) {
+func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activeParses *atomic.Int64, maxActiveParses *atomic.Int64, logPrefix string, writeLane *storeWriteLane) (result indexParseResult) {
 	result = indexParseResult{im: im, startedAt: time.Now().UnixMilli(), bytes: p.indexProfileBytes(im)}
 	defer func() {
 		result.im.transcriptData = nil
@@ -2215,7 +2258,12 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			return result
 		}
 		slog.Warn(logPrefix+": index transcript", "session_id", im.session.SessionID, "error", err)
-		p.reportIndexRefusal(im.session.SessionID, err)
+		// A refusal about the source bytes is reported once. The audit row still
+		// records every attempt, and the parse still runs every harvest, so a
+		// repaired source is seen; only the user-facing repeat settles.
+		if cause, ok := sourceUnavailableCause(err); !ok || p.settleUnavailableSource(ctx, im.session.SessionID, cause, writeLane) {
+			p.reportIndexRefusal(im.session.SessionID, err)
+		}
 		errMsg := err.Error()
 		result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
 		return result
@@ -3248,6 +3296,11 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 				piConsumedBytes = doc.consumedBytes
 			} else {
 				data, err = completeJSONLPrefix(data)
+				if err != nil {
+					// A record that is not complete JSON is a present source
+					// whose bytes cannot be used, distinct from a missing file.
+					err = malformedSourceRecord{cause: err}
+				}
 			}
 		}
 		if err != nil {
@@ -4271,6 +4324,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	refusedKinds []RecordKindRefusal,
 ) (*PipelineResult, error) {
 	prog := p.config.Progress
+	sessionResults = p.appendUnroutedRepairFailures(sessionResults)
 
 	// INDEX session_entries (best-effort, non-fatal).
 	// successfullyIndexed tracks successfully stored index results. Persistent
@@ -4529,6 +4583,10 @@ func (p *Pipeline) indexComputeAndFinalize(
 			pipelineResult.Summary.Errors++
 			continue
 		}
+		if sr.ExcludedBySelection {
+			pipelineResult.Summary.ExcludedBySelection++
+			continue
+		}
 		switch sr.Status {
 		case DiffNew:
 			pipelineResult.Summary.New++
@@ -4549,12 +4607,14 @@ func (p *Pipeline) indexComputeAndFinalize(
 	if p.logger != nil {
 		finishedAt := time.Now().UnixMilli()
 		logEntry := IngestLogEntry{
-			Outcomes:          p.runOutcomes(sessionResults, finishedAt),
-			StartedAt:         start.UnixMilli(),
-			FinishedAt:        &finishedAt,
-			SessionsNew:       pipelineResult.Summary.New,
-			SessionsUpdated:   pipelineResult.Summary.Updated,
-			SessionsUnchanged: pipelineResult.Summary.Unchanged,
+			Outcomes:        p.runOutcomes(sessionResults, finishedAt),
+			StartedAt:       start.UnixMilli(),
+			FinishedAt:      &finishedAt,
+			SessionsNew:     pipelineResult.Summary.New,
+			SessionsUpdated: pipelineResult.Summary.Updated,
+			// The stored log keeps its meaning: excluded sessions stay in
+			// unchanged so a run's stored counts add up to its session total.
+			SessionsUnchanged: pipelineResult.Summary.Unchanged + pipelineResult.Summary.ExcludedBySelection,
 			SessionsError:     pipelineResult.Summary.Errors,
 			IndexedCount:      pipelineResult.Summary.Indexed,
 			ComputedCount:     pipelineResult.Summary.Computed,
@@ -5037,17 +5097,21 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 
 	// Stage 3: FILTER — explicit session and age constraints apply to both stale
 	// and forced work. Saved discovery selection is not an access boundary over
-	// already-stored sessions and is deliberately not applied here.
+	// already-stored sessions and is deliberately not applied here. Only the
+	// session half is tested here: the harness half was already decided upstream,
+	// by pairRepairTargets in Stage 1 for a repair and by the Stage 2 inventory
+	// for the rest, and a repair target may legitimately carry no named harness,
+	// so testing it strictly again would drop repairs this run selected.
 	filterProfileStart := time.Now()
 	filterTotal := len(targeted)
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageFilter, Total: filterTotal})
 	filtered := targeted[:0]
 	for _, target := range targeted {
-		allowed := p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[target.session.SessionID]
+		allowed := p.includesSession(target.session.SessionID)
 		// Stored metadata records the native session start. The managed file's
 		// mtime is publication time, so it cannot establish a session's age.
-		if allowed && p.config.Since != nil {
-			allowed = !time.UnixMilli(target.startMs).Before(*p.config.Since)
+		if allowed {
+			allowed = p.withinRunAge(target.startMs)
 		}
 		if allowed {
 			if err := p.checkStoredMetadataVersion(ctx, target.session.SessionID); err != nil {
@@ -5123,8 +5187,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			// Native re-ingestion is the repair: prefer the session as
 			// discovery saw it, and fall back to the stored source locator
 			// when discovery did not offer it. A source that is gone is
-			// reported, not silently dropped.
-			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch) {
+			// reported, not silently dropped. A forced run counts that as a
+			// failed session instead of indexing the damaged pair.
+			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch, p.pairRepairInScope(t.session, t.startMs)) && !p.config.Force {
 				fallbackTargets = append(fallbackTargets, t)
 			}
 			continue
@@ -5135,7 +5200,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		// selected sessions are checked, so no tree is walked and no pair is
 		// read for work this run does not owe.
 		if p.pairNeedsRepair(ctx, t.session.SessionID) {
-			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch) {
+			if !p.routePairRepair(ctx, t, sourceSessions, entryByID, inBatch, p.pairRepairInScope(t.session, t.startMs)) && !p.config.Force {
 				fallbackTargets = append(fallbackTargets, t)
 			}
 			continue
@@ -5465,7 +5530,12 @@ func (t reindexTarget) repairMetadataPath() string {
 // re-ingestion. The session as discovery saw it is preferred (workspace,
 // worktree, commit context); the stored source locator is the fallback. It
 // reports and returns false when no source is reachable.
-func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, sourceSessions map[SessionID]DiscoveredSession, entryByID map[SessionID]DiffEntry, inBatch map[SessionID]bool) bool {
+//
+// inScope is the run's explicit-filter verdict for this target, computed by each
+// caller from pairRepairInScope: the tolerant harness test, the session filter,
+// and the --since window. It is a parameter rather than an assumption because
+// the filters are applied by the caller's stage, not here.
+func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, sourceSessions map[SessionID]DiscoveredSession, entryByID map[SessionID]DiffEntry, inBatch map[SessionID]bool, inScope bool) bool {
 	sid := target.session.SessionID
 	if discovered, found := sourceSessions[sid]; found {
 		entryByID[sid] = DiffEntry{Session: discovered, Status: DiffUpdated, pairRepair: true, repairMetadataPath: target.repairMetadataPath()}
@@ -5481,6 +5551,11 @@ func (p *Pipeline) routePairRepair(ctx context.Context, target reindexTarget, so
 		}
 	}
 	p.reportPairRepairUnavailable(ctx, sid, target.originalSourcePath, nil, nil)
+	// Returning false leaves the session out of the extract batch. A forced
+	// run still has to count that unrouted repair; the caller must not also
+	// index the stored pair, which is missing or damaged by definition. The
+	// repair is this run's failure only when the run's own filters cover it.
+	p.noteUnroutedForcedRepair(sid, target.session.Harness, target.originalSourcePath, inScope)
 	return false
 }
 

@@ -3,13 +3,14 @@
  *
  * It boots peasant twice, each on its own throwaway XDG directories so no
  * real session store is read:
- *   - with the mock store (`web,sessions,qualitySessions,search`), which serves
- *     retained browse, project summaries, transcript details and search;
+ *   - with the mock store (`web,sessions,qualitySessions,search,review`), which
+ *     serves retained browse, project summaries, transcript details, search and
+ *     the review route;
  *   - with no mock store, for the empty install.
  * The mock store holds no Home pages or publication receipts, so the
  * browser fulfils the home/project-options sync views and publications from
  * the mock sessions and the pattern in testdata/root-page.yaml. The project
- * summary is intercepted only for the selection notice and recovery states.
+ * summary is the recorded project library.
  * Global statistics are deliberately absent. The complementary bounded-page
  * journey protects first25 and loaded-window refresh request counts.
  * The page, the shell, the fairtrade components and every request path stay
@@ -17,10 +18,9 @@
  *
  * States, each in both themes at desktop and phone width: the list under each
  * filter (all, not published, published, auto), the collapsed and expanded
- * child family, a search, the selection
- * notice, the selection recovery panel, and the empty install. Every filter's
- * membership is checked against the rows it lists, walking every page of the
- * table.
+ * child family, a search, the populated Home project browse, the /map and
+ * /review project pickers, and the empty install. Every filter's membership is
+ * checked against the rows it lists, walking every page of the table.
  *
  * Usage: CHROME_PATH=/path/to/chrome node scripts/visual/root-page-visual.mjs
  *        PLAYWRIGHT_MODULE may name an installed Playwright ESM entry when
@@ -37,6 +37,7 @@ import YAML from 'yaml'
 import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { loadContextNavigationFixture } from './context-navigation-fixture.mjs'
+import { chromeFailures, loadShellChromeManifest, shippedItems } from './shell-chrome-manifest.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -58,20 +59,75 @@ const FILTERS = [
   { id: 'published', label: 'published' },
   { id: 'auto', label: 'auto-publish on' },
 ]
+const FIXTURE = YAML.parse(readFileSync(join(HERE, 'testdata/root-page.yaml'), 'utf8'))
+const SHELL_MANIFEST = loadShellChromeManifest()
+const SHIPPED_SHELL_ITEMS = shippedItems(SHELL_MANIFEST)
 // Bytes only this change introduces: the list marker and the strip's accessible
 // name live in the app chunk, the strip and publish-state classes in fairtrade's.
 const FEATURE_GROUPS = [
   { label: 'root page', signatures: ['data-root-session-list', 'data-home-bounded'] },
   { label: 'recursive session family', signatures: ['data-session-group-child', 'session-group-rows:', 'var(--sp-5) + var(--sp-4)'] },
   { label: 'parent-attached session disclosure', signatures: ['data-session-family'] },
-  { label: 'automatic publishing reminder', signatures: ['dismiss auto-publish tip', 'your sessions can publish on their own'] },
+  { label: 'automatic publishing reminder', signatures: ['dismiss auto-publish tip', FIXTURE.autoPublishTipCopy] },
   { label: 'fairtrade publish state', signatures: ['pub-state-text'] },
 ]
-const FIXTURE = YAML.parse(readFileSync(join(HERE, 'testdata/root-page.yaml'), 'utf8'))
+// Copy only the removed saved-selection browsing states carried. The public
+// Fairtrade publish-state union still owns its own (unused) outside-lists text,
+// so it is deliberately not named here.
+const RETIRED_SELECTION_BROWSING_COPY = [
+  'hidden by a saved selection',
+  'your saved selection hides all projects',
+  'project selection recovery',
+]
+const PROJECT_PAGE_NAMES = ['home-projects', 'map-projects', 'review-projects']
+const PROJECT_PAGE_VIEWS = new Set(['home-project-browse', 'map-picker', 'review-picker'])
+const PROJECT_DESTINATIONS = new Set(['/sessions', '/map', '/review'])
 const CONTEXT = loadContextNavigationFixture()
 const pause = (ms) => new Promise((done) => setTimeout(done, ms))
 const fail = (message) => { throw new Error(`Root page visual harness failed: ${message}`) }
 if ([PORT, PORT + 1].includes(8690)) fail('the regression runner must use sandbox ports, never the user server')
+if (typeof FIXTURE.autoPublishTipCopy !== 'string' || !FIXTURE.autoPublishTipCopy.trim()) fail('root-page.yaml must pin the automatic publishing tip copy')
+
+function loadProjectPages() {
+  const block = FIXTURE.projectPages
+  if (!block || typeof block !== 'object' || Array.isArray(block)) fail('root-page.yaml projectPages is missing')
+  const requiredNames = block.requiredNames
+  if (!Array.isArray(requiredNames) || requiredNames.length !== PROJECT_PAGE_NAMES.length
+    || PROJECT_PAGE_NAMES.some((name) => !requiredNames.includes(name))
+    || requiredNames.some((name) => !PROJECT_PAGE_NAMES.includes(name))) {
+    fail(`root-page.yaml projectPages.requiredNames must name exactly ${PROJECT_PAGE_NAMES.join(', ')}`)
+  }
+  if (!Array.isArray(block.cases) || block.cases.length !== PROJECT_PAGE_NAMES.length) {
+    fail(`root-page.yaml projectPages.cases must hold exactly ${PROJECT_PAGE_NAMES.length} cases`)
+  }
+  const seen = new Set()
+  return block.cases.map((entry, index) => {
+    const where = `root-page.yaml projectPages.cases[${index}]`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) fail(`${where} must be a mapping`)
+    for (const field of ['name', 'route', 'view', 'hero', 'destination', 'linkPrefix', 'breadcrumb']) {
+      if (!(field in entry)) fail(`${where} is missing ${field}`)
+    }
+    if (!PROJECT_PAGE_NAMES.includes(entry.name) || seen.has(entry.name)) fail(`${where}.name is unknown or repeated`)
+    seen.add(entry.name)
+    if (typeof entry.route !== 'string' || !entry.route.startsWith('/')) fail(`${where}.route must be an absolute app route`)
+    if (!PROJECT_PAGE_VIEWS.has(entry.view)) fail(`${where}.view is not a populated project view`)
+    if (typeof entry.hero !== 'string' || entry.hero.length === 0) fail(`${where}.hero must be the page title`)
+    if (!PROJECT_DESTINATIONS.has(entry.destination)) fail(`${where}.destination is not a project route prefix`)
+    if (typeof entry.linkPrefix !== 'string' || entry.linkPrefix.trim().length === 0) fail(`${where}.linkPrefix must name the row's accessible name`)
+    if (!Array.isArray(entry.breadcrumb) || entry.breadcrumb.some((label) => typeof label !== 'string' || label.length === 0)) {
+      fail(`${where}.breadcrumb must be a list of breadcrumb labels`)
+    }
+    if (entry.browseView !== undefined && entry.browseView !== 'project') fail(`${where}.browseView must be the project browse choice`)
+    if ((entry.name === 'home-projects') !== Boolean(entry.browseView)) fail(`${where}.browseView belongs to the Home project browse only`)
+    if (entry.name === 'home-projects' && entry.breadcrumb.length !== 0) fail(`${where}.breadcrumb must be empty on Home`)
+    if (entry.name !== 'home-projects' && (entry.breadcrumb.length !== 2 || entry.breadcrumb[0] !== 'home')) {
+      fail(`${where}.breadcrumb must name Home and the surface`)
+    }
+    return entry
+  })
+}
+
+const PROJECT_PAGES = loadProjectPages()
 
 function filesBelow(directory) {
   if (!existsSync(directory)) return []
@@ -85,6 +141,10 @@ function assertProvenance() {
   const chunks = join(WEB, 'out/_next/static/chunks')
   if (!existsSync(BIN) || !existsSync(chunks)) fail(`missing ${relative(REPO, BIN)} or exported chunks; run make build in this worktree first`)
   const javascript = filesBelow(chunks).filter((path) => path.endsWith('.js')).map((path) => ({ path, content: readFileSync(path, 'utf8') }))
+  const retired = javascript.flatMap(({ path, content }) => RETIRED_SELECTION_BROWSING_COPY
+    .filter((copy) => content.includes(copy))
+    .map((copy) => `${relative(REPO, path)}: ${JSON.stringify(copy)}`))
+  if (retired.length) fail(`the exported chunks still carry retired saved-selection browsing copy ${retired.join(', ')}; rebuild this exact worktree`)
   const binary = readFileSync(BIN)
   return FEATURE_GROUPS.map(({ label, signatures }) => {
     const missing = signatures.filter((signature) => !binary.includes(Buffer.from(signature)))
@@ -153,10 +213,10 @@ function publishingAnswers(sessions) {
   for (const id of [CONTEXT.childSessionId, CONTEXT.unresolvedChildId]) {
     const row = sync.find((row) => row.id === id)
     const parent = id === CONTEXT.childSessionId ? CONTEXT.parentId : CONTEXT.absentTargetId
-    if (row?.parentSessionId !== parent || row.parentUnresolved || publications.get(id)?.outsideSelection !== false) fail(`root-page-visual.mjs publishingAnswers: context_navigation.yaml child ${id} lost its nameable parent or selected publication; omission cannot prove childhood; restore parentSessionId=${parent} and the publication row, then rerun visual:root-page`)
+    if (row?.parentSessionId !== parent || row.parentUnresolved) fail(`root-page-visual.mjs publishingAnswers: context_navigation.yaml child ${id} lost its nameable parent; omission cannot prove childhood; restore parentSessionId=${parent}, then rerun visual:root-page`)
   }
   const expected = sync.filter((row) => !row.parentSessionId && !row.parentUnresolved)
-    .map((row) => publications.get(row.id)).filter((entry) => entry && !entry.outsideSelection)
+    .map((row) => publications.get(row.id)).filter(Boolean)
   return { sessions, sync, publications, expected }
 }
 
@@ -193,16 +253,16 @@ async function installRoutes(page, { answers, summary, diagnostics }) {
     // Hide the development mock badge so the capture shows the production chrome.
     if (url.pathname === '/api/v1/config/mock') return respond(json({ enabled: false }))
     if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'project-options') {
-      const options = new Map((answers?.sync ?? []).filter(row => !row.parentSessionId && !row.parentUnresolved && !answers.publications.get(row.id)?.outsideSelection).map(row => [row.projectHash, { projectHash: row.projectHash, projectName: row.projectName }]))
+      const options = new Map((answers?.sync ?? []).filter(row => !row.parentSessionId && !row.parentUnresolved).map(row => [row.projectHash, { projectHash: row.projectHash, projectName: row.projectName }]))
       return respond(json({ projects: [...options.values()].sort((a, b) => a.projectName.localeCompare(b.projectName) || a.projectHash.localeCompare(b.projectHash)) }))
     }
     if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home') {
       const parent = url.searchParams.get('parentSessionId')
       const publication = url.searchParams.get('publication') ?? 'all'
       const start = url.searchParams.get('pageToken') === 'more-sessions' ? 25 : 0
-      const source = !answers || (summary?.projects?.length === 0 && summary.selection?.active) ? [] : answers.sync.filter(row => {
+      const source = !answers ? [] : answers.sync.filter(row => {
         const receipt = answers.publications.get(row.id)
-        return receipt && !receipt.outsideSelection && !row.parentUnresolved
+        return receipt && !row.parentUnresolved
           && (parent ? row.parentSessionId === parent : !row.parentSessionId)
           && (parent || publication === 'all' || publication === 'auto' && receipt.autoPublish
             || publication === 'published' && receipt.state === 'published' || publication === 'not-published' && receipt.state === 'unpublished')
@@ -210,7 +270,7 @@ async function installRoutes(page, { answers, summary, diagnostics }) {
       return respond(json({ items: source.slice(start, start + 25).map(sync => {
         const { audience, ...publication } = answers.publications.get(sync.id)
         const session = answers.sessions.find(session => session.id === sync.id)
-        return { sync, publication, title: session?.title ?? '', preview: sync.firstPrompt ?? session?.preview ?? '', childCount: answers.sync.filter(child => child.parentSessionId === sync.id && !answers.publications.get(child.id)?.outsideSelection).length }
+        return { sync, publication, title: session?.title ?? '', preview: sync.firstPrompt ?? session?.preview ?? '', childCount: answers.sync.filter(child => child.parentSessionId === sync.id && answers.publications.get(child.id)).length }
       }), next: start + 25 < source.length ? 'more-sessions' : '' }))
     }
     if (answers && url.pathname === '/api/v1/sync/sessions') return respond(json({ sessions: answers.sync }))
@@ -248,8 +308,9 @@ async function openPage(browser, origin, theme, viewport, routes) {
     document.documentElement.setAttribute('data-theme', value)
   }, theme)
   await installRoutes(page, routes)
-  const response = await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded' })
-  if (response?.status() !== 200) fail(`${theme}/${viewport.id}: HTTP ${response?.status()} for ${origin}/`)
+  const path = routes.path ?? '/'
+  const response = await page.goto(`${origin}${path}`, { waitUntil: 'domcontentloaded' })
+  if (response?.status() !== 200) fail(`${theme}/${viewport.id}: HTTP ${response?.status()} for ${origin}${path}`)
   return page
 }
 
@@ -266,7 +327,7 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector, equ
     await page.screenshot({ path: file, fullPage: true })
   }
   if (contentSelector) {
-    // A short recovery panel paints only a small part of the full frame. Keep
+    // A short mounted state paints only a small part of the full frame. Keep
     // the complete shell capture, and apply the unchanged pixel gate to the
     // actual mounted panel rather than the empty space below it.
     const full = await gate.measure(file)
@@ -284,13 +345,19 @@ async function shoot(page, gate, file, label, { clipHeight, contentSelector, equ
     if (!chrome || chrome.height <= 0 || chrome.x < 0 || (chrome.which === 'bar' && Math.abs(chrome.width - chrome.innerWidth) > 1)) fail(`${label}: shell sidebar missing or incomplete: ${JSON.stringify(chrome)} viewport=${JSON.stringify(viewport)}`)
     const panel = await page.$(contentSelector)
     const panelBox = panel ? await panel.boundingBox() : null
-     if (!panelBox || panelBox.width <= 0 || panelBox.height <= 0 || panelBox.x < 0 || panelBox.y < 0 || panelBox.x + panelBox.width > full.w + 1 || panelBox.y + panelBox.height > full.h + 1) fail(`${label}: mounted recovery panel is not contained in the full shell/body capture (${contentSelector})`)
+     if (!panelBox || panelBox.width <= 0 || panelBox.height <= 0 || panelBox.x < 0 || panelBox.y < 0 || panelBox.x + panelBox.width > full.w + 1 || panelBox.y + panelBox.height > full.h + 1) fail(`${label}: mounted state is not contained in the full shell/body capture (${contentSelector})`)
     const contentFile = file.replace(/\.png$/, '.content.png')
     await panel.screenshot({ path: contentFile })
     await gate.assert(`${label}/content`, contentFile, { sel: contentSelector, where: 'root-page-visual.mjs' })
   } else {
     await gate.assert(label, file, { sel: 'full page', where: 'root-page-visual.mjs', equivalentSurfaces })
   }
+}
+
+/** Verify the same required-name shell manifest as the mounted chrome gates. */
+async function assertChrome(page, theme, where) {
+  const failures = await page.evaluate(chromeFailures, { manifest: SHELL_MANIFEST, context: { theme, shipped: SHIPPED_SHELL_ITEMS } })
+  if (failures.length) fail(`${where}: persistent product shell: ${failures.join('; ')}`)
 }
 
 /** Computed-style claims the design system makes about this page. */
@@ -312,11 +379,7 @@ async function probeStyles(page, where) {
       titleSize: title ? getComputedStyle(title).fontSize : '',
       pageOverflow: root.scrollWidth - root.clientWidth,
       pathname: location.pathname,
-      shell: !!document.querySelector('.asb a.asb-brand[href="/"]')
-        && !!document.querySelector('.asb a[href="/settings"], .asb a[href="/settings/"]')
-        && !!document.querySelector('.asb button[title^="search"]')
-        && !!document.querySelector('.asb button[title^="switch to "]')
-        && document.querySelector('.asb-panel [aria-current="page"]')?.getAttribute('href') === '/',
+      homeNav: document.querySelector('.asb-panel [aria-current="page"]')?.getAttribute('href') ?? null,
     }
   })
   if (!/atkinson\s*hyperlegible/i.test(probe.bodyFont) || /mono/i.test(probe.bodyFont.split(',')[0])) fail(`${where}: body font is ${probe.bodyFont}`)
@@ -326,7 +389,8 @@ async function probeStyles(page, where) {
   if (probe.optionRadius !== '0px') fail(`${where}: filters trigger radius is ${probe.optionRadius}`)
   if (!probe.tablePresent || probe.titleSize !== '16px') fail(`${where}: session table probe ${JSON.stringify(probe)}`)
   if (probe.pageOverflow > 0) fail(`${where}: the page scrolls sideways by ${probe.pageOverflow}px`)
-  if (!probe.shell || probe.pathname !== '/') fail(`${where}: the home route or persistent product shell is missing ${JSON.stringify(probe)}`)
+  await assertChrome(page, probe.theme, where)
+  if (probe.homeNav !== '/' || probe.pathname !== '/') fail(`${where}: the home route or active navigation is wrong ${JSON.stringify(probe)}`)
   return probe
 }
 
@@ -552,12 +616,21 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
       const text = aside?.querySelector('p')
       if (!aside || !text) return null
       const box = aside.getBoundingClientRect()
-      const range = document.createRange()
-      range.selectNodeContents(text)
-      const lines = [...range.getClientRects()]
+      // A range over the whole paragraph includes clipped screen-reader copy.
+      // Measure painted text nodes without changing the mounted DOM.
+      const nodes = document.createTreeWalker(text, NodeFilter.SHOW_TEXT, {
+        acceptNode: (node) => node.parentElement?.closest('.sr-only')
+          ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+      })
+      const lines = []
+      while (nodes.nextNode()) {
+        const range = document.createRange()
+        range.selectNodeContents(nodes.currentNode)
+        lines.push(...range.getClientRects())
+      }
       return { copy: text.textContent, docs: aside.querySelector('a[data-docs-topic="autoPublish"][target="_blank"]')?.getAttribute('href') ?? null, dismiss: !!aside.querySelector('button[aria-label="dismiss auto-publish tip"]'), font: getComputedStyle(text).fontFamily, size: getComputedStyle(text).fontSize, left: box.left, right: box.right, width: innerWidth, textRight: Math.max(...lines.map((line) => line.right)), textLeft: Math.min(...lines.map((line) => line.left)) }
     })
-    if (!tip || !tip.copy.includes('your sessions can publish on their own') || !tip.docs || tip.copy.includes('/peasant auto') || !tip.dismiss) fail(`${where}: the actual automatic publishing tip, its docs link or its exit is missing`)
+    if (!tip || !tip.copy.includes(FIXTURE.autoPublishTipCopy) || !tip.docs || tip.copy.includes('/peasant auto') || !tip.dismiss) fail(`${where}: the actual automatic publishing tip, its docs link or its exit is missing`)
     if (tip.left < 0 || tip.right > tip.width + 1 || tip.textRight > tip.right + 1 || tip.textLeft < tip.left - 1) fail(`${where}: the mounted tip overflows its phone or desktop bounds ${JSON.stringify(tip)}`)
     if (!/atkinson/i.test(tip.font) || parseFloat(tip.size) < 16) fail(`${where}: the tip body violates the canonical font or 16px floor ${JSON.stringify(tip)}`)
     const probe = await probeStyles(page, where)
@@ -674,38 +747,153 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
   }
 }
 
-async function runSelection(browser, gate, theme, viewport, answers, summaryBase) {
-  const where = `${theme}/${viewport.id}`
-  const diagnostics = []
-  let page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers, diagnostics, summary: { ...summaryBase, selection: FIXTURE.selectionNotice } })
-  try {
-    await page.waitForSelector('[data-root-session-list] tbody tr', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the list never mounted under a selection notice`))
-    await browseBy(page, 'project')
-    await page.getByRole('status').filter({ hasText: 'hidden by a saved selection' }).waitFor({ state: 'visible' })
-    const notice = await page.evaluate(() => [...document.querySelectorAll('[role="status"]')].map((node) => node.textContent.trim()).find((text) => text.includes('hidden by a saved selection')) ?? '')
-    const { hiddenProjects, hiddenSessions } = FIXTURE.selectionNotice
-    if (notice !== `${hiddenProjects} projects and ${hiddenSessions} sessions hidden by a saved selection`) fail(`${where}: selection notice reads ${JSON.stringify(notice)}`)
-    await shoot(page, gate, join(OUT, theme, viewport.id, 'selection-notice.png'), `${where}/selection-notice`)
-    // The session list is the other view of the same menu.
-    await browseBy(page, 'sessions')
-    await page.waitForSelector('[data-root-session-list] tbody tr', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the list never came back from the project view`))
-    await listedRows(page)
-    await assertMissingParentOmitted(page, `${where}/selection-notice`)
-  } finally {
-    await page.close()
+/** The populated project pickers: shell, hero, breadcrumbs, and every project row. */
+async function probeProjectPicker(page, testCase, where, summary, theme) {
+  const expectedRoute = testCase.route.replace(/\/+$/, '') || '/'
+  const probe = await page.evaluate(() => {
+    const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim()
+    const h1 = document.querySelector('main h1, h1')
+    const nav = document.querySelector('nav[aria-label="Breadcrumb"]')
+    const crumbs = [...(nav?.children ?? [])]
+      .filter((node) => node.tagName === 'A' || node.tagName === 'SPAN')
+      .map((node) => ({
+        text: normalize(node.textContent),
+        href: node.tagName === 'A' ? node.getAttribute('href') : null,
+        current: node.classList.contains('cur'),
+      }))
+    const picker = document.querySelector('[data-tour="project-picker"]')
+    const rows = [...(picker?.querySelectorAll('a[href]') ?? [])].map((link) => ({
+      href: new URL(link.href).pathname.replace(/\/+$/, ''),
+      label: normalize(link.getAttribute('aria-label')),
+      rowText: normalize(link.textContent),
+    }))
+    const browse = [...document.querySelectorAll('button')]
+      .map((node) => normalize(node.textContent))
+      .find((value) => value.startsWith('browse by:')) ?? ''
+    const root = document.documentElement
+    const bodyText = document.body.textContent ?? ''
+    return {
+      theme: root.getAttribute('data-theme'),
+      bodyFont: getComputedStyle(document.body).fontFamily,
+      h1Font: h1 ? getComputedStyle(h1).fontFamily : '',
+      h1Size: h1 ? getComputedStyle(h1).fontSize : '',
+      h1Text: normalize(h1?.textContent),
+      pageOverflow: root.scrollWidth - root.clientWidth,
+      pathname: location.pathname.replace(/\/+$/, '') || '/',
+      crumbs,
+      rows,
+      browse,
+      browseView: !!document.querySelector('[data-browse-view="projects"]'),
+      table: !!document.querySelector('[data-root-session-list]'),
+      homeNav: document.querySelector('.asb-panel [aria-current="page"]')?.getAttribute('href') ?? null,
+      retiredCopy: ['hidden by a saved selection', 'your saved selection hides all projects', 'project selection recovery']
+        .some((copy) => bodyText.includes(copy)),
+      kickstartCopy: bodyText.includes('peasant kickstart'),
+    }
+  })
+
+  const titleSize = (await page.evaluate(() => window.innerWidth)) < 768 ? '28px' : '40px'
+  if (!/atkinson\s*hyperlegible/i.test(probe.bodyFont) || /mono/i.test(probe.bodyFont.split(',')[0])) fail(`${where}: body font is ${probe.bodyFont}`)
+  if (!/atkinson\s*hyperlegible\s*mono/i.test(probe.h1Font) || probe.h1Size !== titleSize || probe.h1Text !== testCase.hero) {
+    fail(`${where}: project page title probe ${JSON.stringify(probe)}`)
+  }
+  if (probe.pageOverflow > 0) fail(`${where}: the project page scrolls sideways by ${probe.pageOverflow}px`)
+  await assertChrome(page, theme, where)
+  if (probe.pathname !== expectedRoute) fail(`${where}: mounted at ${probe.pathname}, expected ${expectedRoute}`)
+  if (probe.theme !== theme) fail(`${where}: data-theme is ${probe.theme}`)
+  if (probe.table) fail(`${where}: the session table mounted on a project picker`)
+  if (probe.retiredCopy || probe.kickstartCopy) fail(`${where}: retired saved-selection browsing copy is still rendered`)
+
+  const expectedCrumbs = testCase.breadcrumb
+  if (probe.crumbs.map((crumb) => crumb.text).join(' > ') !== expectedCrumbs.join(' > ')) {
+    fail(`${where}: breadcrumb is ${JSON.stringify(probe.crumbs)}, expected ${JSON.stringify(expectedCrumbs)}`)
+  }
+  if (expectedCrumbs.length) {
+    const current = probe.crumbs.at(-1)
+    if (!current?.current || current.href !== null || probe.crumbs[0]?.href !== '/') fail(`${where}: breadcrumb current/home state is ${JSON.stringify(probe.crumbs)}`)
+  }
+  if (testCase.name === 'home-projects') {
+    if (probe.browse !== `browse by: ${testCase.browseView}` || !probe.browseView || probe.homeNav !== '/') {
+      fail(`${where}: Home project browse state is ${JSON.stringify({ browse: probe.browse, browseView: probe.browseView, homeNav: probe.homeNav })}`)
+    }
+  } else if (probe.browse || probe.browseView) {
+    fail(`${where}: Home browse controls leaked onto ${testCase.name}`)
   }
 
-  page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { answers, diagnostics, summary: { projects: [], selection: FIXTURE.selectionRecovery } })
-  try {
-    await browseBy(page, 'project')
-    await page.waitForSelector('[role="status"][aria-label="project selection recovery"]', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the recovery panel never mounted`))
-    const leaked = await page.locator('[data-root-session-list] [data-session-id], [data-browse-view="projects"] a:not([data-docs-topic])').count()
-    if (leaked) fail(`${where}: selection recovery leaked session/project identities`)
-    await shoot(page, gate, join(OUT, theme, viewport.id, 'selection-recovery.png'), `${where}/selection-recovery`, { contentSelector: '[role="status"][aria-label="project selection recovery"]' })
-  } finally {
-    await page.close()
+  const expectedRows = summary.projects.map((project) => ({
+    href: `${testCase.destination}/${project.projectHash}`,
+    coverage: project.totalFiles > 0 ? `${project.recordedFiles} of ${project.totalFiles}` : null,
+  }))
+  const actualHrefs = probe.rows.map((row) => row.href).sort()
+  const expectedHrefs = expectedRows.map((row) => row.href).sort()
+  if (actualHrefs.length !== summary.projects.length || JSON.stringify(actualHrefs) !== JSON.stringify(expectedHrefs)) {
+    fail(`${where}: picker rows ${JSON.stringify(actualHrefs)} do not match the served project library ${JSON.stringify(expectedHrefs)}`)
   }
-  if (diagnostics.length) fail(`${where}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
+  for (const row of probe.rows) {
+    if (!row.label.startsWith(`${testCase.linkPrefix} `) || row.label.length <= testCase.linkPrefix.length) {
+      fail(`${where}: row ${row.href} has accessible name ${JSON.stringify(row.label)}`)
+    }
+  }
+  for (const expected of expectedRows) {
+    const row = probe.rows.find((candidate) => candidate.href === expected.href)
+    if (!row || (expected.coverage !== null && !row.rowText.includes(expected.coverage))) {
+      fail(`${where}: row ${expected.href} lost its served count ${JSON.stringify(expected.coverage)}: ${JSON.stringify(row)}`)
+    }
+  }
+  return probe
+}
+
+/** Follow the real first picker row into its surface, then return to the picker. */
+async function followFirstProject(page, testCase, expectedRows, where) {
+  const first = page.locator('[data-tour="project-picker"] a[href]').first()
+  const href = await first.getAttribute('href')
+  if (!href?.startsWith(`${testCase.destination}/`)) fail(`${where}: first picker row href is ${JSON.stringify(href)}`)
+  await first.click()
+  const expectedPath = new URL(href, MOCK_ORIGIN).pathname.replace(/\/+$/, '')
+  await page.waitForURL((url) => url.pathname.replace(/\/+$/, '') === expectedPath, { timeout: 20000 })
+  await page.goBack({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('[data-tour="project-picker"] a[href]', { state: 'visible', timeout: 20000 }).catch(() => fail(`${where}: the picker did not return after Back`))
+  await page.waitForFunction((count) => document.querySelectorAll('[data-tour="project-picker"] a[href]').length === count, expectedRows.length, { timeout: 20000 })
+    .catch(() => fail(`${where}: Back did not restore every project row`))
+  const pathname = await page.evaluate(() => location.pathname.replace(/\/+$/, '') || '/')
+  if (pathname !== (testCase.route.replace(/\/+$/, '') || '/')) fail(`${where}: Back landed on ${pathname}`)
+}
+
+async function runProjectPickers(browser, gate, theme, viewport, summary) {
+  for (const testCase of PROJECT_PAGES) {
+    const where = `${theme}/${viewport.id}/${testCase.name}`
+    const diagnostics = []
+    const page = await openPage(browser, MOCK_ORIGIN, theme, viewport, { diagnostics, summary, path: testCase.route })
+    try {
+      if (testCase.browseView) await browseBy(page, testCase.browseView)
+      await page.waitForSelector('[data-tour="project-picker"] a[href]', { state: 'visible', timeout: 20000 })
+        .catch(() => fail(`${where}: the populated project picker never mounted`))
+      const expectedHrefs = summary.projects.map((project) => `${testCase.destination}/${project.projectHash}`).sort()
+      await page.waitForFunction(({ expected }) => {
+        const picker = document.querySelector('[data-tour="project-picker"]')
+        const actual = [...(picker?.querySelectorAll('a[href]') ?? [])]
+          .map((link) => new URL(link.href).pathname.replace(/\/+$/, ''))
+          .sort()
+        return actual.join() === expected.join()
+      }, { expected: expectedHrefs }, { timeout: 20000 }).catch(() => fail(`${where}: the picker never settled on the served project library`))
+      const coverageAnchor = summary.projects.find((project) => project.totalFiles > 0)
+      if (coverageAnchor) {
+        await page.waitForFunction((text) => document.querySelector('[data-tour="project-picker"]')?.textContent.includes(text), `${coverageAnchor.recordedFiles} of ${coverageAnchor.totalFiles}`, { timeout: 20000 })
+          .catch(() => fail(`${where}: the picker never settled on the served project counts`))
+      }
+      await pause(150)
+      await probeProjectPicker(page, testCase, where, summary, theme)
+      await shoot(page, gate, join(OUT, theme, viewport.id, `${testCase.name}.png`), where, {
+        // Include the route heading and controls, not just the shared table:
+        // the mounted page is the surface, and its title distinguishes routes.
+        contentSelector: '.asb-page',
+      })
+      if (testCase.name !== 'home-projects') await followFirstProject(page, testCase, summary.projects, where)
+      if (diagnostics.length) fail(`${where}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
+    } finally {
+      await page.close()
+    }
+  }
 }
 
 async function runEmpty(browser, gate, theme, viewport) {
@@ -732,7 +920,7 @@ const servers = []
 let browser
 try {
   browser = await chromium.launch({ executablePath: CHROME, headless: true })
-  const mockServer = boot(PORT, 'web,sessions,qualitySessions,search')
+  const mockServer = boot(PORT, 'web,sessions,qualitySessions,search,review')
   servers.push(mockServer)
   const emptyServer = boot(PORT + 1, 'none')
   servers.push(emptyServer)
@@ -749,21 +937,24 @@ try {
   console.log(`provenance chunks=${chunks.map((chunk) => relative(REPO, chunk.path)).join(',')} served=true`)
 
   const mockSessions = (await (await fetch(`${MOCK_ORIGIN}/api/v1/sessions`)).json()).sessions
-  const summaryBase = await (await fetch(`${MOCK_ORIGIN}/api/v1/projects/summary`)).json()
   if (!Array.isArray(mockSessions) || mockSessions.length < FIXTURE.pattern.length) fail(`the mock store served ${mockSessions?.length} sessions; the pattern needs at least ${FIXTURE.pattern.length}`)
   const answers = publishingAnswers(mockSessions)
+  const mockSummary = await (await fetch(`${MOCK_ORIGIN}/api/v1/projects/summary`)).json()
+  if (!Array.isArray(mockSummary?.projects) || mockSummary.projects.length === 0) {
+    fail('the mock store served no recorded project library for the project-picker captures')
+  }
 
   const gate = new SurfaceGate(await browser.newPage())
   for (const theme of THEMES) {
     for (const viewport of VIEWPORTS) {
       const { expectedCounts } = await runPopulated(browser, gate, theme, viewport, answers)
       await runNestedAlignment(browser, gate, theme, viewport, answers)
-      await runSelection(browser, gate, theme, viewport, answers, summaryBase)
+      await runProjectPickers(browser, gate, theme, viewport, mockSummary)
       await runEmpty(browser, gate, theme, viewport)
       console.log(`OK ${theme}/${viewport.id} counts=${JSON.stringify(expectedCounts)}`)
     }
   }
-  console.log(`captures=${OUT}/{dark,light}/{desktop,phone}/{filter-all,filter-not-published,filter-published,filter-auto,collapsed-group,expanded-group,nested-group,search,selection-notice,selection-recovery,empty}.png`)
+  console.log(`captures=${OUT}/{dark,light}/{desktop,phone}/{filter-all,filter-not-published,filter-published,filter-auto,collapsed-group,expanded-group,nested-group,search,home-projects,map-projects,review-projects,empty}.png`)
 } finally {
   const cleanup = await Promise.allSettled([browser?.close(), ...servers.map(async (booted) => {
     await new Promise((resolve, reject) => {

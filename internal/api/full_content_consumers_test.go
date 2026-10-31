@@ -211,7 +211,7 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			strictRefused := fixture.Damage != "none"
 			previewRefused := strictRefused && !fixture.Previewable
 			denied := &deniedTranscriptFS{MemFS: testutil.NewMemFS()}
-			provider := NewStoreDataProviderWithFS(db, sessionvisibility.All(), denied)
+			provider := NewStoreDataProviderWithFS(db, sessionvisibility.Browsing(), denied)
 			session, detailErr := provider.SessionByID(t.Context(), id)
 			detail, exportErr := export.ExportSession(t.Context(), db, denied, id)
 			cfg := config.BaseConfig()

@@ -1,0 +1,16 @@
+# Recording a source cause is a transition. The first observation is new, a
+# repeat of that cause is not, and a different cause replaces the stored one.
+requiredNames:
+  - insert-missing-source
+  - repeat-missing-source
+  - replace-with-unusable-record
+steps:
+  - name: insert-missing-source
+    reason: original-source-unavailable-no-usable-saved-copy
+    wantChanged: true
+  - name: repeat-missing-source
+    reason: original-source-unavailable-no-usable-saved-copy
+    wantChanged: false
+  - name: replace-with-unusable-record
+    reason: original-source-present-record-unusable
+    wantChanged: true

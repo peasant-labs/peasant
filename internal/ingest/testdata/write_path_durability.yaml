@@ -16,6 +16,7 @@ required_names:
   - parent_mirror_fails_child_refused_next_drain
   - torn_pair_no_row_reingested
   - torn_pair_row_present_detected_on_read
+  - torn_pair_row_present_completed_index
   - mixed_pair_transcript_new_metadata_old
   - mixed_pair_torn_write
 cases:
@@ -58,24 +59,34 @@ cases:
     scenario: torn_no_row
 
   # A torn or mixed pair with a row present is a power loss after the row was
-  # durable: a plain harvest is database-first and never touches it, so the
-  # stored session keeps serving. The rebuild read is the one that reports the
-  # damaged saved copy by its exact diagnostic, and it never overwrites the row.
+  # durable: a plain harvest is database-first and never touches it, so the row
+  # is left as it was. The rebuild read is the one that reports the damaged
+  # saved copy by its exact diagnostic, and it never overwrites the row. The
+  # diagnostic names a stored copy only when a completed index is what serves.
   - name: torn_pair_row_present_detected_on_read
     scenario: torn_row_present
+    expect_diagnostic: "is damaged, and no stored transcript is being served from the database for it yet. Run `peasant harvest --force --session"
+
+  # The same damaged copy on a row that HAS finished indexing. That is the one
+  # state where the database really is still serving the session, so the
+  # diagnostic names the stored copy instead of the neutral wording.
+  - name: torn_pair_row_present_completed_index
+    scenario: torn_row_present
+    completed_index: true
     expect_diagnostic: "is damaged. Its stored transcript is still served from the database. Run `peasant harvest --force --session"
 
   # The crash-reachable mixed ordering: the transcript is the new content while
   # the metadata is still the old file that names the old transcript hash. The
   # pair fails its hash check on read, so it is refused, never served as a
-  # matching pair; the row keeps serving and the rebuild reports it as damaged.
+  # matching pair; the row is left untouched, and because no index has finished
+  # the rebuild reports it as damaged without promising a stored copy.
   - name: mixed_pair_transcript_new_metadata_old
     scenario: mixed_transcript_new_metadata_old
-    expect_diagnostic: "is damaged. Its stored transcript is still served from the database. Run `peasant harvest --force --session"
+    expect_diagnostic: "is damaged, and no stored transcript is being served from the database for it yet. Run `peasant harvest --force --session"
 
   # The other reachable interruption, a torn write: the transcript bytes are
   # truncated while the metadata names a whole-file hash. The pair fails its
   # hash check the same way and is reported as damaged, the row untouched.
   - name: mixed_pair_torn_write
     scenario: mixed_torn_write
-    expect_diagnostic: "is damaged. Its stored transcript is still served from the database. Run `peasant harvest --force --session"
+    expect_diagnostic: "is damaged, and no stored transcript is being served from the database for it yet. Run `peasant harvest --force --session"

@@ -60,7 +60,6 @@ surface rendered non-empty), separate from the demo-parity pixel diff.
 | Script | What it does |
 |---|---|
 | `probe-peasant.mjs` | DOM validator. Reports the `.txn-*` box sizes, the tab + view-toggle labels, the theme control, and the `.txn-stream` scroll metrics (its `overflowY`/scroll vs client height, plus `.txn-stream-prelude`'s computed `position` — must never be `fixed`/`sticky`) and confirms the PAGE itself does not overflow (the composite owns the only scroller). Run it first whenever the harness route or the composite changes. |
-| `selection-recovery-probe.mjs` | Real-build computed-style probe for the shared selection-recovery panel. It verifies build provenance, boots `peasant`, mounts the all-hidden state on Home and Map through the production summary request, and checks both themes for accepted copy, visibility, Atkinson fonts, tabular counts, canonical surface styling, and the copy control focus ring. It writes no screenshots. |
 | `peasant-shoot.mjs` | Captures the 10 transcript surfaces for one theme. Most surfaces are captured at the base viewport (`captureBeyondViewport:true`); the full trace canvas (whose content scrolls inside the bounded `.txn-stream`) is captured in FULL by temporarily growing the viewport to the stream's natural height (`shotTall`, ported from fairtrade's own `shootdemo.mjs`). Every capture passes the non-empty `SurfaceGate`. **Two-tier failures** (below). |
 | `surface-gate.mjs` | The shared non-empty assertion (byte floor, non-background ratio, distinct-colour count, no byte-identical duplicates). Vendored from the demo side so both are held to the same bar. |
 | `boot-peasant.mjs` | Host-integration check (oracle arm 2): boots the **real** `/projects/[name]/[id]` route against a running backend and asserts the composite renders through the real `SessionDetailV2` adapter + WebSocket path (exit 2 if `.txn-app` never mounts). The fixture route is backend-free, so this is the only arm that exercises the real transport. Validates its `PEASANT_PROJECT` coordinate against the live backend first (`validate-mock-coordinates.mjs`) so a stale default fails loud, not as a misleading transport-broken diagnosis. |
@@ -73,7 +72,7 @@ surface rendered non-empty), separate from the demo-parity pixel diff.
 | `context-navigation-shoot.mjs` | Mounted current-parent and child-context navigation evidence on the REAL binary: boots `peasant` with the mock store and opens the child transcript through the real WebSocket `session_detail` payload, so the stored `context_from` source, the stored `started_by` parent, and the retained earlier-history partition all arrive through the real store → decoration boundary → adapter → composite path. It asserts the two stable links, that the disclosure toggle writes only `earlier=` (the reader's view is held by the browser's scroll anchoring for exactly the inserted height — compared and retained, not merely recorded), following the current-parent link to the EXACT stored parent, and Back restoring the child's route, disclosure, `.txn-stream` offset, selected turn, and query — the asserted state is the one pictured, and the state is re-sampled after each key capture to prove it. Reopening the search panel is a separate, labelled action that runs the viewer's own match jump, so it gets its own sample and its own capture instead of being folded into the restoration claim. Also asserts a reload, a copied disclosed link, and the honest unavailable reference for a child whose target is no longer stored. Both themes; served-chunk + embedded-binary build provenance is asserted before any capture. Fixture: `internal/mock/testdata/context_navigation.yaml` (shared with the Go mock provider via `context-navigation-fixture.mjs`). |
 | `settings-shoot.mjs` | Settings page evidence (`/settings`) on the real built binary. It builds a throwaway world under the OS temp directory (three git repositories each with a recorded Claude Code session, a `config.yaml`, auto-publish rules in `hooks.yaml`, and a stored Village sign-in whose Village is a local double listing two collectives), ingests through the real route, and shoots both themes: the page as it opens (desktop and 390px), a switch whose write is held pending, a text field the server refuses (value restored, reason shown), the account group, every section whole, the install action offering 3 repositories before any call, and the same action after a foreign hook appeared (two installed, one blocked with its remedy). It checks build provenance first (the settings marker in a fresh `web/out` chunk, in `peasant`, and in the served chunk), probes computed fonts, sizes, radius and numerals, fails if any row or heading carries a provenance chip, and fails if the page scrolls sideways at 390px with its groups open. Run `pnpm shoot:settings [out-dir]` with `CHROME_PATH` after `make build`. |
 | `home-pages-visual.mjs` | First half of `pnpm visual:root-page`: first25, opaque sync-view continuations, explicit additional pages, lazy children, and finite loaded-window refresh/failure/retry on an isolated built binary. It rejects eager full-library reads/subscriptions, checks complete metadata-only project choices (including off-page projects), and verifies served chunk bytes. Both themes and phone/desktop captures use the YAML Home page stimulus; API dependencies are intercepted, not the mounted Home component. |
-| `root-page-visual.mjs` | Complementary mounted regressions, also run by `pnpm visual:root-page`: complete shell, canonical fonts and 16px titles, square filters, sideways overflow, every publication filter, recursive family geometry, real child/detail navigation and return, missing-parent deep links, search, lazy selection notice/recovery, and empty-install teaching. It verifies build provenance, then boots two sandbox binaries on throwaway XDG directories. Home page/publication/search dependencies use the mock corpus and YAML fixtures; transcript details use the real server path. Global statistics are not required. Font and navigation mutations (`PEASANT_HOME_VISUAL_MUTATION=font` or `navigation`, run this script directly) must fail. Captures go to `$CAPTURES` (default `/tmp/peasant-root-page`). |
+| `root-page-visual.mjs` | Complementary mounted regressions, also run by `pnpm visual:root-page`: complete shell, canonical fonts and 16px titles, square filters, sideways overflow, every publication filter, recursive family geometry, real child/detail navigation and return, missing-parent deep links, search, the populated Home project browse, the `/map` and `/review` project pickers, and empty-install teaching. The picker captures use the mock server's recorded project summaries and prove the app renders every row; they do not stand in for the Go store's selection-matcher tests. It verifies build provenance (and that retired saved-selection browsing copy is absent from the exported chunks), then boots two sandbox binaries on throwaway XDG directories. Home page/publication/search dependencies use the mock corpus and YAML fixtures; transcript details use the real server path. Global statistics are not required. Font and navigation mutations (`PEASANT_HOME_VISUAL_MUTATION=font` or `navigation`, run this script directly) must fail. Captures go to `$CAPTURES` (default `/tmp/peasant-root-page`). |
 | `stitch-sxs.mjs` | Builds the height-matched **REFERENCE \| SUBJECT** composites per surface per theme (`REF_DIR`/`APP_DIR`) into a `SURFACE_SET`-distinct `SXS_OUT_SUBDIR` (`sxs-smoke`/`sxs`). Both panes drawn to the taller height, top-aligned; the shorter is **padded, never scaled**, with a sampled background + a dashed end-hairline. For `transcript`/`changes`, a missing subject capture becomes a labeled placeholder so the set stays complete (gate still fails on the missing pair). For `smoke`, a missing reference OR subject capture writes **no placeholder at all** — the surface is skipped and logged as a `FAIL`, so durable smoke evidence can never contain a fake stand-in. **Default `REF_DIR=demo`** pairs the fairtrade demo reference against the app captures (the retired pre-composite-migration `tb` golden was removed — see the Oracle section above). |
 
 ## Two-tier failure contract
@@ -145,9 +144,6 @@ pnpm dev   # terminal 1 — next dev on :3000
 # 0. sanity-check the DOM (optional)
 pnpm probe:peasant
 
-# 0b. probe the production selection-recovery panel on Home + Map in both themes
-pnpm probe:selection-recovery
-
 # 1. app side — both themes
 pnpm shoot:peasant -- dark  "$CAPTURES/peasant/dark"
 pnpm shoot:peasant -- light "$CAPTURES/peasant/light"
@@ -179,7 +175,6 @@ review-capture/                         # runtime output (ephemeral, gitignored)
 | `CHROME_PATH` | — (required) | all |
 | `PUPPETEER_CORE` | bare `puppeteer-core` | all (set only if the bare import won't resolve) |
 | `PEASANT_URL` | `http://localhost:3000/dev/visual-harness` | probe, shoot |
-| `PEASANT_RECOVERY_PORT` | `8707` | selection-recovery probe real-binary server |
 | `REF_DIR` | `demo` | stitch (reference/left; `demo`=the fairtrade demo reference — cross-component, informational; same-component gates are `changes` and the smoke baseline) |
 | `REF_LABEL` | same-component baseline caption | stitch (reference column caption) |
 | `APP_DIR` | `peasant` | stitch (subject/right capture subdir) |
@@ -474,8 +469,9 @@ Run `CHROME_PATH=<chrome> pnpm visual:publish-states` after `make build`.
 `publish-states-shoot.mjs` boots this worktree's embedded binary, verifies the
 branch marker in both the binary and served chunk, and mounts the transcript
 route with the synthetic Local API fixture. Every required bar and popup state
-is captured in dark and light; the normal bar, publish popup, and update popup
-also run at phone width. Captures and computed font, radius, and theme evidence
+is captured in dark and light; the normal bar, the
+unpublished-outside-ingestion-selection bar, the publish popup, and the update
+popup also run at phone width. Captures and computed font, radius, and theme evidence
 go to `/tmp/peasant-publish-states` (override with
 `PEASANT_PUBLISH_STATES_CAPTURE_DIR`). Upload inspected evidence to the
 `peasant-498--screenshots` side branch; capture PNGs are never tracked here.
@@ -488,3 +484,22 @@ than more browser scenarios. The capture process owns its server and browser,
 tears them down on success and ordinary failure, and uses a dedicated port
 (default 8847). Concurrent captures must set distinct ports and output roots.
 A forced kill may require closing the child browser/server before rerunning.
+
+### Mounted long transcript and recorded source journey
+
+Run the built binary with an isolated HOME and mock data, then execute the focused
+Playwright journey (set the actual binary and browser paths):
+
+```sh
+CHROME_PATH=/path/to/chrome PEASANT_ORIGIN=http://localhost:15570 \
+  PEASANT_BIN=/path/to/peasant pnpm exec playwright test --config playwright.transcript-viewport.config.mjs
+```
+
+The four named viewport/theme cases exercise the real hydrated session route,
+the mock WebSocket's 52-turn payload, bounded shell and inner scrolling. The
+source case augments that synthetic WebSocket payload and intercepts the additive
+pull-request response; it checks the mounted source action and scope clearing,
+not backend detection or a real GitHub request. The shell mutation removes the
+viewport class to prove that the footer assertion detects the previous failure.
+Set `TRANSCRIPT_CAPTURE_DIR` only to a private output directory when screenshots
+are needed. Use an isolated HOME so account details cannot leak into captures.

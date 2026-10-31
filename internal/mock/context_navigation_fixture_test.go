@@ -69,6 +69,48 @@ func TestProviderReadServesStoredLinksAndRetainedHistory(t *testing.T) {
 			t.Errorf("%q navigation localId = %v, want %q", kind, entry.LocalID, want)
 		}
 	}
+
+	// The child's durable parent names the same stored session its started_by
+	// relationship targets, so the transcript's parent link reads a parent the
+	// store holds instead of an unresolved reference.
+	if read.ParentSessionID == nil || *read.ParentSessionID != schema.SessionID(fixture.Parent.ID) {
+		t.Errorf("parentSessionId = %v, want the stored parent %q", read.ParentSessionID, fixture.Parent.ID)
+	}
+
+	// The recorded spawn edge reaches the mounted read as the contract's
+	// teammate object, carrying the identity the fixture declares rather than
+	// one the read invents.
+	if read.Teammate == nil {
+		t.Fatal("the local read omitted the recorded teammate identity, so the mounted transcript would render no identity line")
+	}
+	want := schema.SessionTeammate{
+		Team:     fixture.Child.Teammate.Team,
+		Name:     fixture.Child.Teammate.Name,
+		Evidence: schema.SessionTeammateEvidenceNativeDynamicWorkflow,
+	}
+	if *read.Teammate != want {
+		t.Errorf("teammate = %+v, want %+v", *read.Teammate, want)
+	}
+	if err := read.Validate(); err != nil {
+		t.Errorf("the served read payload does not satisfy the read contract: %v", err)
+	}
+}
+
+// TestProviderReadWithholdsUnrecordedTeammates keeps the identity honest: a
+// stored session whose parent transcript records no spawn edge carries no
+// teammate object, so a read cannot claim a teammate for ordinary parentage.
+func TestProviderReadWithholdsUnrecordedTeammates(t *testing.T) {
+	fixture := canonicalContextNavigationFixture
+	provider := NewProvider()
+	for _, id := range []string{fixture.Source.ID, fixture.Parent.ID, fixture.Unresolved.ID} {
+		read, err := api.SessionDetailReadForProvider(context.Background(), provider, id)
+		if err != nil {
+			t.Fatalf("session detail read for %s failed: %v", id, err)
+		}
+		if read.Teammate != nil {
+			t.Errorf("session %s served teammate %+v with no recorded spawn edge", id, *read.Teammate)
+		}
+	}
 }
 
 // TestProviderReadReportsAbsentTargetHonestly keeps the unavailable case

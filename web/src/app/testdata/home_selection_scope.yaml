@@ -1,0 +1,33 @@
+# Saved-ingestion-selection browsing regressions, asserted on the mounted Home
+# project picker.
+#
+# Selection controls what a future harvest records. Every saved-selection shape
+# below returns the same already-ingested project library as `mode: all`, so a
+# restrictive, empty, excluded, or stale selection must render exactly
+# `expectedProjects`, with no hidden-by-selection notice or recovery state.
+expectedCaseCount: 4
+cases:
+  - name: restrictive saved selection keeps the mode-all library
+    projects:
+      - { project: alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+      - { project: control-project, projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb }
+    selection: { active: true, hiddenProjects: 2, hiddenSessions: 5 }
+    expectedProjects: [alpha-project, control-project]
+  - name: empty saved selection keeps the mode-all library
+    projects:
+      - { project: alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+      - { project: control-project, projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb }
+    selection: { active: true, hiddenProjects: 0, hiddenSessions: 0 }
+    expectedProjects: [alpha-project, control-project]
+  - name: excluded saved selection keeps the mode-all library
+    projects:
+      - { project: alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+      - { project: control-project, projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb }
+    selection: { active: true, hiddenProjects: 1, hiddenSessions: 3 }
+    expectedProjects: [alpha-project, control-project]
+  - name: stale saved selection keeps the mode-all library
+    projects:
+      - { project: alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+      - { project: control-project, projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb }
+    selection: { active: false, hiddenProjects: 0, hiddenSessions: 0 }
+    expectedProjects: [alpha-project, control-project]

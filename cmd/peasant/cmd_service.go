@@ -547,7 +547,7 @@ func runServiceInstall(cmd *cobra.Command, deps serviceDeps, flags serviceInstal
 	// Refuse now what every scheduled run would refuse: a stored redaction
 	// level this version will not ingest at.
 	configPath := resolveConfigPath(cmd)
-	cfg, err := loadRunConfig(configPath, true)
+	cfg, err := loadRunConfig(cmd, configPath, true)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

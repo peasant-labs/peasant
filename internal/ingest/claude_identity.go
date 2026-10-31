@@ -48,7 +48,7 @@ func addClaudeIdentityRecord(value map[string]any, evidence *ClaudeTranscriptEvi
 	record.SessionID, _ = value["sessionId"].(string)
 	record.Type, _ = value["type"].(string)
 	if record.SessionID == "" {
-		if record.Type == "summary" || record.Type == "file-history-snapshot" || isClaudeControlRecordType(record.Type) {
+		if isClaudeOwnerRotationRecord(record.Type) {
 			evidence.ControlRecordSeen = true
 		}
 		return
@@ -447,6 +447,21 @@ func claudeNativeSpawn(records []ClaudeIdentityRecord, agentID string) bool {
 	return false
 }
 
+// claudeOwnerMatch reports whether an artifact's recorded identity names the
+// same owner its transcript does, and whether that owner can only be derived
+// because the artifact predates the recorded parent field. The native and
+// retained exits share this match rule; each still proves a derived owner its
+// own way, and says so where it does.
+func claudeOwnerMatch(sessionID string, parent *SessionID, owner SessionID, nativeAgentID string) (matches, derived bool) {
+	if sessionID != defaults.ClaudeSubagentPrefix+nativeAgentID {
+		return false, false
+	}
+	if parent != nil {
+		return owner == *parent, false
+	}
+	return true, true
+}
+
 // verifyClaudeIdentity runs on the captured bytes, not the discovery cache. A
 // changed source cannot inherit a cached admission from a different transcript.
 func (a *ClaudeAdapter) verifyClaudeIdentity(data []byte, session DiscoveredSession) (map[string]bool, []schema.SessionRelationship, error) {
@@ -481,14 +496,11 @@ func verifyClaudeIdentityAgainst(data []byte, session DiscoveredSession, native 
 		if !ok || owner.String() == session.SessionID.String() {
 			return refuse()
 		}
-		parentMatches := session.ParentUUID != nil && owner == *session.ParentUUID
-		identityMatches := session.SessionID.String() == defaults.ClaudeSubagentPrefix+proof.NativeAgentID
 		// A legacy root agent file records its owner in every record's sessionId
 		// but predates the recorded parent field. Derive the owner when the
 		// native owner source exists and names that owner; a rotated owner file
 		// that retains no session records is the same file identity.
-		derivedOwner := session.ParentUUID == nil
-		ownerMatches := identityMatches && (parentMatches || derivedOwner)
+		ownerMatches, derivedOwner := claudeOwnerMatch(session.SessionID.String(), session.ParentUUID, owner, proof.NativeAgentID)
 		layout, hasLayout := claudeLayoutParent(session.SourcePath)
 		legacyLayout := hasLayout && layout == owner && claudeLegacyAgentProof(proof, proof.NativeAgentID)
 		nativeProof := proof.NativeAgentValid || legacyLayout
@@ -576,6 +588,9 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 	if original.ParentUUID != nil {
 		allowed[original.ParentUUID.String()] = true
 	}
+	refuse := func() (map[string]bool, []schema.SessionRelationship, error) {
+		return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: native agent identity disagrees with its recorded owner; keep the last-good capture and restore matching native input", original.SessionID)
+	}
 	if strings.HasPrefix(original.SessionID.String(), defaults.ClaudeSubagentPrefix) && claudeContradictorySidechain(proof) {
 		return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: explicit native sidechain evidence contradicts an agent artifact; keep the last-good capture and restore matching native input", original.SessionID)
 	}
@@ -585,20 +600,17 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 		// The artifact must never name itself as its owner, whether the owner
 		// was derived or the recorded parent names the same session.
 		if !ok || owner.String() == original.SessionID.String() {
-			return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: native agent identity disagrees with its recorded owner; keep the last-good capture and restore matching native input", original.SessionID)
+			return refuse()
 		}
-		parentMatches := original.ParentUUID != nil && owner == *original.ParentUUID
-		identityMatches := original.SessionID.String() == defaults.ClaudeSubagentPrefix+proof.NativeAgentID
 		// A legacy root agent artifact stores its owner in every record's
 		// sessionId but has no recorded parent. Derive the owner when the
 		// recorded relationship is bound to these bytes, or when the native
 		// owner source still exists and names that owner.
-		derivedOwner := original.ParentUUID == nil
-		ownerMatches := identityMatches && (parentMatches || derivedOwner)
+		ownerMatches, derivedOwner := claudeOwnerMatch(original.SessionID.String(), original.ParentUUID, owner, proof.NativeAgentID)
 		legacyProof := claudeLegacyAgentProof(proof, proof.NativeAgentID)
 		nativeProof := proof.NativeAgentValid || legacyProof
 		if !nativeProof || !ok || !ownerMatches {
-			return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: native agent identity disagrees with its recorded owner; keep the last-good capture and restore matching native input", original.SessionID)
+			return refuse()
 		}
 		if derivedOwner {
 			recordedProof := false
@@ -616,7 +628,7 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 			if !recordedProof {
 				_, available := snapshot(claudeSourcePath(ResolvedPath(original.Source.FilePath), owner))
 				if !available {
-					return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: native agent identity disagrees with its recorded owner; keep the last-good capture and restore matching native input", original.SessionID)
+					return refuse()
 				}
 			}
 			allowed[owner.String()] = true

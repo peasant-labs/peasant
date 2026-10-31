@@ -45,3 +45,83 @@ cases:
       - {index: 1, role: assistant, toolCalls: 1}
     expectedToolOutput:
       call-observed: ""
+  - name: claude_represented_text_block_is_not_a_subagent_turn
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, depth: 0, content: "the export now resumes", sourceRef: assistant-record}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "the export now resumes", sourceRef: assistant-text-block}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 0}
+  - name: claude_unrepresented_text_block_stays_visible
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, depth: 0, content: "first paragraph", sourceRef: assistant-record}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "first paragraph", sourceRef: first-block}
+      - {index: 2, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "second paragraph", sourceRef: second-block}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 0}
+      - {index: 2, role: assistant, toolCalls: 0}
+  - name: another_harness_child_text_is_not_suppressed
+    entries:
+      - {index: 0, harness: opencode, role: assistant, depth: 0, content: "shared words", sourceRef: parent-record}
+      - {index: 1, harness: opencode, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "shared words", sourceRef: child-record}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 0}
+      - {index: 1, role: assistant, toolCalls: 0}
+  - name: an_untyped_claude_child_is_not_assumed_to_be_a_content_block
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, depth: 0, content: "shared words", sourceRef: parent-record}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, content: "shared words", sourceRef: child-record}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 0}
+      - {index: 1, role: assistant, toolCalls: 0}
+  - name: a_claude_child_without_its_parent_is_not_suppressed
+    entries:
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "standalone child", sourceRef: child-record}
+    expectedTurns:
+      - {index: 1, role: assistant, toolCalls: 0}
+  - name: a_claude_child_model_observation_is_preserved
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, depth: 0, content: "shared words", sourceRef: parent-record}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "shared words", sourceRef: child-record, extra: '{"model_id":"anthropic/claude-opus-4-8"}'}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 0}
+      - {index: 1, role: assistant, toolCalls: 0}
+  - name: a_deeper_claude_child_is_not_a_message_content_block
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, depth: 0, content: "shared words", sourceRef: parent-record}
+      - {index: 1, harness: claude-code, role: assistant, depth: 2, parentIndex: 0, partType: text, content: "shared words", sourceRef: child-record}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 0}
+      - {index: 1, role: assistant, toolCalls: 0}
+  - name: a_claude_child_thinking_observation_is_preserved
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, depth: 0, content: "shared words", sourceRef: parent-record}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "shared words", sourceRef: child-record, extra: '{"thinking_level":"high"}'}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 0}
+      - {index: 1, role: assistant, toolCalls: 0}
+
+  - name: empty_claude_carrier_preserves_child_model
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, depth: 0, entryType: tool_use, sourceRef: parent-record}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "child prose", sourceRef: child-record, extra: '{"model_id":"anthropic/claude-opus-4-8"}'}
+      - {index: 2, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, entryType: tool_use, toolCallId: read-id, sourceRef: tool-record}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 1}
+      - {index: 1, role: assistant, toolCalls: 0}
+
+  - name: empty_claude_carrier_preserves_child_thinking
+    entries:
+      - {index: 0, harness: claude-code, role: assistant, depth: 0, entryType: tool_use, sourceRef: parent-record}
+      - {index: 1, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "child prose", sourceRef: child-record, extra: '{"thinking_level":"high"}'}
+      - {index: 2, harness: claude-code, role: assistant, depth: 1, parentIndex: 0, entryType: tool_use, toolCallId: read-id, sourceRef: tool-record}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 1}
+      - {index: 1, role: assistant, toolCalls: 0}
+
+  - name: empty_other_harness_carrier_does_not_adopt_text
+    entries:
+      - {index: 0, harness: opencode, role: assistant, depth: 0, entryType: tool_use, sourceRef: parent-record}
+      - {index: 1, harness: opencode, role: assistant, depth: 1, parentIndex: 0, partType: text, content: "child prose", sourceRef: child-record}
+      - {index: 2, harness: opencode, role: assistant, depth: 1, parentIndex: 0, entryType: tool_use, toolCallId: read-id, sourceRef: tool-record}
+    expectedTurns:
+      - {index: 0, role: assistant, toolCalls: 1}

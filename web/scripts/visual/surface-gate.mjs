@@ -27,6 +27,7 @@ import { createHash } from 'node:crypto'
 export const DEFAULT_MIN_BYTES = 16 * 1024 // a full-size background-only PNG is ~5.9KB; the smallest real full surface (scorecard) is ~35KB
 export const BYTE_FLOORS = {
   'txn-scrubber': 400, // sticky condensed header; small but real, so content signal matters more than byte size
+  'context-teammate-prelude': 400, // a crop of the transcript prelude line (identity text + parent link), small but real
   'offline-home-short': 8 * 1024, // a 320x256 frame (~6% of a desktop frame's pixels); real captures are ~14KB, a blank one ~1KB
   'offline-transcript-short': 8 * 1024, // the same 320x256 frame, on the transcript
   'offline-share-mobile': 8 * 1024, // a 320x568 frame (~14% of a desktop frame's pixels); a blank one ~2KB

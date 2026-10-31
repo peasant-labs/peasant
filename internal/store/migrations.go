@@ -271,6 +271,8 @@ var migrationV24 = createSessionCommands + ";\n" +
 // migrationV66 adds the session thinking-level columns. See schema_v66.go.
 // migrationV67 adds the latest-attempt pointer columns to sessions.
 // See schema_v67.go.
+// migrationV69 rebuilds session_source_unavailability so its reason CHECK
+// admits a present-but-unusable source as well as a missing one. See schema_v69.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -343,6 +345,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV66,
 		migrationV67,
 		migrationV68,
+		migrationV69,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -405,5 +408,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V66: ALTER TABLE ADD COLUMN sessions.thinking_level + thinking_level_raw + thinking_level_history (no FKs)
 		nil,                        // V67: latest-attempt pointer columns (additive, no backfill)
 		nil,                        // V68: scoped collective observations (additive, no backfill)
+		{DisableForeignKeys: true}, // V69: rebuild session_source_unavailability for the widened reason CHECK
 	},
 }

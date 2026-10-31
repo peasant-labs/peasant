@@ -4,8 +4,33 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
+
+// strikeRecordRefusal marks a capture refusal that blames the source bytes:
+// the record did not parse, a field failed validation, or a typed decode
+// failed. The sentence stays the one the cause already carried. Cancellation
+// is not a property of those bytes, and a kind this build does not represent
+// is a vocabulary gap rather than corruption; both stay unmarked so a settle
+// cannot treat them as a source the user has to repair.
+func strikeRecordRefusal(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	var unrepresented *UnrepresentedRecordError
+	if errors.As(err, &unrepresented) {
+		return err
+	}
+	var already malformedSourceRecord
+	if errors.As(err, &already) {
+		return err
+	}
+	return malformedSourceRecord{cause: err}
+}
 
 // captureDecodedStrike validates and assembles each physical record together.
 // Decoded payloads live for one record; only the existing correlation maps and
@@ -33,7 +58,9 @@ func (idx *StrikeIndexer) captureDecodedStrike(ctx context.Context, s Discovered
 		if failure != nil {
 			return
 		}
-		fail := func(err error) { failure = &captureCorruptionError{err: captureFailure(s, line, err)} }
+		fail := func(err error) {
+			failure = &captureCorruptionError{err: captureFailure(s, line, strikeRecordRefusal(err))}
+		}
 		if err := ctx.Err(); err != nil {
 			failure = &captureCorruptionError{err: err}
 			return
@@ -76,7 +103,10 @@ func (idx *StrikeIndexer) captureDecodedStrike(ctx context.Context, s Discovered
 		var event strikeEventData
 		if !whole {
 			if strikeRecordTooLarge(bytes.TrimSpace(filtered), 0) {
-				fail(fmt.Errorf("record exceeds Strike format limit"))
+				// The filtered encoding outgrew the production limit. That is
+				// this build's bound, not an unparseable record or a field the
+				// source failed to validate, so it keeps reporting.
+				failure = &captureCorruptionError{err: captureFailure(s, line, fmt.Errorf("record exceeds Strike format limit"))}
 				return
 			}
 			if err := json.Unmarshal(filtered, &env); err != nil {
@@ -130,7 +160,7 @@ func (idx *StrikeIndexer) captureDecodedStrike(ctx context.Context, s Discovered
 		return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("the stored transcript omits source records without positional evidence; restore the source before certifying capture"))
 	}
 	if len(v.pending) != 0 {
-		return TranscriptCaptureResult{}, captureFailure(s, 0, fmt.Errorf("tool output has no terminal event; restore complete tool trace"))
+		return TranscriptCaptureResult{}, captureFailure(s, 0, strikeRecordRefusal(fmt.Errorf("tool output has no terminal event; restore complete tool trace")))
 	}
 	unknown, err := retainedUnknownEntries(a.entries)
 	return TranscriptCaptureResult{Entries: a.entries, IgnoredRecords: ignored, RetainedUnknown: unknown}, err

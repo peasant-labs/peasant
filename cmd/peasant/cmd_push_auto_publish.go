@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -51,6 +52,20 @@ type autoPublishPlan struct {
 	held map[string]string
 	// unbound counts the sessions of a bound push that no rule covers.
 	unbound int
+	// publicHeld records the sessions updateHold held because their
+	// transcript is public, so a plan names that reason as a value. Nil
+	// records nothing.
+	publicHeld *sync.Map
+}
+
+// heldPublic reports whether updateHold held the session because its
+// transcript is public.
+func (p autoPublishPlan) heldPublic(id string) bool {
+	if p.publicHeld == nil {
+		return false
+	}
+	_, ok := p.publicHeld.Load(id)
+	return ok
 }
 
 // bound reports whether a rule binds any session of this push.
@@ -150,6 +165,9 @@ func (p autoPublishPlan) updateHold(db *store.Store, creds *auth.Credentials, cl
 			return fmt.Sprintf("who can read its transcript %s could not be read from peasant online (%v), and an auto-publish rule publishes only to collectives, so it was not updated; retry when peasant online answers", record.Receipt.TranscriptURL, err)
 		}
 		if visibility == schema.VillageTranscriptVisibilityPublic {
+			if p.publicHeld != nil {
+				p.publicHeld.Store(id, true)
+			}
 			return fmt.Sprintf("its transcript %s is public on peasant online, and an auto-publish rule publishes only to collectives, never publicly; make the transcript private on peasant online, and the next push updates it and shares it with the rule's collectives", record.Receipt.TranscriptURL)
 		}
 		return ""

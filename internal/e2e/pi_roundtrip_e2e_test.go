@@ -194,7 +194,7 @@ func piLocalDetail(t *testing.T, sandbox disposableSandbox, sessionID string) *s
 	db, err := store.Open(filepath.Join(sandbox.dataHome, "peasant", "peasant.db"), store.WithSkipMigrations())
 	piNoError(t, err)
 	defer db.Close()
-	session, err := api.NewStoreDataProvider(db, sessionvisibility.All()).SessionByID(t.Context(), sessionID)
+	session, err := api.NewStoreDataProvider(db, sessionvisibility.Browsing()).SessionByID(t.Context(), sessionID)
 	piNoError(t, err)
 	detail, err := transcript.SessionToDetailValidated(session)
 	piNoError(t, err)

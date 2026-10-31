@@ -14,6 +14,52 @@
 # to empty) while default-background stays green (guarding inverted forwarding).
 declared_rows: 4
 
+strict_commands:
+  - [harvest]
+  - [harvest, --dry-run]
+  - [village, push, --json]
+  - [village, push, --dry-run, --json]
+  - [prune, --unselected]
+
+startup_cases:
+  - name: unsupported-selection-mode
+    document: |
+      selection: {mode: hostile-invalid}
+    selection_error: selection.mode
+  - name: deprecated-selection-policy
+    document: |
+      selection:
+        mode: selected
+        providers: {claude-code: {sessions: [11111111-1111-4111-8111-111111111111]}}
+    selection_error: selection.providers
+  - name: malformed-selection-exclusion
+    document: |
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions: {sessions: [not-a-session]}
+    selection_error: exclusions.sessions
+  - name: unrelated-redaction-stays-strict
+    document: |
+      selection: {mode: hostile-invalid}
+      redaction:
+        custom_patterns: [{id: bad, category: unsupported, pattern: secret}]
+    startup_error: unknown category
+  - name: unrelated-display-stays-strict
+    document: |
+      selection: {mode: hostile-invalid}
+      display: {theme: unsupported}
+    startup_error: display.theme
+  - name: unrelated-write-budget-stays-strict
+    document: |
+      selection: {mode: hostile-invalid}
+      write: {batchSessions: -1}
+    startup_error: write
+  - name: malformed-yaml-stays-strict
+    document: 'selection: ['
+    startup_error: parse YAML
+
 # Deletion protection by NAME, not by count. A count alone cannot tell which case
 # went missing, so removing the forwarding proof named above and decrementing the
 # number left the suite green while the behaviour it guarded was unprotected.

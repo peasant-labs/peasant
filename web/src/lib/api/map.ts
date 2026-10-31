@@ -70,9 +70,14 @@ type DecodedChangeSession = Omit<ChangeSession, 'binding' | 'harness' | 'tasks'>
 type DecodedDiffHunk = Omit<DiffHunk, 'lines'> & { lines: DecodedDiffLine[] };
 
 /**
- * Selection-state metadata on GET /api/v1/projects/summary: whether the
- * persisted kickstart selection is narrowing this list, and how much of the
- * store it hides, without naming which projects or sessions.
+ * Selection-state metadata on GET /api/v1/projects/summary: the saved
+ * ingestion selection and the aggregate counts it excludes from future
+ * ingestion, without naming which projects or sessions.
+ *
+ * This is ingestion metadata. The project list above is every recorded project
+ * and is never narrowed by these counts. The field stays decoded for backward
+ * compatibility with servers that still send it.
+ *
  * This is a peasant-local addition to the response, not part
  * of the schema module's `ProjectSummariesPayload` contract (see
  * internal/codemap/selection_state.go), so it is typed here rather than

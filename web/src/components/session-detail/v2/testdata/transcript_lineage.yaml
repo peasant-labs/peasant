@@ -1,0 +1,25 @@
+# The transcript prelude's host-owned lineage line.
+#
+# A case is what the flat local read carries for one stored transcript: the
+# recorded Claude Code teammate identity, the stored parent transcript id, or
+# neither. The prelude renders the identity line, the parent link, both, or
+# nothing, and the durable payload handed to the viewer never carries either
+# read-only field.
+requiredNames:
+  - teammate-and-parent-link
+  - teammate-without-parent
+  - parent-without-teammate
+  - neither
+cases:
+  - name: teammate-and-parent-link
+    teammate: { team: migration, name: tests }
+    parentSessionId: 11111111-1111-4111-8111-111111111111
+  - name: teammate-without-parent
+    teammate: { team: migration, name: tests }
+    parentSessionId: null
+  - name: parent-without-teammate
+    teammate: null
+    parentSessionId: 11111111-1111-4111-8111-111111111111
+  - name: neither
+    teammate: null
+    parentSessionId: null

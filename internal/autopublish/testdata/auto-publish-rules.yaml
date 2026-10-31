@@ -1125,3 +1125,6 @@ cases:
       ownerVisibilities: [public]
       license: CC-BY-4.0
       audience: {}
+      # The double does not apply owner updates, so the session is not
+      # sent and the run exits 1.
+      errorContains: [1 session(s) could not be published]

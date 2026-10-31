@@ -1,0 +1,10 @@
+requiredNames:
+  - transcript-deep-link
+  - ordinary-home
+cases:
+  - name: transcript-deep-link
+    pathname: /projects/example/session-id/
+    bounded: true
+  - name: ordinary-home
+    pathname: /
+    bounded: false

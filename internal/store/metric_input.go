@@ -38,7 +38,7 @@ func (s *Store) readMetricInputOnConn(conn *sqlite.Conn, sid ingest.SessionID, i
 	if err != nil {
 		return nil, err
 	}
-	missingIndexStamp := input.IndexState.IndexedAt == nil || input.IndexState.IndexerVersion <= 0
+	missingIndexStamp := !input.IndexState.Completed()
 	missingIndexIdentity := input.IndexState.IndexVersion == nil || input.IndexState.SessionEntriesHash == nil
 	if len(input.Entries) == 0 && (missingIndexStamp || missingIndexIdentity) {
 		return nil, fmt.Errorf("read metric input for session %s: empty entries have no completed index; prior metrics were preserved; index the session before retrying", sid)

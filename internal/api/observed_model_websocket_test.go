@@ -91,7 +91,7 @@ func TestHubSessionDetailRejectsPersistedNonAssistantEvidence(t *testing.T) {
 	if err := testutil.WriteFullEntries(context.Background(), db, ingest.SessionID(fixture.SessionID), []schema.SessionEntry{entry}); err != nil {
 		t.Fatal(err)
 	}
-	hub := api.NewHub(api.NewStoreDataProvider(db, sessionvisibility.All()))
+	hub := api.NewHub(api.NewStoreDataProvider(db, sessionvisibility.Browsing()))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go hub.Run(ctx)
@@ -150,7 +150,7 @@ func TestHubSessionDetailEmitsObservedModelEvidence(t *testing.T) {
 	if err := testutil.WriteFullEntries(context.Background(), db, ingest.SessionID(fixture.SessionID), entries); err != nil {
 		t.Fatalf("persist entries: %v", err)
 	}
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	hub := api.NewHub(provider)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

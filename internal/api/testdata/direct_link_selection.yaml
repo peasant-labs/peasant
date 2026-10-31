@@ -1,7 +1,7 @@
 declared_rows: 2
 harness: claude-code
-expected_visible_sessions: 1
-expected_visible_projects: 1
+expected_visible_sessions: 2
+expected_visible_projects: 2
 rows:
   - role: listed-selection
     session_id: 71111111-1111-4111-8111-111111111111

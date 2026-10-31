@@ -13,12 +13,13 @@ import {
 import type { DocsTopic } from '@/lib/docs';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { ProjectPicker, rowsFromSummaries } from './ProjectPicker';
-import { ProjectListState, SelectionRecoveryPanel, projectListState } from './SelectionRecoveryPanel';
+import { ProjectListState, projectListState } from './projectListState';
 
 /**
  * The page a project surface shows before a project is chosen: /map and
- * /review. Both list the same projects with the same picker; only the title,
- * its docs link and where a row lands differ.
+ * /review. Both list every recorded project with the same picker; only the
+ * title, its docs link and where a row lands differ. The saved ingestion
+ * selection is not a display filter: an ingested project stays listed.
  */
 export function ProjectPickerPage({
   title,
@@ -58,8 +59,6 @@ export function ProjectPickerPage({
   }, [reload]);
 
   const listState = summaries === null ? null : projectListState(summaries);
-  const selectionRecovery =
-    listState === ProjectListState.SelectionRecovery ? summaries?.selection ?? null : null;
 
   return (
     <div className="asb-page animate-fade-up">
@@ -92,11 +91,9 @@ export function ProjectPickerPage({
         <Skeleton avatar={false} lines={3} label="Loading projects" />
       )}
 
-      {!error && selectionRecovery && <SelectionRecoveryPanel {...selectionRecovery} />}
-
       {!error && listState === ProjectListState.NoData && <IngestTeach />}
 
-      {summaries !== null && summaries.projects.length > 0 && (
+      {listState === ProjectListState.Projects && summaries !== null && (
         <ProjectPicker rows={rowsFromSummaries(summaries)} destination={destination} />
       )}
     </div>

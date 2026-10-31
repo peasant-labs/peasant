@@ -47,6 +47,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/schema"
 )
 
 // villageAPIKeyPrefix mirrors the village's auth.APIKeyPrefix. Kept as a local
@@ -424,8 +425,11 @@ func villageAPIRequest(t *testing.T, method, villageURL, path, apiKey string, bo
 // annotate it, driving the REAL authenticated village API as the transcript OWNER
 // (ownerAPIKey) so the transcript mutation attributes to the owner's UUID. It
 // (a) POSTs /collectives {name} (the creator is auto-added as the owner member),
-// (b) POSTs /collectives/{id}/members {username} to add the member by username, and
-// (c) POSTs /transcripts/{id}/share {group_ids:[id]}. For an 'open' group the share is
+// (b) invites the member by username as the owner (POST /collectives/{id}/invitations)
+// and accepts the invitation as the member (GET /users/me/invitations, then POST
+// /users/me/invitations/{invitationID}/accept), because Village admits a member
+// only by their own consent, and (c) POSTs /transcripts/{id}/share
+// {group_ids:[id]}. For an 'open' group the share is
 // approved immediately AND the share call auto-flips visibility private→'shared'
 // (recorded by the governance trigger) — exactly what the pull surface's
 // ListApprovedTranscriptShareGroups requires, with no raw DB writes. Returns the
@@ -434,7 +438,7 @@ func villageAPIRequest(t *testing.T, method, villageURL, path, apiKey string, bo
 // MUST be called BEFORE the member annotates the transcript (the village's
 // CreateTranscriptAnnotation gates on canViewTranscript; an unshared transcript is
 // 404 to a non-owner).
-func groupShareTranscript(t *testing.T, villageURL, ownerAPIKey, memberUsername, transcriptID, groupName string) string {
+func groupShareTranscript(t *testing.T, villageURL, ownerAPIKey string, member villageCredentials, transcriptID, groupName string) string {
 	t.Helper()
 
 	// (a) Create the group; the creator becomes its owner member automatically.
@@ -450,14 +454,41 @@ func groupShareTranscript(t *testing.T, villageURL, ownerAPIKey, memberUsername,
 		t.Fatalf("e2e: groupShareTranscript: parse collective id from POST /api/v1/collectives response: %v\nbody: %s", err, resp)
 	}
 
-	// (b) Add the member by USERNAME (the endpoint takes a username, not a user id);
-	// the caller (owner) is authorized because CreateGroup made it the owner member.
-	status, resp = villageAPIRequest(t, http.MethodPost, villageURL,
-		fmt.Sprintf("/api/v1/collectives/%s/members", group.ID), ownerAPIKey,
-		map[string]any{"username": memberUsername})
+	// (b) Invite the member by USERNAME as the owner. Village answers 202 whether or
+	// not an account holds the handle, so the invitation is proven by the member
+	// seeing it, not by the invite response.
+	invitationsPath := fmt.Sprintf("/api/v1/collectives/%s/invitations", group.ID)
+	status, resp = villageAPIRequest(t, http.MethodPost, villageURL, invitationsPath, ownerAPIKey,
+		schema.VillageCollectiveInvitationRequest{Username: member.Username})
+	if status != http.StatusAccepted {
+		t.Fatalf("e2e: groupShareTranscript: POST %s status = %d, want 202\nbody: %s", invitationsPath, status, resp)
+	}
+
+	// The member lists their own pending invitations and accepts the one this
+	// collective sent; accepting is what makes them a member.
+	status, resp = villageAPIRequest(t, http.MethodGet, villageURL, "/api/v1/users/me/invitations", member.APIKey, nil)
 	if status != http.StatusOK {
-		t.Fatalf("e2e: groupShareTranscript: POST /api/v1/collectives/%s/members status = %d, want 200\nbody: %s",
-			group.ID, status, resp)
+		t.Fatalf("e2e: groupShareTranscript: GET /api/v1/users/me/invitations status = %d, want 200\nbody: %s", status, resp)
+	}
+	var mine schema.VillageMyInvitationsResponse
+	if err := json.Unmarshal(resp, &mine); err != nil {
+		t.Fatalf("e2e: groupShareTranscript: parse GET /api/v1/users/me/invitations response: %v\nbody: %s", err, resp)
+	}
+	var invitationID string
+	for _, invitation := range mine.Invitations {
+		if string(invitation.Collective.ID) == group.ID {
+			invitationID = string(invitation.ID)
+			break
+		}
+	}
+	if invitationID == "" {
+		t.Fatalf("e2e: groupShareTranscript: %s has no pending invitation to collective %s after the owner invited them\nbody: %s",
+			member.Username, group.ID, resp)
+	}
+	acceptPath := fmt.Sprintf("/api/v1/users/me/invitations/%s/accept", invitationID)
+	status, resp = villageAPIRequest(t, http.MethodPost, villageURL, acceptPath, member.APIKey, nil)
+	if status != http.StatusOK {
+		t.Fatalf("e2e: groupShareTranscript: POST %s status = %d, want 200\nbody: %s", acceptPath, status, resp)
 	}
 
 	// (c) Share the transcript with the group. For an 'open' group this approves the

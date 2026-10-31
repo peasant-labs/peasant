@@ -216,39 +216,36 @@ describe('ReviewSurface — fetch states', () => {
   });
 
   // Pins ReviewSurface to the SAME shared web/src/lib/selectionGuidance.ts
-  // discoveryErrorMessage() renderer Home (page.test.tsx) and Map
-  // (MapRouter.tsx) use, not a locally re-implemented message fallback. The
-  // server error message here deliberately does NOT already contain
-  // "peasant kickstart" (unlike the real production Go error text), so the
-  // guidance can only appear in the rendered output if discoveryErrorMessage
-  // itself appended it for the selection_visibility code — proving the
-  // shared renderer actually ran, not just that the server happened to say
-  // the same thing. A future regression that reverts either call site back
-  // to a local `error.message` fallback would fail this test even though the
-  // real backend's baked-in text would currently still "look right".
-  it('list: a selection-visibility failure renders through the shared discoveryErrorMessage renderer', async () => {
+  // renderer Home (page.test.tsx) and Map (MapRouter.tsx) use, not a locally
+  // re-implemented message fallback. A legacy `selection_visibility` error is
+  // an ordinary, retryable failure: the server's cause is shown unchanged and
+  // no surface appends a `peasant kickstart` recovery for a browsing
+  // restriction that no longer exists.
+  it('list: a legacy selection error renders the server message without kickstart guidance', async () => {
     fetchReviewChanges.mockRejectedValueOnce(new DiscoveryRequestError(
       `/api/v1/review/${PROJECT_HASH}`,
       500,
-      'project discovery failed while applying saved selection',
+      'project discovery failed while reading the summary',
       'selection_visibility',
     ));
     render(<ReviewSurface projectHash={PROJECT_HASH as never} branch={null} />);
     const alert = await screen.findByText(/couldn.t load this project.s changes/i);
-    expect(alert.parentElement).toHaveTextContent(/peasant kickstart/);
+    expect(alert.parentElement).toHaveTextContent(/project discovery failed while reading the summary/);
+    expect(alert.parentElement).not.toHaveTextContent(/peasant kickstart/);
   });
 
-  it('detail: a selection-visibility failure renders through the shared discoveryErrorMessage renderer', async () => {
+  it('detail: a legacy selection error renders the server message without kickstart guidance', async () => {
     fetchReviewChanges.mockResolvedValue(REVIEW_OK);
     fetchChangeDetail.mockRejectedValueOnce(new DiscoveryRequestError(
       `/api/v1/review/${PROJECT_HASH}/change`,
       500,
-      'project discovery failed while applying saved selection',
+      'project discovery failed while reading the summary',
       'selection_visibility',
     ));
     render(<ReviewSurface projectHash={PROJECT_HASH as never} branch="feat/x" />);
     const alert = await screen.findByText(/couldn.t load this change/i);
-    expect(alert.parentElement).toHaveTextContent(/peasant kickstart/);
+    expect(alert.parentElement).toHaveTextContent(/project discovery failed while reading the summary/);
+    expect(alert.parentElement).not.toHaveTextContent(/peasant kickstart/);
   });
 
   // Pins the third (and last) discoveryErrorMessage() call site — the lazy
@@ -259,19 +256,20 @@ describe('ReviewSurface — fetch states', () => {
   // real getDiff(file) it was handed (mirroring the lifted package), so the
   // error sentinel it renders comes from ReviewSurface's actual diffErrors
   // state, not a test-only stand-in.
-  it('diff: a selection-visibility failure renders through the shared discoveryErrorMessage renderer', async () => {
+  it('diff: a legacy selection error renders the server message without kickstart guidance', async () => {
     requestDiffInMock = true;
     fetchReviewChanges.mockResolvedValue(REVIEW_OK);
     fetchChangeDetail.mockResolvedValueOnce(DETAIL_OK);
     fetchChangeDiff.mockRejectedValueOnce(new DiscoveryRequestError(
       `/api/v1/review/${PROJECT_HASH}/diff`,
       500,
-      'project discovery failed while applying saved selection',
+      'project discovery failed while reading the summary',
       'selection_visibility',
     ));
     render(<ReviewSurface projectHash={PROJECT_HASH as never} branch="feat/x" />);
     const diffError = await screen.findByTestId('diff-error');
-    expect(diffError).toHaveTextContent(/peasant kickstart/);
+    expect(diffError).toHaveTextContent(/project discovery failed while reading the summary/);
+    expect(diffError).not.toHaveTextContent(/peasant kickstart/);
     expect(fetchChangeDiff).toHaveBeenCalledWith(PROJECT_HASH, 'feat/x', DIFF_TEST_FILE);
   });
 
@@ -329,8 +327,8 @@ describe('ReviewSurface — fetch states', () => {
     expect(lastChangeDetailProps?.payload.insights).toEqual(graphAdapterContractFixture.insights);
   });
 
-  it('list: a sessions-channel policy error does not block an explicit canonical project route', async () => {
-    sessionsError = new Error('selection policy failed');
+  it('list: a sessions-channel legacy selection error does not block an explicit canonical project route', async () => {
+    sessionsError = new Error('live session updates failed');
     sessionsErrorCode = 'selection_visibility';
     fetchReviewChanges.mockResolvedValue(REVIEW_OK);
     render(<ReviewSurface projectHash={PROJECT_HASH as never} branch={null} />);

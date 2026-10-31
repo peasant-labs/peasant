@@ -1,0 +1,14 @@
+requiredNames:
+  - sparse-turn-second-call
+  - empty-id-second-call
+cases:
+  - name: sparse-turn-second-call
+    detail: '{"turns":[{"index":42,"toolCalls":[{"name":"Bash","arguments":"echo ignored"},{"name":"Bash","id":"exact-call","arguments":"gh pr create","result":"https://github.com/acme/web/pull/42"}]}]}'
+    turnIndex: 42
+    toolCallIndex: 1
+    toolCallId: exact-call
+  - name: empty-id-second-call
+    detail: '{"turns":[{"index":42,"toolCalls":[{"name":"Bash","arguments":"echo ignored"},{"name":"Bash","arguments":"gh pr create","result":"https://github.com/acme/web/pull/42"}]}]}'
+    turnIndex: 42
+    toolCallIndex: 1
+    toolCallId: ''

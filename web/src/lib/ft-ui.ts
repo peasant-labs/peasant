@@ -995,6 +995,11 @@ export interface AppSidebarLayoutProps {
   sidebar: ReactNode;
   children: ReactNode;
   className?: string;
+  viewport?: boolean;
+  topBar?: ReactNode;
+  notice?: ReactNode;
+  mainAs?: 'div' | 'main';
+  mainId?: string;
 }
 export const AppSidebarLayout = FtAppSidebarLayout as unknown as ComponentType<AppSidebarLayoutProps>;
 export const APP_SIDEBAR_APPS = FT_APP_SIDEBAR_APPS as unknown as readonly AppSidebarApp[];

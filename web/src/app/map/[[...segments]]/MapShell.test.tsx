@@ -192,7 +192,7 @@ describe('MapShell — one map without lenses', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('renders an explicitly resolved hidden project without a visible session prerequisite', async () => {
+  it('renders a resolved recorded project without a visible session prerequisite', async () => {
     ws.data = { sessions: [] };
     render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} />);
     expect(await screen.findByTestId('map-canvas')).toBeInTheDocument();
@@ -200,7 +200,7 @@ describe('MapShell — one map without lenses', () => {
   });
 
   it('keeps the mounted map available when live session updates fail', async () => {
-    ws.error = 'selection conflict';
+    ws.error = 'live session updates failed';
   ws.errorCode = 'selection_visibility';
     render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} />);
     expect(await screen.findByTestId('map-canvas')).toBeInTheDocument();

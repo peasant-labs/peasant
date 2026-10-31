@@ -58,6 +58,10 @@ var requiredPolicyBehaviorNames = []string{
 	"both_scopes_together_hide_an_agent_row_in_a_selected_project",
 	"both_scopes_together_admit_a_user_row_in_a_selected_project",
 	"an_unusable_origin_withholds_the_discovery_list",
+	"zero_policy_admits_user",
+	"zero_policy_admits_unknown",
+	"zero_policy_withholds_agent",
+	"zero_policy_rejects_invalid_origin",
 }
 
 type policyFixture struct {
@@ -65,10 +69,11 @@ type policyFixture struct {
 }
 
 type policyCase struct {
-	Name      string                                   `yaml:"name"`
-	Mode      config.SelectionMode                     `yaml:"mode"`
-	Harnesses map[string]config.SelectionHarnessConfig `yaml:"harnesses"`
-	Candidate candidateFixture                         `yaml:"candidate"`
+	ZeroPolicy bool                                     `yaml:"zero_policy"`
+	Name       string                                   `yaml:"name"`
+	Mode       config.SelectionMode                     `yaml:"mode"`
+	Harnesses  map[string]config.SelectionHarnessConfig `yaml:"harnesses"`
+	Candidate  candidateFixture                         `yaml:"candidate"`
 	// Result is what selection scope alone decides, through Policy.Visible.
 	Result        string `yaml:"result"`
 	ErrorContains string `yaml:"error_contains"`
@@ -98,6 +103,10 @@ func loadPolicyFixture(data []byte) (policyFixture, error) {
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, tc := range fixture.Cases {
+		configured := tc.Mode != "" || len(tc.Harnesses) != 0
+		if tc.ZeroPolicy && (configured || tc.DiscoveryResult == "") {
+			return policyFixture{}, fmt.Errorf("zero-policy fixture %q must exercise discovery without configured selection", tc.Name)
+		}
 		if tc.Name == "" || (tc.Result != "visible" && tc.Result != "hidden" && tc.Result != "error") {
 			return policyFixture{}, fmt.Errorf("policy fixture case %q is incomplete: result must be exactly visible, hidden, or error", tc.Name)
 		}
@@ -136,9 +145,9 @@ func TestPolicyFixture(t *testing.T) {
 	}
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			policy, err := sessionvisibility.New(config.SelectionConfig{Mode: tc.Mode, Harnesses: tc.Harnesses})
-			if err != nil {
-				t.Fatalf("New: %v", err)
+			policy := sessionvisibility.New(config.SelectionConfig{Mode: tc.Mode, Harnesses: tc.Harnesses})
+			if tc.ZeroPolicy {
+				policy = sessionvisibility.Policy{}
 			}
 			candidate := sessionvisibility.Candidate{
 				SessionID:       ingest.SessionID(tc.Candidate.SessionID),
@@ -151,19 +160,19 @@ func TestPolicyFixture(t *testing.T) {
 				ParentSessionID: ingest.SessionID(tc.Candidate.ParentSessionID),
 			}
 			assertDiscoveryScope(t, policy, candidate, tc)
-			visible, err := policy.Visible(candidate)
+			selected, err := policy.SelectedForIngest(candidate)
 			if tc.Result == "error" {
 				if err == nil || !strings.Contains(err.Error(), tc.ErrorContains) {
-					t.Fatalf("Visible error = %v, want containing %q", err, tc.ErrorContains)
+					t.Fatalf("SelectedForIngest error = %v, want containing %q", err, tc.ErrorContains)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("Visible: %v", err)
+				t.Fatalf("SelectedForIngest: %v", err)
 			}
-			wantVisible := tc.Result == "visible"
-			if visible != wantVisible {
-				t.Fatalf("Visible = %v, want %v", visible, wantVisible)
+			wantSelected := tc.Result == "visible"
+			if selected != wantSelected {
+				t.Fatalf("SelectedForIngest = %v, want %v", selected, wantSelected)
 			}
 		})
 	}
@@ -197,24 +206,17 @@ func TestPolicyFixtureLoaderRejectsStructuralDrift(t *testing.T) {
 	}
 }
 
-func TestZeroPolicyFailsClosed(t *testing.T) {
-	visible, err := (sessionvisibility.Policy{}).Visible(sessionvisibility.Candidate{})
-	if err == nil || visible {
-		t.Fatalf("zero policy Visible = %v, %v; want false and actionable error", visible, err)
+func TestZeroPolicyIngestMembershipFailsClosed(t *testing.T) {
+	selected, err := (sessionvisibility.Policy{}).SelectedForIngest(sessionvisibility.Candidate{})
+	if err == nil || selected {
+		t.Fatalf("zero policy SelectedForIngest = %v, %v; want false and actionable error", selected, err)
 	}
 }
 
-func TestZeroPolicyProjectionInputsFailClosed(t *testing.T) {
-	mode, matcher, err := (sessionvisibility.Policy{}).ProjectionInputs()
-	if err == nil || mode != "" || matcher != nil {
-		t.Fatalf("zero policy ProjectionInputs = %q, %v, %v; want empty mode, nil matcher, and actionable error", mode, matcher, err)
-	}
-}
-
-// assertDiscoveryScope checks the conjunction of the two scopes for the arms
-// that state one. Every arm still checks selection scope alone through
-// Policy.Visible, so a case whose two expectations DIFFER is what proves origin
-// scope acts in discovery and nowhere else.
+// assertDiscoveryScope checks the browsing projection. Every arm still checks
+// ingest/push membership through Policy.SelectedForIngest; a case whose two
+// expectations DIFFER is what proves the saved selection does NOT narrow
+// browsing.
 func assertDiscoveryScope(t *testing.T, policy sessionvisibility.Policy, candidate sessionvisibility.Candidate, tc policyCase) {
 	t.Helper()
 	if tc.DiscoveryResult == "" {
@@ -235,12 +237,5 @@ func assertDiscoveryScope(t *testing.T, policy sessionvisibility.Policy, candida
 	}
 	if want := tc.DiscoveryResult == "visible"; visible != want {
 		t.Fatalf("VisibleForDiscovery = %v, want %v", visible, want)
-	}
-}
-
-func TestZeroPolicyDiscoveryFailsClosed(t *testing.T) {
-	visible, err := (sessionvisibility.Policy{}).VisibleForDiscovery(sessionvisibility.Candidate{Origin: sessionorigin.User})
-	if err == nil || visible {
-		t.Fatalf("zero policy VisibleForDiscovery = %v, %v; want false and actionable error", visible, err)
 	}
 }

@@ -250,7 +250,7 @@ describe('map REST client', () => {
   // The server's selection-state metadata (a
   // peasant-local addition, not part of the schema module's
   // ProjectSummariesPayload contract) must pass through decoding unchanged.
-  it('fetchProjectSummaries decodes the selection field when the server reports an active, narrowing selection', async () => {
+  it('fetchProjectSummaries decodes saved-selection metadata when the server reports it', async () => {
     fetchMock.mockReturnValueOnce(
       okResponse({
         projects: [],

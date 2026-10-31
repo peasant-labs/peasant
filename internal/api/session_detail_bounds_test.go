@@ -77,7 +77,7 @@ func TestHub_SessionDetail_BoundsAnOversizedToolResult(t *testing.T) {
 		t.Fatalf("WriteFullEntries: %v", err)
 	}
 
-	storeProv := api.NewStoreDataProvider(s, sessionvisibility.All())
+	storeProv := api.NewStoreDataProvider(s, sessionvisibility.Browsing())
 	cfg := &config.Config{Sources: config.SourcesConfig{Mock: config.MockConfig{Enabled: false}}}
 	prov := api.NewProgressiveProvider(cfg, defaults.MockComponents.Web, nil, storeProv)
 

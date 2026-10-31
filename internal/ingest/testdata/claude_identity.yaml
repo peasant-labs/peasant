@@ -7,10 +7,11 @@ retained_expectations:
   context_from: {target_state: target_known_retained, evidence: retained_last_good, anchor: {kind: general_source_session}}
   started_by: {target_state: target_known_retained, evidence: retained_last_good}
   conflicting_current_native_evidence: {target_state: conflicting_current_native_evidence, evidence: conflict}
-required_cache_upgrade_names: [legacy without structural proof, prior uncorrelated spawn proof]
+required_cache_upgrade_names: [legacy without structural proof, prior uncorrelated spawn proof, prior title that ignored isMeta]
 cache_upgrades:
   - {name: legacy without structural proof, proof_version: 0}
   - {name: prior uncorrelated spawn proof, proof_version: 1}
+  - {name: prior title that ignored isMeta, proof_version: 2, stale_title: "harness-injected notice"}
 required_retained_refusal_names:
   - changed multi-source bytes
   - absent multi-source digest with own-only replacement

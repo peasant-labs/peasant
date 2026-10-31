@@ -1,0 +1,153 @@
+# The two additive session-extra reads. Each case is one Local API answer for
+# one endpoint; `expect` names what the fetch helper must do with it:
+#   rows     decoded to the endpoint's row list (numbers stay numbers)
+#   refusal  rejects with the server's own non-2xx reason
+#   contract rejects because the answer is outside the row shape
+requiredNames:
+  - commits-recorded
+  - commits-empty
+  - commits-unknown-session
+  - commits-outside-contract
+  - commits-null
+  - commits-time-not-an-integer
+  - commits-time-unsafe-integer
+  - pull-requests-detected
+  - pull-requests-empty
+  - pull-requests-outside-contract
+  - pull-requests-number-not-an-integer
+  - pull-requests-null
+  - pull-requests-url-not-github
+  - pull-requests-url-not-https
+  - pull-requests-number-zero
+  - pull-requests-missing-source
+  - pull-requests-empty-owner
+  - pull-requests-empty-repo
+  - pull-requests-empty-source
+  - unverified-source-locator
+  - unverified-empty
+  - unverified-null
+  - unverified-source-missing-index
+cases:
+  - name: unverified-source-locator
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[],"unverified_pull_requests":[{"owner":"acme","repo":"web","number":42,"url":"https://github.com/acme/web/pull/42","source":{"turnIndex":42,"toolCallIndex":1,"toolCallId":"call-2"}}]}'
+    expect: rows
+  - name: unverified-empty
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[],"unverified_pull_requests":[]}'
+    expect: rows
+  - name: unverified-null
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[],"unverified_pull_requests":null}'
+    expect: contract
+  - name: unverified-source-missing-index
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[],"unverified_pull_requests":[{"owner":"acme","repo":"web","number":42,"url":"https://github.com/acme/web/pull/42","source":{"turnIndex":42}}]}'
+    expect: contract
+  - name: commits-recorded
+    endpoint: commits
+    status: 200
+    body: '{"commits":[{"hash":"9f3c1ad0aa11","message":"feat(canvas): port TurnRow","authorName":"Ada Lovelace","authorEmail":"ada@example.test","commitTime":1752566460000,"authorTime":1752566400000},{"hash":"1b2c3d4e5f60","message":"fix(api): keep the refusal reason","authorName":"Ada Lovelace","authorEmail":"ada@example.test","commitTime":1752566520000,"authorTime":1752566520000}]}'
+    expect: rows
+  - name: commits-empty
+    endpoint: commits
+    status: 200
+    body: '{"commits":[]}'
+    expect: rows
+  - name: commits-unknown-session
+    endpoint: commits
+    status: 404
+    body: '{"error":"session not found"}'
+    expect: refusal
+  - name: commits-outside-contract
+    endpoint: commits
+    status: 200
+    body: '{"commits":[{"hash":"9f3c1ad0aa11","message":"feat(canvas): port TurnRow"}]}'
+    expect: contract
+  - name: commits-null
+    endpoint: commits
+    status: 200
+    body: '{"commits":null}'
+    expect: contract
+  # The contract's times are int64 millis. A fraction is not an instant, and an
+  # integer past 2^53 cannot survive the JSON number the local read carries, so
+  # both are refused rather than widened into a wrong instant.
+  - name: commits-time-not-an-integer
+    endpoint: commits
+    status: 200
+    body: '{"commits":[{"hash":"9f3c1ad0aa11","message":"feat(canvas): port TurnRow","authorName":"Ada Lovelace","authorEmail":"ada@example.test","commitTime":1.5,"authorTime":1752566400000}]}'
+    expect: contract
+  - name: commits-time-unsafe-integer
+    endpoint: commits
+    status: 200
+    body: '{"commits":[{"hash":"9f3c1ad0aa11","message":"feat(canvas): port TurnRow","authorName":"Ada Lovelace","authorEmail":"ada@example.test","commitTime":9007199254740993,"authorTime":1752566400000}]}'
+    expect: contract
+  - name: pull-requests-detected
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"https://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: rows
+  - name: pull-requests-empty
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[]}'
+    expect: rows
+  - name: pull-requests-outside-contract
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"source":"gh_pr_create"}]}'
+    expect: contract
+  - name: pull-requests-number-not-an-integer
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":"42","url":"https://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract
+  - name: pull-requests-null
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":null}'
+    expect: contract
+  # The row renders its URL as a link, so a destination outside GitHub over https
+  # is refused rather than shown behind a row that claims to be a pull request.
+  - name: pull-requests-url-not-github
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"https://gitlab.example/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract
+  - name: pull-requests-url-not-https
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"http://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract
+  # GitHub numbers pull requests from 1.
+  - name: pull-requests-number-zero
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":0,"url":"https://github.com/storytold/photocraft/pull/0","source":"gh_pr_create"}]}'
+    expect: contract
+  # The contract marks owner, repo, and source `minLength: 1`. A blank of any of
+  # them names no repository and no evidence, so the row is outside it.
+  - name: pull-requests-missing-source
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"https://github.com/storytold/photocraft/pull/42"}]}'
+    expect: contract
+  - name: pull-requests-empty-owner
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"","repo":"photocraft","number":42,"url":"https://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract
+  - name: pull-requests-empty-repo
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"","number":42,"url":"https://github.com/storytold/photocraft/pull/42","source":"gh_pr_create"}]}'
+    expect: contract
+  - name: pull-requests-empty-source
+    endpoint: pull-requests
+    status: 200
+    body: '{"pullRequests":[{"owner":"storytold","repo":"photocraft","number":42,"url":"https://github.com/storytold/photocraft/pull/42","source":""}]}'
+    expect: contract

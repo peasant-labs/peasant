@@ -28,7 +28,7 @@ const (
 
 // memberScopeEntry is the server-local record behind an opaque member scope. It
 // is a lookup token, NOT an access grant: every replay re-applies the current
-// route predicate, authorization, selection and eligibility.
+// route predicate, authorization, origin scope and eligibility.
 type memberScopeEntry struct {
 	GroupID   string
 	Variant   GroupedRouteVariant
@@ -129,7 +129,7 @@ func (c *memberScopeCache) evictOldestLocked() {
 }
 
 // issueMemberScope satisfies the grouping issuer seam with the server's cache
-// and the process selection revision.
+// and the process browsing revision.
 func (s *Server) issueMemberScope(groupID string, variant GroupedRouteVariant, filters GroupedFilters) (string, error) {
 	return s.memberScopes.issue(groupID, variant, filters, s.groupedRevision)
 }

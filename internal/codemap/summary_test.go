@@ -9,7 +9,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -215,7 +214,7 @@ func TestProjectSummaries_EmptyStore(t *testing.T) {
 func newEmptyService(t *testing.T) *codemap.Service {
 	t.Helper()
 	s := storetest.Open(t)
-	return codemap.NewService(s, func(string) gitops.Repository { return noRepo() }, codegraph.NewGraphBuilder(), sessionvisibility.All())
+	return codemap.NewService(s, func(string) gitops.Repository { return noRepo() }, codegraph.NewGraphBuilder())
 }
 
 // seedSessionForProject inserts a session row under an arbitrary project

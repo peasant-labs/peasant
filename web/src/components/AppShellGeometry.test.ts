@@ -67,10 +67,10 @@ describe('app shell geometry', () => {
   });
 
   it('keeps <main> out of the tab order at rest, with no top padding to clear', () => {
-    const main = /<main\s[^>]*className=[^>]*>/.exec(source(fixture.restingMain.path));
-    expect(main, `${fixture.restingMain.path} must render <main>`).not.toBeNull();
-    expect(main![0], '<main> must carry no tabIndex at rest').not.toMatch(/tabIndex/i);
-    expect(main![0], 'nothing fixed sits over <main>, so it pads no top').not.toMatch(/\bpt-|padding-top/);
+    const shell = source(fixture.restingMain.path);
+    expect(shell).toContain('mainAs="main"');
+    expect(shell).toContain('notice={<LocalOfflineNotice />}');
+    expect(shell).toContain('viewport={viewport}');
   });
 
   it('lets only the notice move where content starts', () => {

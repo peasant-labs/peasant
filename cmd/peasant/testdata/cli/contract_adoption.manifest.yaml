@@ -1,0 +1,14 @@
+# Required-name manifest for contract_adoption.yaml: deletion protection by NAME.
+requiredNames:
+  - export_sessions_stdin
+  - export_alias_still_works
+  - export_json_stdout_only
+  - export_json_2_redirect_parses
+  - redact_sessions_from_dry_run
+  - push_json_has_warnings_array
+  - push_dry_run_json_is_one_document
+  - push_empty_has_code
+  - contract_help_golden
+  - y_shorthand_registered
+  - export_missing_source_is_usage_error
+  - export_sessions_from_with_session_is_usage_error

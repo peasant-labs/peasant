@@ -17,9 +17,11 @@ export async function fetchHomeSessions(query: SyncSessionsQuery, signal: AbortS
   const response = await fetch(`${getApiBaseUrl()}${path}?${params}`, { signal });
   if (!response.ok) throw parseDiscoveryError(path, response.status, await response.text());
   const page = zLocalSyncSessionPage.parse(await response.json());
+  // `outsideSelection` is ingestion and push metadata. It never narrows what a
+  // stored, already-indexed session may show here, so it is not checked.
   if (page.items.length > Math.min(query.maxItems || 25, 100)
     || new Set(page.items.map(row => row.sync.id)).size !== page.items.length
-    || page.items.some(row => row.sync.id !== row.publication.sessionId || row.publication.outsideSelection)) {
+    || page.items.some(row => row.sync.id !== row.publication.sessionId)) {
     throw new Error('Home received inconsistent session identities or an oversized sync page. Retry; if this persists, update the server and schema together.');
   }
   return page;

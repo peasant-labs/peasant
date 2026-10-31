@@ -66,9 +66,12 @@ export interface BarModel {
 
 /**
  * The bar's status. A publish in flight wins; then a session this computer has
- * not published is `not published` (or outside the saved lists); a published one
- * is under auto-publish, has new turns, or is up to date. The collective count
- * is left out when village could not be asked who reads the transcript.
+ * not published is `not published`; a published one is under auto-publish, has
+ * new turns, or is up to date. The collective count is left out when village
+ * could not be asked who reads the transcript.
+ *
+ * The saved ingestion selection is push metadata and is not used to derive the
+ * bar's state; the server owns `autoPublish`.
  */
 export function barModel(options: {
   publication: LocalPublication;
@@ -84,7 +87,6 @@ export function barModel(options: {
   // out rather than shown as 0.
   const collectives = audienceKnown && readers.length > 0 ? readers.length : undefined;
   if (publication.state !== 'published') {
-    if (publication.outsideSelection) return { state: 'outside-lists' };
     if (publication.autoPublish) return { state: 'auto-publish' };
     return { state: 'not-published' };
   }

@@ -103,10 +103,7 @@ func newAutoPublishWorld(t *testing.T, options autoPublishWorldOptions) *autoPub
 	cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
 		defaults.HarnessClaudeCode.String(): {Projects: []config.ProjectSelection{{GitRemote: "git@github.com:acme/tools.git"}}},
 	}}
-	policy, err := sessionvisibility.New(cfg.Selection)
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := sessionvisibility.New(cfg.Selection)
 	ctx, cancel := context.WithCancel(context.Background())
 	server := NewServer(hs.config(ServerConfig{Port: 0, Store: db, Config: cfg, Provider: NewStoreDataProvider(db, policy)}))
 	if err := server.Listen(ctx); err != nil {
@@ -397,6 +394,33 @@ func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 		t.Fatalf("autoPublish after the install = %v; the listed session publishes and the one the selection leaves out does not", got)
 	}
 
+	// Bind the outside-selection repository too, so a managed hook would publish
+	// its session. The explicit auto view must still exclude it: the rendered
+	// autoPublish for that row is false because the saved ingest selector leaves
+	// it out, and the filter must match what it renders.
+	status, body = world.request(t, http.MethodPost, installRoute("work"), schema.AutoPublishInstallRequest{Path: world.second})
+	decodeContract(t, status, body, &installed)
+	if installed.Hooks[0].Status != schema.AutoPublishHookInstalled {
+		t.Fatalf("install outside-selection repository = %+v", installed)
+	}
+	var ordinary schema.LocalSyncSessionPage
+	world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", &ordinary)
+	if len(ordinary.Items) != 3 {
+		t.Fatalf("Home ordinary page lists %d rows, want all 3 stored rows", len(ordinary.Items))
+	}
+	outsideAuto := map[string]bool{}
+	for _, item := range ordinary.Items {
+		outsideAuto[item.Sync.ID] = item.Publication.AutoPublish
+	}
+	if outsideAuto[recordedInsideSessionID] != true || outsideAuto[recordedOutsideSessionID] || outsideAuto[secondRecordedSessionID] {
+		t.Fatalf("Home per-row autoPublish = %v, want only the selected session true", outsideAuto)
+	}
+	var automaticHome schema.LocalSyncSessionPage
+	world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&publication=auto", &automaticHome)
+	if len(automaticHome.Items) != 1 || automaticHome.Items[0].Sync.ID != recordedInsideSessionID {
+		t.Fatalf("Home auto view = %+v, want only the selected row whose rendered autoPublish is true", automaticHome.Items)
+	}
+
 	var removed schema.AutoPublishRemovalResponse
 	status, body = world.request(t, http.MethodDelete, ruleRoute("work"), nil)
 	decodeContract(t, status, body, &removed)
@@ -513,8 +537,25 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 			}
 			var home schema.LocalSyncSessionPage
 			world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", &home)
-			if len(home.Items) != 1 || home.Items[0].Sync.ID != recordedInsideSessionID || home.Items[0].Publication.AutoPublish != c.Expect {
-				t.Fatalf("Home ordinary page disagrees with canonical hook projection: %+v", home.Items)
+			homeByID := make(map[string]schema.LocalSyncSessionRow, len(home.Items))
+			for _, item := range home.Items {
+				homeByID[item.Sync.ID] = item
+			}
+			if len(home.Items) != 3 {
+				t.Fatalf("Home ordinary page lists %d stored rows, want all 3: %+v", len(home.Items), home.Items)
+			}
+			inside, ok := homeByID[recordedInsideSessionID]
+			if !ok || inside.Publication.OutsideSelection || inside.Publication.AutoPublish != c.Expect {
+				t.Fatalf("Home row for the selected session = %+v, want outsideSelection=false and autoPublish=%v", inside, c.Expect)
+			}
+			for _, id := range []string{recordedOutsideSessionID, secondRecordedSessionID} {
+				row, ok := homeByID[id]
+				if !ok {
+					t.Fatalf("Home omitted stored session %s", id)
+				}
+				if !row.Publication.OutsideSelection || row.Publication.AutoPublish {
+					t.Fatalf("Home row for unselected session %s = %+v, want outsideSelection=true and autoPublish=false", id, row.Publication)
+				}
 			}
 			var automatic schema.LocalSyncSessionPage
 			world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&publication=auto", &automatic)

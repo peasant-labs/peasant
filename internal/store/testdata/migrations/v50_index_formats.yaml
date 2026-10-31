@@ -5,6 +5,7 @@ requiredNames:
   - never-indexed
   - parser-without-success-time
   - timestamp-without-parser
+  - negative-parser-with-time
 cases:
   - name: populated-parser-zero
     sessionID: a1000000-0000-4000-8000-000000000001
@@ -32,3 +33,9 @@ cases:
     sessionID: a1000000-0000-4000-8000-000000000006
     indexerVersion: 0
     indexedAt: 1700000000300
+  # A negative producer revision is not a revision, so it does not make an
+  # otherwise empty index count as a successful one.
+  - name: negative-parser-with-time
+    sessionID: a1000000-0000-4000-8000-000000000007
+    indexerVersion: -1
+    indexedAt: 1700000000400

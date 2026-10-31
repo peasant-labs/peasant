@@ -1,0 +1,250 @@
+# A repair that cannot reach its source.
+#
+# A routine harvest reports it and does not fail the run. One shape is the
+# exception: the source is PRESENT but a record in it cannot be used, and no
+# index has finished, so nothing serves and there is no state a reader can fall
+# back on (harvest-malformed-no-index). A source that is merely missing is
+# reported and left to the next harvest whether or not a copy serves
+# (harvest-missing-no-index): the file may simply reappear.
+#
+# An explicit forced run counts the repair as a failed session and does not
+# index it, so a person or a script can tell that the repair did not take. The
+# cause text promises a stored copy only when a completed index is what still
+# serves.
+#
+# A reindex run reaches stored-content recovery before the pair lane, so the
+# stored-content lane is the one that names the missing or malformed source
+# there; the harvest rows are named by the pair lane. want_diagnostics states
+# how many of the two lanes speak, and want_mentions names the one diagnostic
+# that carries the contract text.
+#
+# want_content_promise pins the stored-content lane's own message, which is a
+# different sentence from the pair lane's. A row with no completed index must say
+# nothing is served from the database yet; a row that has finished indexing must
+# say the stored copy keeps serving instead.
+required_names:
+  - harvest-missing-routine
+  - harvest-missing-forced
+  - harvest-malformed-routine
+  - harvest-malformed-forced
+  - reindex-missing-routine
+  - reindex-missing-forced
+  - reindex-malformed-routine
+  - reindex-malformed-forced
+  - harvest-malformed-no-index
+  - harvest-missing-no-index
+  - reindex-unrecorded-routine
+  - reindex-unrecorded-forced
+  - harvest-unrecorded-forced-outside-since
+  - harvest-unrecorded-forced
+  - reindex-unrecorded-forced-outside-since
+  - reindex-damaged-forced-inside-since
+  - reindex-damaged-forced-outside-since
+cases:
+  - name: harvest-missing-routine
+    command: harvest
+    source: missing
+    completed_index: true
+    want_errors: false
+    want_diagnostics: 1
+    want_indexed: 0
+    want_promise: serving
+    want_mentions: "is unavailable"
+  - name: harvest-missing-forced
+    command: harvest
+    source: missing
+    force: true
+    completed_index: true
+    want_errors: true
+    want_diagnostics: 1
+    want_indexed: 0
+    want_promise: serving
+    want_mentions: "is unavailable"
+  - name: harvest-malformed-routine
+    command: harvest
+    source: malformed
+    completed_index: true
+    want_errors: false
+    want_diagnostics: 1
+    want_indexed: 0
+    want_promise: serving
+    want_mentions: "capture JSONL record 2: malformed complete JSON"
+  - name: harvest-malformed-forced
+    command: harvest
+    source: malformed
+    force: true
+    completed_index: true
+    want_errors: true
+    want_diagnostics: 1
+    want_indexed: 0
+    want_promise: serving
+    want_mentions: "capture JSONL record 2: malformed complete JSON"
+  # A routine reindex cannot repair this session, so it keeps the session in the
+  # run for the stored-index fallback instead of dropping it. Nothing is indexed:
+  # the saved pair is the missing half, and the index capture refuses a pair that
+  # does not match the recorded identity.
+  - name: reindex-missing-routine
+    command: reindex
+    source: missing
+    completed_index: true
+    want_errors: false
+    want_diagnostics: 1
+    want_indexed: 0
+    want_updated: 1
+    want_promise: serving
+    want_mentions: "file does not exist"
+    want_content_promise: serving
+
+  - name: reindex-missing-forced
+    command: reindex
+    source: missing
+    force: true
+    completed_index: true
+    want_errors: true
+    want_diagnostics: 1
+    want_indexed: 0
+    want_promise: serving
+    want_mentions: "file does not exist"
+  - name: reindex-malformed-routine
+    command: reindex
+    source: malformed
+    completed_index: true
+    want_errors: false
+    want_diagnostics: 1
+    want_indexed: 0
+    want_promise: serving
+    want_mentions: "malformed JSON"
+    want_content_promise: serving
+
+  - name: reindex-malformed-forced
+    command: reindex
+    source: malformed
+    force: true
+    completed_index: true
+    want_errors: true
+    want_diagnostics: 1
+    want_indexed: 0
+    want_promise: serving
+    want_mentions: "malformed JSON"
+  # A present-but-unusable source is the failure even on a routine run, because
+  # the user's own fix is what clears it and the stored copy is not the answer
+  # the run can stand on once nothing has finished indexing.
+  - name: harvest-malformed-no-index
+    command: harvest
+    source: malformed
+    completed_index: false
+    want_errors: true
+    want_diagnostics: 1
+    want_indexed: 0
+    want_promise: neutral
+    want_mentions: "capture JSONL record 2: malformed complete JSON"
+  # A missing source is not a failure on a routine run: the repair is what the
+  # next harvest owes, and the diagnostic says so. It stays neutral about a
+  # stored copy because nothing has finished indexing to serve.
+  - name: harvest-missing-no-index
+    command: harvest
+    source: missing
+    completed_index: false
+    want_errors: false
+    want_diagnostics: 1
+    want_indexed: 0
+    want_promise: neutral
+    want_mentions: "is unavailable"
+  # Both lanes speak for a session with no recorded source: the pair lane names
+  # the missing locator, and stored-content recovery reports its own refusal,
+  # which is a different error class and so is not settled by the pair lane's
+  # cause.
+  - name: reindex-unrecorded-routine
+    command: reindex
+    source: unrecorded
+    completed_index: false
+    want_errors: false
+    want_diagnostics: 2
+    want_indexed: 0
+    want_promise: neutral
+    want_mentions: "no recorded original source"
+    want_content_promise: neutral
+
+  - name: reindex-unrecorded-forced
+    command: reindex
+    source: unrecorded
+    force: true
+    completed_index: false
+    want_errors: true
+    want_diagnostics: 2
+    want_indexed: 0
+    want_promise: neutral
+    want_mentions: "no recorded original source"
+    want_content_promise: neutral
+  # The run's own age filter bounds the failure count. This session has no
+  # recorded start, so a --since window cannot place it inside the window and its
+  # unrouted repair is not this run's failed session.
+  - name: harvest-unrecorded-forced-outside-since
+    command: harvest
+    source: unrecorded
+    force: true
+    since: out-of-window
+    completed_index: false
+    want_errors: false
+    want_diagnostics: 1
+    want_indexed: 0
+    want_updated: 0
+    want_promise: neutral
+    want_mentions: "no recorded original source"
+  # The reindex path reaches the same repair through the stored inventory, and the
+  # same window keeps it out of the failure count.
+  - name: reindex-unrecorded-forced-outside-since
+    command: reindex
+    source: unrecorded
+    force: true
+    since: out-of-window
+    completed_index: false
+    want_errors: false
+    want_diagnostics: 1
+    want_indexed: 0
+    want_updated: 0
+    want_promise: neutral
+    want_mentions: "no recorded original source"
+  # The same repair without the window is this run's work, so the forced run
+  # counts it and does not index the session.
+  - name: harvest-unrecorded-forced
+    command: harvest
+    source: unrecorded
+    force: true
+    completed_index: false
+    want_errors: true
+    want_diagnostics: 2
+    want_indexed: 0
+    want_updated: 0
+    want_promise: neutral
+    want_mentions: "no recorded original source"
+    want_content_promise: neutral
+  # The same window on a session whose stored metadata survived: its recorded
+  # start is inside the window, so the repair is this run's work and the forced
+  # failure is counted.
+  - name: reindex-damaged-forced-inside-since
+    command: reindex
+    source: missing
+    force: true
+    stored_pair: damaged-identity
+    since: in-window
+    completed_index: true
+    want_errors: true
+    want_diagnostics: 1
+    want_indexed: 0
+    want_promise: serving
+    want_mentions: "is unavailable"
+  # A recorded start outside the window is not selected at all: no diagnostic and
+  # no failed session.
+  - name: reindex-damaged-forced-outside-since
+    command: reindex
+    source: missing
+    force: true
+    stored_pair: damaged-identity
+    since: out-of-window
+    completed_index: true
+    want_errors: false
+    want_diagnostics: 0
+    want_indexed: 0
+    want_promise: ""
+    want_mentions: ""

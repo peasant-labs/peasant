@@ -1,3 +1,6 @@
+# Every case keeps its original saved-selection input and asserts it is IGNORED:
+# all stored projects and sessions are listed, and the retained SelectionState
+# carrier reports no active browse filter and zero hidden rows.
 cases:
   - name: all_mode_selection_inactive_nothing_hidden
     classification: must-pass
@@ -36,7 +39,7 @@ cases:
             - {id: "66666666-6666-4666-8666-666666666666"}
             - {id: "77777777-7777-4777-8777-777777777777"}
             - {id: "88888888-8888-4888-8888-888888888888"}
-    expected: {active: true, hidden_projects: 1, hidden_sessions: 3, visible_project_count: 1, visible_session_count: 2}
+    expected: {active: false, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 2, visible_session_count: 5}
 
   - name: selected_mode_hides_some_sessions_without_hiding_the_project_row
     classification: must-pass
@@ -54,7 +57,7 @@ cases:
             - {id: "99999999-9999-4999-8999-999999999999"}
             - {id: "aaaaaaaa-1111-4111-8111-111111111111"}
             - {id: "bbbbbbbb-2222-4222-8222-222222222222"}
-    expected: {active: true, hidden_projects: 0, hidden_sessions: 2, visible_project_count: 1, visible_session_count: 1}
+    expected: {active: false, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 3}
 
   - name: selected_mode_hides_every_stored_project
     classification: must-pass
@@ -71,7 +74,7 @@ cases:
           sessions:
             - {id: "cccccccc-3333-4333-8333-333333333331"}
             - {id: "cccccccc-3333-4333-8333-333333333332", git_worktree: /work/hidden-linked}
-    expected: {active: true, hidden_projects: 1, hidden_sessions: 2, visible_project_count: 0, visible_session_count: 0}
+    expected: {active: false, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 2}
 
   - name: explicitly_selected_parent_admits_nested_child
     classification: must-pass
@@ -88,7 +91,7 @@ cases:
           sessions:
             - {id: "eeeeeeee-5555-4555-8555-555555555550"}
             - {id: "eeeeeeee-5555-4555-8555-555555555551", parent_id: "eeeeeeee-5555-4555-8555-555555555550", git_worktree: /work/nested-linked}
-    expected: {active: true, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 2}
+    expected: {active: false, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 2}
 
   - name: session_worktree_overrides_project_cwd
     classification: must-pass
@@ -106,7 +109,7 @@ cases:
           sessions:
             - {id: "ffffffff-6666-4666-8666-666666666661", git_worktree: /work/delta-linked}
             - {id: "ffffffff-6666-4666-8666-666666666662"}
-    expected: {active: true, hidden_projects: 0, hidden_sessions: 1, visible_project_count: 1, visible_session_count: 1}
+    expected: {active: false, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 2}
 
   - name: project_cwd_fallback_admits_session_without_worktree
     classification: must-pass
@@ -123,7 +126,7 @@ cases:
         - cwd: /work/epsilon-main
           sessions:
             - {id: "abababab-7777-4777-8777-777777777777"}
-    expected: {active: true, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 1}
+    expected: {active: false, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 1}
 
   - name: canonical_clone_selection_does_not_widen_sibling_worktree
     classification: must-pass
@@ -143,7 +146,7 @@ cases:
           sessions:
             - {id: "cdcdcdcd-8888-4888-8888-888888888881"}
             - {id: "cdcdcdcd-8888-4888-8888-888888888882", git_worktree: /work/shared-clone-b}
-    expected: {active: true, hidden_projects: 0, hidden_sessions: 1, visible_project_count: 1, visible_session_count: 1}
+    expected: {active: false, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 2}
 
   - name: selected_canonical_parent_remains_visible_without_selected_descendants
     classification: must-pass
@@ -162,4 +165,4 @@ cases:
           git_remote: https://github.com/example/parent-only.git
           sessions:
             - {id: "dededede-9999-4999-8999-999999999999", git_worktree: /work/parent-clone-b}
-    expected: {active: true, hidden_projects: 0, hidden_sessions: 1, visible_project_count: 1, visible_session_count: 0}
+    expected: {active: false, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 1}

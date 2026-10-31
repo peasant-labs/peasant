@@ -20,7 +20,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/salt"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -325,7 +324,7 @@ func assertFullToolSemantics(t *testing.T, db *store.Store, sid ingest.SessionID
 	if !scopeFound {
 		t.Fatal("long tool JSON did not produce stored scope annotation")
 	}
-	svc := codemap.NewService(db, func(string) gitops.Repository { return testutil.NoGitRepository() }, nil, sessionvisibility.All())
+	svc := codemap.NewService(db, func(string) gitops.Repository { return testutil.NoGitRepository() }, nil)
 	tasks, err := svc.ProjectTasks(t.Context(), testutil.TestProjectHash, "internal/widget.go")
 	if err != nil {
 		t.Fatal(err)

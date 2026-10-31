@@ -72,7 +72,7 @@ loaderMutations:
 expectedMutationCount: 4
 mutations:
   - name: durable payload keeps the read navigation mixed in
-    find: "const { relationshipNavigation, ...durableDetail } = detail;"
+    find: "const { relationshipNavigation, teammate: _teammate, ...durableDetail } = detail;"
     replace: "const durableDetail = detail;"
     expectedTestFile: src/components/session-detail/v2/SessionDetailV2.relationshipNavigation.test.tsx
     expectedFailedTestNames:

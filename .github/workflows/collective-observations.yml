@@ -26,6 +26,13 @@ jobs:
         with:
           fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41
+      # Hosted runners are ephemeral. Restore Go's module/build caches for the
+      # fixture seeder and both binary builds; the Nix shell still supplies Go.
+      - name: Restore Go caches
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
       - name: Frozen dependencies, support contracts and actual embedded binary journey
         run: |
           nix develop --command bash -euo pipefail <<'SCRIPT'

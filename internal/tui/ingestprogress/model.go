@@ -32,6 +32,10 @@ type ObserveMsg struct {
 	At              time.Time
 	Snapshot        map[ingest.Stage]ingest.StageProgress
 	CancelRequested bool
+	// Waiting is why the run has not started, such as another harvest
+	// holding the data dir's lock (ingest.ProgressState.Waiting); empty when
+	// it is not waiting.
+	Waiting string
 }
 
 type CancelRequestedMsg struct{ At time.Time }
@@ -64,6 +68,8 @@ type Model struct {
 	observations             map[ingest.Stage]observation
 	retainedEstimate         estimate
 	retaining                bool
+	// waiting is the latest observed reason the run has not started.
+	waiting string
 }
 
 func New(options Options) Model {
@@ -85,6 +91,7 @@ func (m Model) Update(message tea.Msg) (Model, tea.Cmd) {
 		if msg.CancelRequested {
 			m.retainEstimate()
 		}
+		m.waiting = msg.Waiting
 		m.observe(msg.At, msg.Snapshot)
 	case CancelRequestedMsg:
 		m.retainEstimate()
@@ -249,6 +256,9 @@ func (m Model) View() string {
 		estimateText = "  estimate: " + displayDuration(estimate.value)
 	}
 	detail := []string{styles.Muted.Render("  total elapsed: " + displayDuration(now.Sub(m.startedAt))), styles.Muted.Render(estimateText)}
+	if m.waiting != "" {
+		detail = append([]string{styles.Base.Render("  " + m.waiting)}, detail...)
+	}
 	lines = append(lines, detail...)
 	if m.height < 0 || len(lines) <= m.height {
 		return strings.Join(lines, "\n")

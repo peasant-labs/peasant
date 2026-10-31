@@ -180,7 +180,7 @@ func TestPiKickstartMountedDiscoveryThroughStoredImport(t *testing.T) {
 			if err != nil || len(ids) != 1 || ids[0] != row.SessionID {
 				t.Fatalf("actual import must store selected valid session only: %v %v", ids, err)
 			}
-			session, err := api.NewStoreDataProvider(db, sessionvisibility.All()).SessionByID(t.Context(), row.SessionID)
+			session, err := api.NewStoreDataProvider(db, sessionvisibility.Browsing()).SessionByID(t.Context(), row.SessionID)
 			if err != nil {
 				t.Fatal(err)
 			}

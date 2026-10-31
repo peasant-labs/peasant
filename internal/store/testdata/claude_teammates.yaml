@@ -1,0 +1,219 @@
+# Claude Code teammate identity, read from the stored transcript evidence cache.
+#
+# Each case seeds the sessions and the cached transcript evidence it names, then
+# asks the store for the subject session's teammate. A case's `want_present`
+# says whether that one session may carry an identity: the identity is evidence
+# (a parent transcript that records spawning that exact team and agent), never a
+# guess from a parent link, a team name, another harness's parentage, or a
+# subagent-scope cache row. A `want_error` case states the identity the cache
+# holds but the local contract refuses; the read must fail closed and name why.
+#
+# `batch_probe` names the three recorded spawn edges the bounded-page probe seeds
+# at the first position, in the middle of the second query batch, and at the last
+# position of one three-batch page.
+requiredNames:
+  - positive-spawn-edge
+  - positive-spawn-edge-in-the-middle
+  - positive-spawn-edge-at-the-page-end
+  - parent-without-spawn
+  - same-team-different-name
+  - non-claude-child
+  - non-claude-parent
+  - missing-parent
+  - subagent-evidence-identity
+  - invalid-empty-identity
+  - invalid-control-character-identity
+batch_probe:
+  first: positive-spawn-edge
+  middle: positive-spawn-edge-in-the-middle
+  last: positive-spawn-edge-at-the-page-end
+cases:
+  - name: positive-spawn-edge
+    subject: 22222222-2222-4222-8222-222222222222
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        source_path: /captured/11111111-1111-4111-8111-111111111111.jsonl
+        identity: { team: migration, name: lead }
+        spawns:
+          - { team: migration, name: tests }
+      - id: 22222222-2222-4222-8222-222222222222
+        harness: claude-code
+        source_path: /captured/22222222-2222-4222-8222-222222222222.jsonl
+        parent_id: 11111111-1111-4111-8111-111111111111
+        identity: { team: migration, name: tests }
+    want_present: true
+    want_teammate: { team: migration, name: tests }
+
+  - name: positive-spawn-edge-in-the-middle
+    subject: 99999999-9999-4999-8999-999999999999
+    sessions:
+      - id: 88888888-8888-4888-8888-888888888888
+        harness: claude-code
+        source_path: /captured/88888888-8888-4888-8888-888888888888.jsonl
+        identity: { team: release, name: lead }
+        spawns:
+          - { team: release, name: notes }
+      - id: 99999999-9999-4999-8999-999999999999
+        harness: claude-code
+        source_path: /captured/99999999-9999-4999-8999-999999999999.jsonl
+        parent_id: 88888888-8888-4888-8888-888888888888
+        identity: { team: release, name: notes }
+    want_present: true
+    want_teammate: { team: release, name: notes }
+
+  - name: positive-spawn-edge-at-the-page-end
+    subject: 55555555-5555-4555-8555-555555555555
+    sessions:
+      - id: 44444444-4444-4444-8444-444444444444
+        harness: claude-code
+        source_path: /captured/44444444-4444-4444-8444-444444444444.jsonl
+        identity: { team: review, name: lead }
+        spawns:
+          - { team: review, name: docs }
+      - id: 55555555-5555-4555-8555-555555555555
+        harness: claude-code
+        source_path: /captured/55555555-5555-4555-8555-555555555555.jsonl
+        parent_id: 44444444-4444-4444-8444-444444444444
+        identity: { team: review, name: docs }
+    want_present: true
+    want_teammate: { team: review, name: docs }
+
+  - name: parent-without-spawn
+    subject: 22222222-2222-4222-8222-222222222222
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        source_path: /captured/11111111-1111-4111-8111-111111111111.jsonl
+        identity: { team: migration, name: lead }
+      - id: 22222222-2222-4222-8222-222222222222
+        harness: claude-code
+        source_path: /captured/22222222-2222-4222-8222-222222222222.jsonl
+        parent_id: 11111111-1111-4111-8111-111111111111
+        identity: { team: migration, name: tests }
+    want_present: false
+
+  - name: same-team-different-name
+    subject: 22222222-2222-4222-8222-222222222222
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        source_path: /captured/11111111-1111-4111-8111-111111111111.jsonl
+        identity: { team: migration, name: lead }
+        spawns:
+          - { team: migration, name: reviewer }
+      - id: 22222222-2222-4222-8222-222222222222
+        harness: claude-code
+        source_path: /captured/22222222-2222-4222-8222-222222222222.jsonl
+        parent_id: 11111111-1111-4111-8111-111111111111
+        identity: { team: migration, name: tests }
+    want_present: false
+
+  - name: non-claude-child
+    subject: 22222222-2222-4222-8222-222222222222
+    sessions:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        source_path: /captured/11111111-1111-4111-8111-111111111111.jsonl
+        identity: { team: migration, name: lead }
+        spawns:
+          - { team: migration, name: tests }
+      # Another harness's child: the parent transcript still records the spawn,
+      # and the child carries an identity record, but the child is not Claude
+      # Code, so the teammate identity is never projected onto it.
+      - id: 22222222-2222-4222-8222-222222222222
+        harness: codex
+        source_path: /captured/22222222-2222-4222-8222-222222222222.jsonl
+        parent_id: 11111111-1111-4111-8111-111111111111
+        identity: { team: migration, name: tests }
+    want_present: false
+
+  - name: non-claude-parent
+    subject: 77777777-7777-4777-8777-777777777777
+    sessions:
+      # The child is Claude Code and declares the identity, and the parent's
+      # cached transcript records spawning exactly that pair, but the parent
+      # session is not Claude Code: another harness's transcript cannot vouch
+      # for a Claude teammate.
+      - id: 66666666-6666-4666-8666-666666666666
+        harness: codex
+        source_path: /captured/66666666-6666-4666-8666-666666666666.jsonl
+        identity: { team: migration, name: lead }
+        spawns:
+          - { team: migration, name: tests }
+      - id: 77777777-7777-4777-8777-777777777777
+        harness: claude-code
+        source_path: /captured/77777777-7777-4777-8777-777777777777.jsonl
+        parent_id: 66666666-6666-4666-8666-666666666666
+        identity: { team: migration, name: tests }
+    want_present: false
+
+  - name: missing-parent
+    subject: 22222222-2222-4222-8222-222222222222
+    sessions:
+      # A spawner discovery could not resolve leaves its child parentless while
+      # the child's own transcript still declares the identity. With no stored
+      # parent there is no transcript that records the spawn, so there is no
+      # teammate.
+      - id: 22222222-2222-4222-8222-222222222222
+        harness: claude-code
+        source_path: /captured/22222222-2222-4222-8222-222222222222.jsonl
+        identity: { team: migration, name: tests }
+    want_present: false
+
+  - name: subagent-evidence-identity
+    subject: 22222222-2222-4222-8222-222222222222
+    sessions:
+      # The child's cached record is a subagent-scope row: it carries an
+      # identity, but only a root transcript can name the teammate a parent
+      # spawned, so this row never projects a teammate.
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        source_path: /captured/11111111-1111-4111-8111-111111111111.jsonl
+        identity: { team: migration, name: lead }
+        spawns:
+          - { team: migration, name: tests }
+      - id: 22222222-2222-4222-8222-222222222222
+        harness: claude-code
+        source_path: /captured/22222222-2222-4222-8222-222222222222.jsonl
+        parent_id: 11111111-1111-4111-8111-111111111111
+        scope: subagent
+        identity: { team: migration, name: tests }
+    want_present: false
+
+  - name: invalid-empty-identity
+    subject: 22222222-2222-4222-8222-222222222222
+    sessions:
+      # The spawn edge matches, but the stored identity is empty. A local read
+      # cannot carry it, and dropping it silently would hide a corrupt cache
+      # row, so the read must fail closed and name the field.
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        source_path: /captured/11111111-1111-4111-8111-111111111111.jsonl
+        identity: { team: migration, name: lead }
+        spawns:
+          - { team: "", name: tests }
+      - id: 22222222-2222-4222-8222-222222222222
+        harness: claude-code
+        source_path: /captured/22222222-2222-4222-8222-222222222222.jsonl
+        parent_id: 11111111-1111-4111-8111-111111111111
+        identity: { team: "", name: tests }
+    want_error: "team is empty"
+
+  - name: invalid-control-character-identity
+    subject: 22222222-2222-4222-8222-222222222222
+    sessions:
+      # A control character in the recorded name cannot be rendered as an
+      # identity line, so it is refused rather than emitted.
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        source_path: /captured/11111111-1111-4111-8111-111111111111.jsonl
+        identity: { team: migration, name: lead }
+        spawns:
+          - { team: migration, name: "tests\u0007" }
+      - id: 22222222-2222-4222-8222-222222222222
+        harness: claude-code
+        source_path: /captured/22222222-2222-4222-8222-222222222222.jsonl
+        parent_id: 11111111-1111-4111-8111-111111111111
+        identity: { team: migration, name: "tests\u0007" }
+    want_error: "control character"

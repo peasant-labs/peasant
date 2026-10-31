@@ -1,6 +1,6 @@
 expectedCaseCount: 13
 requiredNames:
-  - selection visibility fails closed
+  - discovery metadata failure is a provider failure
   - missing project is stable
   - ambiguous legacy project is stable
   - malformed project identity is stable
@@ -11,16 +11,16 @@ requiredNames:
   - missing guard hash is actionable
   - malformed guard hash is actionable
   - unavailable guard provider is actionable
-  - search selection visibility is operation aware
+  - search discovery metadata failure is operation aware
   - search provider failure is operation aware
 cases:
-  - name: selection visibility fails closed
-    errorKind: selection
+  - name: discovery metadata failure is a provider failure
+    errorKind: discovery
     endpoint: map
     status: 500
-    code: map_selection_visibility
-    requiredFragments: [saved kickstart selection, No partial project data was returned, Run `peasant kickstart`]
-    forbiddenFragments: [not-a-selection-mode]
+    code: map_provider_failure
+    requiredFragments: [local provider failed, No partial data was returned, Retry]
+    forbiddenFragments: [selection_visibility, saved kickstart selection, peasant kickstart]
   - name: missing project is stable
     errorKind: project
     endpoint: map
@@ -91,13 +91,13 @@ cases:
     code: provider_unavailable
     requiredFragments: [no data provider was configured, internal/api.exactRequestGuard, No provider call was made, Restart Peasant]
     forbiddenFragments: [generic-error]
-  - name: search selection visibility is operation aware
-    errorKind: search-selection
+  - name: search discovery metadata failure is operation aware
+    errorKind: search-discovery
     endpoint: search
     status: 500
-    code: search_selection_visibility
-    requiredFragments: [Search results could not be loaded, saved kickstart selection is invalid, No partial search results were returned, Run `peasant kickstart`]
-    forbiddenFragments: [Map or changes data, not-a-selection-mode]
+    code: search_provider_failure
+    requiredFragments: [Search results could not be loaded, local search provider failed, No partial search results were returned]
+    forbiddenFragments: [Map or changes data, selection_visibility, peasant kickstart]
   - name: search provider failure is operation aware
     errorKind: search-provider
     endpoint: search

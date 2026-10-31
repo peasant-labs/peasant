@@ -6,10 +6,7 @@ import (
 	"net/http"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 )
-
-const selectionVisibilityErrorCode = "selection_visibility"
 
 type errorEnvelope struct {
 	Error string `json:"error"`
@@ -23,11 +20,9 @@ func writeAPIError(w http.ResponseWriter, status int, message, code string) {
 }
 
 func writeDiscoveryError(w http.ResponseWriter, operation string, err error) {
+	// Discovery no longer applies the saved selection, so this writer never
+	// rewrites a failure as a selection-repair problem. The error itself carries
+	// the actionable cause (an unusable stored origin names re-ingest).
 	message := fmt.Sprintf("%s: %v; no discovery rows were returned, so retry after resolving the reported cause", operation, err)
-	code := ""
-	if sessionvisibility.IsError(err) {
-		code = selectionVisibilityErrorCode
-		message += "; run `peasant kickstart` to repair the persisted selection, then retry"
-	}
-	writeAPIError(w, http.StatusInternalServerError, message, code)
+	writeAPIError(w, http.StatusInternalServerError, message, "")
 }

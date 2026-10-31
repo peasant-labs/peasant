@@ -1,0 +1,44 @@
+# A finished stored index is a positive producer revision and a recorded
+# completion time. The format stamp is not that rule: a format version does
+# not make a row serve, and a finished row does not need one. A negative
+# producer revision is not a revision at all: it does not serve even beside a
+# completion time.
+required_names:
+  - producer-and-completion
+  - producer-without-completion
+  - completion-without-producer
+  - negative-producer
+  - producer-without-format
+  - no-row
+cases:
+  - name: producer-and-completion
+    row: true
+    indexer_version: 2
+    indexed_at: 1700000000000
+    format_version: 1
+    want: true
+  - name: producer-without-completion
+    row: true
+    indexer_version: 2
+    format_version: 1
+    want: false
+  - name: completion-without-producer
+    row: true
+    indexer_version: 0
+    indexed_at: 1700000000000
+    format_version: 1
+    want: false
+  - name: negative-producer
+    row: true
+    indexer_version: -1
+    indexed_at: 1700000000000
+    format_version: 1
+    want: false
+  - name: producer-without-format
+    row: true
+    indexer_version: 2
+    indexed_at: 1700000000000
+    want: true
+  - name: no-row
+    row: false
+    want: false

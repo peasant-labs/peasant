@@ -1,0 +1,138 @@
+# The run's explicit filters are applied by two different scope tests, and the
+# difference is the harness half only.
+#
+# want_inventory is the index inventory's decision (includesIndexTarget): the
+# strict harness and session filters plus the age window. A --harness run asks
+# for one harness, so a candidate whose harness the caller cannot name is
+# OUTSIDE it: reading that session would widen what the run asked to read.
+# The artifact mirror, the adapter refresh selection and the stored-discovery
+# usability check apply the same strict harness test.
+#
+# want_repair is the pair repair's decision (pairRepairInScope): the same
+# session filter and age window, and the tolerant harness test. A repair the
+# database already selected is this run's work, and only a named harness can
+# fail a --harness filter, so an unnamed harness stays in scope instead of
+# dropping the repair.
+#
+# The age window is stated once (withinRunAge). The repair resolves a start from
+# the candidate when the caller has none, because a repair selected from native
+# discovery carries no metadata start; the inventory never does, so a target
+# without a start is outside a window there. session_id is the candidate under
+# test; allowed_sessions is the run's explicit session filter, and a case with
+# none declared sets no filter. A zero since_ms sets no window. Times are epoch
+# milliseconds; the window seated below is 2025-06-01T00:00:00Z.
+required_names:
+  - unnamed-harness-is-outside-a-harness-inventory
+  - named-harness-in-the-run-is-inside-both
+  - another-named-harness-is-outside-both
+  - no-harness-filter-keeps-an-unnamed-harness
+  - session-filter-outside-the-list-is-excluded
+  - session-filter-inside-the-list-is-included
+  - age-window-excludes-a-candidate-with-no-start
+  - age-window-includes-a-start-inside-it
+  - age-window-excludes-a-start-after-it
+  - created-at-places-a-repair-inside-the-window
+  - mod-time-places-a-repair-inside-the-window
+  - created-at-after-the-window-excludes-a-repair
+  - created-at-inside-wins-over-an-earlier-mod-time
+  - created-at-outside-wins-over-a-later-mod-time
+cases:
+  - name: unnamed-harness-is-outside-a-harness-inventory
+    harness: claude-code
+    session_harness: ""
+    want_inventory: false
+    want_repair: true
+
+  - name: named-harness-in-the-run-is-inside-both
+    harness: claude-code
+    session_harness: claude-code
+    want_inventory: true
+    want_repair: true
+
+  - name: another-named-harness-is-outside-both
+    harness: claude-code
+    session_harness: codex
+    want_inventory: false
+    want_repair: false
+
+  - name: no-harness-filter-keeps-an-unnamed-harness
+    session_harness: ""
+    want_inventory: true
+    want_repair: true
+
+  - name: session-filter-outside-the-list-is-excluded
+    session_harness: claude-code
+    allowed_sessions: ["22222222-2222-4222-8222-222222222222"]
+    want_inventory: false
+    want_repair: false
+
+  - name: session-filter-inside-the-list-is-included
+    session_harness: claude-code
+    allowed_sessions: ["11111111-1111-4111-8111-111111111111"]
+    want_inventory: true
+    want_repair: true
+
+  - name: age-window-excludes-a-candidate-with-no-start
+    session_harness: claude-code
+    since_ms: 1748736000000
+    want_inventory: false
+    want_repair: false
+
+  - name: age-window-includes-a-start-inside-it
+    session_harness: claude-code
+    start_ms: 1748736001000
+    since_ms: 1748736000000
+    want_inventory: true
+    want_repair: true
+
+  - name: age-window-excludes-a-start-after-it
+    session_harness: claude-code
+    start_ms: 1748735999000
+    since_ms: 1748736000000
+    want_inventory: false
+    want_repair: false
+
+  # A repair selected from native discovery has no recorded start, so the
+  # candidate's own created time places it. The inventory has no such fallback:
+  # the target it reads starts from stored metadata, and an absent start stays
+  # outside the window.
+  - name: created-at-places-a-repair-inside-the-window
+    session_harness: claude-code
+    created_at_ms: 1748736001000
+    since_ms: 1748736000000
+    want_inventory: false
+    want_repair: true
+
+  - name: mod-time-places-a-repair-inside-the-window
+    session_harness: claude-code
+    mod_time_ms: 1748736001000
+    since_ms: 1748736000000
+    want_inventory: false
+    want_repair: true
+
+  - name: created-at-after-the-window-excludes-a-repair
+    session_harness: claude-code
+    created_at_ms: 1748735999000
+    since_ms: 1748736000000
+    want_inventory: false
+    want_repair: false
+
+  # Both times are present only in the two cases below, and each of them fails
+  # if the resolution falls back to the file time: the first is included by its
+  # created time and excluded by its modification time, the second the reverse.
+  # Together they pin the created time as the start the candidate prefers.
+  - name: created-at-inside-wins-over-an-earlier-mod-time
+    session_harness: claude-code
+    created_at_ms: 1748736001000
+    mod_time_ms: 1748735999000
+    since_ms: 1748736000000
+    want_inventory: false
+    want_repair: true
+
+  - name: created-at-outside-wins-over-a-later-mod-time
+    session_harness: claude-code
+    created_at_ms: 1748735999000
+    mod_time_ms: 1748736001000
+    since_ms: 1748736000000
+    want_inventory: false
+    want_repair: false

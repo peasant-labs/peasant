@@ -20,10 +20,7 @@ import (
 func TestGroupedViewIsOptInAndLegacyFlatRoutesAreUnchanged(t *testing.T) {
 	db := storetest.Open(t)
 	seedGroupedRouteBoundarySessions(t, db)
-	policy, err := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
 	provider := NewStoreDataProvider(db, policy)
 	base := startHelperGroupServer(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{}, Provider: provider})
 
@@ -86,10 +83,7 @@ func TestGroupedViewIsOptInAndLegacyFlatRoutesAreUnchanged(t *testing.T) {
 func TestMemberRouteRefusesFiltersAndStaleScopes(t *testing.T) {
 	db := storetest.Open(t)
 	seedGroupedRouteBoundarySessions(t, db)
-	policy, err := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
 	provider := NewStoreDataProvider(db, policy)
 	base := startHelperGroupServer(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{}, Provider: provider})
 
@@ -142,16 +136,14 @@ func helperGroupFirstGroup(t *testing.T, payload schema.LocalSessionListPayload)
 	return schema.HelperGroupSummary{}
 }
 
-// TestMemberRouteRefusesChangedSelectionRevision proves a scope issued under one
-// persisted selection is refused once the selection revision changes, so a
-// changed selection can never be replayed against a different visible set.
-func TestMemberRouteRefusesChangedSelectionRevision(t *testing.T) {
+// TestMemberRouteRefusesChangedBrowsingRevision proves a scope issued under one
+// browsing revision is refused once that revision changes, so a token can never
+// be replayed against a different visible set. The saved ingest selector is not
+// part of this revision.
+func TestMemberRouteRefusesChangedBrowsingRevision(t *testing.T) {
 	db := storetest.Open(t)
 	seedGroupedRouteBoundarySessions(t, db)
-	policy, err := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
 	provider := NewStoreDataProvider(db, policy)
 	server, base := startHelperGroupServerHandle(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{}, Provider: provider})
 
@@ -182,10 +174,7 @@ func TestMemberRouteRefusesChangedSelectionRevision(t *testing.T) {
 func TestRegisteredRouteVariantSeamServesMembers(t *testing.T) {
 	db := storetest.Open(t)
 	seedGroupedRouteBoundarySessions(t, db)
-	policy, err := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
 	provider := NewStoreDataProvider(db, policy)
 	server, base := startHelperGroupServerHandle(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{}, Provider: provider})
 

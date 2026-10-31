@@ -190,13 +190,13 @@ func assertLastGoodHookRefusal(t *testing.T, flag string, stdout, stderr string,
 // --non-interactive, so the public-consent prompt still applies.
 func TestPushWizardEnabledSkipsForLastGood(t *testing.T) {
 	t.Parallel()
-	if !pushWizardEnabled(false, false, true, false, false) {
+	if !pushWizardEnabled(false, false, true, false, false, false) {
 		t.Fatal("an ordinary interactive run must open the push wizard")
 	}
-	if pushWizardEnabled(false, false, true, true, false) {
+	if pushWizardEnabled(false, false, true, true, false, false) {
 		t.Fatal("--non-interactive must disable the push wizard")
 	}
-	if pushWizardEnabled(false, false, true, false, true) {
+	if pushWizardEnabled(false, false, true, false, true, false) {
 		t.Fatal("--last-good must disable the push wizard: the wizard previews the newer attempt while the flag publishes the last-good authority")
 	}
 }
