@@ -1,0 +1,33 @@
+# Required-name manifest for testdata/village_share.yaml.
+requiredNames:
+  - share_one_transcript_one_collective
+  - share_pending_approval
+  - two_collectives_one_call
+  - already_held_is_skipped
+  - rejected_is_not_asked_again
+  - taken_back_is_not_asked_again
+  - unchanged_session_by_receipt
+  - session_without_receipt_fails_that_target_only
+  - not_owner_403
+  - missing_transcript_read_fails_that_target_only
+  - conflict_with_no_history_stays_a_failure
+  - same_transcript_named_twice_shares_once
+  - sessions_from_stdin_with_yes
+  - sessions_from_stdin_leaves_no_answer_for_the_prompt
+  - non_member_collective_fails_before_mutation
+  - ambiguous_collective_name_fails
+  - lookalike_url_refused
+  - dry_run_sends_nothing
+  - dry_run_with_yes_needs_no_confirmation
+  - prompts_without_yes
+  - prompt_accepts_y
+  - prompt_on_end_of_input_shares_nothing
+  - yes_and_y_skip_prompt
+  - no_tty_without_yes_refuses
+  - json_without_yes_refuses_on_a_terminal
+  - everything_decided_asks_nothing
+  - json_golden
+  - not_logged_in_exit_3
+  - no_transcript_named_exit_3
+  - no_collective_named_exit_3
+  - auto_publish_rules_are_not_read

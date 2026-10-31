@@ -98,6 +98,16 @@ commands:
         expect_error: false
         output_contains: ["open", "--session", "--hook", "--port"]
 
+  - name: VillageShare
+    use: share
+    flags:
+      - { name: collective, type: stringArray, default: "[]" }
+      - { name: session, type: stringArray, default: "[]" }
+      - { name: sessions-from, type: string, default: "" }
+      - { name: dry-run, type: bool, default: "false" }
+      - { name: json, type: bool, default: "false" }
+      - { name: yes, type: bool, default: "false" }
+
   - name: Push
     use: push
     flags:

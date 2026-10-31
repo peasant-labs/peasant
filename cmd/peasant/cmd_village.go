@@ -18,6 +18,7 @@ func BuildVillageCommand() *cobra.Command {
 	// transcripts push` alias is a possible future addition, but the asymmetry here
 	// is chosen, not an oversight.
 	cmd.AddCommand(BuildPushCommand())
+	cmd.AddCommand(BuildVillageShareCommand())
 	cmd.AddCommand(BuildLoginCommand())
 	cmd.AddCommand(BuildLogoutCommand())
 

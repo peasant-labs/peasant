@@ -12,6 +12,12 @@ Release, which holds the signed artifacts and checksums.
   `subagent`, `skill`, `mcp`, `compact`, `clear`, `model-switch`, `background`
   and `partial`, and every named facet must hold. `--min-turns` and `--max-turns`
   bound the `turns` column. Each `--json` row now states `facets`.
+- `village share` offers transcripts you already published to collectives, named
+  by UUID, page URL, `--session` or `--sessions-from`, without pushing again. It
+  asks once; `--yes` confirms in advance, and with `--json` or no terminal and no
+  `--yes` it refuses, exits 3 and shares nothing. A collective that already has a
+  share, live, rejected or taken back, is not asked again. `--dry-run --json`
+  prints the plan. It uploads nothing and changes no visibility or license.
 
 ### Changed
 - `sessions list` shows main sessions only by default, so a script that counts

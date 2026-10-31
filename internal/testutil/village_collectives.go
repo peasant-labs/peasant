@@ -70,6 +70,7 @@ type CollectiveVillage struct {
 	failPublish          bool
 	refusePublish        map[schema.SessionID]bool
 	failShare            map[schema.VillageUUID]bool
+	refuseShare          map[schema.TranscriptID]bool
 	conflictShare        map[schema.VillageUUID]bool
 	failShareRead        bool
 	failTranscriptRead   bool
@@ -169,6 +170,17 @@ func (v *CollectiveVillage) FailShare(id schema.VillageUUID) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.failShare[id] = true
+}
+
+// RefuseShare makes sharing the transcript answer 403, as Village does for a
+// transcript the caller does not own.
+func (v *CollectiveVillage) RefuseShare(transcript schema.TranscriptID) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.refuseShare == nil {
+		v.refuseShare = map[schema.TranscriptID]bool{}
+	}
+	v.refuseShare[transcript] = true
 }
 
 // RefusePublish makes the publish of one session answer 422, as peasant
@@ -732,6 +744,11 @@ func (v *CollectiveVillage) share(w http.ResponseWriter, r *http.Request, transc
 	shares, exists := v.transcripts[transcript]
 	if !exists {
 		http.Error(w, `{"error":"Transcript not found"}`, http.StatusNotFound)
+		return
+	}
+	if v.refuseShare[transcript] {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(schema.VillageErrorResponse{Error: "You do not own this transcript"})
 		return
 	}
 	for _, id := range request.GroupIDs {
