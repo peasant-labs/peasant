@@ -134,7 +134,11 @@ func (p *Pipeline) CollectiveSharer(client CollectiveSharer) CollectiveSharer {
 	if p.observations == nil {
 		return client
 	}
-	return &observedSharer{CollectiveSharer: client, observations: p.observations}
+	return observeSharer(p.observations, client)
+}
+
+func observeSharer(observations *actionObservations, client CollectiveSharer) CollectiveSharer {
+	return &observedSharer{CollectiveSharer: client, observations: observations}
 }
 
 type observedSharer struct {
