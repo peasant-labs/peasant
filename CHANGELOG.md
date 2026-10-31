@@ -20,6 +20,13 @@ Release, which holds the signed artifacts and checksums.
 - The local web commands accept decimal TCP ports from 1 to 65535 and reject
   invalid values before starting a server. Base-prefixed values such as `0x50`
   are refused; `080` means port 80.
+- `harvest --since`, `sessions list --since/--until` and `prune --before/--after`
+  now share one time grammar: `Nh`, `Nd`, `Nw`, `Nmo` (months), `Ny`, or a
+  `YYYY-MM-DD`/RFC3339 date. **`sessions list --since 30m` now means 30
+  months, not 30 minutes**; use `1h` for the last hour. Compound and sub-hour
+  values such as `1h30m` and `90s`, which `sessions list` used to accept, are
+  now refused. `prune` refuses a bare `Nm` and asks for `Nmo`. `prune` accepts
+  relative values and `harvest --since` accepts dates for the first time.
 
 ## [0.13.5] - 2026-10-29
 

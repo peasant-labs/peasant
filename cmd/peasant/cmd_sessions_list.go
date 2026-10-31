@@ -62,8 +62,8 @@ func buildSessionsListCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&project, "project", "", "Filter by project name (matches git remote URL or directory basename)")
 	cmd.Flags().StringVar(&session, "session", "", "Filter to one exact session id")
-	cmd.Flags().StringVar(&since, "since", "", "Show sessions starting after this date (e.g. 7d, 24h, 2026-01-01)")
-	cmd.Flags().StringVar(&until, "until", "", "Show sessions starting before this date (e.g. 7d, 24h, 2026-01-01)")
+	cmd.Flags().StringVar(&since, "since", "", "Show sessions starting after this time ("+timeFilterHelp+")")
+	cmd.Flags().StringVar(&until, "until", "", "Show sessions starting before this time ("+timeFilterHelp+")")
 	cmd.Flags().StringVar(&harness, "harness", "", "Filter by harness (claude-code, gemini-cli, codex, opencode)")
 	cmd.Flags().StringVar(&tag, "tag", "", "Filter by session tag")
 	cmd.Flags().StringVar(&sort, "sort", string(defaults.SessionSortDate), "Sort by field (date, turns, tokens, project)")
@@ -191,45 +191,20 @@ func buildSessionListFilter(project, session, since, until, harness, tag, sort s
 	return f, nil
 }
 
-// parseDateOrDuration parses a date or duration string into a Unix millisecond timestamp.
-// Durations are relative to now: "7d" means 7 days ago, "24h" means 24 hours ago.
-// fromSide=true computes "now minus duration" (for --since); false also computes "now minus
-// duration" (for --until — the cutoff is still in the past, just the upper bound).
+// parseDateOrDuration parses sessions list --since/--until with the shared
+// time-filter grammar into Unix milliseconds. A date given to --until
+// (fromSide=false) covers that whole day.
 func parseDateOrDuration(s string, fromSide bool) (int64, error) {
-	now := time.Now()
-
-	// Try RFC3339 / date-only formats first.
-	for _, layout := range []string{"2006-01-02", time.RFC3339} {
-		if t, err := time.Parse(layout, s); err == nil {
-			if fromSide {
-				return t.UnixMilli(), nil
-			}
-			// For --until with a date, use end-of-day.
-			return t.Add(24 * time.Hour).UnixMilli(), nil
-		}
-	}
-
-	// Parse as duration: support "7d", "24h", "30m", standard Go duration + days.
-	d, err := parseDurationWithDays(s)
+	t, err := parseTimeFilter(s, time.Now())
 	if err != nil {
-		return 0, fmt.Errorf("expected a duration (e.g. 7d, 24h) or date (YYYY-MM-DD): %w", err)
+		return 0, err
 	}
-	// Both --since and --until with a duration subtract from now: "7d" means 7 days ago.
-	return now.Add(-d).UnixMilli(), nil
-}
-
-// parseDurationWithDays extends time.ParseDuration to support "Nd" (N days) notation.
-// "7d" → 7 * 24 * time.Hour. Mixed forms like "7d2h" are NOT supported.
-func parseDurationWithDays(s string) (time.Duration, error) {
-	if strings.HasSuffix(s, "d") {
-		daysStr := s[:len(s)-1]
-		days := 0
-		if _, err := fmt.Sscanf(daysStr, "%d", &days); err != nil || days < 0 {
-			return 0, fmt.Errorf("invalid day count in %q", s)
+	if !fromSide {
+		if _, dateOnly := time.Parse("2006-01-02", s); dateOnly == nil {
+			t = t.Add(24 * time.Hour)
 		}
-		return time.Duration(days) * 24 * time.Hour, nil
 	}
-	return time.ParseDuration(s)
+	return t.UnixMilli(), nil
 }
 
 // printSessionTable writes an aligned tabular output of sessions.

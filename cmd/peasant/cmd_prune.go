@@ -189,8 +189,8 @@ func BuildPruneCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&sessionIDs, "session", nil, "Session IDs to prune (repeatable)")
 	cmd.Flags().StringVar(&project, "project", "", "Prune sessions by project hash")
 	cmd.Flags().StringVar(&harness, "harness", "", "Prune sessions by harness (claude-code, gemini-cli, codex, opencode)")
-	cmd.Flags().StringVar(&before, "before", "", "Prune sessions started before this date (YYYY-MM-DD)")
-	cmd.Flags().StringVar(&after, "after", "", "Prune sessions started after this date (YYYY-MM-DD)")
+	cmd.Flags().StringVar(&before, "before", "", "Prune sessions started before this time ("+timeFilterHelp+")")
+	cmd.Flags().StringVar(&after, "after", "", "Prune sessions started after this time ("+timeFilterHelp+")")
 	cmd.Flags().BoolVar(&all, "all", false, "Prune all sessions")
 	cmd.Flags().BoolVar(&unselected, "unselected", false, "Prune sessions not selected by harness, project, clone, branch, or explicit session rules (requires selection.mode=selected)")
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "Skip interactive confirmation (for scripts/CI)")
@@ -260,18 +260,18 @@ func buildPruneFilter(sessionIDStrs []string, project, harness, before, after st
 	}
 
 	if before != "" {
-		t, err := time.Parse("2006-01-02", before)
+		t, err := parsePruneTimeFilter(before, time.Now())
 		if err != nil {
-			return filter, fmt.Errorf("invalid --before date %q: use YYYY-MM-DD format", before)
+			return filter, fmt.Errorf("invalid --before date %q: %w", before, err)
 		}
 		ms := t.UnixMilli()
 		filter.Before = &ms
 	}
 
 	if after != "" {
-		t, err := time.Parse("2006-01-02", after)
+		t, err := parsePruneTimeFilter(after, time.Now())
 		if err != nil {
-			return filter, fmt.Errorf("invalid --after date %q: use YYYY-MM-DD format", after)
+			return filter, fmt.Errorf("invalid --after date %q: %w", after, err)
 		}
 		ms := t.UnixMilli()
 		filter.After = &ms

@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -170,7 +169,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	_ = cmd.Flags().MarkHidden("debug")
 	cmd.Flags().BoolVar(&flags.jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().StringSliceVar(&flags.sessionIDs, "session", nil, "Filter to specific session IDs (repeatable, comma-separated)")
-	cmd.Flags().StringVar(&flags.since, "since", "", "Filter to sessions from the last N period (e.g. 2w, 3m, 7d)")
+	cmd.Flags().StringVar(&flags.since, "since", "", "Only sessions newer than this ("+timeFilterHelp+")")
 	cmd.Flags().StringVar(&flags.outputPath, "output", "", "Override output base path")
 
 	if mode == harvestIndexOnly {
@@ -1246,31 +1245,10 @@ func buildSourceConfigsTo(cfg *config.Config, warnings io.Writer) map[defaults.H
 	return sources
 }
 
-// parseSinceDuration parses a relative duration string like "2w", "3m", "7d"
-// and returns the corresponding time.Time cutoff (now - duration).
+// parseSinceDuration parses harvest --since with the shared time-filter
+// grammar and returns the cutoff.
 func parseSinceDuration(s string) (time.Time, error) {
-	if len(s) < 2 {
-		return time.Time{}, fmt.Errorf("invalid duration: %q (expected format: Nd, Nw, Nm)", s)
-	}
-	numStr := s[:len(s)-1]
-	unit := s[len(s)-1]
-
-	n, err := strconv.Atoi(numStr)
-	if err != nil || n <= 0 {
-		return time.Time{}, fmt.Errorf("invalid duration: %q (number must be positive integer)", s)
-	}
-
-	now := time.Now()
-	switch unit {
-	case 'd':
-		return now.AddDate(0, 0, -n), nil
-	case 'w':
-		return now.AddDate(0, 0, -n*7), nil
-	case 'm':
-		return now.AddDate(0, -n, 0), nil
-	default:
-		return time.Time{}, fmt.Errorf("invalid duration unit %q in %q (use d/w/m)", string(unit), s)
-	}
+	return parseTimeFilter(s, time.Now())
 }
 
 // jsonPipelineResult is the JSON-safe equivalent of ingest.PipelineResult.

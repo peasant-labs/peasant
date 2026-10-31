@@ -1,0 +1,14 @@
+# Every name here must stay in time_filter.yaml.
+required:
+  - hours
+  - days
+  - weeks
+  - months_mo
+  - years
+  - zero
+  - negative
+  - unknown_unit
+  - compound_duration
+  - seconds
+  - bad_number_quotes_input_as_typed
+  - bare_m_is_ambiguous

@@ -175,7 +175,7 @@ are replayed once through the ordinary push candidate path.
 | `--force` | Force re-process sessions that match current filters |
 | `--all` | Process ALL sessions (clears filters, implies `--force`) |
 | `--session <ids>` | Filter to specific session IDs (repeatable, comma-separated). Overrides the selection index. |
-| `--since <duration>` | Filter to sessions from the last N period (e.g. `2w`, `3m`, `7d`) |
+| `--since <time>` | Only sessions newer than this: `Nh`, `Nd`, `Nw`, `Nmo` (months), `Ny`, or `YYYY-MM-DD`. `sessions list --since/--until` and `prune --before/--after` take the same values, except that `prune` refuses a bare `Nm` (write `Nmo`). |
 | `--source-harness <h>` | Discover only this harness using its configured or default path (`claude-code`, `opencode`, `codex`, `cursor`, `strike`, `pi`) |
 | `--source-path <path>` | Override the named harness's source paths (requires `--source-harness`; replaces config, not additive) |
 | `--output <path>` | Override output base path |

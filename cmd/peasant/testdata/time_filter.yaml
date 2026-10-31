@@ -1,0 +1,19 @@
+# The one grammar behind every --since, --until, --before and --after flag.
+# accepted runs through harvest, sessions list and prune; a span is in whole
+# days ago. refused runs through all three. pruneOnly is what prune alone
+# refuses, because it deletes what it selects.
+accepted:
+  - { name: hours, input: 48h, minDays: 1, maxDays: 3 }
+  - { name: days, input: 7d, minDays: 6, maxDays: 8 }
+  - { name: weeks, input: 3w, minDays: 20, maxDays: 22 }
+  - { name: months_mo, input: 3mo, minDays: 88, maxDays: 93 }
+  - { name: years, input: 1y, minDays: 364, maxDays: 367 }
+refused:
+  - { name: zero, input: 0d, wantError: positive integer }
+  - { name: negative, input: -1w, wantError: positive integer }
+  - { name: unknown_unit, input: 2x, wantError: expected Nh }
+  - { name: compound_duration, input: 1h30m, wantError: positive integer }
+  - { name: seconds, input: 90s, wantError: expected Nh }
+  - { name: bad_number_quotes_input_as_typed, input: 3xmo, wantError: '"3xmo"' }
+pruneOnly:
+  - { name: bare_m_is_ambiguous, input: 30m, wantError: 30mo }

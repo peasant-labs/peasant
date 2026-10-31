@@ -1330,7 +1330,7 @@ func TestParseSinceDuration_Invalid(t *testing.T) {
 		{"0d", "positive integer"},
 		{"-1w", "positive integer"},
 		{"2x", "invalid duration unit"},
-		{"2y", "invalid duration unit"},
+		{"2x5", "positive integer"},
 	}
 
 	for _, tc := range tests {
