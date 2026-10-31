@@ -794,3 +794,79 @@ cases:
       - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "legacy prompt", provenance: {origin: submitted_input, actor: unknown, delivery: session_admission, ownership: local, evidence: native_typed, inputModality: text}}
       - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "legacy reply"}
       - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 1, toolCallIDFromIndex: -1, preview: "legacy reply"}
+
+  # The size of a depth-0 entry is its source line, and a block carved from that
+  # line does not repeat it: thinking records its text and the rest record none.
+  - name: raw-byte-length-per-line
+    transcript: |
+      {"type":"user","uuid":"u1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"read it"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"thinking","thinking":"12345678"},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"a.txt"}}]}}
+      {"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"contents"}]}}
+    completeness: complete
+    turnCount: 3
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1:1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u2"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u2:0"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u1"
+    entries:
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "read it", rawByteLengthOfLine: 1}
+      - {depth: 0, role: assistant, entryType: tool_use, hasThinking: true, parentIndex: -1, toolCallIDFromIndex: -1, previewUnchecked: true, rawByteLengthOfLine: 2}
+      - {depth: 1, role: assistant, entryType: thinking, partType: thinking, hasThinking: true, parentIndex: 1, toolCallIDFromIndex: -1, preview: "12345678", rawByteLength: 8}
+      - {depth: 1, role: assistant, entryType: tool_use, partType: tool_use, parentIndex: 1, toolCallIDFromIndex: -1, previewUnchecked: true, rawByteLengthAbsent: true}
+      - {depth: 0, role: tool, entryType: tool_result, parentIndex: -1, toolCallIDFromIndex: -1, previewAbsent: true, rawByteLengthOfLine: 3}
+      - {depth: 1, role: tool, entryType: tool_result, partType: tool_result, parentIndex: 4, toolCallIDFromIndex: 3, preview: "contents", rawByteLengthAbsent: true}
+
+  # Retention re-encodes a line whose content block is unknown and takes a whole
+  # unknown record out of the parse. Both still report the size of the source
+  # line. The spaces and the key order below make a re-encoded copy a different
+  # size from the source.
+  - name: raw-byte-length-retained-unknown
+    transcript: |
+      {"uuid": "a1", "type": "assistant", "sessionId": "99d59925-36bc-424c-a789-8be54d9702ba", "message": {"role": "assistant", "model": "claude-sonnet-4", "content": [{"type": "text", "text": "known"}, {"type": "future_block", "value": "held"}]}}
+      {"type":"future_record","uuid":"f1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","payload":"held"}
+    completeness: complete
+    turnCount: 1
+    inputSubmissionCount: 0
+    titleRefCount: 0
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:f1"
+    entries:
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "known", extraContains: "retainedUnknown", rawByteLengthOfLine: 1}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 0, toolCallIDFromIndex: -1, preview: "known", rawByteLengthAbsent: true}
+      - {depth: 0, role: system, entryType: system, parentIndex: -1, toolCallIDFromIndex: -1, previewAbsent: true, extraContains: "retainedUnknown", rawByteLengthOfLine: 2}
+
+  # Current main transcripts lead with bookkeeping records that carry no version.
+  - name: harness-version-after-leading-records
+    transcript: |
+      {"type":"file-history-snapshot","messageId":"m1","snapshot":{"messageId":"m1","trackedFileBackups":{},"timestamp":"2026-01-01T00:00:00Z"},"isSnapshotUpdate":false}
+      {"type":"last-prompt","lastPrompt":"hello","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba"}
+      {"type":"user","uuid":"u1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","version":"2.1.241","message":{"role":"user","content":"hello"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","version":"9.9.9","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"hi"}]}}
+    completeness: complete
+    harnessVersion: "2.1.241"
+    turnCount: 4
+    inputSubmissionCount: 1
+    titleRefCount: 1
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:pos:1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1:0"
+    acceptKeys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u1"
+    entries:
+      - {depth: 0, role: system, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, previewUnchecked: true, rawByteLengthOfLine: 1}
+      - {depth: 0, role: system, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, previewUnchecked: true, rawByteLengthOfLine: 2}
+      - {depth: 0, role: user, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "hello"}
+      - {depth: 0, role: assistant, entryType: text, parentIndex: -1, toolCallIDFromIndex: -1, preview: "hi"}
+      - {depth: 1, role: assistant, entryType: text, partType: text, parentIndex: 3, toolCallIDFromIndex: -1, preview: "hi"}
