@@ -181,6 +181,10 @@ func (s *Store) GetSessionContentCapture(ctx context.Context, id ingest.SessionI
 		return ingest.SessionContentCapture{}, false, err
 	}
 	defer s.pool.Put(conn)
+	return effectiveCaptureOnConn(conn, id)
+}
+
+func effectiveCaptureOnConn(conn *sqlite.Conn, id ingest.SessionID) (ingest.SessionContentCapture, bool, error) {
 	pointer, err := readLatestAttemptPointerOnConn(conn, schema.SessionID(id))
 	if err != nil {
 		return ingest.SessionContentCapture{}, false, err
