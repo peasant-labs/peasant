@@ -40,10 +40,12 @@ cases:
   # A newer indexer might represent the record, so the refusal is retried. This
   # is the case that proves the steady state is conditional and not a mute.
   # Two readers act: the recovery sweep, whose whole job is to certify a capture
-  # a newer producer might now certify, and the index path.
+  # a newer producer might now certify, and the index path. Only the index path
+  # reports: the sweep's refusal would say the capture stays incomplete, which
+  # the index path disproves in the same run.
   - name: a-newer-indexer-lifts-the-refusal
     bump_indexer: true
-    second_harvest_diagnostics: 2
+    second_harvest_diagnostics: 1
     # Four reads: the pair-repair selection reads the pair once to decide whether
     # it is missing or damaged before any parser work; the recovery sweep reads
     # it once to verify it is not a torn copy before recovering, then once more

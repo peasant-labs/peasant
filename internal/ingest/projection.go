@@ -145,7 +145,8 @@ type ClassifiedBlock struct {
 	Extra string
 	// RawByteLength is the producer-measured source size of this block's
 	// content. Nil means the producer measured no size. When set it is written
-	// straight to the stored entry.
+	// straight to the stored entry. What a producer measures for a block carved
+	// from one source record is stated at that producer.
 	RawByteLength *int
 	// Omitted is the source record this block stands in for: a record left out
 	// before redaction. It is valid only at depth 0 in the main partition,

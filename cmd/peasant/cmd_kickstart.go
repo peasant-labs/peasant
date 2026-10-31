@@ -729,6 +729,8 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			Write:              cfg.Write,
 			Progress:           progState,
 			AllowedSessionIDs:  allowedIDs,
+			// The wizard's allowlist is the user's selection.
+			AllowedSessionIDsIsSelection: true,
 		}
 
 		// Open DB and wire analytics stages.
@@ -764,6 +766,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()),
 		)
 
+		pipelineOpts = append(pipelineOpts, ingest.WithRunLock(filepath.Join(string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd))), ingest.RunLockFileName)))
 		pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg, pipelineOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("create pipeline: %w", err)
@@ -773,19 +776,25 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			return nil, fmt.Errorf("pipeline failed: %w", err)
 		}
 
-		providerCounts := aggregateProviderCounts(result.Sessions)
-
-		s := result.Summary
-		return &ftue.IngestResult{
-			New:            s.New,
-			Updated:        s.Updated,
-			Unchanged:      s.Unchanged,
-			Errors:         s.Errors,
-			Duration:       result.Duration,
-			ProviderCounts: providerCounts,
-			Diagnostics:    append([]ingest.DiagnosticEntry(nil), result.Diagnostics...),
-		}, nil
+		return kickstartIngestResult(result), nil
 	}, progState
+}
+
+// kickstartIngestResult is the wizard's view of a pipeline run. Sessions the
+// selection excluded are carried as their own count so the wizard's totals
+// add up.
+func kickstartIngestResult(result *ingest.PipelineResult) *ftue.IngestResult {
+	s := result.Summary
+	return &ftue.IngestResult{
+		New:                 s.New,
+		Updated:             s.Updated,
+		Unchanged:           s.Unchanged,
+		ExcludedBySelection: s.ExcludedBySelection,
+		Errors:              s.Errors,
+		Duration:            result.Duration,
+		ProviderCounts:      aggregateProviderCounts(result.Sessions),
+		Diagnostics:         append([]ingest.DiagnosticEntry(nil), result.Diagnostics...),
+	}
 }
 
 // kickstartAllowedSessionIDs preserves the difference between unrestricted

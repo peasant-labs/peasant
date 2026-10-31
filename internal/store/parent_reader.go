@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -63,6 +64,82 @@ func LogicalParentSQL(alias string) string {
      AND r.target_state IN ('target_known','target_known_retained')
      AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
 ), ` + alias + `.parent_id)`
+}
+
+// ParentUnresolvedSQL renders whether a session is a known spawned child whose
+// parent cannot be named: its started_by evidence, in the same generation scope
+// as LogicalParentSQL, says so. The session list and the local sync list read
+// the same two target states.
+func ParentUnresolvedSQL(alias string) string {
+	return `EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = ` + alias + `.session_id
+     AND r.generation_id = ` + parentGenerationScopeSQL(alias) + `
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+)`
+}
+
+// LogicalChildSQL renders whether a session is a subagent session: it has a
+// logical parent, or it is a known child whose parent cannot be named. A parent
+// the store does not hold still makes the session a child.
+func LogicalChildSQL(alias string) string {
+	return `(` + LogicalParentSQL(alias) + ` IS NOT NULL OR ` + ParentUnresolvedSQL(alias) + `)`
+}
+
+// SessionLineage is where one session sits under its parent. It carries the
+// same meaning as the parent fields of schema.LocalSessionRow: at most one of
+// ParentSessionID and ParentUnresolved is set, and ParentSessionID may name a
+// session the store does not hold.
+type SessionLineage struct {
+	ParentSessionID  *string
+	ParentUnresolved bool
+	RootSessionID    *string
+}
+
+// SessionLineages answers the lineage of each named session through the same
+// rendered rules the MainOnly filter applies, so a row's fields and the filter
+// cannot disagree. A session the store does not hold has no entry.
+func (s *Store) SessionLineages(ctx context.Context, sessionIDs []string) (map[string]SessionLineage, error) {
+	lineages := make(map[string]SessionLineage, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return lineages, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: take connection to read session lineage: %w; no lineage was read; retry the command", err)
+	}
+	defer s.pool.Put(conn)
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		batch := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			args[i] = id
+		}
+		query := `SELECT s.session_id, ` + LogicalParentSQL("s") + `, ` + ParentUnresolvedSQL("s") + `, s.root_session_id
+FROM sessions s WHERE s.session_id IN (?` + strings.Repeat(",?", len(batch)-1) + `)`
+		err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				var lineage SessionLineage
+				lineage.ParentUnresolved = stmt.ColumnInt(2) != 0
+				if !lineage.ParentUnresolved && stmt.ColumnType(1) != sqlite.TypeNull {
+					parent := stmt.ColumnText(1)
+					lineage.ParentSessionID = &parent
+				}
+				if stmt.ColumnType(3) != sqlite.TypeNull {
+					root := stmt.ColumnText(3)
+					lineage.RootSessionID = &root
+				}
+				lineages[stmt.ColumnText(0)] = lineage
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("store: read session lineage: %w; no lineage was read; run peasant harvest verify and retry", err)
+		}
+	}
+	return lineages, nil
 }
 
 // LogicalParentForSession returns the durable logical parent for one session:

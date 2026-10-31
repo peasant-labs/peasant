@@ -24,20 +24,25 @@ var claudeProducerManifestYAML []byte
 // match inside the same case, so the fixture states structure without carrying
 // opaque refs it cannot know.
 type claudeProducerEntry struct {
-	Depth               int                       `yaml:"depth"`
-	Role                string                    `yaml:"role"`
-	EntryType           string                    `yaml:"entryType"`
-	PartType            string                    `yaml:"partType"`
-	HasThinking         bool                      `yaml:"hasThinking"`
-	ParentIndex         int                       `yaml:"parentIndex"`
-	Preview             string                    `yaml:"preview"`
-	PreviewAbsent       bool                      `yaml:"previewAbsent"`
-	PreviewContains     string                    `yaml:"previewContains"`
-	PreviewUnchecked    bool                      `yaml:"previewUnchecked"`
-	ToolCallIDFromIndex int                       `yaml:"toolCallIDFromIndex"`
-	ToolCallIDLiteral   string                    `yaml:"toolCallIDLiteral"`
-	ExtraContains       string                    `yaml:"extraContains"`
-	RawByteLength       int                       `yaml:"rawByteLength"`
+	Depth               int    `yaml:"depth"`
+	Role                string `yaml:"role"`
+	EntryType           string `yaml:"entryType"`
+	PartType            string `yaml:"partType"`
+	HasThinking         bool   `yaml:"hasThinking"`
+	ParentIndex         int    `yaml:"parentIndex"`
+	Preview             string `yaml:"preview"`
+	PreviewAbsent       bool   `yaml:"previewAbsent"`
+	PreviewContains     string `yaml:"previewContains"`
+	PreviewUnchecked    bool   `yaml:"previewUnchecked"`
+	ToolCallIDFromIndex int    `yaml:"toolCallIDFromIndex"`
+	ToolCallIDLiteral   string `yaml:"toolCallIDLiteral"`
+	ExtraContains       string `yaml:"extraContains"`
+	RawByteLength       int    `yaml:"rawByteLength"`
+	// RawByteLengthOfLine requires the source size of that 1-based transcript
+	// line, so the expectation is measured from the fixture's own bytes.
+	RawByteLengthOfLine int `yaml:"rawByteLengthOfLine"`
+	// RawByteLengthAbsent requires that the entry records no size at all.
+	RawByteLengthAbsent bool                      `yaml:"rawByteLengthAbsent"`
 	Provenance          *claudeProducerProvenance `yaml:"provenance"`
 }
 
@@ -97,9 +102,11 @@ type claudeProducerCase struct {
 	WantRefusal            bool   `yaml:"wantRefusal"`
 	WantRefusalLocatorFree bool   `yaml:"wantRefusalLocatorFree"`
 	Completeness           string `yaml:"completeness"`
-	TurnCount              int    `yaml:"turnCount"`
-	InputSubmissionCount   int    `yaml:"inputSubmissionCount"`
-	TitleRefCount          int    `yaml:"titleRefCount"`
+	// HarnessVersion, when set, is the session's required harness version.
+	HarnessVersion       string `yaml:"harnessVersion"`
+	TurnCount            int    `yaml:"turnCount"`
+	InputSubmissionCount int    `yaml:"inputSubmissionCount"`
+	TitleRefCount        int    `yaml:"titleRefCount"`
 	// DistinctSubmissionRefs requires the admitted submissions' refs to be
 	// pairwise distinct, so two answers never collapse into one group.
 	DistinctSubmissionRefs bool                  `yaml:"distinctSubmissionRefs"`
@@ -315,6 +322,9 @@ func assertClaudeProducerCandidate(t *testing.T, row claudeProducerCase, candida
 	if got := string(generation.Completeness); got != row.Completeness {
 		t.Fatalf("completeness = %q, want %q", got, row.Completeness)
 	}
+	if row.HarnessVersion != "" && generation.Metadata.Version != row.HarnessVersion {
+		t.Fatalf("harness version = %q, want %q", generation.Metadata.Version, row.HarnessVersion)
+	}
 	if got := generation.Metadata.Stats.TurnCount; got != row.TurnCount {
 		t.Fatalf("turnCount = %d, want %d", got, row.TurnCount)
 	}
@@ -454,6 +464,15 @@ func assertClaudeProducerEntries(t *testing.T, row claudeProducerCase, entries [
 			if entry.RawByteLength == nil || *entry.RawByteLength != want.RawByteLength {
 				t.Errorf("%s rawByteLength = %v, want %d", where, entry.RawByteLength, want.RawByteLength)
 			}
+		}
+		if want.RawByteLengthOfLine > 0 {
+			line := strings.Split(row.Transcript, "\n")[want.RawByteLengthOfLine-1]
+			if entry.RawByteLength == nil || *entry.RawByteLength != len(line) {
+				t.Errorf("%s rawByteLength = %v, want %d, the size of transcript line %d", where, entry.RawByteLength, len(line), want.RawByteLengthOfLine)
+			}
+		}
+		if want.RawByteLengthAbsent && entry.RawByteLength != nil {
+			t.Errorf("%s rawByteLength = %d, want none", where, *entry.RawByteLength)
 		}
 		if want.Provenance != nil {
 			if entry.Provenance == nil {

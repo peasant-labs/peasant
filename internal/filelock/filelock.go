@@ -1,11 +1,9 @@
 // Package filelock provides a minimal exclusive-only advisory file lock with
-// a deadline. It exists so test helpers (the storetest golden-template cache)
-// can serialize a cross-process build without copying the session lock's
-// retry loop or importing unix-only APIs outside a build-tagged file. The
-// Windows port can extend this package with a shared mode for
-// internal/store/session_lock.go or lift it into production; that reuse is the
-// surface this package provides, and it is the only new shared package the
-// cache adds.
+// a deadline. Two kinds of caller use it, and they treat a failure differently:
+// test helpers (the storetest golden-template cache) serialize a cross-process
+// build and proceed without the lock on any error, while the ingest run lock
+// serializes writing harvests in production and fails closed. The Windows port
+// can extend this package with a shared mode for internal/store/session_lock.go.
 package filelock
 
 import (
@@ -36,15 +34,20 @@ var errDeadline = errors.New("filelock: deadline exceeded while waiting for the 
 // means DefaultWait from now. The caller must call the release function when
 // done; the lock is also released by the OS if the process exits first.
 //
-// Any Acquire error means "proceed without the lock" to the caller — the
-// storetest cache builds privately in that case and never fails a test.
+// An Acquire error means no lock was taken; the caller decides what follows.
+// The storetest cache builds privately and never fails a test, and the ingest
+// run lock refuses to run. IsDeadline tells a held lock from any other failure.
 func Acquire(path string, deadline time.Time) (ReleaseFunc, error) {
 	if deadline.IsZero() {
 		deadline = time.Now().Add(DefaultWait)
 	}
 	release, err := acquire(path, deadline)
 	if err != nil {
-		return nil, fmt.Errorf("filelock: acquire exclusive lock on %s before %s: %w; no lock was taken; retry after the holder releases or proceed without the lock", path, deadline.Format(time.RFC3339), err)
+		return nil, fmt.Errorf("filelock: acquire exclusive lock on %s before %s: %w; no lock was taken; retry after the holder releases", path, deadline.Format(time.RFC3339), err)
 	}
 	return release, nil
 }
+
+// IsDeadline reports whether err is Acquire giving up because the lock stayed
+// held until the deadline, as opposed to failing to open the lock file.
+func IsDeadline(err error) bool { return errors.Is(err, errDeadline) }

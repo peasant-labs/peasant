@@ -19,8 +19,13 @@ import (
 	"github.com/peasant-labs/redact"
 )
 
+// DiscoveryCodeClaudeAgentIDCollision is the DiscoveryDiagnostic code for a
+// Claude subagent left out because another session's subagent has its id.
+const DiscoveryCodeClaudeAgentIDCollision = "claude_agent_id_collision"
+
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
 type ClaudeAdapter struct {
+	diagnostics         []DiscoveryDiagnostic
 	fs                  FileSystem
 	git                 GitResolver
 	salt                salt.Salt
@@ -161,6 +166,7 @@ type claudeFileOpener interface {
 //
 // Per RFC Section 6.4, symlinks are skipped silently.
 func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
+	a.diagnostics = nil
 	var sessions []DiscoveredSession
 
 	// Mining a transcript is the expensive part of Claude discovery: it reads
@@ -198,7 +204,10 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 			}
 
 			if err != nil {
-				return nil // skip unreadable entries
+				// Keep walking, but name a directory permissions hid so the
+				// run does not just report fewer sessions.
+				a.noteUnreadable(path, err)
+				return nil
 			}
 
 			// Skip symlinks per RFC Section 6.4.
@@ -304,10 +313,24 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		// child keeps its run directory in its source path, which is where the
 		// run id is recorded.
 		admitted := make(map[SessionID]ResolvedPath)
+		admittedParent := make(map[SessionID]SessionID)
 		for _, entry := range append(workflowEntries, subagentEntries...) {
 			if kept, taken := admitted[entry.subagentID]; taken {
 				slog.Debug("claude discovery: transcript left out, another transcript holds its agent id",
 					"session_id", entry.subagentID.String(), "left_out", entry.path, "kept", kept.String())
+				// The same agent under the same parent (a workflow copy) is
+				// expected. Under a different parent it is a distinct subagent
+				// whose transcript is not stored, so say so.
+				if admittedParent[entry.subagentID] != entry.parentID {
+					a.diagnostics = append(a.diagnostics, DiscoveryDiagnostic{
+						Provider: HarnessClaudeCode,
+						Code:     DiscoveryCodeClaudeAgentIDCollision,
+						Location: entry.path,
+						Summary:  "subagent left out: another session's subagent has the same agent id",
+						Detail: fmt.Sprintf("subagent %s of session %s was not ingested because %s (session %s) already holds that id; "+
+							"discovery keeps whichever transcript it reaches first, and subagent ids are not scoped to their parent yet", entry.subagentID, entry.parentID, kept, admittedParent[entry.subagentID]),
+					})
+				}
 				continue
 			}
 			info, err := a.fs.Stat(entry.path)
@@ -347,6 +370,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				Signal:        evidence.Signal,
 			}
 			admitted[entry.subagentID] = rp
+			admittedParent[entry.subagentID] = parentSID
 			sessions = append(sessions, ds)
 		}
 	}
@@ -1092,6 +1116,7 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 	var (
 		firstLine      claudeJSONLLine
 		literalCWD     string
+		harnessVersion string // first non-empty version across all lines
 		hasFirst       bool
 		firstTimestamp string // earliest non-empty timestamp across all lines
 		lastTimestamp  string // latest non-empty timestamp across all lines
@@ -1142,6 +1167,12 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 		}
 		if literalCWD == "" {
 			literalCWD = line.CWD
+		}
+		// Bookkeeping records such as file-history-snapshot and last-prompt can
+		// lead a transcript and carry no version, so the first line cannot
+		// supply it.
+		if harnessVersion == "" {
+			harnessVersion = line.Version
 		}
 		if !hasFirst {
 			firstLine = line
@@ -1222,7 +1253,7 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 
 	// Populate fields from parsed lines.
 	if hasFirst {
-		meta.Version = firstLine.Version
+		meta.Version = harnessVersion
 
 		// Timestamps: use earliest/latest non-empty timestamps found across
 		// all lines, not just the first/last line positions. Some sessions
@@ -1357,4 +1388,17 @@ func parseTimestampMillis(ts string) int64 {
 		}
 	}
 	return t.UnixMilli()
+}
+
+var _ DiscoveryDiagnosticReporter = (*ClaudeAdapter)(nil)
+
+// DiscoveryDiagnostics names the source locations the last Discover could not read.
+func (a *ClaudeAdapter) DiscoveryDiagnostics() []DiscoveryDiagnostic {
+	return append([]DiscoveryDiagnostic(nil), a.diagnostics...)
+}
+
+func (a *ClaudeAdapter) noteUnreadable(path string, err error) {
+	if d, ok := unreadableSourceDiagnostic(HarnessClaudeCode, path, err); ok {
+		a.diagnostics = append(a.diagnostics, d)
+	}
 }

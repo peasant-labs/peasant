@@ -41,3 +41,6 @@ requiredNames:
   - self-parent-agent-refusal
   - retained-started-by-unbound-refusal
   - retained-started-by-wrong-hash-refusal
+  - raw-byte-length-per-line
+  - raw-byte-length-retained-unknown
+  - harness-version-after-leading-records

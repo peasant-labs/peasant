@@ -1,0 +1,11 @@
+# Every name here must stay in sessions_list_subagents.yaml.
+required:
+  - default_hides_subagents
+  - include_subagents_shows_all
+  - unresolved_parent_hidden_by_default
+  - dangling_parent_hidden_by_default
+  - session_flag_returns_subagent_row
+  - limit_applies_after_filter
+  - json_fields_always_present
+  - json_fields_match_local_session_row
+  - list_matches_local_api_predicate
