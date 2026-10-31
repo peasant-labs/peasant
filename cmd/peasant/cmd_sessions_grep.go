@@ -217,7 +217,7 @@ func runSessionsGrep(cmd *cobra.Command, pattern string, opts sessionGrepOptions
 	for _, id := range result.BoundedSessions {
 		warnings.Warn(clicontract.Warning{
 			Code:      clicontract.WarningCaptureBounded,
-			Message:   "this capture stores bounded previews, so text past a preview was not searched; run `peasant harvest --force` to recapture the session from its source",
+			Message:   fmt.Sprintf("this capture stores bounded previews, so text past a preview was not searched; run `peasant harvest index --session %s` to repair it", id),
 			SessionID: string(id),
 		})
 	}
