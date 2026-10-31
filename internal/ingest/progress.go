@@ -106,6 +106,24 @@ type StageProgress struct {
 type ProgressState struct {
 	mu     sync.RWMutex
 	stages map[Stage]*StageProgress
+	// waiting is why the run has not started yet, such as waiting for
+	// another harvest's lock; empty when the run is not waiting.
+	waiting string
+}
+
+// SetWaiting records why the run is waiting before its first stage; an empty
+// reason clears it. Safe for concurrent callers.
+func (ps *ProgressState) SetWaiting(reason string) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.waiting = reason
+}
+
+// Waiting returns the reason the run is waiting, or "" when it is not.
+func (ps *ProgressState) Waiting() string {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	return ps.waiting
 }
 
 // NewProgressState creates a ProgressState pre-populated with all pipeline stages.
@@ -163,6 +181,7 @@ func (ps *ProgressState) Reset() {
 	for _, stage := range StageOrder {
 		ps.stages[stage] = &StageProgress{}
 	}
+	ps.waiting = ""
 }
 
 // Snapshot returns a point-in-time copy of all stage progress. Safe for concurrent callers.

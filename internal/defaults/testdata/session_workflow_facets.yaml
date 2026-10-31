@@ -1,0 +1,16 @@
+# The closed facet set, in the order a list row reports it. Membership is the
+# contract: a new facet is added here on purpose.
+requiredNames:
+  - facet_closed_set
+  - facet_unknown_refused
+  - facet_empty_refused
+  - facet_case_refused
+cases:
+  - name: facet_closed_set
+    set: [subagent, skill, mcp, compact, clear, model-switch, background, partial]
+  - name: facet_unknown_refused
+    refused: bogus
+  - name: facet_empty_refused
+    refused: ""
+  - name: facet_case_refused
+    refused: MCP

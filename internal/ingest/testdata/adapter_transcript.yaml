@@ -3,7 +3,7 @@ publicationMetadata: |
 publicationTranscript: '{"type":"user","message":{"role":"user","content":"retained capture fixture"}}'
 preservedValues: [retained-clock, retained-stat, retained evidence]
 nativeAppend: '{"type":"assistant","timestamp":"2026-01-01T00:00:01Z","message":{"model":"fixture-model","content":"new native response"}}'
-pipelineRequiredNames: [retained-normal, retained-index-only, native-append-wins, failed-native-read, all-discovery-fail, initial-all-discovery-fail, omitted-baseline-current, refresh-without-clock-then-native-append]
+pipelineRequiredNames: [retained-normal, retained-index-only, native-append-wins, failed-native-read, all-discovery-fail, initial-all-discovery-fail, omitted-baseline-current, refresh-without-clock-then-native-append, stamped-row-behind-target]
 pipelineCases:
   - {name: retained-normal, target: 2, retainedExtraction: true}
   - {name: retained-index-only, target: 2, reindex: true, retainedExtraction: true}
@@ -13,6 +13,7 @@ pipelineCases:
   - {name: initial-all-discovery-fail, target: 2, discoveryFailure: true, noSeed: true, fatal: true}
   - {name: omitted-baseline-current, target: 1}
   - {name: refresh-without-clock-then-native-append, target: 2, retainedExtraction: true, unknownClock: true}
+  - {name: stamped-row-behind-target, target: 3, storedAdapter: 2, discoveredUnchanged: true, retainedExtraction: true}
 requiredNames:
   - claude-retained-context
   - codex-retained-context

@@ -146,6 +146,8 @@ are replayed once through the ordinary push candidate path.
 | Flag | Description |
 |------|-------------|
 | `--provider <p>` | Filter models by provider (`anthropic`, `google`, `openai`) |
+| `--dry-run` | Show the count without writing; no confirmation prompt |
+| `--yes`, `-y` | Sync without the confirmation prompt (for scripts) |
 
 ### `peasant sessions tag` subcommands
 

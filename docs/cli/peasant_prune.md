@@ -21,7 +21,7 @@ peasant prune [flags]
       --harness string    Prune sessions by harness (claude-code, gemini-cli, codex, opencode)
   -h, --help              help for prune
       --json              Output results as JSON
-      --project string    Prune sessions by project hash
+      --project string    Prune sessions of one project: its hash, path, directory name or git remote (owner/repo, host/owner/repo or a clone URL)
       --session strings   Session IDs to prune (repeatable)
       --unselected        Prune sessions not selected by harness, project, clone, branch, or explicit session rules (requires selection.mode=selected)
 ```

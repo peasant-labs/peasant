@@ -72,6 +72,7 @@ If --session is omitted, recent sessions are listed so you can pick one.`,
 					SortField: defaults.SessionSortDate,
 					SortDesc:  true,
 					Limit:     defaults.SessionListDefaultLimit,
+					MainOnly:  true,
 				}
 				_ = listSessionsShared(cmd, db, f, false)
 				return fmt.Errorf(
@@ -103,10 +104,7 @@ If --session is omitted, recent sessions are listed so you can pick one.`,
 				return fmt.Errorf("sessions context: %w", err)
 			}
 			if maxIdx < 0 {
-				return fmt.Errorf(
-					"session %s not found or not yet indexed — run `peasant ingest` if the session should exist",
-					sid,
-				)
+				return errSessionNotIndexed(sid)
 			}
 
 			// Validate --turn is within bounds before clamping.
@@ -162,6 +160,14 @@ If --session is omitted, recent sessions are listed so you can pick one.`,
 		"How to render tool calls: verbose (full box), compact (one-line), or quiet (hidden)")
 
 	return cmd
+}
+
+// errSessionNotIndexed is the refusal of a session with no indexed entries.
+func errSessionNotIndexed(sid schema.SessionID) error {
+	return fmt.Errorf(
+		"session %s not found or not yet indexed — run `peasant ingest` if the session should exist",
+		sid,
+	)
 }
 
 // renderSessionContextJSON writes the JSON envelope to cmd's output.

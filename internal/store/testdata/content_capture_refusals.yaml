@@ -1,0 +1,72 @@
+# What a full read says when it refuses a stored capture, and that it still
+# refuses. The capture row and the producer stamp are set after a real write.
+#   producer: stale | current (current also records the index input proof)
+#   rowless: the capture row is absent
+requiredNames:
+  - strict-refused-older-producer
+  - strict-refused-current-producer
+  - legacy-preview
+  - omitted-without-placeholder-current-producer
+  - preview-without-failure-code
+  - allowed-code-over-a-bounded-preview
+  - failed-capture
+  - no-capture-row
+cases:
+  - name: strict-refused-older-producer
+    status: incomplete
+    format: preview_only
+    code: strict_capture_refused
+    message: 'capture claude-code session x at source record 3: unrepresented claude-code record "image"; complete content was not stored; restore a supported intact transcript and rerun harvest index --force'
+    producer: stale
+    wantReason: strict_capture_refused
+    wantDetail: 'capture claude-code session x at source record 3: unrepresented claude-code record "image"'
+    wantRepairable: true
+  - name: strict-refused-current-producer
+    status: incomplete
+    format: preview_only
+    code: strict_capture_refused
+    message: strict parser refused the transcript and the tolerant projection was stored instead; previews show it and nothing certifies it
+    producer: current
+    wantReason: strict_capture_refused
+    wantDetail: strict parser refused the transcript and the tolerant projection was stored instead
+    wantRepairable: false
+  - name: legacy-preview
+    status: incomplete
+    format: legacy_preview_only
+    code: legacy_preview_only
+    message: legacy capture predates content certification; bounded preview only; re-index the source for a certified capture
+    producer: current
+    wantReason: legacy_preview_only
+    wantDetail: legacy capture predates content certification
+    wantRepairable: true
+  - name: omitted-without-placeholder-current-producer
+    status: incomplete
+    format: preview_only
+    code: source_records_omitted
+    producer: current
+    wantReason: source_records_omitted
+    wantRepairable: false
+  - name: preview-without-failure-code
+    status: incomplete
+    format: preview_only
+    producer: stale
+    wantReason: capture_unproven
+    wantRepairable: true
+  - name: allowed-code-over-a-bounded-preview
+    status: incomplete
+    format: preview_only
+    code: unknown_data_retained
+    producer: stale
+    wantReason: unknown_data_retained
+    wantRepairable: true
+  - name: failed-capture
+    status: failed
+    format: preview_only
+    producer: stale
+    wantReason: capture_unproven
+    wantRepairable: true
+  - name: no-capture-row
+    rowless: true
+    producer: stale
+    wantReason: no_capture
+    wantRepairable: true

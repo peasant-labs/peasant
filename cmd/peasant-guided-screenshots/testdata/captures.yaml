@@ -45,6 +45,7 @@ completion:
   new: 2
   updated: 1
   unchanged: 3
+  excludedBySelection: 4
   errors: 0
   diagnostics:
     - location: /fixtures/managed/session-future/session-future.meta.json
@@ -67,7 +68,7 @@ completion:
     - key: warnings-bottom
       wantContains: [2 warnings, restore read access, next steps, peasant config, peasant village push, PgUp, quit]
     - key: no-warnings
-      wantContains: [kickstart complete, 2 new, 1 updated, 3 unchanged, next steps, peasant village push]
+      wantContains: [kickstart complete, 2 new, 1 updated, 3 unchanged, 4 excluded by selection, next steps, peasant village push]
       wantAbsent: [warnings]
   captures:
     - {name: ingest-completion-warnings-top-dark-80x24, state: warnings-top, theme: dark, width: 80, height: 24}

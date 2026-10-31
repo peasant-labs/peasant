@@ -13,9 +13,10 @@ peasant models sync [flags]
 ### Options
 
 ```
-      --dry-run           Show count without writing
+      --dry-run           Show count without writing (no confirmation prompt)
   -h, --help              help for sync
       --provider string   Only sync models from this provider
+  -y, --yes               Sync without the confirmation prompt
 ```
 
 ### Options inherited from parent commands

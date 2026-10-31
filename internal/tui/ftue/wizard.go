@@ -95,8 +95,11 @@ type IngestResult struct {
 	New       int
 	Updated   int
 	Unchanged int
-	Errors    int
-	Duration  time.Duration
+	// ExcludedBySelection counts sessions the selection kept out of this
+	// run; with New, Updated, Unchanged and Errors it adds up to the total.
+	ExcludedBySelection int
+	Errors              int
+	Duration            time.Duration
 	// ProviderCounts holds per-provider breakdown of new + updated counts.
 	ProviderCounts []ProviderIngestCount
 	// Diagnostics are nonfatal pipeline warnings, kept separate from errors.

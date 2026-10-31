@@ -151,6 +151,11 @@ type SessionListFilter struct {
 	SortField     defaults.SessionSortField // column to sort by (date, turns, tokens, project)
 	SortDesc      bool                      // true = DESC (default), false = ASC
 	Limit         int                       // 0 = no limit
+	MainOnly      bool                      // leave out sessions that LogicalChildSQL calls a child; SessionID, naming one row exactly, overrides it
+
+	Facets   []defaults.SessionWorkflowFacet // empty = no facet constraint; all must hold
+	MinTurns *int                            // nil = no lower bound, inclusive
+	MaxTurns *int                            // nil = no upper bound, inclusive
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +163,12 @@ type SessionListFilter struct {
 // ---------------------------------------------------------------------------
 
 const (
+	// sqlSessionTurnCount is the one turn count a session list reports, sorts
+	// by and bounds: the captured row for native sessions, the legacy metrics
+	// columns otherwise. It needs the sessions s, session_metrics m and
+	// session_captured_stats c joins.
+	sqlSessionTurnCount = `CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END`
+
 	// sqlDashboardAggregates is the dashboard aggregate query.
 	sqlDashboardAggregates = `SELECT
     COALESCE(SUM(session_count), 0),
@@ -217,7 +228,7 @@ var (
     s.session_id, s.model_harness, s.model_id, COALESCE(h.host_slug, s.opaque_host_id),
     s.project_hash, COALESCE(p.canonical_cwd, p.project_hash), s.start_ms, s.end_ms,
     s.git_branch, s.tool_version,
-    CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END,
+    ` + sqlSessionTurnCount + `,
     CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END,
     m.input_tokens,
     CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,
@@ -911,6 +922,11 @@ func buildSessionListFilterWhere(f SessionListFilter) (conditions []string, args
 		args = append(args, *f.SessionID)
 	}
 
+	// Main sessions only. An exact session id still answers its row, child or not.
+	if f.MainOnly && f.SessionID == nil {
+		conditions = append(conditions, "NOT "+LogicalChildSQL("s"))
+	}
+
 	// Base SessionFilter conditions.
 	if f.ModelHarness != nil {
 		conditions = append(conditions, "s.model_harness = ?")
@@ -956,6 +972,22 @@ func buildSessionListFilterWhere(f SessionListFilter) (conditions []string, args
 				" ))",
 		)
 		args = append(args, pname, pname, pname, pname)
+	}
+
+	// Workflow facets: every named facet must hold.
+	for _, facet := range f.Facets {
+		conditions = append(conditions, sessionFacetSQL(facet))
+	}
+
+	// Turn bounds read the turns column a row shows, which prints a missing
+	// count as 0, so a session with no count is a session with no turns.
+	if f.MinTurns != nil {
+		conditions = append(conditions, "COALESCE("+sqlSessionTurnCount+", 0) >= ?")
+		args = append(args, *f.MinTurns)
+	}
+	if f.MaxTurns != nil {
+		conditions = append(conditions, "COALESCE("+sqlSessionTurnCount+", 0) <= ?")
+		args = append(args, *f.MaxTurns)
 	}
 	return conditions, args
 }
@@ -1020,7 +1052,8 @@ func (s *Store) CountSessionsFiltered(ctx context.Context, f SessionListFilter) 
 	query := `SELECT COUNT(*) FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
 JOIN projects p ON s.project_hash = p.project_hash
-LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
+LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
+LEFT JOIN session_captured_stats c ON c.session_id = s.session_id`
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -1046,7 +1079,7 @@ func sortFieldToColumn(f defaults.SessionSortField) string {
 		// Sorts the moved turn count both homes serve: the captured row for
 		// native sessions, the legacy metrics columns otherwise. sqlAllSessions
 		// carries both joins, so this expression is valid wherever it sorts.
-		return "CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END"
+		return sqlSessionTurnCount
 	case defaults.SessionSortTokens:
 		// tokens_total in sqlAllSessions is COALESCE(m.input_tokens, 0); use m.input_tokens for sort.
 		return "COALESCE(m.input_tokens, 0)"

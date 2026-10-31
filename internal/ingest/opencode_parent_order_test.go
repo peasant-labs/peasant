@@ -83,7 +83,7 @@ func TestCanonicalOpenCodeParentsEmittedBeforeChildren(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Summary.New != 1 || result.Summary.Unchanged != 1 {
-		t.Fatalf("selected-mode admission summary=%+v, want the root admitted and the subagent denied on its own selection (New=1, Unchanged=1)", result.Summary)
+	if result.Summary.New != 1 || result.Summary.ExcludedBySelection != 1 || result.Summary.Unchanged != 0 {
+		t.Fatalf("selected-mode admission summary=%+v, want the root admitted and the subagent denied on its own selection (New=1, ExcludedBySelection=1, Unchanged=0)", result.Summary)
 	}
 }
