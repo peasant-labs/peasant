@@ -28,6 +28,7 @@ peasant sessions list --limit 50
 peasant sessions list --harness claude-code --since 7d
 peasant sessions list --project peasant --sort tokens
 peasant sessions list --include-subagents
+peasant sessions list --has subagent,mcp --min-turns 5 --max-turns 200
 peasant sessions list --json | jq '.[].id'
 ```
 
@@ -41,12 +42,42 @@ Flags:
 | `--tag <tag>` | — | Filter by session tag (see [Tags](#peasant-sessions-tag)) |
 | `--since <when>` | — | Sessions starting after a date (`7d`, `24h`, `2026-01-01`) |
 | `--until <when>` | — | Sessions starting before a date |
+| `--has <facet>[,<facet>...]` | — | Only sessions where every named facet holds; repeat it or use commas |
+| `--min-turns <n>` | — | Only sessions with at least `n` turns, using the `turns` column |
+| `--max-turns <n>` | — | Only sessions with at most `n` turns, using the `turns` column |
 | `--sort <field>` | `date` | Sort by `date`, `turns`, `tokens`, or `project` |
 | `--reverse` | — | Ascending instead of descending |
 | `--json` | — | Emit a JSON array instead of a table |
 
 Use `--harness` with the canonical harness values; see
 [`docs/bestiary.md`](bestiary.md) for the full harness set and display names.
+
+### Workflow facets
+
+A facet says what happened inside a session. Peasant reads it from the stored
+entries when the command runs, so nothing needs a re-index. An unknown facet, a
+negative turn bound, or `--min-turns` above `--max-turns` exits with status 2
+before the store opens. `--limit` applies after the facets.
+
+| facet | holds when |
+|---|---|
+| `subagent` | The session has a child session, or it called the `Task` or `Agent` tool. |
+| `skill` | The session ran a custom slash command, or it called the `Skill` or `skill` tool. |
+| `mcp` | It called a tool whose name starts with `mcp__`. |
+| `compact` | Its context was compacted: a compact boundary, or a compaction summary from Codex or OpenCode. Typing `/compact` alone does not count. |
+| `clear` | A `/clear` command is recorded in the session. |
+| `model-switch` | Its assistant turns observed more than one model. Claude Code's `<synthetic>` marker does not count as a model. |
+| `background` | A tool call's input sets `run_in_background` to true. |
+| `partial` | The session's active generation is marked partial. An older generation does not count. |
+
+A facet can only report what the harness recorded. `mcp` sees only tool names
+that start with `mcp__`, so a harness that names its MCP tools another way is not
+matched. OpenCode's current format stores no model on its assistant turns and no
+marker on a model switch, so `model-switch` does not hold for those sessions.
+
+With `--json`, each row carries `facets`: every facet that holds, not only the
+ones requested, in the order of the table above. It is `[]` when none holds. The
+table output does not read facets unless `--has` asks for them.
 
 ## `peasant sessions context`
 
