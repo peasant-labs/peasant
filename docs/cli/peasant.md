@@ -25,6 +25,7 @@ peasant [flags]
 * [peasant export](peasant_export.md)	 - Export session data, annotations, and schemas
 * [peasant harvest](peasant_harvest.md)	 - Harvest AI coding agent transcripts
 * [peasant kickstart](peasant_kickstart.md)	 - Run the first-time setup wizard
+* [peasant layout](peasant_layout.md)	 - Describe and capture the storage layout of tools Peasant does not ingest yet
 * [peasant metrics](peasant_metrics.md)	 - Manage session metrics
 * [peasant migrate](peasant_migrate.md)	 - Convert file-backed sessions to the harmonized content model
 * [peasant models](peasant_models.md)	 - Manage model reference data

@@ -282,3 +282,16 @@ commands:
       - args: ["--help"]
         expect_error: false
         output_contains: ["migrate"]
+  - name: Layout
+    use: layout
+    subcommands:
+      - use: list
+      - use: capture
+        flags:
+          - { name: path, type: stringSlice, default: "[]" }
+          - { name: limit, type: int, default: "5" }
+          - { name: include-metadata, type: bool, default: "false" }
+    exit_cases:
+      - args: ["capture", "no-such-tool"]
+        expect_error: true
+        error_contains: ["unknown layout tool"]
