@@ -870,25 +870,11 @@ func printIndexProfileStage(w io.Writer, stage ingest.IndexProfileStage) {
 	fmt.Fprintf(w, "    %s: %s%s\n", stage.Stage, stage.Duration.Round(time.Millisecond), progress)
 }
 
-// runVerify checks database schema integrity.
-func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
-	if repair && !content {
-		return fmt.Errorf("harvest verify: --repair requires --content; nothing was checked and nothing changed; re-run with `peasant harvest verify --content --repair`")
-	}
-	if content {
-		return runVerifyContent(cmd, repair)
-	}
-	ctx := cmd.Context()
-	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-
-	db, err := store.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("open database: %w", err)
-	}
-	defer db.Close()
-
-	out := cmd.OutOrStdout()
-
+// verifyTablePresence prints the schema overview and the table presence
+// check, and fails when an expected table is missing. When more checks follow
+// (--content), a pass is reported for the tables only, so the one overall
+// "Status:" line is the last check's.
+func verifyTablePresence(out io.Writer, db *store.Store, dbPath string, expectedTables []string, moreChecks bool) error {
 	// Header
 	fmt.Fprintln(out, "==============================================")
 	fmt.Fprintln(out, "Peasant Database Verification")
@@ -905,11 +891,12 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 		return fmt.Errorf("get table names: %w", err)
 	}
 
-	// Expected tables from schema.go
-	expectedTables := store.AllTableNames
-	schemaVersion := "v1-v20 (migrations)"
-
-	fmt.Fprintf(out, "Expected schema: %s\n", schemaVersion)
+	foundVersion, err := store.SchemaVersionAt(dbPath)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Expected schema: v%d\n", store.CurrentSchemaVersion())
+	fmt.Fprintf(out, "Found schema:    v%d\n", foundVersion)
 	fmt.Fprintf(out, "Expected tables: %d\n", len(expectedTables))
 	fmt.Fprintf(out, "Found tables:    %d\n", len(existingTables))
 
@@ -941,8 +928,40 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 		return fmt.Errorf("database verification failed: %d missing table(s)", len(missingTables))
 	}
 
+	if moreChecks {
+		fmt.Fprintln(out, "Tables: PASSED (all expected tables are present); content checks follow")
+		return nil
+	}
 	fmt.Fprintln(out, "Status: PASSED")
 	fmt.Fprintln(out, "All expected tables are present.")
+	return nil
+}
+
+// runVerify checks database schema integrity.
+func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
+	if repair && !content {
+		return fmt.Errorf("harvest verify: --repair requires --content; nothing was checked and nothing changed; re-run with `peasant harvest verify --content --repair`")
+	}
+	if content {
+		return runVerifyContent(cmd, repair)
+	}
+	ctx := cmd.Context()
+	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+
+	db, err := store.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer db.Close()
+
+	out := cmd.OutOrStdout()
+	expectedTables, err := store.ExpectedTableNames()
+	if err != nil {
+		return err
+	}
+	if err := verifyTablePresence(out, db, dbPath, expectedTables, false); err != nil {
+		return err
+	}
 
 	// 4. Table Statistics
 	fmt.Fprintln(out, "\n4. Table Statistics")

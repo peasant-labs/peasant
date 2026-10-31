@@ -33,6 +33,17 @@ func runVerifyContent(cmd *cobra.Command, repair bool) error {
 		return err
 	}
 	defer closeStore()
+	// Presence first: content verification on a database that is missing a
+	// table would report PASSED over it. This runs on the store opened above so
+	// the migration consent gate stays in front of any upgrade.
+	expectedTables, err := store.ExpectedTableNames()
+	if err != nil {
+		return err
+	}
+	if err := verifyTablePresence(cmd.OutOrStdout(), db, dbPath, expectedTables, true); err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout())
 
 	report, err := db.VerifyContent(cmd.Context(), repair)
 	if err != nil {
