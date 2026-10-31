@@ -1391,6 +1391,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 					continue
 				}
 			}
+			// An age filter leaves a session out exactly as a session filter does,
+			// so it is counted the same way: `harvest --since` must not skip stored
+			// maintenance without saying so.
+			if !p.withinRunAge(startMs) {
+				selectionSkipped++
+				continue
+			}
 			// The pair-repair pass owns a session whose saved pair is missing
 			// or damaged: its pair is not a readable index input, and that pass
 			// already re-ingested it from native input or reported the

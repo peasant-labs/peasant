@@ -195,7 +195,7 @@ resolves the names), or a `--collective` confirmation it cannot ask for. Under
 
 | command | follows |
 |---|---|
-| `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused` |
+| `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, `refused` and `refusal_reasons` counts in the document, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused: 1 strict_capture_refused; peasant harvest index re-indexes 1 of them` |
 | `redact` | `--sessions-from` |
 | `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`, with a per-session `plan` (below) |
 | `upgrade` | `-y` |
