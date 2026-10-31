@@ -800,6 +800,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			return nil, fmt.Errorf("pipeline prepare session filter after discovery: %w", err)
 		}
 	}
+	// After the selection is prepared, so a duplicate this run does not cover
+	// is skipped by the FILTER stage like any other session instead of failing
+	// a run that was scoped to something else.
+	allSessions, duplicateResults := refuseDuplicateSessionIDs(p.fs, allSessions, p.inRunScope)
+	for _, refused := range duplicateResults {
+		p.reportSessionDiagnostic(refused.SessionID, DiagnosticEntry{ErrorType: "duplicate_session_id", Location: string(refused.Harness) + " " + string(refused.SessionID), Message: refused.Error.Error(), Remediation: "Move one of the files out of the harness directory (keep a copy; it may be the only one) and retry harvest."})
+	}
 
 	// Fill in the verdict on every session an EARLIER run stored, before this
 	// run writes any session of its own.
@@ -883,9 +890,16 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	//   skipped — unselected or unchanged captured sources: no processing.
 	//   toProcess — new or changed sources, including active sessions.
 	var sessionResults []SessionResult
+	sessionResults = append(sessionResults, duplicateResults...)
 	var indexSessions []indexedMeta // sessions to index after write
 	var toProcessEntries []DiffEntry
 	dryRunSessions := make([]SessionResult, 0, len(diffResult.Sessions))
+	// A duplicate-id refusal never reaches DIFF, so the dry-run forecast has
+	// to carry the same failed result the real run counts. Otherwise the
+	// summary reports 0 errors and the command exits 0.
+	if p.config.DryRun {
+		dryRunSessions = append(dryRunSessions, duplicateResults...)
+	}
 	recordDryRun := func(entry DiffEntry, status DiffStatus) {
 		if !p.config.DryRun {
 			return
@@ -1072,8 +1086,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	toProcessEntries = ApplySchedulingParents(toProcessEntries, p.storedParentSet(ctx, toProcessEntries))
 
 	// Dry-run uses the same allowed-session, time, positive-selection, exact-
-	// denial, and parent-inheritance decisions as a real run. It stops only after
-	// that shared FILTER pass and performs no extraction, write, or store action.
+	// denial, parent-inheritance, and duplicate-id decisions as a real run.
+	// It stops only after that shared FILTER pass and performs no extraction,
+	// write, or store action. A refusal counts as one error, matching REPORT.
 	if p.config.DryRun {
 		result := &PipelineResult{
 			Duration:             time.Since(start),
@@ -1086,6 +1101,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		result.Summary.OriginResolve = p.originResolve
 		result.Summary.OriginResolveError = p.originResolveErr
 		for _, session := range dryRunSessions {
+			if session.Error != nil {
+				result.Summary.Errors++
+				continue
+			}
 			if session.ExcludedBySelection {
 				result.Summary.ExcludedBySelection++
 				continue
