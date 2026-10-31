@@ -38,6 +38,11 @@ type adapterMaintenanceFixtures struct {
 		Warning            bool   `yaml:"warning"`
 		Fatal              bool   `yaml:"fatal"`
 		UnknownClock       bool   `yaml:"unknownClock"`
+		// StoredAdapter seeds a row already stamped with this adapter revision.
+		StoredAdapter int `yaml:"storedAdapter"`
+		// DiscoveredUnchanged keeps the native source present and discovered,
+		// with nothing newer than the stored capture.
+		DiscoveredUnchanged bool `yaml:"discoveredUnchanged"`
 	} `yaml:"pipelineCases"`
 }
 
@@ -125,6 +130,9 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 				unknown := int64(0)
 				metadata.Timestamp.Ingested = &unknown
 			}
+			if row.StoredAdapter != 0 {
+				metadata.AdapterVersion = &row.StoredAdapter
+			}
 			encoded, err := json.Marshal(&metadata)
 			if err != nil {
 				t.Fatal(err)
@@ -158,7 +166,7 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 				// historical baseline 1 that this corpus subsequently refreshes.
 				baselineVersions := maps.Clone(ingest.HarvesterVersionRegistry)
 				baselineTarget := baselineVersions[metadata.ModelHarness]
-				baselineTarget.AdapterVersion = 1
+				baselineTarget.AdapterVersion = max(1, row.StoredAdapter)
 				baselineVersions[metadata.ModelHarness] = baselineTarget
 				baseline, err := newTestPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, baselineConfig, ingest.WithHarvesterVersions(baselineVersions), ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 				if err != nil {
@@ -198,6 +206,17 @@ func TestPipelineRetainedAdapterMaintenance(t *testing.T) {
 					t.Fatal(err)
 				}
 				session.ModTime = changed
+				adapter.sessions = []ingest.DiscoveredSession{session}
+			}
+			if row.DiscoveredUnchanged {
+				if err := os.WriteFile(native, []byte(fixture.Transcript+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				settled := time.UnixMilli(*metadata.Timestamp.Ingested - 1000)
+				if err := os.Chtimes(native, settled, settled); err != nil {
+					t.Fatal(err)
+				}
+				session.ModTime = settled
 				adapter.sessions = []ingest.DiscoveredSession{session}
 			}
 			filesystem.failRead = row.FailRead

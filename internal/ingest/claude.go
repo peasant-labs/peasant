@@ -1092,6 +1092,7 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 	var (
 		firstLine      claudeJSONLLine
 		literalCWD     string
+		harnessVersion string // first non-empty version across all lines
 		hasFirst       bool
 		firstTimestamp string // earliest non-empty timestamp across all lines
 		lastTimestamp  string // latest non-empty timestamp across all lines
@@ -1142,6 +1143,12 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 		}
 		if literalCWD == "" {
 			literalCWD = line.CWD
+		}
+		// Bookkeeping records such as file-history-snapshot and last-prompt can
+		// lead a transcript and carry no version, so the first line cannot
+		// supply it.
+		if harnessVersion == "" {
+			harnessVersion = line.Version
 		}
 		if !hasFirst {
 			firstLine = line
@@ -1222,7 +1229,7 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 
 	// Populate fields from parsed lines.
 	if hasFirst {
-		meta.Version = firstLine.Version
+		meta.Version = harnessVersion
 
 		// Timestamps: use earliest/latest non-empty timestamps found across
 		// all lines, not just the first/last line positions. Some sessions

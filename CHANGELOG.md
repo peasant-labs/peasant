@@ -9,6 +9,9 @@ Release, which holds the signed artifacts and checksums.
 
 ### Fixed
 - Claude discovery skips harness-injected `isMeta` notices when choosing session titles. Existing cached transcripts are read again once to refresh their titles.
+- Claude Code main sessions keep their harness version when the transcript starts with a record that has no version.
+- Claude Code entries stored as managed generations keep `rawByteLength`, and thinking blocks keep their thinking flag. The next harvest refreshes existing sessions; a session that is already published needs `peasant village push --force` to send the new values.
+- A harvest now applies an adapter revision bump to a session whose stored row already has an older revision. Before, the refresh was skipped and the session stayed stale.
 
 ### Fixed
 - `--data-dir` now keeps default transcript copies beside its database under
