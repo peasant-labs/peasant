@@ -7,6 +7,12 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Changed
+- `sessions list` shows main sessions only by default, so a script that counts
+  its rows now sees fewer. `--include-subagents` lists every session, and
+  `--session <id>` still finds a subagent session. Each `--json` row now states
+  `parentSessionId`, `parentUnresolved` and `rootSessionId`.
+
 ### Fixed
 - Claude discovery skips harness-injected `isMeta` notices when choosing session titles. Existing cached transcripts are read again once to refresh their titles.
 

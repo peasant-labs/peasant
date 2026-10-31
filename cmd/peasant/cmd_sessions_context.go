@@ -72,6 +72,7 @@ If --session is omitted, recent sessions are listed so you can pick one.`,
 					SortField: defaults.SessionSortDate,
 					SortDesc:  true,
 					Limit:     defaults.SessionListDefaultLimit,
+					MainOnly:  true,
 				}
 				_ = listSessionsShared(cmd, db, f, false)
 				return fmt.Errorf(

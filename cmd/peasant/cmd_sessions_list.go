@@ -23,6 +23,12 @@ type sessionListEntry struct {
 	Turns       int    `json:"turns"`
 	Tokens      int    `json:"tokens"`
 	Preview     string `json:"preview"`
+	// ParentSessionID, ParentUnresolved and RootSessionID carry the meaning of
+	// the same fields on schema.LocalSessionRow. A row is a subagent session
+	// exactly when ParentSessionID is set or ParentUnresolved is true.
+	ParentSessionID  *string `json:"parentSessionId"`
+	ParentUnresolved bool    `json:"parentUnresolved"`
+	RootSessionID    *string `json:"rootSessionId"`
 }
 
 // buildSessionsListCommand constructs the `peasant sessions list` subcommand.
@@ -38,6 +44,8 @@ func buildSessionsListCommand() *cobra.Command {
 		reverse bool
 		limit   int
 		asJSON  bool
+
+		includeSubagents bool
 	)
 
 	cmd := &cobra.Command{
@@ -56,6 +64,8 @@ func buildSessionsListCommand() *cobra.Command {
 				return err
 			}
 
+			f.MainOnly = !includeSubagents
+
 			return listSessionsShared(cmd, db, f, asJSON)
 		},
 	}
@@ -69,6 +79,7 @@ func buildSessionsListCommand() *cobra.Command {
 	cmd.Flags().StringVar(&sort, "sort", string(defaults.SessionSortDate), "Sort by field (date, turns, tokens, project)")
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order (ascending instead of descending)")
 	cmd.Flags().IntVar(&limit, "limit", defaults.SessionListDefaultLimit, "Maximum number of sessions to show (0 = no limit)")
+	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, "Also list subagent sessions (by default only main sessions are listed; --session still finds a subagent session by id)")
 	cmd.Flags().BoolVar(&asJSON, defaults.JSONFlagName, false, "Output as JSON array")
 
 	return cmd
@@ -96,9 +107,15 @@ func listSessionsShared(cmd *cobra.Command, db *store.Store, f store.SessionList
 		previews = map[string]string{} // degrade gracefully; entries will show empty preview
 	}
 
+	lineages, err := db.SessionLineages(ctx, sessionIDs)
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
+	}
+
 	// Build entries with first-user-message previews.
 	entries := make([]sessionListEntry, 0, len(rows))
 	for _, row := range rows {
+		lineage := lineages[row.SessionID]
 		entries = append(entries, sessionListEntry{
 			ID:          row.SessionID,
 			Date:        formatSessionDate(row.StartMs),
@@ -107,6 +124,10 @@ func listSessionsShared(cmd *cobra.Command, db *store.Store, f store.SessionList
 			Turns:       row.TurnCount,
 			Tokens:      row.TokensTotal,
 			Preview:     previews[row.SessionID], // empty string when key absent
+
+			ParentSessionID:  lineage.ParentSessionID,
+			ParentUnresolved: lineage.ParentUnresolved,
+			RootSessionID:    lineage.RootSessionID,
 		})
 	}
 

@@ -151,6 +151,7 @@ type SessionListFilter struct {
 	SortField     defaults.SessionSortField // column to sort by (date, turns, tokens, project)
 	SortDesc      bool                      // true = DESC (default), false = ASC
 	Limit         int                       // 0 = no limit
+	MainOnly      bool                      // leave out sessions that LogicalChildSQL calls a child; SessionID, naming one row exactly, overrides it
 }
 
 // ---------------------------------------------------------------------------
@@ -909,6 +910,11 @@ func buildSessionListFilterWhere(f SessionListFilter) (conditions []string, args
 	if f.SessionID != nil {
 		conditions = append(conditions, "s.session_id = ?")
 		args = append(args, *f.SessionID)
+	}
+
+	// Main sessions only. An exact session id still answers its row, child or not.
+	if f.MainOnly && f.SessionID == nil {
+		conditions = append(conditions, "NOT "+LogicalChildSQL("s"))
 	}
 
 	// Base SessionFilter conditions.

@@ -47,6 +47,7 @@ func BuildSessionsCommand() *cobra.Command {
 				SortField: defaults.SessionSortDate,
 				SortDesc:  true,
 				Limit:     defaults.SessionsBareDefaultLimit,
+				MainOnly:  true,
 			}
 			return listSessionsShared(cmd, db, f, false)
 		},

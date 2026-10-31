@@ -27,6 +27,7 @@ peasant sessions list
 peasant sessions list --limit 50
 peasant sessions list --harness claude-code --since 7d
 peasant sessions list --project peasant --sort tokens
+peasant sessions list --include-subagents
 peasant sessions list --json | jq '.[].id'
 ```
 
