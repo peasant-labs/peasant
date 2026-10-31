@@ -31,6 +31,7 @@ type homeReader interface {
 	SyncParentIdentities(context.Context, []ingest.PushSessionRow) ([]store.ParentIdentityRow, error)
 	FirstUserMessageBulk(context.Context, []string) (map[string]string, error)
 	GroupingEvidenceForSessions(context.Context, []string) (map[string]store.GroupingEvidenceRow, error)
+	ClaudeTeammates(context.Context, []string) (map[string]schema.SessionTeammate, error)
 }
 
 var _ homeReader = (*store.Store)(nil)
@@ -75,21 +76,19 @@ var _ schema.PageReader[schema.LocalSyncSessionRow] = (*syncHomePageReader)(nil)
 
 func (h *homeHandler) newReader(q schema.LocalSyncSessionsQuery) *syncHomePageReader {
 	r := &syncHomePageReader{db: h.reader, query: q, config: h.sync.currentConfig(), publishing: h.publishing, account: h.publishing.signedIn(), resolver: h.resolver}
-	selection := config.SelectionConfig{Mode: config.SelectionModeAll}
-	if r.config != nil {
-		selection = r.config.Selection
-	}
 	filter := schema.LocalSyncPublicationAll
 	if q.Publication != nil {
 		filter = *q.Publication
 	}
 	origin, owner := r.accountScope()
-	// Immutable request configuration, including canonical selection. MaxItems
-	// is intentionally absent, so callers can change their page size.
+	// Immutable request configuration. The saved kickstart selection is
+	// deliberately absent: it controls future ingestion and hook/CLI push, never
+	// which ingested rows this page may show, so changing it must not invalidate
+	// a browsing continuation. MaxItems is intentionally absent, so callers can
+	// change their page size.
 	encoded, _ := json.Marshal(struct {
 		Resource, Order, Parent, Project, Publication, Origin, Owner string
-		Selection                                                    config.SelectionConfig
-	}{"sync/home", "start-desc-id-asc/v1", value(q.ParentSessionID), projectValue(q.ProjectHash), filter.String(), origin, owner, selection})
+	}{"sync/home", "start-desc-id-asc/v1", value(q.ParentSessionID), projectValue(q.ProjectHash), filter.String(), origin, owner})
 	sum := sha256.Sum256(encoded)
 	r.scope = hex.EncodeToString(sum[:])
 	return r
@@ -151,7 +150,7 @@ func (r *syncHomePageReader) boundary(token schema.PageToken) (*store.SyncPageBo
 		return nil, pageTokenError(syncPageTokenCode, "pageToken encoding or shape is unsupported")
 	}
 	if *decoded.Scope != r.scope {
-		return nil, pageTokenError(syncPageScopeCode, "pageToken scope no longer matches selection, account, parent, project or publication filter")
+		return nil, pageTokenError(syncPageScopeCode, "pageToken scope no longer matches account, parent, project or publication filter")
 	}
 	return &store.SyncPageBoundary{StartMs: *decoded.StartMs, ID: *decoded.ID}, nil
 }
@@ -164,6 +163,7 @@ func (r *syncHomePageReader) token(boundary store.SyncPageBoundary) schema.PageT
 // exact ancestry/counts remain explicit O(N) work, separate from window paging.
 type syncHomeCohort struct {
 	rows     map[string]store.HomeCandidate
+	ordered  []store.SessionRow
 	visible  map[string]bool
 	parents  map[string]store.ParentIdentityRow
 	children map[string]int
@@ -175,54 +175,19 @@ func (r *syncHomePageReader) cohort(ctx context.Context) (syncHomeCohort, error)
 	if err != nil {
 		return c, err
 	}
-	policy, err := syncSelectionPolicy(r.config)
-	if err != nil {
-		return c, err
-	}
-	mode, matcher, err := policy.ProjectionInputs()
-	if err != nil {
-		return c, err
-	}
-	var prepared []preparedWebDiscoveryIdentity
-	var remotes, names []ingest.DiscoveryIdentityMultiplicity
-	if mode != config.SelectionModeAll {
-		identities := make([]store.SessionRow, len(rows))
-		for i, row := range rows {
-			if err := ctx.Err(); err != nil {
-				return c, err
-			}
-			identities[i] = row.Identity
-		}
-		prepared, remotes, names, err = prepareWebDiscoveryIdentities(ctx, identities, r.config.Selection, r.resolver)
-		if err != nil {
-			return c, err
-		}
-	}
 	pushRows := make([]ingest.PushSessionRow, 0, len(rows))
-	for i, candidate := range rows {
+	for _, candidate := range rows {
 		if err := ctx.Err(); err != nil {
 			return c, err
 		}
 		row := candidate.Identity
-		selected := true
-		if matcher != nil {
-			match := matcher.MatchBranchCandidate(ingest.DiscoveryCandidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: value(row.CanonicalRemote), ProjectName: row.ProjectName, ClonePath: prepared[i].clonePath, Branch: value(row.GitBranch), RemoteMultiplicity: remotes[i], NameMultiplicity: names[i]})
-			switch match {
-			case ingest.BranchMatchYes:
-				selected = true
-			case ingest.BranchMatchNo:
-				selected = false
-			default:
-				_, err = policy.Visible(syncVisibilityCandidate(ingest.PushSessionRow{SessionID: row.SessionID, ModelHarness: row.ModelHarness, GitRemote: value(row.CanonicalRemote), ProjectName: row.ProjectName, ProjectPath: row.GitWorktree, GitBranch: row.GitBranch}))
-				if err == nil {
-					err = fmt.Errorf("api.syncHomePageReader: unsupported selection result for %q; no page returned; repair kickstart selection and retry", row.SessionID)
-				}
-				return c, err
-			}
-		}
 		c.rows[row.SessionID] = candidate
+		c.ordered = append(c.ordered, row)
 		if candidate.Pushable {
-			c.visible[row.SessionID] = selected
+			// The saved kickstart selection is not a browsing predicate: every
+			// ingested, pushable session belongs to the page, whatever the saved
+			// selection says about future ingest or hook pushes.
+			c.visible[row.SessionID] = true
 			pushRows = append(pushRows, ingest.PushSessionRow{SessionID: row.SessionID, ParentID: value(row.ParentID)})
 		}
 	}
@@ -244,6 +209,28 @@ func (r *syncHomePageReader) cohort(ctx context.Context) (syncHomeCohort, error)
 	}
 	return c, nil
 }
+
+// selectionMembership computes the saved INGEST/PUSH selector's verdict for
+// requested IDs, using the complete cohort as repository identity evidence.
+// Only publication metadata and the explicit publication=auto filter need it;
+// project options and selection-free browse pages never evaluate it.
+func (r *syncHomePageReader) selectionMembership(ctx context.Context, cohort syncHomeCohort, ids []string) (map[string]bool, error) {
+	selection := config.SelectionConfig{Mode: config.SelectionModeAll}
+	if r.config != nil {
+		selection = r.config.Selection
+	}
+	membership, err := storedSelectionMembership(ctx, cohort.ordered, ids, selection, r.resolver)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		if _, known := membership[id]; !known {
+			return nil, fmt.Errorf("api.syncHomePageReader.selectionMembership: session %q is in the requested cohort but has no stored identity row, so outsideSelection cannot be reported truthfully; no page was returned; retry after verifying the local store", id)
+		}
+	}
+	return membership, nil
+}
+
 func (c syncHomeCohort) matches(id, parent string) bool {
 	if !c.visible[id] {
 		return false
@@ -272,7 +259,7 @@ func (r *syncHomePageReader) ReadPage(ctx context.Context, request schema.PageRe
 	}
 	parent := value(r.query.ParentSessionID)
 	if parent != "" && !cohort.visible[parent] {
-		return page, &syncPageError{code: "home_parent_not_found", message: "api.syncHomePageReader: parent is unknown or unselected; no child identities returned; choose a visible parent and retry"}
+		return page, &syncPageError{code: "home_parent_not_found", message: "api.syncHomePageReader: parent is not a stored pushable session; no child identities returned; open a parent from the current Home list and retry"}
 	}
 	filter := schema.LocalSyncPublicationAll
 	if r.query.Publication != nil {
@@ -284,15 +271,26 @@ func (r *syncHomePageReader) ReadPage(ctx context.Context, request schema.PageRe
 		return page, err
 	}
 	var auto func(string) bool
+	var membership map[string]bool
 	if filter == schema.LocalSyncPublicationAuto {
 		auto = r.publishing.autoPublicationChecker(ctx)
+		autoIDs := make([]string, 0, len(window.Candidates))
+		for _, candidate := range window.Candidates {
+			if cohort.matches(candidate.ID, parent) {
+				autoIDs = append(autoIDs, candidate.ID)
+			}
+		}
+		membership, err = r.selectionMembership(ctx, cohort, autoIDs)
+		if err != nil {
+			return page, err
+		}
 	}
 	ids := make([]string, 0, maximum)
 	for i, candidate := range window.Candidates {
 		if err := ctx.Err(); err != nil {
 			return page, err
 		}
-		if cohort.matches(candidate.ID, parent) && (auto == nil || auto(cohort.rows[candidate.ID].Identity.GitWorktree)) {
+		if cohort.matches(candidate.ID, parent) && (auto == nil || (membership[candidate.ID] && auto(cohort.rows[candidate.ID].Identity.GitWorktree))) {
 			ids = append(ids, candidate.ID)
 		}
 		// Only consumed candidates advance traversal. An empty/short eligible
@@ -309,22 +307,38 @@ func (r *syncHomePageReader) ReadPage(ctx context.Context, request schema.PageRe
 	if len(ids) == 0 {
 		return page, nil
 	}
-	page.Items, err = r.hydrate(ctx, ids, cohort)
+	page.Items, err = r.hydrate(ctx, ids, cohort, membership)
 	return page, err
 }
 
-func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort syncHomeCohort) ([]schema.LocalSyncSessionRow, error) {
+func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort syncHomeCohort, membership map[string]bool) ([]schema.LocalSyncSessionRow, error) {
 	rows, err := r.db.HomePageRows(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 	byID := make(map[string]store.HomePageRow, len(rows))
 	hydrated := make([]ingest.PushSessionRow, 0, len(rows))
-	scope := map[string]bool{}
 	for _, row := range rows {
 		byID[row.Sync.SessionID] = row
 		hydrated = append(hydrated, row.Sync)
-		scope[row.Sync.SessionID] = true
+	}
+	// Publication metadata describes the saved INGEST/PUSH selector, which is a
+	// different question from whether the row may appear here. Membership uses
+	// the complete cohort to resolve repository ambiguity; only returned IDs are
+	// passed to publication hydration. An unselected row remains browsable.
+	if membership == nil {
+		membership, err = r.selectionMembership(ctx, cohort, ids)
+		if err != nil {
+			return nil, err
+		}
+	}
+	scope := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		inSelection, known := membership[id]
+		if !known {
+			return nil, fmt.Errorf("api.syncHomePageReader.hydrate: session %q has no saved ingest/push selection membership, so outsideSelection cannot be reported truthfully; no page was returned; retry after verifying the local store and saved selection", id)
+		}
+		scope[id] = inSelection
 	}
 	metadata, err := push.LoadPublicationMetadata(ctx, r.db, hydrated)
 	if err != nil {
@@ -335,6 +349,10 @@ func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort s
 		return nil, err
 	}
 	evidence, err := r.db.GroupingEvidenceForSessions(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	teammates, err := r.db.ClaudeTeammates(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +374,7 @@ func (r *syncHomePageReader) hydrate(ctx context.Context, ids []string, cohort s
 			return nil, fmt.Errorf("api.syncHomePageReader: session %q changed during hydration; no page returned; restart traversal", id)
 		}
 		status, hold := computeSyncStatus(row.Sync, false, push.PublicationMetadataReady(metadata[id]))
-		_, summary, err := buildSyncGroupedRow(syncSessionEntry{row: row.Sync, status: status, hold: hold, identity: cohort.parents[id]}, evidence[id], previews[id])
+		_, summary, err := buildSyncGroupedRow(syncSessionEntry{row: row.Sync, status: status, hold: hold, identity: cohort.parents[id]}, evidence[id], previews[id], teammateFor(teammates, id))
 		if err != nil {
 			return nil, err
 		}

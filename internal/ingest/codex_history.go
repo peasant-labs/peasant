@@ -174,14 +174,17 @@ type CodexCapturedNode struct {
 	ByteStart        int64
 	ByteEndExclusive int64
 	EnvelopeType     string
-	NativeType       string
-	NativeRole       string
-	ItemID           string
-	CallID           string
-	TurnID           string
-	Ownership        CodexOwnership
-	Payload          []byte
-	Metadata         json.RawMessage
+	// TimestampMs is the record envelope's timestamp; every block the
+	// node yields is stamped with it.
+	TimestampMs *int64
+	NativeType  string
+	NativeRole  string
+	ItemID      string
+	CallID      string
+	TurnID      string
+	Ownership   CodexOwnership
+	Payload     []byte
+	Metadata    json.RawMessage
 }
 
 // CodexCapturedCorrelation is one proven native correlation. Refs names the

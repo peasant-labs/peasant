@@ -1,0 +1,35 @@
+# Cases behind TestPullTranscript_ServedETagFixtures. `etag` is the ETag the
+# content endpoint answers with; `{hash}` is replaced by the served blob's real
+# content hash and `{wrong}` by a different well-formed hash. Each case pulls
+# through the production pipeline and asserts the outcome; `repull` pulls a
+# second time without --force and asserts the If-None-Match sent.
+# Guarded by requiredNames, never by a count.
+requiredNames:
+  - strong_etag_used
+  - weak_etag_prefix_stripped
+  - malformed_etag_falls_back_to_local_hash
+  - no_etag_falls_back_to_local_hash
+  - weak_etag_reechoed_verbatim_in_if_none_match
+  - wrong_hash_etag_still_refused
+cases:
+  - name: strong_etag_used
+    etag: '"{hash}"'
+    wantPulled: true
+  - name: weak_etag_prefix_stripped
+    etag: 'W/"{hash}"'
+    wantPulled: true
+  - name: malformed_etag_falls_back_to_local_hash
+    etag: '"not-a-content-hash"'
+    wantPulled: true
+  - name: no_etag_falls_back_to_local_hash
+    etag: ''
+    wantPulled: true
+  - name: weak_etag_reechoed_verbatim_in_if_none_match
+    etag: 'W/"{hash}"'
+    wantPulled: true
+    repull: true
+    wantIfNoneMatch: 'W/"{hash}"'
+  - name: wrong_hash_etag_still_refused
+    etag: '"{wrong}"'
+    wantPulled: false
+    wantErrorContains: blob checksum does not match manifest

@@ -1,0 +1,37 @@
+requiredNames:
+  - dark-copy-transcript
+  - light-copy-transcript
+  - dark-copy-link
+  - light-copy-link
+  - denied-copy-transcript
+  - denied-copy-link
+  - pending-copy-link
+cases:
+  - name: dark-copy-transcript
+    theme: dark
+    action: transcript
+    result: success
+  - name: light-copy-transcript
+    theme: light
+    action: transcript
+    result: success
+  - name: dark-copy-link
+    theme: dark
+    action: link
+    result: success
+  - name: light-copy-link
+    theme: light
+    action: link
+    result: success
+  - name: denied-copy-transcript
+    theme: dark
+    action: transcript
+    result: denied
+  - name: denied-copy-link
+    theme: light
+    action: link
+    result: denied
+  - name: pending-copy-link
+    theme: dark
+    action: link
+    result: pending

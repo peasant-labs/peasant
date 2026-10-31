@@ -21,19 +21,20 @@ for (const row of f.cases) test(row.name, { timeout: 20000 }, async t => {
     child.child.stdin.write('acquire');
     return { ...child, ready };
   }
-  if (row.mode === 'forced' || row.mode === 'missing') {
+  if (row.mode === 'forced' || row.mode === 'timeout' || row.mode === 'missing') {
     const life = await acquire(); cleanups.push(() => life.cleanup());
     const immutable = readFileSync(join(directory, 'owner.json'), 'utf8');
     const child = row.mode === 'missing'
       ? life.launch('/no-such-peasant-journey-command', [], { stdio: 'ignore' })
       : life.launch(process.execPath, ['-e', "process.on('SIGTERM',()=>{});process.stdout.write('ready\\n');setTimeout(()=>process.exit(3),20000)"], { stdio: ['ignore', 'pipe', 'inherit'] });
-    if (row.mode === 'forced') await bounded(new Promise(done => child.child.stdout.once('data', done)), 3000, 'test child readiness');
+    if (row.mode !== 'missing') await bounded(new Promise(done => child.child.stdout.once('data', done)), 3000, 'test child readiness');
     else await assert.rejects(child.done);
+    if (row.mode === 'timeout') await assert.rejects(bounded(child.done, 50, 'test compile deadline'), /test compile deadline exceeded/);
     assert.equal(readFileSync(join(directory, 'owner.json'), 'utf8'), immutable);
     let settlements = 0; void child.settled.then(() => settlements++);
     const cleaning = life.cleanup(); assert.equal(life.cleanup(), cleaning); await cleaning;
     assert.equal(settlements, 1); assert.equal(ownedGroups(life.identity.owner).size, 0);
-    if (row.mode === 'forced') assert.equal((await child.settled).signal, 'SIGKILL');
+    if (row.mode !== 'missing') assert.equal((await child.settled).signal, 'SIGKILL');
     assert.equal(existsSync(life.identity.stateRoot), false); assert.equal(existsSync(directory), false);
     assert.equal(existsSync(`${directory}.gate`), true);
     return;

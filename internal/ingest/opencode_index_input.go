@@ -85,7 +85,10 @@ func parseOpenCodeJSONInput(input *openCodeJSONInput, completion *indexCompletio
 	for _, captured := range input.Messages {
 		completion.line++
 		if err := completion.record(captured.File.Data); err != nil {
-			return nil, fmt.Errorf("message %s: %w", captured.File.Name, err)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("message %s: %w", captured.File.Name, err)
+			}
+			return nil, fmt.Errorf("message %s: %w", captured.File.Name, malformedSourceRecord{err})
 		}
 		messageID := strings.TrimSuffix(captured.File.Name, defaults.ExtJSON.String())
 		message, err := parseOpenCodeSemanticMessage(messageID, 0, captured.File.Data)
@@ -107,7 +110,10 @@ func parseOpenCodeJSONInput(input *openCodeJSONInput, completion *indexCompletio
 		}
 		for _, capturedPart := range captured.Parts {
 			if err := completion.record(capturedPart.Data); err != nil {
-				return nil, fmt.Errorf("part %s: %w", capturedPart.Name, err)
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return nil, fmt.Errorf("part %s: %w", capturedPart.Name, err)
+				}
+				return nil, fmt.Errorf("part %s: %w", capturedPart.Name, malformedSourceRecord{err})
 			}
 			partID := strings.TrimSuffix(capturedPart.Name, defaults.ExtJSON.String())
 			part, err := parseOpenCodeSemanticPart(partID, 0, capturedPart.Data)

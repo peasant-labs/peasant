@@ -26,8 +26,8 @@ export function SharePageClient() {
 
 /**
  * Resolve the session's project and replace this page with its transcript,
- * opened on the publish popup. The lookup applies no list scope: a session the
- * saved lists leave out still opens by its link.
+ * opened on the publish popup. The lookup applies no list scope: a stored
+ * session opens by its link regardless of the saved ingestion selection.
  */
 async function resolveProjectHash(sessionId: string): Promise<ProjectHash> {
   const path = `/api/v1/session-summaries?ids=${encodeURIComponent(sessionId)}`;
@@ -68,7 +68,7 @@ function OpenTranscriptPublish({ sessionId }: { sessionId: string }) {
 
   if (failure) {
     return (
-      <div className="max-w-[1600px] mx-auto px-6 pt-6" role="alert">
+      <div className="asb-page share-page" role="alert">
         <FeedbackPanel variant="error" title="the transcript could not be opened">
           {failure}{' '}
           <Link href="/share?step=select" className="link">publish several sessions instead</Link>
@@ -77,8 +77,8 @@ function OpenTranscriptPublish({ sessionId }: { sessionId: string }) {
     );
   }
   return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6" role="status">
-      <p className="font-mono text-[14px] text-ink-3">opening the transcript to publish it</p>
+    <div className="asb-page share-page" role="status">
+      <p className="font-mono text-[length:var(--fs-label)] text-ink-3">opening the transcript to publish it</p>
     </div>
   );
 }

@@ -40,9 +40,11 @@ var webCapabilitiesMatrixYAML []byte
 
 // webCapabilityMatrixFixtures is the real-binary matrix corpus.
 type webCapabilityMatrixFixtures struct {
-	DeclaredRows  int                       `yaml:"declared_rows"`
-	RequiredCases []string                  `yaml:"required_cases"`
-	Cases         []webCapabilityMatrixCase `yaml:"cases"`
+	StartupCases   []browsingStartupCase     `yaml:"startup_cases"`
+	StrictCommands [][]string                `yaml:"strict_commands"`
+	DeclaredRows   int                       `yaml:"declared_rows"`
+	RequiredCases  []string                  `yaml:"required_cases"`
+	Cases          []webCapabilityMatrixCase `yaml:"cases"`
 }
 
 // webCapabilityMatrixCase is one invocation of the built binary and its expected

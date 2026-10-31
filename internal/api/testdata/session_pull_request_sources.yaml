@@ -1,0 +1,26 @@
+requiredNames:
+  - first-call
+  - second-call
+  - third-call
+cases:
+  - name: first-call
+    owner: storytold
+    repo: photocraft
+    number: 1204
+    turnIndex: 0
+    toolCallIndex: 0
+    toolCallId: call-1
+  - name: second-call
+    owner: acme
+    repo: web
+    number: 42
+    turnIndex: 0
+    toolCallIndex: 1
+    toolCallId: call-2
+  - name: third-call
+    owner: acme
+    repo: api
+    number: 42
+    turnIndex: 0
+    toolCallIndex: 2
+    toolCallId: call-3

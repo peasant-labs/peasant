@@ -1,4 +1,5 @@
 requiredNames:
+  - v69-source-unavailability-cause
   - v68-collective-observations
   - v01-initial-schema
   - v02-session-entries

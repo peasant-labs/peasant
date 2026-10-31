@@ -151,7 +151,7 @@ func TestFamiliarityVisibilityFixtureGuards(t *testing.T) {
 	}
 }
 
-func TestProjectFamiliarity_FiltersBeforeAggregationAndCaps(t *testing.T) {
+func TestProjectFamiliarity_AggregatesEveryStoredSessionAndCaps(t *testing.T) {
 	corpus := loadFamiliarityVisibilityCorpus(t)
 	for _, tc := range corpus.Cases {
 		tc := tc
@@ -182,25 +182,14 @@ func TestProjectFamiliarity_FiltersBeforeAggregationAndCaps(t *testing.T) {
 					t.Fatalf("UpsertSessionFiles(%s): %v", session.ID, err)
 				}
 			}
-			policy, err := sessionvisibility.New(tc.Input.Selection)
-			if err != nil {
-				t.Fatalf("selection policy: %v", err)
-			}
-			provider := api.NewStoreDataProvider(s, policy)
+			// The fixture keeps its saved-selection input to prove familiarity
+			// aggregates every stored session, selection or not.
+			provider := api.NewStoreDataProvider(s, sessionvisibility.New(tc.Input.Selection))
 			projectHash, hashErr := schema.NewProjectHash(tc.Input.ProjectHash)
 			if hashErr != nil {
 				t.Fatalf("fixture project hash: %v", hashErr)
 			}
 			payload, err := provider.ProjectFamiliarity(context.Background(), projectHash)
-			if tc.Classification == testcase.MustFail {
-				if err == nil || !sessionvisibility.IsError(err) || !strings.Contains(err.Error(), tc.Expected.ErrorContains) {
-					t.Fatalf("ProjectFamiliarity error = %v, want visibility error containing %q", err, tc.Expected.ErrorContains)
-				}
-				if payload != nil {
-					t.Fatalf("ProjectFamiliarity returned partial payload on policy error: %+v", payload)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatalf("ProjectFamiliarity: %v", err)
 			}

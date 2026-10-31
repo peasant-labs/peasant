@@ -23,6 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 type kickstartCommandDeps struct {
@@ -61,11 +62,17 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 		pathResolver:       ingest.NewPhysicalPathResolver(),
 		repositoryResolver: ingest.NewGitRepositoryIdentityResolver(),
 		run: func(model ftue.WizardModel) error {
+			if err := requireTerminal("kickstart"); err != nil {
+				return err
+			}
 			_, err := tea.NewProgram(model).Run()
 			return err
 		},
 		runFlow: runKickstartFlow,
 		runModel: func(model tea.Model) error {
+			if err := requireTerminal("kickstart"); err != nil {
+				return err
+			}
 			_, err := tea.NewProgram(model, tea.WithFPS(progressProgramFPS)).Run()
 			return err
 		},
@@ -88,7 +95,7 @@ func BuildKickstartCommand() *cobra.Command {
 }
 
 func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
-	var reset bool
+	var reset, confirmReset bool
 
 	cmd := &cobra.Command{
 		Use:     "kickstart",
@@ -97,8 +104,21 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			configPath := resolveConfigPath(cmd)
+			if confirmReset && !reset {
+				return fmt.Errorf("--confirm only applies with --reset; nothing was changed; run `peasant kickstart --reset --confirm` to reset without a prompt")
+			}
 
 			if reset {
+				if !confirmReset {
+					ok, err := confirmKickstartReset(cmd, configPath)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						fmt.Fprintln(cmd.ErrOrStderr(), "Reset cancelled; nothing was removed.")
+						return nil
+					}
+				}
 				if err := resetAll(cmd, configPath); err != nil {
 					return err
 				}
@@ -157,7 +177,9 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&reset, "reset", false, "Remove config, credentials, database, ingested data, and state (full reset)")
+	withCleanTerminalError(cmd)
+	cmd.Flags().BoolVar(&reset, "reset", false, "Remove config, credentials, database, ingested data, and state (full reset); asks for confirmation")
+	cmd.Flags().BoolVar(&confirmReset, "confirm", false, "With --reset: skip the confirmation prompt (for scripts/CI)")
 	return cmd
 }
 
@@ -204,6 +226,49 @@ func runLegacyFTUEWizard(
 	return nil
 }
 
+// kickstartResetTargetList names what --reset removes, resolved from the same
+// overrides resetAll uses, so the prompt lists exactly what will be deleted.
+type kickstartResetTargetList struct {
+	config, database, sync, state string
+}
+
+func kickstartResetTargets(configPath, dataDirOverride, stateDirOverride string) kickstartResetTargetList {
+	return kickstartResetTargetList{
+		config:   configPath,
+		database: string(defaults.ResolveDBFilePathWith(dataDirOverride)),
+		sync:     filepath.Join(string(defaults.ResolveDataDirPathWith(dataDirOverride)), "peasant-sync"),
+		state:    string(defaults.ResolveStateDirPathWith(stateDirOverride)),
+	}
+}
+
+// confirmKickstartReset lists what --reset removes and asks for consent. Like
+// confirmPrune it refuses outright unless the command's input is a terminal:
+// the ingested copies may be the only copy left once a harness has expired its
+// own transcripts, so a piped or closed stdin cannot approve the delete.
+func confirmKickstartReset(cmd *cobra.Command, configPath string) (bool, error) {
+	in := cmd.InOrStdin()
+	file, isFile := in.(*os.File)
+	if !isFile || !term.IsTerminal(int(file.Fd())) {
+		return false, fmt.Errorf("non-interactive terminal: `peasant kickstart --reset` refused to prompt for consent because its standard input is not a terminal; nothing was removed; re-run with --confirm to reset without a prompt, or run the command from an interactive shell")
+	}
+	targets := kickstartResetTargets(configPath, dataDirOverride(cmd), stateDirOverride(cmd))
+	return promptKickstartReset(cmd.ErrOrStderr(), file, targets), nil
+}
+
+// promptKickstartReset prints the targets and reads one answer. Only "y" or
+// "yes" (any case, blanks trimmed) consents; anything else, including "y" with
+// more words, an empty line or EOF, keeps everything.
+func promptKickstartReset(w io.Writer, r io.Reader, targets kickstartResetTargetList) bool {
+	fmt.Fprintln(w, "kickstart --reset permanently removes:")
+	fmt.Fprintf(w, "  config:       %s\n", targets.config)
+	fmt.Fprintln(w, "  credentials:  the saved village login")
+	fmt.Fprintf(w, "  database:     %s (and its -wal, -shm and -journal files)\n", targets.database)
+	fmt.Fprintf(w, "  peasant-sync: %s\n", targets.sync)
+	fmt.Fprintf(w, "  state:        %s\n", targets.state)
+	fmt.Fprint(w, "Reset everything? [y/N]: ")
+	return readConsent(r)
+}
+
 // resetAll removes the config file, credentials, database, peasant-sync directory, and state directory.
 func resetAll(cmd *cobra.Command, configPath string) error {
 	// 1. Config file.
@@ -218,8 +283,13 @@ func resetAll(cmd *cobra.Command, configPath string) error {
 
 	// 3. Database file.
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-	if err := removeIfExists(dbPath); err != nil {
-		return fmt.Errorf("reset database: %w", err)
+	// Its SQLite sidecars go too: a process killed mid-read (for example
+	// `peasant sessions list | head`) leaves -wal/-shm behind, and a stale WAL
+	// beside the next, fresh database could be replayed into it.
+	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm", dbPath + "-journal"} {
+		if err := removeIfExists(path); err != nil {
+			return fmt.Errorf("reset database: %w", err)
+		}
 	}
 
 	// 4. Peasant-sync directory (ingested transcripts + metadata).
@@ -228,10 +298,9 @@ func resetAll(cmd *cobra.Command, configPath string) error {
 		return fmt.Errorf("reset peasant-sync: %w", err)
 	}
 
-	// 5. State directory (PID files). Resolve at call time for the same reason
-	// as pidFilePath: a test that redirects XDG_STATE_HOME resets its own state,
-	// not the developer's.
-	stateDir := string(defaults.ResolveStateDirPath())
+	// 5. State directory (PID files), honoring --state-dir like the other
+	// locations honor --data-dir and --config-dir.
+	stateDir := string(defaults.ResolveStateDirPathWith(stateDirOverride(cmd)))
 	if err := removeAllIfExists(stateDir); err != nil {
 		return fmt.Errorf("reset state: %w", err)
 	}
@@ -619,7 +688,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 		defer slog.SetDefault(origLogger)
 
-		cfg, err := loadConfig(configPath)
+		cfg, err := loadCommandConfig(cmd, configPath)
 		if err != nil {
 			return nil, fmt.Errorf("load config: %w", err)
 		}

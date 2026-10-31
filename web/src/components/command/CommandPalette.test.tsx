@@ -36,8 +36,8 @@ vi.mock('@/contexts/ServerCapabilitiesContext', () => ({
   }),
 }));
 
-const parentVisibleFixture = projectViewerStateFixture('explicit session makes parent visible');
-const PROJECT_HASH = parentVisibleFixture.summary.projects[0].projectHash;
+const projectLibraryFixture = projectViewerStateFixture('restrictive-saved-selection-keeps-recorded-projects');
+const PROJECT_HASH = projectLibraryFixture.summary.projects[0].projectHash;
 const fixturePath = resolve(process.cwd(), 'src/components/command/testdata/search_discovery.yaml');
 const fixture = requireRecord(parseStrictYAML(readFileSync(fixturePath, 'utf8'), 'search discovery fixture'), 'search discovery fixture');
 requireExactRequiredFields(fixture, ['valid', 'invalid'], 'search discovery fixture');

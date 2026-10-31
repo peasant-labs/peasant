@@ -1,0 +1,10 @@
+requiredNames:
+  - code-change-rollout-timestamps
+  - text-response-rollout-timestamps
+cases:
+  - name: code-change-rollout-timestamps
+    sessionID: 019e7724-38f5-7660-b2d7-2eda237d4a7d
+    year: 2024
+  - name: text-response-rollout-timestamps
+    sessionID: 019e7724-8abb-7851-adac-69a30b4bc1bb
+    year: 2024

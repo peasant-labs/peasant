@@ -1,0 +1,6 @@
+requiredNames:
+  - json_public_without_yes_refuses
+  - json_public_from_config_default_refuses
+  - json_public_with_yes_publishes
+  - json_private_unchanged
+  - json_never_prints_prompt

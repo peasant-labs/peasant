@@ -406,14 +406,9 @@ func seedMountedSelectionWorld(t *testing.T, fixture mountedSelectionSafetyCase)
 
 func mountedViewerIDs(t *testing.T, world mountedSelectionWorld) map[string]bool {
 	t.Helper()
-	cfg, err := loadConfig(world.ConfigPath)
-	if err != nil {
-		t.Fatalf("load mounted viewer config: %v", err)
-	}
-	policy, err := sessionvisibility.New(cfg.Selection)
-	if err != nil {
-		t.Fatalf("build mounted viewer policy: %v", err)
-	}
+	// The mounted viewer browses the ingested library: the saved selector is
+	// deliberately not part of this policy.
+	policy := sessionvisibility.Browsing()
 	db, err := openPreparedStore(t, world.DBPath)
 	if err != nil {
 		t.Fatalf("open mounted viewer store: %v", err)
@@ -595,10 +590,11 @@ func TestMountedSelectionPushChooserPipelineAndPruneKeepTheCloneBoundary(t *test
 			t.Parallel()
 			world := seedMountedSelectionWorld(t, fixture)
 			wantPushed := mountedExpectedIDs(fixture, func(row mountedSelectionRow) bool { return row.ExpectedPush })
-			if len(fixture.BranchExclusions) > 0 || len(fixture.SessionExclusions) > 0 {
-				viewerIDs := mountedViewerIDs(t, world)
-				assertMountedIDSet(t, "mounted viewer", viewerIDs, wantPushed)
-			}
+			// Browsing shows every ingested row; the saved selector still decides
+			// which rows the push chooser and the push pipeline publish.
+			wantViewer := mountedExpectedIDs(fixture, func(mountedSelectionRow) bool { return true })
+			viewerIDs := mountedViewerIDs(t, world)
+			assertMountedIDSet(t, "mounted viewer", viewerIDs, wantViewer)
 
 			chooserIDs := mountedChooserIDs(t, fixture, world)
 			assertMountedIDSet(t, "mounted chooser selected", chooserIDs, wantPushed)

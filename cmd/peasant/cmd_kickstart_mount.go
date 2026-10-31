@@ -311,7 +311,7 @@ func openKickstartStore(cmd *cobra.Command, ownedRoot string) (*store.Store, fun
 // fallback the post-consent ingest runner uses, so the reader and the writer
 // resolve one tree.
 func resolveKickstartOutputRoot(cmd *cobra.Command, cfg *config.Config) (ingest.ResolvedPath, error) {
-	outputPath := cfg.Output.BasePath
+	outputPath := effectiveOutputBasePath(cmd, cfg)
 	if outputPath == "" {
 		outputPath = string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
 	}
@@ -383,11 +383,10 @@ func ingestedSessionIDs(cmd *cobra.Command, db *store.Store) []string {
 // still previewable, which is the whole point of the pane: it shows what
 // Peasant recorded, and it certifies nothing.
 //
-// Visibility is deliberately sessionvisibility.All: kickstart is where a
-// selection is being CHOSEN, so scoping the preview by a selection the user has
-// not committed yet would hide the very rows they are deciding about. This
-// matches the ratified model in which a selection scopes discovery lists rather
-// than access to stored data.
+// Visibility is deliberately sessionvisibility.Browsing: kickstart is where a
+// selection is being CHOSEN, so the preview must never be narrowed by a saved
+// selection at all. Browsing is origin-only, which matches the ratified model:
+// selection controls future ingestion, not access to stored data.
 func kickstartPreview(
 	cmd *cobra.Command,
 	db *store.Store,
@@ -414,7 +413,7 @@ func kickstartPreviewWithRoot(
 	// "no turns" would report a broken database as an empty session.
 	var storedTurns func(sessionID string) ([]ingest.Turn, bool, error)
 	if db != nil {
-		provider := api.NewStoreDataProvider(db, sessionvisibility.All(), managedRoot)
+		provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing(), managedRoot)
 		storedTurns = func(sessionID string) ([]ingest.Turn, bool, error) {
 			row, err := db.SessionDetailByID(ctx, sessionID)
 			if err != nil {

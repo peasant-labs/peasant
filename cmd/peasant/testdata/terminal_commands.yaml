@@ -1,0 +1,5 @@
+requiredNames: [kickstart, config, tui]
+cases:
+  - {name: kickstart, hint: peasant harvest}
+  - {name: config, hint: edit config.yaml}
+  - {name: tui, hint: peasant web start}

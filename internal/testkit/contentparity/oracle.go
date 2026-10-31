@@ -395,7 +395,7 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 		result.Detail.Bytes = detailBytes
 	}
 	if c.Harness == "pi" {
-		provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+		provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 		session, e := provider.SessionByID(ctx, string(sid))
 		if e == nil {
 			detail, e = transcript.SessionToDetailValidated(session)

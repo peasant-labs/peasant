@@ -1,4 +1,4 @@
-requiredNames: [complete-root-projects, selection-scoped-projects, empty-selection-projects]
+requiredNames: [complete-root-projects, selection-scoped-projects, empty-selection-projects, invalid-selection-projects, conflicting-selection-projects]
 sessions:
   - {id: sess_a, project: a, name: zeta}
   - {id: sess_a2, project: a, name: zeta}
@@ -6,7 +6,14 @@ sessions:
   - {id: sess_child, project: c, name: child-only, parent: sess_a}
   - {id: sess_unresolved, project: d, name: unresolved-only, unresolved: true}
   - {id: sess_hidden, project: e, name: hidden}
+# Every case returns the same stored root projects. The "scoped" and "empty"
+# names are retained required-name families; their saved selectors are now
+# ingest-only inputs that must change nothing here.
 cases:
   - {name: complete-root-projects, projects: [b, e, a]}
-  - {name: selection-scoped-projects, narrow: true, selected: [sess_a, sess_b, sess_child, sess_unresolved], projects: [b, a]}
-  - {name: empty-selection-projects, narrow: true, selected: [sess_absent], projects: []}
+  - {name: selection-scoped-projects, narrow: true, selected: [sess_a, sess_b, sess_child, sess_unresolved], projects: [b, e, a]}
+  - {name: empty-selection-projects, narrow: true, selected: [sess_absent], projects: [b, e, a]}
+  # Project options carry no publication metadata, so an unusable or conflicting
+  # ingest selection must not gate them.
+  - {name: invalid-selection-projects, invalidSelection: true, projects: [b, e, a]}
+  - {name: conflicting-selection-projects, conflictingSelection: true, projects: [b, e, a]}

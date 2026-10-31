@@ -1,12 +1,14 @@
-// Package sessionvisibility applies the persisted kickstart selection to
-// user-facing discovery. It deliberately does not authorize direct access or
-// deletion: callers use it only when enumerating sessions and projects.
+// Package sessionvisibility holds the discovery projection a browsing surface
+// applies to stored sessions, and the saved-selection membership that ingest
+// and push metadata report.
+//
+// Browsing is origin-only. The saved kickstart selection controls what Peasant
+// discovers and ingests next, and what a hook or CLI push publishes; it never
+// decides which already-ingested rows a person may browse. A restrictive, empty,
+// stale or invalid saved selection therefore cannot hide the ingested library.
 package sessionvisibility
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -15,23 +17,30 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 )
 
-// Error marks a discovery failure caused by invalid persisted selection state.
-// Callers use this type to attach recovery guidance without rewriting unrelated
-// database, transport, or server failures as kickstart problems.
+// Error marks a failure caused by unusable stored session metadata or an
+// invalid saved selection. Browsing surfaces use it for an unusable origin; the
+// ingest/push metadata read uses it for a saved selection it cannot apply.
 type Error struct{ message string }
 
 func (e *Error) Error() string { return e.message }
 
 func errorf(format string, args ...any) error { return &Error{message: fmt.Sprintf(format, args...)} }
 
-// IsError reports whether err was caused by invalid persisted selection state.
+// IsError reports whether err was caused by unusable session metadata or an
+// invalid saved selection.
 func IsError(err error) bool {
 	var target *Error
 	return errors.As(err, &target)
 }
 
+// browsingRevision identifies the browsing projection a member scope was issued
+// under. It is deliberately independent of the saved selection: changing which
+// sessions Peasant will ingest next must not invalidate a browsing continuation.
+const browsingRevision = "browsing/v1"
+
 // Candidate is the discovery-relevant identity of one stored session: the
-// selection-scope fields, plus the origin the producer declared for it.
+// origin the producer declared for it, plus the identity fields the canonical
+// selection matcher needs when a caller reports ingest or push membership.
 type Candidate struct {
 	SessionID   ingest.SessionID
 	Harness     ingest.Harness
@@ -40,8 +49,8 @@ type Candidate struct {
 	ClonePath   ingest.ClonePath
 	GitBranch   string
 	// Origin is who drove the session, as recorded in sessions.session_origin.
-	// It is read only by VisibleForDiscovery: selection scope never consults it,
-	// which is what keeps the two scopes independent axes.
+	// VisibleForDiscovery reads it; selection membership never consults it, which
+	// is what keeps the two axes independent.
 	Origin sessionorigin.Origin
 	// ParentSessionID names the root a subagent transcript belongs to, empty for
 	// a root session.
@@ -56,86 +65,61 @@ type Candidate struct {
 	ParentSessionID ingest.SessionID
 }
 
-// Policy is an immutable, validated discovery projection.
+// Policy carries two independent projections:
+//
+//   - the discovery projection, which is origin-only and answers
+//     VisibleForDiscovery; every browsing surface uses this;
+//   - the saved-selection membership: SelectedForIngest answers for an isolated
+//     candidate; Selection supplies the selector to cohort-aware publication
+//     metadata, which also needs repository topology and clone multiplicities.
+//
+// A browsing caller must not use SelectedForIngest or the saved selection for
+// any list, count, picker, search, or paging decision.
 type Policy struct {
-	mode     config.SelectionMode
-	matcher  ingest.SelectionMatcher
+	selection config.SelectionConfig
+	matcher   ingest.SelectionMatcher
+	// revision is the browsing revision, never the selection digest.
 	revision string
 }
 
-// New validates a persisted selection and builds its immutable matcher.
-func New(selection config.SelectionConfig) (Policy, error) {
-	if !selection.Mode.IsValid() {
-		return Policy{}, errorf(
-			"session visibility: invalid selection mode %q; the persisted kickstart selection is missing or unsupported in internal/sessionvisibility.New while the server is starting, so discovery cannot be served safely; run `peasant kickstart` to repair selection.mode (valid: all, selected)",
-			selection.Mode,
-		)
+// New carries a saved selection for the ingest/push metadata read. It does not
+// validate the selection, because browsing does not depend on it: an invalid
+// saved selection must not stop the server from serving the stored library. A
+// metadata read that needs the selection fails at the point of use, where the
+// error can name the remedy without touching browsing.
+func New(selection config.SelectionConfig) Policy {
+	return Policy{
+		selection: selection,
+		matcher:   config.CompileSelectionMatcher(selection),
+		revision:  browsingRevision,
 	}
-
-	return Policy{mode: selection.Mode, matcher: config.CompileSelectionMatcher(selection), revision: selectionRevision(selection)}, nil
 }
 
-// All returns an explicit all-data policy for tests and non-configured tools.
-func All() Policy {
-	return Policy{mode: config.SelectionModeAll, revision: selectionRevision(config.SelectionConfig{Mode: config.SelectionModeAll})}
+// Browsing returns the origin-only discovery policy. It carries no saved
+// selection: browsing never consults one.
+func Browsing() Policy {
+	return New(config.SelectionConfig{Mode: config.SelectionModeAll})
 }
 
-// Revision returns a stable digest of the persisted selection this policy was
-// built from. Discovery readers record it beside a list so a later read can
-// detect that the selection changed underneath it and refuse rather than
-// silently serving a different visible set. An uninitialized policy has no
-// revision to compare and returns the empty string.
+// Selection returns the saved ingest/push selector for cohort-aware metadata
+// projection. Callers must treat it as immutable; browsing must not consult it.
+func (p Policy) Selection() config.SelectionConfig { return p.selection }
+
+// Revision returns the stable browsing revision. Discovery readers record it
+// beside a list so a member continuation replays the same browsing projection.
 func (p Policy) Revision() string { return p.revision }
 
-// selectionRevision hashes the persisted selection deterministically. The JSON
-// encoder sorts map keys, so two selections that differ only in harness-map
-// iteration order hash identically while any real change (mode, sessions,
-// projects, branches, exclusions) changes the digest.
-func selectionRevision(selection config.SelectionConfig) string {
-	encoded, err := json.Marshal(selection)
-	if err != nil {
-		// The selection is composed of strings, slices and maps, so encoding
-		// cannot fail in practice. An unavailable revision is safer than a
-		// guessed one: readers treat it as unverifiable and refuse to replay.
-		return ""
-	}
-	sum := sha256.Sum256(encoded)
-	return hex.EncodeToString(sum[:])
-}
-
-// Active reports whether the policy is narrowing discovery (mode=selected),
-// as opposed to exposing everything (mode=all). Callers use this to explain
-// a sparse project/session list to the user rather than leaving it looking
-// broken — it reports state only, never which
-// projects or sessions the selection hides.
-func (p Policy) Active() bool { return p.mode == config.SelectionModeSelected }
-
-// ProjectionInputs returns the validated mode and canonical matcher for a
-// cohort-aware discovery projection. The caller must still compute candidate
-// identity multiplicity over its complete cohort before it uses the matcher.
-// Mode all returns a nil matcher because batch projections must bypass selected-
-// mode matching entirely.
-func (p Policy) ProjectionInputs() (config.SelectionMode, *ingest.SelectionMatcher, error) {
-	if !p.mode.IsValid() {
-		return "", nil, errorf(
-			"session visibility: uninitialized policy; no validated kickstart selection reached internal/sessionvisibility.Policy.ProjectionInputs while preparing a discovery cohort, so the caller must not expose a partial list; construct the provider with sessionvisibility.New(config.Selection), run `peasant kickstart` if the saved selection is invalid, and retry",
-		)
-	}
-	if p.mode == config.SelectionModeAll {
-		return p.mode, nil, nil
-	}
-	matcher := p.matcher
-	return p.mode, &matcher, nil
-}
-
-// Visible reports whether a candidate belongs in a user-facing list.
-func (p Policy) Visible(candidate Candidate) (bool, error) {
-	if !p.mode.IsValid() {
+// SelectedForIngest reports whether the saved selection admits a candidate for
+// ingest or push metadata. It is NOT a browsing predicate: use
+// VisibleForDiscovery for discovery lists.
+func (p Policy) SelectedForIngest(candidate Candidate) (bool, error) {
+	if !p.selection.Mode.IsValid() {
 		return false, errorf(
-			"session visibility: uninitialized policy; no validated kickstart selection reached internal/sessionvisibility.Policy.Visible during discovery, so the caller must not expose stored rows; construct the provider with sessionvisibility.New(config.Selection) and retry",
+			"session visibility: the saved kickstart selection has no valid mode while ingest/push membership was requested for session %q; browsing is unaffected, but the publication metadata cannot be reported truthfully; run `peasant kickstart` to repair selection.mode and retry the publication read",
+			candidate.SessionID,
 		)
 	}
-	if p.mode == config.SelectionModeAll {
+	if p.selection.Mode == config.SelectionModeAll {
 		return true, nil
 	}
 
@@ -155,42 +139,34 @@ func (p Policy) Visible(candidate Candidate) (bool, error) {
 		return false, nil
 	case ingest.BranchMatchWithheldConflict:
 		return false, errorf(
-			"session visibility: conflicting project branch rules for session %q; multiple persisted kickstart entries identify the same project but disagree about branch %q in internal/sessionvisibility.Policy.Visible during discovery, so the session was withheld and no partial list is safe; run `peasant kickstart` and make the project's branch selection consistent",
+			"session visibility: conflicting project branch rules for session %q; multiple persisted kickstart entries identify the same project but disagree about branch %q, so ingest/push membership cannot be reported for that session; browsing is unaffected; run `peasant kickstart` and make the project's branch selection consistent",
 			candidate.SessionID, candidate.GitBranch,
 		)
 	default:
-		return false, errorf("session visibility: unknown matcher result for session %q in internal/sessionvisibility.Policy.Visible; discovery was stopped to avoid exposing an unselected row; update peasant or rerun kickstart", candidate.SessionID)
+		return false, errorf("session visibility: unknown matcher result for session %q while reporting ingest/push membership; update peasant or rerun kickstart", candidate.SessionID)
 	}
 }
 
 // VisibleForDiscovery reports whether a candidate belongs in a discovery list:
-// a picker, a chooser, a sessions list. It is the conjunction of the configured
-// selection scope and the origin scope, which are separate, independent axes —
-// either one alone can withhold a candidate, and neither can admit one the
-// other withheld.
+// a picker, a chooser, a sessions list. It applies the origin scope ONLY. The
+// saved kickstart selection is deliberately absent: selection decides what is
+// ingested next, not what an already-ingested row may show in the library.
 //
 // Origin scope withholds exactly one value: a session a program drove
 // (sessionorigin.Agent). user and unknown are both offered, because unknown is
 // the fail-safe value and must behave like a person's own session everywhere in
 // Peasant.
 //
-// Like selection scope, this is a DISCOVERY boundary and NEVER an access control
-// boundary. A direct link to a hidden session still resolves — link resolution
-// runs through a by-id path that applies neither scope, because a caller holding
-// an identifier is not browsing.
+// This is a DISCOVERY boundary and NEVER an access control boundary. A direct
+// link to a hidden session still resolves — link resolution runs through a
+// by-id path that applies neither scope, because a caller holding an identifier
+// is not browsing.
 func (p Policy) VisibleForDiscovery(candidate Candidate) (bool, error) {
 	if err := candidate.Origin.Validate(); err != nil {
 		return false, errorf(
 			"session visibility: session %q carries an unusable origin in internal/sessionvisibility.Policy.VisibleForDiscovery while building a discovery list, so the list was withheld rather than guessed at: neither substitution is safe, because treating it as user would offer an agent-driven session and treating it as agent would hide a person's own work; re-ingest the session so sessions.session_origin holds a menu value, then retry: %v",
 			candidate.SessionID, err,
 		)
-	}
-	selected, err := p.Visible(candidate)
-	if err != nil {
-		return false, err
-	}
-	if !selected {
-		return false, nil
 	}
 	return candidate.Origin != sessionorigin.Agent, nil
 }

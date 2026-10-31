@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -28,6 +29,9 @@ type durabilityFixture struct {
 	Scenario         string `yaml:"scenario"`
 	Variant          string `yaml:"variant"`
 	ExpectDiagnostic string `yaml:"expect_diagnostic"`
+	// CompletedIndex seeds a finished index for the durable row, so the case can
+	// pin the wording a row with something to serve gets.
+	CompletedIndex bool `yaml:"completed_index"`
 }
 
 func loadDurabilityFixtures(t *testing.T) []durabilityFixture {
@@ -98,7 +102,7 @@ func TestWritePathDurability(t *testing.T) {
 			case "torn_no_row":
 				runTornNoRow(t)
 			case "torn_row_present":
-				runTornRowPresent(t, fixture.ExpectDiagnostic)
+				runTornRowPresent(t, fixture.ExpectDiagnostic, fixture.CompletedIndex)
 			case "parent_mirror_fails":
 				runParentMirrorFails(t, fixture.ExpectDiagnostic)
 			case "mixed_transcript_new_metadata_old":
@@ -408,8 +412,9 @@ func runTornNoRow(t *testing.T) {
 // runTornRowPresent proves the crash-row-3 state: a torn saved pair whose row
 // is present. A plain harvest is database-first and leaves it untouched; the
 // rebuild read reports the damaged copy by its exact diagnostic and never
-// overwrites the row.
-func runTornRowPresent(t *testing.T, expectDiagnostic string) {
+// overwrites the row. completedIndex seeds a finished index, which is the only
+// state whose diagnostic may promise a stored copy that keeps serving.
+func runTornRowPresent(t *testing.T, expectDiagnostic string, completedIndex bool) {
 	if expectDiagnostic == "" {
 		t.Fatal("torn_row_present fixture must carry the expected diagnostic text")
 	}
@@ -423,6 +428,21 @@ func runTornRowPresent(t *testing.T, expectDiagnostic string) {
 	ds := newDurabilityStore(t, storetest.CopyGoldenDB(t))
 	if results := ds.MirrorArtifacts(ctx, []ingest.ArtifactMirrorRequest{{Artifact: artifact}}); len(results) != 1 || results[0].Err != nil {
 		t.Fatalf("seed row: %+v", results)
+	}
+	if completedIndex {
+		writes := ds.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+			SessionID: sid, IndexVersion: 1, IndexerVersion: 15, IndexedAtMs: 1700000000000,
+			Result: indexformat.V1{Entries: []schema.SessionEntry{{
+				SessionID: sid, EntryIndex: 0,
+				EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: ptrTo("an entry the stored index already completed"),
+			}}},
+		}})
+		if len(writes) != 1 || writes[0].Err != nil {
+			t.Fatalf("seed a completed index: %+v", writes)
+		}
+		if state, err := ds.ReadIndexState(ctx, sid); err != nil || state == nil || state.IndexedAt == nil || state.IndexerVersion == 0 {
+			t.Fatalf("the seeded row must have a completed index; got %+v, %v", state, err)
+		}
 	}
 
 	// Power loss leaves the transcript torn while the row stays durable.

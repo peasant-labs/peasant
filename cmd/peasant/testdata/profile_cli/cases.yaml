@@ -289,7 +289,8 @@ cases:
     seedSessions: true
     publishStatus: 400
     outcome: failed
-    expectError: false
+    # A session the run could not send makes it exit 1.
+    expectError: true
     expectStdoutContains: ['"errors": 1']
     expectStderrContains: [profile written to]
   - name: profile_pipeline_failure
@@ -366,8 +367,10 @@ cases:
         "skipped": 0,
         "errors": 0,
         "held": 0,
+        "sessions": [],
+        "warnings": [],
+        "empty_code": "store_has_no_sessions",
         "empty_reason": "Nothing to push. Run 'peasant ingest' first to import your sessions.",
-        "sessions": null,
         "annotations": {
           "total": 0,
           "created": 0,

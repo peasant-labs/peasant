@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
 
@@ -21,6 +22,11 @@ func init() {
 type Provider struct {
 	sessions        []ingest.Session
 	qualitySessions []api.QualitySession
+	// teammates holds the recorded Claude Code teammate identity each stored
+	// session was spawned under, keyed by session identifier. A session absent
+	// from the map carries no teammate, exactly as a store read finds no spawn
+	// evidence for it.
+	teammates map[string]schema.SessionTeammate
 }
 
 // NewProvider creates a MockProvider backed by the default mock sessions.
@@ -28,6 +34,7 @@ func NewProvider() *Provider {
 	return &Provider{
 		sessions:        Sessions(),
 		qualitySessions: GenerateQualitySessions(),
+		teammates:       canonicalContextNavigationFixture.teammateIdentities(),
 	}
 }
 
@@ -77,6 +84,44 @@ func (p *Provider) ResolveStoredTargets(_ context.Context, ids []string) ([]api.
 // without restating the decoration boundary.
 var _ interface {
 	ResolveStoredTargets(ctx context.Context, ids []string) ([]api.StoredTarget, error)
+} = (*Provider)(nil)
+
+// DetailReadPayload serves one flat local read: the validated durable detail,
+// authorized current-target navigation, and the recorded teammate identity the
+// stored parent transcript supports. It builds the payload through the same
+// conversion and decoration boundary the generation-backed store uses, so the
+// mounted transcript renders navigation and the identity line from the real
+// read path instead of from harness-side fixture data. Sessions with no recorded
+// spawn edge carry no teammate object.
+func (p *Provider) DetailReadPayload(ctx context.Context, id string) (*schema.SessionDetailReadPayload, error) {
+	session, err := p.SessionByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	detail, err := transcript.SessionToDetailValidated(session)
+	if err != nil {
+		return nil, fmt.Errorf("mock provider: build the durable detail for session %s: %w", id, err)
+	}
+	read, err := api.DecorateDetailReadPayload(ctx, detail, p.ResolveStoredTargets)
+	if err != nil {
+		return nil, err
+	}
+	if teammate, ok := p.teammates[id]; ok {
+		read.Teammate = &teammate
+	}
+	// Only the local addition is checked here; the durable detail already passed
+	// its own validation when it was built.
+	if err := read.Teammate.Validate(); err != nil {
+		return nil, fmt.Errorf("mock provider: local detail read for session %s carries an invalid teammate identity: %w; the read was withheld rather than served with evidence the contract refuses", id, err)
+	}
+	return read, nil
+}
+
+// Verify the mock provider serves the flat local read projection at compile
+// time, so api.SessionDetailReadForProvider takes the read-payload path for the
+// mock instead of the durable-only fallback.
+var _ interface {
+	DetailReadPayload(ctx context.Context, id string) (*schema.SessionDetailReadPayload, error)
 } = (*Provider)(nil)
 
 func (p *Provider) DashboardMetrics(_ context.Context) (*api.DashboardPayload, error) {

@@ -50,7 +50,7 @@ func legacyPublicOwner(id string, username *string) schema.VillagePublicOwner {
 // a public owner. A row read under it or a later envelope must carry the
 // public owner; the 0.2.0 account strings are refused rather than trusted as a
 // profile.
-const PublicOwnerPullEnvelope schema.PushContractVersion = "0.3.0"
+const PublicOwnerPullEnvelope schema.PushContractVersion = schema.PublicOwnerPullContractVersion
 
 // SetPullEnvelope records the pull envelope the village serves, for a client
 // whose caller negotiated it on another client. NegotiatePull sets it itself.

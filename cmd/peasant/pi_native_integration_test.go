@@ -489,7 +489,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 func assertPiNativeOutward(t *testing.T, db *store.Store, fs ingest.FileSystem, sid schema.SessionID, output ingest.ResolvedPath, tc piSourceCase) {
 	t.Helper()
 	ctx := t.Context()
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	local, err := provider.SessionByID(ctx, sid.String())
 	if err != nil {
 		t.Fatal(err)

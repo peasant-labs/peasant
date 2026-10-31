@@ -225,21 +225,30 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					// The saved pair no longer matches the row. Report it in the
 					// one damaged-pair text every reader prints and preserve the
 					// database copy; the user re-saves it with harvest --force.
-					p.reportMetadataRefusal(string(id), fmt.Errorf("%s", damagedPairText(id)))
+					p.reportDamagedPair(id, state)
 					continue
 				}
-				if sourceRecordUnusable(err) && p.sourceUnavailableRecorded(ctx, id) {
-					// The pair-repair lane already reported this session's
-					// acquisition failure with its cause, and the stored copy
-					// still serves. Repeating it here on every later run adds no
-					// fact the user can act on. The recovery itself still runs,
-					// so a source that returns is still recovered.
-					continue
+				if cause, ok := sourceUnavailableCause(err); ok {
+					if !p.settleUnavailableSource(ctx, id, cause, nil) || p.laneCauseAlreadyReported(id, cause) {
+						// An earlier harvest already reported this cause, or the
+						// pair-repair lane already reported it in this harvest.
+						// Recovery already ran above, so repaired bytes are
+						// still seen. A different cause still reports.
+						continue
+					}
+					p.markLaneCauseReported(id, cause)
 				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
+				// Preserving the prior content is only a promise the database can
+				// keep once an index has finished. Before that the reader gets
+				// nothing, so the text says so instead of offering a copy.
+				preserved := "the prior content and producer evidence were preserved; nothing is served from the database for this session yet; ordinary supported indexing remains eligible"
+				if state.Completed() {
+					preserved = "the prior content and producer evidence were preserved; the stored copy keeps serving meanwhile; ordinary supported indexing remains eligible"
+				}
 				p.reportSessionDiagnostic(id, DiagnosticEntry{
 					ErrorType: "content_recovery_unavailable", Location: fmt.Sprintf("session %s stored-content recovery", id),
-					Message:     err.Error() + "; the prior content and producer evidence were preserved; ordinary supported indexing remains eligible",
+					Message:     err.Error() + "; " + preserved,
 					Remediation: "Restore the stored transcript or native source and retry harvest; inspect the recovery error before forcing replacement.",
 				})
 				continue
@@ -356,9 +365,9 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 	// the row that names it. Read the pair once and compare its identity to the
 	// recorded hash: a torn or mixed pair, or a hand edit, is reported as damaged
 	// and left for an explicit re-save rather than re-captured from corrupt
-	// bytes. The database still serves the session. The provider-source path has
-	// no stored-pair identity to check, so this guard is scoped to the snapshot
-	// authority.
+	// bytes. The database keeps serving the session only while an index has
+	// completed. The provider-source path has no stored-pair identity to check,
+	// so this guard is scoped to the snapshot authority.
 	if authority == ContentSourcePeasantSnapshot && state.ArtifactHash != nil {
 		pair, pairErr := ReadManagedPair(p.fs, p.config.OutputDir.String(), metaPath, id)
 		if pairErr != nil || pair.ArtifactHash != *state.ArtifactHash {

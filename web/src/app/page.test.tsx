@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { DOCS } from '@/lib/docs';
-import { render, screen, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import HomePage from './page';
@@ -147,57 +147,66 @@ function replaceExactlyOnce(source: string, find: string, replace: string, label
   return source.replace(find, replace);
 }
 
-const requiredSelectionRetryCaseNames = [
-  'pending retry stays closed until selected replacement succeeds',
-  'failed retry stays closed and actionable',
+const requiredSelectionScopeCaseNames = [
+  'restrictive saved selection keeps the mode-all library',
+  'empty saved selection keeps the mode-all library',
+  'excluded saved selection keeps the mode-all library',
+  'stale saved selection keeps the mode-all library',
 ] as const;
 
-type SelectionRetryFixture = {
-  cases: Array<{
-    name: string;
-    hiddenProject: string;
-    replacementProjects: Array<{ project: string; projectHash: string }>;
-    retryOutcome: 'success' | 'failure';
-  }>;
+type SelectionScopeCase = {
+  name: (typeof requiredSelectionScopeCaseNames)[number];
+  projects: Array<{ project: string; projectHash: string }>;
+  selection: DecodedProjectSummariesPayload['selection'];
+  expectedProjects: string[];
 };
 
-function loadSelectionRetryFixture(): SelectionRetryFixture {
-  const source = readFileSync(resolve(process.cwd(), 'src/app/testdata/home_selection_retry.yaml'), 'utf8');
-  const root = requireRecord(parseStrictYAML(source, 'home selection retry fixture'), 'home selection retry fixture');
-  requireExactRequiredFields(root, ['expectedCaseCount', 'cases'], 'home selection retry fixture');
-  if (root.expectedCaseCount !== requiredSelectionRetryCaseNames.length) {
-    throw new Error(`home selection retry fixture expectedCaseCount must equal independently defined ${requiredSelectionRetryCaseNames.length}`);
+function loadSelectionScopeFixture(): { cases: SelectionScopeCase[] } {
+  const source = readFileSync(resolve(process.cwd(), 'src/app/testdata/home_selection_scope.yaml'), 'utf8');
+  const root = requireRecord(parseStrictYAML(source, 'home selection scope fixture'), 'home selection scope fixture');
+  requireExactRequiredFields(root, ['expectedCaseCount', 'cases'], 'home selection scope fixture');
+  if (root.expectedCaseCount !== requiredSelectionScopeCaseNames.length) {
+    throw new Error(`home selection scope fixture expectedCaseCount must equal independently defined ${requiredSelectionScopeCaseNames.length}`);
   }
-  if (!Array.isArray(root.cases) || root.cases.length !== requiredSelectionRetryCaseNames.length) {
-    throw new Error(`home selection retry fixture must contain ${requiredSelectionRetryCaseNames.length} cases`);
+  if (!Array.isArray(root.cases) || root.cases.length !== requiredSelectionScopeCaseNames.length) {
+    throw new Error(`home selection scope fixture must contain ${requiredSelectionScopeCaseNames.length} cases`);
   }
-  const cases = root.cases.map((value, index) => requireRecord(value, `home selection retry fixture.cases[${index}]`));
-  requireUniqueNames(cases, 'home selection retry fixture.cases');
+  const cases = root.cases.map((value, index) => requireRecord(value, `home selection scope fixture.cases[${index}]`));
+  requireUniqueNames(cases, 'home selection scope fixture.cases');
   for (const [index, testCase] of cases.entries()) {
-    requireExactRequiredFields(testCase, ['name', 'hiddenProject', 'replacementProjects', 'retryOutcome'], `home selection retry fixture.cases[${index}]`);
-    if (!requiredSelectionRetryCaseNames.includes(testCase.name as (typeof requiredSelectionRetryCaseNames)[number])) {
-      throw new Error(`home selection retry fixture has unknown semantic case ${String(testCase.name)}`);
+    const label = `home selection scope fixture.cases[${index}]`;
+    requireExactRequiredFields(testCase, ['name', 'projects', 'selection', 'expectedProjects'], label);
+    if (!requiredSelectionScopeCaseNames.includes(testCase.name as SelectionScopeCase['name'])) {
+      throw new Error(`${label}.name has unknown semantic case ${String(testCase.name)}`);
     }
-    if (!Array.isArray(testCase.replacementProjects)) {
-      throw new Error(`home selection retry fixture.cases[${index}].replacementProjects must be an array`);
+    if (!Array.isArray(testCase.projects) || testCase.projects.length === 0) {
+      throw new Error(`${label}.projects must name at least one recorded project`);
     }
-    testCase.replacementProjects.forEach((project, projectIndex) => {
-      requireExactRequiredFields(
-        requireRecord(project, `home selection retry fixture.cases[${index}].replacementProjects[${projectIndex}]`),
-        ['project', 'projectHash'],
-        `home selection retry fixture.cases[${index}].replacementProjects[${projectIndex}]`,
-      );
-    });
-    if (testCase.retryOutcome !== 'success' && testCase.retryOutcome !== 'failure') {
-      throw new Error(`home selection retry fixture.cases[${index}].retryOutcome is invalid`);
+    for (const [projectIndex, project] of testCase.projects.entries()) {
+      const projectLabel = `${label}.projects[${projectIndex}]`;
+      requireExactRequiredFields(requireRecord(project, projectLabel), ['project', 'projectHash'], projectLabel);
+      const row = project as Record<string, unknown>;
+      if (typeof row.project !== 'string' || row.project.length === 0) throw new Error(`${projectLabel}.project must be a non-empty string`);
+      if (typeof row.projectHash !== 'string' || !/^[0-9a-f]{64}$/.test(row.projectHash)) throw new Error(`${projectLabel}.projectHash must be a 64-character lowercase hex hash`);
+    }
+    const selection = requireRecord(testCase.selection, `${label}.selection`);
+    requireExactRequiredFields(selection, ['active', 'hiddenProjects', 'hiddenSessions'], `${label}.selection`);
+    if (typeof selection.active !== 'boolean') throw new Error(`${label}.selection.active must be a boolean`);
+    for (const field of ['hiddenProjects', 'hiddenSessions'] as const) {
+      if (!Number.isSafeInteger(selection[field]) || (selection[field] as number) < 0) {
+        throw new Error(`${label}.selection.${field} must be a non-negative integer`);
+      }
+    }
+    if (!Array.isArray(testCase.expectedProjects) || testCase.expectedProjects.length !== testCase.projects.length) {
+      throw new Error(`${label}.expectedProjects must name every recorded project`);
     }
   }
-  for (const name of requiredSelectionRetryCaseNames) {
+  for (const name of requiredSelectionScopeCaseNames) {
     if (!cases.some((testCase) => testCase.name === name)) {
-      throw new Error(`home selection retry fixture is missing required semantic case ${name}`);
+      throw new Error(`home selection scope fixture is missing required semantic case ${name}`);
     }
   }
-  return root as unknown as SelectionRetryFixture;
+  return root as unknown as { cases: SelectionScopeCase[] };
 }
 
 const requiredFlatSessionCaseNames = [
@@ -309,22 +318,7 @@ function deferred<T>() {
   return { promise, resolve: resolvePromise, reject: rejectPromise };
 }
 
-const selectionRetryFixture = loadSelectionRetryFixture();
-
-/**
- * The saved-selection notices on screen. The page has other live statuses (the
- * session list's loading state), so the notice is found by its own words.
- */
-function selectionNotices(): HTMLElement[] {
-  return screen
-    .queryAllByRole('status')
-    .filter((node) => node.textContent?.includes('hidden by a saved selection'));
-}
-
-async function findSelectionNotice(): Promise<HTMLElement> {
-  await waitFor(() => expect(selectionNotices()).toHaveLength(1));
-  return selectionNotices()[0];
-}
+const selectionScopeFixture = loadSelectionScopeFixture();
 
 describe('HomePage — the changes-first picker', () => {
   beforeEach(() => {
@@ -381,46 +375,31 @@ describe('HomePage — the changes-first picker', () => {
     expect(screen.queryByText(/on this machine/)).not.toBeInTheDocument();
   });
 
-  it('shows one recovery panel instead of stale rows or first-use teaching when selection hides all data', async () => {
-    const fixture = projectViewerStateFixture('all hidden by saved selection');
-    channelData = {
-      sessions: [
-        makeSession({
-          id: fixture.forbiddenIdentities[2],
-          project: fixture.forbiddenIdentities[1],
-        }),
-      ],
-    };
-    api.fetchProjectSummaries.mockResolvedValue(fixture.summary);
-    render(<HomePage />);
-    await openView(PROJECTS_VIEW);
-    const panel = await screen.findByRole('status', { name: 'project selection recovery' });
-    expect(panel).toHaveTextContent('peasant hides 2 projects and 5 sessions.');
-    expect(panel).toHaveTextContent('the data stays ingested and indexed.');
-    expect(panel).toHaveTextContent('it is not available for a future push.');
-    expect(panel).toHaveTextContent('peasant did not delete data.');
-    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
-    expect(screen.queryByText(/hidden by a saved selection/)).not.toBeInTheDocument();
-    for (const identity of fixture.forbiddenIdentities) {
-      expect(document.body.textContent).not.toContain(identity);
-    }
-  });
+  for (const testCase of selectionScopeFixture.cases) {
+    it(`lists the ingested library: ${testCase.name}`, async () => {
+      channelData = { sessions: [] };
+      api.fetchProjectSummaries.mockResolvedValue(makeSummaries(
+        testCase.projects.map(project => makeSummary({
+          project: project.project,
+          projectHash: newProjectHash(project.projectHash),
+        })),
+        testCase.selection,
+      ));
+      render(<HomePage />);
+      await openView(PROJECTS_VIEW);
 
-  it('renders an explicit session parent from the shared project summary without recovery guidance', async () => {
-    const fixture = projectViewerStateFixture('explicit session makes parent visible');
-    channelData = { sessions: [] };
-    api.fetchProjectSummaries.mockResolvedValue(fixture.summary);
-    render(<HomePage />);
-    await openView(PROJECTS_VIEW);
-
-    expect(
-      await screen.findByRole('link', {
-        name: `Open the sessions of ${fixture.expectedParentLabel}`,
-      }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('status', { name: 'project selection recovery' })).not.toBeInTheDocument();
-    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
-  });
+      for (const project of testCase.expectedProjects) {
+        expect(await screen.findByRole('link', { name: `Open the sessions of ${project}` })).toBeInTheDocument();
+      }
+      // The saved selection is ingestion metadata: it produces no hidden
+      // notice, no all-hidden recovery state, and no kickstart instruction.
+      expect(screen.queryByText(/hidden by a saved selection/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/your saved selection hides all projects/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('status', { name: 'project selection recovery' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/peasant kickstart/)).not.toBeInTheDocument();
+      expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
+    });
+  }
 
   it('keeps project summaries lazy and omits the unavailable global ledger', async () => {
     channelData = {
@@ -645,84 +624,57 @@ describe('HomePage — the changes-first picker', () => {
     ).toBeInTheDocument();
   });
 
-  it('does not reveal stale websocket rows after REST reports a saved-selection failure', async () => {
-    channelData = { sessions: [makeSession({ id: 'hidden', project: 'hidden-project' })] };
+  it('keeps an ingested project browsable when the summary read reports a legacy selection error', async () => {
+    channelData = { sessions: [makeSession({ id: 'stored', project: 'stored-project' })] };
     api.fetchProjectSummaries.mockRejectedValue(new DiscoveryRequestError(
       '/api/v1/projects/summary',
       500,
-      'project discovery failed while applying saved selection',
+      'project discovery failed while reading the summary',
       'selection_visibility',
     ));
     render(<HomePage />);
     await openView(PROJECTS_VIEW);
-    expect(await screen.findByText(/peasant kickstart/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Open the sessions of hidden-project' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/on this machine/)).not.toBeInTheDocument();
-    // Fail closed: no retained view is offered over the stale channel rows.
+
+    // The failure is reported, with a retry, as the ordinary error it is. The
+    // stored project from the sessions channel stays browsable, and the page
+    // does not teach a kickstart recovery for a browsing restriction that no
+    // longer exists.
+    expect(await screen.findByText(/project discovery failed while reading the summary/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry project discovery/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open the sessions of stored-project' })).toBeInTheDocument();
+    expect(screen.queryByText(/peasant kickstart/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/hidden by a saved selection/)).not.toBeInTheDocument();
     expect(browseTrigger()).toHaveTextContent(`browse by: ${PROJECTS_VIEW}`);
-    expect(document.body.textContent).not.toContain('hidden-project');
   });
 
-  for (const testCase of selectionRetryFixture.cases) {
-    it(testCase.name, async () => {
-      channelData = { sessions: [makeSession({ id: 'hidden', project: testCase.hiddenProject })] };
-      const retry = deferred<DecodedProjectSummariesPayload>();
-      api.fetchProjectSummaries
-        .mockRejectedValueOnce(new DiscoveryRequestError(
-          '/api/v1/projects/summary',
-          500,
-          'project discovery failed while applying saved selection',
-          'selection_visibility',
-        ))
-        .mockReturnValueOnce(retry.promise);
-      render(<HomePage />);
-      await openView(PROJECTS_VIEW);
-      expect(await screen.findByText(/peasant kickstart/)).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: /retry project discovery/i }));
-
-      expect(api.fetchProjectSummaries).toHaveBeenCalledTimes(2);
-      expect(screen.getByText(/peasant kickstart/)).toBeInTheDocument();
-      expect(screen.queryByRole('link', { name: `Open the sessions of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
-      expect(screen.queryByText(/on this machine/)).not.toBeInTheDocument();
-      expect(document.body.textContent).not.toContain(testCase.hiddenProject);
-
-      if (testCase.retryOutcome === 'success') {
-        retry.resolve(makeSummaries(
-          testCase.replacementProjects.map((project) =>
-            makeSummary({ ...project, projectHash: newProjectHash(project.projectHash) }),
-          ),
-        ));
-        for (const project of testCase.replacementProjects) {
-          expect(await screen.findByRole('link', { name: `Open the sessions of ${project.project}` })).toBeInTheDocument();
-        }
-        expect(screen.queryByRole('link', { name: `Open the sessions of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
-      } else {
-        retry.reject(new Error('database unavailable'));
-        await waitFor(() => expect(screen.getByText(/database unavailable/)).toBeInTheDocument());
-        expect(screen.getByRole('button', { name: /retry project discovery/i })).toBeInTheDocument();
-        expect(screen.queryByRole('link', { name: `Open the sessions of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
-        expect(screen.queryByText(/on this machine/)).not.toBeInTheDocument();
-        expect(document.body.textContent).not.toContain(testCase.hiddenProject);
-      }
-    });
-  }
-
-  it('fails closed on a saved-selection policy error and recovers by refetching when it clears', async () => {
-    channelData = { sessions: [makeSession({ id: 'hidden', project: 'hidden-project' })] };
-    channelError = new Error('selection policy failed');
-    channelErrorCode = 'selection_visibility';
-    api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'hidden-project' })]));
-    const view = render(<HomePage />);
+  it('retries a genuine summary failure and replaces the fallback rows', async () => {
+    channelData = { sessions: [makeSession({ id: 'stored', project: 'stored-project' })] };
+    const retry = deferred<DecodedProjectSummariesPayload>();
+    api.fetchProjectSummaries
+      .mockRejectedValueOnce(new Error('database unavailable'))
+      .mockReturnValueOnce(retry.promise);
+    render(<HomePage />);
     await openView(PROJECTS_VIEW);
-    expect(await screen.findByText(/peasant kickstart/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Open the sessions of hidden-project' })).not.toBeInTheDocument();
 
-    channelError = null;
-    channelErrorCode = undefined;
-    channelData = { sessions: [makeSession({ id: 'visible', project: 'alpha-project' })] };
-    api.fetchProjectSummaries.mockResolvedValue(makeSummaries([makeSummary({ project: 'alpha-project' })]));
-    view.rerender(<HomePage />);
+    expect(await screen.findByText(/database unavailable/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open the sessions of stored-project' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /retry project discovery/i }));
+    expect(api.fetchProjectSummaries).toHaveBeenCalledTimes(2);
+
+    retry.resolve(makeSummaries([makeSummary({ project: 'alpha-project' })]));
     expect(await screen.findByRole('link', { name: 'Open the sessions of alpha-project' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/database unavailable/)).not.toBeInTheDocument());
+  });
+
+  it('shows a channel failure without kickstart guidance', async () => {
+    channelError = new Error('live session updates failed');
+    channelErrorCode = 'selection_visibility';
+    channelData = undefined;
+    render(<HomePage />);
+    await openView(PROJECTS_VIEW);
+
+    expect(await screen.findByText(/live session updates failed/)).toBeInTheDocument();
+    expect(screen.queryByText(/peasant kickstart/)).not.toBeInTheDocument();
   });
 
   it('renders the ordinary picker for a single-project install — never an embedded change graph', async () => {
@@ -739,97 +691,6 @@ describe('HomePage — the changes-first picker', () => {
     expect(document.querySelector('[data-tour="changes-list"]')).toBeNull();
     // A single-project install still gets the aggregate KPI grid.
     expect(screen.getByText('files built with ai')).toBeInTheDocument();
-  });
-
-  // A selected-mode project list without an explanation reads as broken rather
-  // than filtered when most projects are hidden. These guard the fix: an active,
-  // actually-hiding selection is called out plainly (with a
-  // path to review/widen it, and WITHOUT naming the hidden projects), and an
-  // active-but-not-hiding-anything selection stays silent.
-  it('shows a selection notice when an active selection hides projects and sessions, on a single-project install', async () => {
-    channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
-    api.fetchProjectSummaries.mockResolvedValue(
-      makeSummaries([makeSummary({ project: 'alpha-project' })], {
-        active: true,
-        hiddenProjects: 2,
-        hiddenSessions: 5,
-      }),
-    );
-    render(<HomePage />);
-    await openView(PROJECTS_VIEW);
-    const notice = await findSelectionNotice();
-    // EXACT match, not a substring/blacklist check: a blacklist of forbidden
-    // literals (the previous version of this test) can always be defeated by
-    // an identity string that just isn't on the list — this caught a real
-    // vacuous-test finding where an unrelated project name was injected
-    // straight into the rendered banner and every assertion still passed.
-    // An exact match on the full rendered text fails on ANY extra content,
-    // named or not, so there is nowhere for a leaked identity to hide.
-    // Collapsed, the notice is one quiet line carrying the counts only.
-    expect(notice.textContent).toBe('2 projects and 5 sessions hidden by a saved selection');
-
-    // Expanding must not introduce an identity either — same exact-match
-    // discipline applied to the disclosed body.
-    fireEvent.click(within(notice).getByRole('button'));
-    expect(notice.textContent).toBe(
-      '2 projects and 5 sessions hidden by a saved selection'
-      + 'a saved project selection is limiting what’s shown here. '
-      + 'the data stays ingested and indexed; it is only hidden from this list.'
-      + 'change the selection, opens the docs in a new tab',
-    );
-  });
-
-  it('shows a selection notice when an active selection hides data, on the multi-project picker view', async () => {
-    channelData = {
-      sessions: [
-        makeSession({ id: 's1', project: 'alpha-project' }),
-        makeSession({ id: 's2', project: 'beta-project', projectHash: BETA_HASH }),
-      ],
-    };
-    api.fetchProjectSummaries.mockResolvedValue(
-      makeSummaries(
-        [makeSummary({ project: 'alpha-project' }), makeSummary({ project: 'beta-project', projectHash: BETA_HASH })],
-        { active: true, hiddenProjects: 1, hiddenSessions: 1 },
-      ),
-    );
-    render(<HomePage />);
-    await openView(PROJECTS_VIEW);
-    const notice = await findSelectionNotice();
-    // Same exact-match discipline as the single-project case above, with the
-    // singular ("1 project"/"1 session", "is hidden") grammar branch.
-    expect(notice.textContent).toBe('1 project and 1 session hidden by a saved selection');
-  });
-
-  it('shows no selection notice when the selection is inactive', async () => {
-    channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
-    api.fetchProjectSummaries.mockResolvedValue(
-      makeSummaries([makeSummary({ project: 'alpha-project' })], {
-        active: false,
-        hiddenProjects: 0,
-        hiddenSessions: 0,
-      }),
-    );
-    render(<HomePage />);
-
-    await openView(PROJECTS_VIEW);
-    await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
-    expect(selectionNotices()).toHaveLength(0);
-  });
-
-  it('shows no selection notice when the selection is active but nothing is hidden', async () => {
-    channelData = { sessions: [makeSession({ id: 's1', project: 'alpha-project' })] };
-    api.fetchProjectSummaries.mockResolvedValue(
-      makeSummaries([makeSummary({ project: 'alpha-project' })], {
-        active: true,
-        hiddenProjects: 0,
-        hiddenSessions: 0,
-      }),
-    );
-    render(<HomePage />);
-
-    await openView(PROJECTS_VIEW);
-    await screen.findByRole('link', { name: 'Open the sessions of alpha-project' });
-    expect(selectionNotices()).toHaveLength(0);
   });
 
   it('renders a single-project row from the sessions channel when summaries fail', async () => {

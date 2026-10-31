@@ -1,0 +1,103 @@
+# Capture refusals that blame the source bytes, and the refusals that must
+# not. A marked refusal keeps the sentence the capture already printed. A
+# validation or typed-decode refusal pins that sentence in full. A cancelled
+# run and a stored omission flag stay unmarked. SESSION_ID is the session the
+# capture is asked to read. The pinned sentences use
+# 11111111-1111-4111-8111-111111111111, the session this check reads.
+#
+# A typed-decode sentence is named by message_from plus message_template. The
+# template is the literal sentence the capture prints around the decoded cause,
+# with one verb where the cause goes, and the test fills that verb with the error
+# the production decoder returned. The wrapper is therefore pinned here in full,
+# exactly as the validation rows pin theirs, and only the standard-library
+# wording is rebuilt. The rebuilt sentence is compared in full.
+required_names:
+  - pi-unparseable
+  - pi-validation
+  - pi-typed-decode
+  - pi-cancelled
+  - pi-omitted
+  - strike-unparseable
+  - strike-typed-decode
+  - strike-validation
+  - strike-cancelled
+  - strike-omitted
+
+cases:
+  - name: pi-unparseable
+    harness: pi
+    kind: unparseable
+    settles: true
+    message_contains: "raw JSON validation failed"
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"healthy session","timestamp":1767312001000}}
+      malformed
+  - name: pi-validation
+    harness: pi
+    kind: validation
+    settles: true
+    message: "Pi tree failed in ingest at physical line 2: nonheader entry requires parentId (null for root); this session was not accepted and other sessions may continue; restore a valid Pi v3 recording and retry harvest"
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"healthy session","timestamp":1767312001000}}
+  - name: pi-typed-decode
+    harness: pi
+    kind: typed-decode
+    settles: true
+    message_from: pi-message-content
+    message_template: "Pi message content failed in ingest at physical line 2: %v; this session was not accepted and other sessions may continue; restore a valid Pi v3 recording and retry harvest"
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":[{"type":"text","text":1}],"timestamp":1767312001000}}
+  - name: pi-cancelled
+    harness: pi
+    kind: cancelled
+    settles: false
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"healthy session","timestamp":1767312001000}}
+  - name: pi-omitted
+    harness: pi
+    kind: omitted
+    settles: false
+    message_contains: "stored transcript omitted source content"
+    transcript: |
+      {"type":"session","version":3,"id":"SESSION_ID","cwd":"/workspace","timestamp":"2026-01-02T00:00:00Z"}
+  - name: strike-unparseable
+    harness: strike
+    kind: unparseable
+    settles: true
+    message_contains: "malformed JSON"
+    transcript: |
+      {"type":"user.message","data":{"text":"healthy session"}}
+      malformed
+  - name: strike-typed-decode
+    harness: strike
+    kind: typed-decode
+    settles: true
+    message_from: strike-event-data
+    message_template: "capture strike session 11111111-1111-4111-8111-111111111111 at source record 2: %v; complete content was not stored; restore a supported intact transcript and rerun harvest index --force"
+    transcript: |
+      {"type":"user.message","data":{"text":"healthy session"}}
+      {"type":"usage.reported","data":{"inputTokens":"wrong"}}
+  - name: strike-validation
+    harness: strike
+    kind: validation
+    settles: true
+    message: "capture strike session 11111111-1111-4111-8111-111111111111 at source record 1: tool begin requires callId, name and input; complete content was not stored; restore a supported intact transcript and rerun harvest index --force"
+    transcript: |
+      {"type":"tool.begin","data":{"text":"missing call"}}
+  - name: strike-cancelled
+    harness: strike
+    kind: cancelled
+    settles: false
+    transcript: |
+      {"type":"user.message","data":{"text":"healthy session"}}
+  - name: strike-omitted
+    harness: strike
+    kind: omitted
+    settles: false
+    message_contains: "omits source records without positional evidence"
+    transcript: |
+      {"type":"user.message","data":{"text":"healthy session"}}

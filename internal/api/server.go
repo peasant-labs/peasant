@@ -99,8 +99,9 @@ type Server struct {
 	// for a route owner that registers later, before Serve; handlers read it.
 	groupedMu       sync.RWMutex
 	groupedVariants map[GroupedRouteVariant]GroupedVariantSource
-	// groupedRevision is the selection revision captured at startup. A member
+	// groupedRevision is the browsing revision captured at startup. A member
 	// scope issued under a different revision is refused rather than replayed.
+	// It never changes with the saved kickstart selection.
 	groupedRevision string
 	// memberScopes is the bounded server-local TTL cache of opaque member scopes.
 	memberScopes *memberScopeCache
@@ -180,6 +181,8 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteConfigCapabilities.String(), s.handleUICapabilities)
 	mux.HandleFunc("GET "+defaults.RouteSessions.String(), s.handleSessions)
 	mux.HandleFunc("GET "+defaults.RouteSessionDetail.String(), s.handleSessionDetail)
+	mux.HandleFunc("GET "+defaults.RouteSessionCommits.String(), s.handleSessionCommits)
+	mux.HandleFunc("GET "+defaults.RouteSessionPullRequests.String(), s.handleSessionPullRequests)
 	mux.HandleFunc("GET "+defaults.RouteSessionSummaries.String(), s.handleSessionSummariesByID)
 	mux.HandleFunc("GET /api/v1/web/discovery", s.handleWebDiscovery)
 	mux.HandleFunc("GET "+defaults.RouteSessionTranscript.String(), s.handleSessionTranscript)
@@ -257,6 +260,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	if identityResolver == nil {
 		identityResolver = ingest.NewGitRepositoryIdentityResolver()
 	}
+	ph.resolver = identityResolver
 	sh.home = &homeHandler{reader: homeStore, sync: sh, publishing: ph, resolver: identityResolver}
 	mux.HandleFunc("GET "+defaults.RouteVillageCollectives.String(), ph.handleVillageCollectives)
 	observations := &collectiveObservationHandler{service: collectiveobservations.New(collectiveobservations.Dependencies{Store: s.cfg.Store, ConfigHome: s.cfg.ConfigHome, LocallyHeldTranscriptIDs: observationinventory.Held(s.cfg.Store), FetchTimeout: fetchTimeout})}
@@ -372,18 +376,18 @@ func (s *Server) handleMockConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	if s.cfg.MockConfig == nil {
-		http.Error(w, `{"error":"mock config not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "mock config not available")
 		return
 	}
 
 	data, err := json.Marshal(s.cfg.MockConfig)
 	if err != nil {
-		http.Error(w, `{"error":"failed to marshal config"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to marshal config")
 		return
 	}
 	w.Write(data)
@@ -403,20 +407,13 @@ func (s *Server) handleMockConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUICapabilities(w http.ResponseWriter, _ *http.Request) {
 	resp, err := newUICapabilitiesResponse(uiCapabilitiesForConfig(s.cfg))
 	if err != nil {
-		http.Error(
-			w,
-			fmt.Sprintf(
-				`{"error":"failed to build UI capabilities advertisement: %s"}`,
-				err.Error(),
-			),
-			http.StatusInternalServerError,
-		)
+		writeJSONError(w, http.StatusInternalServerError, "failed to build UI capabilities advertisement: "+err.Error())
 		return
 	}
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		http.Error(w, `{"error":"failed to marshal UI capabilities response"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to marshal UI capabilities response")
 		return
 	}
 
@@ -435,24 +432,24 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
 	if s.cfg.Provider == nil {
-		http.Error(w, `{"error":"data provider not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "data provider not available")
 		return
 	}
 
 	sessionID := r.PathValue("id")
 	if sessionID == "" {
-		http.Error(w, `{"error":"missing session ID"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing session ID")
 		return
 	}
 	if _, err := ingest.NewSessionID(sessionID); err != nil {
-		http.Error(w, `{"error":"invalid session ID"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid session ID")
 		return
 	}
 
 	detail, err := SessionDetailReadForProvider(r.Context(), s.cfg.Provider, sessionID)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
-			http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, "session not found")
 			return
 		}
 		writeDiscoveryError(w, "failed to load session detail", err)
@@ -461,7 +458,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 
 	data, err := json.Marshal(detail)
 	if err != nil {
-		http.Error(w, `{"error":"failed to marshal session detail"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to marshal session detail")
 		return
 	}
 	w.Write(data)
@@ -471,12 +468,12 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	if s.cfg.Provider == nil {
-		http.Error(w, `{"error":"data provider not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "data provider not available")
 		return
 	}
 
@@ -508,7 +505,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := json.Marshal(sessionsEnvelope{Sessions: summaries})
 	if err != nil {
-		http.Error(w, `{"error":"failed to marshal sessions"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to marshal sessions")
 		return
 	}
 	w.Write(data)
@@ -525,7 +522,7 @@ func (s *Server) handleSessionSummariesByID(w http.ResponseWriter, r *http.Reque
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
 	if s.cfg.Provider == nil {
-		http.Error(w, `{"error":"data provider not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "data provider not available")
 		return
 	}
 
@@ -556,7 +553,7 @@ func (s *Server) handleSessionSummariesByID(w http.ResponseWriter, r *http.Reque
 	}
 	data, err := json.Marshal(sessionsEnvelope{Sessions: summaries})
 	if err != nil {
-		http.Error(w, `{"error":"failed to marshal sessions"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "failed to marshal sessions")
 		return
 	}
 	w.Write(data)
@@ -565,24 +562,24 @@ func (s *Server) handleSessionSummariesByID(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleSessionTranscript(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	if sessionID == "" {
-		http.Error(w, `{"error":"missing session ID"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing session ID")
 		return
 	}
 
 	if s.cfg.Store == nil {
-		http.Error(w, `{"error":"store not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "store not available")
 		return
 	}
 
 	sid, sidErr := ingest.NewSessionID(sessionID)
 	if sidErr != nil {
-		http.Error(w, `{"error":"invalid session ID"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid session ID")
 		return
 	}
 
 	hostSlug, parentID, err := s.cfg.Store.LookupSessionLocation(r.Context(), sid)
 	if err != nil || hostSlug == "" {
-		http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
@@ -615,8 +612,7 @@ func (s *Server) handleSessionTranscript(w http.ResponseWriter, r *http.Request)
 	if transcriptPath == "" {
 		// The database still holds the session; only the saved file is gone.
 		// Name where it was looked for and the command that saves it again.
-		body := fmt.Sprintf(`{"error":"the saved transcript file for session %s is missing from %s; the session is still stored in the database; run peasant harvest --force --session %s to save it again"}`, sessionID, sessionDir, sessionID)
-		http.Error(w, body, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("the saved transcript file for session %s is missing from %s; the session is still stored in the database; run peasant harvest --force --session %s to save it again", sessionID, sessionDir, sessionID))
 		return
 	}
 
@@ -630,14 +626,14 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
 	if s.cfg.Store == nil {
-		http.Error(w, `{"error":"store not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "store not available")
 		return
 	}
 
 	pool := s.cfg.Store.Pool()
 	conn, err := pool.Take(r.Context())
 	if err != nil {
-		http.Error(w, `{"error":"db connection failed"}`, http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "db connection failed")
 		return
 	}
 	defer pool.Put(conn)
@@ -678,7 +674,7 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 	var rows []reviewRow
 	stmt, _, stmtErr := conn.PrepareTransient(query)
 	if stmtErr != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"query failed: %s"}`, stmtErr), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("query failed: %s", stmtErr))
 		return
 	}
 	defer stmt.Finalize()

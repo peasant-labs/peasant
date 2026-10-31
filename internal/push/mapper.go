@@ -264,6 +264,13 @@ func mapMetadataWithPolicy(opts MapOptions, limitBytes int) (_ []byte, err error
 		return result, nil
 	}
 	defer observeRedactionDocument(opts.Redactor, &err, redactionMetadataValidation)
+	// Each entry's Extra is redacted as the JSON document it is; the text
+	// pass below would read its escapes as text. Its text-pass result is
+	// replaced by the document redaction before the request is read back.
+	documents, err := redactEntryExtras(opts.Redactor, document.Entries, nil)
+	if err != nil {
+		return nil, err
+	}
 	redacted, err := redactJSONDocumentWithInputCap(opts.Redactor, result, "publish request", limitBytes)
 	if err != nil {
 		return nil, err
@@ -276,6 +283,10 @@ func mapMetadataWithPolicy(opts MapOptions, limitBytes int) (_ []byte, err error
 		return nil, fmt.Errorf("restore schema-owned evidence after publish-request redaction: entry count changed from %d to %d; no request was created because model evidence cannot be matched safely; fix the redaction rule and retry", len(document.Entries), len(redactedDocument.Entries))
 	}
 	for index := range document.Entries {
+		if extra, ok := documents[index]; ok {
+			redactedDocument.Entries[index].Extra = extra
+			continue
+		}
 		modelID, present, evidenceErr := observedModelFromExtra(document.Entries[index].Extra)
 		if evidenceErr != nil {
 			return nil, evidenceErr

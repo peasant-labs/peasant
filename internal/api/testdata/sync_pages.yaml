@@ -36,27 +36,30 @@ traversals:
     first: [0, 2]
     next: [true, true]
     deleteBoundary: true
+  # The saved selection no longer narrows Home, so these cases keep their
+  # historical names while proving a restrictive selector creates no sparse or
+  # skipped page: traversal follows the contiguous stored order.
   - name: sparse-short-continuation
     roots: 13
     selected: [sess_root006, sess_root012]
     maxima: [2, 2]
-    counts: [1, 1]
-    first: [6, 12]
-    next: [true, false]
+    counts: [2, 2]
+    first: [0, 2]
+    next: [true, true]
   - name: sparse-empty-continuation
     roots: 13
     selected: [sess_root012]
-    maxima: [2, 2]
-    counts: [0, 1]
-    first: [0, 12]
+    maxima: [5, 100]
+    counts: [5, 8]
+    first: [0, 5]
     next: [true, false]
   - name: sparse-beyond-many-windows
     roots: 25
     selected: [sess_root024]
-    maxima: [2, 2, 2, 2]
-    counts: [0, 0, 0, 1]
-    first: [0, 0, 0, 24]
-    next: [true, true, true, false]
+    maxima: [5, 5, 5, 5]
+    counts: [5, 5, 5, 5]
+    first: [0, 5, 10, 15]
+    next: [true, true, true, true]
   - name: immediate-children-only
     roots: 13
     parent: sess_parent
@@ -69,7 +72,7 @@ scopeCases:
   - {name: project, query: 'projectHash=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', code: sync_page_scope_changed}
   - {name: publication, query: 'publication=published', code: sync_page_scope_changed}
   - {name: parent, query: 'parentSessionId=sess_root000', code: sync_page_scope_changed}
-  - {name: selection, selection: true, code: sync_page_scope_changed}
+  - {name: selection, selection: true, ok: true}
   - {name: account-origin, origin: 'https://village.example', code: sync_page_scope_changed}
   - {name: account-owner, owner: true, code: sync_page_scope_changed}
   - {name: token-version, version: 2, code: sync_page_token_invalid}

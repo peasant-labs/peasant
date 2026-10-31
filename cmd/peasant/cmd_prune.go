@@ -296,9 +296,7 @@ func confirmPrune(cmd *cobra.Command, plannedSessions []ingest.PruneSessionRow) 
 		return false, fmt.Errorf("non-interactive terminal: `peasant prune` refused to prompt for consent to delete %d session(s) because its standard input is not a terminal, so an affirmative answer cannot be attributed to a person; nothing was deleted; re-run with --confirm to proceed without a prompt, or run the command from an interactive shell", len(plannedSessions))
 	}
 	fmt.Fprintf(cmd.OutOrStderr(), "\nDelete %d session(s)? [y/N]: ", len(plannedSessions))
-	var response string
-	fmt.Fscanln(file, &response)
-	return response == "y" || response == "Y", nil
+	return readConsent(file), nil
 }
 
 // printPrunePreview displays a table of sessions that will be deleted.

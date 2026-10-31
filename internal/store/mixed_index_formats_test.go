@@ -406,7 +406,7 @@ func assertMixedReads(t *testing.T, db *store.Store, document mixedFormatDocumen
 	if !maps.Equal(gotOwned, wantOwned) {
 		t.Fatalf("reopened owned representation=%v, want %v", gotOwned, wantOwned)
 	}
-	search, err := codemap.NewService(db, nil, nil, sessionvisibility.All()).Search(ctx, "needle", 50)
+	search, err := codemap.NewService(db, nil, nil).Search(ctx, "needle", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func assertMixedReads(t *testing.T, db *store.Store, document mixedFormatDocumen
 	}
 	// A supported projection remains viewable, but this synthetic format has
 	// no matching retained input/full parser proof and cannot claim full export.
-	view, err := api.NewStoreDataProvider(db, sessionvisibility.All()).SessionByID(ctx, string(document.TargetSession))
+	view, err := api.NewStoreDataProvider(db, sessionvisibility.Browsing()).SessionByID(ctx, string(document.TargetSession))
 	if err != nil || view == nil || len(view.Turns) == 0 {
 		t.Fatalf("supported projection lost preview access: %+v %v", view, err)
 	}

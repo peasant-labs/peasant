@@ -56,6 +56,15 @@ type publicationCaptureCase struct {
 	ReindexConcurrentCapture bool              `yaml:"reindex_concurrent_capture"`
 	ReindexMutateAfterRead   bool              `yaml:"reindex_mutate_after_read"`
 	ReindexUnreadableEntries bool              `yaml:"reindex_unreadable_entries"`
+	// ExpectedManualError is whether the manual reindex fails a session.
+	// ExpectedManualDiagnostic and ExpectedManualDiagnosticText name the
+	// diagnostic that manual run must carry for a refused managed pair: its
+	// error type and a fragment of the sentence. They are asserted, not derived
+	// from the case's other flags, so the run cannot change which reader speaks
+	// or what it says without failing here.
+	ExpectedManualError          bool   `yaml:"expected_manual_error"`
+	ExpectedManualDiagnostic     string `yaml:"expected_manual_diagnostic"`
+	ExpectedManualDiagnosticText string `yaml:"expected_manual_diagnostic_text"`
 }
 
 func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
@@ -93,6 +102,20 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		unrecoverable := c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract || c.FailSidecar
 		if !unrecoverable && (c.ExpectedManualIndexed == nil || c.ExpectedManualReadiness == "") {
 			t.Fatalf("fixture %s has no expected manual indexing outcome", c.Name)
+		}
+		if c.ReindexChangeManaged {
+			switch c.ExpectedManualDiagnostic {
+			case "pair_repair_unavailable", "index_refused":
+			default:
+				t.Fatalf("fixture %s refuses a managed pair but names no expected diagnostic", c.Name)
+			}
+			if strings.TrimSpace(c.ExpectedManualDiagnosticText) == "" {
+				t.Fatalf("fixture %s names a diagnostic but no sentence fragment for it", c.Name)
+			}
+			continue
+		}
+		if c.ExpectedManualError || c.ExpectedManualDiagnostic != "" || c.ExpectedManualDiagnosticText != "" {
+			t.Fatalf("fixture %s expects a manual diagnostic without a refused managed pair", c.Name)
 		}
 	}
 	if len(required) != 0 {
@@ -412,6 +435,21 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				if err := os.WriteFile(path, data, 0600); err != nil {
 					t.Fatal(err)
 				}
+				if c.ReindexChangeSource {
+					// The case is an edit made after the harvest. A reindex
+					// sees a file source change by its mtime being after the
+					// stored ingest time, and Linux stamps mtimes from a
+					// coarse clock that can lag the ingest timestamp taken
+					// just before, so state the edit's time explicitly (#735).
+					stored, err := database.LoadPublicationInput(ctx, id)
+					if err != nil || stored.Metadata.Timestamp.Ingested == nil {
+						t.Fatalf("read the stored ingest time: %v", err)
+					}
+					edited := time.UnixMilli(*stored.Metadata.Timestamp.Ingested).Add(time.Second)
+					if err := os.Chtimes(path, edited, edited); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 			if c.ReindexRemoveProof {
 				conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)
@@ -438,33 +476,41 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				filesystem.mutateAfterReadAt = 2
 			}
 			manualResult := run()
-			if manualResult.Summary.Errors != 0 || manualResult.Summary.StoreError != nil {
-				t.Fatalf("manual reindex failed: %+v", manualResult)
+			// A forced reindex whose saved pair no longer matches and whose
+			// source is gone cannot be routed. The run fails so the miss is
+			// visible, and it does not index the damaged pair. The fixture says
+			// which shape this is; the test asserts it rather than deriving it
+			// from the flag combination.
+			if manualResult.Summary.StoreError != nil || (manualResult.Summary.Errors != 0) != c.ExpectedManualError {
+				t.Fatalf("manual reindex errors = %d, want %v: %+v", manualResult.Summary.Errors, c.ExpectedManualError, manualResult)
 			}
 			if manualResult.Summary.Indexed != *c.ExpectedManualIndexed {
 				t.Fatalf("manual indexed = %d want %d: %+v", manualResult.Summary.Indexed, *c.ExpectedManualIndexed, manualResult)
 			}
 			if c.ReindexChangeManaged {
 				// A managed pair whose transcript no longer matches its committed
-				// metadata is refused, not re-indexed: the refusal is a warning
-				// naming the session AND the checksum that failed, the run has no
-				// error, the last-good index is untouched, and the verified
-				// capture is still served.
-				//
-				// Either strict reader of the committed pair may be the one that
-				// meets it: the reconciliation walk, which reads a pair only when
-				// the session's small evidence says it changed, or the index
-				// capture, which verifies the pair of every session it evaluates.
+				// metadata is refused, not re-indexed. The refusal names the
+				// session, and the fixture names the diagnostic and the sentence
+				// this run owes, so a run that changes which reader speaks, or
+				// what it says, fails here. A forced run whose source is also
+				// gone reports that the repair could not be routed; a reader
+				// that reaches the pair reports the checksum that failed. That
+				// checksum sentence is pinned where a damaged pair is read
+				// (deferred_pair_repair_test.go asserts it on the refusal), and no
+				// case here takes that arm: a forced reindex cannot select the
+				// damaged pair's source once it is gone. The last-good index is
+				// untouched, and the verified capture is still served.
 				warned := false
 				for _, diagnostic := range manualResult.Diagnostics {
-					reportedBy := diagnostic.ErrorType == "artifact_recovery_incomplete" || diagnostic.ErrorType == "index_refused"
-					if reportedBy && strings.Contains(diagnostic.Message, c.ID) && diagnostic.Remediation != "" &&
-						strings.Contains(diagnostic.Message, "transcript checksum does not match committed metadata") {
+					if diagnostic.ErrorType != c.ExpectedManualDiagnostic || !strings.Contains(diagnostic.Message, c.ID) || diagnostic.Remediation == "" {
+						continue
+					}
+					if strings.Contains(diagnostic.Message, c.ExpectedManualDiagnosticText) {
 						warned = true
 					}
 				}
 				if !warned {
-					t.Fatalf("inconsistent managed pair was not reported as a recovery warning: %+v", manualResult.Diagnostics)
+					t.Fatalf("inconsistent managed pair was not reported as %s naming %q: %+v", c.ExpectedManualDiagnostic, c.ExpectedManualDiagnosticText, manualResult.Diagnostics)
 				}
 				untouched, err := database.ListEntries(ctx, id)
 				if err != nil || !reflect.DeepEqual(untouched, lastGood) {

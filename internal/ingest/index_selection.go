@@ -6,9 +6,11 @@ import (
 	"time"
 )
 
+// includesIndexTarget is the index inventory's scope test: the strict harness
+// and session halves from includesManagedSession plus the run's age window.
 func (p *Pipeline) includesIndexTarget(target reindexTarget) bool {
 	return p.includesManagedSession(target.session.SessionID, target.session.Harness) &&
-		(p.config.Since == nil || !time.UnixMilli(target.startMs).Before(*p.config.Since))
+		p.withinRunAge(target.startMs)
 }
 
 // nativeRefreshSchemaVersions is the exact set of stored schema versions this
@@ -270,17 +272,60 @@ func (p *Pipeline) scanPeasantSyncSessions(ctx context.Context) []reindexTarget 
 	return targets
 }
 
-// includesManagedSession applies the run's explicit harness and session
-// filters to a stored session. It is the scope test every database-driven
-// inventory shares.
-func (p *Pipeline) includesManagedSession(sid SessionID, harness Harness) bool {
-	return (p.config.Harness == nil || harness == *p.config.Harness) &&
-		(p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[sid])
+// withinRunAge applies the run's --since window to a session start. A nil
+// window includes every start. This is the age half of the run's explicit
+// filters, stated once; the harness and session halves live in
+// includesManagedSession. A start the caller could not read stays the caller's
+// decision: the zero time is before any window, so a session with no recorded
+// start is excluded whenever a window is set.
+func (p *Pipeline) withinRunAge(startMs int64) bool {
+	return p.config.Since == nil || !time.UnixMilli(startMs).Before(*p.config.Since)
 }
 
-// includesManagedArtifact adds the age filter to includesManagedSession, for a
-// session whose start time the caller already knows from its metadata.
-func (p *Pipeline) includesManagedArtifact(meta *UnifiedMetadata) bool {
-	return p.includesManagedSession(meta.SessionID, meta.ModelHarness) &&
-		(p.config.Since == nil || !time.UnixMilli(meta.Timestamp.Start).Before(*p.config.Since))
+// discoveredSessionStart is the start a session carries on its own, for a
+// candidate whose caller has no metadata start: the created time the harness
+// recorded, or the file time when it recorded none. Zero means the session
+// cannot say when it started.
+func discoveredSessionStart(session DiscoveredSession) int64 {
+	if !session.CreatedAt.IsZero() {
+		return session.CreatedAt.UnixMilli()
+	}
+	if !session.ModTime.IsZero() {
+		return session.ModTime.UnixMilli()
+	}
+	return 0
+}
+
+// includesSession is the session half of the run's explicit filters: a run that
+// names sessions reads only those. It is stated once, so a scope test that
+// applies the session half without the harness half — as the reindex FILTER
+// stage does, where the harness half was already decided upstream, by
+// pairRepairTargets in Stage 1 for a repair and by the Stage 2 inventory for the
+// rest — still reads the same rule as includesManagedSession.
+func (p *Pipeline) includesSession(sid SessionID) bool {
+	return p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[sid]
+}
+
+// includesManagedSession is the strict harness and session half of the run's
+// explicit filters. Every database-driven inventory applies it, each with
+// withinRunAge for the age half: the index inventory, which the artifact mirror
+// and the dry-run plan share, the adapter refresh selection, the stored
+// metrics refresh, and the stored-discovery usability check. An unnamed harness
+// does not match a --harness run, because it is no evidence that the session
+// belongs to that harness.
+func (p *Pipeline) includesManagedSession(sid SessionID, harness Harness) bool {
+	return (p.config.Harness == nil || harness == *p.config.Harness) && p.includesSession(sid)
+}
+
+// includesManagedSessionOrUnknown is includesManagedSession for a repair the
+// database already selected. Such a candidate is this run's work before the
+// filters are applied, and only a named harness can fail a --harness filter, so
+// a harness the store could not name stays in scope instead of dropping the
+// repair. Inventories do not use it: there an unnamed harness would widen what
+// a --harness run reads.
+func (p *Pipeline) includesManagedSessionOrUnknown(sid SessionID, harness Harness) bool {
+	if harness == "" && p.config.Harness != nil {
+		harness = *p.config.Harness
+	}
+	return p.includesManagedSession(sid, harness)
 }

@@ -779,6 +779,28 @@ func defaultWriteConfig() ingest.WriteConfig {
 //
 // Users who want a config file should run `peasant kickstart`.
 func Load(path string, fs ingest.FileSystem, git ingest.GitResolver) (*Config, error) {
+	return load(path, fs, git, true)
+}
+
+// LoadForBrowsing validates all configuration except the ingestion selector.
+// Stored browsing is independent of selection. Preserve the raw selector so
+// publication metadata can refuse invalid policy rather than inventing consent.
+// Ingest, push, prune and configuration writes must continue to use strict Load.
+func LoadForBrowsing(path string, fs ingest.FileSystem, git ingest.GitResolver) (*Config, error) {
+	return load(path, fs, git, false)
+}
+
+// LoadForHarnessOnly supplies a selected native harness's documented default
+// before the ordinary strict ingestion validation runs.
+func LoadForHarnessOnly(path string, fs ingest.FileSystem, git ingest.GitResolver, harness defaults.Harness) (*Config, error) {
+	return loadWithSourceFallback(path, fs, git, true, &harness)
+}
+
+func load(path string, fs ingest.FileSystem, git ingest.GitResolver, selectionRequired bool) (*Config, error) {
+	return loadWithSourceFallback(path, fs, git, selectionRequired, nil)
+}
+
+func loadWithSourceFallback(path string, fs ingest.FileSystem, git ingest.GitResolver, selectionRequired bool, harnessOnly *defaults.Harness) (*Config, error) {
 	if path == "" {
 		return LoadDefaults(context.Background(), git), nil
 	}
@@ -799,14 +821,14 @@ func Load(path string, fs ingest.FileSystem, git ingest.GitResolver) (*Config, e
 				if err != nil {
 					return nil, fmt.Errorf("config: read migrated %q: %w", path, err)
 				}
-				return Parse(data)
+				return parseWithSourceFallback(data, selectionRequired, harnessOnly)
 			}
 			return LoadDefaults(context.Background(), git), nil
 		}
 		return nil, fmt.Errorf("config: read %q: %w", path, err)
 	}
 
-	return Parse(data)
+	return parseWithSourceFallback(data, selectionRequired, harnessOnly)
 }
 
 // LoadDefaults returns a Config populated with sensible production defaults.
@@ -829,13 +851,35 @@ func LoadDefaults(ctx context.Context, git ingest.GitResolver) *Config {
 // Parse decodes raw YAML bytes into a Config, applies missing-field defaults, and
 // validates the result. Returns an error if any field fails validation.
 func Parse(data []byte) (*Config, error) {
+	return parse(data, true)
+}
+
+// ParseForHarnessOnly is the non-writing counterpart used by dry runs.
+func ParseForHarnessOnly(data []byte, harness defaults.Harness) (*Config, error) {
+	return parseWithSourceFallback(data, true, &harness)
+}
+
+func parse(data []byte, selectionRequired bool) (*Config, error) {
+	return parseWithSourceFallback(data, selectionRequired, nil)
+}
+
+func parseWithSourceFallback(data []byte, selectionRequired bool, harnessOnly *defaults.Harness) (*Config, error) {
 	cfg := BaseConfig()
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse YAML: %w", err)
 	}
+	if harnessOnly != nil {
+		fallback, known := defaults.SourcePathFor(*harnessOnly)
+		if !known {
+			return nil, fmt.Errorf("config: harness-only source %q has no documented default path", *harnessOnly)
+		}
+		if provider, ok := cfg.Sources.Provider(*harnessOnly); ok && len(provider.Paths) == 0 {
+			provider.Paths = []string{fallback.String()}
+		}
+	}
 
-	if err := validate(cfg); err != nil {
+	if err := validate(cfg, selectionRequired); err != nil {
 		return nil, err
 	}
 
@@ -875,8 +919,8 @@ func CustomPatternsToUserPatterns(patterns []CustomPattern) ([]redact.UserPatter
 	return out, nil
 }
 
-// validate checks all semantic constraints on a parsed Config.
-func validate(cfg *Config) error {
+// validate checks configuration constraints, deferring only selection for browsing.
+func validate(cfg *Config, selectionRequired bool) error {
 	if cfg.Version != defaults.ConfigVersion {
 		return fmt.Errorf("config: unsupported config version %d (only version %d is supported)", cfg.Version, defaults.ConfigVersion)
 	}
@@ -992,27 +1036,10 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("config: village.connected is true but village.url is empty")
 	}
 
-	// Validate selection config.
-	if cfg.Selection.Mode != "" && !cfg.Selection.Mode.IsValid() {
-		return fmt.Errorf("config: unknown selection.mode %q (valid: all, selected)", cfg.Selection.Mode)
-	}
-	// The legacy "selection.providers:" key was renamed to "selection.harnesses:" in
-	// the bestiary harness migration. Reject it with remediation rather than silently
-	// ignoring it (consistent with the sources.claude rejection above).
-	// TEMPORARY (bestiary migration): remove this check at the private->public launch.
-	if len(cfg.Selection.DeprecatedProviders) > 0 {
-		return fmt.Errorf(
-			"config: selection.providers is no longer accepted (renamed to selection.harnesses).\n" +
-				"  What this means: peasant will not apply your selection allowlist until the config is updated.\n" +
-				"  How to fix: in your config.yaml, rename the YAML key `providers:` under `selection:` to `harnesses:`.\n" +
-				"  Example:\n" +
-				"    selection:\n" +
-				"      harnesses:    # was 'providers'\n" +
-				"        claude-code:\n" +
-				"          projects: [...]")
-	}
-	if err := validateSelectionExclusions(cfg.Selection); err != nil {
-		return err
+	if selectionRequired {
+		if err := ValidateSelection(cfg.Selection); err != nil {
+			return err
+		}
 	}
 
 	// Validate display config.
@@ -1029,6 +1056,30 @@ func validate(cfg *Config) error {
 		return err
 	}
 	return nil
+}
+
+// ValidateSelection checks the persisted ingestion policy without changing it.
+// Publication metadata uses the same boundary as strict configuration loading.
+func ValidateSelection(selection SelectionConfig) error {
+	if selection.Mode != "" && !selection.Mode.IsValid() {
+		return fmt.Errorf("config: unknown selection.mode %q (valid: all, selected)", selection.Mode)
+	}
+	// The legacy "selection.providers:" key was renamed to "selection.harnesses:" in
+	// the bestiary harness migration. Reject it with remediation rather than silently
+	// ignoring it (consistent with the sources.claude rejection above).
+	// TEMPORARY (bestiary migration): remove this check at the private->public launch.
+	if len(selection.DeprecatedProviders) > 0 {
+		return fmt.Errorf(
+			"config: selection.providers is no longer accepted (renamed to selection.harnesses).\n" +
+				"  What this means: peasant will not apply your selection allowlist until the config is updated.\n" +
+				"  How to fix: in your config.yaml, rename the YAML key `providers:` under `selection:` to `harnesses:`.\n" +
+				"  Example:\n" +
+				"    selection:\n" +
+				"      harnesses:    # was 'providers'\n" +
+				"        claude-code:\n" +
+				"          projects: [...]")
+	}
+	return validateSelectionExclusions(selection)
 }
 
 func validateSelectionExclusions(selection SelectionConfig) error {

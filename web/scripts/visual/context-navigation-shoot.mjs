@@ -13,6 +13,10 @@
  *                      sessions, the retained earlier history starts collapsed,
  *                      the disclosure toggle does not re-position the stream,
  *                      and expanding it writes the section to the route.
+ *   context-teammate-prelude
+ *                      the child prelude carries the recorded teammate identity
+ *                      line beside the parent-transcript link, in the mono type
+ *                      it declares, and the link opens the exact stored parent.
  *   context-child-scrolled
  *                      the child with a real reading position: the stream
  *                      scrolled, a selected turn, and a typed search query.
@@ -167,6 +171,55 @@ async function contextRows(page) {
 }
 
 /**
+ * The child's prelude as the reader sees it: the recorded teammate identity line
+ * and the parent-transcript link beside it, with the computed type and paint
+ * that make the line readable rather than merely present.
+ */
+async function teammatePrelude(page) {
+  return page.evaluate(() => {
+    const line = document.querySelector('[data-transcript-teammate="true"]')
+    if (!line) return null
+    const paragraph = line.closest('p')
+    const link = paragraph?.querySelector('a[href]') ?? null
+    const style = getComputedStyle(line)
+    const box = line.getBoundingClientRect()
+    const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim()
+    return {
+      text: normalize(line.textContent),
+      paragraphText: normalize(paragraph?.textContent),
+      fontFamily: style.fontFamily,
+      color: style.color,
+      opacity: style.opacity,
+      display: style.display,
+      width: Math.round(box.width * 100) / 100,
+      height: Math.round(box.height * 100) / 100,
+      visible: box.width > 0 && box.height > 0,
+      parentLinkText: link ? normalize(link.textContent) : null,
+      parentHref: link?.getAttribute('href') ?? null,
+    }
+  })
+}
+
+/** The paint alpha a computed CSS colour carries; 1 when it states none. */
+function paintAlpha(value) {
+  const modern = value.match(/\/\s*([0-9.]+)(%?)\s*\)$/)
+  if (modern) return modern[2] ? Number(modern[1]) / 100 : Number(modern[1])
+  if (/^rgba\(/i.test(value)) return Number(value.slice(5, -1).split(',')[3])
+  return 1
+}
+
+/** Capture one mounted element the selectors cannot name on their own. */
+async function captureHandle(page, gate, handle, theme, id, sel, evidence) {
+  const directory = join(OUT, theme)
+  mkdirSync(directory, { recursive: true })
+  const file = join(directory, `${id}.png`)
+  await handle.screenshot({ path: file, captureBeyondViewport: false })
+  await gate.assert(`${id}-${theme}`, file, { sel, where: 'context-navigation-shoot.mjs' })
+  evidence.captures.push(file)
+  return file
+}
+
+/**
  * The mounted reading position: the route, the stream offset, the rendered
  * active turn, and the per-turn layout the viewer derives that highlight from.
  *
@@ -253,6 +306,26 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
       throw fail('rendering the child context rows', `labels ${JSON.stringify(rows.map((row) => row.label))} are not ${JSON.stringify([FIXTURE.contextLabel, FIXTURE.starterLabel])}`)
     }
     if (rows.some((row) => row.link !== LINK_ACTION)) throw fail('rendering the child context rows', `link controls ${JSON.stringify(rows.map((row) => row.link))} are not ${JSON.stringify(LINK_ACTION)}`)
+
+    // The recorded teammate identity leads the prelude, and the parent link
+    // beside it opens the exact stored parent. Both are local read evidence the
+    // durable payload never carries, so their presence here proves the served
+    // read carried them.
+    const teammateText = `teammate ${FIXTURE.childTeammate.name} on ${FIXTURE.childTeammate.team}`
+    const prelude = await teammatePrelude(page)
+    if (!prelude) throw fail('rendering the recorded teammate identity', 'the child prelude carried no [data-transcript-teammate] line, so the served read did not reach the mounted identity surface: confirm the session_detail frame carries the recorded teammate (the Go mock read projection) AND that the browser keeps it, because @peasant-labs/schema parseServerMessageRaw rebuilds the read payload from the durable fields and relationshipNavigation only, so a teammate it omits never mounts')
+    if (prelude.text !== teammateText) throw fail('rendering the recorded teammate identity', `the identity line reads ${JSON.stringify(prelude.text)}, expected ${JSON.stringify(teammateText)}`)
+    if (!prelude.visible) throw fail('rendering the recorded teammate identity', `the identity line rendered no measurable box (${prelude.width}x${prelude.height})`)
+    if (!/mono/i.test(prelude.fontFamily)) throw fail('rendering the recorded teammate identity', `the identity line rendered font-family ${JSON.stringify(prelude.fontFamily)}, which is not the mono family the prelude declares`)
+    if (prelude.color === 'transparent' || !(paintAlpha(prelude.color) > 0) || Number(prelude.opacity) === 0) {
+      throw fail('rendering the recorded teammate identity', `the identity line painted ${JSON.stringify({ color: prelude.color, opacity: prelude.opacity })}, so it is invisible`)
+    }
+    if (prelude.parentLinkText !== 'parent transcript') throw fail('rendering the parent transcript link', `the prelude link reads ${JSON.stringify(prelude.parentLinkText)}, expected "parent transcript" beside a recorded teammate identity`)
+    if (!prelude.parentHref?.includes(FIXTURE.childParentSessionId)) throw fail('rendering the parent transcript link', `the prelude link targets ${JSON.stringify(prelude.parentHref)}, which is not the child's stored parent ${FIXTURE.childParentSessionId}`)
+    const preludeHandle = await page.evaluateHandle(() => document.querySelector('[data-transcript-teammate="true"]')?.closest('p'))
+    if (!preludeHandle.asElement()) throw fail('capturing the recorded teammate identity', 'the prelude paragraph the identity line belongs to disappeared before the capture')
+    const preludeCapture = await captureHandle(page, gate, preludeHandle.asElement(), theme, 'context-teammate-prelude', '[data-transcript-teammate="true"] (closest p)', evidence)
+    evidence.teammatePreludes = [...(evidence.teammatePreludes ?? []), { theme, ...prelude, capture: preludeCapture }]
 
     const collapsed = await page.$eval('.txn-earlier-toggle', (node) => node.getAttribute('aria-expanded'))
     if (collapsed !== 'false') throw fail('capturing the child context links', `retained history was disclosed without a reader action (aria-expanded=${collapsed})`)
@@ -391,10 +464,12 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
       pathname: window.location.pathname,
       theme: document.documentElement.getAttribute('data-theme'),
       contextLinks: document.querySelectorAll('.txn-context-link').length,
+      teammateLines: document.querySelectorAll('[data-transcript-teammate="true"]').length,
     }), FIXTURE.parentId)
     if (!parentProbe.pathname.includes(FIXTURE.parentId)) throw fail('following the current-parent link', `the route ${JSON.stringify(parentProbe.pathname)} is not the authorized target ${FIXTURE.parentId}`)
     if (parentProbe.theme !== theme) throw fail('mounting the exact stored parent session', `the parent rendered theme ${parentProbe.theme}`)
     if (parentProbe.contextLinks !== 0) throw fail('mounting the exact stored parent session', "the child's context controls leaked onto the parent session")
+    if (parentProbe.teammateLines !== 0) throw fail('mounting the exact stored parent session', "the parent session rendered the child's recorded teammate identity, which its own read does not carry")
     await capture(page, gate, theme, 'parent-session', '.txn-app', evidence)
     evidence.follow = { theme, parentProbe, before }
 

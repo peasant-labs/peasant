@@ -1,0 +1,8 @@
+# Required-name manifest for testdata/push_subagent_tree.yaml.
+requiredNames:
+  - tree_is_walked_breadth_first_under_its_root
+  - cycle_in_parent_links_ends_the_walk
+  - named_descendant_keeps_its_own_tree
+  - without_subagents_counts_the_whole_tree
+  - tree_at_the_depth_bound_is_walked
+  - tree_deeper_than_the_bound_is_refused

@@ -32,7 +32,7 @@ func TestSessionSummaries_HidesNotYetIndexedSession(t *testing.T) {
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("InsertSessions: %v", err)
 	}
-	provider := api.NewStoreDataProvider(s, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(s, sessionvisibility.Browsing())
 
 	inList := func() bool {
 		t.Helper()

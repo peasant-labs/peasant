@@ -260,9 +260,8 @@ func (p *ProgressiveProvider) GroupedCandidates(ctx context.Context, filters Gro
 	return grouped.GroupedCandidates(ctx, filters)
 }
 
-// GroupedScopeRevision reports the real provider's selection revision. Mock
-// sections carry no persisted selection, so the scope refusal tracks the
-// selection that actually gates the store-backed lists.
+// GroupedScopeRevision reports the real provider's browsing revision. Mock
+// sections carry no stored rows, so only the store-backed provider issues one.
 func (p *ProgressiveProvider) GroupedScopeRevision() string {
 	if grouped, ok := p.real.(groupedCandidateProvider); ok {
 		return grouped.GroupedScopeRevision()
@@ -271,14 +270,14 @@ func (p *ProgressiveProvider) GroupedScopeRevision() string {
 }
 
 // SelectionScopeByID answers from the real store whatever the mock settings
-// say: the publication read it serves reads this computer's receipts, which
-// the mock does not have.
-func (p *ProgressiveProvider) SelectionScopeByID(ctx context.Context, ids []string) (map[string]bool, error) {
+// say: the publication metadata read it serves describes this computer's saved
+// ingest/push selector, which the mock does not have. It never narrows a list.
+func (p *ProgressiveProvider) SelectionScopeByID(ctx context.Context, ids []string, resolver ingest.RepositoryIdentityResolver) (map[string]bool, error) {
 	scoped, ok := p.real.(selectionScopeReader)
 	if !ok {
 		return nil, fmt.Errorf("progressive provider: selection scope by id: no stored-session provider is wired, so the saved selection cannot be applied to the named sessions; start Peasant with its normal store and retry")
 	}
-	return scoped.SelectionScopeByID(ctx, ids)
+	return scoped.SelectionScopeByID(ctx, ids, resolver)
 }
 
 // Ensure implementation of DataProvider interface.

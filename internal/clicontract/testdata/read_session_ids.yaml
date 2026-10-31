@@ -1,0 +1,72 @@
+# ReadSessionIDs cases. input is the exact bytes read; wantIDs is the parsed
+# list in order. wantErrContains names text the error must carry (the line or
+# index of the fault). wantNoIDs asserts the error is ErrNoSessionIDs: an input
+# that names nothing is refused, never read as "all sessions".
+cases:
+  - name: newline_text
+    input: |
+
+      aaaaaaaa-0000-4000-8000-000000000001
+      # a comment line is skipped
+
+        aaaaaaaa-0000-4000-8000-000000000002
+      aaaaaaaa-0000-4000-8000-000000000003
+    wantIDs:
+      - aaaaaaaa-0000-4000-8000-000000000001
+      - aaaaaaaa-0000-4000-8000-000000000002
+      - aaaaaaaa-0000-4000-8000-000000000003
+
+  - name: json_array_of_strings
+    input: '  ["b-2", "a-1", "c-3"]'
+    wantIDs: [b-2, a-1, c-3]
+
+  - name: sessions_list_output
+    input: |
+      [
+        {"id": "a", "date": "2026-10-29", "harness": "claude-code"}
+      ]
+    wantIDs: [a]
+
+  - name: object_with_session_id_key
+    input: '[{"session_id": "s-1", "status": "new"}]'
+    wantIDs: [s-1]
+
+  - name: duplicates_collapse
+    input: |
+      x-2
+      x-1
+      x-2
+      x-3
+      x-1
+    wantIDs: [x-2, x-1, x-3]
+
+  - name: mixed_shapes_refused
+    input: |
+      ["a", "b"]
+      c
+    wantErrContains: line 2
+
+  - name: empty_input_refused
+    input: |
+
+      # only a comment
+
+    wantNoIDs: true
+
+  - name: object_without_id_refused
+    input: '[{"id": "a"}, {"date": "2026-10-29"}]'
+    wantErrContains: index 1
+
+  - name: empty_json_array_refused
+    input: '[]'
+    wantNoIDs: true
+
+  - name: text_line_with_json_refused
+    input: |
+      a
+      {"id": "b"}
+    wantErrContains: line 2
+
+  - name: non_string_element_refused
+    input: '["a", 7]'
+    wantErrContains: index 1

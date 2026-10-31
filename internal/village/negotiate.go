@@ -3,7 +3,6 @@ package village
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/peasant-labs/schema"
@@ -118,75 +117,114 @@ func ClassifyContract(cli, min, current schema.PushContractVersion) ContractNego
 }
 
 // NegotiatePullWindow returns the pull envelope the village serves when this
-// CLI reads it. A pull request names no version, so the village serves its
-// current envelope to every caller: the one envelope that matters is the
-// village's advertised current version, and this CLI accepts the village only
-// when that version lies inside the CLI's window [cliMin, cliCurrent]. The
-// village's own floor says what older CLIs it still claims to serve and does
-// not change what this CLI receives.
+// CLI reads it, from the window the village advertises: its floor (min), its
+// default (current) and, when the envelope is requestable, its newest (max).
 //
-// A newer current version is refused even when the village's window reaches
-// back into the CLI's: on a 0.x contract a minor bump is not additive (pull
-// contract 0.3.0 removed the account strings 0.2.0 carried), so this CLI cannot
-// read an envelope newer than its own. ok is false when current is empty or
-// outside the window; the caller handles an unadvertised window (both bounds
-// empty) before calling.
-func NegotiatePullWindow(cliMin, cliCurrent, min, current schema.PushContractVersion) (schema.PushContractVersion, bool) {
-	if current == "" || compareSemver(current, cliMin) < 0 || compareSemver(current, cliCurrent) > 0 {
+// A village that advertises max serves the envelope a pull read asks for in the
+// schema.PullContractHeader request header: the highest it supports at or below
+// the requested version and at or above its floor. This CLI asks for
+// cliCurrent, so the served envelope is cliCurrent, or max when max is older.
+// A patch bump within a minor is additive, so a served version in cliCurrent's
+// minor is read as cliCurrent. The village refuses a request below its floor
+// (406), so a floor above the served envelope is refused here first.
+//
+// A village that advertises no max predates the header and serves its current
+// envelope to every caller: this CLI accepts it only when that version lies
+// inside the CLI's window [cliMin, cliCurrent]. A newer current version is
+// refused even when the village's window reaches back into the CLI's: on a 0.x
+// contract a minor bump is not additive (pull contract 0.3.0 removed the
+// account strings 0.2.0 carried), so this CLI cannot read an envelope newer
+// than its own.
+//
+// ok is false when no envelope this CLI reads is served; the caller handles an
+// unadvertised window (min and current both empty) before calling. The
+// returned envelope is always a readable envelope's canonical version (0.2.0 or
+// 0.3.0), never a patch of one.
+func NegotiatePullWindow(cliMin, cliCurrent, min, current, max schema.PushContractVersion) (schema.PushContractVersion, bool) {
+	served := current
+	if max != "" {
+		served = cliCurrent
+		if compareSemver(max, cliCurrent) < 0 {
+			served = max
+		}
+	}
+	if served == "" || compareSemver(served, cliMin) < 0 {
 		return "", false
 	}
-	if min != "" && compareSemver(min, current) > 0 {
+	if compareSemver(served, cliCurrent) > 0 && !sameMinor(served, cliCurrent) {
 		return "", false
 	}
-	return current, true
+	if min != "" && compareSemver(min, served) > 0 {
+		return "", false
+	}
+	return readablePullEnvelope(served)
+}
+
+// sameMinor reports whether two versions share their major and minor, so they
+// differ at most by an additive patch.
+func sameMinor(a, b schema.PushContractVersion) bool {
+	pa, pb := semverParts(a), semverParts(b)
+	return pa[0] == pb[0] && pa[1] == pb[1]
 }
 
 // CanDowngrade reports whether this CLI can serialize the older `target`
 // contract. A MAJOR-version gap is a breaking change and is NOT downgradable;
 // same-major older targets are (additions are backward-droppable).
 func CanDowngrade(cli, target schema.PushContractVersion) bool {
-	return parseSemver(cli)[0] == parseSemver(target)[0]
+	return semverParts(cli)[0] == semverParts(target)[0]
 }
 
 // compareSemver returns -1, 0, or 1 for a<b, a==b, a>b over MAJOR.MINOR.PATCH.
 // Package-internal: the public window helpers (ClassifyContract/CanDowngrade,
 // consumed by internal/push) build on it; there is no external consumer.
-// Each component is compared NUMERICALLY (so 0.10.0 > 0.9.0). Any pre-release or
-// build suffix on the patch component is ignored.
+// Each component is compared NUMERICALLY (so 0.10.0 > 0.9.0) without
+// converting it to an integer, so a run of digits too long for an int (which a
+// version header may carry) still compares by value instead of overflowing.
+// Any pre-release or build suffix on the patch component is ignored.
 func compareSemver(a, b schema.PushContractVersion) int {
-	pa, pb := parseSemver(a), parseSemver(b)
+	pa, pb := semverParts(a), semverParts(b)
 	for i := 0; i < 3; i++ {
-		switch {
-		case pa[i] < pb[i]:
-			return -1
-		case pa[i] > pb[i]:
-			return 1
+		if c := compareDigits(pa[i], pb[i]); c != 0 {
+			return c
 		}
 	}
 	return 0
 }
 
-// parseSemver splits "MAJOR.MINOR.PATCH" into a numeric triple. Missing
-// components default to 0; non-numeric/suffix content is truncated at the first
-// non-digit so "1.2.3-rc1" parses as {1,2,3}.
-func parseSemver(v schema.PushContractVersion) [3]int {
-	var out [3]int
+// compareDigits orders two runs of ASCII digits with no leading zeros by
+// value: the longer run is larger, and runs of equal length order as strings.
+func compareDigits(a, b string) int {
+	switch {
+	case len(a) != len(b):
+		if len(a) < len(b) {
+			return -1
+		}
+		return 1
+	default:
+		return strings.Compare(a, b)
+	}
+}
+
+// semverParts splits "MAJOR.MINOR.PATCH" into its three leading digit runs,
+// each with leading zeros removed so equal values compare equal. Missing
+// components and components with no leading digit are "" (zero);
+// non-numeric/suffix content is truncated at the first non-digit so
+// "1.2.3-rc1" parses as {1,2,3}.
+func semverParts(v schema.PushContractVersion) [3]string {
+	var out [3]string
 	parts := strings.SplitN(v.String(), ".", 3)
 	for i := 0; i < len(parts) && i < 3; i++ {
-		out[i] = leadingInt(parts[i])
+		out[i] = leadingDigits(parts[i])
 	}
 	return out
 }
 
-// leadingInt parses the leading run of ASCII digits in s (0 if none).
-func leadingInt(s string) int {
+// leadingDigits returns the leading run of ASCII digits in s without its
+// leading zeros ("" for zero or no digits).
+func leadingDigits(s string) string {
 	end := 0
 	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
 		end++
 	}
-	if end == 0 {
-		return 0
-	}
-	n, _ := strconv.Atoi(s[:end])
-	return n
+	return strings.TrimLeft(s[:end], "0")
 }

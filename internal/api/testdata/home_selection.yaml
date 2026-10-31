@@ -1,17 +1,42 @@
-requiredNames: [clone-and-branch, ambiguous-remote-with-nonpushable-clone, branch-mismatch, explicit-session-does-not-widen]
+# Every case carries a different saved selector and asserts the same stored Home
+# set: selection controls future ingestion, never this page. The
+# dropIndependentMetrics case removes one row's metrics, which is a real
+# push-eligibility bound and still applies.
+requiredNames: [clone-and-branch, ambiguous-remote-with-nonpushable-clone, branch-mismatch, explicit-session-does-not-widen, project-filter-skips-unrelated-conflict, clone-and-branch-installed-binding, ambiguous-remote-installed-binding]
 cases:
   - name: clone-and-branch
     clone: true
     branch: main
-    ids: [session-linked-feature, session-selected-main]
+    ids: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-independent-clone]
   - name: ambiguous-remote-with-nonpushable-clone
     dropIndependentMetrics: true
     branch: main
-    ids: []
+    ids: [session-other-project, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-linked-feature, session-selected-main]
   - name: branch-mismatch
     clone: true
     branch: missing-branch
-    ids: []
+    ids: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
   - name: explicit-session-does-not-widen
     explicit: session-selected-main
-    ids: [session-selected-main]
+    ids: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-independent-clone, session-linked-feature]
+  - name: project-filter-skips-unrelated-conflict
+    conflictUnrelated: true
+    ids: [session-independent-clone, session-linked-feature, session-selected-main]
+    outsideSelection: [session-independent-clone, session-linked-feature]
+  - name: clone-and-branch-installed-binding
+    clone: true
+    branch: main
+    installedBinding: true
+    ids: [session-other-project, session-independent-clone, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-independent-clone]
+    autoPublish: [session-linked-feature, session-selected-main]
+  - name: ambiguous-remote-installed-binding
+    dropIndependentMetrics: true
+    branch: main
+    installedBinding: true
+    ids: [session-other-project, session-linked-feature, session-selected-main]
+    outsideSelection: [session-other-project, session-linked-feature, session-selected-main]

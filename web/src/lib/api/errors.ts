@@ -1,4 +1,10 @@
 export const DiscoveryErrorCode = {
+  /**
+   * Legacy code from servers that applied the saved ingestion selection to a
+   * stored read. Stored browsing no longer depends on that selection, but an
+   * older server's answer keeps its typed code and is shown as the ordinary,
+   * retryable failure it is.
+   */
   SelectionVisibility: 'selection_visibility',
   HomeParentNotFound: 'home_parent_not_found',
   SyncPageScopeChanged: 'sync_page_scope_changed',

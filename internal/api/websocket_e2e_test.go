@@ -20,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -1233,7 +1234,7 @@ func TestHub_Annotations_BroadcastOnCreate(t *testing.T) {
 	}
 
 	// Wire up a full Server with store, hub, and annotation routes.
-	storeProv := api.NewStoreDataProvider(s, sessionvisibility.All())
+	storeProv := api.NewStoreDataProvider(s, sessionvisibility.Browsing())
 	cfg := &config.Config{
 		Sources: config.SourcesConfig{
 			Mock: config.MockConfig{Enabled: false},
@@ -1429,7 +1430,7 @@ func TestHub_SessionDetail_ToolCallFields(t *testing.T) {
 	}
 
 	// 3. Wire up Hub backed by the real store.
-	storeProv := api.NewStoreDataProvider(s, sessionvisibility.All())
+	storeProv := api.NewStoreDataProvider(s, sessionvisibility.Browsing())
 	cfg := &config.Config{
 		Sources: config.SourcesConfig{
 			Mock: config.MockConfig{Enabled: false},
@@ -1562,7 +1563,7 @@ func TestHub_SessionDetail_Outcome(t *testing.T) {
 	}
 
 	// 3. Wire up Hub backed by the real store.
-	storeProv := api.NewStoreDataProvider(s, sessionvisibility.All())
+	storeProv := api.NewStoreDataProvider(s, sessionvisibility.Browsing())
 	cfg := &config.Config{
 		Sources: config.SourcesConfig{
 			Mock: config.MockConfig{Enabled: false},
@@ -1670,7 +1671,7 @@ func TestHub_SessionDetail_Scorecard(t *testing.T) {
 	}
 
 	// 3. Wire up Hub backed by the real store.
-	storeProv := api.NewStoreDataProvider(s, sessionvisibility.All())
+	storeProv := api.NewStoreDataProvider(s, sessionvisibility.Browsing())
 	cfg := &config.Config{
 		Sources: config.SourcesConfig{
 			Mock: config.MockConfig{Enabled: false},
@@ -1782,7 +1783,7 @@ func TestProgressiveProvider_E2E_WebSocket_WithStore(t *testing.T) {
 	}
 	api.MarkStoredSessionsIndexed(t, s)
 
-	storeProv := api.NewStoreDataProvider(s, sessionvisibility.All())
+	storeProv := api.NewStoreDataProvider(s, sessionvisibility.Browsing())
 
 	cfg := &config.Config{
 		Sources: config.SourcesConfig{
@@ -1849,9 +1850,9 @@ func TestProgressiveProvider_E2E_WebSocket_WithStore(t *testing.T) {
 var selectionVisibilityWSRecoveryFixtureYAML []byte
 
 var requiredSelectionVisibilityWSRecoveryCaseNames = map[string]struct{}{
-	"dashboard channel recovers from a selection-visibility failure":   {},
-	"sessions channel recovers from a selection-visibility failure":    {},
-	"trends channel recovers from a selection-visibility failure":      {},
+	"dashboard channel recovers from a discovery metadata failure":     {},
+	"sessions channel recovers from a discovery metadata failure":      {},
+	"trends channel recovers from a discovery metadata failure":        {},
 	"an unrelated provider failure is not tagged selection_visibility": {},
 }
 
@@ -1895,8 +1896,8 @@ func decodeSelectionVisibilityWSRecoveryFixture(source []byte) (selectionVisibil
 		if testCase.Topic != "dashboard" && testCase.Topic != "sessions" && testCase.Topic != "trends" {
 			return fixture, fmt.Errorf("selection visibility WS recovery fixture cases[%d] %q has unsupported topic %q", index, testCase.Name, testCase.Topic)
 		}
-		if testCase.ErrorKind != "selection" && testCase.ErrorKind != "generic" {
-			return fixture, fmt.Errorf("selection visibility WS recovery fixture cases[%d] %q has unsupported errorKind %q, want \"selection\" or \"generic\"", index, testCase.Name, testCase.ErrorKind)
+		if testCase.ErrorKind != "discovery" && testCase.ErrorKind != "generic" {
+			return fixture, fmt.Errorf("selection visibility WS recovery fixture cases[%d] %q has unsupported errorKind %q, want \"discovery\" or \"generic\"", index, testCase.Name, testCase.ErrorKind)
 		}
 	}
 	if len(seenCases) != len(requiredSelectionVisibilityWSRecoveryCaseNames) {
@@ -1925,8 +1926,8 @@ func TestSelectionVisibilityWSRecoveryFixture_LoaderRejectsMutations(t *testing.
 	)
 	duplicateName = bytes.Replace(
 		duplicateName,
-		[]byte("  - name: sessions channel recovers from a selection-visibility failure\n"),
-		[]byte("  - name: dashboard channel recovers from a selection-visibility failure\n"),
+		[]byte("  - name: sessions channel recovers from a discovery metadata failure\n"),
+		[]byte("  - name: dashboard channel recovers from a discovery metadata failure\n"),
 		1,
 	)
 	if _, err := decodeSelectionVisibilityWSRecoveryFixture(duplicateName); err == nil {
@@ -1950,27 +1951,13 @@ func TestSelectionVisibilityWSRecoveryFixture_LoaderRejectsMutations(t *testing.
 }
 
 // TestHub_SelectionVisibility_ErrorRecovery proves the production Hub's
-// full valid → conflict → cleared state → repaired recovery contract for a
-// persisted-selection-visibility failure on each ticker channel
-// (dashboard/sessions/trends): a fresh subscribe snapshot delivers real
-// data, an injected sessionvisibility failure clears that topic's stale
-// data and delivers an actionable topic-scoped error carrying the
-// "selection_visibility" code and kickstart remediation text (never a
-// generic/untyped error and never silently dropped), and a subsequent
-// subscribe after the failure clears delivers fresh data again with no
-// trace of the error or of a sibling topic's data. This exercises the same
-// production topicError/sendSnapshots code path broadcastAll uses on its
-// recurring tick.
-//
-// The negative-control case (errorKind: generic) proves the converse:
-// injecting an unrelated provider failure (not a sessionvisibility.Error)
-// still surfaces a topic-scoped error message, but WITHOUT the
-// "selection_visibility" code or the kickstart remediation suffix — so a
-// future topicError regression that tags every WS error (not just
-// selection-visibility ones) fails this test. Mirrors the REST-side
-// negative control already established by
-// TestProjectSummariesHandler_PreservesDiscoveryErrorClass's "unrelated
-// provider failure stays untyped" case in map_handlers_test.go.
+// valid → error → cleared → repaired recovery contract on each ticker channel
+// (dashboard/sessions/trends): a fresh subscribe snapshot delivers real data,
+// an injected discovery-metadata failure clears that topic's stale data and
+// delivers a topic-scoped error, and a later subscribe after the failure clears
+// delivers fresh data again with no sibling leakage. Browsing no longer depends
+// on the saved selector, so neither the metadata failure nor the generic
+// negative control carries the old selection code or kickstart suffix.
 func TestHub_SelectionVisibility_ErrorRecovery(t *testing.T) {
 	t.Parallel()
 
@@ -1979,12 +1966,11 @@ func TestHub_SelectionVisibility_ErrorRecovery(t *testing.T) {
 		t.Fatalf("decode fixture: %v", err)
 	}
 
-	// A real, non-test-constructed sessionvisibility.Error, so topicError's
-	// sessionvisibility.IsError(err) classification is exercised for real
-	// rather than special-cased for the test.
-	_, selectionErr := sessionvisibility.New(config.SelectionConfig{Mode: "invalid-mode"})
-	if selectionErr == nil || !sessionvisibility.IsError(selectionErr) {
-		t.Fatalf("test setup: expected an invalid selection mode to produce a sessionvisibility.Error, got %v", selectionErr)
+	// A real discovery metadata error (an unusable stored origin), so the
+	// production error path is exercised rather than special-cased for the test.
+	_, discoveryErr := sessionvisibility.Browsing().VisibleForDiscovery(sessionvisibility.Candidate{SessionID: "session-metadata", Origin: sessionorigin.Origin("teammate")})
+	if discoveryErr == nil || !sessionvisibility.IsError(discoveryErr) {
+		t.Fatalf("test setup: expected an unusable origin to produce a sessionvisibility.Error, got %v", discoveryErr)
 	}
 	// The negative-control injected failure: a genuine, unrelated provider
 	// error that is NOT a sessionvisibility.Error, mirroring the REST
@@ -1997,7 +1983,7 @@ func TestHub_SelectionVisibility_ErrorRecovery(t *testing.T) {
 	for _, testCase := range fixture.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			topic := schema.ChannelTopic(testCase.Topic)
-			injectedErr := selectionErr
+			injectedErr := discoveryErr
 			if testCase.ErrorKind == "generic" {
 				injectedErr = genericErr
 			}
@@ -2074,30 +2060,15 @@ func TestHub_SelectionVisibility_ErrorRecovery(t *testing.T) {
 				t.Errorf("after failure injected: message %q does not confirm the previous topic data was cleared", message)
 			}
 			const kickstartGuidanceSuffix = "run `peasant kickstart` to repair the persisted selection, then retry"
-			if testCase.ErrorKind == "selection" {
-				// The suffix topicError itself appends — deliberately distinct
-				// from sessionvisibility.New's own error text (which also
-				// mentions `peasant kickstart` but with different wording), so
-				// this proves topicError's OWN guidance branch ran rather than
-				// just echoing whatever phrase happened to be in err.Error().
-				if !strings.Contains(message, kickstartGuidanceSuffix) {
-					t.Errorf("after failure injected: message %q does not carry topicError's own kickstart remediation suffix %q", message, kickstartGuidanceSuffix)
-				}
-				errData, ok := errMsg["data"].(map[string]any)
-				if !ok || errData["code"] != "selection_visibility" {
-					t.Errorf("after failure injected: data = %v, want {code: selection_visibility}", errMsg["data"])
-				}
-			} else {
-				// Negative control: an unrelated provider failure must NOT be
-				// misclassified as a selection-visibility problem — no code,
-				// no kickstart remediation text. A topicError regression that
-				// tags every WS error unconditionally fails here.
-				if strings.Contains(message, kickstartGuidanceSuffix) {
-					t.Errorf("after failure injected: unrelated provider failure message %q incorrectly carries the kickstart remediation suffix %q", message, kickstartGuidanceSuffix)
-				}
-				if errData, ok := errMsg["data"].(map[string]any); ok && errData["code"] != nil && errData["code"] != "" {
-					t.Errorf("after failure injected: unrelated provider failure data = %v, want no selection_visibility code", errMsg["data"])
-				}
+			// Browsing no longer depends on the saved selector, so NO topic error
+			// is classified as a selection problem: neither the discovery metadata
+			// failure nor the unrelated provider failure may carry the old code or
+			// the kickstart remediation suffix.
+			if strings.Contains(message, kickstartGuidanceSuffix) {
+				t.Errorf("after failure injected: message %q carries the removed kickstart remediation suffix %q", message, kickstartGuidanceSuffix)
+			}
+			if errData, ok := errMsg["data"].(map[string]any); ok && errData["code"] != nil && errData["code"] != "" {
+				t.Errorf("after failure injected: data = %v, want no error code", errMsg["data"])
 			}
 
 			// Step 3: repaired recovery — clear the failure and resubscribe;

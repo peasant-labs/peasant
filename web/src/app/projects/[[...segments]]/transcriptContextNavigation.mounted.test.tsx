@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   parseSessionDetailPayloadValue,
@@ -299,6 +299,8 @@ describe('mounted context and starter navigation on the production transcript ro
 
     const stream = document.querySelector<HTMLElement>('.txn-stream');
     if (!stream) throw new Error('transcript stream did not mount');
+    // The host attaches its stream listener in its first animation frame.
+    await act(async () => { await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())); });
     stream.scrollTop = 120;
     fireEvent.scroll(stream);
     await waitFor(() =>

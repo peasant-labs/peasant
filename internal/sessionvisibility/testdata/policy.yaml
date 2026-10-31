@@ -1,4 +1,29 @@
 cases:
+  - name: zero_policy_admits_user
+    zero_policy: true
+    candidate: {origin: user}
+    result: error
+    error_contains: run `peasant kickstart`
+    discovery_result: visible
+  - name: zero_policy_admits_unknown
+    zero_policy: true
+    candidate: {origin: unknown}
+    result: error
+    error_contains: run `peasant kickstart`
+    discovery_result: visible
+  - name: zero_policy_withholds_agent
+    zero_policy: true
+    candidate: {origin: agent}
+    result: error
+    error_contains: run `peasant kickstart`
+    discovery_result: hidden
+  - name: zero_policy_rejects_invalid_origin
+    zero_policy: true
+    candidate: {origin: teammate}
+    result: error
+    error_contains: run `peasant kickstart`
+    discovery_result: error
+    discovery_error_contains: re-ingest the session
   - name: all_mode
     mode: all
     candidate: {harness: claude-code, session_id: session-all, project_name: alpha, git_branch: main}
@@ -189,10 +214,10 @@ cases:
         sessions: [session-explicit-forms]
     candidate: {harness: claude-code, session_id: session-explicit-forms, project_name: "/home/developer/work/other-project", git_branch: main}
     result: visible
-  # Origin scope. It is a SECOND, INDEPENDENT axis: `result` is what selection
-  # scope alone decides, `discovery_result` is what the two scopes together
-  # decide. An arm whose two values differ is the evidence that origin scope
-  # acts in discovery and only there.
+  # Origin scope. `result` is the saved selection's INGEST/PUSH membership;
+  # `discovery_result` is browsing, which applies origin only. An arm whose two
+  # values differ is the evidence that the saved selection does not narrow the
+  # viewer.
   #
   # Every withholding arm below is paired with a control that differs ONLY in
   # origin. Without the pair an arm proves nothing, because the row could have
@@ -227,8 +252,8 @@ cases:
     candidate: {harness: claude-code, session_id: session-subagent-row, project_name: alpha, git_branch: main, origin: user, parent_session_id: session-agent-root}
     result: visible
     discovery_result: visible
-  # Selection scope alone: a person's own session in an unselected project is
-  # still withheld, so origin scope cannot admit what selection scope refused.
+  # Selection scope alone hides the row from ingest/push metadata, but browsing
+  # is origin-only: the same stored row stays in the viewer.
   - name: selection_scope_alone_hides_a_user_origin_row
     mode: selected
     harnesses:
@@ -237,7 +262,7 @@ cases:
           - {name: alpha}
     candidate: {harness: claude-code, session_id: session-unselected-user, project_name: beta, git_branch: main, origin: user}
     result: hidden
-    discovery_result: hidden
+    discovery_result: visible
   # Both scopes together, on a project selection that admits the row: the
   # decision then rests entirely on origin, and the control proves it.
   - name: both_scopes_together_hide_an_agent_row_in_a_selected_project

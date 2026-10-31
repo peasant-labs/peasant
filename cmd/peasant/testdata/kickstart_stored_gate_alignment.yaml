@@ -44,8 +44,8 @@ cases:
     expectedGate: none
     expectedCandidateCount: 2
     expectedDescendantCount: 2
-    expectedViewerProjects: 1
-    expectedViewerSessions: 1
+    expectedViewerProjects: 2
+    expectedViewerSessions: 2
     expectedPushSessionIds:
       - 71000000-0000-4000-8000-000000000001
 
@@ -103,7 +103,7 @@ cases:
     expectedCandidateCount: 1
     expectedDescendantCount: 1
     expectedViewerProjects: 1
-    expectedViewerSessions: 0
+    expectedViewerSessions: 1
     expectedPushSessionIds: []
 
   - name: unique db-only non-git name aligns gate viewer and push
@@ -193,8 +193,8 @@ cases:
     expectedGate: confirm-no-projects
     expectedCandidateCount: 1
     expectedDescendantCount: 1
-    expectedViewerProjects: 0
-    expectedViewerSessions: 0
+    expectedViewerProjects: 1
+    expectedViewerSessions: 1
     expectedPushSessionIds: []
 
   - name: selected mode rejects a stored evidence query failure

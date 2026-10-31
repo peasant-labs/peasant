@@ -179,7 +179,8 @@ vi.mock('@peasant-labs/fairtrade/graph', () => ({
   TrajectoryGraph: () => null,
 }));
 
-vi.mock('@peasant-labs/fairtrade/ui', () => ({
+vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@peasant-labs/fairtrade/ui')>()),
   computeAnalytics: () => ({}),
   adaptTranscript: (payload: Record<string, unknown>) => ({
     turns: payload.turns,

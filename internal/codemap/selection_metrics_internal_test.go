@@ -14,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -136,9 +135,6 @@ func validateSelectionMetricsCase(fixtureCase selectionMetricsCase) error {
 	if fixtureCase.Selection.Mode != config.SelectionModeSelected {
 		return fmt.Errorf("selection mode = %q, want selected", fixtureCase.Selection.Mode)
 	}
-	if _, err := sessionvisibility.New(fixtureCase.Selection); err != nil {
-		return fmt.Errorf("invalid selection: %w", err)
-	}
 	if len(fixtureCase.Sessions) < unusualMinProjectSessions || len(fixtureCase.BoundSessionIDs) < unusualMinChangeSessions {
 		return errors.New("session inventory cannot exercise unusual-signal thresholds")
 	}
@@ -165,24 +161,10 @@ func validateSelectionMetricsCase(fixtureCase selectionMetricsCase) error {
 		sessionNames[session.Name] = struct{}{}
 	}
 
-	selectedIDs := make(map[string]struct{})
-	for harness, selected := range fixtureCase.Selection.Harnesses {
-		for _, sessionID := range selected.Sessions {
-			session, exists := sessionsByID[sessionID]
-			if !exists {
-				return fmt.Errorf("selected session %q is absent from sessions", sessionID)
-			}
-			if session.Harness != harness {
-				return fmt.Errorf("selected session %q harness = %q, want %q", sessionID, session.Harness, harness)
-			}
-			if _, duplicate := selectedIDs[sessionID]; duplicate {
-				return fmt.Errorf("selected session %q is repeated", sessionID)
-			}
-			selectedIDs[sessionID] = struct{}{}
-		}
-	}
-	if len(selectedIDs) != fixtureCase.Expected.VisibleMetricCount {
-		return fmt.Errorf("selected session count = %d, want visibleMetricCount %d", len(selectedIDs), fixtureCase.Expected.VisibleMetricCount)
+	// Every stored session contributes a metric row: selection is ingest-only
+	// metadata and never narrows this baseline.
+	if fixtureCase.Expected.VisibleMetricCount != len(fixtureCase.Sessions) {
+		return fmt.Errorf("visibleMetricCount = %d, want every stored session (%d) to contribute", fixtureCase.Expected.VisibleMetricCount, len(fixtureCase.Sessions))
 	}
 	boundIDs := make(map[string]struct{}, len(fixtureCase.BoundSessionIDs))
 	for _, sessionID := range fixtureCase.BoundSessionIDs {
@@ -193,36 +175,15 @@ func validateSelectionMetricsCase(fixtureCase selectionMetricsCase) error {
 			return fmt.Errorf("bound session ID %q is repeated", sessionID)
 		}
 		boundIDs[sessionID] = struct{}{}
-		if _, selected := selectedIDs[sessionID]; !selected {
-			return fmt.Errorf("bound session %q is not selected", sessionID)
+		if _, exists := sessionsByID[sessionID]; !exists {
+			return fmt.Errorf("bound session %q is absent from sessions", sessionID)
 		}
 	}
-	promoted, exists := sessionsByID[fixtureCase.PromoteSessionID]
-	if !exists {
+	if _, exists := sessionsByID[fixtureCase.PromoteSessionID]; !exists {
 		return fmt.Errorf("promoted session %q is absent from sessions", fixtureCase.PromoteSessionID)
-	}
-	if _, alreadySelected := selectedIDs[fixtureCase.PromoteSessionID]; alreadySelected {
-		return fmt.Errorf("promoted session %q is already selected", fixtureCase.PromoteSessionID)
-	}
-	if promoted.RetryLoops != fixtureCase.Expected.HiddenRetryLoops {
-		return fmt.Errorf("promoted session retry-loop count = %d, want hidden expected count %d", promoted.RetryLoops, fixtureCase.Expected.HiddenRetryLoops)
-	}
-	var maximumVisibleRetryLoops int
-	visibleBaselineSet := false
-	for sessionID := range selectedIDs {
-		if !visibleBaselineSet || sessionsByID[sessionID].RetryLoops > maximumVisibleRetryLoops {
-			maximumVisibleRetryLoops = sessionsByID[sessionID].RetryLoops
-			visibleBaselineSet = true
-		}
-	}
-	if promoted.RetryLoops <= maximumVisibleRetryLoops {
-		return fmt.Errorf("promoted session retry-loop count = %d, must exceed visible baseline maximum %d", promoted.RetryLoops, maximumVisibleRetryLoops)
 	}
 	if strings.TrimSpace(fixtureCase.Expected.SignalKind) == "" {
 		return errors.New("expected signal kind must be nonempty")
-	}
-	if fixtureCase.Expected.InitialSignalCount == fixtureCase.Expected.PromotedSignalCount {
-		return errors.New("promotion must change the observable unusual-signal outcome")
 	}
 	return nil
 }
@@ -267,30 +228,19 @@ func TestSelectionMetricsFixtureGuards(t *testing.T) {
 	if err := validateSelectionMetricsFixture(emptySignalKind); err == nil || !strings.Contains(err.Error(), "expected signal kind must be nonempty") {
 		t.Fatalf("empty signal-kind mutation error = %v, want expectation rejection", err)
 	}
-	nonExtreme := fixture
-	nonExtreme.Cases = append([]selectionMetricsCase(nil), fixture.Cases...)
-	nonExtreme.Cases[0].Sessions = append([]selectionMetricsSession(nil), fixture.Cases[0].Sessions...)
-	mutatedCase := &nonExtreme.Cases[0]
-	var replacementRetryLoops int
-	for _, session := range mutatedCase.Sessions {
-		if session.ID == mutatedCase.BoundSessionIDs[0] {
-			replacementRetryLoops = session.RetryLoops
-			break
-		}
-	}
-	for index := range mutatedCase.Sessions {
-		if mutatedCase.Sessions[index].ID == mutatedCase.PromoteSessionID {
-			mutatedCase.Sessions[index].RetryLoops = replacementRetryLoops
-			mutatedCase.Expected.HiddenRetryLoops = mutatedCase.Sessions[index].RetryLoops
-			break
-		}
-	}
-	if err := validateSelectionMetricsFixture(nonExtreme); err == nil || !strings.Contains(err.Error(), "must exceed visible baseline maximum") {
-		t.Fatalf("non-extreme mutation error = %v, want relational-extremity rejection", err)
+	hiddenMetric := fixture
+	hiddenMetric.Cases = append([]selectionMetricsCase(nil), fixture.Cases...)
+	hiddenMetric.Cases[0].Expected.VisibleMetricCount--
+	if err := validateSelectionMetricsFixture(hiddenMetric); err == nil || !strings.Contains(err.Error(), "every stored session") {
+		t.Fatalf("hidden-metric mutation error = %v, want every-stored-session rejection", err)
 	}
 }
 
-func TestSelectedMetricsExcludeHiddenExtremeFromUnusualSignalBaseline(t *testing.T) {
+// TestProjectDataIncludesEveryStoredSessionMetric proves the Map/Review data
+// path keeps every stored session's metrics regardless of the saved selection:
+// the selection only controls future ingestion, so the unusual-signal baseline
+// is computed over the whole project.
+func TestProjectDataIncludesEveryStoredSessionMetric(t *testing.T) {
 	t.Parallel()
 	fixture := loadSelectionMetricsFixture(t)
 	for _, fixtureCase := range fixture.Cases {
@@ -299,46 +249,25 @@ func TestSelectedMetricsExcludeHiddenExtremeFromUnusualSignalBaseline(t *testing
 			database := storetest.Open(t)
 			seedSelectionMetricsCase(t, database, fixtureCase)
 
-			policy, err := sessionvisibility.New(fixtureCase.Selection)
-			if err != nil {
-				t.Fatalf("selection policy: %v", err)
-			}
-			service := NewService(database, nil, codegraph.NewGraphBuilder(), policy)
+			service := NewService(database, nil, codegraph.NewGraphBuilder())
 			projectHash, _ := schema.NewProjectHash(fixtureCase.Project.Hash)
 			project, err := service.loadProjectData(context.Background(), projectHash)
 			if err != nil {
 				t.Fatalf("loadProjectData: %v", err)
 			}
 			if len(project.metrics) != fixtureCase.Expected.VisibleMetricCount {
-				t.Fatalf("visible metric count = %d, want %d", len(project.metrics), fixtureCase.Expected.VisibleMetricCount)
+				t.Fatalf("metric count = %d, want %d (every stored session)", len(project.metrics), fixtureCase.Expected.VisibleMetricCount)
 			}
-			if _, leaked := project.metrics[fixtureCase.PromoteSessionID]; leaked {
-				t.Fatalf("hidden session %q with retry-loop count %d leaked into project metrics", fixtureCase.PromoteSessionID, fixtureCase.Expected.HiddenRetryLoops)
+			for _, session := range fixtureCase.Sessions {
+				metric, present := project.metrics[session.ID]
+				if !present || metric.retryLoops == nil || *metric.retryLoops != session.RetryLoops {
+					t.Fatalf("session %q metric = %+v, present=%t, want retry-loop count %d", session.ID, metric, present, session.RetryLoops)
+				}
 			}
 
 			bindings := boundSelectionMetricSessions(fixtureCase.BoundSessionIDs)
-			initialSignals := unusualSignals(project, bindings)
-			assertSelectionMetricSignals(t, initialSignals, fixtureCase.Expected.InitialSignalCount, fixtureCase.Expected.SignalKind, fixtureCase.Expected.InitialPerChange, fixtureCase.Expected.InitialPerProject)
-
-			promotedSelection := cloneSelectionWithSession(fixtureCase.Selection, fixtureCase.Sessions, fixtureCase.PromoteSessionID)
-			promotedPolicy, err := sessionvisibility.New(promotedSelection)
-			if err != nil {
-				t.Fatalf("promoted selection policy: %v", err)
-			}
-			promotedService := NewService(database, nil, codegraph.NewGraphBuilder(), promotedPolicy)
-			promotedProject, err := promotedService.loadProjectData(context.Background(), projectHash)
-			if err != nil {
-				t.Fatalf("loadProjectData after promotion: %v", err)
-			}
-			promotedMetric, present := promotedProject.metrics[fixtureCase.PromoteSessionID]
-			if !present || promotedMetric.retryLoops == nil || *promotedMetric.retryLoops != fixtureCase.Expected.HiddenRetryLoops {
-				t.Fatalf("promoted hidden metric = %+v, present=%t, want retry-loop count %d", promotedMetric, present, fixtureCase.Expected.HiddenRetryLoops)
-			}
-			promotedSignals := unusualSignals(promotedProject, bindings)
-			assertSelectionMetricSignalCount(t, promotedSignals, fixtureCase.Expected.PromotedSignalCount)
-			if len(initialSignals) == len(promotedSignals) {
-				t.Fatalf("promoting hidden extreme did not change unusual-signal outcome: before=%+v after=%+v", initialSignals, promotedSignals)
-			}
+			signals := unusualSignals(project, bindings)
+			assertSelectionMetricSignals(t, signals, fixtureCase.Expected.InitialSignalCount, fixtureCase.Expected.SignalKind, fixtureCase.Expected.InitialPerChange, fixtureCase.Expected.InitialPerProject)
 		})
 	}
 }
@@ -384,25 +313,6 @@ func boundSelectionMetricSessions(sessionIDs []string) []sessionBinding {
 		bindings[index] = sessionBinding{sessionID: sessionID, binding: schema.ChangeBindingBound}
 	}
 	return bindings
-}
-
-func cloneSelectionWithSession(selection config.SelectionConfig, sessions []selectionMetricsSession, sessionID string) config.SelectionConfig {
-	promoted := selection
-	promoted.Harnesses = make(map[string]config.SelectionHarnessConfig, len(selection.Harnesses))
-	for harness, selected := range selection.Harnesses {
-		selected.Sessions = append([]string(nil), selected.Sessions...)
-		selected.Projects = append([]config.ProjectSelection(nil), selected.Projects...)
-		promoted.Harnesses[harness] = selected
-	}
-	for _, session := range sessions {
-		if session.ID == sessionID {
-			selected := promoted.Harnesses[session.Harness]
-			selected.Sessions = append(selected.Sessions, sessionID)
-			promoted.Harnesses[session.Harness] = selected
-			return promoted
-		}
-	}
-	return promoted
 }
 
 func assertSelectionMetricSignals(t *testing.T, signals []schema.UnusualSignal, count int, signalKind string, perChange, perProject float64) {

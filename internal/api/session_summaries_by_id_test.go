@@ -99,9 +99,8 @@ func decodeSummariesByID(source []byte) (summariesByIDFixture, error) {
 		if err := sessionorigin.Origin(row.Origin).Validate(); err != nil {
 			return fixture, fmt.Errorf("session-summaries-by-id fixture rows[%d] origin: %w", index, err)
 		}
-		if row.Listed && !row.Selected {
-			return fixture, fmt.Errorf("session-summaries-by-id fixture rows[%d] claims to be listed while outside the selection", index)
-		}
+		// Listed means "offered by the stored-session list". The saved selector
+		// is ingest-only metadata, so the two fields are independent.
 		if row.Listed && sessionorigin.Origin(row.Origin) == sessionorigin.Agent {
 			return fixture, fmt.Errorf("session-summaries-by-id fixture rows[%d] claims an agent-driven row is listed", index)
 		}
@@ -218,7 +217,7 @@ func TestStoreDataProviderChildReferencesNormalizeStartTimeToUTC(t *testing.T) {
 	db := openTestStore(t)
 	sessionIDByRole, _ := seedSummariesByIDStore(t, db, fixture)
 
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	parentID := sessionIDByRole["listed-user-root"]
 	refs, err := provider.ChildSessionsForParent(context.Background(), parentID)
 	if err != nil {
@@ -322,15 +321,12 @@ func TestMountedLinkedSessionsResolveOutsideBothDiscoveryScopes(t *testing.T) {
 		seenClone[row.Clone] = true
 		projects = append(projects, config.ProjectSelection{ClonePaths: []string{clonePaths[row.Clone]}})
 	}
-	policy, err := sessionvisibility.New(config.SelectionConfig{
+	policy := sessionvisibility.New(config.SelectionConfig{
 		Mode: config.SelectionModeSelected,
 		Harnesses: map[string]config.SelectionHarnessConfig{
 			fixture.Harness: {Projects: projects},
 		},
 	})
-	if err != nil {
-		t.Fatalf("build linked-session selection policy: %v", err)
-	}
 
 	provider := api.NewStoreDataProvider(db, policy)
 	baseURL := startLinkedSessionServer(t, db, provider)
@@ -360,8 +356,9 @@ func TestMountedLinkedSessionsResolveOutsideBothDiscoveryScopes(t *testing.T) {
 	}
 	assertSameSessionSet(t, "by-id resolution", summaryIDs(resolved), wantResolved)
 
-	// The two hidden roles are the load-bearing ones: they are absent above and
-	// present here, which is the whole discovery-versus-access distinction.
+	// The origin-hidden roles are absent above and present here, which is the
+	// discovery-versus-access distinction. The former selection-only role is
+	// listed above too: the saved selector never narrows browsing.
 	for _, role := range []string{"hidden-agent-root", "hidden-unselected-user-root", "hidden-agent-subagent-row"} {
 		row := fixture.row(t, role)
 		summary, ok := summaryByID(resolved, row.SessionID)
@@ -390,7 +387,7 @@ func TestMountedLinkedSessionsResolveOutsideBothDiscoveryScopes(t *testing.T) {
 func TestMountedLinkedSessionsRejectAnEmptyIdentifierSet(t *testing.T) {
 	t.Parallel()
 	db := openTestStore(t)
-	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
 	baseURL := startLinkedSessionServer(t, db, provider)
 	status, _, body := getJSON(t, baseURL+defaults.RouteSessionSummaries.String()+"?ids=")
 	if status != 400 {

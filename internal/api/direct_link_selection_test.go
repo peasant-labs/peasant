@@ -78,8 +78,11 @@ func decodeDirectLinkSelection(source []byte) (directLinkSelectionFixture, error
 	if fixture.Harness != defaults.HarnessClaudeCode.String() {
 		return fixture, fmt.Errorf("direct-link selection fixture harness = %q, want %q", fixture.Harness, defaults.HarnessClaudeCode)
 	}
-	if fixture.ExpectedVisibleSessions != 1 || fixture.ExpectedVisibleProjects != 1 {
-		return fixture, fmt.Errorf("direct-link selection fixture must keep exactly one discovery session and project visible")
+	// Both rows are ingested, so both must be browsable and both projects must
+	// appear: the saved selection admits one and excludes the other, and it must
+	// not narrow the library either way.
+	if fixture.ExpectedVisibleSessions != directLinkSelectionRowCount || fixture.ExpectedVisibleProjects != directLinkSelectionRowCount {
+		return fixture, fmt.Errorf("direct-link selection fixture must keep every ingested session and project visible")
 	}
 	allowedRoles := make(map[directLinkRole]bool, len(allDirectLinkRoles))
 	for _, role := range allDirectLinkRoles {
@@ -212,7 +215,7 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	policy, err := sessionvisibility.New(config.SelectionConfig{
+	policy := sessionvisibility.New(config.SelectionConfig{
 		Mode: config.SelectionModeSelected,
 		Harnesses: map[string]config.SelectionHarnessConfig{
 			fixture.Harness: {
@@ -224,9 +227,6 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("build mounted direct-link selection policy: %v", err)
-	}
 	provider := api.NewStoreDataProvider(db, policy)
 	baseURL := startDirectLinkSelectionServer(t, db, provider)
 
@@ -240,8 +240,17 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 	if err := json.Unmarshal(body, &sessionEnvelope); err != nil {
 		t.Fatalf("decode mounted session discovery: %v", err)
 	}
-	if len(sessionEnvelope.Sessions) != fixture.ExpectedVisibleSessions || sessionEnvelope.Sessions[0].ID != listed.SessionID {
-		t.Fatalf("mounted session discovery = %+v, want only %s", sessionEnvelope.Sessions, listed.SessionID)
+	if len(sessionEnvelope.Sessions) != fixture.ExpectedVisibleSessions {
+		t.Fatalf("mounted session discovery = %+v, want every ingested session including %s", sessionEnvelope.Sessions, hidden.SessionID)
+	}
+	foundListed := false
+	for _, session := range sessionEnvelope.Sessions {
+		if session.ID == listed.SessionID {
+			foundListed = true
+		}
+	}
+	if !foundListed {
+		t.Fatalf("mounted session discovery = %+v, want the selected session %s", sessionEnvelope.Sessions, listed.SessionID)
 	}
 
 	status, _, body = getJSON(t, baseURL+defaults.RouteProjectsSummary.String())
@@ -252,26 +261,24 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 	if err := json.Unmarshal(body, &projects); err != nil {
 		t.Fatalf("decode mounted project discovery: %v", err)
 	}
-	if len(projects.Projects) != fixture.ExpectedVisibleProjects || projects.Projects[0].ProjectHash.String() != listed.ProjectHash {
-		t.Fatalf("mounted project discovery = %+v, want only project %s", projects.Projects, listed.ProjectHash)
+	if len(projects.Projects) != fixture.ExpectedVisibleProjects {
+		t.Fatalf("mounted project discovery = %+v, want every ingested project including %s", projects.Projects, hidden.ProjectHash)
 	}
-	for _, project := range projects.Projects {
-		if project.ProjectHash.String() == hidden.ProjectHash {
-			t.Fatalf("hidden project %s unexpectedly appeared in discovery", hidden.ProjectHash)
-		}
+	if projects.Selection.Active || projects.Selection.HiddenProjects != 0 || projects.Selection.HiddenSessions != 0 {
+		t.Fatalf("mounted project discovery reported an active browse filter: %+v", projects.Selection)
 	}
 
 	resolveURL := baseURL + defaults.RouteProjectResolve.String() + "?name=" + url.QueryEscape(hidden.ProjectHash)
 	status, _, body = getJSON(t, resolveURL)
 	if status != 200 {
-		t.Fatalf("hidden canonical project direct link status = %d, want 200; body=%s", status, body)
+		t.Fatalf("canonical project direct link status = %d, want 200; body=%s", status, body)
 	}
 	var resolution schema.ProjectResolutionPayload
 	if err := json.Unmarshal(body, &resolution); err != nil {
-		t.Fatalf("decode hidden canonical project direct link: %v", err)
+		t.Fatalf("decode canonical project direct link: %v", err)
 	}
 	if resolution.ProjectHash.String() != hidden.ProjectHash || resolution.Project != hidden.ProjectDisplay {
-		t.Fatalf("hidden canonical project direct link = %+v, want project=%q hash=%s", resolution, hidden.ProjectDisplay, hidden.ProjectHash)
+		t.Fatalf("canonical project direct link = %+v, want project=%q hash=%s", resolution, hidden.ProjectDisplay, hidden.ProjectHash)
 	}
 
 	wsContext, cancelWS := context.WithTimeout(t.Context(), 10*time.Second)
@@ -279,7 +286,7 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 	wsURL := "ws://" + strings.TrimPrefix(baseURL, "http://") + defaults.RouteWS.String()
 	conn, _, err := websocket.Dial(wsContext, wsURL, nil)
 	if err != nil {
-		t.Fatalf("dial mounted hidden-session direct link: %v", err)
+		t.Fatalf("dial mounted outside-selection session direct link: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 	_, connectedBytes, err := conn.Read(wsContext)
@@ -301,32 +308,32 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 	}
 	encodedSubscribe, err := json.Marshal(subscribe)
 	if err != nil {
-		t.Fatalf("encode mounted hidden-session subscription: %v", err)
+		t.Fatalf("encode mounted outside-selection session subscription: %v", err)
 	}
 	if err := conn.Write(wsContext, websocket.MessageText, encodedSubscribe); err != nil {
-		t.Fatalf("write mounted hidden-session subscription: %v", err)
+		t.Fatalf("write mounted outside-selection session subscription: %v", err)
 	}
 	_, detailBytes, err := conn.Read(wsContext)
 	if err != nil {
-		t.Fatalf("read mounted hidden-session detail: %v", err)
+		t.Fatalf("read mounted outside-selection session detail: %v", err)
 	}
 	var detailMessage struct {
 		Type string          `json:"type"`
 		Data json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(detailBytes, &detailMessage); err != nil {
-		t.Fatalf("decode mounted hidden-session detail envelope: %v", err)
+		t.Fatalf("decode mounted outside-selection session detail envelope: %v", err)
 	}
 	if detailMessage.Type != string(api.MsgSessionDetail) {
-		t.Fatalf("mounted hidden-session detail message type = %q, want %q; message=%s", detailMessage.Type, api.MsgSessionDetail, detailBytes)
+		t.Fatalf("mounted outside-selection session detail message type = %q, want %q; message=%s", detailMessage.Type, api.MsgSessionDetail, detailBytes)
 	}
 	var detail struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(detailMessage.Data, &detail); err != nil {
-		t.Fatalf("decode mounted hidden-session detail payload: %v", err)
+		t.Fatalf("decode mounted outside-selection session detail payload: %v", err)
 	}
 	if detail.ID != hidden.SessionID {
-		t.Fatalf("mounted hidden-session direct link returned %q, want %q", detail.ID, hidden.SessionID)
+		t.Fatalf("mounted outside-selection session direct link returned %q, want %q", detail.ID, hidden.SessionID)
 	}
 }

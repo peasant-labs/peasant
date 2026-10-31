@@ -11,7 +11,6 @@
 !.gitignore
 !README.md
 !probe-peasant.mjs
-!selection-recovery-probe.mjs
 !peasant-shoot.mjs
 !inspect-feedback-shoot.mjs
 !context-navigation-shoot.mjs

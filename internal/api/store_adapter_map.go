@@ -8,7 +8,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
 )
@@ -16,12 +15,11 @@ import (
 // newCodemapService wires the production codemap.Service: the store, the
 // exec-git repository factory (canonical_cwd → repo), and the tree-sitter
 // graph builder.
-func newCodemapService(s *store.Store, visibility sessionvisibility.Policy, resolver ingest.PathIdentityResolver) *codemap.Service {
+func newCodemapService(s *store.Store, resolver ingest.PathIdentityResolver) *codemap.Service {
 	return codemap.NewService(
 		s,
 		func(repoPath string) gitops.Repository { return gitops.NewExecGitRepository(repoPath) },
 		codegraph.NewGraphBuilder(),
-		visibility,
 		codemap.WithPathIdentityResolver(resolver),
 	)
 }

@@ -92,10 +92,7 @@ func newPublishingWorld(t *testing.T) *publishingWorld {
 	cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
 		defaults.HarnessClaudeCode.String(): {Projects: []config.ProjectSelection{{GitRemote: "git@github.com:acme/tools.git"}}},
 	}}
-	policy, err := sessionvisibility.New(cfg.Selection)
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := sessionvisibility.New(cfg.Selection)
 	ctx, cancel := context.WithCancel(context.Background())
 	// The provider is composed the way `peasant web start` composes it: the
 	// store-backed provider behind the progressive one.

@@ -6,7 +6,7 @@ requiredNames:
   - missing_identity_is_not_found
   - malformed_identity_fails_closed
   - hidden_explicit_hash_still_resolves
-  - hidden_legacy_label_does_not_resolve
+  - outside_selection_legacy_label_still_resolves
   - remote_derived_display_name_github
   - remote_derived_display_name_gitlab
   - no_remote_falls_back_to_cwd_path

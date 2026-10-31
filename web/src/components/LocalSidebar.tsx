@@ -16,9 +16,8 @@ import { DOCS_URL, onlineCollectivesHref } from '@/lib/village/links';
 
 /**
  * Where the switcher's other app lives: the docs, opened in a new tab.
- * Fairtrade never lists online or local in a switcher and ends it with
- * community marked soon by itself; the collectives link is the local app's
- * way to online.
+ * Fairtrade hides community and never lists online or local in a switcher;
+ * the collectives link is the local app's way to online.
  */
 function switcherApps() {
   const urls: Partial<Record<string, string>> = { docs: DOCS_URL };
@@ -62,11 +61,10 @@ function NextLink({ href, ...rest }: { href: string } & React.AnchorHTMLAttribut
  * analytics, changes, the code map) and `/share` are not linked from it. A
  * settings page keeps this same nav, settings current: its sections are the
  * in-page section bar of the settings page itself. The sidebar owns its own
- * order, the same in every app: the shortcuts (search, the command palette
- * on ⌘K; the docs; community marked soon; then the collectives link, which
- * opens online), the app's pages, then the footer with the account and the
- * settings gear and theme toggle. Fairtrade turns the registry's settings
- * entry into that gear.
+ * order, the same in every app: the app's pages, then shortcuts near the
+ * footer (search, the command palette on ⌘K; the docs; then the collectives
+ * link, which opens online), then the account, settings gear and theme toggle.
+ * Fairtrade turns the registry's settings entry into that gear.
  */
 export function LocalSidebar() {
   const pathname = usePathname() ?? '/';

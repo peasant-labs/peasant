@@ -1,0 +1,13 @@
+requiredNames:
+  - release_version_sent
+  - dev_version_with_build_metadata_sent
+  - leading_v_stripped
+  - dev_placeholder_omitted
+  - client_validates_against_schema
+  - fingerprint_unchanged_by_client
+  - version_without_leading_v_sent
+  - go_pseudo_version_sent
+  - empty_version_omitted
+  - partial_version_omitted
+  - leading_zero_omitted
+  - double_v_omitted

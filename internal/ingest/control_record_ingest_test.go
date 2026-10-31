@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/export"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -25,11 +27,14 @@ var controlRecordIngestYAML []byte
 
 type controlRecordIngestCase struct {
 	Name                string            `yaml:"name"`
+	Managed             bool              `yaml:"managed"`
+	Harness             ingest.Harness    `yaml:"harness"`
 	Transcript          string            `yaml:"transcript"`
 	CaptureStatus       string            `yaml:"capture_status"`
 	CaptureFormat       string            `yaml:"capture_format"`
 	FailureCode         string            `yaml:"failure_code"`
 	ControlPartType     string            `yaml:"control_part_type"`
+	ControlPartTypes    []string          `yaml:"control_part_types"`
 	ControlPreview      string            `yaml:"control_preview"`
 	ControlExtraMembers map[string]string `yaml:"control_extra_members"`
 	ExportAccepted      bool              `yaml:"export_accepted"`
@@ -73,31 +78,54 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
 			root := t.TempDir()
-			sourceDir := filepath.Join(root, "source", "-workspace")
+			harness := fixture.Harness
+			if harness == "" {
+				harness = ingest.HarnessClaudeCode
+			}
+			sourceRoot := filepath.Join(root, "source")
+			sourceDir := filepath.Join(sourceRoot, "-workspace")
+			if harness == ingest.HarnessCodex {
+				sourceDir = filepath.Join(sourceRoot, "2026", "01", "01")
+			}
 			if err := os.MkdirAll(sourceDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
 			transcript := strings.ReplaceAll(fixture.Transcript, "SESSION_ID", testutil.TestSessionUUID)
-			sourcePath := filepath.Join(sourceDir, testutil.TestSessionUUID+".jsonl")
+			filename := testutil.TestSessionUUID + ".jsonl"
+			if harness == ingest.HarnessCodex {
+				filename = "rollout-2026-01-01T00-00-00-" + filename
+			}
+			sourcePath := filepath.Join(sourceDir, filename)
 			if err := os.WriteFile(sourcePath, []byte(transcript), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			path := storetest.CopyGoldenDB(t)
-			db, err := store.Open(path, store.WithSkipMigrations())
+			openStore := func() (*store.Store, error) {
+				if fixture.Managed {
+					return nativeRepairStore(t, path, filepath.Join(root, "artifacts")), nil
+				}
+				return store.Open(path, store.WithSkipMigrations())
+			}
+			db, err := openStore()
 			if err != nil {
 				t.Fatal(err)
 			}
 			fs := &ingest.OSFileSystem{}
 			cfg := ingest.PipelineConfig{
 				Sources: map[ingest.Harness]ingest.SourceConfig{
-					ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(filepath.Join(root, "source"))}},
+					harness: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(sourceRoot)}},
 				},
 				OutputDir:   ingest.ResolvedPath(filepath.Join(root, "output")),
 				Parallelism: 1,
 			}
-			pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+			options := []ingest.PipelineOption{
 				ingest.WithStore(db), ingest.WithMetricsStore(db),
-				ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
+				ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+			}
+			if fixture.Managed {
+				options = append(options, ingest.WithHarvesterVersions(ingest.GenerationTargets(ingest.HarvesterVersionRegistry)))
+			}
+			pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, options...)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -118,7 +146,7 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(path, store.WithSkipMigrations())
+			db, err = openStore()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -137,6 +165,24 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 			if string(capture.FailureCode) != fixture.FailureCode {
 				t.Fatalf("capture failure code = %q, want %q", capture.FailureCode, fixture.FailureCode)
 			}
+			if fixture.Managed {
+				state, err := db.ReadIndexState(ctx, sid)
+				if err != nil || state == nil || state.IndexVersion == nil || *state.IndexVersion != 2 {
+					t.Fatalf("managed case stored index state %+v, want format 2 (%v)", state, err)
+				}
+			}
+			var nativeEntries []schema.SessionEntry
+			if fixture.Managed {
+				if err := db.WithSessionSnapshot(ctx, schema.SessionID(sid), func(read indexformat.ReadSnapshot) error {
+					if read.IndexVersion != 2 || read.Completeness != indexformat.GenerationCompletenessComplete {
+						return fmt.Errorf("managed snapshot format=%d completeness=%q", read.IndexVersion, read.Completeness)
+					}
+					nativeEntries = read.Main.Entries
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			// The complete-content reader is the boundary export and publication
 			// share. A certified capture must retain the control fields there.
@@ -150,11 +196,45 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 					t.Fatal("the complete-content reader accepted an incomplete capture")
 				}
 				if fixture.RetainedKind != "" {
-					records, err := ingest.ProjectRetainedUnknown(snapshot.Entries, ingest.HarnessClaudeCode)
+					records, err := ingest.ProjectRetainedUnknown(snapshot.Entries, harness)
 					if err != nil || len(records) != 1 || records[0].Kind != fixture.RetainedKind {
 						t.Fatalf("retained evidence missing: %+v %v", records, err)
 					}
 				} else {
+					if fixture.Managed {
+						wanted := make(map[string]bool, len(fixture.ControlPartTypes))
+						for _, kind := range fixture.ControlPartTypes {
+							wanted[kind] = true
+						}
+						counts := make(map[string]int)
+						refs := make(map[schema.SourceEntryRef]bool)
+						for _, entry := range nativeEntries {
+							if entry.PartType == nil || !wanted[*entry.PartType] {
+								continue
+							}
+							counts[*entry.PartType]++
+							if entry.Role != ingest.RoleSystem || entry.EntryType != ingest.EntryTypeSystem || entry.Depth != 0 {
+								t.Fatalf("managed control %q has conversation shape: %+v", *entry.PartType, entry)
+							}
+							if entry.SourceEntryRef == "" || refs[entry.SourceEntryRef] {
+								t.Fatalf("managed control %q has missing or duplicate source ref %q", *entry.PartType, entry.SourceEntryRef)
+							}
+							refs[entry.SourceEntryRef] = true
+							if entry.RawByteLength == nil || *entry.RawByteLength <= 0 || entry.Extra == nil || len(*entry.Extra) > 8208 {
+								t.Fatalf("managed control %q lost bounded source accounting", *entry.PartType)
+							}
+						}
+						for kind := range wanted {
+							if counts[kind] != 1 {
+								t.Fatalf("stored managed generation has %d %q controls, want one", counts[kind], kind)
+							}
+						}
+					}
+					for _, kind := range fixture.ControlPartTypes {
+						if findControlIngestEntry(snapshot.Entries, controlRecordIngestCase{ControlPartType: kind}) == nil {
+							t.Fatalf("the full-content reader lost %q control", kind)
+						}
+					}
 					entry := findControlIngestEntry(snapshot.Entries, fixture)
 					if entry == nil {
 						t.Fatalf("the stored session lost its %q control record", fixture.ControlPartType)

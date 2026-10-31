@@ -1,0 +1,8 @@
+# Required-name manifest for testdata/push_plan_counts.yaml.
+requiredNames:
+  - every_verdict_has_one_count
+  - subagents_counted_once_each
+  - not_ready_is_not_an_error
+  - excluded_sessions_never_sent_are_counted
+  - mixed_selection_with_failed_parent_and_subagents
+  - no_plan_keeps_pipeline_counters

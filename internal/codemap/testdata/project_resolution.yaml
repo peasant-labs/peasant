@@ -33,19 +33,9 @@ cases:
         - {hash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd, cwd: /work/shared, session_id: 44444444-4444-4444-4444-444444444444}
     expected: {error_kind: ambiguous, error_contains: matches 2 stored projects}
 
-  # NOTE: this case's error is byte-identical to
-  # hidden_legacy_label_does_not_resolve's below, by design -- both
-  # zero-match ("no such label") and hidden-single-match ("label exists,
-  # visibility denies it") legacy-label failures must return the SAME text
-  # AND perform the SAME projectHasVisibleSession query/visibility-loop
-  # work (see summary.go ResolveProject case 0's comment and
-  # TestResolveProject_NotFoundPathsShareVisibilityQueryShape in
-  # resolve_project_timing_internal_test.go), so a caller can't
-  # distinguish "no such project" from "hidden project" by response body
-  # OR by response latency. A future refactor that special-cases either
-  # branch back to an early return reintroduces that timing side-channel
-  # even if this fixture case keeps passing -- the query-count parity is
-  # covered by the internal test, not by this black-box case alone.
+  # A genuinely unknown label reports not-found. Resolution no longer has a
+  # "hidden but stored" failure mode: the saved kickstart selection does not
+  # hide an ingested project, so a stored project's legacy label always resolves.
   - name: missing_identity_is_not_found
     classification: must-fail
     provenance: {source: requirement, ref: missing-project-identity}
@@ -79,16 +69,16 @@ cases:
         - {hash: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, cwd: /work/hidden, session_id: 77777777-7777-7777-7777-777777777777}
     expected: {project: /work/hidden, hash: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
 
-  - name: hidden_legacy_label_does_not_resolve
-    classification: must-fail
-    provenance: {source: requirement, ref: legacy-label-resolution-is-not-discovery-authorization}
-    mutation: {description: skip the visibility check and resolve the label directly like the hash branch}
+  - name: outside_selection_legacy_label_still_resolves
+    classification: must-pass
+    provenance: {source: requirement, ref: selection-does-not-hide-ingested-projects}
+    mutation: {description: apply the saved selection to resolution so an unselected project is reported missing}
     input:
       identity: /work/hidden-by-label
       selection: {mode: selected}
       projects:
         - {hash: 1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, cwd: /work/hidden-by-label, session_id: 88888888-8888-8888-8888-888888888888}
-    expected: {error_kind: missing, error_contains: does not identify a stored project}
+    expected: {project: /work/hidden-by-label, hash: 1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
 
   # Usability requirement: "We also should be using the Git repo remote
   # to display them, not the path. e.g. github.com:example-org/garden-app, ...".

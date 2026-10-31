@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -109,6 +110,12 @@ func (r *boundedHomeReader) GroupingEvidenceForSessions(ctx context.Context, ids
 	}
 	return r.Store.GroupingEvidenceForSessions(ctx, ids)
 }
+func (r *boundedHomeReader) ClaudeTeammates(ctx context.Context, ids []string) (map[string]schema.SessionTeammate, error) {
+	if err := r.record("teammate", ids); err != nil {
+		return nil, err
+	}
+	return r.Store.ClaudeTeammates(ctx, ids)
+}
 
 func homeExec(t *testing.T, db *store.Store, query string, args ...any) {
 	t.Helper()
@@ -135,8 +142,9 @@ func seedHomeSessions(t *testing.T, db *store.Store, ids []string) {
 }
 func homeTestHandler(t *testing.T, reader homeReader, db *store.Store, cfg *config.Config) http.Handler {
 	t.Helper()
-	sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-	sh.home = &homeHandler{reader: reader, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: fixtureRepositoryResolver{}}
+	sh := &syncHandler{config: newLiveConfig(cfg)}
+	h := &homeHandler{reader: reader, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: fixtureRepositoryResolver{}}
+	sh.home = h
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+defaults.RouteSyncSessions.String(), sh.handleSyncSessions)
 	return mux
@@ -184,7 +192,7 @@ func assertHydrated(t *testing.T, reader *boundedHomeReader, want []string) {
 			t.Fatalf("%s hydrated %v want %v", kind, ids, want)
 		}
 	}
-	if len(want) > 0 && len(reader.reads) != 4 {
+	if len(want) > 0 && len(reader.reads) != 5 {
 		t.Fatalf("hydration exits missing: %v", reader.reads)
 	}
 }
@@ -201,6 +209,7 @@ type syncTraversalCase struct {
 type syncScopeCase struct {
 	Name, Query, Origin, Code string
 	Selection, Owner, Missing bool
+	OK                        bool `yaml:"ok"`
 	Version                   int
 	InvalidID                 bool `yaml:"invalidID"`
 	Duplicate                 bool
@@ -288,7 +297,7 @@ func TestSyncHomePageBounds(t *testing.T) {
 			}
 		})
 	}
-	base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: config.BaseConfig(), Provider: NewStoreDataProvider(db, sessionvisibility.All()), ConfigHome: t.TempDir()})
+	base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: config.BaseConfig(), Provider: NewStoreDataProvider(db, sessionvisibility.Browsing()), ConfigHome: t.TempDir()})
 	resp, err := http.Get(base + defaults.RouteSyncSessions.String() + "?view=home")
 	if err != nil {
 		t.Fatal(err)
@@ -411,6 +420,14 @@ func TestSyncHomeTokenScope(t *testing.T) {
 			}
 			response := httptest.NewRecorder()
 			sh.handleSyncSessions(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&pageToken="+url.QueryEscape(string(token))+"&"+tc.Query, nil))
+			if tc.OK {
+				// Changing the saved ingest selection must not invalidate an
+				// unrelated browsing continuation.
+				if response.Code != http.StatusOK {
+					t.Fatalf("unchanged-scope replay status = %d, want 200; body=%s", response.Code, response.Body.String())
+				}
+				return
+			}
 			var refusal errorEnvelope
 			_ = json.Unmarshal(response.Body.Bytes(), &refusal)
 			if response.Code != 400 || refusal.Code != tc.Code || !strings.Contains(refusal.Error, "restart") {
@@ -420,25 +437,44 @@ func TestSyncHomeTokenScope(t *testing.T) {
 	}
 }
 
-func TestSyncHomeAncestryAndSelection(t *testing.T) {
-	var f struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		Sessions      []struct {
-			ID, Cache, Snapshot, Kind, State, Target string
-			Latest, Inactive                         bool
-		}
-		Cases []struct {
-			Name, Query      string
-			IDs              []string
-			Children         []int
-			Selected         []string
-			Status           int
-			InvalidSelection bool `yaml:"invalidSelection"`
-		}
+type homeAncestrySession struct {
+	ID       string
+	Cache    string
+	Snapshot string
+	Kind     string
+	State    string
+	Target   string
+	Latest   bool
+	Inactive bool
+}
+
+type homeAncestryCase struct {
+	Name             string
+	Query            string
+	IDs              []string
+	Children         []int
+	Selected         []string
+	Status           int
+	InvalidSelection bool `yaml:"invalidSelection"`
+}
+
+type homeAncestryDocument struct {
+	RequiredNames []string `yaml:"requiredNames"`
+	Sessions      []homeAncestrySession
+	Cases         []homeAncestryCase
+}
+
+func loadHomeAncestry(t *testing.T) homeAncestryDocument {
+	t.Helper()
+	var document homeAncestryDocument
+	if err := testutil.DecodeNamedFixtureYAML(homeAncestryYAML, &document); err != nil {
+		t.Fatalf("decode home ancestry fixture: %v", err)
 	}
-	if err := testutil.DecodeNamedFixtureYAML(homeAncestryYAML, &f); err != nil {
-		t.Fatal(err)
-	}
+	return document
+}
+
+func TestSyncHomeAncestryIgnoresSavedSelection(t *testing.T) {
+	f := loadHomeAncestry(t)
 	db := storetest.Open(t)
 	ids := make([]string, len(f.Sessions))
 	for i, s := range f.Sessions {
@@ -500,15 +536,175 @@ func TestSyncHomeAncestryAndSelection(t *testing.T) {
 	}
 }
 
-func TestSyncHomeCompleteCloneSelectionCohort(t *testing.T) {
-	var f struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		Cases         []struct {
-			Name, Branch, Explicit string
-			Clone                  bool
-			DropIndependentMetrics bool `yaml:"dropIndependentMetrics"`
-			IDs                    []string
+// TestSyncHomeInvalidSelectionFailsMetadataButNotStoredBrowsing proves the two
+// questions stay separate. Home publication metadata cannot be reported
+// truthfully from an unusable saved selector, so the page fails closed with no
+// partial body. Plain stored browsing has no such dependency and still lists
+// the same rows.
+func TestSyncHomeInvalidSelectionFailsMetadataButNotStoredBrowsing(t *testing.T) {
+	fixture := loadHomeAncestry(t)
+	if len(fixture.Sessions) == 0 {
+		t.Fatal("home ancestry fixture has no sessions")
+	}
+	db := storetest.Open(t)
+	ids := make([]string, len(fixture.Sessions))
+	for i, session := range fixture.Sessions {
+		ids[i] = session.ID
+	}
+	seedHomeSessions(t, db, ids)
+
+	cfg := config.BaseConfig()
+	cfg.Selection.Mode = config.SelectionMode("hostile-invalid")
+
+	response := httptest.NewRecorder()
+	homeTestHandler(t, db, db, cfg).ServeHTTP(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", nil))
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("Home status with an unusable selector = %d, want 500 (body %s)", response.Code, response.Body.String())
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &keys); err != nil {
+		t.Fatalf("decode Home failure body: %v (body %s)", err, response.Body.String())
+	}
+	if keys["items"] != nil || keys["next"] != nil {
+		t.Fatalf("Home failure returned a partial page: %s", response.Body.String())
+	}
+	var envelope errorEnvelope
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode Home error envelope: %v", err)
+	}
+	if !strings.Contains(envelope.Error, "selection") || !strings.Contains(envelope.Error, "kickstart") {
+		t.Fatalf("Home failure message = %q, want the saved-selection cause and its remedy", envelope.Error)
+	}
+
+	provider := NewStoreDataProvider(db, sessionvisibility.New(cfg.Selection))
+	base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: cfg, Provider: provider, ConfigHome: t.TempDir()})
+	assertPublicationMetadataFailure(t, &publishingWorld{db: db, baseURL: base}, ids, "selection", "kickstart")
+	sessions, err := provider.Sessions(context.Background())
+	if err != nil {
+		t.Fatalf("plain Sessions: %v", err)
+	}
+	if len(sessions) != len(ids) {
+		t.Fatalf("plain Sessions = %d rows, want all %d stored rows with the same unusable selector", len(sessions), len(ids))
+	}
+	projects, err := provider.ProjectSummaries(context.Background())
+	if err != nil {
+		t.Fatalf("plain ProjectSummaries: %v", err)
+	}
+	if len(projects.Projects) == 0 {
+		t.Fatal("plain ProjectSummaries returned no stored project for an unusable selector")
+	}
+}
+
+// assertProjectFilteredConflictMetadata proves a Home page filtered to a
+// healthy project never evaluates ingest rules for an unrelated stored project.
+// The full cohort still supplies identity evidence, but only requested rows are
+// matched. Requesting the conflicting project's metadata fails truthfully.
+func assertProjectFilteredConflictMetadata(t *testing.T, tc homeSelectionCase, db *store.Store, source discoveryHTTPFixture, resolver fixtureRepositoryResolver) {
+	t.Helper()
+	healthy, conflicting := source.Sessions[0], source.Sessions[3]
+	selection := config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
+		defaults.HarnessClaudeCode.String(): {
+			Sessions: []string{healthy.ID},
+			Projects: []config.ProjectSelection{
+				{GitRemote: conflicting.Remote, Branches: []string{"release"}},
+				{GitRemote: conflicting.Remote, Branches: []string{"main"}},
+			},
+		},
+	}}
+	cfg := config.BaseConfig()
+	cfg.Selection = selection
+	sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
+	h := &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: resolver}
+	base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: cfg, Provider: NewStoreDataProvider(db, sessionvisibility.New(cfg.Selection)), ConfigHome: t.TempDir(), RepositoryIdentityResolver: resolver})
+	world := &publishingWorld{db: db, baseURL: base}
+
+	var healthyPage schema.LocalSyncSessionPage
+	world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&projectHash="+healthy.ProjectHash, &healthyPage)
+	assertHomePublicationParity(t, world, healthyPage.Items)
+	gotIDs := make([]string, 0, len(healthyPage.Items))
+	for _, item := range healthyPage.Items {
+		gotIDs = append(gotIDs, item.Sync.ID)
+		wantOutside := false
+		for _, id := range tc.OutsideSelection {
+			if id == item.Sync.ID {
+				wantOutside = true
+				break
+			}
 		}
+		if item.Publication.OutsideSelection != wantOutside {
+			t.Fatalf("healthy project session %q outsideSelection=%t, want %t", item.Sync.ID, item.Publication.OutsideSelection, wantOutside)
+		}
+	}
+	if !reflect.DeepEqual(gotIDs, tc.IDs) {
+		t.Fatalf("project-filtered Home IDs = %v, want %v", gotIDs, tc.IDs)
+	}
+
+	response := httptest.NewRecorder()
+	h.handleSessions(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&projectHash="+conflicting.ProjectHash, nil))
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("conflicting-project Home status = %d, want 500 (body %s)", response.Code, response.Body.String())
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &keys); err != nil {
+		t.Fatalf("decode conflicting-project failure: %v (body %s)", err, response.Body.String())
+	}
+	if keys["items"] != nil || keys["next"] != nil {
+		t.Fatalf("conflicting-project failure returned a partial page: %s", response.Body.String())
+	}
+	var envelope errorEnvelope
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode conflicting-project error: %v", err)
+	}
+	if !strings.Contains(envelope.Error, "conflicting") {
+		t.Fatalf("conflicting-project failure = %q, want the conflicting-rule cause", envelope.Error)
+	}
+	assertPublicationMetadataFailure(t, world, []string{healthy.ID, conflicting.ID}, "conflicting", "kickstart")
+}
+
+func assertPublicationMetadataFailure(t *testing.T, world *publishingWorld, ids []string, cause, remedy string) {
+	t.Helper()
+	status, body := world.request(t, http.MethodGet, defaults.RoutePublications.String()+"?sessionIds="+strings.Join(ids, ","), nil)
+	if status != http.StatusInternalServerError {
+		t.Fatalf("publication metadata failure status = %d, want 500; body %s", status, body)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(body, &keys); err != nil {
+		t.Fatal(err)
+	}
+	if keys["publications"] != nil || keys["items"] != nil || keys["next"] != nil {
+		t.Fatalf("publication metadata failure returned partial rows: %s", body)
+	}
+	var envelope errorEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(envelope.Error, cause) || !strings.Contains(envelope.Error, remedy) {
+		t.Fatalf("publication metadata failure = %q, want cause %q and remedy", envelope.Error, cause)
+	}
+	// An entirely stale request has no membership to compute, even when the
+	// stored selector or another row's identity cannot be evaluated.
+	var missing schema.LocalPublicationsResponse
+	world.decode(t, http.MethodGet, defaults.RoutePublications.String()+"?sessionIds=missing-stored-session", &missing)
+	if len(missing.Publications) != 0 {
+		t.Fatalf("missing-only publication read invented rows: %+v", missing.Publications)
+	}
+}
+
+type homeSelectionCase struct {
+	Name, Branch, Explicit string
+	Clone                  bool
+	DropIndependentMetrics bool     `yaml:"dropIndependentMetrics"`
+	ConflictUnrelated      bool     `yaml:"conflictUnrelated"`
+	InstalledBinding       bool     `yaml:"installedBinding"`
+	AutoPublish            []string `yaml:"autoPublish"`
+	IDs                    []string `yaml:"ids"`
+	OutsideSelection       []string `yaml:"outsideSelection"`
+}
+
+func TestSyncHomeListsEveryPushableSessionRegardlessOfSelection(t *testing.T) {
+	var f struct {
+		RequiredNames []string            `yaml:"requiredNames"`
+		Cases         []homeSelectionCase `yaml:"cases"`
 	}
 	if err := testutil.DecodeNamedFixtureYAML(homeSelectionYAML, &f); err != nil {
 		t.Fatal(err)
@@ -518,6 +714,10 @@ func TestSyncHomeCompleteCloneSelectionCohort(t *testing.T) {
 			db := storetest.Open(t)
 			source := loadDiscoveryHTTPFixture(t)
 			paths, resolver := seedDiscoveryHTTPStore(t, db, source)
+			if tc.ConflictUnrelated {
+				assertProjectFilteredConflictMetadata(t, tc, db, source, resolver)
+				return
+			}
 			selection := config.SelectionHarnessConfig{}
 			if tc.Explicit != "" {
 				selection.Sessions = []string{tc.Explicit}
@@ -533,17 +733,88 @@ func TestSyncHomeCompleteCloneSelectionCohort(t *testing.T) {
 			}
 			cfg := config.BaseConfig()
 			cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{defaults.HarnessClaudeCode.String(): selection}}
-			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-			sh.home = &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: resolver}
-			p := syncPageRequest(t, http.HandlerFunc(sh.handleSyncSessions), "view=home", 200)
+			var topology ingest.RepositoryIdentityResolver = resolver
+			if tc.InstalledBinding {
+				main := paths[source.Sessions[0].Worktree]
+				runGit(t, main, "init", "-b", "main")
+				runGit(t, main, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "fixture")
+				runGit(t, main, "worktree", "add", "-b", "fixture-feature", paths[source.Sessions[1].Worktree])
+				runGit(t, paths[source.Sessions[2].Worktree], "init", "-b", "main")
+				runGit(t, paths[source.Sessions[3].Worktree], "init", "-b", "main")
+				topology = ingest.NewGitRepositoryIdentityResolver()
+			}
+			base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: cfg, Provider: NewStoreDataProvider(db, sessionvisibility.New(cfg.Selection)), ConfigHome: t.TempDir(), RepositoryIdentityResolver: topology})
+			world := &publishingWorld{db: db, baseURL: base}
+			if tc.InstalledBinding {
+				var saved schema.AutoPublishRule
+				status, body := world.request(t, http.MethodPut, ruleRoute("metadata-parity"), schema.AutoPublishRuleRequest{Kind: schema.AutoPublishRuleFolder, Match: filepath.Dir(paths[source.Sessions[0].Worktree]) + "/*", Events: []schema.AutoPublishEvent{schema.AutoPublishPrePush}, Collectives: []schema.VillageUUID{publishingCollectives["platform"].ID}})
+				decodeContract(t, status, body, &saved)
+				var installed schema.AutoPublishRepository
+				status, body = world.request(t, http.MethodPost, installRoute("metadata-parity"), schema.AutoPublishInstallRequest{Path: paths[source.Sessions[0].Worktree]})
+				decodeContract(t, status, body, &installed)
+				if installed.Hooks[0].Status != schema.AutoPublishHookInstalled {
+					t.Fatalf("binding hook not installed: %+v", installed)
+				}
+			}
+			var p schema.LocalSyncSessionPage
+			world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home", &p)
+			assertHomePublicationParity(t, world, p.Items)
 			ids := []string{}
 			for _, row := range p.Items {
 				ids = append(ids, row.Sync.ID)
+				wantOutside := false
+				for _, id := range tc.OutsideSelection {
+					if id == row.Sync.ID {
+						wantOutside = true
+						break
+					}
+				}
+				if row.Publication.OutsideSelection != wantOutside {
+					t.Fatalf("session %q outsideSelection=%t, want %t", row.Sync.ID, row.Publication.OutsideSelection, wantOutside)
+				}
+				if wantOutside && row.Publication.AutoPublish {
+					t.Fatalf("session %q reports autoPublish=true while outsideSelection=true", row.Sync.ID)
+				}
+				if row.Publication.AutoPublish != slices.Contains(tc.AutoPublish, row.Sync.ID) {
+					t.Fatalf("session %q autoPublish=%t, want IDs %v", row.Sync.ID, row.Publication.AutoPublish, tc.AutoPublish)
+				}
 			}
 			if !reflect.DeepEqual(ids, tc.IDs) {
 				t.Fatalf("ids=%v want=%v", ids, tc.IDs)
 			}
+			if tc.InstalledBinding {
+				var automatic schema.LocalSyncSessionPage
+				world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&publication=auto", &automatic)
+				autoIDs := make([]string, 0, len(automatic.Items))
+				for _, row := range automatic.Items {
+					autoIDs = append(autoIDs, row.Sync.ID)
+				}
+				if !slices.Equal(autoIDs, tc.AutoPublish) {
+					t.Fatalf("Home auto view IDs=%v, want=%v", autoIDs, tc.AutoPublish)
+				}
+				assertHomePublicationParity(t, world, automatic.Items)
+			}
 		})
+	}
+}
+
+func assertHomePublicationParity(t *testing.T, world *publishingWorld, items []schema.LocalSyncSessionRow) {
+	t.Helper()
+	ids := make([]string, 0, len(items)+1)
+	for _, item := range items {
+		ids = append(ids, item.Sync.ID)
+	}
+	// A stale identifier must stay omitted, not acquire invented membership.
+	ids = append(ids, "missing-stored-session")
+	var publications schema.LocalPublicationsResponse
+	world.decode(t, http.MethodGet, defaults.RoutePublications.String()+"?sessionIds="+strings.Join(ids, ","), &publications)
+	if len(publications.Publications) != len(items) {
+		t.Fatalf("by-ID publications = %+v, want exactly %d stored rows", publications.Publications, len(items))
+	}
+	for i, item := range items {
+		if !reflect.DeepEqual(publications.Publications[i], item.Publication) {
+			t.Errorf("session %q Home publication %+v differs from by-ID %+v", item.Sync.ID, item.Publication, publications.Publications[i])
+		}
 	}
 }
 
@@ -590,7 +861,7 @@ func TestSyncHomeAccountPublications(t *testing.T) {
 			if tc.Origin != "" {
 				writeSyncDoorCredentials(t, hs.Config, tc.Origin)
 			}
-			base := startDiscoveryHTTPServer(t, hs.config(ServerConfig{Store: db, Config: config.BaseConfig(), Provider: NewStoreDataProvider(db, sessionvisibility.All())}))
+			base := startDiscoveryHTTPServer(t, hs.config(ServerConfig{Store: db, Config: config.BaseConfig(), Provider: NewStoreDataProvider(db, sessionvisibility.Browsing())}))
 			query := "view=home&" + tc.Query
 			read := func(query string, status int) schema.LocalSyncSessionPage {
 				t.Helper()
@@ -653,6 +924,8 @@ func TestSyncHomeProjectOptions(t *testing.T) {
 			Name               string
 			Selected, Projects []string
 			Narrow             bool
+			InvalidSelection   bool `yaml:"invalidSelection"`
+			Conflicting        bool `yaml:"conflictingSelection"`
 		}
 	}
 	if err := testutil.DecodeNamedFixtureYAML(syncProjectOptionsYAML, &f); err != nil {
@@ -678,6 +951,15 @@ func TestSyncHomeProjectOptions(t *testing.T) {
 			cfg := config.BaseConfig()
 			if tc.Narrow {
 				cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{defaults.HarnessOpenCode.String(): {Sessions: tc.Selected}}}
+			}
+			if tc.InvalidSelection {
+				cfg.Selection = config.SelectionConfig{Mode: config.SelectionMode("hostile-invalid")}
+			}
+			if tc.Conflicting {
+				cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{defaults.HarnessOpenCode.String(): {Projects: []config.ProjectSelection{
+					{GitRemote: "example.test/org/repo", Branches: []string{"main"}},
+					{Name: "/repo", Branches: []string{"dev"}},
+				}}}}
 			}
 			r := &boundedHomeReader{Store: db, allowed: map[string]bool{}, reads: map[string][]string{}}
 			response := httptest.NewRecorder()
@@ -719,12 +1001,10 @@ func TestSyncHomeCancellationAndUnavailable(t *testing.T) {
 	syncPageRequest(t, homeTestHandler(t, nil, db, config.BaseConfig()), "view=home", 503)
 }
 
-// TestSyncHomeRepositoryIdentityEvidence pins the difference between a stored
-// Git worktree and the canonical project directory used as recorded-path
-// evidence. A project recorded outside Git (the user's home directory, /tmp, a
-// scratch capture folder) is ordinary stored data: asking it for repository
-// topology must not fail the whole Home projection. A captured worktree that
-// no longer resolves remains ambiguous evidence and still fails closed.
+// TestSyncHomeRepositoryIdentityEvidence pins Home's publication-metadata
+// identity boundary: browsing no longer filters by the saved selector, but an
+// ambiguous captured worktree still prevents outsideSelection from being
+// reported truthfully, while a project recorded outside Git stays ordinary.
 func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
@@ -761,6 +1041,8 @@ func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 				// still reaches the canonical matcher.
 				defaults.HarnessOpenCode.String(): {Projects: []config.ProjectSelection{{Name: "unrelated-name", ClonePaths: []string{physical.String()}}}},
 			}}
+			base := startDiscoveryHTTPServer(t, ServerConfig{Store: db, Config: cfg, Provider: NewStoreDataProvider(db, sessionvisibility.New(cfg.Selection)), ConfigHome: t.TempDir()})
+			world := &publishingWorld{db: db, baseURL: base}
 			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
 			sh.home = &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: ingest.NewGitRepositoryIdentityResolver()}
 			response := httptest.NewRecorder()
@@ -783,6 +1065,7 @@ func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 				if !slices.Equal(ids, tc.IDs) {
 					t.Fatalf("ids = %v, want %v", ids, tc.IDs)
 				}
+				assertHomePublicationParity(t, world, page.Items)
 				return
 			}
 			var body errorEnvelope
@@ -792,6 +1075,7 @@ func TestSyncHomeRepositoryIdentityEvidence(t *testing.T) {
 			if !strings.Contains(body.Error, sessionID) || !strings.Contains(body.Error, "ambiguous") {
 				t.Fatalf("failure body = %q, want the fail-closed topology error naming %q", body.Error, sessionID)
 			}
+			assertPublicationMetadataFailure(t, world, []string{sessionID}, "ambiguous", "Restore")
 		})
 	}
 }

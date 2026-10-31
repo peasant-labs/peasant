@@ -62,7 +62,7 @@ func BuildMigrateCommand() *cobra.Command {
 			cmd.SetContext(ctx)
 			defer cmd.SetContext(previousContext)
 			cfgPath := resolveConfigPath(cmd)
-			cfg, err := loadConfig(cfgPath)
+			cfg, err := loadCommandConfig(cmd, cfgPath)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}

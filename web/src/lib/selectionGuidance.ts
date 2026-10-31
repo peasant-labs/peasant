@@ -1,26 +1,17 @@
-import {
-  DiscoveryErrorCode,
-  discoveryErrorCode,
-  type DiscoveryErrorCode as DiscoveryErrorCodeValue,
-} from '@/lib/api/errors';
-
-export const SELECTION_RECOVERY_GUIDANCE =
-  'Your saved project selection no longer matches the indexed data. Run `peasant kickstart` to repair the persisted selection, then retry.';
-
-/** Preserve the server's actionable cause and add kickstart recovery only for
- * the typed persisted-selection failure class. */
-
-export function discoveryErrorMessage(
-  error: unknown,
-  code?: DiscoveryErrorCodeValue,
-): string {
-  const message = error instanceof Error
+/**
+ * Render a discovery failure for a surface. The server's message carries the
+ * cause; the app adds no recovery instruction of its own.
+ *
+ * A legacy `selection_visibility` error keeps its place in the typed contract
+ * (`DiscoveryErrorCode`), but stored browsing no longer depends on the saved
+ * ingestion selection. When an older server still answers with that code, it is
+ * shown as the ordinary, retryable failure it is, and the UI does not suggest
+ * re-running `peasant kickstart` to reveal projects.
+ */
+export function discoveryErrorMessage(error: unknown): string {
+  return error instanceof Error
     ? error.message
     : typeof error === 'string'
       ? error
       : 'Discovery failed without an error message. Retry, then inspect the Peasant server logs if the failure continues.';
-  const resolvedCode = code ?? discoveryErrorCode(error);
-  if (resolvedCode !== DiscoveryErrorCode.SelectionVisibility) return message;
-  if (message.includes('peasant kickstart')) return message;
-  return `${message} ${SELECTION_RECOVERY_GUIDANCE}`;
 }

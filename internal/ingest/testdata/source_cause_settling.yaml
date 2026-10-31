@@ -1,0 +1,20 @@
+# A settled source refusal names its cause. Changing that cause reports once.
+# Two lanes that see the same cause in one harvest index report it once between
+# them. A store fault is not a source cause: it keeps failing and writes no row.
+required_names:
+  - missing-then-malformed
+  - harvest-index-same-cause
+  - pair-lane-store-fault
+cases:
+  - name: missing-then-malformed
+    kind: cause-change
+    first_reason: original-source-unavailable-no-usable-saved-copy
+    second_reason: original-source-present-record-unusable
+    first_mentions: "is unavailable"
+    second_mentions: "capture JSONL record 2: malformed complete JSON"
+  - name: harvest-index-same-cause
+    kind: same-cause-one-run
+    first_reason: original-source-unavailable-no-usable-saved-copy
+  - name: pair-lane-store-fault
+    kind: store-fault
+    fault: "synthetic store write failure: database is locked"

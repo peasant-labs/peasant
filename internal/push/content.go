@@ -318,6 +318,16 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 		}
 		return entries, nil
 	}
+	// Every other Extra is redacted as the JSON document it is, and kept out
+	// of the text pass below, which would read its escapes as text.
+	documents, err := redactEntryExtras(redactor, entries, protected)
+	if err != nil {
+		return nil, err
+	}
+	for i, extra := range documents {
+		protected[i] = extra
+		entries[i].Extra = nil
+	}
 	raw, err := json.Marshal(entries)
 	if err != nil {
 		return nil, fmt.Errorf(

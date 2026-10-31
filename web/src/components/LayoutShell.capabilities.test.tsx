@@ -10,6 +10,11 @@ import {
 import { usePublishState } from '@/contexts/PublishContext';
 import { LayoutShell } from './LayoutShell';
 import { OPEN_COMMAND_PALETTE_EVENT } from './command/CommandPalette';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot } from 'react-dom/client';
+import YAML from 'yaml';
 
 // ---------------------------------------------------------------------------
 // Only HTTP is mocked. The ServerCapabilitiesProvider under test is REAL; the
@@ -18,8 +23,9 @@ import { OPEN_COMMAND_PALETTE_EVENT } from './command/CommandPalette';
 // ---------------------------------------------------------------------------
 
 const push = vi.fn();
+const route = vi.hoisted(() => ({ pathname: '/' }));
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/',
+  usePathname: () => route.pathname,
   useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ push }),
 }));
@@ -52,12 +58,40 @@ let fetchMock: ReturnType<typeof vi.fn>;
 let originalWebSocket: typeof globalThis.WebSocket;
 
 beforeEach(() => {
+  route.pathname = '/';
   push.mockClear();
   originalWebSocket = globalThis.WebSocket;
   // @ts-expect-error — inert stand-in for the browser WebSocket in jsdom.
   globalThis.WebSocket = MockWebSocket;
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
+});
+
+const hydration = YAML.parse(readFileSync(resolve(process.cwd(), 'src/components/testdata/shell_hydration.yaml'), 'utf8')) as {
+  requiredNames: string[];
+  cases: { name: string; pathname: string; bounded: boolean }[];
+};
+
+describe('static shell hydration', () => {
+  it('retains the named route cases', () => {
+    expect(new Set(hydration.cases.map((row) => row.name))).toEqual(new Set(hydration.requiredNames));
+  });
+  for (const row of hydration.cases) {
+    it(row.name, async () => {
+      mockHttp(UI_CAPABILITY_CASES[0]);
+      route.pathname = '/';
+      const html = renderToString(<LayoutShell>representative transcript body</LayoutShell>);
+      const container = document.createElement('div');
+      document.body.append(container);
+      container.innerHTML = html;
+      route.pathname = row.pathname;
+      let root: ReturnType<typeof hydrateRoot>;
+      await act(async () => { root = hydrateRoot(container, <LayoutShell>representative transcript body</LayoutShell>); });
+      expect(container.querySelector('.asb-layout')?.classList.contains('asb-layout-viewport')).toBe(row.bounded);
+      await act(async () => root!.unmount());
+      container.remove();
+    });
+  }
 });
 
 afterEach(() => {
@@ -86,7 +120,7 @@ describe('LayoutShell — the code map stays route-only whatever the server adve
       mockHttp(row);
       render(
         <LayoutShell>
-          <main>body</main>
+          body
         </LayoutShell>,
       );
       // Let the capability request settle (or stay pending) before reading.

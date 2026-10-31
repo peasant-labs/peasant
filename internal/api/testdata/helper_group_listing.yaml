@@ -95,8 +95,8 @@ cases:
 
   - name: selected-helper-search
     classification: must-pass
-    provenance: {source: bug, ref: "grouped search ignored the persisted selection, so an unselected saved helper was listed and expandable"}
-    mutation: {description: "two matching saved helpers share one owner but only one is inside the persisted selection"}
+    provenance: {source: requirement, ref: "grouped search returns every stored match; the saved selector is ingest-only"}
+    mutation: {description: "two matching saved helpers share one owner while the saved selector admits only one"}
     input:
       route: search
       searchQuery: needle
@@ -111,19 +111,19 @@ cases:
       statusCode: 200
       totalItems: 1
       ordinarySessionTotal: 0
-      helperThreadTotal: 1
+      helperThreadTotal: 2
       items:
-        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 2, memberIds: [agent-b1, agent-b2]}
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+            - {page: 1, limit: 20, total: 2, memberIds: [agent-b1, agent-b2]}
       reListIdentical: true
 
   - name: search-limit-selected-backfill
     classification: must-pass
-    provenance: {source: bug, ref: "grouped search paged the global ranked window before applying selection, so an unselected hit displaced the only selected one"}
-    mutation: {description: "two unselected short matches outrank the one selected long match while the page limit is one"}
+    provenance: {source: requirement, ref: "grouped search keeps the flat route's ranked page; the saved selector cannot displace a match"}
+    mutation: {description: "three matches rank by term frequency while the page limit is one and the selector admits only one of them"}
     input:
       route: search
       searchQuery: needle
@@ -131,80 +131,80 @@ cases:
       selection: selected
       selectedIds: [agent-b3]
       sessions:
-        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-b2, startMs: 470, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-b3, startMs: 460, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle followed by a deliberately long stretch of extra prose so the ranked window prefers the shorter unselected matches"}
+        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle needle needle"}
+        - {id: agent-b2, startMs: 470, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle needle"}
+        - {id: agent-b3, startMs: 460, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
     expected:
       statusCode: 200
       totalItems: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 1
       items:
-        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b3]}
+        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
 
   - name: selected-search-beyond-first-window
     classification: must-pass
-    provenance: {source: bug, ref: "grouped search applied the flat route's global page bound to the ranked stream before the persisted selection, so a selected match ranked past that bound vanished from every grouped exit"}
-    mutation: {description: "fifty-one unselected short matches outrank the one selected long match while the page limit is one"}
+    provenance: {source: requirement, ref: "grouped search reads the whole ranked stream and never consults the saved selector"}
+    mutation: {description: "many stored matches precede one uniquely named match while the page limit is one"}
     input:
       route: search
-      searchQuery: needle
+      searchQuery: uniqueneedle
       searchLimit: 1
       selection: selected
       selectedIds: [agent-b3]
       sessions:
-        - {id: agent-probe0, startMs: 700, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe1, startMs: 701, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe2, startMs: 702, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe3, startMs: 703, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe4, startMs: 704, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe5, startMs: 705, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe6, startMs: 706, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe7, startMs: 707, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe8, startMs: 708, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe9, startMs: 709, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe10, startMs: 710, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe11, startMs: 711, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe12, startMs: 712, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe13, startMs: 713, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe14, startMs: 714, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe15, startMs: 715, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe16, startMs: 716, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe17, startMs: 717, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe18, startMs: 718, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe19, startMs: 719, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe20, startMs: 720, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe21, startMs: 721, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe22, startMs: 722, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe23, startMs: 723, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe24, startMs: 724, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe25, startMs: 725, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe26, startMs: 726, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe27, startMs: 727, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe28, startMs: 728, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe29, startMs: 729, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe30, startMs: 730, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe31, startMs: 731, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe32, startMs: 732, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe33, startMs: 733, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe34, startMs: 734, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe35, startMs: 735, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe36, startMs: 736, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe37, startMs: 737, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe38, startMs: 738, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe39, startMs: 739, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe40, startMs: 740, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe41, startMs: 741, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe42, startMs: 742, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe43, startMs: 743, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe44, startMs: 744, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe45, startMs: 745, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe46, startMs: 746, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe47, startMs: 747, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe48, startMs: 748, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe49, startMs: 749, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-probe50, startMs: 750, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
-        - {id: agent-b3, startMs: 460, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle followed by a deliberately long stretch of extra prose so the stream ranks the shorter unselected matches first"}
+        - {id: agent-probe0, startMs: 700, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe1, startMs: 701, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe2, startMs: 702, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe3, startMs: 703, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe4, startMs: 704, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe5, startMs: 705, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe6, startMs: 706, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe7, startMs: 707, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe8, startMs: 708, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe9, startMs: 709, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe10, startMs: 710, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe11, startMs: 711, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe12, startMs: 712, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe13, startMs: 713, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe14, startMs: 714, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe15, startMs: 715, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe16, startMs: 716, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe17, startMs: 717, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe18, startMs: 718, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe19, startMs: 719, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe20, startMs: 720, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe21, startMs: 721, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe22, startMs: 722, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe23, startMs: 723, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe24, startMs: 724, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe25, startMs: 725, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe26, startMs: 726, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe27, startMs: 727, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe28, startMs: 728, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe29, startMs: 729, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe30, startMs: 730, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe31, startMs: 731, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe32, startMs: 732, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe33, startMs: 733, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe34, startMs: 734, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe35, startMs: 735, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe36, startMs: 736, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe37, startMs: 737, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe38, startMs: 738, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe39, startMs: 739, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe40, startMs: 740, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe41, startMs: 741, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe42, startMs: 742, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe43, startMs: 743, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe44, startMs: 744, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe45, startMs: 745, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe46, startMs: 746, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe47, startMs: 747, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe48, startMs: 748, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe49, startMs: 749, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-probe50, startMs: 750, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "decoyneedle"}
+        - {id: agent-b3, startMs: 460, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "uniqueneedle"}
     expected:
       statusCode: 200
       totalItems: 1
@@ -219,8 +219,8 @@ cases:
 
   - name: owner-excluded
     classification: must-pass
-    provenance: {source: requirement, ref: "section9.2 excluded owner renders a context container without a fake ordinary row"}
-    mutation: {description: "select only the saved helper so its owner is outside the route candidate set"}
+    provenance: {source: requirement, ref: "an ingested owner stays visible; the saved selector does not hide it"}
+    mutation: {description: "select only the saved helper while its person-driven owner is outside the saved selector"}
     input:
       route: sessions
       selection: selected
@@ -231,10 +231,10 @@ cases:
     expected:
       statusCode: 200
       totalItems: 1
-      ordinarySessionTotal: 0
+      ordinarySessionTotal: 1
       helperThreadTotal: 1
       items:
-        - {kind: context_container, ownerStatus: known_unavailable, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
 
   - name: unresolved-independent
     classification: must-pass
@@ -400,8 +400,8 @@ cases:
 
   - name: selected-vs-pulled-ineligible
     classification: must-pass
-    provenance: {source: requirement, ref: "section9.2 an unselected saved helper contributes zero rows and zero counts"}
-    mutation: {description: "one of two saved helpers is outside the persisted selection"}
+    provenance: {source: requirement, ref: "a stored helper outside the saved selector still contributes its row and count"}
+    mutation: {description: "one of two stored helpers is outside the saved selector"}
     input:
       route: sessions
       selection: selected
@@ -414,9 +414,9 @@ cases:
       statusCode: 200
       totalItems: 1
       ordinarySessionTotal: 1
-      helperThreadTotal: 1
+      helperThreadTotal: 2
       items:
-        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1]}
+        - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 2, memberIds: [agent-b2, agent-b1]}
 
   - name: scope-search-replay
     classification: must-pass
@@ -627,7 +627,7 @@ cases:
 
   - name: sync-selection-scope
     classification: must-pass
-    provenance: {source: requirement, ref: "section9.2 the grouped view applies the persisted selection predicate to sync candidates"}
+    provenance: {source: requirement, ref: "the grouped sync chooser lists every pushable stored session; selection is ingest/push metadata only"}
     mutation: {description: "one pushable ordinary and one pushable helper are selected while a second pushable ordinary session stays outside the selection"}
     input:
       route: sync
@@ -639,11 +639,12 @@ cases:
         - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, pushable: true}
     expected:
       statusCode: 200
-      totalItems: 1
-      ordinarySessionTotal: 1
+      totalItems: 2
+      ordinarySessionTotal: 2
       helperThreadTotal: 1
       items:
         - {kind: transcript, sessionId: agent-a1, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b1], syncStatus: held}
+        - {kind: transcript, sessionId: agent-a2, groupCount: 0, syncStatus: held}
       memberPages:
         - itemIndex: 0
           pages:

@@ -35,6 +35,7 @@ required_names:
   - claude-null-identity-strict-refused
   - claude-stored-identity-strict-refused
   - codex-null-identity-retains-unknown
+  - codex-control-record-certifies
   - cursor-null-identity-strict-refused
   - claude-control-record-content-settles
   - codex-unknown-record-settles
@@ -55,6 +56,10 @@ transcripts:
     {"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it now."}]}}
     {"type":"future-record","payload":"a record kind no shipped build represents"}
   codex-unrepresented: |
+    {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
+    {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
+    {"type":"event_msg","payload":{"type":"future_control"}}
+  codex-control-record: |
     {"type":"session_meta","payload":{"id":"fixture-codex-session"}}
     {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the retained fixture"}]}}
     {"type":"event_msg","payload":{"type":"patch_apply_end"}}
@@ -119,7 +124,13 @@ cases:
     wantCaptureStatus: incomplete
     wantCaptureFormat: full
     wantFailureCode: unknown_data_retained
-    wantRetainedKind: patch_apply_end
+    wantRetainedKind: future_control
+    wantEntries: 2
+  - name: codex-control-record-certifies
+    harness: codex
+    transcript: codex-control-record
+    wantCaptureStatus: complete
+    wantCaptureFormat: full
     wantEntries: 2
   - name: cursor-null-identity-strict-refused
     harness: cursor

@@ -9,7 +9,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/codegraph"
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/gitops"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -357,7 +356,7 @@ func TestProjectTasks_TitleFallbackChain(t *testing.T) {
 			if tc.metricsTitle != "" {
 				seedMetrics(t, s, fxSession1, tc.metricsTitle, schema.OutcomeResolved, 100, 0, nil)
 			}
-			svc := codemap.NewService(s, func(string) gitops.Repository { return noRepo() }, codegraph.NewGraphBuilder(), sessionvisibility.All())
+			svc := codemap.NewService(s, func(string) gitops.Repository { return noRepo() }, codegraph.NewGraphBuilder())
 
 			payload, err := svc.ProjectTasks(context.Background(), fxProjectHash, "")
 			if err != nil {

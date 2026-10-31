@@ -60,41 +60,36 @@ describe('MapRouter project discovery', () => {
     expect(fetchProjectSummaries).toHaveBeenCalledTimes(2);
   });
 
-  it('shows the shared recovery panel instead of first-use teaching when selection hides all data', async () => {
-    const fixture = projectViewerStateFixture('all hidden by saved selection');
-    fetchProjectSummaries.mockResolvedValue(fixture.summary);
-    render(<MapRouter />);
+  for (const name of [
+    'restrictive-saved-selection-keeps-recorded-projects',
+    'empty-saved-selection-keeps-recorded-projects',
+    'excluded-saved-selection-keeps-recorded-projects',
+    'stale-saved-selection-keeps-recorded-projects',
+  ] as const) {
+    it(`lists every recorded project: ${name}`, async () => {
+      const fixture = projectViewerStateFixture(name);
+      fetchProjectSummaries.mockResolvedValue(fixture.summary);
+      render(<MapRouter />);
 
-    const panel = await screen.findByRole('status', { name: 'project selection recovery' });
-    expect(panel).toHaveTextContent('peasant hides 2 projects and 5 sessions.');
-    expect(panel).toHaveTextContent('the web viewer does not list it.');
-    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
-    for (const identity of fixture.forbiddenIdentities) {
-      expect(document.body.textContent).not.toContain(identity);
-    }
-  });
+      expect(
+        await screen.findByRole('link', {
+          name: `Open the map of ${fixture.expectedParentLabel}`,
+        }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Open the map of control-project' })).toBeInTheDocument();
+      expect(screen.queryByText(/hidden by a saved selection/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/your saved selection hides all projects/)).not.toBeInTheDocument();
+      expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
+    });
+  }
 
-  it('keeps genuine no-data teaching when there is no hidden selection', async () => {
+  it('keeps genuine no-data teaching when there are no recorded projects', async () => {
     const fixture = projectViewerStateFixture('genuine no data');
     fetchProjectSummaries.mockResolvedValue(fixture.summary);
     render(<MapRouter />);
 
     expect(await screen.findByRole('link', { name: /^how to record sessions/ })).toHaveAttribute('href', DOCS.record);
     expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
-    expect(screen.queryByRole('status', { name: 'project selection recovery' })).not.toBeInTheDocument();
-  });
-
-  it('renders an explicit session parent from the shared project summary without recovery guidance', async () => {
-    const fixture = projectViewerStateFixture('explicit session makes parent visible');
-    fetchProjectSummaries.mockResolvedValue(fixture.summary);
-    render(<MapRouter />);
-
-    expect(
-      await screen.findByRole('link', {
-        name: `Open the map of ${fixture.expectedParentLabel}`,
-      }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('status', { name: 'project selection recovery' })).not.toBeInTheDocument();
-    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
+    expect(screen.queryByText(/hidden by a saved selection/)).not.toBeInTheDocument();
   });
 });

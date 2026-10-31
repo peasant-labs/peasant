@@ -157,7 +157,7 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&sessionID, "session", "", "ID of the session to record and open (required)")
-	cmd.Flags().IntVar(&port, "port", defaults.DefaultPort, "Port of the web dashboard")
+	portFlagVar(cmd.Flags(), &port, defaults.DefaultPort, "Port of the web dashboard (1-65535)")
 	cmd.Flags().BoolVar(&hook, "hook", false, "Print the Claude Code hook response JSON instead of plain lines, and exit 0 on every outcome")
 	return cmd
 }

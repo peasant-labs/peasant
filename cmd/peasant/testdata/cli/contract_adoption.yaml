@@ -1,0 +1,177 @@
+# contract_adoption: the commands that adopt the shared CLI contract
+# (docs/cli-contract.md), driven through their production builders.
+#
+# kind:
+#   run            runs args under a test root whose --data-dir, --config-dir
+#                  and --state-dir are one temporary directory. {out} is an
+#                  output directory and {ids} a file holding idsFile, one per
+#                  line. seed is "" (nothing), export (seedExport sessions are
+#                  stored ready to export) or redact (the redact command's two
+#                  sessions). credentials writes a login. wantExit is the
+#                  status the run must exit with (0 when unset).
+#                  wantWarnings asserts the document's warnings array, in
+#                  order; a case that sets it also proves the array is never
+#                  null.
+#   help           renders --help of command from the production root and
+#                  asserts each flag in helpLists is listed and each flag in
+#                  helpOmits is not.
+#   yes_shorthand  walks the whole production command tree and asserts that
+#                  every command defining --yes accepts -y for it, and that
+#                  every command in yesCommands is among them.
+cases:
+  - name: export_sessions_stdin
+    kind: run
+    seed: export
+    seedExport:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+      - 33333333-3333-4333-8333-333333333333
+    args: [export, sessions, --sessions-from, "-", --output-dir, "{out}"]
+    stdin: |
+      11111111-1111-4111-8111-111111111111
+      33333333-3333-4333-8333-333333333333
+    wantExported:
+      - 11111111-1111-4111-8111-111111111111
+      - 33333333-3333-4333-8333-333333333333
+
+  - name: export_alias_still_works
+    kind: run
+    seed: export
+    seedExport:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    idsFile:
+      - 22222222-2222-4222-8222-222222222222
+    args: [export, sessions, --session-from-file, "{ids}", --output-dir, "{out}"]
+    wantExported:
+      - 22222222-2222-4222-8222-222222222222
+
+  - name: export_json_stdout_only
+    kind: run
+    seed: export
+    seedExport:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    args: [export, sessions, --sessions-from, "-", --output-dir, "{out}", --json]
+    stdin: |
+      ["11111111-1111-4111-8111-111111111111",
+       "99999999-9999-4999-8999-999999999999",
+       "22222222-2222-4222-8222-222222222222"]
+    wantStdoutJSON: true
+    wantExported:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    wantDocSessions:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    wantWarnings:
+      - code: session_refused
+        sessionID: 99999999-9999-4999-8999-999999999999
+    wantStderrContains:
+      - "warning: session 99999999-9999-4999-8999-999999999999:"
+      - "2 of 3 sessions exported, 1 refused"
+
+  - name: export_json_2_redirect_parses
+    kind: run
+    seed: export
+    seedExport:
+      - 11111111-1111-4111-8111-111111111111
+    args: [export, sessions, --sessions-from, "-", --output-dir, "{out}", --json]
+    stdin: |
+      [{"id": "88888888-8888-4888-8888-888888888888"},
+       {"id": "11111111-1111-4111-8111-111111111111"}]
+    wantStdoutJSON: true
+    wantStderrNonEmpty: true
+    wantExported:
+      - 11111111-1111-4111-8111-111111111111
+    wantDocSessions:
+      - 11111111-1111-4111-8111-111111111111
+    wantWarnings:
+      - code: session_refused
+        sessionID: 88888888-8888-4888-8888-888888888888
+
+  - name: export_missing_source_is_usage_error
+    kind: run
+    args: [export, sessions, --output-dir, "{out}"]
+    wantExit: 2
+
+  - name: export_sessions_from_with_session_is_usage_error
+    kind: run
+    args: [export, sessions, --sessions-from, "-", --session, 11111111-1111-4111-8111-111111111111, --output-dir, "{out}"]
+    stdin: |
+      11111111-1111-4111-8111-111111111111
+    wantExit: 2
+
+  - name: redact_sessions_from_dry_run
+    kind: run
+    seed: redact
+    args: [redact, --sessions-from, "-", --dry-run, --json]
+    stdin: |
+      aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+    wantStdoutJSON: true
+    wantDocSessions:
+      - aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+    wantSyncUnchanged: true
+    wantStdoutOmits: ["Continue?", "[y/N]"]
+
+  - name: push_json_has_warnings_array
+    kind: run
+    credentials: true
+    args: [push, --json]
+    wantStdoutJSON: true
+    wantGolden: |
+      {
+        "new": 0,
+        "updated": 0,
+        "skipped": 0,
+        "errors": 0,
+        "held": 0,
+        "sessions": [],
+        "warnings": [],
+        "empty_code": "store_has_no_sessions",
+        "empty_reason": "Nothing to push. Run 'peasant ingest' first to import your sessions.",
+        "annotations": {
+          "total": 0,
+          "created": 0,
+          "updated": 0,
+          "skipped": 0,
+          "retracted": 0,
+          "errors": 0
+        }
+      }
+
+  - name: push_dry_run_json_is_one_document
+    kind: run
+    seed: export
+    seedExport:
+      - 11111111-1111-4111-8111-111111111111
+    credentials: true
+    args: [push, --json, --dry-run]
+    wantStdoutJSON: true
+    wantStdoutOmits: ["Dry run"]
+    wantDocSessions:
+      - 11111111-1111-4111-8111-111111111111
+
+  - name: push_empty_has_code
+    kind: run
+    credentials: true
+    args: [push, --json]
+    wantStdoutJSON: true
+    wantDocKeys: [empty_code, empty_reason, warnings]
+
+  - name: contract_help_golden
+    kind: help
+    helpCases:
+      - command: [export, sessions]
+        helpLists: [sessions-from]
+        helpOmits: [session-from-file]
+      - command: [redact]
+        helpLists: [sessions-from]
+
+  - name: y_shorthand_registered
+    kind: yes_shorthand
+    # Commands that must be among those found, so the walk cannot pass by
+    # finding nothing.
+    yesCommands:
+      - [village, push]
+      - [upgrade]

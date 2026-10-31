@@ -90,7 +90,7 @@ func TestHubSessionDetailThinkingLevel(t *testing.T) {
 			if err := testutil.WriteFullEntries(ctx, db, schema.SessionID(sid), entries); err != nil {
 				t.Fatal(err)
 			}
-			hub := api.NewHub(api.NewStoreDataProvider(db, sessionvisibility.All()))
+			hub := api.NewHub(api.NewStoreDataProvider(db, sessionvisibility.Browsing()))
 			go hub.Run(ctx)
 			server := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 			defer server.Close()

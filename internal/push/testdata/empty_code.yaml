@@ -1,0 +1,52 @@
+# The empty_code a push reports when it sent nothing. A program branches on
+# empty_code, so every state the pipeline names is pinned here: swapping two
+# codes anywhere in the pipeline fails one of these cases.
+#
+# world is what the store holds:
+#   empty-store         no session at all
+#   other-only          sessions exist, none of them in the repository scope
+#   all-published       the one session was published and has not changed
+#   selection-excluded  the configured selection excludes the one session
+#
+# scoped runs the push with a repository scope that admits the one session.
+# reasonPrefix is the start of empty_reason, so the code and the prose that
+# explains it cannot drift apart.
+cases:
+  - name: empty_store_is_store_has_no_sessions
+    world: empty-store
+    wantCode: store_has_no_sessions
+    reasonPrefix: "Nothing to push."
+
+  - name: already_pushed_is_nothing_changed
+    world: all-published
+    wantCode: nothing_changed
+    reasonPrefix: "All selected sessions already pushed"
+
+  - name: selection_excluded_all_is_filters_excluded_all
+    world: selection-excluded
+    wantCode: filters_excluded_all
+    reasonPrefix: "No sessions match the configured selection."
+
+  - name: scope_empty_store_is_store_has_no_sessions
+    world: empty-store
+    scoped: true
+    wantCode: store_has_no_sessions
+    reasonPrefix: "No sessions are recorded for scope"
+
+  - name: scope_nothing_recorded_is_filters_excluded_all
+    world: other-only
+    scoped: true
+    wantCode: filters_excluded_all
+    reasonPrefix: "No sessions are recorded for scope"
+
+  - name: scope_selection_excluded_is_filters_excluded_all
+    world: selection-excluded
+    scoped: true
+    wantCode: filters_excluded_all
+    reasonPrefix: "No sessions match the configured selection inside scope"
+
+  - name: scope_already_pushed_is_nothing_changed
+    world: all-published
+    scoped: true
+    wantCode: nothing_changed
+    reasonPrefix: "No new sessions to push for scope"

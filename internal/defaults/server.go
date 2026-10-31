@@ -46,6 +46,15 @@ const (
 	// relationshipNavigation is added beside them. It is a read projection, not
 	// a publication body, so it never carries navigation into published content.
 	RouteSessionDetail Route = "/api/v1/sessions/{id}"
+	// RouteSessionCommits reads the commits the recorded session's work
+	// produced, from the stored session_commits projection. It is a local
+	// display read: it carries no publication body and grants no access.
+	RouteSessionCommits Route = "/api/v1/sessions/{id}/commits"
+	// RouteSessionPullRequests reads the pull requests detected from the
+	// session's stored tool calls. Detection runs on read, so an already-stored
+	// session needs no backfill. It is display-only: it never widens who can
+	// read a transcript and never posts to GitHub.
+	RouteSessionPullRequests Route = "/api/v1/sessions/{id}/pull-requests"
 	// RouteSessionSummaries resolves links: it returns summaries for an explicit
 	// set of session identifiers named in ?ids=, applying neither origin scope
 	// nor selection scope. A sibling RESOURCE rather than a path under

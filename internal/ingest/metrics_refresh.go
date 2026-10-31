@@ -35,9 +35,7 @@ func (p *Pipeline) refreshStoredMetrics(ctx context.Context) (computed, checked,
 			if ctx.Err() != nil {
 				break
 			}
-			if p.config.Harness != nil && session.Harness != *p.config.Harness ||
-				p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[session.SessionID] ||
-				p.config.Since != nil && time.UnixMilli(session.StartMS).Before(*p.config.Since) {
+			if !p.includesManagedSession(session.SessionID, session.Harness) || !p.withinRunAge(session.StartMS) {
 				continue
 			}
 			checked++

@@ -166,6 +166,7 @@ describe('TurnLabelPopover — restored outcome+flag modal', () => {
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('network unreachable'));
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+    expect(document.activeElement).toBe(outcomeTrigger());
 
     // Retry reopens the modal so the user can attempt the save again.
     fireEvent.click(screen.getByRole('button', { name: /retry/i }));
@@ -200,7 +201,7 @@ describe('TurnLabelPopover — "more labels" preserves the typed registry (custo
       screen.getByText(/Type a label, then press Enter or Save/i),
     ).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'save' })).toBeInTheDocument();
   });
 
   it('saves the typed free-text string via saveTurnLabel (single-item) and reports it upward', async () => {
@@ -210,7 +211,7 @@ describe('TurnLabelPopover — "more labels" preserves the typed registry (custo
     fireEvent.click(moreTrigger());
     fireEvent.click(screen.getByRole('button', { name: /Custom label/ }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'good handoff' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
 
     await waitFor(() => expect(saveTurnLabel).toHaveBeenCalledTimes(1));
     expect(saveTurnLabel).toHaveBeenCalledWith({
@@ -230,6 +231,7 @@ describe('TurnLabelPopover — "more labels" preserves the typed registry (custo
         }),
       ),
     );
+    expect(document.activeElement).toBe(moreTrigger());
   });
 
   it('lists the permissible values for an enumerated system-classifier type and saves the clicked one', async () => {

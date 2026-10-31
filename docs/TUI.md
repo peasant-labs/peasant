@@ -1,5 +1,9 @@
 # TUI Keyboard Shortcuts
 
+> **`peasant tui` is deprecated.** Use `peasant web` for the dashboard, sessions,
+> and trends, and `peasant annotate` for annotations. The standalone config
+> screen and kickstart wizard remain available.
+
 Peasant's kit-based TUI screens derive dispatch, footer hints, and help from one
 typed action catalog in `internal/tui/keymap`, built on
 [`charmbracelet/bubbles/key`](https://pkg.go.dev/github.com/charmbracelet/bubbles/key).

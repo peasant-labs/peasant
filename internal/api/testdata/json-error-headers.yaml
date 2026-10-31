@@ -1,0 +1,10 @@
+requiredNames: [session unavailable, annotations unavailable, annotation types unavailable, commits unavailable, pull evidence unavailable, invalid commit session, invalid pull session, escaped error message]
+cases:
+  - {name: session unavailable, path: /api/v1/sessions/not-present, status: 503}
+  - {name: annotations unavailable, path: '/api/v1/annotations?session_id=any', status: 503}
+  - {name: annotation types unavailable, path: /api/v1/annotation-types, status: 503}
+  - {name: commits unavailable, path: /api/v1/sessions/5d625d28-937e-4d9f-bd1a-1a44890d6112/commits, status: 503}
+  - {name: pull evidence unavailable, path: /api/v1/sessions/5d625d28-937e-4d9f-bd1a-1a44890d6112/pull-requests, status: 503}
+  - {name: invalid commit session, path: /api/v1/sessions/invalid/commits, status: 400}
+  - {name: invalid pull session, path: /api/v1/sessions/invalid/pull-requests, status: 400}
+  - {name: escaped error message, message: "invalid value: \"quoted\"\nretry", status: 400}

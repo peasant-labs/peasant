@@ -1,0 +1,24 @@
+# Exact membership of the closed sets a --json document can carry. A code is
+# added here in the same change that adds it to the Go set; a code removed
+# from the Go set without this file fails the test. rejected lists values the
+# constructors must refuse.
+warningCodes:
+  - session_refused
+  - index_stale
+  - index_maintenance_pending
+  - filter_ignored
+emptyCodes:
+  - store_has_no_sessions
+  - filters_excluded_all
+  - input_list_was_empty
+  - nothing_changed
+  - not_fetched_yet
+confirmDecisions:
+  - ask
+  - assumed_yes
+  - skipped_dry_run
+  - refused_no_tty
+rejected:
+  - bogus
+  - ""
+  - Session_Refused

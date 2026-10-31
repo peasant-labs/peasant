@@ -55,6 +55,13 @@ func claudeCandidateCompletionFailure(session DiscoveredSession) error {
 	}
 }
 
+// claudeCandidateRegates reports whether a recorded sidecar is re-gated at the
+// current schema. A negative revision is not a version any build wrote: the
+// extraction boundary refuses it, so the candidate never normalizes it.
+func claudeCandidateRegates(version int) bool {
+	return version >= 0 && metadataNeedsNativeRefresh(version)
+}
+
 // BuildGeneration runs the production Claude candidate exit: retained identity
 // proof over the captured bytes, stored metadata extraction, strict record
 // validation, tolerant classification, and the shared validated generation
@@ -103,7 +110,7 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	// future revision is not re-gated; the ordinary extraction boundary
 	// refuses it.
 	recorded := in.RecordedMetadata
-	if recorded.SchemaVersion >= 0 && metadataNeedsNativeRefresh(recorded.SchemaVersion) {
+	if claudeCandidateRegates(recorded.SchemaVersion) {
 		revisioned := *recorded
 		revisioned.SchemaVersion = CurrentSchemaVersion
 		recorded = &revisioned
