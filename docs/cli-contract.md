@@ -28,6 +28,7 @@ commands do today.
 | 1 | The command failed after it had started its work. |
 | 2 | The command refused how it was called: flags that cannot be combined, a flag value outside its closed set, a `--sessions-from` input it cannot read, or a confirmation it cannot ask for. Nothing was attempted. Fix the call; retrying it unchanged fails again. |
 | 3 | `village push` failed before it made a single request to peasant online. Nothing was published and nothing was recorded as published. |
+| 4 | `sessions review` ran to the end and found residue. No session failed, and at least one has findings. A session it could not review makes it exit 1 instead. |
 
 Status 2 is raised by the refusals that `internal/clicontract` owns. An unknown
 flag or a flag with a missing value is reported by the flag parser and still
@@ -36,14 +37,24 @@ exits 1.
 ## Session ids in: `--sessions-from`
 
 `--sessions-from` reads a file, or standard input when the value is `-`. It
-accepts three shapes and picks one from the first character that is not a
+accepts four shapes and picks one from the first character that is not a
 space:
 
 - **One id per line.** Blank lines and lines that start with `#` are skipped.
 - **A JSON array of ids**, for example `["a1b2...", "c3d4..."]`.
 - **A JSON array of objects.** Each object gives its `id` key, or else its
-  `session_id` key. This is the array `peasant sessions list --json` prints, so
-  its output can be piped straight in.
+  `session_id` key, or else its `sessionId` key. This is the array
+  `peasant sessions list --json` prints, so its output can be piped straight in.
+- **A `sessions review --json` document.** An object with a `sessions` array,
+  each element carrying `sessionId` and `status`. Any other object is refused.
+
+From a review document only the sessions with status `clean` are taken. The same
+rule holds for an array of objects that carry both `sessionId` and `status`, so
+`jq .sessions` does not remove it. Each session left out is reported by the
+receiving command as a `session_refused` warning, and a run continues with the
+clean ones. When no session is clean the input is refused with exit status 2,
+and the refusal names each session and its status (`village push` exits 3 for
+this refusal, as for its others).
 
 A repeated id is used once, at its first position. An input in any other shape
 is refused with the line or array index of the fault. An input that names no id
@@ -57,6 +68,26 @@ list, each id once.
 ```sh
 peasant sessions list --json --limit 20 | peasant export sessions --sessions-from - --output-dir out --json
 ```
+
+### Piping a review into a publish
+
+```sh
+peasant sessions list --json \
+  | peasant sessions review --sessions-from - --json \
+  | peasant village push --sessions-from - --dry-run --json
+```
+
+`sessions review` exits 4 when it finds residue, and it still prints its
+document. In a shell pipe without `set -o pipefail`, that status is not seen and
+the next command runs anyway. This is why the clean-only rule lives in the
+reader: the session with findings stops at `--sessions-from`, whatever the shell
+did with the exit status. Use `set -o pipefail` when a script must also stop on
+findings. A review that writes nothing to the pipe, such as a usage error,
+leaves an empty input, which the next command refuses.
+
+The status of a review entry covers the session's subagent sessions, because
+`village push` sends them with it. Naming a session with `--session` on
+`village push` is your own choice and is not filtered.
 
 ## Warnings and empty results out
 
@@ -196,7 +227,8 @@ resolves the names), or a `--collective` confirmation it cannot ask for. Under
 | command | follows |
 |---|---|
 | `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, `refused` and `refusal_reasons` counts in the document, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused: 1 strict_capture_refused; peasant harvest index re-indexes 1 of them`. It exits 1 when it refuses any session, and the sessions it did export stay written |
-| `redact` | `--sessions-from` |
+| `redact` | `--sessions-from`, with `warnings` in its `--json` document only when a review document left sessions out |
+| `sessions review` | `--sessions-from`, `--json` with `warnings` |
 | `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`, with a per-session `plan` (below) |
 | `upgrade` | `-y` |
 

@@ -124,10 +124,10 @@ func makeGroupCommandsRunnable(cmd *cobra.Command) {
 
 // exitCodeFor maps a command failure to the status peasant exits with.
 //
-// Only one distinction is drawn, and it exists for a reader that cannot read
-// the message: a generated Git hook sees the status and nothing else. A push
-// that failed before sending anything must not be reported by that hook as one
-// that published part of its work. The version alias is the mirror image: its
+// The distinctions exist for a reader that cannot read the message: a generated
+// Git hook sees the status and nothing else. A push that failed before sending
+// anything must not be reported by that hook as one that published part of its
+// work, and a review that found residue is not a review that failed. The version alias is the mirror image: its
 // sentinel error is a success, and main maps it to exit 0.
 func exitCodeFor(err error) defaults.ExitCode {
 	var versionRequested *versionRequestedError
@@ -137,6 +137,10 @@ func exitCodeFor(err error) defaults.ExitCode {
 	var nothingAttempted *pushNothingAttemptedError
 	if errors.As(err, &nothingAttempted) {
 		return defaults.ExitNothingAttempted
+	}
+	var findings *sessionsReviewFindingsError
+	if errors.As(err, &findings) {
+		return defaults.ExitFindings
 	}
 	var usage *clicontract.UsageError
 	if errors.As(err, &usage) {

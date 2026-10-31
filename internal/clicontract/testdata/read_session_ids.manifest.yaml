@@ -11,3 +11,17 @@ requiredNames:
   - empty_json_array_refused
   - text_line_with_json_refused
   - non_string_element_refused
+  - session_id_camel_key_in_array
+  - session_id_snake_key_keeps_its_own_status
+  - review_document_takes_only_clean
+  - review_document_nothing_clean_refused
+  - review_entries_keep_the_rule_without_the_document
+  - review_entries_keep_the_rule_beside_another_id_key
+  - review_entries_unknown_status_refused
+  - id_both_clean_and_not_clean_is_not_clean
+  - review_document_empty_sessions_refused
+  - review_document_unknown_status_refused
+  - review_document_missing_status_refused
+  - review_document_needs_session_id_camel_key
+  - object_without_sessions_refused
+  - object_with_content_after_it_refused

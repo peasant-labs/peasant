@@ -1,0 +1,182 @@
+# Detector cases. Every value here is an obviously fake canary. entries run
+# through the real redactor at the standard level, so a case that says nothing
+# is found proves the redactor removed it first. An entry's index is its
+# position. ownerEmails is the owner set. want lists the findings in order, and
+# an absent want means none. kinds lists finding kinds for a case that asserts
+# only those.
+closedLists:
+  findingKinds:
+    - credential_assignment
+    - credential_file_output
+    - foreign_email
+    - shareable_document_link
+    - redaction_residue
+  credentialFileNames:
+    - .credentials.json
+    - .env
+    - .netrc
+    - .npmrc
+    - .pgpass
+    - .pypirc
+    - application_default_credentials.json
+    - auth.json
+    - credentials
+    - credentials.json
+    - id_ed25519
+    - id_rsa
+    - secrets.json
+    - secrets.yaml
+    - secrets.yml
+    - service-account.json
+    - service_account.json
+    - token.json
+  shareableHosts:
+    - docs.google.com
+    - drive.google.com
+    - dropbox.com
+    - www.dropbox.com
+    - 1drv.ms
+    - .sharepoint.com
+    - app.box.com
+
+cases:
+  - name: clean_session
+    entries:
+      - { role: user, text: "please fix the failing test in the parser" }
+      - { role: assistant, text: "the parser now handles an empty line" }
+
+  - name: known_key_is_redacted_not_reported
+    entries:
+      - { role: tool, output: "the key is sk-ant-api03-FAKEcanaryFAKEcanaryFAKEcanaryFAKEcanaryFAKEcanaryFAKEcanary" }
+
+  - name: unknown_format_assignment
+    entries:
+      - { role: user, text: "secret_key: FAKE-canary-value-not-real-0123456789-abcd" }
+    want:
+      - { kind: credential_assignment, entry: 0, role: user, rule: credential_name_value, preview: "secret_key=**** (len 32-63)" }
+
+  - name: low_entropy_value_ignored
+    entries:
+      - { role: user, text: "token: example" }
+      - { role: user, text: "password = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1" }
+
+  - name: code_expression_is_not_a_value
+    entries:
+      - { role: assistant, text: "key = getConfiguredProvider-Name.fromSettings" }
+
+  - name: placeholder_is_not_a_value
+    entries:
+      - { role: tool, output: "API_TOKEN=<REDACTED_BY_AN_EARLIER_PASS_01234>" }
+
+  - name: credentials_json_tool_result
+    entries:
+      - { role: user, text: "read the file" }
+      - { role: assistant, toolCallId: call-1, toolInput: '{"file_path": "/srv/app/credentials.json"}', toolKind: read }
+      - { role: tool, toolCallId: call-1, output: '{"type": "service_account", "private": "FAKE-canary-value-not-real-0123456789-abcd"}' }
+    want:
+      - { kind: credential_file_output, entry: 2, role: tool, rule: credential_file_name, preview: "credentials.json: content=****" }
+
+  - name: failed_read_of_credentials_is_not_output
+    entries:
+      - { role: assistant, toolCallId: call-1, toolInput: '{"file_path": "/srv/app/credentials.json"}', toolKind: read }
+      - { role: tool, toolCallId: call-1, output: "no such file", isError: true }
+
+  - name: write_of_credentials_is_not_output
+    entries:
+      - { role: assistant, toolCallId: call-1, toolInput: '{"file_path": "/srv/app/.env"}', toolKind: edit }
+      - { role: tool, toolCallId: call-1, output: "file written" }
+
+  - name: env_listing_tool_result
+    entries:
+      - { role: tool, output: "ACCESS_KEY=FAKEcanary0access1key\nSECRET_KEY=FAKE-canary-value-not-real-0123456789-abcd\nPATH_STYLE=true" }
+    want:
+      - { kind: credential_file_output, entry: 0, role: tool, rule: secret_env_listing, preview: "2 secret-named lines=****" }
+
+  - name: env_listing_of_numbers_ignored
+    entries:
+      - { role: tool, output: "MAX_TOKENS=4000\nTOKEN_LIMIT=100" }
+
+  - name: owner_email_ignored
+    ownerEmails: ["Andre@Univ.Example.edu", "andré@univ.example.edu"]
+    entries:
+      - { role: user, text: "write to andré@univ.example.edu" }
+
+  - name: foreign_email_in_prompt
+    entries:
+      - { role: user, text: "write to andré@univ.example.edu" }
+    want:
+      - { kind: foreign_email, entry: 0, role: user, rule: foreign_email, preview: "a***@univ.example.edu" }
+
+  - name: foreign_email_in_tool_result
+    entries:
+      - { role: tool, output: "owner: andré@univ.example.edu" }
+    want:
+      - { kind: foreign_email, entry: 0, role: tool, rule: foreign_email, preview: "a***@univ.example.edu" }
+
+  - name: redacted_email_not_reported
+    entries:
+      - { role: user, text: "write to someone.else@example.org" }
+
+  - name: git_remote_is_not_an_email
+    entries:
+      - { role: user, text: "git@example.org is the deploy account" }
+
+  - name: shareable_link_each_host
+    entries:
+      - { role: user, text: "https://docs.google.com/document/d/FAKEdocument/edit?usp=sharing" }
+      - { role: user, text: "https://drive.google.com/file/d/FAKEdocument/view" }
+      - { role: user, text: "https://dropbox.com/s/FAKEdocument/notes.txt" }
+      - { role: user, text: "https://www.dropbox.com/scl/fi/FAKEdocument/notes.txt?dl=0" }
+      - { role: user, text: "https://1drv.ms/u/FAKEdocument" }
+      - { role: user, text: "https://acme.sharepoint.com/:w:/FAKEdocument" }
+      - { role: user, text: "https://app.box.com/s/FAKEdocument" }
+    want:
+      - { kind: shareable_document_link, entry: 0, role: user, rule: share_google_docs, preview: "docs.google.com/document/****" }
+      - { kind: shareable_document_link, entry: 1, role: user, rule: share_google_drive, preview: "drive.google.com/file/****" }
+      - { kind: shareable_document_link, entry: 2, role: user, rule: share_dropbox, preview: "dropbox.com/s/****" }
+      - { kind: shareable_document_link, entry: 3, role: user, rule: share_dropbox, preview: "www.dropbox.com/scl/****" }
+      - { kind: shareable_document_link, entry: 4, role: user, rule: share_onedrive, preview: "1drv.ms/u/****" }
+      - { kind: shareable_document_link, entry: 5, role: user, rule: share_sharepoint, preview: "acme.sharepoint.com/:w:/****" }
+      - { kind: shareable_document_link, entry: 6, role: user, rule: share_box, preview: "app.box.com/s/****" }
+
+  - name: private_link_ignored
+    entries:
+      - { role: user, text: "https://docs.google.com/document/u/0/" }
+      - { role: user, text: "https://www.dropbox.com/home/notes" }
+      - { role: user, text: "https://evil.example.org/document/d/FAKEdocument" }
+
+  - name: residue_passthrough
+    entries:
+      - { role: tool, output: "Bearer FAKEcanaryNOTaTOKEN" }
+    want:
+      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****" }
+
+  - name: git_remote_is_not_also_an_email_residue
+    entries:
+      - { role: user, text: "clone git@gitlab.com:acme/tools.git" }
+    want:
+      - { kind: redaction_residue, entry: 0, role: user, rule: residue_git_remote_ssh, preview: "residue_git_remote_ssh: ****" }
+
+  - name: assignment_is_not_also_residue
+    entries:
+      - { role: user, text: "session_token: 0123456789abcdef0123456789abcdef" }
+    want:
+      - { kind: credential_assignment, entry: 0, role: user, rule: credential_name_value, preview: "session_token=**** (len 32-63)" }
+
+  - name: link_is_not_also_residue
+    entries:
+      - { role: user, text: "https://docs.google.com/document/d/FAKEdocumentFAKEdocumentFAKEdocumentFAKEdocument1" }
+    want:
+      - { kind: shareable_document_link, entry: 0, role: user, rule: share_google_docs, preview: "docs.google.com/document/****" }
+
+  - name: repeated_finding_reported_once
+    entries:
+      - { role: tool, output: "Bearer FAKEcanaryNOTaTOKEN then Bearer FAKEcanaryNOTaTOKEN" }
+    want:
+      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****" }
+
+  - name: preview_max_length
+    entries:
+      - { role: user, text: "an_extremely_long_secret_key_name_that_keeps_going_for_a_while: FAKE-canary-value-not-real-0123456789-abcd" }
+      - { role: user, text: "write to andré@a-very-long-department-name.of-a-university.example.edu" }
+      - { role: user, text: "https://a-very-long-tenant-name-of-a-company-somewhere.sharepoint.com/:w:/FAKEdocument" }

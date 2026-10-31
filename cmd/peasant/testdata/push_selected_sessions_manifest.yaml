@@ -43,3 +43,6 @@ requiredNames:
   - refused_upload_exits_1_on_named_sessions
   - refused_upload_exits_1_without_named_sessions
   - not_ready_session_keeps_exit_0_without_named_sessions
+  - review_document_sends_only_clean
+  - review_document_nothing_clean_refused
+  - session_flag_is_not_reported_as_dropped

@@ -122,6 +122,48 @@ depth-0 turn. For a depth-0 entry it is empty. A harness message graph, when one
 exists, is carried on the entry `parent_entry_id` link instead: OpenCode records
 a depth-0 message's parent message there. Renderers decide nesting by `depth`.
 
+## `peasant sessions review`
+
+Redaction removes what its rules know. `sessions review` looks for what is left
+in sessions you name, before you publish them. It reads each session, runs your
+configured redactor on it in memory, and scans the result. It writes nothing,
+and it does not stop a publish on its own.
+
+```bash
+peasant sessions review --session <id>
+peasant sessions review --session <id> --owner-email you@example.org
+peasant sessions list --json --limit 20 | peasant sessions review --sessions-from - --json
+```
+
+| kind | what it found |
+|---|---|
+| `credential_assignment` | A secret-named `name: value` whose value is long, high in entropy, and known to no rule. |
+| `credential_file_output` | A tool result from reading a credential-shaped file, or one listing two or more secret-named `NAME=value` lines. |
+| `foreign_email` | An address that survived redaction and is not yours. Your addresses are your git identity and each `--owner-email`. |
+| `shareable_document_link` | A link on a closed list of document hosts that anyone holding it can open. |
+| `redaction_residue` | A hit from the redaction module's advisory rules. These are broad on purpose, so expect some on ordinary text such as long paths and hashes. |
+
+A finding shows a masked preview, such as `secret_key=**** (len 32-63)`, and
+never the matched text. Text output is one line per finding,
+`<session> entry <n> <role> <kind> <preview>`, then a total.
+
+Each session gets a status. `clean` means it was read in full and nothing was
+found. `findings` means it has at least one finding. `error` means it could not
+be reviewed, and `reason` says why: a session stored only as a bounded preview
+is an error, never clean. A session's subagent sessions are reviewed with it, as
+`village push` sends them with it, so its status covers them. A finding's
+`sessionId` names the session it is in, and `subagents` counts the subagent
+sessions reviewed.
+
+The exit status is 0 when every session is clean, 4 when at least one has
+findings and none failed, and 1 when at least one could not be reviewed. With
+no session named it exits 2 and reads nothing.
+
+The `--json` document can be piped into a command that takes `--sessions-from`,
+which then takes only the clean sessions.
+[The CLI contract](cli-contract.md#piping-a-review-into-a-publish) explains why
+that holds even when the shell ignores the exit status.
+
 ## `peasant sessions tag`
 
 Session tags are free-form labels you can attach to sessions and then filter on
@@ -137,7 +179,8 @@ peasant sessions tag list <session-id>           # show a session's tags
 ## See also
 
 - [`docs/cli/peasant_sessions_list.md`](cli/peasant_sessions_list.md),
-  [`docs/cli/peasant_sessions_context.md`](cli/peasant_sessions_context.md) —
+  [`docs/cli/peasant_sessions_context.md`](cli/peasant_sessions_context.md),
+  [`docs/cli/peasant_sessions_review.md`](cli/peasant_sessions_review.md) —
   auto-generated flag references
 - [Annotation CLI reference](cli/peasant_annotate.md) — commands for creating and importing
   annotations

@@ -12,3 +12,6 @@ requiredNames:
   - y_shorthand_registered
   - export_missing_source_is_usage_error
   - export_sessions_from_with_session_is_usage_error
+  - export_review_document_takes_only_clean
+  - export_review_document_nothing_clean_is_usage_error
+  - redact_review_document_warns

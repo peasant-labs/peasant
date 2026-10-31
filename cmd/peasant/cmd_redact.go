@@ -67,13 +67,17 @@ func BuildRedactCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// --sessions-from replaces --session and --all; the resolver
 			// refuses a combination and an empty list, so a list never widens.
-			fromIDs, fromSet, fromErr := clicontract.ResolveSessionsFrom(cmd)
+			fromList, fromSet, fromErr := clicontract.ResolveSessionsFrom(cmd)
 			if fromErr != nil {
 				cmd.SilenceUsage = true
 				return fromErr
 			}
 			if fromSet {
-				sessionIDs = fromIDs
+				sessionIDs = fromList.IDs
+			}
+			inputWarnings := clicontract.NewCollector(cmd.ErrOrStderr(), jsonOutput)
+			for _, warning := range fromList.Warnings() {
+				inputWarnings.Warn(warning)
 			}
 
 			// Require at least one filter.
@@ -81,51 +85,11 @@ func BuildRedactCommand() *cobra.Command {
 				return fmt.Errorf("at least one filter is required (--session, --sessions-from or --all)")
 			}
 
-			// Load config for default redaction level.
-			//
-			// Through resolveConfigPath, NOT the raw --config flag. Reading the flag
-			// directly returns its DEFAULT when it is unset, so --config-dir - a
-			// supported root flag - was ignored here: a configuration carrying a
-			// level this version refuses ran to completion and exited 0, while the
-			// same file passed via --config refused correctly. The refusal this
-			// command owns was bypassed by a supported flag.
-			cfgPath := resolveConfigPath(cmd)
-			cfg, err := loadConfig(cfgPath)
+			built, err := buildRedactor(cmd, level, redactOperationRefusal, loadConfig)
 			if err != nil {
-				// Non-fatal: use default config if file not found.
-				cfg = config.BaseConfig()
+				return err
 			}
-
-			// Resolve redaction level: --level flag overrides config.
-			requestedLevel := cfg.Redaction.Level
-			if level != "" {
-				requestedLevel = redact.RedactionLevel(level)
-			}
-			if !requestedLevel.IsValid() {
-				return fmt.Errorf("invalid redaction level %q (the level this version offers is %s)",
-					requestedLevel, config.RedactionLevelMenu())
-			}
-			if refusal := redactionLevelRefusal(requestedLevel, level != "", configSourceDescription(cfgPath)); refusal != nil {
-				cmd.SilenceUsage = true
-				return refusal
-			}
-			redactionPolicy := config.ResolveRedactionPolicy(requestedLevel)
-			if redactionPolicy.Raised() {
-				fmt.Fprintln(cmd.ErrOrStderr(), redactionPolicy.Disclosure())
-			}
-			redactLevel := redactionPolicy.Effective
-
-			// Convert custom patterns from config.
-			userPatterns, err := config.CustomPatternsToUserPatterns(cfg.Redaction.CustomPatterns)
-			if err != nil {
-				return fmt.Errorf("invalid custom patterns: %w", err)
-			}
-
-			// Create redactor.
-			redactor, err := redact.NewRedactor(redactLevel, userPatterns, resolveXDGPaths(cmd))
-			if err != nil {
-				return fmt.Errorf("create redactor: %w", err)
-			}
+			redactor, redactLevel := built.Redactor, built.Level
 
 			// Open the store to look up session locations.
 			db, cleanup, err := openDB(cmd)
@@ -197,14 +161,20 @@ func BuildRedactCommand() *cobra.Command {
 
 			// Output results.
 			if jsonOutput {
-				return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
+				document := map[string]any{
 					"dry_run":      dryRun,
 					"redacted":     redactedCount,
 					"skipped":      skippedCount,
 					"not_ingested": noFilesCount,
 					"errors":       errorCount,
 					"sessions":     results,
-				})
+				}
+				// Present only for a review document's dropped sessions, so
+				// every other run prints the document it always printed.
+				if inputWarnings.Count() > 0 {
+					document["warnings"] = inputWarnings.Meta("", "").Warnings
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(document)
 			}
 
 			if dryRun {
@@ -418,6 +388,81 @@ func redactJSONDocBytes(r redact.Redactor, data []byte) []byte {
 	return redact.RedactJSONDocBytes(r, data)
 }
 
+// builtRedactor is the redactor a command runs with, and the configuration and
+// effective level that decided it.
+type builtRedactor struct {
+	Redactor redact.Redactor
+	Level    redact.RedactionLevel
+	Config   *config.Config
+}
+
+// buildRedactor is the one construction of the configured redactor: the level
+// from --level or the configuration, its refusals and disclosure, the custom
+// patterns, and redact.NewRedactor. load reads the configuration, which lets a
+// read-only command read it without migrating the file.
+func buildRedactor(cmd *cobra.Command, level string, refusal redactionRefusalText, load func(string) (*config.Config, error)) (builtRedactor, error) {
+	// Load config for default redaction level.
+	//
+	// Through resolveConfigPath, NOT the raw --config flag. Reading the flag
+	// directly returns its DEFAULT when it is unset, so --config-dir - a
+	// supported root flag - was ignored here: a configuration carrying a
+	// level this version refuses ran to completion and exited 0, while the
+	// same file passed via --config refused correctly. The refusal this
+	// command owns was bypassed by a supported flag.
+	cfgPath := resolveConfigPath(cmd)
+	cfg, err := load(cfgPath)
+	if err != nil {
+		// Non-fatal: use default config if file not found.
+		cfg = config.BaseConfig()
+	}
+
+	// Resolve redaction level: --level flag overrides config.
+	requestedLevel := cfg.Redaction.Level
+	if level != "" {
+		requestedLevel = redact.RedactionLevel(level)
+	}
+	if !requestedLevel.IsValid() {
+		return builtRedactor{}, fmt.Errorf("invalid redaction level %q (the level this version offers is %s)",
+			requestedLevel, config.RedactionLevelMenu())
+	}
+	if refused := refusal.of(requestedLevel, level != "", configSourceDescription(cfgPath)); refused != nil {
+		cmd.SilenceUsage = true
+		return builtRedactor{}, refused
+	}
+	redactionPolicy := config.ResolveRedactionPolicy(requestedLevel)
+	if redactionPolicy.Raised() {
+		fmt.Fprintln(cmd.ErrOrStderr(), redactionPolicy.Disclosure())
+	}
+
+	// Convert custom patterns from config.
+	userPatterns, err := config.CustomPatternsToUserPatterns(cfg.Redaction.CustomPatterns)
+	if err != nil {
+		return builtRedactor{}, fmt.Errorf("invalid custom patterns: %w", err)
+	}
+
+	// Create redactor.
+	redactor, err := redact.NewRedactor(redactionPolicy.Effective, userPatterns, resolveXDGPaths(cmd))
+	if err != nil {
+		return builtRedactor{}, fmt.Errorf("create redactor: %w", err)
+	}
+	return builtRedactor{Redactor: redactor, Level: redactionPolicy.Effective, Config: cfg}, nil
+}
+
+// redactionRefusalText names, in a level refusal, the command that refused and
+// what it had not yet done.
+type redactionRefusalText struct {
+	Operation string
+	Step      string
+	Impact    string
+}
+
+// redactOperationRefusal is the refusal text of `peasant redact`.
+var redactOperationRefusal = redactionRefusalText{
+	Operation: "peasant redact",
+	Step:      "before any stored transcript was read or rewritten",
+	Impact:    "No transcript was changed.",
+}
+
 // redactionLevelRefusal is what `peasant redact` does with a level before it
 // opens anything, or nil when the run may proceed.
 //
@@ -436,15 +481,17 @@ func redactJSONDocBytes(r redact.Redactor, data []byte) []byte {
 // while the same level sitting in a configuration is raised and disclosed, there
 // being nobody at the keyboard to tell at the moment it is read.
 func redactionLevelRefusal(level redact.RedactionLevel, askedByFlag bool, configSource string) error {
+	return redactOperationRefusal.of(level, askedByFlag, configSource)
+}
+
+// of applies the level policy for the command this text names. The policy is
+// shared; only the words differ.
+func (t redactionRefusalText) of(level redact.RedactionLevel, askedByFlag bool, configSource string) error {
 	source := configSource
 	if askedByFlag {
 		source = "the --level flag"
 	}
-	const (
-		operation = "peasant redact"
-		step      = "before any stored transcript was read or rewritten"
-		impact    = "No transcript was changed."
-	)
+	operation, step, impact := t.Operation, t.Step, t.Impact
 	switch config.RedactionLevelDispositionOf(level) {
 	case config.RedactionLevelDispositionRefused, config.RedactionLevelDispositionUnknown:
 		return &config.UnsupportedRedactionLevelError{

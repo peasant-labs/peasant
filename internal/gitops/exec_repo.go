@@ -90,6 +90,17 @@ func (r *ExecGitRepository) runGit(ctx context.Context, args ...string) ([]byte,
 	return out, nil
 }
 
+// UserEmail returns the repository's `git config user.email`, or "" when it is
+// not set. git exits 1 for an unset key, so any failure reads as unset: the
+// caller treats the value as a hint, not a requirement.
+func (r *ExecGitRepository) UserEmail(ctx context.Context) string {
+	out, err := r.runGit(ctx, "config", "user.email")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // runGitLines executes one git command and returns non-empty trimmed output lines.
 func (r *ExecGitRepository) runGitLines(ctx context.Context, args ...string) ([]string, error) {
 	out, err := r.runGit(ctx, args...)

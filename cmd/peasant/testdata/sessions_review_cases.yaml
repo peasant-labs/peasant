@@ -1,0 +1,223 @@
+# sessions review through the production command, a real store and a real
+# redactor. Every value here is an obviously fake canary.
+#
+# bodies: named transcripts. An entry has role and text or output, and a tool
+#   call has toolCallId and toolInput. padOutput puts that many filler bytes
+#   ahead of the output, past every bounded preview.
+# seeds: one stored session each. capture is full (default), preview (a stored
+#   row with bounded entries and no verified capture) or native (a managed
+#   generation, whose entries live in the generation tables). parent makes it a
+#   subagent session.
+# runs: args after `sessions review`; gitEmail is the git identity the command
+#   sees, none when empty. wantStatus maps a session to its status and
+#   wantKinds to its finding kinds in order. wantReason maps a session to text
+#   its reason must hold. wantErr is text the error must hold. wantWarnings are
+#   the ids in the document's warnings. wantStderrEmpty asserts no warning line.
+#
+# Session ids:
+#   A 7a7a7a7a-0000-4000-8000-00000000000a   B 7b7b7b7b-0000-4000-8000-00000000000b
+#   C 7c7c7c7c-0000-4000-8000-00000000000c   G 7d7d7d7d-0000-4000-8000-00000000000d
+#   U 99999999-0000-4000-8000-000000000099 (never stored)
+canaries:
+  - FAKE-canary-value-not-real-0123456789-abcd
+  - FAKE-canary-file-content-0123456789-efgh
+  - FAKE-canary-env-access-0123456789-ijkl
+  - FAKE-canary-env-secret-0123456789-mnop
+  - andré
+  - FAKE-canary-document-id
+  - FAKEcanaryNOTaTOKEN
+
+bodies:
+  clean:
+    - { role: user, text: "please fix the failing test in the parser" }
+    - { role: assistant, text: "the parser now handles an empty line" }
+  assignment:
+    - { role: user, text: "secret_key: FAKE-canary-value-not-real-0123456789-abcd" }
+  owner_mail:
+    - { role: user, text: "mail andré@univ.example.edu about this" }
+  long_output:
+    - { role: tool, padOutput: 300000, output: "secret_key: FAKE-canary-value-not-real-0123456789-abcd" }
+  every_kind:
+    - { role: user, text: "secret_key: FAKE-canary-value-not-real-0123456789-abcd" }
+    - { role: assistant, toolCallId: call-1, toolInput: '{"file_path": "/srv/app/credentials.json"}' }
+    - { role: tool, toolCallId: call-1, output: '{"private": "FAKE-canary-file-content-0123456789-efgh"}' }
+    - { role: tool, output: "ACCESS_KEY=FAKE-canary-env-access-0123456789-ijkl\nSECRET_KEY=FAKE-canary-env-secret-0123456789-mnop" }
+    - { role: user, text: "mail andré@univ.example.edu about this" }
+    - { role: user, text: "https://docs.google.com/document/d/FAKE-canary-document-id/edit?usp=sharing" }
+    - { role: tool, output: "Bearer FAKEcanaryNOTaTOKEN" }
+
+cases:
+  - name: clean_session
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: clean }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        wantExit: 0
+        wantStatus: { 7a7a7a7a-0000-4000-8000-00000000000a: clean }
+
+  - name: exit_status_matrix
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: clean }
+      - { id: 7b7b7b7b-0000-4000-8000-00000000000b, body: assignment }
+      - { id: 7c7c7c7c-0000-4000-8000-00000000000c, body: clean, capture: preview }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        wantExit: 0
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --session, 7b7b7b7b-0000-4000-8000-00000000000b, --json]
+        wantExit: 4
+        wantStatus:
+          7a7a7a7a-0000-4000-8000-00000000000a: clean
+          7b7b7b7b-0000-4000-8000-00000000000b: findings
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --session, 7c7c7c7c-0000-4000-8000-00000000000c, --json]
+        wantExit: 1
+      - args: [--session, 7b7b7b7b-0000-4000-8000-00000000000b, --session, 7c7c7c7c-0000-4000-8000-00000000000c, --json]
+        wantExit: 1
+        wantStatus:
+          7b7b7b7b-0000-4000-8000-00000000000b: findings
+          7c7c7c7c-0000-4000-8000-00000000000c: error
+      - args: [--session, 99999999-0000-4000-8000-000000000099, --json]
+        wantExit: 1
+        wantStatus: { 99999999-0000-4000-8000-000000000099: error }
+        wantReason: { 99999999-0000-4000-8000-000000000099: does not hold this session }
+
+  - name: no_session_selected
+    runs:
+      - args: [--json]
+        wantExit: 2
+        wantErr: [no session selected]
+      - args: [--sessions-from, "-"]
+        stdin: "# only a comment\n"
+        wantExit: 2
+        wantErr: [names no session ids]
+
+  - name: session_flag_and_list_refused
+    runs:
+      - args: [--session, x, --sessions-from, "-"]
+        stdin: "y\n"
+        wantExit: 2
+        wantErr: [conflicting flags]
+
+  - name: preview_only_capture_is_error
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: clean, capture: preview }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        wantExit: 1
+        wantStatus: { 7a7a7a7a-0000-4000-8000-00000000000a: error }
+        wantReason: { 7a7a7a7a-0000-4000-8000-00000000000a: bounded preview }
+
+  - name: native_session_reviewed
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: assignment, capture: native }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        wantExit: 4
+        wantStatus: { 7a7a7a7a-0000-4000-8000-00000000000a: findings }
+        wantKinds: { 7a7a7a7a-0000-4000-8000-00000000000a: [credential_assignment] }
+
+  - name: full_tool_output_scanned
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: long_output }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        wantExit: 4
+        wantKinds: { 7a7a7a7a-0000-4000-8000-00000000000a: [credential_assignment] }
+
+  - name: owner_email_ignored
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: owner_mail }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        gitEmail: andré@univ.example.edu
+        wantExit: 0
+
+  - name: flag_owner_email_ignored
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: owner_mail }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --owner-email, andré@univ.example.edu, --json]
+        wantExit: 0
+
+  - name: foreign_email_in_prompt
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: owner_mail }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        gitEmail: someone@example.org
+        wantExit: 4
+        wantKinds: { 7a7a7a7a-0000-4000-8000-00000000000a: [foreign_email] }
+
+  - name: subagent_findings_hold_the_parent
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: clean }
+      - { id: 7d7d7d7d-0000-4000-8000-00000000000d, body: assignment, parent: 7a7a7a7a-0000-4000-8000-00000000000a }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        wantExit: 4
+        wantStatus: { 7a7a7a7a-0000-4000-8000-00000000000a: findings }
+        wantKinds: { 7a7a7a7a-0000-4000-8000-00000000000a: [credential_assignment] }
+
+  - name: subagent_error_holds_the_parent
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: clean }
+      - { id: 7d7d7d7d-0000-4000-8000-00000000000d, body: clean, capture: preview, parent: 7a7a7a7a-0000-4000-8000-00000000000a }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        wantExit: 1
+        wantStatus: { 7a7a7a7a-0000-4000-8000-00000000000a: error }
+        wantReason: { 7a7a7a7a-0000-4000-8000-00000000000a: subagent session 7d7d7d7d-0000-4000-8000-00000000000d }
+
+  - name: sessions_list_output_piped_in
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: clean }
+    runs:
+      - args: [--sessions-from, "-", --json]
+        stdin: '[{"id": "7a7a7a7a-0000-4000-8000-00000000000a", "date": "2026-10-29"}]'
+        wantExit: 0
+        wantStderrEmpty: true
+
+  - name: review_document_piped_into_review
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: clean }
+    runs:
+      - args: [--sessions-from, "-", --json]
+        stdin: '{"sessions": [{"sessionId": "7a7a7a7a-0000-4000-8000-00000000000a", "status": "clean"}, {"sessionId": "7b7b7b7b-0000-4000-8000-00000000000b", "status": "findings"}]}'
+        wantExit: 0
+        wantStatus: { 7a7a7a7a-0000-4000-8000-00000000000a: clean }
+        wantWarnings: [7b7b7b7b-0000-4000-8000-00000000000b]
+
+  - name: level_refusals_match_redact
+    runs:
+      - args: [--session, x, --level, maximum]
+        wantExit: 1
+        wantErr: [peasant sessions review]
+      - args: [--session, x, --level, nonsense]
+        wantExit: 1
+        wantErr: [invalid redaction level]
+
+  - name: output_never_contains_value
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: every_kind }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        wantExit: 4
+        wantKinds:
+          7a7a7a7a-0000-4000-8000-00000000000a:
+            - credential_assignment
+            - credential_file_output
+            - credential_file_output
+            - foreign_email
+            - shareable_document_link
+            - redaction_residue
+        goldenFile: sessions_review_output.json
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a]
+        wantExit: 4
+        goldenFile: sessions_review_output.txt
+
+  - name: read_only
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: every_kind }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        wantExit: 4
+        wantUnchanged: true
