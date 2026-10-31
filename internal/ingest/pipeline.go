@@ -289,6 +289,11 @@ type indexedMeta struct {
 // Pipeline composes all ingest stages with dependency injection.
 // It is the concrete implementation of Discoverer, DiffResolver, and OrphanCleaner.
 type Pipeline struct {
+	// runLockPath is the WithRunLock lock file; empty takes no lock.
+	// runLockNoWait fails a held lock after one runLockPoll attempt (WithRunLockNoWait).
+	runLockPath   string
+	runLockNoWait bool
+
 	fs       FileSystem
 	git      GitResolver
 	adapters map[Harness]AdapterFactory
@@ -736,6 +741,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("pipeline start: %w", err)
 	}
+	unlock, err := p.lockRun(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	// REINDEX mode: alternative code path that scans peasant-sync output
 	// instead of discovering from source providers.
@@ -1399,6 +1409,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 					missingInput++
 					continue
 				}
+			}
+			// An age filter leaves a session out exactly as a session filter does,
+			// so it is counted the same way: `harvest --since` must not skip stored
+			// maintenance without saying so.
+			if !p.withinRunAge(startMs) {
+				selectionSkipped++
+				continue
 			}
 			// The pair-repair pass owns a session whose saved pair is missing
 			// or damaged: its pair is not a readable index input, and that pass

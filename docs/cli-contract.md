@@ -26,7 +26,7 @@ commands do today.
 |---|---|
 | 0 | The command succeeded. An empty result is a success. |
 | 1 | The command failed after it had started its work. |
-| 2 | The command refused how it was called: flags that cannot be combined, a `--sessions-from` input it cannot read, or a confirmation it cannot ask for. Nothing was attempted. Fix the call; retrying it unchanged fails again. |
+| 2 | The command refused how it was called: flags that cannot be combined, a flag value outside its closed set, a `--sessions-from` input it cannot read, or a confirmation it cannot ask for. Nothing was attempted. Fix the call; retrying it unchanged fails again. |
 | 3 | `village push` failed before it made a single request to peasant online. Nothing was published and nothing was recorded as published. |
 
 Status 2 is raised by the refusals that `internal/clicontract` owns. An unknown
@@ -88,6 +88,7 @@ Warning codes:
 | `index_stale` | A result read from an index that is behind its sources. |
 | `index_maintenance_pending` | Index maintenance is due and has not run. |
 | `filter_ignored` | A filter the command accepted and did not apply. |
+| `capture_bounded` | A session whose stored text is a bounded preview, or whose capture lacks content, so a read of it is not whole. |
 
 Empty codes:
 
@@ -98,6 +99,7 @@ Empty codes:
 | `input_list_was_empty` | The input list named nothing to act on. |
 | `nothing_changed` | There was nothing new to do. |
 | `not_fetched_yet` | A local copy of state from peasant online has not been fetched yet. |
+| `no_matching_entries` | Stored sessions were read, and no entry met the command's selection. |
 
 Both sets are closed. A new code is added to the set before any command prints
 it.
@@ -195,11 +197,15 @@ resolves the names), or a `--collective` confirmation it cannot ask for. Under
 
 | command | follows |
 |---|---|
-| `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused` |
+| `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, `refused` and `refusal_reasons` counts in the document, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused: 1 strict_capture_refused; peasant harvest index re-indexes 1 of them`. It exits 1 when it refuses any session, and the sessions it did export stay written |
 | `redact` | `--sessions-from` |
+| `sessions prompts` | `--json` with `warnings`, `empty_code` and `empty_reason`; a refused call exits 2 before the store opens |
 | `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`, with a per-session `plan` (below) |
 | `upgrade` | `-y` |
 
 `sessions list --json` prints a bare array, which has no place for `warnings`.
+Each row carries `facets`, an array that is `[]` when no workflow facet holds.
+`sessions list` refuses an unknown `--has` value or an impossible turn bound with
+exit status 2 before it opens the store.
 `export annotations`, `annotate prune` and `annotate sample` still take
 `--session-from-file`, a path only.

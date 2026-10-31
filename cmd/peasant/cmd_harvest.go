@@ -522,6 +522,9 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		pipelineOpts = append(pipelineOpts, ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()))
 	}
 
+	// One writing harvest at a time per data dir, across processes.
+	pipelineOpts = append(pipelineOpts, ingest.WithRunLock(filepath.Join(string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd))), ingest.RunLockFileName)))
+
 	// 9. Create and run pipeline.
 	if err := ctx.Err(); err != nil {
 		cmd.SilenceUsage = true

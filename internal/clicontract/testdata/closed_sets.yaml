@@ -7,12 +7,14 @@ warningCodes:
   - index_stale
   - index_maintenance_pending
   - filter_ignored
+  - capture_bounded
 emptyCodes:
   - store_has_no_sessions
   - filters_excluded_all
   - input_list_was_empty
   - nothing_changed
   - not_fetched_yet
+  - no_matching_entries
 confirmDecisions:
   - ask
   - assumed_yes

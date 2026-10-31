@@ -995,7 +995,13 @@ func (p Program) observeProgress(at time.Time) Program {
 	if p.deps.Progress == nil {
 		return p
 	}
-	p.progressView, _ = p.progressView.Update(ingestprogress.ObserveMsg{At: at, Snapshot: p.deps.Progress.Snapshot()})
+	observed := ingestprogress.ObserveMsg{At: at, Snapshot: p.deps.Progress.Snapshot()}
+	// A source that can say why the run has not started (another harvest
+	// holds the data dir's lock) shows it instead of a silent, empty list.
+	if waiting, ok := p.deps.Progress.(interface{ Waiting() string }); ok {
+		observed.Waiting = waiting.Waiting()
+	}
+	p.progressView, _ = p.progressView.Update(observed)
 	return p
 }
 

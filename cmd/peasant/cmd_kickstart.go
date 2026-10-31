@@ -766,6 +766,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()),
 		)
 
+		pipelineOpts = append(pipelineOpts, ingest.WithRunLock(filepath.Join(string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd))), ingest.RunLockFileName)))
 		pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg, pipelineOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("create pipeline: %w", err)

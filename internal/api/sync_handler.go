@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -1198,6 +1199,10 @@ func (h *syncHandler) handleSyncIngestSession(w http.ResponseWriter, r *http.Req
 	defer closeStore()
 	started := time.Now()
 	result, err := pipeline.Run(ctx)
+	if errors.Is(err, ingest.ErrHarvestRunning) {
+		writeAPIError(w, http.StatusConflict, "another harvest is running on this data dir (for example `peasant harvest` in a terminal); the previous index was kept; retry when it finishes", "ingest_running")
+		return
+	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		writeAPIError(w, http.StatusGatewayTimeout, fmt.Sprintf("re-indexing this session took longer than %s and was stopped; the previous index was kept; retry, or run peasant harvest --session %s", timeout, id), "session_ingest_timeout")
 		return
@@ -1321,6 +1326,10 @@ func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
 	defer closeStore()
 
 	result, err := pipeline.Run(context.Background())
+	if errors.Is(err, ingest.ErrHarvestRunning) {
+		h.setIngestError(fmt.Errorf("another harvest is running on this data dir (for example `peasant harvest` in a terminal); retry when it finishes"))
+		return
+	}
 	if err != nil {
 		h.setIngestError(fmt.Errorf("pipeline failed: %w", err))
 		return
@@ -1422,6 +1431,8 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	}
 
 	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg,
+		ingest.WithRunLock(filepath.Join(string(h.dataDir()), ingest.RunLockFileName)),
+		ingest.WithRunLockNoWait(),
 		ingest.WithStore(db),
 		ingest.WithMetricsStore(db),
 		ingest.WithSalt(db.InstallationSalt()),
