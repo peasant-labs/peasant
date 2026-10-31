@@ -37,6 +37,9 @@ Release, which holds the signed artifacts and checksums.
   no lock. Other commands that write the data directory, such as `prune`,
   `redact` and `kickstart --reset`, do not take this lock; do not run them
   during a harvest.
+- A Claude subagent left out because another session's subagent has the same
+  agent id now raises a `claude_agent_id_collision` warning naming both, in the
+  summary and in `discoveryDiagnostics`. The subagent is still not stored.
 - Claude discovery skips harness-injected `isMeta` notices when choosing session titles. Existing cached transcripts are read again once to refresh their titles.
 - A session `export sessions` or publication refuses now states the reason stored for its capture and the one command that repairs it, `peasant harvest index --session <id>`, or says that this build cannot lift the refusal. Damaged content names `peasant harvest index --force`, the only run that replaces it.
 - `harvest --since` reports the stored sessions outside its window that still need index maintenance, which it used to skip without saying so. Run `peasant harvest index` to process them; this is what repairs sessions an older build stored as bounded previews.
