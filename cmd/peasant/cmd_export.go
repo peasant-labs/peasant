@@ -658,10 +658,11 @@ one-line summary on stderr: exported, refused, and why.
 The command exits 1 when it refuses any session. The sessions it did export
 stay written.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			sessionIDs, err := resolveExportSessionIDs(cmd)
+			sessionList, err := resolveExportSessionIDs(cmd)
 			if err != nil {
 				return err
 			}
+			sessionIDs := sessionList.IDs
 
 			if err := ensureOutputDir(outputDir); err != nil {
 				return fmt.Errorf(
@@ -689,6 +690,9 @@ stay written.`,
 			refusals := map[string]int{}
 			refuse := func(sid string, reason string, message string) {
 				refusals[reason]++
+			for _, warning := range sessionList.Warnings() {
+				warnings.Warn(warning)
+			}
 				warnings.Warn(clicontract.Warning{Code: clicontract.WarningSessionRefused, SessionID: sid, Message: message})
 			}
 			exportedSessions := []exportedSession{}
@@ -859,13 +863,13 @@ func exportSummaryLine(exported, total, refused, repairable int, reasons map[str
 
 // resolveExportSessionIDs reads the session ids export sessions acts on:
 // --session for one, or --sessions-from for a list. Exactly one is required.
-func resolveExportSessionIDs(cmd *cobra.Command) ([]string, error) {
-	ids, set, err := clicontract.ResolveSessionsFrom(cmd)
+func resolveExportSessionIDs(cmd *cobra.Command) (clicontract.SessionList, error) {
+	list, set, err := clicontract.ResolveSessionsFrom(cmd)
 	if err != nil || set {
-		return ids, err
+		return list, err
 	}
 	if !cmd.Flags().Changed("session") {
-		return nil, clicontract.NewUsageError(fmt.Sprintf(
+		return clicontract.SessionList{}, clicontract.NewUsageError(fmt.Sprintf(
 			"%s: missing required flag\n"+
 				"What went wrong: neither --session nor --%s was provided.\n"+
 				"Why: a session id source is required to identify what to export.\n"+
@@ -874,9 +878,9 @@ func resolveExportSessionIDs(cmd *cobra.Command) ([]string, error) {
 	}
 	session, err := cmd.Flags().GetString("session")
 	if err != nil {
-		return nil, err
+		return clicontract.SessionList{}, err
 	}
-	return []string{session}, nil
+	return clicontract.SessionList{IDs: []string{session}}, nil
 }
 
 // buildExportAnnotationsCommand constructs the `peasant export annotations` subcommand.

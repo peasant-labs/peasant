@@ -38,6 +38,11 @@ type readSessionIDsCase struct {
 	WantIDs         []string `yaml:"wantIDs"`
 	WantErrContains string   `yaml:"wantErrContains"`
 	WantNoIDs       bool     `yaml:"wantNoIDs"`
+	WantNoClean     bool     `yaml:"wantNoClean"`
+	WantDropped     []struct {
+		ID     string `yaml:"id"`
+		Status string `yaml:"status"`
+	} `yaml:"wantDropped"`
 }
 
 type promptPolicyCase struct {
@@ -113,6 +118,10 @@ func TestReadSessionIDs(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 			ids, err := clicontract.ReadSessionIDs(strings.NewReader(tc.Input))
+			var noClean *clicontract.NoCleanSessionsError
+			if got := errors.As(err, &noClean); got != tc.WantNoClean {
+				t.Fatalf("NoCleanSessionsError = %v, want %v (err %v)", got, tc.WantNoClean, err)
+			}
 			switch {
 			case tc.WantNoIDs:
 				if !errors.Is(err, clicontract.ErrNoSessionIDs) {
@@ -132,8 +141,32 @@ func TestReadSessionIDs(t *testing.T) {
 				if !slices.Equal(ids, tc.WantIDs) {
 					t.Fatalf("ids = %v, want %v", ids, tc.WantIDs)
 				}
+				list, err := clicontract.ReadSessionList(strings.NewReader(tc.Input))
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertDropped(t, tc, list)
 			}
 		})
+	}
+}
+
+// assertDropped checks the dropped sessions and that each one becomes the
+// session_refused warning a receiving command prints.
+func assertDropped(t *testing.T, tc readSessionIDsCase, list clicontract.SessionList) {
+	t.Helper()
+	if len(list.Dropped) != len(tc.WantDropped) {
+		t.Fatalf("dropped = %+v, want %+v", list.Dropped, tc.WantDropped)
+	}
+	warnings := list.Warnings()
+	for i, want := range tc.WantDropped {
+		got := list.Dropped[i]
+		if got.ID != want.ID || string(got.Status) != want.Status {
+			t.Errorf("dropped[%d] = %+v, want %+v", i, got, want)
+		}
+		if warnings[i].Code != clicontract.WarningSessionRefused || warnings[i].SessionID != want.ID {
+			t.Errorf("warnings[%d] = %+v, want session_refused for %s", i, warnings[i], want.ID)
+		}
 	}
 }
 
@@ -275,8 +308,8 @@ func newSelectorCommand(got *[]string, gotErr *error) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "probe",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ids, set, err := clicontract.ResolveSessionsFrom(cmd)
-			*got, *gotErr = ids, err
+			list, set, err := clicontract.ResolveSessionsFrom(cmd)
+			*got, *gotErr = list.IDs, err
 			if err == nil && !set {
 				*got = []string{"<unset>"}
 			}

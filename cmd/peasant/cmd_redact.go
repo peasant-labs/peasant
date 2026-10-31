@@ -67,13 +67,17 @@ func BuildRedactCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// --sessions-from replaces --session and --all; the resolver
 			// refuses a combination and an empty list, so a list never widens.
-			fromIDs, fromSet, fromErr := clicontract.ResolveSessionsFrom(cmd)
+			fromList, fromSet, fromErr := clicontract.ResolveSessionsFrom(cmd)
 			if fromErr != nil {
 				cmd.SilenceUsage = true
 				return fromErr
 			}
 			if fromSet {
-				sessionIDs = fromIDs
+				sessionIDs = fromList.IDs
+			}
+			inputWarnings := clicontract.NewCollector(cmd.ErrOrStderr(), jsonOutput)
+			for _, warning := range fromList.Warnings() {
+				inputWarnings.Warn(warning)
 			}
 
 			// Require at least one filter.
@@ -157,14 +161,20 @@ func BuildRedactCommand() *cobra.Command {
 
 			// Output results.
 			if jsonOutput {
-				return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
+				document := map[string]any{
 					"dry_run":      dryRun,
 					"redacted":     redactedCount,
 					"skipped":      skippedCount,
 					"not_ingested": noFilesCount,
 					"errors":       errorCount,
 					"sessions":     results,
-				})
+				}
+				// Present only for a review document's dropped sessions, so
+				// every other run prints the document it always printed.
+				if inputWarnings.Count() > 0 {
+					document["warnings"] = inputWarnings.Meta("", "").Warnings
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(document)
 			}
 
 			if dryRun {
