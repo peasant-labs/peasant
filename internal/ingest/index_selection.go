@@ -150,6 +150,18 @@ func permanentRefusalIsSettled(expected *SessionIndexState, target HarvesterVers
 		expected.IndexedInputHash != nil
 }
 
+// StoredRefusalIsFinal reports whether an index run of this build leaves a stored
+// capture refusal in place. It reads the same predicate the selector uses,
+// against the newest target this build holds for the harness, so a session a
+// run would still upgrade is never reported as final.
+func StoredRefusalIsFinal(state *SessionIndexState) bool {
+	target, managed := GenerationRepairTargets[state.Harness]
+	if !managed {
+		target = HarvesterVersionRegistry[state.Harness]
+	}
+	return permanentRefusalIsSettled(state, target)
+}
+
 // permanentRefusalSettled reports whether a stored session location carries a
 // refusal this build cannot lift, using the same predicate the index selector
 // uses. The location carries the raw stored columns and the caller supplies

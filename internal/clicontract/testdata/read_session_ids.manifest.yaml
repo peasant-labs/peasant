@@ -1,0 +1,13 @@
+# Required-name manifest for read_session_ids.yaml: deletion protection by NAME.
+requiredNames:
+  - newline_text
+  - json_array_of_strings
+  - sessions_list_output
+  - object_with_session_id_key
+  - duplicates_collapse
+  - mixed_shapes_refused
+  - empty_input_refused
+  - object_without_id_refused
+  - empty_json_array_refused
+  - text_line_with_json_refused
+  - non_string_element_refused

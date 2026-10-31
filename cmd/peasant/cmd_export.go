@@ -2,19 +2,26 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/export"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -620,8 +627,9 @@ func printExportSummary(w io.Writer, result *export.ExportResult[export.EEEMetri
 // Each session is written to <output-dir>/<session-id>.json.
 func buildExportSessionsCommand() *cobra.Command {
 	var (
-		outputDir string
-		lastGood  bool
+		outputDir  string
+		lastGood   bool
+		jsonOutput bool
 	)
 
 	cmd := &cobra.Command{
@@ -637,9 +645,20 @@ is refused by default: the newer attempt is never exported as the session, and
 the last-good content is not leaked past the refusal. Pass --last-good to export
 the last-good full authority explicitly.
 
-Requires either --session for a single session or --session-from-file for a batch.`,
+Requires either --session for a single session or --sessions-from for a batch.
+--sessions-from reads a file, or standard input when the value is -, holding one
+id per line or the JSON array that 'peasant sessions list --json' prints.
+
+With --json, stdout holds one JSON document: the sessions exported, the refusal
+count by reason, and a warnings array naming every session that was refused. A
+refused session is also reported on stderr with the reason stored for it and the
+command that repairs it, and a run over more than one session ends with a
+one-line summary on stderr: exported, refused, and why.
+
+The command exits 1 when it refuses any session. The sessions it did export
+stay written.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			sessionIDs, err := resolveSessionIDs(cmd)
+			sessionIDs, err := resolveExportSessionIDs(cmd)
 			if err != nil {
 				return err
 			}
@@ -659,14 +678,21 @@ Requires either --session for a single session or --session-from-file for a batc
 			}
 			defer cleanup()
 
-			cfg, err := loadConfig(resolveConfigPath(cmd))
+			cfg, err := loadCommandConfig(cmd, resolveConfigPath(cmd))
 			if err != nil {
 				return err
 			}
 			ctx := cmd.Context()
 			fs := &ingest.OSFileSystem{}
 
-			var succeeded, failed int
+			warnings := clicontract.NewCollector(cmd.ErrOrStderr(), jsonOutput)
+			refusals := map[string]int{}
+			refuse := func(sid string, reason string, message string) {
+				refusals[reason]++
+				warnings.Warn(clicontract.Warning{Code: clicontract.WarningSessionRefused, SessionID: sid, Message: message})
+			}
+			exportedSessions := []exportedSession{}
+			var succeeded, failed, repairable int
 			for _, sid := range sessionIDs {
 				// The default seam stays on the authority read; only the explicit
 				// flag routes through the selected one. The last-good selection is
@@ -681,15 +707,19 @@ Requires either --session for a single session or --session-from-file for a batc
 					exported, exportErr = exportSessionTranscript(ctx, db, fs, sid, cfg.Output.BasePath)
 				}
 				if exportErr != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: %v\n", sid, exportErr)
+					refuse(sid, exportRefusalReason(exportErr), exportErr.Error())
 					failed++
+					var refusal *store.ContentCaptureRefusal
+					if errors.As(exportErr, &refusal) && refusal.Repairable {
+						repairable++
+					}
 					continue
 				}
 
 				outPath := filepath.Join(outputDir, sid+".json")
 				data, marshalErr := json.MarshalIndent(exported, "", "  ")
 				if marshalErr != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: marshal JSON: %v\n", sid, marshalErr)
+					refuse(sid, exportRefusalWrite, fmt.Sprintf("marshal JSON: %v", marshalErr))
 					failed++
 					continue
 				}
@@ -699,15 +729,48 @@ Requires either --session for a single session or --session-from-file for a batc
 				// before this point, so stdout stays silent until the rename
 				// commits the new bytes.
 				if writeErr := writeFileAtomic(outPath, data, 0644); writeErr != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: session %s: write %s: %v\n", sid, outPath, writeErr)
+					refuse(sid, exportRefusalWrite, fmt.Sprintf("write %s: %v", outPath, writeErr))
 					failed++
 					continue
 				}
 
-				fmt.Fprintf(cmd.OutOrStdout(), "exported %s -> %s (%d turns)\n", sid, outPath, exported.TurnCount)
+				if !jsonOutput {
+					fmt.Fprintf(cmd.OutOrStdout(), "exported %s -> %s (%d turns)\n", sid, outPath, exported.TurnCount)
+				}
+				exportedSessions = append(exportedSessions, exportedSession{SessionID: sid, Path: outPath, Turns: exported.TurnCount})
 				succeeded++
 			}
 
+			// A bulk run ends with one summary line on stderr, so the refusals
+			// and their reasons are visible without reading every warning.
+			if len(sessionIDs) > 1 {
+				fmt.Fprintln(cmd.ErrOrStderr(), exportSummaryLine(succeeded, len(sessionIDs), failed, repairable, refusals))
+			}
+			if jsonOutput {
+				doc := exportSessionsDocument{
+					Exported:       succeeded,
+					Refused:        failed,
+					RefusalReasons: refusals,
+					Sessions:       exportedSessions,
+					Meta:           warnings.Meta("", ""),
+				}
+				if err := clicontract.WriteJSON(cmd.OutOrStdout(), doc); err != nil {
+					return err
+				}
+			}
+
+			if failed > 0 {
+				// The report above is complete, so the flag usage would only bury it.
+				cmd.SilenceUsage = true
+			}
+			if succeeded > 0 && failed > 0 {
+				return fmt.Errorf(
+					"export sessions: %d of %d session(s) refused\n"+
+						"What went wrong: the other sessions were exported, but these were not.\n"+
+						"Fix: check the warnings above for why each was refused and what repairs it.",
+					failed, len(sessionIDs),
+				)
+			}
 			if succeeded == 0 && failed > 0 {
 				return fmt.Errorf(
 					"export sessions: all %d session(s) failed to export\n"+
@@ -722,11 +785,98 @@ Requires either --session for a single session or --session-from-file for a batc
 	}
 
 	cmd.Flags().String("session", "", "Single session ID to export")
-	cmd.Flags().String("session-from-file", "", "Path to a newline-delimited file of session IDs to export")
+	clicontract.RegisterSessionsFrom(cmd)
+	// The earlier spelling keeps working, hidden, so existing scripts run.
+	clicontract.AliasSessionsFrom(cmd, "session-from-file")
 	cmd.Flags().StringVar(&outputDir, "output-dir", ".", "Directory to write exported session JSON files")
+	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Print one JSON document of the exported sessions and warnings on stdout")
 	cmd.Flags().BoolVar(&lastGood, "last-good", false, "Export the last-good full transcript when a newer incomplete attempt is kept beside it. Without it such a session is refused rather than exporting the incomplete attempt; the store resolves the last-good authority server-side, so no session or generation identifier is accepted")
 
 	return cmd
+}
+
+// exportedSession is one session in the export sessions --json document.
+type exportedSession struct {
+	SessionID string `json:"session_id"`
+	Path      string `json:"path"`
+	Turns     int    `json:"turns"`
+}
+
+// exportSessionsDocument is the export sessions --json document.
+type exportSessionsDocument struct {
+	Exported int `json:"exported"`
+	Refused  int `json:"refused"`
+	// RefusalReasons counts the refused sessions by reason; it is {} when none was.
+	RefusalReasons map[string]int    `json:"refusal_reasons"`
+	Sessions       []exportedSession `json:"sessions"`
+	clicontract.Meta
+}
+
+// Refusal reasons a store capture refusal does not supply itself.
+const (
+	exportRefusalInconsistent  = "capture_inconsistent"
+	exportRefusalLatestAttempt = "latest_attempt_incomplete"
+	exportRefusalNotFound      = "session_not_found"
+	exportRefusalWrite         = "write_failed"
+	exportRefusalOther         = "export_failed"
+)
+
+// exportRefusalReason names why one session was refused, for the run's counts.
+func exportRefusalReason(err error) string {
+	var refusal *store.ContentCaptureRefusal
+	switch {
+	case errors.As(err, &refusal):
+		return refusal.Reason
+	case errors.Is(err, store.ErrContentIntegrity):
+		return exportRefusalInconsistent
+	case errors.Is(err, indexformat.ErrLatestAttemptIncomplete):
+		return exportRefusalLatestAttempt
+	case errors.Is(err, export.ErrSessionNotFound):
+		return exportRefusalNotFound
+	}
+	return exportRefusalOther
+}
+
+// exportSummaryLine is the one line that ends a bulk export. Reasons print
+// largest first, then by name, so the same run prints the same line.
+func exportSummaryLine(exported, total, refused, repairable int, reasons map[string]int) string {
+	line := fmt.Sprintf("%d of %d sessions exported, %d refused", exported, total, refused)
+	if refused == 0 {
+		return line
+	}
+	names := slices.Sorted(maps.Keys(reasons))
+	slices.SortStableFunc(names, func(a, b string) int { return cmp.Compare(reasons[b], reasons[a]) })
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%d %s", reasons[name], name))
+	}
+	line += ": " + strings.Join(parts, ", ")
+	if repairable > 0 {
+		line += fmt.Sprintf("; peasant harvest index re-indexes %d of them", repairable)
+	}
+	return line
+}
+
+// resolveExportSessionIDs reads the session ids export sessions acts on:
+// --session for one, or --sessions-from for a list. Exactly one is required.
+func resolveExportSessionIDs(cmd *cobra.Command) ([]string, error) {
+	ids, set, err := clicontract.ResolveSessionsFrom(cmd)
+	if err != nil || set {
+		return ids, err
+	}
+	if !cmd.Flags().Changed("session") {
+		return nil, clicontract.NewUsageError(fmt.Sprintf(
+			"%s: missing required flag\n"+
+				"What went wrong: neither --session nor --%s was provided.\n"+
+				"Why: a session id source is required to identify what to export.\n"+
+				"Fix: provide --session <session-id> for a single session, or --%s <file|-> for a list of session ids.",
+			cmd.CommandPath(), clicontract.SessionsFromFlag, clicontract.SessionsFromFlag))
+	}
+	session, err := cmd.Flags().GetString("session")
+	if err != nil {
+		return nil, err
+	}
+	return []string{session}, nil
 }
 
 // buildExportAnnotationsCommand constructs the `peasant export annotations` subcommand.

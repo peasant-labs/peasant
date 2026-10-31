@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Changes, ChangeDetail } from '@peasant-labs/fairtrade/graph';
+import { Button } from '@/lib/ft-ui';
 import { displayProject } from '@/lib/quality/utils';
 import { fetchChangeDiff, fetchChangeDetail, fetchReviewChanges } from '@/lib/api/map';
 import {
@@ -100,41 +101,48 @@ export function ReviewSurface({
 
   // ── lazy per-file diffs ─────────────────────────────────────────────────────
   // The lifted <ChangeDetail> calls `getDiff(file)` for each OPEN file during render;
-  // we return the cached cooked diff (null while it loads), an error sentinel for files
-  // whose fetch failed (the surface renders an error, not a spinner — and we do NOT
-  // retry them), and fetch any requested-but-unresolved file after render. The cache +
+  // we return the cached cooked diff (null while it loads), or an error sentinel.
+  // A child-only file toggle does not rerender this host, so the lookup schedules
+  // its read directly; only the asynchronous result updates React state. The cache +
   // error set are BRANCH-SCOPED: they reset on a branch change so a stale diff from a
   // prior branch can never be served.
-  const requested = useRef<Set<string>>(new Set());
+  const diffRequests = useRef<{
+    projectHash: ProjectHash;
+    branch: string;
+    requested: Set<string>;
+  } | null>(null);
   const [diffCache, setDiffCache] = useState<Record<string, CookedDiff>>({});
   const [diffErrors, setDiffErrors] = useState<Record<string, string>>({});
   useEffect(() => {
-    // branch (or project) changed → drop everything keyed to the old branch.
-    requested.current = new Set();
+    const scope = effectiveHash && branch
+      ? { projectHash: effectiveHash, branch, requested: new Set<string>() }
+      : null;
+    diffRequests.current = scope;
     setDiffCache({});
     setDiffErrors({});
+    return () => { if (diffRequests.current === scope) diffRequests.current = null; };
   }, [effectiveHash, branch]);
 
-  useEffect(() => {
-    if (!effectiveHash || !branch) return;
-    const pending = [...requested.current].filter(
-      (p) => !(p in diffCache) && !(p in diffErrors),
-    );
-    if (pending.length === 0) return;
-    let alive = true;
-    for (const p of pending) {
-      fetchChangeDiff(effectiveHash, branch, p)
+  function requestDiff(path: string) {
+    const scope = diffRequests.current;
+    if (!scope || scope.projectHash !== effectiveHash || scope.branch !== branch || scope.requested.has(path)) return;
+    scope.requested.add(path);
+    queueMicrotask(() => {
+      if (diffRequests.current !== scope) return;
+      fetchChangeDiff(scope.projectHash, scope.branch, path)
         .then((wire) => {
-          if (alive) setDiffCache((c) => ({ ...c, [p]: adaptChangeDiff(wire) }));
+          if (diffRequests.current === scope) setDiffCache((c) => ({ ...c, [path]: adaptChangeDiff(wire) }));
         })
         .catch((e) => {
-          if (alive) setDiffErrors((m) => ({ ...m, [p]: discoveryErrorMessage(e) }));
+          if (diffRequests.current === scope) setDiffErrors((m) => ({ ...m, [path]: discoveryErrorMessage(e) }));
         });
-    }
-    return () => {
-      alive = false;
-    };
-  });
+    });
+  }
+
+  function retryDiffs() {
+    for (const path of Object.keys(diffErrors)) diffRequests.current?.requested.delete(path);
+    setDiffErrors({});
+  }
 
   // Project resolution is the trust boundary for every canonical Changes route.
   // Keep this after all hooks so retry/error rendering never changes hook order,
@@ -175,7 +183,12 @@ export function ReviewSurface({
     return (
       <ChangeDetail
         payload={payload}
+        headerActions={Object.keys(diffErrors).length > 0
+          ? <Button variant="secondary" size="sm" onClick={retryDiffs}>retry file diffs</Button>
+          : undefined}
         getDiff={(f) => {
+          const scope = diffRequests.current;
+          if (!scope || scope.projectHash !== effectiveHash || scope.branch !== branch) return null;
           if (f.path in diffErrors) {
             // error sentinel: a valid (empty) diff shape carrying `error`, which the
             // lifted surface renders as an error row instead of a spinner.
@@ -190,7 +203,7 @@ export function ReviewSurface({
               error: diffErrors[f.path] || 'couldn’t load this file’s diff.',
             };
           }
-          requested.current.add(f.path);
+          if (!(f.path in diffCache)) requestDiff(f.path);
           return diffCache[f.path] ?? null;
         }}
         onOpenMap={() =>
@@ -283,7 +296,7 @@ function ReviewError({
     <div className="gmp-root gmp-changes-root">
       <div className="gmp-changes-body gmp-error-body" role="alert">
         <p className="gmp-diff-state gmp-diff-error mono">{label}</p>
-        {detail && <p className="gmp-diff-state mono">{detail}</p>}
+        {detail && <p className="gmp-diff-state mono [overflow-wrap:anywhere]">{detail}</p>}
         <button type="button" className="btn btn-secondary btn-sm" onClick={onRetry}>
           retry
         </button>

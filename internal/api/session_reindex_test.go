@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/filelock"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
@@ -34,6 +35,7 @@ type sessionReindexCase struct {
 	NeighbourAppendTurns    int    `yaml:"neighbour_append_turns"`
 	Unrecorded              bool   `yaml:"unrecorded"`
 	Busy                    bool   `yaml:"busy"`
+	HarvestLockHeld         bool   `yaml:"harvest_lock_held"`
 	Timeout                 string `yaml:"timeout"`
 	Status                  int    `yaml:"status"`
 	Code                    string `yaml:"code"`
@@ -217,6 +219,14 @@ func TestSessionReindexRoute(t *testing.T) {
 
 			if c.Busy {
 				handler.ingestStatus = "running"
+			}
+			if c.HarvestLockHeld {
+				// Another process's harvest holds the data dir's lock.
+				release, err := filelock.Acquire(filepath.Join(string(handler.dataDir()), ingest.RunLockFileName), time.Now().Add(time.Second))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = release() })
 			}
 			if c.Timeout != "" {
 				timeout, err := time.ParseDuration(c.Timeout)

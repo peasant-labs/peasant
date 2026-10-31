@@ -1,0 +1,31 @@
+# What a bulk export reports. Each session is seeded whole; `capture` then sets
+# the stored capture a refused session carries.
+#   refused-strict: a bounded preview an older build refused
+#   refused-legacy: a capture that predates content certification
+requiredNames:
+  - every-session-exported
+  - partial-refusal-is-a-failure
+  - refusal-reasons-count-largest-first
+  - all-refused
+cases:
+  - name: every-session-exported
+    sessions: [ok, ok]
+    wantExported: 2
+    wantSummary: 2 of 2 sessions exported, 0 refused
+  - name: partial-refusal-is-a-failure
+    sessions: [ok, refused-strict]
+    wantExported: 1
+    wantRefused: {strict_capture_refused: 1}
+    wantSummary: "1 of 2 sessions exported, 1 refused: 1 strict_capture_refused; peasant harvest index re-indexes 1 of them"
+    wantError: 1 of 2 session(s) refused
+  - name: refusal-reasons-count-largest-first
+    sessions: [ok, refused-legacy, refused-strict, refused-strict]
+    wantExported: 1
+    wantRefused: {strict_capture_refused: 2, legacy_preview_only: 1}
+    wantSummary: "1 of 4 sessions exported, 3 refused: 2 strict_capture_refused, 1 legacy_preview_only; peasant harvest index re-indexes 3 of them"
+    wantError: 3 of 4 session(s) refused
+  - name: all-refused
+    sessions: [refused-strict, refused-legacy]
+    wantRefused: {strict_capture_refused: 1, legacy_preview_only: 1}
+    wantSummary: "0 of 2 sessions exported, 2 refused: 1 legacy_preview_only, 1 strict_capture_refused; peasant harvest index re-indexes 2 of them"
+    wantError: all 2 session(s) failed to export

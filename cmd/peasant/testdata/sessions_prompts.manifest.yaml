@@ -1,0 +1,28 @@
+# Every name here must stay in sessions_prompts.yaml.
+required:
+  - typed_prompt_kept
+  - system_reminder_excluded
+  - local_command_caveat_excluded
+  - task_notification_excluded
+  - skill_body_excluded
+  - meta_record_excluded
+  - ide_note_policy
+  - slash_command_shown
+  - tool_result_excluded
+  - depth_one_excluded
+  - max_chars_rune_safe
+  - subagent_note
+  - empty_says_why
+  - not_indexed_error
+  - native_long_prompt_whole
+  - mirror_long_prompt_whole
+  - mirror_slash_command_shown
+  - preview_capture_warns_native
+  - preview_capture_warns_mirror
+  - full_capture_no_warning
+  - unresolved_parent_note
+  - text_view_escapes_control_characters
+  - unsupported_index_format_refused
+  - invalid_session_id_is_usage
+  - negative_max_chars_is_usage
+  - missing_session_id_is_usage

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/memory"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/spf13/cobra"
@@ -247,7 +248,7 @@ Requires OPENAI_API_KEY environment variable.`,
 		},
 	}
 	cmd.Flags().StringVar(&model, "model", "text-embedding-3-small", "OpenAI embedding model")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip interactive confirmation")
+	clicontract.AddYesFlag(cmd, &yes, "Skip interactive confirmation")
 	return cmd
 }
 

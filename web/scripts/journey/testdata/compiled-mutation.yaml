@@ -1,0 +1,25 @@
+requiredNames: [original-locals, renamed-locals, dollar-locals, missing-anchor, duplicate-anchor, literal-navigation-mutation, literal-body-mutation]
+cases:
+  - name: original-locals
+    source: 'async function fetcher(t){let a=await (0,c.yT)(u,{method:"POST",signal:t});if(!o.rHE.safeParse(a.body).success)throw Error("invalid");return a}'
+    guard: 'if(!a.ok)throw Error("typed partial report discarded")'
+  - name: renamed-locals
+    source: 'async function m(e){let t="".concat(u,"/fetch"),s=await (0,c.yT)(t,{method:"POST",signal:e});if(!o.rHE.safeParse(s.body).success)throw Error("invalid");return s}'
+    guard: 'if(!s.ok)throw Error("typed partial report discarded")'
+  - name: dollar-locals
+    source: 'async function $f($signal){let $answer=await (0,$c.$read)($path,{method:"POST",signal:$signal});if(!$schema.$report.safeParse($answer.body).success)throw Error("invalid");return $answer}'
+    guard: 'if(!$answer.ok)throw Error("typed partial report discarded")'
+  - name: missing-anchor
+    source: 'async function read(){return {ok:true}}'
+    missing: true
+  - name: duplicate-anchor
+    source: 'async function one(e){let s=await (0,c.yT)(t,{method:"POST",signal:e});if(!o.rHE.safeParse(s.body).success)throw Error("invalid")}async function two(e){let s=await (0,c.yT)(t,{method:"POST",signal:e});if(!o.rHE.safeParse(s.body).success)throw Error("invalid")}'
+    error: anchor is not unique
+  - name: literal-navigation-mutation
+    mutation: village-back-in-nav
+    source: 'const sections=[Object.freeze({id:"village",label:"online",inNav:!1})]'
+    guard: 'Object.freeze({id:"village",label:"online",inNav:!0})'
+  - name: literal-body-mutation
+    mutation: village-body-missing
+    source: 'function body(){return x.jsx("div",{className:"village-page",children:[]})}'
+    guard: '("section",{className:"village-page",hidden:!0,children:['

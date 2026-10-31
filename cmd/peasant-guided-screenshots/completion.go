@@ -44,6 +44,7 @@ type completionFixture struct {
 	New         int                        `yaml:"new"`
 	Updated     int                        `yaml:"updated"`
 	Unchanged   int                        `yaml:"unchanged"`
+	Excluded    int                        `yaml:"excludedBySelection"`
 	Errors      int                        `yaml:"errors"`
 	Diagnostics []ingest.DiagnosticEntry   `yaml:"diagnostics"`
 	States      []completionStateFixture   `yaml:"states"`
@@ -97,7 +98,7 @@ func renderCompletionCapture(directory string, index int, fixture completionFixt
 	if err != nil {
 		return "", err
 	}
-	result := &ftue.IngestResult{New: fixture.New, Updated: fixture.Updated, Unchanged: fixture.Unchanged, Errors: fixture.Errors}
+	result := &ftue.IngestResult{New: fixture.New, Updated: fixture.Updated, Unchanged: fixture.Unchanged, ExcludedBySelection: fixture.Excluded, Errors: fixture.Errors}
 	if capture.State != completionNoWarnings {
 		result.Diagnostics = fixture.Diagnostics
 	}

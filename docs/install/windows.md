@@ -16,7 +16,9 @@ documented separately in [wsl.md](wsl.md); this guide covers the native Windows 
 Run these in PowerShell:
 
 ```powershell
-$Version = '0.1.0'
+$Release = Invoke-RestMethod https://api.github.com/repos/peasant-labs/peasant/releases/latest
+if (-not $Release.tag_name) { throw 'could not read the latest release; choose a tag from the releases page' }
+$Version = $Release.tag_name.TrimStart('v')
 $Zip     = "peasant_${Version}_windows_amd64.zip"
 $Base    = "https://github.com/peasant-labs/peasant/releases/download/v$Version"
 
@@ -47,7 +49,9 @@ without the licence and notice files that the zip carries, so prefer the zip unl
 have a reason not to:
 
 ```powershell
-$Version = '0.1.0'
+$Release = Invoke-RestMethod https://api.github.com/repos/peasant-labs/peasant/releases/latest
+if (-not $Release.tag_name) { throw 'could not read the latest release; choose a tag from the releases page' }
+$Version = $Release.tag_name.TrimStart('v')
 $Base    = "https://github.com/peasant-labs/peasant/releases/download/v$Version"
 
 Invoke-WebRequest -Uri "$Base/peasant_${Version}_windows_amd64.exe" -OutFile peasant.exe

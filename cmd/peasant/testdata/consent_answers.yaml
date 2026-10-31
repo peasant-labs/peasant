@@ -1,0 +1,13 @@
+requiredNames: [short yes, uppercase yes, full yes, surrounding spaces, no, empty line, empty EOF, incomplete yes at EOF, trailing words, full yes with trailing words, junk]
+cases:
+  - {name: short yes, input: "y\n", want: true}
+  - {name: uppercase yes, input: "Y\n", want: true}
+  - {name: full yes, input: "yes\n", want: true}
+  - {name: surrounding spaces, input: "  YES \n", want: true}
+  - {name: no, input: "N\n", want: false}
+  - {name: empty line, input: "\n", want: false}
+  - {name: empty EOF, input: '', want: false}
+  - {name: incomplete yes at EOF, input: 'yes', want: false}
+  - {name: trailing words, input: "y extra\n", want: false}
+  - {name: full yes with trailing words, input: "yes please\n", want: false}
+  - {name: junk, input: "yx\n", want: false}

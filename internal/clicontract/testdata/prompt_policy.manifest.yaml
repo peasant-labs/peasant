@@ -1,0 +1,10 @@
+# Required-name manifest for prompt_policy.yaml: deletion protection by NAME.
+requiredNames:
+  - dry_run_never_asks
+  - dry_run_never_asks_with_tty
+  - dry_run_never_asks_with_yes
+  - dry_run_never_asks_with_tty_and_yes
+  - yes_wins
+  - json_refused
+  - no_tty_refused
+  - tty_asks

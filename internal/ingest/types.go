@@ -239,12 +239,12 @@ type IndexLogEntry struct {
 
 // PruneFilter constrains which sessions are eligible for pruning.
 type PruneFilter struct {
-	SessionIDs  []SessionID // specific session IDs (empty = not filtered by ID)
-	ProjectHash *string     // filter by project hash
-	Harness     *Harness    // filter by provider
-	Before      *int64      // unix ms — sessions started before this time
-	After       *int64      // unix ms — sessions started after this time
-	All         bool        // prune all sessions (ignores other filters)
+	SessionIDs []SessionID // specific session IDs (empty = not filtered by ID)
+	Project    *string     // filter by project: hash, path, directory name or git remote (see store.QueryPrunableSessions)
+	Harness    *Harness    // filter by provider
+	Before     *int64      // unix ms — sessions started before this time
+	After      *int64      // unix ms — sessions started after this time
+	All        bool        // prune all sessions (ignores other filters)
 }
 
 // PruneSessionRow is a session eligible for pruning.

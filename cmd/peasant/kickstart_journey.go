@@ -103,7 +103,7 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 			if result.New+result.Updated == 0 {
 				status = ftue.StatusSkipped
 			}
-			detail := fmt.Sprintf("local import completed: %d new, %d updated, %d unchanged, %d errors; see warnings for refused sessions", result.New, result.Updated, result.Unchanged, result.Errors)
+			detail := fmt.Sprintf("local import completed: %d new, %d updated, %d unchanged, %d excluded by selection, %d errors; see warnings for refused sessions", result.New, result.Updated, result.Unchanged, result.ExcludedBySelection, result.Errors)
 			return []ftue.PersistedEffect{{Stage: ftue.StageIngest, Status: status, Detail: detail}}, nil, nil
 		}
 		effects := make([]ftue.PersistedEffect, 0, len(ids))
@@ -118,7 +118,7 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 		if request.Answers.Destination != ftue.DestinationVillage || len(ids) == 0 {
 			return []ftue.PersistedEffect{{Stage: ftue.StagePublication, Status: ftue.StatusSkipped, Detail: "local-only destination"}}, nil, nil
 		}
-		cfg, err := loadConfig(configPath)
+		cfg, err := loadCommandConfig(cmd, configPath)
 		if err != nil {
 			return nil, retrySessions(ftue.StagePublication, ids), fmt.Errorf("load saved kickstart config for publication: %w", err)
 		}

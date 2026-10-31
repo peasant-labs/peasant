@@ -49,6 +49,10 @@ review-capture/
 # Per checkout, rebuilt on demand — delete with `rm -rf .testcache/`.
 .testcache/
 
+# make check gate streams and reports (cmd/testgate). CI writes them to
+# $RUNNER_TEMP; a local gate writes them here.
+/.agents.local/testgate/
+
 # Interrupted topology tests leave copied build packages in the source tree.
 internal/ingest/.sqlite-topology-*/
 

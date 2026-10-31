@@ -1,0 +1,35 @@
+# The client object on the authoritative publish request. Each case injects an
+# application version into the production request builder. A sent case expects
+# exactly that client; an omitted case expects no client key on the wire.
+#
+# The name is literal data, not the production constant, so a renamed program
+# fails here.
+name: peasant
+
+cases:
+  # A release build injects the tag through ldflags.
+  - {name: release_version_sent, appVersion: v0.13.6, sentVersion: 0.13.6}
+  # A default Makefile source build injects git describe output.
+  - {name: dev_version_with_build_metadata_sent, appVersion: v0.13.6-dev.6+d5fecf354, sentVersion: 0.13.6-dev.6+d5fecf354}
+  # SemVer 2.0 has no leading v; an injected version without one passes through.
+  - {name: leading_v_stripped, appVersion: v1.2.3, sentVersion: 1.2.3}
+  - {name: version_without_leading_v_sent, appVersion: 1.2.3, sentVersion: 1.2.3}
+  # A go install build reports the module pseudo-version.
+  - {name: go_pseudo_version_sent, appVersion: v0.0.0-20261030120000-abcdef123456, sentVersion: 0.0.0-20261030120000-abcdef123456}
+  # The placeholder of a build with no version. Village refuses the whole
+  # publish on an invalid client, so the field is left out.
+  - {name: dev_placeholder_omitted, appVersion: dev}
+  - {name: empty_version_omitted, appVersion: ''}
+  - {name: partial_version_omitted, appVersion: v1.2}
+  - {name: leading_zero_omitted, appVersion: v01.2.3}
+  - {name: double_v_omitted, appVersion: vv1.2.3}
+  # Every sent client is checked by the schema validator and by the strict
+  # schema decoder of the final request; this case names that check.
+  - {name: client_validates_against_schema, appVersion: v1.2.3-rc.1+build.7, sentVersion: 1.2.3-rc.1+build.7}
+
+# The client is outside the publish fingerprint and canonicalization. Requests
+# built with each version must canonicalize and fingerprint identically, so a
+# held transcript does not look changed after an upgrade.
+fingerprintCases:
+  - name: fingerprint_unchanged_by_client
+    appVersions: [v0.13.6, v0.13.7-dev.1+abc1234, dev]

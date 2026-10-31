@@ -1,5 +1,11 @@
 package defaults
 
+import (
+	"fmt"
+	"slices"
+	"strings"
+)
+
 // SessionSortField represents the field by which sessions are sorted in listings.
 type SessionSortField string
 
@@ -33,6 +39,69 @@ var AllSessionSortFields = []SessionSortField{
 	SessionSortTokens,
 	SessionSortProject,
 }
+
+// SessionWorkflowFacet names one thing that happened inside a session, as
+// `peasant sessions list --has` selects it. The store derives every facet from
+// rows it already holds, at query time.
+type SessionWorkflowFacet string
+
+func (f SessionWorkflowFacet) String() string { return string(f) }
+
+const (
+	// SessionFacetSubagent holds when the session spawned a subagent session.
+	SessionFacetSubagent SessionWorkflowFacet = "subagent"
+	// SessionFacetSkill holds when the session ran a custom command or a skill tool.
+	SessionFacetSkill SessionWorkflowFacet = "skill"
+	// SessionFacetMCP holds when the session called an MCP tool.
+	SessionFacetMCP SessionWorkflowFacet = "mcp"
+	// SessionFacetCompact holds when the session's context was compacted.
+	SessionFacetCompact SessionWorkflowFacet = "compact"
+	// SessionFacetClear holds when the session records a /clear command.
+	SessionFacetClear SessionWorkflowFacet = "clear"
+	// SessionFacetModelSwitch holds when assistant turns observed more than one model.
+	SessionFacetModelSwitch SessionWorkflowFacet = "model-switch"
+	// SessionFacetBackground holds when a tool call ran in the background.
+	SessionFacetBackground SessionWorkflowFacet = "background"
+	// SessionFacetPartial holds when the session's active generation is partial.
+	SessionFacetPartial SessionWorkflowFacet = "partial"
+)
+
+// AllSessionWorkflowFacets is the closed facet set, in the order a session
+// list row reports them.
+var AllSessionWorkflowFacets = []SessionWorkflowFacet{
+	SessionFacetSubagent,
+	SessionFacetSkill,
+	SessionFacetMCP,
+	SessionFacetCompact,
+	SessionFacetClear,
+	SessionFacetModelSwitch,
+	SessionFacetBackground,
+	SessionFacetPartial,
+}
+
+// SessionWorkflowFacetNames returns the facet names joined with commas, for
+// flag help and refusal messages.
+func SessionWorkflowFacetNames() string {
+	names := make([]string, len(AllSessionWorkflowFacets))
+	for i, facet := range AllSessionWorkflowFacets {
+		names[i] = string(facet)
+	}
+	return strings.Join(names, ", ")
+}
+
+// NewSessionWorkflowFacet validates raw against the closed facet set.
+func NewSessionWorkflowFacet(raw string) (SessionWorkflowFacet, error) {
+	facet := SessionWorkflowFacet(raw)
+	if slices.Contains(AllSessionWorkflowFacets, facet) {
+		return facet, nil
+	}
+	return "", fmt.Errorf("unknown session facet %q: must be one of %s", raw, SessionWorkflowFacetNames())
+}
+
+// ClaudeSyntheticModelID is the model value Claude Code writes on an assistant
+// record that no model produced, such as a local error notice. It is stored
+// as an observation but it never names a model the session ran on.
+const ClaudeSyntheticModelID = "<synthetic>"
 
 // ToolCallFormat controls how tool calls are rendered in session output.
 type ToolCallFormat string

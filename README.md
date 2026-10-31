@@ -38,14 +38,16 @@ Or download a `peasant_<version>_<os>_<arch>.tar.gz` archive, verify it against
 # Enter the dev shell (provides Go toolchain, gopls, staticcheck, delve)
 nix develop
 
-# Build the binary
+# Build the binary and embedded web dashboard. This needs the pnpm version
+# declared by web/package.json (packageManager) and runs a Next.js build.
+# go build ./cmd/peasant builds the CLI without rebuilding the dashboard.
 make build          # outputs peasant
 
 # Run the first-time setup wizard
 peasant kickstart
 
-# Ingest sessions from all configured providers
-peasant ingest
+# Harvest sessions from all configured harnesses
+peasant harvest
 
 # Start the web dashboard (background, auto-opens browser)
 peasant web start
@@ -75,8 +77,8 @@ privacy boundaries, and recovery behavior.
 
 | Command | Description |
 |---------|-------------|
-| `peasant ingest` | Run the data ingestion pipeline |
-| `peasant ingest verify` | Verify database schema integrity |
+| `peasant harvest` | Run the data ingestion pipeline |
+| `peasant harvest verify` | Verify database schema integrity |
 | `peasant village push` | Push ingested transcripts + annotations to the Peasant village (incremental — server-manifest skip-gate + retraction; see [flags](#peasant-village-push-flags)) |
 | `peasant village auto` | Publish this repository's sessions on every `git push`, redacted and private, to the collectives you published to last: saves an auto-publish rule in `hooks.yaml` (see [the network reference](docs/NETWORK.md#6-hook-triggered-push)) and installs the pre-push hook here |
 | `peasant login` / `peasant logout` | Authenticate with / disconnect from the village |
@@ -144,6 +146,8 @@ are replayed once through the ordinary push candidate path.
 | Flag | Description |
 |------|-------------|
 | `--provider <p>` | Filter models by provider (`anthropic`, `google`, `openai`) |
+| `--dry-run` | Show the count without writing; no confirmation prompt |
+| `--yes`, `-y` | Sync without the confirmation prompt (for scripts) |
 
 ### `peasant sessions tag` subcommands
 
@@ -153,38 +157,47 @@ are replayed once through the ordinary push candidate path.
 | `peasant sessions tag remove <session> <tag>` | Remove a tag from a session |
 | `peasant sessions tag list <session>` | List all tags for a session |
 
-### `peasant ingest verify` flags
+### `peasant harvest verify` flags
+
+(`peasant ingest verify` is a hidden alias.)
 
 | Flag | Description |
 |------|-------------|
 | `--verbose` | Show sample data from each table |
+| `--content` | Verify session content objects and the search index |
+| `--repair` | Mark content corruptions found by `--content` for the repair activation (requires `--content`) |
 
-### `peasant ingest` flags
+### `peasant harvest` flags
+
+(`peasant ingest` is a hidden alias and takes the same flags.)
 
 | Flag | Description |
 |------|-------------|
-| `--dry-run` | Show what would be ingested without writing |
-| `--force` | Re-ingest all sessions (respects staleness) |
-| `--include-active` | Also ingest sessions still being written |
+| `--dry-run` | Show what would be processed without writing |
+| `--force` | Force re-process sessions that match current filters |
+| `--all` | Process ALL sessions (clears filters, implies `--force`) |
 | `--session <ids>` | Filter to specific session IDs (repeatable, comma-separated). Overrides the selection index. |
 | `--since <duration>` | Filter to sessions from the last N period (e.g. `2w`, `3m`, `7d`) |
-| `--source-harness <h>` | Override source harness (`claude-code`, `opencode`, `codex`, `cursor`, `strike`) |
-| `--source-path <path>` | Override source path for the provider (replaces config, not additive) |
+| `--source-harness <h>` | Discover only this harness using its configured or default path (`claude-code`, `opencode`, `codex`, `cursor`, `strike`, `pi`) |
+| `--source-path <path>` | Override the named harness's source paths (requires `--source-harness`; replaces config, not additive) |
 | `--output <path>` | Override output base path |
 | `--json` | Output as JSON instead of human-readable |
-| `--verbose` | Show file-level detail with subagent expansion |
-| `--reindex` | Re-process sessions with stale or missing index data |
+| `--verbose` | Show file-level detail |
+| `--profile-index` | Print INDEX parse/write timing diagnostics |
 | `--detect-commits` | Detect and store git commits linked to each session (default on; pass `--detect-commits=false` to skip) |
-| `--config <path>` | Path to config file |
+| `--include-active` | Deprecated and has no effect: active sessions are processed by default |
+| `--config <path>` | Path to config file (global flag) |
+| `--data-dir`, `--config-dir`, `--state-dir` | Override the data, config and state directories (global flags; see [`peasant`](docs/cli/peasant.md)) |
 
-When a selection index is configured (via `peasant kickstart`), ingest automatically filters to only
+When a selection index is configured (via `peasant kickstart`), harvest automatically filters to only
 the selected projects, branches, and sessions. The `--session` flag overrides this filter.
+
 
 ### `peasant web start` flags
 
 | Flag | Description |
 |------|-------------|
-| `--port <n>` | Port to listen on (default 8690) |
+| `--port <n>` | Port to listen on, 1-65535 (default 8690) |
 | `--foreground` | Run in foreground instead of forking to background |
 | `--no-browser` | Do not auto-open browser |
 | `--dev` | Proxy to Next.js dev server on localhost:3000 (implies --foreground) |
@@ -233,7 +246,7 @@ session.
 | Flag | Description |
 |------|-------------|
 | `--session <id>` | The session to record and open (required) |
-| `--port <n>` | Port of the web dashboard (default 8690, as for `peasant web start`) |
+| `--port <n>` | Port of the web dashboard, 1-65535 (default 8690, as for `peasant web start`) |
 | `--hook` | Print the Claude Code hook response `{"continue":false,"stopReason":"..."}` as one line on stdout instead, with the same lines in `stopReason`. Nothing goes to stderr, and the exit status is 0 on every outcome |
 
 ### `peasant tui` flags (deprecated)
@@ -261,7 +274,7 @@ in the bestiary migration; temporary `LegacyHarness*` deprecation shims remain u
 
 ## Ingest pipeline
 
-`peasant ingest` runs a 9-stage pipeline (`internal/ingest/pipeline.go`):
+`peasant harvest` runs a 9-stage pipeline (`internal/ingest/pipeline.go`):
 
 ```
 DISCOVER -> DIFF -> FILTER -> EXTRACT+WRITE -> DB INSERT -> INDEX -> COMPUTE -> CLEANUP -> REPORT
@@ -940,7 +953,7 @@ var migrations = []Migration{
 Run verification after migrations:
 
 ```bash
-./peasant ingest verify
+./peasant harvest verify
 ```
 
 ### Database verification

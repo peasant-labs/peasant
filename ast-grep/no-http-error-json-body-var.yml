@@ -1,0 +1,31 @@
+id: no-http-error-json-body-var
+language: Go
+severity: error
+message: >
+  http.Error with a JSON body. http.Error sets Content-Type text/plain, so the
+  client is told the JSON error is text. Use writeJSONError(w, status, message)
+  (or writeAPIError for a code), which encodes the envelope and labels it
+  application/json.
+note: >
+  Found in #699: about 60 Local API error responses sent {"error":...} as text/plain,
+  and the ones built by string concatenation broke on a quote in the message.
+rule:
+  # The JSON body is built into a variable first, then passed. A separate
+  # rule: in one any-rule the direct branch binds the variable and its
+  # constraint fails before this branch is tried.
+  pattern: http.Error($W, $VAR, $CODE)
+  inside:
+    kind: block
+    stopBy: end
+    has:
+      stopBy: end
+      any:
+        - pattern: $VAR := $INIT
+        - pattern: $VAR = $INIT
+constraints:
+  INIT:
+    regex: '^(fmt\.Sprintf\(\s*)?[`"]\{\\?"error'
+files:
+  - "internal/api/**/*.go"
+ignore:
+  - "**/*_test.go"

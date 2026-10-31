@@ -32,15 +32,32 @@ automatically. --last-good publishes the last-good full transcript instead, as a
 explicit hand-run choice; it is refused together with --auto-publish-event and
 --require-auto-publish-rule, and no generated hook file carries it.
 
+Named sessions — --session and --sessions-from push only the sessions they name, with the
+subagent sessions of each named main session, nested ones included (--without-subagents
+leaves the whole tree out). Every
+other narrowing and readiness still applies, with one exception: a subagent session pulled in
+with a named session follows that session's saved-selection decision instead of its own branch,
+as long as the named session is sent by the same run (subagent sessions often run on worktree
+branches you never chose to exclude). A subagent session named on its own keeps its own
+check. --dry-run --json prints a plan with one entry
+per named session saying what the run would do and why. --collective shares each sent
+transcript with the collectives it names, publishing private and unlicensed without
+consulting the auto-publish rules for those sessions, so the push asks once before it runs.
+
 Exit status — a caller that branches on it, including a generated Git hook, needs the
 one distinction it cannot read out of prose: whether anything was published at all.
 
   0  the run succeeded.
   1  the run failed after it had started talking to peasant online, so part of the work
-     may be published and recorded as published.
-  3  the run failed BEFORE a single peasant online request was made — a missing or expired
+     may be published and recorded as published. That includes a run that sent some
+     sessions and could not send one: an upload error, an upload peasant online refused,
+     or a failed share. A session that is not ready, left out or unchanged is not a
+     failure.
+  3  the run failed BEFORE it sent peasant online anything to write — a missing or expired
      login, an unreadable config, a store that would not open, a repository scope that
-     would not resolve. Nothing was published and nothing was recorded as published.
+     would not resolve, a named session the store does not hold, an unknown collective
+     (found by the one read that resolves --collective names), or a confirmation that
+     could not be asked. Nothing was published and nothing was recorded as published.
 
 ```
 peasant village push [flags]
@@ -52,7 +69,8 @@ peasant village push [flags]
       --annotation-hash stringArray   Only push annotations with these content hashes (repeatable; default: all).
       --annotation-id stringArray     Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.
       --auto-publish-event string     Require consent for this hook event (post-commit or pre-push)
-      --concurrency int               Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, use ~22 to saturate the peasant online pool toward the <5s target.
+      --collective stringArray        Share each sent transcript with this collective: a name, UUID or page URL, as in village pull (repeatable; needs --session or --sessions-from). Publishes private and unlicensed and skips your auto-publish rules for the named sessions, so it asks for confirmation once unless --yes is given. A --dry-run reads the collective list to resolve the names, and the visibility of any transcript it would update, and writes nothing
+      --concurrency int               Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, raise it to about 2x NumCPU and confirm throughput with --timing.
       --dry-run                       Show what would be pushed without uploading
       --force                         Re-push all sessions (including already-pushed ones)
   -h, --help                          help for push
@@ -65,12 +83,15 @@ peasant village push [flags]
       --quiet                         Suppress the summary and redaction report; print only errors, a waiting prompt request, and a final result line
       --repository string             Only push sessions carrying this Git repository's canonical project identity (a path). Peasant first uses the normalized checkout upstream remote when there is one it can normalize, then the normalized origin remote, so separate clones using the same remote share an identity. If neither is usable — including when there is no origin remote or a remote is a local path or file:// URL — identity instead comes from the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which identity was used is printed when the push runs. Default: every configured session
       --require-auto-publish-rule     Publish only sessions currently bound by an active auto-publish rule (used by rule-installed hooks)
+      --session stringArray           Push only this session (repeatable; combines with --sessions-from). The selection is an AND with --repository, --source-harness, the saved selection and readiness; a session that fails one is reported, never sent. The subagent sessions of each named main session travel with it, nested ones included, and follow its saved-selection decision. Skips the push wizard. A real run refuses an id the local store does not hold
+      --sessions-from string          Read session ids from a file, or from standard input when the value is -. Accepts one id per line, a JSON array of ids, or the JSON array that a --json listing prints
       --source-harness string         Filter to a specific harness (claude-code, gemini-cli, codex, opencode, cursor, strike, pi)
       --timeout duration              Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a peasant online server that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach peasant online. Default: no budget. Git hooks always pass one.
       --timing                        Measure and report per-phase push timing (connection setup/server split, redaction, annotation batches) to stderr, plus a per-upload JSONL log under the state dir. Off by default.
       --verbose                       Show per-session detail
       --visibility string             Override visibility for this run (private, public). Also changes every already-published session the run selects, including ones shared with collectives on peasant online, which otherwise keep the visibility they have there
-      --yes                           (alias for --non-interactive)
+      --without-subagents             Leave out the subagent sessions of the named main sessions, the whole tree; the plan counts them under subagentsOmitted
+  -y, --yes                           (alias for --non-interactive)
 ```
 
 ### Options inherited from parent commands
@@ -87,4 +108,4 @@ peasant village push [flags]
 
 * [peasant village](peasant_village.md)	 - Interact with peasant online
 
-###### Auto generated by spf13/cobra on 24-Oct-2026
+###### Auto generated by spf13/cobra on 30-Oct-2026

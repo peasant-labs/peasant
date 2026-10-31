@@ -141,50 +141,6 @@ func validCommandWrapperBody(kind commandWrapperKind, body string) bool {
 	}
 }
 
-// commandInvocationFromEntry projects the command an entry recorded at index
-// time onto the wire type. The recorded name gets the leading slash the wire
-// requires when the harness recorded it bare. It returns nil when the entry
-// recorded no command and when the recorded name cannot form a valid
-// invocation — which is also how a built-in harness command stays off the wire,
-// because schema.NewCommandInvocation refuses one.
-func commandInvocationFromEntry(entry schema.SessionEntry) *schema.CommandInvocation {
-	if entry.Extra == nil {
-		return nil
-	}
-	var stored struct {
-		Name string          `json:"command_name"`
-		Args json.RawMessage `json:"command_args"`
-	}
-	if err := json.Unmarshal([]byte(*entry.Extra), &stored); err != nil || stored.Name == "" {
-		return nil
-	}
-	name := stored.Name
-	if !strings.HasPrefix(name, "/") {
-		name = "/" + name
-	}
-	invocation, err := schema.NewCommandInvocation(name, commandArgsFromRaw(stored.Args))
-	if err != nil {
-		return nil
-	}
-	return &invocation
-}
-
-// commandArgsFromRaw reads a stored command_args value tolerantly: a JSON
-// string becomes the args, and anything else — a number, an object, an array,
-// a boolean, null, or the field being absent — is treated as empty args, so a
-// non-string args value never drops the invocation (the name still reaches the
-// wire).
-func commandArgsFromRaw(raw json.RawMessage) string {
-	var args string
-	if len(raw) == 0 {
-		return args
-	}
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return ""
-	}
-	return args
-}
-
 // entriesToTurns converts flat session_entries into the Turn model expected by
 // the detail view. Depth=1 tool_use and tool_result entries are folded into
 // their depth=0 parent Turn's ToolCalls, producing one card per assistant
@@ -240,6 +196,35 @@ func unjoinedOmissionPlaceholder(entry schema.SessionEntry, toolUseIDs map[strin
 		return false
 	}
 	return entry.ToolCallID == nil || !toolUseIDs[*entry.ToolCallID]
+}
+
+// representedClaudeTextBlock identifies a decomposed block whose entire text
+// its assistant carrier already displays. A source-referenced block bypasses
+// consecutive dedup; unrelated children and their own evidence must survive.
+func representedClaudeTextBlock(child, parent schema.SessionEntry) bool {
+	if child.Harness != schema.HarnessClaudeCode || parent.Harness != child.Harness {
+		return false
+	}
+	if child.Depth != 1 || parent.Depth != 0 {
+		return false
+	}
+	if child.Role != schema.RoleAssistant || parent.Role != schema.RoleAssistant {
+		return false
+	}
+	if child.EntryType != schema.EntryTypeText || child.PartType == nil || *child.PartType != "text" {
+		return false
+	}
+	if child.HasToolUse || child.HasThinking || child.ToolCallID != nil {
+		return false
+	}
+	if child.ContentPreview == nil || parent.ContentPreview == nil {
+		return false
+	}
+	if *child.ContentPreview == "" || *child.ContentPreview != *parent.ContentPreview || modelObservation(child).present {
+		return false
+	}
+	level, rawLevel := thinkingLevelObservation(child)
+	return level == "" && rawLevel == ""
 }
 
 func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra) []ingest.Turn {
@@ -373,15 +358,15 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 	// Fallback for pre-v10 sessions: depth-0 user/tool wrappers whose children
 	// are tool_result. A provider may attach tool_use and tool_result children
 	// directly to one assistant parent, which must remain visible.
-	depthZeroRoles := make(map[int]schema.Role)
+	depthZeroEntries := make(map[int]schema.SessionEntry)
 	for _, e := range entries {
 		if e.Depth == 0 {
-			depthZeroRoles[e.EntryIndex] = e.Role
+			depthZeroEntries[e.EntryIndex] = e
 		}
 	}
 	for _, e := range entries {
 		if e.Depth == 1 && e.EntryType == schema.EntryTypeToolResult && e.ParentIndex != nil {
-			role := depthZeroRoles[*e.ParentIndex]
+			role := depthZeroEntries[*e.ParentIndex].Role
 			if role == schema.RoleUser || role == schema.RoleTool {
 				suppress[*e.ParentIndex] = true
 			}
@@ -396,9 +381,37 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 	for parentIdx := range foldedToolCalls {
 		parentsWithTools[parentIdx] = true
 	}
+	representedTextParents := make(map[int]bool)
+	hydratedCarrierText := make(map[int]*string)
 	for _, e := range entries {
+		if e.ParentIndex != nil && !representedTextParents[*e.ParentIndex] {
+			parent := depthZeroEntries[*e.ParentIndex]
+			// Managed tool carriers retain their prose in text children rather
+			// than their tool-argument channel. Display the first plain block
+			// on that carrier, preserving its model, time and folded tools.
+			// Work on the local entry copy so stored evidence stays unchanged.
+			if parentsWithTools[parent.EntryIndex] && parent.EntryType == schema.EntryTypeToolUse && parent.ToolCallID == nil &&
+				(parent.ContentPreview == nil || *parent.ContentPreview == "") {
+				represented := parent
+				represented.ContentPreview = e.ContentPreview
+				if representedClaudeTextBlock(e, represented) {
+					parent = represented
+					depthZeroEntries[parent.EntryIndex] = parent
+					hydratedCarrierText[parent.EntryIndex] = parent.ContentPreview
+				}
+			}
+			if representedClaudeTextBlock(e, parent) {
+				suppress[e.EntryIndex] = true
+				// The carrier represents one occurrence, not every equal block.
+				// Two native "ok" blocks must still display twice in total.
+				representedTextParents[*e.ParentIndex] = true
+			}
+		}
 		if e.Depth == 1 && e.ParentIndex != nil && parentsWithTools[*e.ParentIndex] {
-			if e.EntryType == schema.EntryTypeText || e.EntryType == schema.EntryTypeThinking {
+			// A Claude carrier contains only its first text block. Its other
+			// text blocks remain conversation even when tools share the record.
+			legacyTextSummary := e.EntryType == schema.EntryTypeText && e.Harness != schema.HarnessClaudeCode
+			if legacyTextSummary || e.EntryType == schema.EntryTypeThinking {
 				suppress[e.EntryIndex] = true
 			}
 		}
@@ -408,6 +421,9 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 	turns := make([]ingest.Turn, 0, len(entries))
 	turnObservations := make(map[int]entryModelObservation)
 	for _, e := range entries {
+		if content, hydrated := hydratedCarrierText[e.EntryIndex]; hydrated && e.Depth == 0 {
+			e.ContentPreview = content
+		}
 		_, pi := evidence[e.EntryIndex]
 		if suppress[e.EntryIndex] || ingest.IsPiCarrier(e) || ingest.IsRetainedUnknownCarrier(e) || (pi && e.Depth > 0 && e.ParentIndex != nil && (e.EntryType == schema.EntryTypeThinking || e.EntryType == schema.EntryTypeText)) {
 			continue
@@ -423,7 +439,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 			ts = time.UnixMilli(*e.TimestampMs)
 		}
 
-		command := commandInvocationFromEntry(e)
+		command := ingest.CommandInvocationFromEntry(e)
 		role := injectedCommandRole(e, content)
 		// A USER turn whose only content is the invocation is harness-injected
 		// markup too, exactly like the command wrappers the gate above

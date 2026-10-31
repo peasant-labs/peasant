@@ -1,0 +1,719 @@
+# village push with an explicit selection: --session, --sessions-from and
+# --collective. Each case builds one computer (a store, two git repositories
+# "repo" and "other", a config with push.visibility private unless
+# configVisibility says otherwise) signed in to a Village double that knows the
+# collectives research (open), review (curated, so a share waits for its
+# owner) and two collectives both named twin. Then it runs the production
+# push once per entry in runs, in order, against that one world.
+#
+# seeds: kind ready | needs_ingest | latest_attempt; where repo (default) or
+#   other; parent makes a subagent session; published publishes the session
+#   before the runs; public then makes its transcript public on the double.
+# selectedOnly: the saved selection (mode selected) admits only these.
+# selectedBranches: the saved selection admits only these branches of repo;
+#   a seed's branch (main when empty) is the branch it recorded.
+# pausedRule: hooks.yaml holds a rule covering repo with no hook event, which
+#   holds every session it covers.
+# failShare: sharing with that collective fails on the double.
+# refusePublish: peasant online refuses these sessions' uploads with 422.
+#
+# Each run: args after `push --config <world config>`, {repo} is the repo
+# path. tty says whether stdin is a terminal. wantRequests is the exact
+# request list of the run; wantNoWrites allows only GET requests. wantPublished
+# is the sessions this run published; wantAudience is who can read a
+# transcript afterwards, "<collective>:<status>" sorted and comma-joined.
+#
+# Session ids:
+#   A  0a0a0a0a-0000-4000-8000-00000000000a   B  0b0b0b0b-0000-4000-8000-00000000000b
+#   C  0c0c0c0c-0000-4000-8000-00000000000c   P  0d0d0d0d-0000-4000-8000-00000000000d
+#   N  0e0e0e0e-0000-4000-8000-00000000000e   L  0f0f0f0f-0000-4000-8000-00000000000f
+#   S1 5a5a5a5a-0000-4000-8000-0000000000a1   S2 5a5a5a5a-0000-4000-8000-0000000000a2
+#   G1 5b5b5b5b-0000-4000-8000-0000000000b1 (a subagent session of S1)
+#   U  99999999-0000-4000-8000-000000000099 (never stored)
+cases:
+  - name: three_ids_two_candidates_one_unknown
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --session, 0b0b0b0b-0000-4000-8000-00000000000b, --session, 99999999-0000-4000-8000-000000000099, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantRequests: []
+        wantPlan:
+          - { id: 0b0b0b0b-0000-4000-8000-00000000000b, verdict: will_publish }
+          - { id: 99999999-0000-4000-8000-000000000099, verdict: unknown_session, reason: not_in_store }
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish }
+
+  - name: real_run_unknown_id_refuses_before_upload
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --session, 99999999-0000-4000-8000-000000000099]
+        wantExit: 3
+        wantStdoutJSON: true
+        wantRefusal: true
+        wantRequests: []
+        wantPublished: []
+        wantErrContains: ["99999999-0000-4000-8000-000000000099", "nothing was uploaded"]
+
+  - name: sessions_from_stdin_equals_repeated_session
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --sessions-from, "-"]
+        stdin: |
+          0b0b0b0b-0000-4000-8000-00000000000b
+          0a0a0a0a-0000-4000-8000-00000000000a
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0b0b0b0b-0000-4000-8000-00000000000b, verdict: will_publish }
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish }
+      - args: [--dry-run, --json, --session, 0b0b0b0b-0000-4000-8000-00000000000b, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        samePlanAs: 0
+      # The two forms combine: --session first, then the list, de-duplicated.
+      - args: [--dry-run, --json, --session, 0b0b0b0b-0000-4000-8000-00000000000b, --sessions-from, "-"]
+        stdin: |
+          0b0b0b0b-0000-4000-8000-00000000000b
+          0a0a0a0a-0000-4000-8000-00000000000a
+        wantStdoutJSON: true
+        samePlanAs: 0
+
+  # Asserts pushWizardEnabled directly, then runs a real push on a terminal:
+  # it publishes without ever opening the wizard.
+  - name: wizard_skipped_on_tty
+    kind: wizard
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        tty: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantOutputContains: ["Plan:", "0a0a0a0a-0000-4000-8000-00000000000a  will_publish"]
+
+  - name: repository_and_session_are_and
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0c0c0c0c-0000-4000-8000-00000000000c, kind: ready, where: other }
+    runs:
+      - args: [--dry-run, --json, --repository, "{repo}", --session, 0a0a0a0a-0000-4000-8000-00000000000a, --session, 0c0c0c0c-0000-4000-8000-00000000000c]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish }
+          - { id: 0c0c0c0c-0000-4000-8000-00000000000c, verdict: excluded, reason: outside_repository }
+      - args: [--json, --yes, --repository, "{repo}", --session, 0a0a0a0a-0000-4000-8000-00000000000a, --session, 0c0c0c0c-0000-4000-8000-00000000000c]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+
+  - name: source_harness_and_session_are_and
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --source-harness, codex, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: excluded, reason: harness_mismatch }
+
+  - name: branch_selection_excludes
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    selectedOnly: [0a0a0a0a-0000-4000-8000-00000000000a]
+    runs:
+      - args: [--dry-run, --json, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --session, 0b0b0b0b-0000-4000-8000-00000000000b]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish }
+          - { id: 0b0b0b0b-0000-4000-8000-00000000000b, verdict: excluded, reason: branch_selection_excluded }
+
+  - name: needs_ingest_not_sent
+    seeds:
+      - { id: 0e0e0e0e-0000-4000-8000-00000000000e, kind: needs_ingest }
+    runs:
+      - args: [--dry-run, --json, --session, 0e0e0e0e-0000-4000-8000-00000000000e]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0e0e0e0e-0000-4000-8000-00000000000e, verdict: not_ready, reason: needs_ingest }
+      - args: [--json, --yes, --session, 0e0e0e0e-0000-4000-8000-00000000000e]
+        wantStdoutJSON: true
+        wantPublished: []
+        wantPlan:
+          - { id: 0e0e0e0e-0000-4000-8000-00000000000e, verdict: not_ready, reason: needs_ingest }
+
+  - name: no_model_reply_is_not_ready_with_its_own_reason
+    # A session that never reached a model (only setup or local commands)
+    # names no model, and no re-index can add one: the plan says so instead
+    # of pointing at harvest.
+    seeds:
+      - { id: 0c1c1c1c-0000-4000-8000-00000000001c, kind: no_model_reply }
+    runs:
+      - args: [--dry-run, --json, --session, 0c1c1c1c-0000-4000-8000-00000000001c]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0c1c1c1c-0000-4000-8000-00000000001c, verdict: not_ready, reason: no_model_reply, detailContains: "never reached a model", detailOmits: "harvest" }
+      - args: [--json, --yes, --session, 0c1c1c1c-0000-4000-8000-00000000001c]
+        wantStdoutJSON: true
+        wantPublished: []
+        wantPlan:
+          - { id: 0c1c1c1c-0000-4000-8000-00000000001c, verdict: not_ready, reason: no_model_reply, detailOmits: "harvest" }
+
+  - name: not_ready_session_is_not_an_error_anywhere
+    # The summary counts a not-ready session as not ready, not as an error,
+    # so the run writes no error log and its profile is not failed.
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0c1c1c1c-0000-4000-8000-00000000001c, kind: no_model_reply }
+    runs:
+      - args: [--yes, --profile-output, "{dir}/profile.json", --session, 0a0a0a0a-0000-4000-8000-00000000000a, --session, 0c1c1c1c-0000-4000-8000-00000000001c]
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantOutputContains: ["0 error(s)", "1 not ready"]
+        wantOutputOmits: ["error details written to"]
+        wantProfileOutcome: ok
+
+  - name: refused_upload_exits_1_on_named_sessions
+    # peasant online refused one session's upload (its own secret check). The
+    # run talked to peasant online and part of it may be published, so it
+    # exits 1, as the help documents.
+    refusePublish: [5a5a5a5a-0000-4000-8000-0000000000a1]
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+    runs:
+      - args: [--json, --yes, --force, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        wantExit: 1
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantErrContains: ["1 session(s) could not be published"]
+        wantPlan:
+          - id: 0a0a0a0a-0000-4000-8000-00000000000a
+            verdict: will_publish
+            subagents:
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: failed, selectedBy: parent }
+
+  - name: refused_upload_exits_1_without_named_sessions
+    # The same refusal on a push that names no sessions.
+    refusePublish: [0b0b0b0b-0000-4000-8000-00000000000b]
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    runs:
+      - args: [--json, --yes]
+        wantExit: 1
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantErrContains: ["1 session(s) could not be published"]
+
+  - name: not_ready_session_keeps_exit_0_without_named_sessions
+    # A session that is not ready was never sent: a push that names no
+    # sessions and sends the rest exits 0.
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0c1c1c1c-0000-4000-8000-00000000001c, kind: no_model_reply }
+    runs:
+      - args: [--json, --yes]
+        wantExit: 0
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+
+  - name: model_gap_needs_a_forced_harvest
+    # An assistant reply without a model is an ingest gap. A plain harvest
+    # reports an already-indexed source unchanged, so the hint forces it.
+    seeds:
+      - { id: 0d1d1d1d-0000-4000-8000-00000000001d, kind: model_gap }
+    runs:
+      - args: [--dry-run, --json, --session, 0d1d1d1d-0000-4000-8000-00000000001d]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0d1d1d1d-0000-4000-8000-00000000001d, verdict: not_ready, reason: needs_ingest, detailContains: "peasant harvest --session 0d1d1d1d-0000-4000-8000-00000000001d --force" }
+
+  - name: latest_attempt_refused_without_last_good
+    seeds:
+      - { id: 0f0f0f0f-0000-4000-8000-00000000000f, kind: latest_attempt }
+    runs:
+      - args: [--json, --yes, --session, 0f0f0f0f-0000-4000-8000-00000000000f]
+        wantStdoutJSON: true
+        wantPublished: []
+        wantPlan:
+          - { id: 0f0f0f0f-0000-4000-8000-00000000000f, verdict: not_ready, reason: latest_attempt_kept }
+
+  - name: latest_attempt_sent_with_last_good
+    seeds:
+      - { id: 0f0f0f0f-0000-4000-8000-00000000000f, kind: latest_attempt }
+    runs:
+      - args: [--json, --yes, --last-good, --session, 0f0f0f0f-0000-4000-8000-00000000000f]
+        wantStdoutJSON: true
+        wantPublished: [0f0f0f0f-0000-4000-8000-00000000000f]
+        wantPlan:
+          - { id: 0f0f0f0f-0000-4000-8000-00000000000f, verdict: will_publish }
+
+  - name: unchanged_not_shared
+    seeds:
+      - { id: 0d0d0d0d-0000-4000-8000-00000000000d, kind: ready, published: true }
+    runs:
+      - args: [--dry-run, --json, --yes, --session, 0d0d0d0d-0000-4000-8000-00000000000d, --collective, research]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0d0d0d0d-0000-4000-8000-00000000000d, verdict: unchanged, reason: unchanged_content, nextContains: "peasant village share 0d0d0d0d-0000-4000-8000-00000000000d --collective research" }
+      - args: [--json, --yes, --session, 0d0d0d0d-0000-4000-8000-00000000000d, --collective, research]
+        wantStdoutJSON: true
+        wantPublished: []
+        wantAudience: { 0d0d0d0d-0000-4000-8000-00000000000d: "" }
+        wantPlan:
+          - { id: 0d0d0d0d-0000-4000-8000-00000000000d, verdict: unchanged, reason: unchanged_content, nextContains: "village share" }
+
+  - name: collective_name_unknown_fails_in_dry_run
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, nowhere]
+        wantExit: 3
+        wantStdoutJSON: true
+        wantRefusal: true
+        wantRequests: ["GET /api/v1/collectives"]
+        wantErrContains: ["nowhere", "research", "review"]
+
+  - name: collective_name_ambiguous_fails
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, twin]
+        wantExit: 3
+        wantStdoutJSON: true
+        wantRefusal: true
+        wantRequests: ["GET /api/v1/collectives"]
+        wantErrContains: ["ambiguous", "aaaaaaaa-0000-4000-8000-000000000003"]
+
+  - name: collective_audience_forces_private
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --visibility, private, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        wantStdoutJSON: true
+        wantKeys: [visibility]
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish, shareOutcomes: [share] }
+      - args: [--dry-run, --json, --visibility, shared, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        wantExit: 3
+        wantRequests: []
+        wantErrContains: ["--visibility shared", "--collective publishes private"]
+      - args: [--dry-run, --json, --license, CC0-1.0, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        wantExit: 3
+        wantRequests: []
+        wantErrContains: ["--license", "unlicensed"]
+
+  - name: collective_needs_a_session
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --collective, research]
+        wantExit: 3
+        wantRequests: []
+        wantErrContains: ["--collective needs --session or --sessions-from"]
+
+  - name: rules_not_consulted_paused_rule
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    pausedRule: true
+    runs:
+      # Control: without --collective the paused rule holds the session.
+      - args: [--dry-run, --json, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: held }
+      - args: [--json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantAudience: { 0a0a0a0a-0000-4000-8000-00000000000a: "research:approved" }
+
+  - name: real_run_shares_new_transcript
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research, --collective, review]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantAudience: { 0a0a0a0a-0000-4000-8000-00000000000a: "research:approved,review:pending" }
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish, shareOutcomes: [succeeded, pending_approval] }
+
+  - name: update_of_public_transcript_held
+    seeds:
+      - { id: 0d0d0d0d-0000-4000-8000-00000000000d, kind: ready, published: true, public: true }
+    runs:
+      # The dry run asks the same visibility question the real run asks, so
+      # its plan holds the session the real run holds.
+      - args: [--dry-run, --json, --yes, --force, --session, 0d0d0d0d-0000-4000-8000-00000000000d, --collective, research]
+        wantStdoutJSON: true
+        wantPublished: []
+        wantPlan:
+          - { id: 0d0d0d0d-0000-4000-8000-00000000000d, verdict: held, reason: transcript_is_public }
+      - args: [--json, --yes, --force, --session, 0d0d0d0d-0000-4000-8000-00000000000d, --collective, research]
+        wantStdoutJSON: true
+        wantPublished: []
+        wantAudience: { 0d0d0d0d-0000-4000-8000-00000000000d: "" }
+        wantPlan:
+          - { id: 0d0d0d0d-0000-4000-8000-00000000000d, verdict: held, reason: transcript_is_public }
+
+  - name: json_without_yes_refuses_public
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--json, --visibility, public, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantExit: 3
+        wantStdoutJSON: true
+        wantRefusal: true
+        wantRequests: []
+      - args: [--dry-run, --json, --visibility, public, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantRequests: []
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish }
+
+  - name: dry_run_never_prompts_with_stdin_closed
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--dry-run, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        tty: true
+        wantPrompt: false
+        wantNoWrites: true
+        wantOutputContains: ["Plan:", "will_publish"]
+        wantOutputOmits: ["[y/N]"]
+
+  - name: plan_json_golden
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --session, 99999999-0000-4000-8000-000000000099, --collective, research]
+        wantStdoutJSON: true
+        # The keys of the document before the plan existed keep their names
+        # and meaning.
+        wantKeys: [new, updated, skipped, errors, held, sessions, warnings, dry_run, collectives, visibility, needsConfirmation, plan, not_ready, excluded, unknown_session]
+        golden: |
+          {
+            "dry_run": true,
+            "collectives": [
+              {
+                "id": "aaaaaaaa-0000-4000-8000-000000000001",
+                "name": "research"
+              }
+            ],
+            "visibility": "private",
+            "needsConfirmation": false,
+            "plan": [
+              {
+                "session_id": "0a0a0a0a-0000-4000-8000-00000000000a",
+                "verdict": "will_publish",
+                "title": "myapp — claude-code (2023-11-14)",
+                "selectedBy": "request",
+                "shares": [
+                  {
+                    "collective_id": "aaaaaaaa-0000-4000-8000-000000000001",
+                    "step": "add_collective",
+                    "would": "share"
+                  }
+                ]
+              },
+              {
+                "session_id": "99999999-0000-4000-8000-000000000099",
+                "verdict": "unknown_session",
+                "reason": "not_in_store",
+                "selectedBy": "request"
+              }
+            ],
+            "not_ready": 0,
+            "excluded": 0,
+            "unknown_session": 1,
+            "new": 1,
+            "updated": 0,
+            "skipped": 0,
+            "errors": 0,
+            "held": 0,
+            "sessions": [
+              {
+                "session_id": "0a0a0a0a-0000-4000-8000-00000000000a",
+                "host_slug": "github.com-acme-tools",
+                "title": "myapp — claude-code (2023-11-14)",
+                "status": "new"
+              }
+            ],
+            "warnings": [],
+            "annotations": {
+              "total": 0,
+              "created": 0,
+              "updated": 0,
+              "skipped": 0,
+              "retracted": 0,
+              "errors": 0
+            }
+          }
+
+  - name: exit_status_matrix
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0e0e0e0e-0000-4000-8000-00000000000e, kind: needs_ingest }
+    failShare: research
+    runs:
+      # 0: a clean dry run, even with a not_ready entry.
+      - args: [--dry-run, --json, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --session, 0e0e0e0e-0000-4000-8000-00000000000e]
+        wantStdoutJSON: true
+        wantExit: 0
+      # 3: refused before any request.
+      - args: [--json, --yes, --session, 99999999-0000-4000-8000-000000000099]
+        wantStdoutJSON: true
+        wantExit: 3
+        wantRefusal: true
+        wantRequests: []
+      # 1: published, then the share failed.
+      - args: [--json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        wantStdoutJSON: true
+        wantExit: 1
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+
+  - name: collective_prompts_without_yes
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    runs:
+      - args: [--session, 0b0b0b0b-0000-4000-8000-00000000000b, --collective, research]
+        tty: true
+        stdin: "n\n"
+        wantPrompt: true
+        wantPublished: []
+        wantNoWrites: true
+        wantOutputContains: ["Publish 1 session(s) privately to research?", "nothing was published"]
+      - args: [--session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        tty: true
+        stdin: "y\n"
+        wantPrompt: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantAudience: { 0a0a0a0a-0000-4000-8000-00000000000a: "research:approved" }
+
+  - name: collective_yes_and_y_skip_prompt
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    runs:
+      - args: [--yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        tty: true
+        wantPrompt: false
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+      - args: [-y, --session, 0b0b0b0b-0000-4000-8000-00000000000b, --collective, research]
+        tty: true
+        wantPrompt: false
+        wantPublished: [0b0b0b0b-0000-4000-8000-00000000000b]
+
+  - name: collective_no_tty_without_yes_refuses
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        stdin: "y\n"
+        wantExit: 3
+        wantPrompt: false
+        wantNoWrites: true
+        wantRequestsOmit: ["GET /api/v1/collectives"]
+        wantPublished: []
+        wantErrContains: ["--yes (-y)"]
+      - args: [--json, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        tty: true
+        wantExit: 3
+        wantStdoutJSON: true
+        wantRefusal: true
+        wantRequests: []
+
+  - name: collective_dry_run_reports_needs_confirmation
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        wantStdoutJSON: true
+        wantNeedsConfirmation: true
+        wantRequests: ["GET /api/v1/collectives"]
+      - args: [--dry-run, --json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --collective, research]
+        wantStdoutJSON: true
+        wantNeedsConfirmation: false
+
+  - name: parent_pulls_subagents
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a2, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+    runs:
+      - args: [--json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a, 5a5a5a5a-0000-4000-8000-0000000000a1, 5a5a5a5a-0000-4000-8000-0000000000a2]
+
+  - name: without_subagents_flag
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a2, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+    runs:
+      - args: [--dry-run, --json, --without-subagents, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish, subagentsOmitted: 2 }
+      - args: [--json, --yes, --without-subagents, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+
+  - name: nested_subagent_pulled_with_root
+    # A subagent session's own subagent session travels too, listed under
+    # the requested session at the root of the tree.
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+      - { id: 5b5b5b5b-0000-4000-8000-0000000000b1, kind: ready, parent: 5a5a5a5a-0000-4000-8000-0000000000a1 }
+    runs:
+      - args: [--dry-run, --json, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPlan:
+          - id: 0a0a0a0a-0000-4000-8000-00000000000a
+            verdict: will_publish
+            subagents:
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: will_publish, selectedBy: parent }
+              - { id: 5b5b5b5b-0000-4000-8000-0000000000b1, verdict: will_publish, selectedBy: parent }
+      - args: [--json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a, 5a5a5a5a-0000-4000-8000-0000000000a1, 5b5b5b5b-0000-4000-8000-0000000000b1]
+
+  - name: without_subagents_omits_the_whole_tree
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+      - { id: 5b5b5b5b-0000-4000-8000-0000000000b1, kind: ready, parent: 5a5a5a5a-0000-4000-8000-0000000000a1 }
+    runs:
+      - args: [--dry-run, --json, --without-subagents, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 0a0a0a0a-0000-4000-8000-00000000000a, verdict: will_publish, subagentsOmitted: 2 }
+      - args: [--json, --yes, --without-subagents, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+
+  - name: worktree_branch_subagent_inherits_parent_selection
+    # The subagent session ran in an auto-named isolated worktree branch the
+    # saved selection does not name. Its parent passes the selection and is
+    # ready, so the subagent session follows the parent's decision.
+    selectedBranches: [main]
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a, branch: worktree-agent-a1b2c3 }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a2, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+    runs:
+      - args: [--dry-run, --json, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPlan:
+          - id: 0a0a0a0a-0000-4000-8000-00000000000a
+            verdict: will_publish
+            subagents:
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: will_publish, selectedBy: parent, selectionInheritedFrom: 0a0a0a0a-0000-4000-8000-00000000000a }
+              # Its own branch is selected: nothing is inherited, so the
+              # field is absent.
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a2, verdict: will_publish, selectedBy: parent }
+      - args: [--json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a, 5a5a5a5a-0000-4000-8000-0000000000a1, 5a5a5a5a-0000-4000-8000-0000000000a2]
+
+  - name: branch_switch_subagent_inherits_parent_selection
+    # The session switched branches mid-session, so its subagent session
+    # recorded a branch outside the selection; a nested subagent session
+    # inherits from the same root.
+    selectedBranches: [main]
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a, branch: switched-mid-session }
+      - { id: 5b5b5b5b-0000-4000-8000-0000000000b1, kind: ready, parent: 5a5a5a5a-0000-4000-8000-0000000000a1, branch: switched-mid-session }
+    runs:
+      - args: [--json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a, 5a5a5a5a-0000-4000-8000-0000000000a1, 5b5b5b5b-0000-4000-8000-0000000000b1]
+        wantPlan:
+          - id: 0a0a0a0a-0000-4000-8000-00000000000a
+            verdict: will_publish
+            subagents:
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: will_publish, selectedBy: parent, selectionInheritedFrom: 0a0a0a0a-0000-4000-8000-00000000000a }
+              - { id: 5b5b5b5b-0000-4000-8000-0000000000b1, verdict: will_publish, selectedBy: parent, selectionInheritedFrom: 0a0a0a0a-0000-4000-8000-00000000000a }
+
+  - name: subagent_named_alone_keeps_own_selection
+    # Named on its own, the subagent session is not pulled in by a parent,
+    # so its own branch decides.
+    selectedBranches: [main]
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a, branch: worktree-agent-a1b2c3 }
+    runs:
+      - args: [--dry-run, --json, --session, 5a5a5a5a-0000-4000-8000-0000000000a1]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: excluded, reason: branch_selection_excluded }
+      - args: [--json, --yes, --session, 5a5a5a5a-0000-4000-8000-0000000000a1]
+        wantStdoutJSON: true
+        wantPublished: []
+
+  - name: inherited_subagent_still_needs_readiness
+    # Inheriting the selection skips only the branch check: a subagent
+    # session that is not ready is still not sent.
+    selectedBranches: [main]
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: needs_ingest, parent: 0a0a0a0a-0000-4000-8000-00000000000a, branch: worktree-agent-a1b2c3 }
+    runs:
+      - args: [--json, --yes, --session, 0a0a0a0a-0000-4000-8000-00000000000a]
+        wantStdoutJSON: true
+        wantPublished: [0a0a0a0a-0000-4000-8000-00000000000a]
+        wantPlan:
+          - id: 0a0a0a0a-0000-4000-8000-00000000000a
+            verdict: will_publish
+            subagents:
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: not_ready, reason: needs_ingest, selectedBy: parent, selectionInheritedFrom: 0a0a0a0a-0000-4000-8000-00000000000a }
+
+  - name: subagent_of_unready_parent_keeps_own_selection
+    # The parent passes the selection but is not ready, so it is not sent and
+    # there is no decision to inherit: the subagent session's own branch
+    # excludes it.
+    selectedBranches: [main]
+    seeds:
+      - { id: 0e0e0e0e-0000-4000-8000-00000000000e, kind: needs_ingest }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0e0e0e0e-0000-4000-8000-00000000000e, branch: worktree-agent-a1b2c3 }
+    runs:
+      - args: [--dry-run, --json, --session, 0e0e0e0e-0000-4000-8000-00000000000e]
+        wantStdoutJSON: true
+        wantPlan:
+          - id: 0e0e0e0e-0000-4000-8000-00000000000e
+            verdict: not_ready
+            reason: needs_ingest
+            subagents:
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: excluded, reason: branch_selection_excluded, selectedBy: parent, detailContains: "the parent is not sent" }
+      - args: [--json, --yes, --session, 0e0e0e0e-0000-4000-8000-00000000000e]
+        wantStdoutJSON: true
+        wantPublished: []
+
+  - name: subagent_named_alone
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+    runs:
+      - args: [--dry-run, --json, --session, 5a5a5a5a-0000-4000-8000-0000000000a1]
+        wantStdoutJSON: true
+        wantPlan:
+          - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: will_publish }
+
+  - name: plan_lists_subagents_under_parent
+    seeds:
+      - { id: 0a0a0a0a-0000-4000-8000-00000000000a, kind: ready }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+      - { id: 5a5a5a5a-0000-4000-8000-0000000000a2, kind: ready, parent: 0a0a0a0a-0000-4000-8000-00000000000a }
+      - { id: 0b0b0b0b-0000-4000-8000-00000000000b, kind: ready }
+    runs:
+      - args: [--dry-run, --json, --session, 0a0a0a0a-0000-4000-8000-00000000000a, --session, 0b0b0b0b-0000-4000-8000-00000000000b]
+        wantStdoutJSON: true
+        wantPlan:
+          - id: 0a0a0a0a-0000-4000-8000-00000000000a
+            verdict: will_publish
+            subagents:
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a1, verdict: will_publish, selectedBy: parent }
+              - { id: 5a5a5a5a-0000-4000-8000-0000000000a2, verdict: will_publish, selectedBy: parent }
+          - { id: 0b0b0b0b-0000-4000-8000-00000000000b, verdict: will_publish }

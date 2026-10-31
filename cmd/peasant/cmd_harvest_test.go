@@ -312,24 +312,6 @@ func TestHarvestCmd_SourcePathWithoutProvider(t *testing.T) {
 	}
 }
 
-// TestHarvestCmd_SourceHarnessWithoutPath verifies that passing --source-harness
-// without --source-path returns a clear error.
-func TestHarvestCmd_SourceHarnessWithoutPath(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	_, err := executeHarvestCmd(t, tmpDir, []string{
-		"--source-harness=claude-code",
-		"--output=" + tmpDir,
-		"--dry-run",
-	})
-	if err == nil {
-		t.Fatal("expected error when --source-harness given without --source-path, got nil")
-	}
-	if !strings.Contains(err.Error(), "--source-harness requires --source-path") {
-		t.Errorf("error should mention '--source-harness requires --source-path', got: %v", err)
-	}
-}
-
 // TestBuildSourceConfigs_DisabledProvider confirms that a disabled provider is
 // not included in the source map returned by buildSourceConfigs.
 func TestBuildSourceConfigs_DisabledProvider(t *testing.T) {
