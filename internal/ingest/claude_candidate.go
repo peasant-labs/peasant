@@ -261,6 +261,13 @@ func claudeBoundKey(key string) (string, error) {
 // fields the block channels do not carry (the raw provider entry ids, the
 // tool-result error flag, the stop reason) are not expressible in a managed
 // generation and are not reconstructed.
+//
+// RawByteLength keeps the retained indexer's meaning. A depth-0 block records
+// the whitespace-trimmed byte length of the JSONL line it came from, including
+// an opaque carrier and a line whose unknown content blocks were retained. A
+// depth-1 block is carved from that line and does not repeat its size: a
+// thinking block records the byte length of its thinking text, and every other
+// depth-1 block records none.
 func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) ([]ClassifiedBlock, error) {
 	type claudeRecord struct {
 		carrier  schema.SessionEntry
@@ -380,6 +387,7 @@ func claudeCarrierBlock(recordKey string, entry schema.SessionEntry, hasToolResu
 	block.RetainedUnknown = retained
 	block.ObservedModel = observedModel
 	block.Extra = extra
+	block.RawByteLength = entry.RawByteLength
 	claudeAssignContent(&block, entry)
 	if err := claudeAssignSubmission(&block, entry, !hasToolResultContent); err != nil {
 		return ClassifiedBlock{}, err
@@ -399,6 +407,8 @@ func claudeChildBlock(childKey, recordKey string, entry schema.SessionEntry, see
 		EntryType:        entry.EntryType,
 		Depth:            1,
 		PartType:         entry.PartType,
+		HasThinking:      entry.HasThinking,
+		RawByteLength:    entry.RawByteLength,
 		ToolName:         derefString(entry.ToolNamesCSV),
 		ToolKind:         derefToolKind(entry.ToolKind),
 	}

@@ -41,6 +41,9 @@ Release, which holds the signed artifacts and checksums.
   agent id now raises a `claude_agent_id_collision` warning naming both, in the
   summary and in `discoveryDiagnostics`. The subagent is still not stored.
 - Claude discovery skips harness-injected `isMeta` notices when choosing session titles. Existing cached transcripts are read again once to refresh their titles.
+- Claude Code main sessions keep their harness version when the transcript starts with a record that has no version.
+- Claude Code entries stored as managed generations keep `rawByteLength`, and thinking blocks keep their thinking flag. The next harvest refreshes existing sessions; a session that is already published needs `peasant village push --force` to send the new values.
+- A harvest now applies an adapter revision bump to a session whose stored row already has an older revision. Before, the refresh was skipped and the session stayed stale.
 - A session `export sessions` or publication refuses now states the reason stored for its capture and the one command that repairs it, `peasant harvest index --session <id>`, or says that this build cannot lift the refusal. Damaged content names `peasant harvest index --force`, the only run that replaces it.
 - `harvest --since` reports the stored sessions outside its window that still need index maintenance, which it used to skip without saying so. Run `peasant harvest index` to process them; this is what repairs sessions an older build stored as bounded previews.
 - A stale session the index stage repairs is no longer reported, in the same run, as a capture that stays incomplete.
