@@ -87,6 +87,8 @@ func carrierEntry(t *testing.T, position UnknownSourcePosition, payload json.Raw
 // bound. The calibration is reproducible with the one-line probe-off mutation
 // documented here, not from this committed test alone.
 func TestProjectRetainedUnknownRefusesOversizedPayloadBeforeMaterializing(t *testing.T) {
+	// Deliberately not parallel: the allocation bound below reads process-wide
+	// memory stats, so another test allocating in the same process masks it.
 	fixture := loadNoMaterializationCases(t)
 	payloadBytes := fixture.PayloadBytes
 	injectedLimit := payloadBytes / 8
@@ -500,6 +502,7 @@ var deliberateSizePrecedenceNames = []string{
 const overDeepPayloadTextDepth = 10001
 
 func TestProjectRetainedUnknownPrecedence(t *testing.T) {
+	t.Parallel()
 	fixtures := loadRetainedProjectionPrecedenceFixtures(t)
 	if fixtures.PayloadBytes <= 0 {
 		t.Fatalf("precedence fixture %s needs a positive payloadBytes", retainedProjectionPrecedenceFixturePath)
