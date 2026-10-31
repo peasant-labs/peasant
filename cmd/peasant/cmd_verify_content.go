@@ -46,7 +46,7 @@ func runVerifyContent(cmd *cobra.Command, repair bool) error {
 	if err != nil {
 		return err
 	}
-	return writeVerifyContentReport(cmd, report, saved, repair)
+	return writeVerifyContentReport(cmd, report, saved, string(ownedRoot), repair)
 }
 
 // openVerifyContentStore opens the analytics store for content
@@ -74,7 +74,7 @@ func openVerifyContentStore(cmd *cobra.Command, ownedRoot, dbPath string) (*stor
 // non-empty damage list fails the command, so scripts and CI can gate on
 // it; the fix for each session is the repair activation on its next
 // harvest.
-func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyReport, saved []savedTranscriptDamage, repair bool) error {
+func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyReport, saved []savedTranscriptDamage, savedRoot string, repair bool) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "Content verification")
 	fmt.Fprintf(out, "sessions checked: %d\n", report.SessionsChecked)
@@ -92,6 +92,10 @@ func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyRepo
 		fmt.Fprintf(out, "  - %s: its sessions row is missing; run peasant harvest --force --session %s to re-index it from its transcript\n", id, id)
 	}
 	fmt.Fprintf(out, "saved transcripts damaged or missing: %d\n", len(saved))
+	if len(saved) > 0 {
+		// Every session reads as missing when the output directory moved.
+		fmt.Fprintf(out, "  (checked under %s)\n", savedRoot)
+	}
 	for _, damage := range saved {
 		fmt.Fprintf(out, "  - %s: %s; run peasant harvest --force --session %s to save it again from the source\n", damage.SessionID, damage.Reason, damage.SessionID)
 	}
