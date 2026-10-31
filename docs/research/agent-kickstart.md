@@ -1,39 +1,34 @@
-# Install Peasant, then open your library
+# Install, then ask your agent
 
-**Proposal, not shipped behavior.** [Try the mockup](https://peasant-kickstart-proposal.handysoftwarestudios.chatgpt.site).
+Run one command in your terminal to install Peasant and start its existing Kickstart:
 
-## Two decisions
-
-1. **Install Peasant.** The website starts the appropriate platform download directly.
-   Other platforms stay secondary. The user completes
-   the normal operating-system installation and opens Peasant.
-2. **Open library.** One local screen shows discovered projects. Choose projects,
-   then select **open library** to save the selection, import locally, and enter
-   the library. No welcome, separate import confirmation, or ready screen.
-
-Existing configured installations open the library directly. Keep existing
-selection and data. Keep other settings, including retention, unchanged unless
-explicitly edited. There is no account, privacy questionnaire, or publishing step.
-
-```mermaid
-flowchart LR
-    A["Install Peasant"] --> B["Choose projects and open library"]
+```sh
+curl -fsSL https://peasantlabs.org/install | bash -s -- --kickstart
 ```
 
-## Engineering boundary
+Then tell Claude or your coding agent:
 
-Today, [`peasant kickstart`](../KICKSTART.md) requires an interactive terminal;
-bare `peasant` does not run it, and the Claude plugin cannot install Peasant.
-The download entry and local first-use screen above remain proposed.
+> Publish this session with Peasant. Ask which collective if needed.
 
-Use verified [official artifacts](https://github.com/peasant-labs/peasant/releases),
-confirm the target machine, OS/architecture, artifact/version, destination,
-privileges, and effects before host approval. Reject failed verification and
-unsupported platforms. Never run a generated installer or silently install on
-a remote agent host.
+Installation adds no project-picker window, account screen, or publishing step.
+Kickstart keeps its existing interactive setup. Publishing is a separate explicit
+request from the agent, with the destination resolved before anything leaves.
 
-Reuse Kickstart's canonical `ingest.SelectionMatcher`, validation, atomic save,
-retention, and ingest engine. Require explicit project selection; existing
-branch/session choices remain available without another mandatory screen.
-Keep installation/save/import errors retryable. Never log in, install hooks,
-or publish without the user's separate explicit action.
+## Implementation
+
+The website installer's optional `--kickstart` mode verifies and installs the
+release, then invokes that exact binary from `~/.local/bin` with the terminal
+attached. It works before the directory is on `PATH`. Bare installation remains
+install-only; cancellation, failed verification, and missing terminals never
+launch setup. On Windows, use the existing installer and the Kickstart command
+it prints.
+
+Reuse canonical Kickstart selection, validation, atomic save, retention, and
+ingest. Preserve existing data and untouched settings. Do not install hooks,
+log in, or publish as an installation side effect.
+
+The current Claude `/peasant` plugin opens this session locally; it does not
+mean upload. The publishing request must use a supported CLI or the canonical
+publish view, ask for missing audience information, and preserve explicit consent.
+
+[Interactive proposal](https://peasant-kickstart-proposal.handysoftwarestudios.chatgpt.site).

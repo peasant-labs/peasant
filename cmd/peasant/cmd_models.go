@@ -54,6 +54,7 @@ func buildModelsCommand(fetcher ModelFetcher) *cobra.Command {
 	var (
 		providerFilter string
 		dryRun         bool
+		assumeYes      bool
 	)
 
 	syncCmd := &cobra.Command{
@@ -71,16 +72,20 @@ func buildModelsCommand(fetcher ModelFetcher) *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "This will sync model data.\n")
 			fmt.Fprintf(cmd.OutOrStdout(), "Source: %s\n", sourceInfo)
 			fmt.Fprintf(cmd.OutOrStdout(), "Purpose: Update local model reference data with pricing and capabilities\n")
-			fmt.Fprintf(cmd.OutOrStdout(), "\nContinue? [y/N] ")
-
-			var response string
-			if _, err := fmt.Fscan(cmd.InOrStdin(), &response); err != nil {
-				return fmt.Errorf("read confirmation: %w", err)
-			}
-			response = strings.ToLower(strings.TrimSpace(response))
-			if response != "y" && response != "yes" {
-				fmt.Fprintln(cmd.OutOrStdout(), "Sync cancelled.")
-				return nil
+			// --dry-run writes nothing and --yes is the scripted consent, so
+			// only an interactive write asks.
+			if !dryRun && !assumeYes {
+				fmt.Fprintf(cmd.OutOrStdout(), "\nContinue? [y/N] ")
+				var response string
+				if _, err := fmt.Fscan(cmd.InOrStdin(), &response); err != nil {
+					cmd.SilenceUsage = true
+					return fmt.Errorf("read confirmation: %w; pass --yes to sync without a prompt", err)
+				}
+				response = strings.ToLower(strings.TrimSpace(response))
+				if response != "y" && response != "yes" {
+					fmt.Fprintln(cmd.OutOrStdout(), "Sync cancelled.")
+					return nil
+				}
 			}
 
 			// 1. Validate the provider filter BEFORE any fetch or fallback. This
@@ -153,7 +158,8 @@ func buildModelsCommand(fetcher ModelFetcher) *cobra.Command {
 	}
 
 	syncCmd.Flags().StringVar(&providerFilter, "provider", "", "Only sync models from this provider")
-	syncCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show count without writing")
+	syncCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show count without writing (no confirmation prompt)")
+	syncCmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "Sync without the confirmation prompt")
 
 	modelsCmd.AddCommand(syncCmd)
 	return modelsCmd

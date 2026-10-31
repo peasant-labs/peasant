@@ -21,6 +21,7 @@ required_names:
   - malformed-record-reindexes-stored-copy-and-names-it
   - unrecorded-session-is-refused
   - busy-index-is-refused
+  - running-cli-harvest-is-refused-not-waited-for
   - overdue-run-is-stopped
 # One turn of the session. TURN is the turn number, TIME its timestamp.
 turn: |
@@ -75,6 +76,17 @@ cases:
     busy: true
     status: 409
     code: ingest_running
+    user_turns_after: 12
+    neighbour_user_turns_after: 3
+  - name: running-cli-harvest-is-refused-not-waited-for
+    turns: 12
+    neighbour_turns: 3
+    append_turns: 1
+    harvest_lock_held: true
+    timeout: 30s
+    status: 409
+    code: ingest_running
+    message: another harvest is running
     user_turns_after: 12
     neighbour_user_turns_after: 3
   - name: overdue-run-is-stopped

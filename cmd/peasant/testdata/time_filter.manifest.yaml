@@ -11,4 +11,20 @@ required:
   - compound_duration
   - seconds
   - bad_number_quotes_input_as_typed
-  - bare_m_is_ambiguous
+  - minutes
+  - exact_minutes
+  - exact_seconds
+  - exact_compound
+  - exact_fraction
+  - month_end_normalizes
+  - duration_overflow
+  - calendar_overflow
+  - trailing_garbage
+  - signed_positive
+  - zero_duration
+  - command_minutes
+  - command_compound
+  - weeks_overflow
+  - fractional_calendar
+  - exact_microseconds
+  - exact_nanosecond

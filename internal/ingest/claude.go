@@ -21,6 +21,7 @@ import (
 
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
 type ClaudeAdapter struct {
+	diagnostics         []DiscoveryDiagnostic
 	fs                  FileSystem
 	git                 GitResolver
 	salt                salt.Salt
@@ -161,6 +162,7 @@ type claudeFileOpener interface {
 //
 // Per RFC Section 6.4, symlinks are skipped silently.
 func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
+	a.diagnostics = nil
 	var sessions []DiscoveredSession
 
 	// Mining a transcript is the expensive part of Claude discovery: it reads
@@ -198,7 +200,10 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 			}
 
 			if err != nil {
-				return nil // skip unreadable entries
+				// Keep walking, but name a directory permissions hid so the
+				// run does not just report fewer sessions.
+				a.noteUnreadable(path, err)
+				return nil
 			}
 
 			// Skip symlinks per RFC Section 6.4.
@@ -1357,4 +1362,17 @@ func parseTimestampMillis(ts string) int64 {
 		}
 	}
 	return t.UnixMilli()
+}
+
+var _ DiscoveryDiagnosticReporter = (*ClaudeAdapter)(nil)
+
+// DiscoveryDiagnostics names the source locations the last Discover could not read.
+func (a *ClaudeAdapter) DiscoveryDiagnostics() []DiscoveryDiagnostic {
+	return append([]DiscoveryDiagnostic(nil), a.diagnostics...)
+}
+
+func (a *ClaudeAdapter) noteUnreadable(path string, err error) {
+	if d, ok := unreadableSourceDiagnostic(HarnessClaudeCode, path, err); ok {
+		a.diagnostics = append(a.diagnostics, d)
+	}
 }

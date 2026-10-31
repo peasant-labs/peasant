@@ -25,6 +25,9 @@ const (
 	WarningIndexMaintenance WarningCode = "index_maintenance_pending"
 	// WarningFilterIgnored is a filter the command accepted and did not apply.
 	WarningFilterIgnored WarningCode = "filter_ignored"
+	// WarningCaptureBounded is a session whose stored text is a bounded
+	// preview, or a capture that lacks content, so a read of it is not whole.
+	WarningCaptureBounded WarningCode = "capture_bounded"
 )
 
 // AllWarningCodes is the closed set of warning codes.
@@ -33,6 +36,7 @@ var AllWarningCodes = []WarningCode{
 	WarningIndexStale,
 	WarningIndexMaintenance,
 	WarningFilterIgnored,
+	WarningCaptureBounded,
 }
 
 // NewWarningCode validates raw against the closed set.
@@ -60,6 +64,9 @@ const (
 	// EmptyNotFetchedYet is a local copy of remote state that has not been
 	// fetched yet.
 	EmptyNotFetchedYet EmptyCode = "not_fetched_yet"
+	// EmptyNoMatchingEntries is a read of stored sessions in which no entry
+	// met the command's selection.
+	EmptyNoMatchingEntries EmptyCode = "no_matching_entries"
 )
 
 // AllEmptyCodes is the closed set of empty-result codes.
@@ -69,6 +76,7 @@ var AllEmptyCodes = []EmptyCode{
 	EmptyInputListWasEmpty,
 	EmptyNothingChanged,
 	EmptyNotFetchedYet,
+	EmptyNoMatchingEntries,
 }
 
 // NewEmptyCode validates raw against the closed set.

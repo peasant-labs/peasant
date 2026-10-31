@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +19,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/export"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -643,10 +649,14 @@ Requires either --session for a single session or --sessions-from for a batch.
 --sessions-from reads a file, or standard input when the value is -, holding one
 id per line or the JSON array that 'peasant sessions list --json' prints.
 
-With --json, stdout holds one JSON document: the sessions exported and a
-warnings array naming every session that was refused. A refused session is
-also reported on stderr, and a run over more than one session ends with a
-one-line summary on stderr.`,
+With --json, stdout holds one JSON document: the sessions exported, the refusal
+count by reason, and a warnings array naming every session that was refused. A
+refused session is also reported on stderr with the reason stored for it and the
+command that repairs it, and a run over more than one session ends with a
+one-line summary on stderr: exported, refused, and why.
+
+The command exits 1 when it refuses any session. The sessions it did export
+stay written.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionIDs, err := resolveExportSessionIDs(cmd)
 			if err != nil {
@@ -676,11 +686,13 @@ one-line summary on stderr.`,
 			fs := &ingest.OSFileSystem{}
 
 			warnings := clicontract.NewCollector(cmd.ErrOrStderr(), jsonOutput)
-			refuse := func(sid string, message string) {
+			refusals := map[string]int{}
+			refuse := func(sid string, reason string, message string) {
+				refusals[reason]++
 				warnings.Warn(clicontract.Warning{Code: clicontract.WarningSessionRefused, SessionID: sid, Message: message})
 			}
 			exportedSessions := []exportedSession{}
-			var succeeded, failed int
+			var succeeded, failed, repairable int
 			for _, sid := range sessionIDs {
 				// The default seam stays on the authority read; only the explicit
 				// flag routes through the selected one. The last-good selection is
@@ -695,15 +707,19 @@ one-line summary on stderr.`,
 					exported, exportErr = exportSessionTranscript(ctx, db, fs, sid, cfg.Output.BasePath)
 				}
 				if exportErr != nil {
-					refuse(sid, exportErr.Error())
+					refuse(sid, exportRefusalReason(exportErr), exportErr.Error())
 					failed++
+					var refusal *store.ContentCaptureRefusal
+					if errors.As(exportErr, &refusal) && refusal.Repairable {
+						repairable++
+					}
 					continue
 				}
 
 				outPath := filepath.Join(outputDir, sid+".json")
 				data, marshalErr := json.MarshalIndent(exported, "", "  ")
 				if marshalErr != nil {
-					refuse(sid, fmt.Sprintf("marshal JSON: %v", marshalErr))
+					refuse(sid, exportRefusalWrite, fmt.Sprintf("marshal JSON: %v", marshalErr))
 					failed++
 					continue
 				}
@@ -713,7 +729,7 @@ one-line summary on stderr.`,
 				// before this point, so stdout stays silent until the rename
 				// commits the new bytes.
 				if writeErr := writeFileAtomic(outPath, data, 0644); writeErr != nil {
-					refuse(sid, fmt.Sprintf("write %s: %v", outPath, writeErr))
+					refuse(sid, exportRefusalWrite, fmt.Sprintf("write %s: %v", outPath, writeErr))
 					failed++
 					continue
 				}
@@ -725,22 +741,36 @@ one-line summary on stderr.`,
 				succeeded++
 			}
 
-			// A bulk run ends with one summary line on stderr, so a count of
-			// refusals is visible without reading every warning above it.
+			// A bulk run ends with one summary line on stderr, so the refusals
+			// and their reasons are visible without reading every warning.
 			if len(sessionIDs) > 1 {
-				fmt.Fprintf(cmd.ErrOrStderr(), "%d of %d sessions exported, %d refused\n", succeeded, len(sessionIDs), failed)
+				fmt.Fprintln(cmd.ErrOrStderr(), exportSummaryLine(succeeded, len(sessionIDs), failed, repairable, refusals))
 			}
 			if jsonOutput {
 				doc := exportSessionsDocument{
-					Exported: succeeded,
-					Sessions: exportedSessions,
-					Meta:     warnings.Meta("", ""),
+					Exported:       succeeded,
+					Refused:        failed,
+					RefusalReasons: refusals,
+					Sessions:       exportedSessions,
+					Meta:           warnings.Meta("", ""),
 				}
 				if err := clicontract.WriteJSON(cmd.OutOrStdout(), doc); err != nil {
 					return err
 				}
 			}
 
+			if failed > 0 {
+				// The report above is complete, so the flag usage would only bury it.
+				cmd.SilenceUsage = true
+			}
+			if succeeded > 0 && failed > 0 {
+				return fmt.Errorf(
+					"export sessions: %d of %d session(s) refused\n"+
+						"What went wrong: the other sessions were exported, but these were not.\n"+
+						"Fix: check the warnings above for why each was refused and what repairs it.",
+					failed, len(sessionIDs),
+				)
+			}
 			if succeeded == 0 && failed > 0 {
 				return fmt.Errorf(
 					"export sessions: all %d session(s) failed to export\n"+
@@ -774,9 +804,57 @@ type exportedSession struct {
 
 // exportSessionsDocument is the export sessions --json document.
 type exportSessionsDocument struct {
-	Exported int               `json:"exported"`
-	Sessions []exportedSession `json:"sessions"`
+	Exported int `json:"exported"`
+	Refused  int `json:"refused"`
+	// RefusalReasons counts the refused sessions by reason; it is {} when none was.
+	RefusalReasons map[string]int    `json:"refusal_reasons"`
+	Sessions       []exportedSession `json:"sessions"`
 	clicontract.Meta
+}
+
+// Refusal reasons a store capture refusal does not supply itself.
+const (
+	exportRefusalInconsistent  = "capture_inconsistent"
+	exportRefusalLatestAttempt = "latest_attempt_incomplete"
+	exportRefusalNotFound      = "session_not_found"
+	exportRefusalWrite         = "write_failed"
+	exportRefusalOther         = "export_failed"
+)
+
+// exportRefusalReason names why one session was refused, for the run's counts.
+func exportRefusalReason(err error) string {
+	var refusal *store.ContentCaptureRefusal
+	switch {
+	case errors.As(err, &refusal):
+		return refusal.Reason
+	case errors.Is(err, store.ErrContentIntegrity):
+		return exportRefusalInconsistent
+	case errors.Is(err, indexformat.ErrLatestAttemptIncomplete):
+		return exportRefusalLatestAttempt
+	case errors.Is(err, export.ErrSessionNotFound):
+		return exportRefusalNotFound
+	}
+	return exportRefusalOther
+}
+
+// exportSummaryLine is the one line that ends a bulk export. Reasons print
+// largest first, then by name, so the same run prints the same line.
+func exportSummaryLine(exported, total, refused, repairable int, reasons map[string]int) string {
+	line := fmt.Sprintf("%d of %d sessions exported, %d refused", exported, total, refused)
+	if refused == 0 {
+		return line
+	}
+	names := slices.Sorted(maps.Keys(reasons))
+	slices.SortStableFunc(names, func(a, b string) int { return cmp.Compare(reasons[b], reasons[a]) })
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%d %s", reasons[name], name))
+	}
+	line += ": " + strings.Join(parts, ", ")
+	if repairable > 0 {
+		line += fmt.Sprintf("; peasant harvest index re-indexes %d of them", repairable)
+	}
+	return line
 }
 
 // resolveExportSessionIDs reads the session ids export sessions acts on:

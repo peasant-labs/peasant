@@ -146,6 +146,8 @@ are replayed once through the ordinary push candidate path.
 | Flag | Description |
 |------|-------------|
 | `--provider <p>` | Filter models by provider (`anthropic`, `google`, `openai`) |
+| `--dry-run` | Show the count without writing; no confirmation prompt |
+| `--yes`, `-y` | Sync without the confirmation prompt (for scripts) |
 
 ### `peasant sessions tag` subcommands
 
@@ -175,7 +177,7 @@ are replayed once through the ordinary push candidate path.
 | `--force` | Force re-process sessions that match current filters |
 | `--all` | Process ALL sessions (clears filters, implies `--force`) |
 | `--session <ids>` | Filter to specific session IDs (repeatable, comma-separated). Overrides the selection index. |
-| `--since <time>` | Only sessions newer than this: `Nh`, `Nd`, `Nw`, `Nmo` (months), `Ny`, or `YYYY-MM-DD`. `sessions list --since/--until` and `prune --before/--after` take the same values, except that `prune` refuses a bare `Nm` (write `Nmo`). |
+| `--since <time>` | Only sessions newer than this: positive Go durations such as `30m`, `1h30m`, or integer calendar units `7d`, `2w`, `3mo` (months), `1y`, or `YYYY-MM-DD`/RFC3339. `sessions list --since/--until` and `prune --before/--after` accept the same values. Relative spans must be positive and unsigned. Harvest formerly treated `m` as months; use `mo` for months now. |
 | `--source-harness <h>` | Discover only this harness using its configured or default path (`claude-code`, `opencode`, `codex`, `cursor`, `strike`, `pi`) |
 | `--source-path <path>` | Override the named harness's source paths (requires `--source-harness`; replaces config, not additive) |
 | `--output <path>` | Override output base path |

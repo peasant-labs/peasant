@@ -33,6 +33,16 @@ type timeFilterFixture struct {
 	Accepted  []timeFilterAccepted `yaml:"accepted"`
 	Refused   []timeFilterRefused  `yaml:"refused"`
 	PruneOnly []timeFilterRefused  `yaml:"pruneOnly"`
+	Exact     []struct {
+		Name  string `yaml:"name"`
+		Now   string `yaml:"now"`
+		Input string `yaml:"input"`
+		Want  string `yaml:"want"`
+	} `yaml:"exact"`
+	Commands []struct {
+		Name  string `yaml:"name"`
+		Input string `yaml:"input"`
+	} `yaml:"commands"`
 }
 
 func loadTimeFilterFixture(t *testing.T) timeFilterFixture {
@@ -51,6 +61,12 @@ func loadTimeFilterFixture(t *testing.T) timeFilterFixture {
 	for _, c := range fixture.Accepted {
 		present[c.Name] = true
 	}
+	for _, c := range fixture.Exact {
+		present[c.Name] = true
+	}
+	for _, c := range fixture.Commands {
+		present[c.Name] = true
+	}
 	for _, c := range append(slices.Clone(fixture.Refused), fixture.PruneOnly...) {
 		present[c.Name] = true
 	}
@@ -60,6 +76,54 @@ func loadTimeFilterFixture(t *testing.T) timeFilterFixture {
 		}
 	}
 	return fixture
+}
+
+func TestTimeFilterCommands(t *testing.T) {
+	t.Parallel()
+	for _, tc := range loadTimeFilterFixture(t).Commands {
+		t.Run(tc.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedPruneTestSessions(t, dir)
+			out, _, err := executePruneCmd(t, dir, []string{"--before", tc.Input, "--dry-run"})
+			if err != nil || !strings.Contains(out, "2 session(s) would be deleted") {
+				t.Fatalf("prune before: %v, %s", err, out)
+			}
+			out, _, err = executePruneCmd(t, dir, []string{"--after", tc.Input, "--dry-run"})
+			if err != nil || strings.Contains(out, "session(s) would be deleted") {
+				t.Fatalf("prune after: %v, %s", err, out)
+			}
+			out, err = executeSessionsCmd(t, dir, []string{"list", "--since", tc.Input})
+			if err != nil || strings.Contains(out, pruneTestSessionA[:8]) {
+				t.Fatalf("sessions since: %v, %s", err, out)
+			}
+			out, err = executeSessionsCmd(t, dir, []string{"list", "--until", tc.Input})
+			if err != nil || !strings.Contains(out, pruneTestSessionA[:8]) {
+				t.Fatalf("sessions until: %v, %s", err, out)
+			}
+			harvestDir := t.TempDir()
+			if out, err = executeHarvestCmd(t, harvestDir, []string{"--output", harvestDir, "--since", tc.Input, "--dry-run"}); err != nil {
+				t.Fatalf("harvest: %v, %s", err, out)
+			}
+		})
+	}
+}
+
+func TestTimeFilterExact(t *testing.T) {
+	t.Parallel()
+	for _, tc := range loadTimeFilterFixture(t).Exact {
+		now, err := time.Parse(time.RFC3339, tc.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := time.Parse(time.RFC3339, tc.Want)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := parseTimeFilter(tc.Input, now)
+		if err != nil || !got.Equal(want) {
+			t.Errorf("%s: got %v, %v; want %v", tc.Name, got, err, want)
+		}
+	}
 }
 
 // TestTimeFiltersShareOneGrammar proves harvest --since, sessions list
@@ -129,22 +193,16 @@ func TestPruneCmdAcceptsRelativeBefore(t *testing.T) {
 	}
 }
 
-// TestPruneRefusesTheAmbiguousMonthUnit proves the destructive prune command
-// refuses a bare "m" (read by people as minutes, by the parser as months)
-// with a hint, and takes the explicit "mo".
-func TestPruneRefusesTheAmbiguousMonthUnit(t *testing.T) {
+// TestPruneAcceptsMinutes checks both destructive selectors through the command.
+func TestPruneAcceptsMinutes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	seedPruneTestSessions(t, dir)
 	for _, flag := range []string{"--after", "--before"} {
-		out, _, err := executePruneCmd(t, dir, []string{flag, "30m", "--dry-run"})
-		if err == nil || !strings.Contains(err.Error(), "30mo") || strings.Contains(out, "session(s) would be deleted") {
-			t.Fatalf("prune %s 30m: err %v, want a refusal naming 30mo and no selection:\n%s", flag, err, out)
+		_, _, err := executePruneCmd(t, dir, []string{flag, "30m", "--dry-run"})
+		if err != nil {
+			t.Fatalf("prune %s 30m: %v", flag, err)
 		}
-	}
-	// Outside prune a bare m keeps meaning months (a maintainer decision).
-	if s, err := parseDateOrDuration("3m", true); err != nil || time.Since(time.UnixMilli(s)).Hours()/24 < 88 {
-		t.Fatalf("sessions list --since 3m: %v, want about three months ago", err)
 	}
 	if _, _, err := executePruneCmd(t, dir, []string{"--after", "30mo", "--dry-run"}); err != nil {
 		t.Fatalf("prune --after 30mo: %v", err)

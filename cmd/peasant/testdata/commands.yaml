@@ -148,6 +148,7 @@ commands:
         flags:
           - { name: provider, type: string, default: "" }
           - { name: dry-run, type: bool, default: "false" }
+          - { name: yes, type: bool, default: "false" }
 
   - name: Sessions
     use: sessions

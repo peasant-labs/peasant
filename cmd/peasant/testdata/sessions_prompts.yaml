@@ -1,0 +1,155 @@
+# Native sessions run through the real harvest command, so the roles are the
+# ones ingest really stores and session_commands stays empty. Mirror sessions
+# are stored directly.
+nativeSessions:
+  - key: main
+    id: 11111111-2222-4333-8444-000000000001
+    records:
+      - { type: user, content: "please look at the widget" }
+      - type: assistant
+        content:
+          - { type: text, text: "looking at it" }
+          - { type: tool_use, id: toolu_1, name: Bash, input: { command: "cat notes.txt" } }
+      - type: user
+        content:
+          - { type: tool_result, tool_use_id: toolu_1, content: "TOOLRESULTMARK" }
+      - { type: user, content: "METAMARK note", isMeta: true }
+      - { type: user, content: "<system-reminder>REMINDERMARK</system-reminder>" }
+      - { type: user, content: "<local-command-caveat>CAVEATMARK</local-command-caveat>" }
+      - { type: user, content: "<task-notification>TASKMARK</task-notification>" }
+      - { type: user, content: "Base directory for this skill: /x\n\nSKILLBODYMARK" }
+      - type: user
+        content: "<command-name>/review</command-name>\n<command-message>review</command-message>\n<command-args>12</command-args>"
+      - type: assistant
+        content:
+          - { type: text, text: "ASSISTANTMARK" }
+      - { type: user, content: "<ide_opened_file>IDENOTEMARK</ide_opened_file>" }
+      - { type: user, longText: { lead: "LONGPROMPT ", rune: "é", repeat: 3000 } }
+      - type: assistant
+        content:
+          - { type: text, text: "done" }
+  - key: harness_only
+    id: 11111111-2222-4333-8444-000000000002
+    records:
+      - { type: user, content: "<system-reminder>only harness text</system-reminder>" }
+      - type: assistant
+        content:
+          - { type: text, text: "nothing to do" }
+  - key: native_preview
+    id: 11111111-2222-4333-8444-000000000003
+    previewCapture: true
+    records:
+      - { type: user, content: "a stored preview" }
+      - type: assistant
+        content:
+          - { type: text, text: "ok" }
+  # Read by read_leaves_store_rows_alone and by nothing else.
+  - key: read_only
+    id: 11111111-2222-4333-8444-000000000004
+    records:
+      - { type: user, content: "read me once" }
+      - type: assistant
+        content:
+          - { type: text, text: "ok" }
+mirrorSessions:
+  - key: mirror_full
+    id: 22222222-2222-4333-8444-000000000001
+    capture: full
+    entries:
+      - { role: user, type: text, longText: { lead: "MIRRORLONG ", rune: "é", repeat: 3000 } }
+      - { role: user, type: text, text: "/ship it", extra: '{"command_name":"/ship","command_args":"it"}' }
+      - { role: user, type: text, depth: 1, text: "DEPTHONEMARK" }
+      - { role: tool, type: tool_result, text: "ROLETOOLMARK" }
+  - key: mirror_preview
+    id: 22222222-2222-4333-8444-000000000002
+    capture: preview
+    entries:
+      - { role: user, type: text, text: "a mirror preview" }
+  - key: child
+    id: 22222222-2222-4333-8444-000000000003
+    capture: full
+    parent: 22222222-2222-4333-8444-000000000001
+    entries:
+      - { role: user, type: text, text: "the parent agent's instruction" }
+  - key: child_unresolved
+    id: 22222222-2222-4333-8444-000000000004
+    capture: full
+    unresolvedParent: true
+    entries:
+      - { role: user, type: text, text: "an instruction from nowhere known" }
+  - key: unsupported
+    id: 22222222-2222-4333-8444-000000000005
+    capture: full
+    indexFormat: 999
+    entries:
+      - { role: user, type: text, text: "never served" }
+  - key: control_chars
+    id: 22222222-2222-4333-8444-000000000006
+    capture: full
+    entries:
+      - { role: user, type: text, text: "\x1b[31mred\nsecond line" }
+cases:
+  - { name: typed_prompt_kept, session: main, present: ["please look at the widget"] }
+  - { name: system_reminder_excluded, session: main, absent: [REMINDERMARK] }
+  - { name: local_command_caveat_excluded, session: main, absent: [CAVEATMARK] }
+  - { name: task_notification_excluded, session: main, absent: [TASKMARK] }
+  - { name: skill_body_excluded, session: main, absent: [SKILLBODYMARK] }
+  - { name: meta_record_excluded, session: main, absent: [METAMARK] }
+  # Pins a gap, not a choice: the indexer leaves this wrapper at role = user, so
+  # it is listed. The fix belongs in isSystemInjectedContent (see #45), and this
+  # case flips with it. The command must not filter it.
+  - { name: ide_note_policy, session: main, present: [IDENOTEMARK] }
+  - name: slash_command_shown
+    session: main
+    wantCommand: { name: review, args: "12", text: "/review 12" }
+  - { name: tool_result_excluded, session: main, absent: [TOOLRESULTMARK, ASSISTANTMARK] }
+  - { name: depth_one_excluded, session: mirror_full, absent: [DEPTHONEMARK, ROLETOOLMARK] }
+  - name: max_chars_rune_safe
+    session: main
+    args: [--max-chars, "20"]
+    wantCut: { lead: "LONGPROMPT ", runes: 20 }
+  - name: subagent_note
+    session: child
+    wantParent: 22222222-2222-4333-8444-000000000001
+    wantNote: "a child of 22222222-2222-4333-8444-000000000001"
+    present: ["the parent agent's instruction"]
+  - name: unresolved_parent_note
+    session: child_unresolved
+    wantNote: "parent could not be resolved"
+  - name: empty_says_why
+    session: harness_only
+    wantCount: 0
+    wantEmptyCode: no_matching_entries
+    wantNote: "harness-injected"
+  - name: not_indexed_error
+    sessionID: 33333333-2222-4333-8444-000000000001
+    wantError: "session 33333333-2222-4333-8444-000000000001 not found or not yet indexed — run `peasant ingest` if the session should exist"
+    wantExit: 1
+  - name: native_long_prompt_whole
+    session: main
+    wantWhole: { lead: "LONGPROMPT ", runes: 3011 }
+    wantNoWarning: true
+  - name: mirror_long_prompt_whole
+    session: mirror_full
+    wantWhole: { lead: "MIRRORLONG ", runes: 3011 }
+  - name: mirror_slash_command_shown
+    session: mirror_full
+    wantCommand: { name: ship, args: it, text: "/ship it" }
+  - name: preview_capture_warns_native
+    session: native_preview
+    wantWarning: capture_bounded
+  - name: preview_capture_warns_mirror
+    session: mirror_preview
+    wantWarning: capture_bounded
+  - { name: full_capture_no_warning, session: mirror_full, wantNoWarning: true }
+  - name: text_view_escapes_control_characters
+    session: control_chars
+    wantTextView: "\\x1b[31mred\nsecond line"
+  - name: unsupported_index_format_refused
+    session: unsupported
+    wantError: "index"
+    wantExit: 1
+usage:
+  - { name: invalid_session_id_is_usage, args: ["../bad"], error: "invalid session id" }
+  - { name: negative_max_chars_is_usage, args: ["11111111-2222-4333-8444-000000000001", "--max-chars", "-1"], error: "--max-chars" }
+  - { name: missing_session_id_is_usage, args: [], error: "takes one session id" }

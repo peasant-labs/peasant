@@ -202,7 +202,7 @@ func TestStore_QueryPrunableSessions_ByProjectHash(t *testing.T) {
 	seedPruneSession(t, s, pruneSessionB, pruneProjectI, defaults.HarnessClaudeCode, 1700100000000)
 
 	rows, err := s.QueryPrunableSessions(ctx, ingest.PruneFilter{
-		ProjectHash: ptrStr(pruneProjectI),
+		Project: ptrStr(pruneProjectI),
 	})
 	if err != nil {
 		t.Fatalf("QueryPrunableSessions: %v", err)
