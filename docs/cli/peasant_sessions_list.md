@@ -14,10 +14,13 @@ peasant sessions list [flags]
 
 ```
       --harness string      Filter by harness (claude-code, gemini-cli, codex, opencode)
+      --has strings         Only sessions where all these facets hold, comma-separated or repeated: subagent, skill, mcp, compact, clear, model-switch, background, partial
   -h, --help                help for list
       --include-subagents   Also list subagent sessions (by default only main sessions are listed; --session still finds a subagent session by id)
       --json                Output as JSON array
       --limit int           Maximum number of sessions to show (0 = no limit) (default 20)
+      --max-turns int       Only sessions with at most this many turns
+      --min-turns int       Only sessions with at least this many turns
       --project string      Filter by project name (matches git remote URL or directory basename)
       --reverse             Reverse sort order (ascending instead of descending)
       --session string      Filter to one exact session id

@@ -26,7 +26,7 @@ commands do today.
 |---|---|
 | 0 | The command succeeded. An empty result is a success. |
 | 1 | The command failed after it had started its work. |
-| 2 | The command refused how it was called: flags that cannot be combined, a `--sessions-from` input it cannot read, or a confirmation it cannot ask for. Nothing was attempted. Fix the call; retrying it unchanged fails again. |
+| 2 | The command refused how it was called: flags that cannot be combined, a flag value outside its closed set, a `--sessions-from` input it cannot read, or a confirmation it cannot ask for. Nothing was attempted. Fix the call; retrying it unchanged fails again. |
 | 3 | `village push` failed before it made a single request to peasant online. Nothing was published and nothing was recorded as published. |
 
 Status 2 is raised by the refusals that `internal/clicontract` owns. An unknown
@@ -201,5 +201,8 @@ resolves the names), or a `--collective` confirmation it cannot ask for. Under
 | `upgrade` | `-y` |
 
 `sessions list --json` prints a bare array, which has no place for `warnings`.
+Each row carries `facets`, an array that is `[]` when no workflow facet holds.
+`sessions list` refuses an unknown `--has` value or an impossible turn bound with
+exit status 2 before it opens the store.
 `export annotations`, `annotate prune` and `annotate sample` still take
 `--session-from-file`, a path only.

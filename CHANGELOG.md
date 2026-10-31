@@ -7,6 +7,12 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Added
+- `sessions list` selects sessions by what happened inside them. `--has` takes
+  `subagent`, `skill`, `mcp`, `compact`, `clear`, `model-switch`, `background`
+  and `partial`, and every named facet must hold. `--min-turns` and `--max-turns`
+  bound the `turns` column. Each `--json` row now states `facets`.
+
 ### Changed
 - `sessions list` shows main sessions only by default, so a script that counts
   its rows now sees fewer. `--include-subagents` lists every session, and
