@@ -5,6 +5,8 @@ analytics database. It is the terminal-first counterpart to the web dashboard:
 `list` answers *"what sessions do I have?"*, `context` answers *"what happened
 around this point in one session?"*, and `prompts` answers *"what did the person
 ask for?"*.
+around this point in one session?"*, and `grep` answers *"which sessions contain
+this text?"*.
 
 > **`sessions context` vs `export sessions`:** `sessions context` produces
 > **human-readable terminal rendering** of a window of a transcript. `peasant
@@ -133,6 +135,18 @@ peasant sessions prompts <session-id>
 peasant sessions prompts <session-id> --max-chars 200
 peasant sessions prompts <session-id> --include-commands
 peasant sessions prompts <session-id> --json | jq -r '.prompts[].text'
+## `peasant sessions grep`
+
+Search the stored entries of many sessions for a literal string or a regular
+expression. Use it to find which sessions printed a credential, or where a topic
+came up, without exporting every session. Pass a hit's session id and entry
+index to `sessions context --session <id> --turn <n>` to read around it.
+
+```bash
+peasant sessions grep AKIA
+peasant sessions grep --regexp 'AKIA[0-9A-Z]{16}' --role tool --since 30d
+peasant sessions grep --ignore-case 'password' --project peasant --json
+peasant sessions list --json --limit 20 | peasant sessions grep TODO --sessions-from -
 ```
 
 Flags:
@@ -151,6 +165,24 @@ Claude Code, the command lists it; the fix belongs in the indexer.
 
 A slash-command or skill invocation stays in the list with `command` set, and
 its `text` is `/name args`.
+| `--regexp` | — | Treat the pattern as a Go (RE2) regular expression. The default is a literal substring |
+| `--ignore-case` | — | Match without regard to case |
+| `--role <r,...>` | — | Only search these roles: `user`, `assistant`, `tool`, `system` |
+| `--entry-type <t,...>` | — | Only search these entry types: `text`, `tool_use`, `tool_result`, `thinking`, `system`, `error`, `result` |
+| `--max-matches <n>` | `100` | Stop after this many matches (`0` = no limit) |
+| `--max-per-session <n>` | `10` | Keep at most this many matches per session (`0` = no limit) |
+| `--snippet-chars <n>` | `200` | Characters of text in each snippet, from 1 to 2000 |
+| `--sessions-from <file\|->` | — | Search only these sessions. Intersects with the filters below |
+| `--session <id>` | — | Search one session. Cannot be combined with `--sessions-from` |
+| `--project`, `--since`, `--until`, `--harness` | — | The same filters as `sessions list` |
+| `--json` | — | Emit one JSON document instead of one line per match |
+
+The text view prints one line per match, with control characters shown as
+escapes:
+
+```text
+<session id> [<entry index>] <role> depth=<n>  <snippet>
+```
 
 ```json
 {
@@ -179,6 +211,42 @@ its `text` is `/name args`.
   `sessions context`.
 
 The output is local and is not redacted.
+  "pattern": "AKIA",
+  "mode": "literal",
+  "ignoreCase": false,
+  "matches": [
+    {
+      "sessionId": "11111111-2222-4333-8444-555555555555",
+      "entryIndex": 17,
+      "role": "tool",
+      "depth": 1,
+      "field": "tool_output",
+      "snippet": "…text around the match…",
+      "snippetTruncated": true
+    }
+  ],
+  "sessionsScanned": 117,
+  "truncated": false,
+  "reason": ""
+}
+```
+
+- The search covers entry content, tool input and tool output. `field` names
+  which one. Each field of an entry reports its first match.
+- Every session is in scope, subagent sessions included.
+- When a limit drops a match, `truncated` is true and `reason` names the limit.
+- When nothing matches, `matches` is `[]`, the command exits 0, and `reason`
+  says why. `empty_code` is `no_matching_entries`, `filters_excluded_all` or
+  `store_has_no_sessions`.
+- A session that holds only bounded previews is searched as stored and gets the
+  warning `capture_bounded`, so a match past the preview cannot be found.
+- An id in `--sessions-from` that the store does not hold, and a session that
+  cannot be searched to its end, get the warning `session_refused`. The search
+  goes on.
+
+The command prints text from the store and does not redact it. The output is
+local and is as sensitive as `sessions context`. It does not search session
+files on disk.
 
 ## `peasant sessions tag`
 
@@ -197,6 +265,7 @@ peasant sessions tag list <session-id>           # show a session's tags
 - [`docs/cli/peasant_sessions_list.md`](cli/peasant_sessions_list.md),
   [`docs/cli/peasant_sessions_context.md`](cli/peasant_sessions_context.md),
   [`docs/cli/peasant_sessions_prompts.md`](cli/peasant_sessions_prompts.md) —
+  [`docs/cli/peasant_sessions_grep.md`](cli/peasant_sessions_grep.md) —
   auto-generated flag references
 - [Annotation CLI reference](cli/peasant_annotate.md) — commands for creating and importing
   annotations
