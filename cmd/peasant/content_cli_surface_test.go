@@ -175,7 +175,7 @@ func TestContentCLISurfaceInventory(t *testing.T) {
 				var buf bytes.Buffer
 				target.SetOut(&buf)
 				report := store.ContentVerifyReport{IndexRebuilt: true, Size: store.SearchSizeReport{IndexBytes: 780, TextBytes: 1000, LiveDocs: 2, FreshEstimateBytes: 390, Ratio: 2, NeedsOptimize: c.NeedsOptimize}}
-				if err := writeVerifyContentReport(target, report, nil, c.Repair); err != nil {
+				if err := writeVerifyContentReport(target, report, nil, "", c.Repair); err != nil {
 					t.Fatal(err)
 				}
 				for _, text := range c.TextContains {

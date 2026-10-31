@@ -939,6 +939,9 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 	if repair && !content {
 		return fmt.Errorf("harvest verify: --repair requires --content; nothing was checked and nothing changed; re-run with `peasant harvest verify --content --repair`")
 	}
+	if content {
+		return runVerifyContent(cmd, repair)
+	}
 	ctx := cmd.Context()
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 
@@ -946,30 +949,15 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer func() {
-		if db != nil {
-			db.Close()
-		}
-	}()
+	defer db.Close()
 
 	out := cmd.OutOrStdout()
 	expectedTables, err := store.ExpectedTableNames()
 	if err != nil {
 		return err
 	}
-	if err := verifyTablePresence(out, db, dbPath, expectedTables, content); err != nil {
+	if err := verifyTablePresence(out, db, dbPath, expectedTables, false); err != nil {
 		return err
-	}
-	// --content builds on the presence check: content verification on a
-	// database that is missing a table would report PASSED over it. It opens
-	// its own store with a writer, so this read handle closes first.
-	if content {
-		if err := db.Close(); err != nil {
-			return fmt.Errorf("close database: %w", err)
-		}
-		db = nil
-		fmt.Fprintln(out)
-		return runVerifyContent(cmd, repair)
 	}
 
 	// 4. Table Statistics
