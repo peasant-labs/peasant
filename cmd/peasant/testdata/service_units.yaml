@@ -6,7 +6,7 @@
 #   cases[].name              case name
 #   cases[].args              harvest command line, binary first
 #   cases[].redact_args       redact command line (omit for --no-redact)
-#   cases[].exec_start_redact expected second ExecStart= value
+#   cases[].exec_start_redact expected ExecStopPost= value
 #   cases[].interval          Go duration (omit with on_calendar)
 #   cases[].on_calendar       systemd calendar expression
 #   cases[].randomized_delay  Go duration ("0s" omits the line)
@@ -18,7 +18,7 @@ cases:
   - name: default interval
     args: ["/opt/peasant/bin/peasant", "harvest", "--data-dir", "/home/u/.local/share"]
     redact_args: ["/opt/peasant/bin/peasant", "redact", "--data-dir", "/home/u/.local/share", "--all"]
-    exec_start_redact: '"/opt/peasant/bin/peasant" "redact" "--data-dir" "/home/u/.local/share" "--all"' 
+    exec_start_redact: '"/opt/peasant/bin/peasant" "redact" "--data-dir" "/home/u/.local/share" "--all"'
     interval: 1h
     randomized_delay: 5m
     exec_start: '"/opt/peasant/bin/peasant" "harvest" "--data-dir" "/home/u/.local/share"'
@@ -44,7 +44,7 @@ cases:
   - name: spaces quotes percent dollar backslash
     args: ["/home/u/My Tools/peasant", "harvest", "--data-dir", "/d/it's \"q\" 100% $HOME \\x"]
     redact_args: ["/home/u/My Tools/peasant", "redact", "--all"]
-    exec_start_redact: '"/home/u/My Tools/peasant" "redact" "--all"' 
+    exec_start_redact: '"/home/u/My Tools/peasant" "redact" "--all"'
     interval: 15m
     randomized_delay: 0s
     exec_start: '"/home/u/My Tools/peasant" "harvest" "--data-dir" "/d/it''s \"q\" 100%% $$HOME \\x"'
