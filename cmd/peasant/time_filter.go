@@ -23,7 +23,7 @@ func parseTimeFilter(s string, now time.Time) (time.Time, error) {
 	return parseRelativeAgo(s, now)
 }
 
-// parseRelativeAgo parses "N<unit>" and returns now minus that span.
+// parseRelativeAgo parses a fixed duration or integer calendar span and subtracts it from now.
 func parseRelativeAgo(s string, now time.Time) (time.Time, error) {
 	invalid := func() (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid duration %q (expected %s)", s, timeFilterHelp)

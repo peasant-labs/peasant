@@ -265,7 +265,7 @@ func buildPruneFilter(sessionIDStrs []string, project, harness, before, after st
 	if before != "" {
 		t, err := parseTimeFilter(before, time.Now())
 		if err != nil {
-			return filter, fmt.Errorf("invalid --before date %q: %w", before, err)
+			return filter, fmt.Errorf("invalid --before time %q: %w", before, err)
 		}
 		ms := t.UnixMilli()
 		filter.Before = &ms
@@ -274,7 +274,7 @@ func buildPruneFilter(sessionIDStrs []string, project, harness, before, after st
 	if after != "" {
 		t, err := parseTimeFilter(after, time.Now())
 		if err != nil {
-			return filter, fmt.Errorf("invalid --after date %q: %w", after, err)
+			return filter, fmt.Errorf("invalid --after time %q: %w", after, err)
 		}
 		ms := t.UnixMilli()
 		filter.After = &ms

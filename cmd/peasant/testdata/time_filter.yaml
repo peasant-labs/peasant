@@ -34,3 +34,9 @@ exact:
 commands:
   - {name: command_minutes, input: 30m}
   - {name: command_compound, input: 1h30m}
+sessionBounds:
+  - {name: since_date_midnight, side: since, input: '2026-01-02', want: '2026-01-02T00:00:00Z'}
+  - {name: until_date_next_midnight, side: until, input: '2026-01-02', want: '2026-01-03T00:00:00Z'}
+  - {name: since_timestamp_exact, side: since, input: '2026-01-02T13:45:12Z', want: '2026-01-02T13:45:12Z'}
+  - {name: until_timestamp_exact, side: until, input: '2026-01-02T13:45:12Z', want: '2026-01-02T13:45:12Z'}
+  - {name: until_timestamp_offset_exact, side: until, input: '2026-01-02T13:45:12+05:30', want: '2026-01-02T08:15:12Z'}

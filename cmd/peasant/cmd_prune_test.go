@@ -146,7 +146,7 @@ func TestPruneCmd_InvalidDate_Error(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid date")
 	}
-	if !strings.Contains(err.Error(), "invalid --before date") {
+	if !strings.Contains(err.Error(), "invalid --before time") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

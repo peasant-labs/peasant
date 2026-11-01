@@ -28,3 +28,8 @@ required:
   - fractional_calendar
   - exact_microseconds
   - exact_nanosecond
+  - since_date_midnight
+  - until_date_next_midnight
+  - since_timestamp_exact
+  - until_timestamp_exact
+  - until_timestamp_offset_exact

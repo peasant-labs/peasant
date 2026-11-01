@@ -186,6 +186,8 @@ are replayed once through the ordinary push candidate path.
 | `--profile-index` | Print INDEX parse/write timing diagnostics |
 | `--detect-commits` | Detect and store git commits linked to each session (default on; pass `--detect-commits=false` to skip) |
 | `--include-active` | Deprecated and has no effect: active sessions are processed by default |
+
+For `sessions list --until`, a date includes the whole UTC day; an RFC3339 timestamp is the exact exclusive cutoff. Previously, timestamp cutoffs incorrectly included another 24 hours.
 | `--config <path>` | Path to config file (global flag) |
 | `--data-dir`, `--config-dir`, `--state-dir` | Override the data, config and state directories (global flags; see [`peasant`](docs/cli/peasant.md)) |
 

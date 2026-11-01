@@ -60,6 +60,9 @@ Release, which holds the signed artifacts and checksums.
   calendar units `d`, `w`, `mo`, `y`, and `YYYY-MM-DD`/RFC3339 dates. Harvest
   formerly interpreted `m` as months; use `mo` for months. `prune` accepts
   relative values and `harvest --since` accepts dates for the first time.
+  For `sessions list --until`, a date includes the whole UTC day, while an
+  RFC3339 timestamp is the exact exclusive cutoff; timestamps previously had
+  24 hours incorrectly added.
 - `peasant harvest --json`: `Summary.Unchanged` no longer counts sessions
   the saved selection leaves out. They are counted in a new
   `Summary.ExcludedBySelection` key, and each such session in `Sessions`

@@ -43,6 +43,12 @@ type timeFilterFixture struct {
 		Name  string `yaml:"name"`
 		Input string `yaml:"input"`
 	} `yaml:"commands"`
+	SessionBounds []struct {
+		Name  string `yaml:"name"`
+		Side  string `yaml:"side"`
+		Input string `yaml:"input"`
+		Want  string `yaml:"want"`
+	} `yaml:"sessionBounds"`
 }
 
 func loadTimeFilterFixture(t *testing.T) timeFilterFixture {
@@ -67,6 +73,9 @@ func loadTimeFilterFixture(t *testing.T) timeFilterFixture {
 	for _, c := range fixture.Commands {
 		present[c.Name] = true
 	}
+	for _, c := range fixture.SessionBounds {
+		present[c.Name] = true
+	}
 	for _, c := range append(slices.Clone(fixture.Refused), fixture.PruneOnly...) {
 		present[c.Name] = true
 	}
@@ -76,6 +85,42 @@ func loadTimeFilterFixture(t *testing.T) timeFilterFixture {
 		}
 	}
 	return fixture
+}
+
+func TestTimeFilterSessionBounds(t *testing.T) {
+	t.Parallel()
+	for _, tc := range loadTimeFilterFixture(t).SessionBounds {
+		t.Run(tc.Name, func(t *testing.T) {
+			want, err := time.Parse(time.RFC3339, tc.Want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var since, until string
+			switch tc.Side {
+			case "since":
+				since = tc.Input
+			case "until":
+				until = tc.Input
+			default:
+				t.Fatalf("unknown side %q", tc.Side)
+			}
+			parsed, err := parseDateOrDuration(tc.Input, tc.Side == "since")
+			if err != nil || parsed != want.UnixMilli() {
+				t.Fatalf("parse: got %d, %v; want %d", parsed, err, want.UnixMilli())
+			}
+			filter, err := buildSessionListFilter("", "", since, until, "", "", "", false, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bound, other := filter.StartFrom, filter.StartBefore
+			if tc.Side == "until" {
+				bound, other = filter.StartBefore, filter.StartFrom
+			}
+			if bound == nil || *bound != want.UnixMilli() || other != nil {
+				t.Fatalf("filter: got bound %v other %v; want %d", bound, other, want.UnixMilli())
+			}
+		})
+	}
 }
 
 func TestTimeFilterCommands(t *testing.T) {
