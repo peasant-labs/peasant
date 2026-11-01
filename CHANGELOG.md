@@ -87,12 +87,12 @@ Release, which holds the signed artifacts and checksums.
 - A session `export sessions` or publication refuses now states the reason stored for its capture and the one command that repairs it, `peasant harvest index --session <id>`, or says that this build cannot lift the refusal. Damaged content names `peasant harvest index --force`, the only run that replaces it.
 - `harvest --since` reports the stored sessions outside its window that still need index maintenance, which it used to skip without saying so. Run `peasant harvest index` to process them; this is what repairs sessions an older build stored as bounded previews.
 - A stale session the index stage repairs is no longer reported, in the same run, as a capture that stays incomplete.
+
 - `--data-dir` now keeps default transcript copies beside its database under
   `<data-dir>/peasant/peasant-sync`, including web publication and reindexing.
   A configured custom output path is preserved. Existing copies are not moved;
   installations that previously used `--data-dir` can run `harvest --force`
   with that same data directory once to recreate them in the corrected location.
-
 ## [0.13.5] - 2026-10-29
 
 ### Fixed
