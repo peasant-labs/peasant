@@ -29,6 +29,16 @@ Release, which holds the signed artifacts and checksums.
   (`summary.Errors` counts the failures) and stderr gets
   `Error: N session(s) failed`. Scripts that treated exit 0 as "JSON was
   printed" should read `summary.Errors` or accept exit 1.
+- Strike sessions holding lifecycle, control or metadata events
+  (permissions, questions, child and team events, phases, verification,
+  scheduling, retries, engine errors, selections and the `session.header`
+  line) now capture complete instead of partial with retained unknown
+  evidence. Teammate messages and steer guidance appear as user turns.
+  A child Strike session links to its parent from the parent's `child.*`
+  events when its sidecar names no parent, `leadSessionId` becomes the
+  root session, `forkedFrom` becomes a `context_from` relationship, and
+  prompt-cache read and write token counts are recorded. Existing Strike
+  sessions re-extract and re-index on the next harvest.
 - `sessions list` shows main sessions only by default, so a script that counts
   its rows now sees fewer. `--include-subagents` lists every session, and
   `--session <id>` still finds a subagent session. Each `--json` row now states

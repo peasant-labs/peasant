@@ -79,6 +79,10 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 			meta := makeMinimalMeta(t, id.String())
 			meta.Project.Hash = testutil.TestProjectHash
 			meta.ModelHarness = ingest.HarnessStrike
+			// The seeded session was extracted by this build's adapter, so the
+			// harvests below owe no adapter refresh; only the refusal is under test.
+			adapterVersion := ingest.HarvesterVersionRegistry[ingest.HarnessStrike].AdapterVersion
+			meta.AdapterVersion = &adapterVersion
 			if fixture.Omitted {
 				// The state ingest leaves when it removes a record longer than the
 				// scanner's line limit: the artifact is short that record and the

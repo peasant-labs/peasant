@@ -244,13 +244,19 @@ func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, co
 		if !isKnownStrikeEvent(envelope.Type) {
 			return
 		}
+		if envelope.Type == strikeEventSessionHeader {
+			if completion != nil {
+				completion.recognized++
+			}
+			return
+		}
 		if completion != nil {
 			if err := requireJSONObject(envelope.Data); err != nil {
 				parseErr = fmt.Errorf("event data: %w", err)
 				return
 			}
 		}
-		event, err := decodeStrikeEventData(envelope.Data)
+		event, err := decodeStrikeEvent(envelope.Type, envelope.Data)
 		if err != nil {
 			if completion != nil {
 				parseErr = err
@@ -279,6 +285,13 @@ func (a *strikeAssembly) applyDecodedEvent(envelope strikeEnvelope, event strike
 
 	case strikeEventTurnStarted:
 		a.beginTurn(event.TurnID)
+
+	case strikeEventAgentMessage, strikeEventTurnSteered:
+		// A teammate message or a steer is injected into this agent's
+		// context as input; keep it as a user turn rather than dropping it.
+		if event.Text != "" {
+			a.appendUser(event.Text, timestamp, rawLength)
+		}
 
 	case strikeEventAssistantText, strikeEventAssistantTextDelta, strikeEventMessageDelta, strikeEventTextDelta:
 		content := strikeEventText(event)

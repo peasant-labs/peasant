@@ -1,0 +1,208 @@
+# Synthetic Strike lifecycle, control and metadata events (#449). One case
+# per event kind; payload shapes follow Strike pkg/protocol. No real data.
+required_kinds:
+  - session.header
+  - agent.selected
+  - effort.selected
+  - autonomy.selected
+  - permission.mode
+  - fast.selected
+  - context.controls
+  - session.meta
+  - prompt.effective
+  - permission.asked
+  - permission.resolved
+  - permission.decided
+  - admission.decided
+  - question.asked
+  - question.resolved
+  - turn.steered
+  - verification.started
+  - verification.completed
+  - harness.progress
+  - phase.changed
+  - plan.handoff
+  - artifact.updated
+  - ledger.updated
+  - phase.grant_approved
+  - files.invalidated
+  - path.overlap
+  - engine.error
+  - child.started
+  - child.completed
+  - child.escalated
+  - delegation.changed
+  - wait.started
+  - wait.resolved
+  - agent.contract.timeout
+  - team.roster
+  - provider.retrying
+  - tool.retrying
+  - tool.loop_detected
+  - scheduler.queued
+  - scheduler.admitted
+  - scheduler.canceled
+  - compaction.started
+  - compaction.completed
+  - session.rewound
+  - hook.matched
+  - diagnostic.bundle
+  - context.fit_warning
+  - session.budget_warning
+  - agent.message
+cases:
+  - kind: session.header
+    classification: metadata
+    record: '{"type":"session.header","schemaVersion":1,"time":"2026-01-02T03:04:00Z"}'
+  - kind: agent.selected
+    classification: metadata
+    record: '{"type":"agent.selected","time":"2026-01-02T03:04:01Z","data":{"agent":"build"}}'
+  - kind: effort.selected
+    classification: metadata
+    record: '{"type":"effort.selected","time":"2026-01-02T03:04:02Z","data":{"effort":"high"}}'
+  - kind: autonomy.selected
+    classification: metadata
+    record: '{"type":"autonomy.selected","time":"2026-01-02T03:04:03Z","data":{"autonomy":"supervised"}}'
+  - kind: permission.mode
+    classification: metadata
+    record: '{"type":"permission.mode","time":"2026-01-02T03:04:04Z","data":{"mode":"default"}}'
+  - kind: fast.selected
+    classification: metadata
+    record: '{"type":"fast.selected","time":"2026-01-02T03:04:05Z","data":{"fast":true}}'
+  - kind: context.controls
+    classification: metadata
+    record: '{"type":"context.controls","time":"2026-01-02T03:04:06Z","data":{"mode":"auto"}}'
+  - kind: session.meta
+    classification: metadata
+    record: '{"type":"session.meta","time":"2026-01-02T03:04:07Z","data":{"prUrl":"https://example.invalid/pr/1","prNumber":1,"prState":"open"}}'
+  - kind: prompt.effective
+    classification: metadata
+    record: '{"type":"prompt.effective","time":"2026-01-02T03:04:08Z","data":{"hash":"synthetic-hash"}}'
+  - kind: permission.asked
+    classification: control
+    record: '{"type":"permission.asked","time":"2026-01-02T03:04:09Z","data":{"requestId":"req-1","permission":"edit","patterns":["synthetic/*"]}}'
+  - kind: permission.resolved
+    classification: control
+    record: '{"type":"permission.resolved","time":"2026-01-02T03:04:10Z","data":{"requestId":"req-1","decision":"once"}}'
+  - kind: permission.decided
+    classification: control
+    record: '{"type":"permission.decided","time":"2026-01-02T03:04:11Z","data":{"requestId":"req-1","decision":"once"}}'
+  - kind: admission.decided
+    classification: control
+    record: '{"type":"admission.decided","time":"2026-01-02T03:04:12Z","data":{"requestId":"req-1","decision":"admit"}}'
+  - kind: question.asked
+    classification: control
+    record: '{"type":"question.asked","time":"2026-01-02T03:04:13Z","data":{"requestId":"q-1","questions":[{"question":"Synthetic question?","options":[{"label":"yes"}]}]}}'
+  - kind: question.resolved
+    classification: control
+    record: '{"type":"question.resolved","time":"2026-01-02T03:04:14Z","data":{"requestId":"q-1"}}'
+  - kind: turn.steered
+    classification: text
+    record: '{"type":"turn.steered","time":"2026-01-02T03:04:15Z","data":{"mode":"queue","text":"synthetic steer"}}'
+    text: synthetic steer
+  - kind: verification.started
+    classification: control
+    record: '{"type":"verification.started","time":"2026-01-02T03:04:16Z","data":{"scope":"child","gateCount":1}}'
+  - kind: verification.completed
+    classification: control
+    record: '{"type":"verification.completed","time":"2026-01-02T03:04:17Z","data":{"scope":"child","report":{"passed":true}}}'
+  - kind: harness.progress
+    classification: control
+    record: '{"type":"harness.progress","time":"2026-01-02T03:04:18Z","data":{"name":"synthetic","payload":{"iteration":1}}}'
+  - kind: phase.changed
+    classification: control
+    record: '{"type":"phase.changed","time":"2026-01-02T03:04:19Z","data":{"workflow":"synthetic","phase":"plan","index":1}}'
+  - kind: plan.handoff
+    classification: control
+    record: '{"type":"plan.handoff","time":"2026-01-02T03:04:20Z","data":{"approvalSource":"user","title":"synthetic plan"}}'
+  - kind: artifact.updated
+    classification: control
+    record: '{"type":"artifact.updated","time":"2026-01-02T03:04:21Z","data":{"name":"synthetic-artifact"}}'
+  - kind: ledger.updated
+    classification: control
+    record: '{"type":"ledger.updated","time":"2026-01-02T03:04:22Z","data":{"name":"synthetic-ledger"}}'
+  - kind: phase.grant_approved
+    classification: control
+    record: '{"type":"phase.grant_approved","time":"2026-01-02T03:04:23Z","data":{"phase":"build"}}'
+  - kind: files.invalidated
+    classification: control
+    record: '{"type":"files.invalidated","time":"2026-01-02T03:04:24Z","data":{"paths":["synthetic.txt"]}}'
+  - kind: path.overlap
+    classification: control
+    record: '{"type":"path.overlap","time":"2026-01-02T03:04:25Z","data":{"path":"synthetic.txt","warning":"synthetic overlap"}}'
+  - kind: engine.error
+    classification: control
+    record: '{"type":"engine.error","time":"2026-01-02T03:04:26Z","data":{"message":"synthetic engine error","code":"queue_full"}}'
+  - kind: child.started
+    classification: control
+    record: '{"type":"child.started","time":"2026-01-02T03:04:27Z","data":{"sessionId":"DDDDDDDDDDDDDDDDDDDDDDDDDD","parentSessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","depth":1,"agent":"explore","name":"helper"}}'
+  - kind: child.completed
+    classification: control
+    record: '{"type":"child.completed","time":"2026-01-02T03:04:28Z","data":{"sessionId":"DDDDDDDDDDDDDDDDDDDDDDDDDD","parentSessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","status":"completed","summary":"synthetic summary","handoff":{"summary":"synthetic"}}}'
+  - kind: child.escalated
+    classification: control
+    record: '{"type":"child.escalated","time":"2026-01-02T03:04:29Z","data":{"sessionId":"DDDDDDDDDDDDDDDDDDDDDDDDDD","parentSessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","action":"finalizing"}}'
+  - kind: delegation.changed
+    classification: control
+    record: '{"type":"delegation.changed","time":"2026-01-02T03:04:30Z","data":{"delegationId":"del-1","state":"running"}}'
+  - kind: wait.started
+    classification: control
+    record: '{"type":"wait.started","time":"2026-01-02T03:04:31Z","data":{"waitId":"w-1"}}'
+  - kind: wait.resolved
+    classification: control
+    record: '{"type":"wait.resolved","time":"2026-01-02T03:04:32Z","data":{"waitId":"w-1"}}'
+  - kind: agent.contract.timeout
+    classification: control
+    record: '{"type":"agent.contract.timeout","time":"2026-01-02T03:04:33Z","data":{"messageId":"m-1"}}'
+  - kind: team.roster
+    classification: control
+    record: '{"type":"team.roster","time":"2026-01-02T03:04:34Z","data":{"sessionId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","leadId":"CCCCCCCCCCCCCCCCCCCCCCCCCC","members":[{"sessionId":"DDDDDDDDDDDDDDDDDDDDDDDDDD","name":"helper"}]}}'
+  - kind: provider.retrying
+    classification: control
+    record: '{"type":"provider.retrying","time":"2026-01-02T03:04:35Z","data":{"nextAttempt":2,"message":"synthetic retry"}}'
+  - kind: tool.retrying
+    classification: control
+    record: '{"type":"tool.retrying","time":"2026-01-02T03:04:36Z","data":{"callId":"call-x","message":"synthetic tool retry"}}'
+  - kind: tool.loop_detected
+    classification: control
+    record: '{"type":"tool.loop_detected","time":"2026-01-02T03:04:37Z","data":{"name":"synthetic"}}'
+  - kind: scheduler.queued
+    classification: control
+    record: '{"type":"scheduler.queued","time":"2026-01-02T03:04:38Z","data":{"position":1}}'
+  - kind: scheduler.admitted
+    classification: control
+    record: '{"type":"scheduler.admitted","time":"2026-01-02T03:04:39Z","data":{}}'
+  - kind: scheduler.canceled
+    classification: control
+    record: '{"type":"scheduler.canceled","time":"2026-01-02T03:04:40Z","data":{}}'
+  - kind: compaction.started
+    classification: control
+    record: '{"type":"compaction.started","time":"2026-01-02T03:04:41Z","data":{}}'
+  - kind: compaction.completed
+    classification: control
+    record: '{"type":"compaction.completed","time":"2026-01-02T03:04:42Z","data":{"summary":"synthetic compaction"}}'
+  - kind: session.rewound
+    classification: control
+    record: '{"type":"session.rewound","time":"2026-01-02T03:04:43Z","data":{"turns":1}}'
+  - kind: hook.matched
+    classification: control
+    record: '{"type":"hook.matched","time":"2026-01-02T03:04:44Z","data":{"name":"synthetic-hook"}}'
+  - kind: diagnostic.bundle
+    classification: control
+    record: '{"type":"diagnostic.bundle","time":"2026-01-02T03:04:45Z","data":{"path":"synthetic-bundle"}}'
+  - kind: context.fit_warning
+    classification: control
+    record: '{"type":"context.fit_warning","time":"2026-01-02T03:04:46Z","data":{"message":"synthetic fit"}}'
+  - kind: session.budget_warning
+    classification: control
+    record: '{"type":"session.budget_warning","time":"2026-01-02T03:04:47Z","data":{"message":"synthetic budget"}}'
+  - kind: agent.message
+    classification: text
+    record: '{"type":"agent.message","time":"2026-01-02T03:04:48Z","data":{"from":"lead","to":"helper","body":"synthetic teammate message","teamId":"CCCCCCCCCCCCCCCCCCCCCCCCCC"}}'
+    text: synthetic teammate message
+# A well-formed event kind no Strike build declares still retains evidence.
+undeclared: '{"type":"future.lifecycle","time":"2026-01-02T03:04:01Z","data":{"note":"synthetic"}}'
+# Malformed data on a known lifecycle kind still refuses, naming the kind.
+malformed:
+  kind: child.started
+  record: '{"type":"child.started","time":"2026-01-02T03:04:01Z","data":{"sessionId":7}}'

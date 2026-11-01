@@ -1,0 +1,5 @@
+{"type":"session.header","schemaVersion":1,"time":"2026-01-02T04:00:00Z"}
+{"type":"model.selected","time":"2026-01-02T04:00:01Z","data":{"provider":"synthetic","model":"synthetic-model"}}
+{"type":"user.message","time":"2026-01-02T04:00:02Z","data":{"sessionId":"EEEEEEEEEEEEEEEEEEEEEEEEEE","turnId":"turn-1","text":"Synthetic request."}}
+{"type":"text.delta","time":"2026-01-02T04:00:03Z","data":{"sessionId":"EEEEEEEEEEEEEEEEEEEEEEEEEE","turnId":"turn-1","text":"Synthetic answer."}}
+{"type":"turn.completed","time":"2026-01-02T04:00:04Z","data":{"sessionId":"EEEEEEEEEEEEEEEEEEEEEEEEEE","turnId":"turn-1","stopReason":"end_turn"}}

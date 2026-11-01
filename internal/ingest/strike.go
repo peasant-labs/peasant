@@ -9,12 +9,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/schema"
 )
 
 // StrikeAdapter discovers and extracts metadata from Strike JSONL sessions.
@@ -58,6 +60,59 @@ const (
 	strikeEventProcessExited      strikeEventType = "process.exited"
 	strikeEventUsageReported      strikeEventType = "usage.reported"
 	strikeEventModelSelected      strikeEventType = "model.selected"
+
+	// Lifecycle, control and metadata events Strike persists beside the
+	// conversation (jonathanung/strike docs/session-format.md). They carry no
+	// conversation content except agent.message.
+	strikeEventSessionHeader         strikeEventType = "session.header"
+	strikeEventAgentSelected         strikeEventType = "agent.selected"
+	strikeEventEffortSelected        strikeEventType = "effort.selected"
+	strikeEventAutonomySelected      strikeEventType = "autonomy.selected"
+	strikeEventPermissionMode        strikeEventType = "permission.mode"
+	strikeEventFastSelected          strikeEventType = "fast.selected"
+	strikeEventContextControls       strikeEventType = "context.controls"
+	strikeEventSessionMeta           strikeEventType = "session.meta"
+	strikeEventPromptEffective       strikeEventType = "prompt.effective"
+	strikeEventPermissionAsked       strikeEventType = "permission.asked"
+	strikeEventPermissionResolved    strikeEventType = "permission.resolved"
+	strikeEventPermissionDecided     strikeEventType = "permission.decided"
+	strikeEventAdmissionDecided      strikeEventType = "admission.decided"
+	strikeEventQuestionAsked         strikeEventType = "question.asked"
+	strikeEventQuestionResolved      strikeEventType = "question.resolved"
+	strikeEventTurnSteered           strikeEventType = "turn.steered"
+	strikeEventVerificationStarted   strikeEventType = "verification.started"
+	strikeEventVerificationCompleted strikeEventType = "verification.completed"
+	strikeEventHarnessProgress       strikeEventType = "harness.progress"
+	strikeEventPhaseChanged          strikeEventType = "phase.changed"
+	strikeEventPlanHandoff           strikeEventType = "plan.handoff"
+	strikeEventArtifactUpdated       strikeEventType = "artifact.updated"
+	strikeEventLedgerUpdated         strikeEventType = "ledger.updated"
+	strikeEventPhaseGrantApproved    strikeEventType = "phase.grant_approved"
+	strikeEventFilesInvalidated      strikeEventType = "files.invalidated"
+	strikeEventPathOverlap           strikeEventType = "path.overlap"
+	strikeEventEngineError           strikeEventType = "engine.error"
+	strikeEventChildStarted          strikeEventType = "child.started"
+	strikeEventChildCompleted        strikeEventType = "child.completed"
+	strikeEventChildEscalated        strikeEventType = "child.escalated"
+	strikeEventDelegationChanged     strikeEventType = "delegation.changed"
+	strikeEventWaitStarted           strikeEventType = "wait.started"
+	strikeEventWaitResolved          strikeEventType = "wait.resolved"
+	strikeEventAgentContractTimeout  strikeEventType = "agent.contract.timeout"
+	strikeEventTeamRoster            strikeEventType = "team.roster"
+	strikeEventProviderRetrying      strikeEventType = "provider.retrying"
+	strikeEventToolRetrying          strikeEventType = "tool.retrying"
+	strikeEventToolLoopDetected      strikeEventType = "tool.loop_detected"
+	strikeEventSchedulerQueued       strikeEventType = "scheduler.queued"
+	strikeEventSchedulerAdmitted     strikeEventType = "scheduler.admitted"
+	strikeEventSchedulerCanceled     strikeEventType = "scheduler.canceled"
+	strikeEventCompactionStarted     strikeEventType = "compaction.started"
+	strikeEventCompactionCompleted   strikeEventType = "compaction.completed"
+	strikeEventSessionRewound        strikeEventType = "session.rewound"
+	strikeEventHookMatched           strikeEventType = "hook.matched"
+	strikeEventDiagnosticBundle      strikeEventType = "diagnostic.bundle"
+	strikeEventContextFitWarning     strikeEventType = "context.fit_warning"
+	strikeEventSessionBudgetWarning  strikeEventType = "session.budget_warning"
+	strikeEventAgentMessage          strikeEventType = "agent.message"
 )
 
 type strikeEnvelope struct {
@@ -75,6 +130,7 @@ type strikeUsage struct {
 
 type strikeEventData struct {
 	SessionID         string          `json:"sessionId"`
+	ParentSessionID   string          `json:"parentSessionId"`
 	ProviderRequestID string          `json:"providerRequestId"`
 	TurnID            string          `json:"turnId"`
 	CallID            string          `json:"callId"`
@@ -103,6 +159,43 @@ type strikeEventData struct {
 	ExitCode          *int            `json:"exitCode,omitempty"`
 	IsError           bool            `json:"isError"`
 	Status            string          `json:"status"`
+	CacheRead         json.RawMessage `json:"cacheRead"`
+	CacheCreation     json.RawMessage `json:"cacheCreation"`
+}
+
+// strikeLifecycleData is the narrow shape read from lifecycle, control and
+// metadata events. Only the correlation and the conversation text of
+// agent.message (body) and turn.steered (text) are read; every other field
+// belongs to Strike and is never interpreted, so an additive Strike field
+// cannot refuse the capture.
+type strikeLifecycleData struct {
+	SessionID       string `json:"sessionId"`
+	ParentSessionID string `json:"parentSessionId"`
+	TurnID          string `json:"turnId"`
+	Body            string `json:"body"`
+	Text            string `json:"text"`
+}
+
+// decodeStrikeEvent decodes one known event's data. The session.header schema
+// marker carries no data. Lifecycle kinds use the narrow shape and name the
+// event type when their data is malformed.
+func decodeStrikeEvent(eventType strikeEventType, raw json.RawMessage) (strikeEventData, error) {
+	if eventType == strikeEventSessionHeader {
+		return strikeEventData{}, nil
+	}
+	if !slices.Contains(strikeLifecycleEventKinds(), eventType) {
+		return decodeStrikeEventData(raw)
+	}
+	var data strikeLifecycleData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return strikeEventData{}, fmt.Errorf("strike %s event data: %w", eventType, err)
+	}
+	return strikeEventData{
+		SessionID:       data.SessionID,
+		ParentSessionID: data.ParentSessionID,
+		TurnID:          data.TurnID,
+		Text:            firstNonEmpty(data.Body, data.Text),
+	}, nil
 }
 
 func decodeStrikeEventData(raw json.RawMessage) (strikeEventData, error) {
@@ -138,6 +231,55 @@ var knownStrikeEventKinds = []strikeEventType{
 	strikeEventProcessExited,
 	strikeEventUsageReported,
 	strikeEventModelSelected,
+	strikeEventSessionHeader,
+	strikeEventAgentSelected,
+	strikeEventEffortSelected,
+	strikeEventAutonomySelected,
+	strikeEventPermissionMode,
+	strikeEventFastSelected,
+	strikeEventContextControls,
+	strikeEventSessionMeta,
+	strikeEventPromptEffective,
+	strikeEventPermissionAsked,
+	strikeEventPermissionResolved,
+	strikeEventPermissionDecided,
+	strikeEventAdmissionDecided,
+	strikeEventQuestionAsked,
+	strikeEventQuestionResolved,
+	strikeEventTurnSteered,
+	strikeEventVerificationStarted,
+	strikeEventVerificationCompleted,
+	strikeEventHarnessProgress,
+	strikeEventPhaseChanged,
+	strikeEventPlanHandoff,
+	strikeEventArtifactUpdated,
+	strikeEventLedgerUpdated,
+	strikeEventPhaseGrantApproved,
+	strikeEventFilesInvalidated,
+	strikeEventPathOverlap,
+	strikeEventEngineError,
+	strikeEventChildStarted,
+	strikeEventChildCompleted,
+	strikeEventChildEscalated,
+	strikeEventDelegationChanged,
+	strikeEventWaitStarted,
+	strikeEventWaitResolved,
+	strikeEventAgentContractTimeout,
+	strikeEventTeamRoster,
+	strikeEventProviderRetrying,
+	strikeEventToolRetrying,
+	strikeEventToolLoopDetected,
+	strikeEventSchedulerQueued,
+	strikeEventSchedulerAdmitted,
+	strikeEventSchedulerCanceled,
+	strikeEventCompactionStarted,
+	strikeEventCompactionCompleted,
+	strikeEventSessionRewound,
+	strikeEventHookMatched,
+	strikeEventDiagnosticBundle,
+	strikeEventContextFitWarning,
+	strikeEventSessionBudgetWarning,
+	strikeEventAgentMessage,
 }
 
 func isKnownStrikeEvent(eventType strikeEventType) bool {
@@ -158,13 +300,139 @@ func knownStrikeEventKind(raw string) (strikeEventType, bool) {
 // metadata rather than conversation content. The strict capture path records
 // them as ignored metadata; keep this set aligned with its metadata branch.
 func strikeMetadataEventKinds() []strikeEventType {
-	return []strikeEventType{strikeEventSessionStarted, strikeEventSessionTitled, strikeEventModelSelected}
+	return []strikeEventType{
+		strikeEventSessionStarted, strikeEventSessionTitled, strikeEventModelSelected,
+		strikeEventSessionHeader,
+		strikeEventAgentSelected,
+		strikeEventEffortSelected,
+		strikeEventAutonomySelected,
+		strikeEventPermissionMode,
+		strikeEventFastSelected,
+		strikeEventContextControls,
+		strikeEventSessionMeta,
+		strikeEventPromptEffective,
+	}
+}
+
+// strikeControlEventKinds names the known Strike lifecycle and control events:
+// permissions, questions, phases, children, team, scheduling, retries,
+// verification and engine state. None carries conversation content; each is
+// recognized and entryless, and the strict capture records it as ignored
+// control so it never blocks certification.
+func strikeControlEventKinds() []strikeEventType {
+	return []strikeEventType{
+		strikeEventPermissionAsked,
+		strikeEventPermissionResolved,
+		strikeEventPermissionDecided,
+		strikeEventAdmissionDecided,
+		strikeEventQuestionAsked,
+		strikeEventQuestionResolved,
+		strikeEventVerificationStarted,
+		strikeEventVerificationCompleted,
+		strikeEventHarnessProgress,
+		strikeEventPhaseChanged,
+		strikeEventPlanHandoff,
+		strikeEventArtifactUpdated,
+		strikeEventLedgerUpdated,
+		strikeEventPhaseGrantApproved,
+		strikeEventFilesInvalidated,
+		strikeEventPathOverlap,
+		strikeEventEngineError,
+		strikeEventChildStarted,
+		strikeEventChildCompleted,
+		strikeEventChildEscalated,
+		strikeEventDelegationChanged,
+		strikeEventWaitStarted,
+		strikeEventWaitResolved,
+		strikeEventAgentContractTimeout,
+		strikeEventTeamRoster,
+		strikeEventProviderRetrying,
+		strikeEventToolRetrying,
+		strikeEventToolLoopDetected,
+		strikeEventSchedulerQueued,
+		strikeEventSchedulerAdmitted,
+		strikeEventSchedulerCanceled,
+		strikeEventCompactionStarted,
+		strikeEventCompactionCompleted,
+		strikeEventSessionRewound,
+		strikeEventHookMatched,
+		strikeEventDiagnosticBundle,
+		strikeEventContextFitWarning,
+		strikeEventSessionBudgetWarning,
+	}
+}
+
+// strikeEntrylessEventKinds is every known Strike event whose payload is
+// never projected into an entry. Their payloads are not scanned for nested
+// content blocks: a lifecycle "message" string is not a conversation block.
+func strikeEntrylessEventKinds() []strikeEventType {
+	return append(strikeMetadataEventKinds(), strikeControlEventKinds()...)
+}
+
+// strikeLifecycleEventKinds are the event kinds this build added for #449.
+// Their correlation may name another session (a child.* event names the child,
+// team.roster names the lead), so they do not take part in the transcript
+// identity check and are decoded through the narrow lifecycle shape.
+func strikeLifecycleEventKinds() []strikeEventType {
+	return []strikeEventType{
+		strikeEventSessionHeader,
+		strikeEventAgentSelected,
+		strikeEventEffortSelected,
+		strikeEventAutonomySelected,
+		strikeEventPermissionMode,
+		strikeEventFastSelected,
+		strikeEventContextControls,
+		strikeEventSessionMeta,
+		strikeEventPromptEffective,
+		strikeEventPermissionAsked,
+		strikeEventPermissionResolved,
+		strikeEventPermissionDecided,
+		strikeEventAdmissionDecided,
+		strikeEventQuestionAsked,
+		strikeEventQuestionResolved,
+		strikeEventTurnSteered,
+		strikeEventVerificationStarted,
+		strikeEventVerificationCompleted,
+		strikeEventHarnessProgress,
+		strikeEventPhaseChanged,
+		strikeEventPlanHandoff,
+		strikeEventArtifactUpdated,
+		strikeEventLedgerUpdated,
+		strikeEventPhaseGrantApproved,
+		strikeEventFilesInvalidated,
+		strikeEventPathOverlap,
+		strikeEventEngineError,
+		strikeEventChildStarted,
+		strikeEventChildCompleted,
+		strikeEventChildEscalated,
+		strikeEventDelegationChanged,
+		strikeEventWaitStarted,
+		strikeEventWaitResolved,
+		strikeEventAgentContractTimeout,
+		strikeEventTeamRoster,
+		strikeEventProviderRetrying,
+		strikeEventToolRetrying,
+		strikeEventToolLoopDetected,
+		strikeEventSchedulerQueued,
+		strikeEventSchedulerAdmitted,
+		strikeEventSchedulerCanceled,
+		strikeEventCompactionStarted,
+		strikeEventCompactionCompleted,
+		strikeEventSessionRewound,
+		strikeEventHookMatched,
+		strikeEventDiagnosticBundle,
+		strikeEventContextFitWarning,
+		strikeEventSessionBudgetWarning,
+		strikeEventAgentMessage,
+	}
 }
 
 type strikeSidecar struct {
 	SessionID       string          `json:"sessionId"`
 	ParentSessionID string          `json:"parentSessionId"`
 	ParentID        string          `json:"parentId"`
+	LeadSessionID   string          `json:"leadSessionId"`
+	ForkedFrom      string          `json:"forkedFrom"`
 	ProjectKey      string          `json:"projectKey"`
 	ProjectName     string          `json:"projectName"`
 	WorktreePath    string          `json:"worktreePath"`
@@ -251,6 +519,9 @@ type strikeTranscriptHints struct {
 	title   string
 	model   string
 	version string
+	// children are the sessions this transcript's child.* events name as
+	// its own foreground children, in first-seen order.
+	children []SessionID
 }
 
 // Discover finds Strike transcript files under configured roots. A transcript is
@@ -262,6 +533,10 @@ func (a *StrikeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 	}
 
 	var sessions []DiscoveredSession
+	// childParents maps a child to the session whose child.* events name it.
+	// The sidecar parentSessionId stays authoritative; the stream link only
+	// fills a sidecar that names no parent.
+	childParents := make(map[SessionID]SessionID)
 	for _, basePath := range cfg.Paths {
 		root := string(basePath)
 		walkErr := a.fs.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
@@ -300,7 +575,7 @@ func (a *StrikeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 					parent = &parentID
 				}
 			}
-			hints := a.readStrikeTranscriptHints(path)
+			hints := a.readStrikeTranscriptHints(path, sid)
 			title := sidecar.Title
 			if hints.title != "" {
 				title = hints.title
@@ -311,6 +586,11 @@ func (a *StrikeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				projectName = filepath.Base(worktree)
 			}
 
+			for _, child := range hints.children {
+				if _, claimed := childParents[child]; !claimed {
+					childParents[child] = sid
+				}
+			}
 			sessions = append(sessions, DiscoveredSession{
 				SessionID:     sid,
 				Harness:       HarnessStrike,
@@ -334,6 +614,14 @@ func (a *StrikeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 	}
 
+	for i := range sessions {
+		if sessions[i].ParentUUID != nil {
+			continue
+		}
+		if parent, ok := childParents[sessions[i].SessionID]; ok {
+			sessions[i].ParentUUID = &parent
+		}
+	}
 	return normalizeStrikeSessions(sessions), nil
 }
 
@@ -472,12 +760,13 @@ func strikeSidecarPath(transcriptPath string) string {
 	return strings.TrimSuffix(transcriptPath, defaults.ExtJSONL.String()) + ".meta.json"
 }
 
-func (a *StrikeAdapter) readStrikeTranscriptHints(path string) strikeTranscriptHints {
+func (a *StrikeAdapter) readStrikeTranscriptHints(path string, self SessionID) strikeTranscriptHints {
 	data, err := a.fs.ReadFile(path)
 	if err != nil {
 		return strikeTranscriptHints{}
 	}
 	var hints strikeTranscriptHints
+	seen := make(map[SessionID]bool)
 	forEachStrikeRecord(data, func(_ int, raw []byte) {
 		if strikeRecordTooLarge(raw, 0) {
 			return
@@ -487,6 +776,22 @@ func (a *StrikeAdapter) readStrikeTranscriptHints(path string) strikeTranscriptH
 			return
 		}
 		switch env.Type {
+		case strikeEventChildStarted, strikeEventChildCompleted, strikeEventChildEscalated:
+			event, err := decodeStrikeEvent(env.Type, env.Data)
+			if err != nil {
+				return
+			}
+			// The parent engine emits child.* with the child's correlation.
+			// A record naming another parent is not this session's child.
+			if event.ParentSessionID != "" && event.ParentSessionID != self.String() {
+				return
+			}
+			child, err := NewSessionID(event.SessionID)
+			if err != nil || child == self || seen[child] {
+				return
+			}
+			seen[child] = true
+			hints.children = append(hints.children, child)
 		case strikeEventSessionTitled:
 			event, err := decodeStrikeEventData(env.Data)
 			if err != nil {
@@ -571,7 +876,7 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		}
 	}
 
-	hints := a.readStrikeTranscriptHints(session.SourcePath.String())
+	hints := a.readStrikeTranscriptHints(session.SourcePath.String(), session.SessionID)
 	model := sidecar.Model
 	if hints.model != "" {
 		model = hints.model
@@ -599,6 +904,8 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	identityMismatch := false
 	callIDs := make(map[string]bool)
 	tokensIn, tokensOut := 0, 0
+	cacheRead, cacheWrite := 0, 0
+	cacheReadKnown, cacheWriteKnown := false, false
 	forEachStrikeRecord(data, func(line int, raw []byte) {
 		if strikeRecordTooLarge(raw, 0) {
 			return
@@ -620,7 +927,7 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		if !isKnownStrikeEvent(env.Type) {
 			return
 		}
-		event, dataErr := decodeStrikeEventData(env.Data)
+		event, dataErr := decodeStrikeEvent(env.Type, env.Data)
 		if dataErr != nil {
 			meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
 				ErrorType:   "event_data_parse_error",
@@ -636,7 +943,9 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			}
 			lastTime = *timestamp
 		}
-		if event.SessionID != "" && event.SessionID != session.SessionID.String() {
+		// Lifecycle events may carry another session's correlation: child.*
+		// names the child and team.roster names the lead.
+		if event.SessionID != "" && event.SessionID != session.SessionID.String() && !slices.Contains(strikeLifecycleEventKinds(), env.Type) {
 			identityMismatch = true
 		}
 		switch env.Type {
@@ -654,6 +963,14 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			in, _, out, _ := strikeUsageCounts(event)
 			tokensIn += in
 			tokensOut += out
+			if n, known := strikeKnownTokenCount(event.CacheRead); known {
+				cacheRead += n
+				cacheReadKnown = true
+			}
+			if n, known := strikeKnownTokenCount(event.CacheCreation); known {
+				cacheWrite += n
+				cacheWriteKnown = true
+			}
 		}
 	})
 
@@ -688,6 +1005,13 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	meta.Stats.SubagentCount = len(session.SubagentPaths)
 	meta.Stats.TokensIn = tokensIn
 	meta.Stats.TokensOut = tokensOut
+	if cacheReadKnown {
+		meta.Stats.CachedReadTokens = &cacheRead
+	}
+	if cacheWriteKnown {
+		meta.Stats.CachedWriteTokens = &cacheWrite
+	}
+	a.applyStrikeLineage(&meta, session, sidecar, sidecarPath)
 
 	worktree := sidecar.worktreePath()
 	if worktree == "" {
@@ -795,5 +1119,45 @@ func forEachStrikeRecord(data []byte, visit func(line int, record []byte)) {
 		end := start + relEnd
 		visit(line, data[start:end])
 		start = end + 1
+	}
+}
+
+// applyStrikeLineage maps the sidecar team lead and fork source onto the
+// existing session graph fields. leadSessionId names the root of a child's
+// agent team, so it is the child's root session; Strike roots are their own
+// lead and record none. forkedFrom names the session whose history a fork
+// copied: the fork stays a root and gains a context_from relationship.
+func (a *StrikeAdapter) applyStrikeLineage(meta *UnifiedMetadata, session DiscoveredSession, sidecar strikeSidecar, sidecarPath string) {
+	invalid := func(field, raw string, err error) {
+		meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, DiagnosticEntry{
+			ErrorType:   "invalid_" + field,
+			Location:    sidecarPath,
+			Message:     fmt.Sprintf("Strike sidecar %s %q is not a valid session ID: %v; the relationship was not recorded", field, raw, err),
+			Remediation: fmt.Sprintf("Correct %s to a valid Strike session ID and rerun peasant ingest.", field),
+		})
+	}
+	if raw := strings.TrimSpace(sidecar.LeadSessionID); raw != "" && session.ParentUUID != nil {
+		lead, err := NewSessionID(raw)
+		switch {
+		case err != nil:
+			invalid("leadSessionId", raw, err)
+		case lead != session.SessionID:
+			meta.RootSessionID = &lead
+		}
+	}
+	if raw := strings.TrimSpace(sidecar.ForkedFrom); raw != "" {
+		source, err := NewSessionID(raw)
+		switch {
+		case err != nil:
+			invalid("forkedFrom", raw, err)
+		case source != session.SessionID:
+			target := source
+			meta.Relationships = append(meta.Relationships, schema.SessionRelationship{
+				Kind:          schema.SessionRelationshipContextFrom,
+				TargetState:   schema.RelationshipTargetKnown,
+				TargetLocalID: &target,
+				Evidence:      schema.EvidenceNativeTyped,
+			})
+		}
 	}
 }
