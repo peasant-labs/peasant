@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/salt"
@@ -74,9 +77,21 @@ func OpenReadOnlyWithOptions(path string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: dry-run inspection of %s: the path must be a regular file, not a directory or a symbolic link; point at the analytics database file", path)
 	}
 
-	pool, err := sqlitex.NewPool(path, sqlitex.PoolOptions{
+	openPath, flags := path, sqlite.OpenReadOnly
+	if o.immutable {
+		if wal, err := os.Stat(path + "-wal"); err == nil && wal.Size() > 0 {
+			return nil, fmt.Errorf("store: read-only inspection of %s: its write-ahead log %s-wal still holds changes that only a writable open can apply; no files were changed; restore write permission and run any peasant command once", path, path)
+		}
+		uriPath := filepath.ToSlash(path)
+		if !strings.HasPrefix(uriPath, "/") {
+			uriPath = "/" + uriPath // a Windows drive path: file:///C:/...
+		}
+		openPath = (&url.URL{Scheme: "file", Path: uriPath, RawQuery: "immutable=1"}).String()
+		flags |= sqlite.OpenURI
+	}
+	pool, err := sqlitex.NewPool(openPath, sqlitex.PoolOptions{
 		PoolSize:    1,
-		Flags:       sqlite.OpenReadOnly,
+		Flags:       flags,
 		PrepareConn: prepareReadOnlyConn,
 	})
 	if err != nil {

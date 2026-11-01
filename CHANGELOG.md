@@ -8,12 +8,6 @@ Release, which holds the signed artifacts and checksums.
 ## [Unreleased]
 
 ### Added
-- `peasant service install|status|uninstall` (Linux) manages a systemd user
-  timer that runs `peasant harvest` and then `peasant redact --all` on a
-  schedule (`--interval`, default 1h, or `--on-calendar`; `--randomized-delay`;
-  `--no-redact` for harvest only). Scheduled runs are local and never publish.
-  `--dry-run` prints the units. `uninstall` removes only the units peasant
-  wrote. Redact runs as `ExecStopPost=`, so it runs after a failed harvest too.
 - `sessions list` selects sessions by what happened inside them. `--has` takes
   `subagent`, `skill`, `mcp`, `compact`, `clear`, `model-switch`, `background`
   and `partial`, and every named facet must hold. `--min-turns` and `--max-turns`
@@ -22,8 +16,19 @@ Release, which holds the signed artifacts and checksums.
   session, with `--json`, `--max-chars` and `--include-commands`. It reads both
   stored representations, and it warns with `capture_bounded` when a session's
   stored text is a bounded preview.
+- `peasant service install|status|uninstall` (Linux) manages a systemd user
+  timer that runs `peasant harvest` and then `peasant redact --all` on a
+  schedule (`--interval`, default 1h, or `--on-calendar`; `--randomized-delay`;
+  `--no-redact` for harvest only). Scheduled runs are local and never publish.
+  `--dry-run` prints the units. `uninstall` removes only the units peasant
+  wrote. Redact runs as `ExecStopPost=`, so it runs after a failed harvest too.
 
 ### Changed
+- **Exit code:** `peasant harvest --json` now exits 1 when a session fails,
+  as the human output already did. Stdout is still one JSON document
+  (`summary.Errors` counts the failures) and stderr gets
+  `Error: N session(s) failed`. Scripts that treated exit 0 as "JSON was
+  printed" should read `summary.Errors` or accept exit 1.
 - `sessions list` shows main sessions only by default, so a script that counts
   its rows now sees fewer. `--include-subagents` lists every session, and
   `--session <id>` still finds a subagent session. Each `--json` row now states
@@ -43,11 +48,6 @@ Release, which holds the signed artifacts and checksums.
   `unchanged` count still includes excluded sessions.
 
 ### Fixed
-- `peasant redact` now reads and redacts the transcript copies in
-  `output.basePath` when the config sets one. Before, it reported those
-  sessions "not ingested" and left the copies as recorded. Redact now writes
-  the redacted transcript and metadata by rename, so an interrupted run never
-  leaves a truncated file.
 - Only one writing harvest runs at a time per data directory. Two harvests
   started together on one data dir used to race each other's index
   replacement. Now `peasant harvest`, `harvest logs`, `harvest index` and
@@ -88,6 +88,11 @@ Release, which holds the signed artifacts and checksums.
   A configured custom output path is preserved. Existing copies are not moved;
   installations that previously used `--data-dir` can run `harvest --force`
   with that same data directory once to recreate them in the corrected location.
+- `peasant redact` now reads and redacts the transcript copies in
+  `output.basePath` when the config sets one. Before, it reported those
+  sessions "not ingested" and left the copies as recorded. Redact now writes
+  the redacted transcript and metadata by rename, so an interrupted run never
+  leaves a truncated file.
 
 ## [0.13.5] - 2026-10-29
 
