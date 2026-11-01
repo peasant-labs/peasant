@@ -200,6 +200,9 @@ func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID Sess
 		if len(trimmed) == 0 {
 			continue
 		}
+		// Unknown-kind retention can replace trimmed with a re-encoded copy, so the
+		// source size is taken first.
+		sourceBytes := len(trimmed)
 		var unknown []RetainedUnknown
 		if idx.retainUnknown {
 			filtered, records, whole, err := prepareUnknownJSONL(HarnessClaudeCode, raw, scanner.Line(), &traversal)
@@ -211,6 +214,7 @@ func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID Sess
 				if err != nil {
 					return nil, err
 				}
+				carrier.RawByteLength = &sourceBytes
 				entries = append(entries, carrier)
 				entryIndex++
 				continue
@@ -264,6 +268,7 @@ func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID Sess
 			entryIndex++
 			continue
 		}
+		entry.RawByteLength = &sourceBytes
 		if err := AttachRetainedUnknown(&entry, unknown); err != nil {
 			return nil, err
 		}

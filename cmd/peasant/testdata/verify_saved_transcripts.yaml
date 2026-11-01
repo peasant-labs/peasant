@@ -1,0 +1,5 @@
+# Damage done to a saved transcript before `harvest verify --content`.
+required_names: [deleted, truncated]
+cases:
+  - {name: deleted, damage: delete}
+  - {name: truncated, damage: truncate, truncate_to: 40}

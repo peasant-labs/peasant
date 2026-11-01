@@ -9,5 +9,5 @@ export default defineConfig({
   testDir: './scripts/journey', testMatch: 'transcript-viewport.journey.mjs', workers: 1, retries: 0,
   timeout: 60000, reporter: 'list',
   use: { baseURL: process.env.PEASANT_ORIGIN, launchOptions: { executablePath: process.env.CHROME_PATH }, reducedMotion: 'reduce' },
-  projects: fixture.projects.map(p => ({ name: p.name, metadata: { theme: p.theme }, use: { viewport: { width: p.width, height: p.height } } })),
+  projects: fixture.projects.map(p => ({ name: p.name, metadata: { theme: p.theme, compact: p.compact, minimumProse: p.minimumProse }, use: { viewport: { width: p.width, height: p.height } } })),
 });

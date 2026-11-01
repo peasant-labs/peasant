@@ -1,0 +1,14 @@
+# Which claims on one session id are refused. Harness is the harness of both
+# claims; out_of_scope marks both claims outside the run's scope.
+required_names:
+  - claude-two-files
+  - codex-two-files
+  - opencode-two-stores
+  - cursor-two-paths
+  - claude-out-of-scope
+cases:
+  - {name: claude-two-files, harness: claude-code, refused: true}
+  - {name: codex-two-files, harness: codex, refused: true}
+  - {name: opencode-two-stores, harness: opencode, refused: false}
+  - {name: cursor-two-paths, harness: cursor, refused: false}
+  - {name: claude-out-of-scope, harness: claude-code, out_of_scope: true, refused: false}
