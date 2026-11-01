@@ -382,10 +382,7 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 	// ETag, recompute the raw hash locally over the blob bytes. servedETag keeps
 	// the verbatim token for the re-pull If-None-Match echo (empty when none).
 	servedETag := etag
-	servedHash := strings.Trim(etag, `"`)
-	if servedHash == "" {
-		servedHash = schema.ComputeTranscriptHash(blob)
-	}
+	servedHash := servedBlobHash(etag, blob)
 
 	// Post-download local-hash DIFF fallback: when the server advertised no hash
 	// (no ETag, no metadata ContentHash) but we already hold a byte-identical copy
@@ -625,4 +622,34 @@ func manifestAnnotations(annotations []schema.PullAnnotation) []ManifestAnnotati
 		})
 	}
 	return out
+}
+
+// servedBlobHash derives the raw content-identity hash of a served blob from
+// its ETag. The village sets a strong ETag naming the blob's hash, but an
+// intermediary that compresses the response weakens it to W/"<hash>"
+// (Cloudflare does), so a weak prefix is dropped before the quotes. A value
+// that is not a content hash falls back to hashing the bytes, so the install
+// check always compares two real hashes. A hash-shaped ETag that does not
+// match the bytes still fails that check, as it should.
+func servedBlobHash(etag string, blob []byte) string {
+	tag := strings.TrimPrefix(strings.TrimSpace(etag), "W/")
+	tag = strings.Trim(tag, `"`)
+	if isContentHash(tag) {
+		return tag
+	}
+	return schema.ComputeTranscriptHash(blob)
+}
+
+// isContentHash reports whether s has the shape of schema.ComputeTranscriptHash
+// output: 64 lowercase hex characters.
+func isContentHash(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }

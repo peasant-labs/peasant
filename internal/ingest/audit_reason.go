@@ -30,7 +30,7 @@ func NewAuditReason(raw string) (AuditReason, error) {
 		"codex_reference_segments_bounded", "codex_reference_unavailable",
 		"codex_reference_unreadable", "codex_rollback_beyond_history", "codex_turn_aborted",
 		"content_capture_incomplete", "content_recovery_refused", "content_recovery_unavailable",
-		"copy_failed", "derive_identity_error", "dry_run_unindexed", "event_data_parse_error",
+		"copy_failed", "derive_identity_error", "dry_run_unindexed", "duplicate_session_id", "event_data_parse_error",
 		"git_failure", "git_timeout", "index_coverage_unavailable", "index_empty_unverified",
 		"index_refused", "invalid_model", "invalid_parent_cycle", "invalid_parent_session_id",
 		"metadata_refused", "metrics_incomplete", "missing_model", "missing_project",

@@ -1,0 +1,10 @@
+# Required-name manifest for testdata/empty_code.yaml. Name-only:
+# testutil.ValidateRequiredNames compares the name sets.
+requiredNames:
+  - empty_store_is_store_has_no_sessions
+  - already_pushed_is_nothing_changed
+  - selection_excluded_all_is_filters_excluded_all
+  - scope_empty_store_is_store_has_no_sessions
+  - scope_nothing_recorded_is_filters_excluded_all
+  - scope_selection_excluded_is_filters_excluded_all
+  - scope_already_pushed_is_nothing_changed

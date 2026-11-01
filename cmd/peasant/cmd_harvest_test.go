@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/spf13/cobra"
 )
@@ -309,24 +310,6 @@ func TestHarvestCmd_SourcePathWithoutProvider(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--source-path requires --source-harness") {
 		t.Errorf("error should mention '--source-path requires --source-harness', got: %v", err)
-	}
-}
-
-// TestHarvestCmd_SourceHarnessWithoutPath verifies that passing --source-harness
-// without --source-path returns a clear error.
-func TestHarvestCmd_SourceHarnessWithoutPath(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	_, err := executeHarvestCmd(t, tmpDir, []string{
-		"--source-harness=claude-code",
-		"--output=" + tmpDir,
-		"--dry-run",
-	})
-	if err == nil {
-		t.Fatal("expected error when --source-harness given without --source-path, got nil")
-	}
-	if !strings.Contains(err.Error(), "--source-harness requires --source-path") {
-		t.Errorf("error should mention '--source-harness requires --source-path', got: %v", err)
 	}
 }
 
@@ -1138,9 +1121,9 @@ func TestHarvestVerify_AnnotationEngineSection(t *testing.T) {
 		t.Fatalf("ingest verify: unexpected error: %v\noutput: %s", err, output)
 	}
 
-	// Schema version updated to v1-v16.
-	if !strings.Contains(output, "v1-v20 (migrations)") {
-		t.Errorf("verify output should show 'v1-v20 (migrations)' schema version\noutput: %s", output)
+	// The header names the current schema version.
+	if want := fmt.Sprintf("Expected schema: v%d", store.CurrentSchemaVersion()); !strings.Contains(output, want) {
+		t.Errorf("verify output should show %q\noutput: %s", want, output)
 	}
 
 	// Annotation Engine subsection header present (subsection of section 4).

@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -23,6 +24,15 @@ type sessionListEntry struct {
 	Turns       int    `json:"turns"`
 	Tokens      int    `json:"tokens"`
 	Preview     string `json:"preview"`
+	// ParentSessionID, ParentUnresolved and RootSessionID carry the meaning of
+	// the same fields on schema.LocalSessionRow. A row is a subagent session
+	// exactly when ParentSessionID is set or ParentUnresolved is true.
+	ParentSessionID  *string `json:"parentSessionId"`
+	ParentUnresolved bool    `json:"parentUnresolved"`
+	RootSessionID    *string `json:"rootSessionId"`
+	// Facets lists every workflow facet that holds for the session, in
+	// defaults.AllSessionWorkflowFacets order. It is [] when none holds.
+	Facets []defaults.SessionWorkflowFacet `json:"facets"`
 }
 
 // buildSessionsListCommand constructs the `peasant sessions list` subcommand.
@@ -38,6 +48,12 @@ func buildSessionsListCommand() *cobra.Command {
 		reverse bool
 		limit   int
 		asJSON  bool
+
+		includeSubagents bool
+
+		has      []string
+		minTurns int
+		maxTurns int
 	)
 
 	cmd := &cobra.Command{
@@ -45,6 +61,11 @@ func buildSessionsListCommand() *cobra.Command {
 		Short: "List sessions",
 		Long:  "List ingested sessions with optional filtering. Outputs a table by default or JSON with --json.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			workflow, err := parseSessionWorkflowFilter(cmd, has, minTurns, maxTurns)
+			if err != nil {
+				return err
+			}
+
 			db, cleanup, err := openDB(cmd)
 			if err != nil {
 				return err
@@ -55,6 +76,9 @@ func buildSessionsListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			f.MainOnly = !includeSubagents
+			f.Facets, f.MinTurns, f.MaxTurns = workflow.facets, workflow.minTurns, workflow.maxTurns
 
 			return listSessionsShared(cmd, db, f, asJSON)
 		},
@@ -69,9 +93,54 @@ func buildSessionsListCommand() *cobra.Command {
 	cmd.Flags().StringVar(&sort, "sort", string(defaults.SessionSortDate), "Sort by field (date, turns, tokens, project)")
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order (ascending instead of descending)")
 	cmd.Flags().IntVar(&limit, "limit", defaults.SessionListDefaultLimit, "Maximum number of sessions to show (0 = no limit)")
+	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, "Also list subagent sessions (by default only main sessions are listed; --session still finds a subagent session by id)")
+	cmd.Flags().StringSliceVar(&has, "has", nil, "Only sessions where all these facets hold, comma-separated or repeated: "+defaults.SessionWorkflowFacetNames())
+	cmd.Flags().IntVar(&minTurns, sessionsListMinTurnsFlag, 0, "Only sessions with at least this many turns")
+	cmd.Flags().IntVar(&maxTurns, sessionsListMaxTurnsFlag, 0, "Only sessions with at most this many turns")
 	cmd.Flags().BoolVar(&asJSON, defaults.JSONFlagName, false, "Output as JSON array")
 
 	return cmd
+}
+
+const (
+	sessionsListMinTurnsFlag = "min-turns"
+	sessionsListMaxTurnsFlag = "max-turns"
+)
+
+// sessionWorkflowFilter holds the parsed --has, --min-turns and --max-turns flags.
+type sessionWorkflowFilter struct {
+	facets   []defaults.SessionWorkflowFacet
+	minTurns *int
+	maxTurns *int
+}
+
+// parseSessionWorkflowFilter validates the workflow flags. It runs before the
+// store opens, so a refused call touches nothing.
+func parseSessionWorkflowFilter(cmd *cobra.Command, has []string, minTurns, maxTurns int) (sessionWorkflowFilter, error) {
+	var parsed sessionWorkflowFilter
+	for _, raw := range has {
+		facet, err := defaults.NewSessionWorkflowFacet(raw)
+		if err != nil {
+			return parsed, clicontract.NewUsageError("invalid --has value: " + err.Error())
+		}
+		parsed.facets = append(parsed.facets, facet)
+	}
+	if cmd.Flags().Changed(sessionsListMinTurnsFlag) {
+		if minTurns < 0 {
+			return parsed, clicontract.NewUsageError(fmt.Sprintf("invalid --min-turns value %d: must be 0 or more", minTurns))
+		}
+		parsed.minTurns = &minTurns
+	}
+	if cmd.Flags().Changed(sessionsListMaxTurnsFlag) {
+		if maxTurns < 0 {
+			return parsed, clicontract.NewUsageError(fmt.Sprintf("invalid --max-turns value %d: must be 0 or more", maxTurns))
+		}
+		parsed.maxTurns = &maxTurns
+	}
+	if parsed.minTurns != nil && parsed.maxTurns != nil && minTurns > maxTurns {
+		return parsed, clicontract.NewUsageError(fmt.Sprintf("--min-turns %d is above --max-turns %d: no session can match; lower --min-turns or raise --max-turns", minTurns, maxTurns))
+	}
+	return parsed, nil
 }
 
 // listSessionsShared runs the session listing and renders to cmd's output.
@@ -96,9 +165,25 @@ func listSessionsShared(cmd *cobra.Command, db *store.Store, f store.SessionList
 		previews = map[string]string{} // degrade gracefully; entries will show empty preview
 	}
 
+	lineages, err := db.SessionLineages(ctx, sessionIDs)
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
+	}
+
+	// Facets are read for the JSON row only: the table has no column for them,
+	// and --has is already applied by the query.
+	var facets map[string][]defaults.SessionWorkflowFacet
+	if asJSON {
+		facets, err = db.SessionWorkflowFacets(ctx, sessionIDs)
+		if err != nil {
+			return fmt.Errorf("list sessions: %w", err)
+		}
+	}
+
 	// Build entries with first-user-message previews.
 	entries := make([]sessionListEntry, 0, len(rows))
 	for _, row := range rows {
+		lineage := lineages[row.SessionID]
 		entries = append(entries, sessionListEntry{
 			ID:          row.SessionID,
 			Date:        formatSessionDate(row.StartMs),
@@ -107,6 +192,12 @@ func listSessionsShared(cmd *cobra.Command, db *store.Store, f store.SessionList
 			Turns:       row.TurnCount,
 			Tokens:      row.TokensTotal,
 			Preview:     previews[row.SessionID], // empty string when key absent
+
+			ParentSessionID:  lineage.ParentSessionID,
+			ParentUnresolved: lineage.ParentUnresolved,
+			RootSessionID:    lineage.RootSessionID,
+
+			Facets: facetsOrEmpty(facets[row.SessionID]),
 		})
 	}
 
@@ -134,6 +225,14 @@ func listSessionsShared(cmd *cobra.Command, db *store.Store, f store.SessionList
 	}
 
 	return nil
+}
+
+// facetsOrEmpty keeps the JSON field an array when no facet holds.
+func facetsOrEmpty(facets []defaults.SessionWorkflowFacet) []defaults.SessionWorkflowFacet {
+	if facets == nil {
+		return []defaults.SessionWorkflowFacet{}
+	}
+	return facets
 }
 
 // buildSessionListFilter parses CLI flag values into a SessionListFilter.

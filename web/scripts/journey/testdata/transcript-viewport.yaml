@@ -1,9 +1,9 @@
 requiredNames: [desktop-dark, desktop-light, mobile-dark, mobile-light]
 projects:
-  - {name: desktop-dark, theme: dark, width: 1280, height: 720}
-  - {name: desktop-light, theme: light, width: 1280, height: 720}
-  - {name: mobile-dark, theme: dark, width: 390, height: 844}
-  - {name: mobile-light, theme: light, width: 390, height: 844}
+  - {name: desktop-dark, theme: dark, width: 1280, height: 720, compact: true, minimumProse: 600}
+  - {name: desktop-light, theme: light, width: 1280, height: 720, compact: true, minimumProse: 600}
+  - {name: mobile-dark, theme: dark, width: 390, height: 844, compact: true, minimumProse: 260}
+  - {name: mobile-light, theme: light, width: 390, height: 844, compact: true, minimumProse: 260}
 project: fortuna
 session: sess-c3d4e5f6-a7b8-9012-cdef-123456789012
 source:

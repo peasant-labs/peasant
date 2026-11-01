@@ -108,6 +108,16 @@ describe('LocalSidebar — the local shell chrome manifest', () => {
     expect(failures).not.toContain('route /map: the persistent chrome links to it');
   });
 
+  it('reports shortcuts moved above the app pages', async () => {
+    await mount();
+    const shortcuts = screen.getByRole('navigation', { name: 'shortcuts' });
+    const sections = screen.getByRole('navigation', { name: 'sections' });
+    sections.parentElement!.insertBefore(shortcuts, sections);
+    expect(chromeFailures(manifest, { theme: 'light', shipped })).toContain(
+      `navigation order: expected ${manifest.navigationOrder.join(', ')}, received shortcuts, sections`,
+    );
+  });
+
   it('lists the registry nav sections in its order, labelled as the registry labels them, settings as the footer gear', async () => {
     await mount();
     const nav = screen.getByRole('navigation', { name: 'sections' });
@@ -168,7 +178,7 @@ describe('LocalSidebar — the local shell chrome manifest', () => {
     expect(link).toHaveAccessibleName(/^collectives\s*, opens outside this app$/);
   });
 
-  it('offers the docs in the shortcuts, opened in a new tab, and community as soon', async () => {
+  it('offers search and the docs near the footer without a community entry', async () => {
     await mount();
     const apps = screen.getByRole('navigation', { name: 'shortcuts' });
     // The switcher leaves this app out: it lists only where else to go.
@@ -178,12 +188,9 @@ describe('LocalSidebar — the local shell chrome manifest', () => {
     expect(docs).toHaveAttribute('target', '_blank');
     // The collectives link is the local app's way to online; the switcher does not offer it again.
     expect(within(apps).queryByText('online')).toBeNull();
-    // search, the docs, community, then the link that leaves for online
-    expect(within(apps).getAllByRole('listitem').map((item) => item.querySelector('.asb-label')?.textContent)).toEqual(['search', 'docs', 'community', 'collectives']);
-    // Community is shown, not linked, until a community space exists.
-    const community = within(apps).getByText('community').closest('.asb-item');
-    expect(community?.tagName).not.toBe('A');
-    expect(community).toHaveTextContent('soon');
+    // search and the docs, then the link that leaves for online
+    expect(within(apps).getAllByRole('listitem').map((item) => item.querySelector('.asb-label')?.textContent)).toEqual(['search', 'docs', 'collectives']);
+    expect(within(apps).queryByText('community')).toBeNull();
   });
 
   it('shows the account row only for a signed-in computer', async () => {

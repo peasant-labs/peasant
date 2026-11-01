@@ -23,12 +23,12 @@ import (
 func sessionExtrasSessionID(w http.ResponseWriter, r *http.Request) (ingest.SessionID, bool) {
 	raw := r.PathValue("id")
 	if raw == "" {
-		http.Error(w, `{"error":"missing session ID"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "missing session ID")
 		return "", false
 	}
 	sessionID, err := ingest.NewSessionID(raw)
 	if err != nil {
-		http.Error(w, `{"error":"invalid session ID"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid session ID")
 		return "", false
 	}
 	return sessionID, true
@@ -46,7 +46,7 @@ func (s *Server) sessionExtrasStoredSession(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 	if hostSlug == "" {
-		http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "session not found")
 		return false
 	}
 	return true
@@ -65,7 +65,7 @@ func (s *Server) handleSessionCommits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.cfg.Store == nil {
-		http.Error(w, `{"error":"store not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "store not available")
 		return
 	}
 	if !s.sessionExtrasStoredSession(w, r, sessionID) {
@@ -112,11 +112,11 @@ func (s *Server) handleSessionPullRequests(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if s.cfg.Store == nil {
-		http.Error(w, `{"error":"store not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "store not available")
 		return
 	}
 	if s.cfg.Provider == nil {
-		http.Error(w, `{"error":"data provider not available"}`, http.StatusServiceUnavailable)
+		writeJSONError(w, http.StatusServiceUnavailable, "data provider not available")
 		return
 	}
 	if !s.sessionExtrasStoredSession(w, r, sessionID) {
@@ -126,7 +126,7 @@ func (s *Server) handleSessionPullRequests(w http.ResponseWriter, r *http.Reques
 	detail, err := SessionDetailReadForProvider(r.Context(), s.cfg.Provider, string(sessionID))
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
-			http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+			writeJSONError(w, http.StatusNotFound, "session not found")
 			return
 		}
 		writeAPIError(w, http.StatusInternalServerError,

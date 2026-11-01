@@ -27,11 +27,14 @@ required_names:
   - release-guard
 
 steps:
+  # The step keeps its name "fmt" (budget tables key on it); since `check`
+  # asserts formatting instead of rewriting files, it runs the read-only
+  # fmt-check recipe with the building toolchain's gofmt.
   - step: fmt
-    program: go
-    args: ["fmt", "./..."]
-    target: fmt
-    fragment: "go fmt ./..."
+    program: sh
+    args: ["-c", "unformatted=$(git ls-files -z -- '*.go' | xargs -0 \"$(go env GOROOT)/bin/gofmt\" -l -e) || exit 1; if [ -n \"$unformatted\" ]; then echo \"$unformatted\"; exit 1; fi"]
+    target: fmt-check
+    fragment: "xargs -0 \"$$(go env GOROOT)/bin/gofmt\" -l"
   - step: lint
     program: ./scripts/vet-go.sh
     args: []

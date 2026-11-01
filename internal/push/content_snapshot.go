@@ -33,7 +33,7 @@ func (p *Pipeline) readPublicationInput(ctx context.Context, candidate ingest.Pu
 		return input, nil, fmt.Errorf("capture session %s for publication: its current project is outside the requested repository; no content was prepared; retry within the selected repository", candidate.SessionID)
 	}
 	if p.runCfg.Selection != nil {
-		if p.runCfg.Selection.Decision(meta.SessionID) != ingest.BranchMatchYes ||
+		if p.runCfg.selectionDecision(meta.SessionID) != ingest.BranchMatchYes ||
 			stringValue(meta.Git.Branch) != stringValue(candidate.GitBranch) ||
 			ingest.NormalizeRemoteForMatch(stringValue(meta.Git.Remote)) != ingest.NormalizeRemoteForMatch(candidate.GitRemote) ||
 			input.ProjectPath != candidate.ProjectPath {

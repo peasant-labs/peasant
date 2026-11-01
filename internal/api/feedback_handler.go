@@ -37,19 +37,19 @@ func (s *Server) handleLocalFeedback(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	var req feedbackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 
 	comment := strings.TrimSpace(req.Comment)
 	if comment == "" {
-		http.Error(w, `{"error":"comment required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "comment required")
 		return
 	}
 	if len(comment) > feedbackCommentMaxLen {
@@ -58,12 +58,12 @@ func (s *Server) handleLocalFeedback(w http.ResponseWriter, r *http.Request) {
 
 	target, err := resolveFeedbackPath()
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"resolve path: %v"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("resolve path: %v", err))
 		return
 	}
 
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"mkdir: %v"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("mkdir: %v", err))
 		return
 	}
 
@@ -71,12 +71,12 @@ func (s *Server) handleLocalFeedback(w http.ResponseWriter, r *http.Request) {
 
 	f, err := os.OpenFile(target, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"open: %v"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("open: %v", err))
 		return
 	}
 	defer f.Close()
 	if _, err := f.WriteString(block); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"write: %v"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("write: %v", err))
 		return
 	}
 

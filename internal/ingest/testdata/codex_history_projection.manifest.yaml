@@ -8,6 +8,8 @@ requiredNames:
   - delivery-object-correlation
   - delivery-malformed-correlation-object
   - delivery-wrong-required-item-field
+  - delivery-authoritative-mirror-replaces-timestamp
+  - delivery-latest-body-without-timestamp-clears-earlier-time
   - delivery-repeated-item-completion
   - delivery-scalar-does-not-open-admission
   - delivery-correlation-opens-admission
@@ -46,6 +48,7 @@ requiredNames:
   - reference-through-running-target
   - reference-through-completed-target
   - canonical-item-variants-emitted
+  - world-state-known-control-envelope
   - event-only-tool-item-arguments
   - legacy-canonical-item-rollback-boundary
   - cross-segment-item-body-replaced

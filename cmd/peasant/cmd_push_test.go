@@ -802,7 +802,7 @@ func TestPushSummary_VerboseMappingNonDryRun(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	// Mirror cmd_push.go:348 exactly, with dryRun=false (real push).
-	printPushSummary(&buf, result, false /* dryRun */, level == outputVerbose)
+	printPushSummary(&buf, result, countsOfResult(result), false /* dryRun */, level == outputVerbose)
 	out := buf.String()
 	if !strings.Contains(out, "sess-verbose-1") {
 		t.Errorf("non-dry-run verbose should render per-session detail; got: %s", out)
@@ -1451,7 +1451,7 @@ func TestPushCmd_VerboseShowsPerSessionRows(t *testing.T) {
 
 	// verbose=false: only the summary line, no per-session rows.
 	var bufQuiet bytes.Buffer
-	printPushSummary(&bufQuiet, result, false, false)
+	printPushSummary(&bufQuiet, result, countsOfResult(result), false, false)
 	quietOut := bufQuiet.String()
 	if strings.Contains(quietOut, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa") {
 		t.Errorf("non-verbose output should NOT contain session ID row; got: %s", quietOut)
@@ -1462,7 +1462,7 @@ func TestPushCmd_VerboseShowsPerSessionRows(t *testing.T) {
 
 	// verbose=true: per-session rows appear before the summary line.
 	var bufVerbose bytes.Buffer
-	printPushSummary(&bufVerbose, result, false, true)
+	printPushSummary(&bufVerbose, result, countsOfResult(result), false, true)
 	verboseOut := bufVerbose.String()
 	if !strings.Contains(verboseOut, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa") {
 		t.Errorf("verbose output should contain session ID row; got: %s", verboseOut)
@@ -1571,7 +1571,7 @@ func TestPushStages_BothSucceed(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printPushSummary(&buf, result, false, false)
+	printPushSummary(&buf, result, countsOfResult(result), false, false)
 	printAnnotationSummary(&buf, annSummary, nil, false)
 	out := buf.String()
 
@@ -1610,7 +1610,7 @@ func TestPushStages_AnnotationFails_TranscriptSucceeds(t *testing.T) {
 	annErr := fmt.Errorf("annotation server: connection refused")
 
 	var buf bytes.Buffer
-	printPushSummary(&buf, result, false, false)
+	printPushSummary(&buf, result, countsOfResult(result), false, false)
 	printAnnotationSummary(&buf, annSummary, annErr, false)
 	out := buf.String()
 
@@ -1656,7 +1656,7 @@ func TestPushStages_TranscriptFails_AnnotationSucceeds(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printPushSummary(&buf, result, false, false)
+	printPushSummary(&buf, result, countsOfResult(result), false, false)
 	printAnnotationSummary(&buf, annSummary, nil, false)
 	out := buf.String()
 
@@ -1934,7 +1934,7 @@ func TestWritePushErrorLog(t *testing.T) {
 	}
 	annErr := fmt.Errorf("annotations endpoint unreachable")
 
-	path, err := writePushErrorLog(result, nil, annErr, "https://api.village.example", stateHome)
+	path, err := writePushErrorLog(result, countsOfResult(result), nil, annErr, "https://api.village.example", stateHome)
 	if err != nil {
 		t.Fatalf("writePushErrorLog: %v", err)
 	}

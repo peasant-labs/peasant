@@ -1,0 +1,25 @@
+# The closed sets of the village push plan. Exact membership: adding or
+# removing a verdict or a reason is a contract change for every caller that
+# branches on them, so it must change this file too.
+verdicts:
+  - will_publish
+  - will_update
+  - unchanged
+  - held
+  - excluded
+  - not_ready
+  - unknown_session
+  - failed
+reasons:
+  - not_in_store
+  - outside_repository
+  - harness_mismatch
+  - branch_selection_excluded
+  - needs_ingest
+  - cohort_not_ready
+  - latest_attempt_kept
+  - unchanged_content
+  - transcript_is_public
+  - no_metrics
+  - no_model_reply
+rejected: ["x", "", "WILL_PUBLISH", "Unchanged"]

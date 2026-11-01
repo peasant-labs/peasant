@@ -177,7 +177,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Filter stored sessions by harness (claude-code, opencode, codex, cursor, strike, pi; cleared by --all)")
 	} else {
 		// Native source overrides are relevant only for logs and all modes.
-		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Override source harness (claude-code, opencode, codex, cursor, strike, pi)")
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Limit discovery to one harness, using its configured or default path (claude-code, opencode, codex, cursor, strike, pi)")
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the harness (replaces config, not additive)")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", true, "Deprecated compatibility flag; active sessions are processed by default")
 	}
@@ -247,8 +247,17 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	fs := filesystem
 	git := &ingest.ExecGitResolver{}
 
+	var nativeHarness *defaults.Harness
+	if mode != harvestIndexOnly && flags.sourceHarness != "" && flags.sourcePath == "" {
+		provider, err := resolveHarnessFlag(flags.sourceHarness)
+		if err != nil {
+			return err
+		}
+		nativeHarness = &provider
+	}
+
 	// 2. Load config.
-	cfg, err := loadRunConfig(configPath, flags.dryRun)
+	cfg, err := loadRunConfigForHarnessOnly(cmd, configPath, flags.dryRun, nativeHarness)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -284,27 +293,23 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 			}
 		}
 	} else {
-		if flags.sourceHarness != "" || flags.sourcePath != "" {
-			if flags.sourceHarness == "" {
-				return fmt.Errorf("--source-path requires --source-harness")
-			}
-			if flags.sourcePath == "" {
-				return fmt.Errorf("--source-harness requires --source-path")
-			}
+		if flags.sourcePath != "" && flags.sourceHarness == "" {
+			return fmt.Errorf("--source-path requires --source-harness")
+		}
+		if flags.sourceHarness != "" {
 			provider, err := resolveHarnessFlag(flags.sourceHarness)
 			if err != nil {
 				return err
 			}
-			resolved, err := ingest.NewResolvedPath(flags.sourcePath)
-			if err != nil {
-				return fmt.Errorf("resolve source path: %w", err)
+			if flags.sourcePath != "" {
+				resolved, err := ingest.NewResolvedPath(flags.sourcePath)
+				if err != nil {
+					return fmt.Errorf("resolve source path: %w", err)
+				}
+				applySourceOverride(cfg, provider, resolved)
 			}
-			applySourceOverride(cfg, provider, resolved)
-			// --source-path (which requires --source-harness) scopes the run to
-			// the NAMED provider as the SOLE active source: disable default
-			// discovery of the OTHER providers so "ingest from THIS path" does not
-			// also read their real default dirs (~/.claude, opencode, codex) — the
-			// isolation leak exposed by the source-scoped integration path.
+			// The named harness is the sole discovery source regardless of
+			// whether its path came from config, defaults, or the flag.
 			isolateSourceHarness(cfg, provider)
 		}
 	}
@@ -516,6 +521,9 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	if !skipDB && flags.detectCommits {
 		pipelineOpts = append(pipelineOpts, ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()))
 	}
+
+	// One writing harvest at a time per data dir, across processes.
+	pipelineOpts = append(pipelineOpts, ingest.WithRunLock(filepath.Join(string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd))), ingest.RunLockFileName)))
 
 	// 9. Create and run pipeline.
 	if err := ctx.Err(); err != nil {
@@ -862,25 +870,11 @@ func printIndexProfileStage(w io.Writer, stage ingest.IndexProfileStage) {
 	fmt.Fprintf(w, "    %s: %s%s\n", stage.Stage, stage.Duration.Round(time.Millisecond), progress)
 }
 
-// runVerify checks database schema integrity.
-func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
-	if repair && !content {
-		return fmt.Errorf("harvest verify: --repair requires --content; nothing was checked and nothing changed; re-run with `peasant harvest verify --content --repair`")
-	}
-	if content {
-		return runVerifyContent(cmd, repair)
-	}
-	ctx := cmd.Context()
-	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-
-	db, err := store.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("open database: %w", err)
-	}
-	defer db.Close()
-
-	out := cmd.OutOrStdout()
-
+// verifyTablePresence prints the schema overview and the table presence
+// check, and fails when an expected table is missing. When more checks follow
+// (--content), a pass is reported for the tables only, so the one overall
+// "Status:" line is the last check's.
+func verifyTablePresence(out io.Writer, db *store.Store, dbPath string, expectedTables []string, moreChecks bool) error {
 	// Header
 	fmt.Fprintln(out, "==============================================")
 	fmt.Fprintln(out, "Peasant Database Verification")
@@ -897,11 +891,12 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 		return fmt.Errorf("get table names: %w", err)
 	}
 
-	// Expected tables from schema.go
-	expectedTables := store.AllTableNames
-	schemaVersion := "v1-v20 (migrations)"
-
-	fmt.Fprintf(out, "Expected schema: %s\n", schemaVersion)
+	foundVersion, err := store.SchemaVersionAt(dbPath)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Expected schema: v%d\n", store.CurrentSchemaVersion())
+	fmt.Fprintf(out, "Found schema:    v%d\n", foundVersion)
 	fmt.Fprintf(out, "Expected tables: %d\n", len(expectedTables))
 	fmt.Fprintf(out, "Found tables:    %d\n", len(existingTables))
 
@@ -933,8 +928,40 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 		return fmt.Errorf("database verification failed: %d missing table(s)", len(missingTables))
 	}
 
+	if moreChecks {
+		fmt.Fprintln(out, "Tables: PASSED (all expected tables are present); content checks follow")
+		return nil
+	}
 	fmt.Fprintln(out, "Status: PASSED")
 	fmt.Fprintln(out, "All expected tables are present.")
+	return nil
+}
+
+// runVerify checks database schema integrity.
+func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
+	if repair && !content {
+		return fmt.Errorf("harvest verify: --repair requires --content; nothing was checked and nothing changed; re-run with `peasant harvest verify --content --repair`")
+	}
+	if content {
+		return runVerifyContent(cmd, repair)
+	}
+	ctx := cmd.Context()
+	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+
+	db, err := store.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer db.Close()
+
+	out := cmd.OutOrStdout()
+	expectedTables, err := store.ExpectedTableNames()
+	if err != nil {
+		return err
+	}
+	if err := verifyTablePresence(out, db, dbPath, expectedTables, false); err != nil {
+		return err
+	}
 
 	// 4. Table Statistics
 	fmt.Fprintln(out, "\n4. Table Statistics")
@@ -1286,6 +1313,9 @@ type jsonSessionResult struct {
 	Status     string           `json:"status"`
 	OutputPath string           `json:"outputPath,omitempty"`
 	Error      string           `json:"error,omitempty"`
+	// ExcludedBySelection marks a session the saved selection left out; its
+	// status stays "unchanged" for existing consumers.
+	ExcludedBySelection bool `json:"excludedBySelection"`
 }
 
 // printJSON outputs the pipeline result as JSON.
@@ -1300,10 +1330,11 @@ func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 	}
 	for _, sr := range result.Sessions {
 		js := jsonSessionResult{
-			SessionID:  sr.SessionID,
-			Provider:   sr.Harness,
-			Status:     sr.Status.String(),
-			OutputPath: sr.OutputPath,
+			SessionID:           sr.SessionID,
+			Provider:            sr.Harness,
+			Status:              sr.Status.String(),
+			ExcludedBySelection: sr.ExcludedBySelection,
+			OutputPath:          sr.OutputPath,
 		}
 		if sr.Error != nil {
 			js.Error = sr.Error.Error()
@@ -1363,7 +1394,7 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	fmt.Fprintln(w)
 
 	s := result.Summary
-	total := s.New + s.Updated + s.Unchanged + s.Active + s.Errors
+	total := s.New + s.Updated + s.Unchanged + s.ExcludedBySelection + s.Active + s.Errors
 
 	// Distinguish debounced active sessions from explicitly included ones.
 	activeLabel := "(debounced)"
@@ -1374,6 +1405,9 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	fmt.Fprintf(w, "   - %-5d new\n", s.New)
 	fmt.Fprintf(w, "   - %-5d updated\n", s.Updated)
 	fmt.Fprintf(w, "   - %-5d unchanged\n", s.Unchanged)
+	if s.ExcludedBySelection > 0 {
+		fmt.Fprintf(w, "   - %-5d excluded by selection (run `peasant config` to choose which projects to ingest)\n", s.ExcludedBySelection)
+	}
 	fmt.Fprintf(w, "   - %-5d errors\n", s.Errors)
 	fmt.Fprintf(w, "   - %-5d active %s\n", s.Active, activeLabel)
 	fmt.Fprintf(w, "duration: %s\n", result.Duration.Round(100*time.Millisecond))
@@ -1477,6 +1511,14 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 		if sr.Error != nil {
 			statusStr = "error"
 		}
+		// printReason names a failure directly under its row; without it the
+		// human output gave only "ERROR <harness> <id>" and the cause was in
+		// --json alone.
+		printReason := func(err error, indent string) {
+			if err != nil {
+				fmt.Fprintf(w, "  %-10s %s%v\n", "", indent, err)
+			}
+		}
 
 		if verbose {
 			// Verbose mode expands subagents beneath each root session.
@@ -1492,6 +1534,7 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 					string(sr.Harness),
 					string(sr.SessionID))
 			}
+			printReason(sr.Error, "")
 			// Expand each subagent on its own indented line.
 			for _, sub := range subagentsByParent[sr.SessionID] {
 				if sub.OutputPath != "" {
@@ -1504,6 +1547,7 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 						"", "",
 						string(sub.SessionID))
 				}
+				printReason(sub.Error, strings.Repeat(" ", 13))
 			}
 		} else {
 			// Default mode summarizes subagents beside the provider and output path.
@@ -1524,6 +1568,14 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 					string(sr.Harness),
 					string(sr.SessionID),
 					suffix)
+			}
+			printReason(sr.Error, "")
+			// A failed subagent has no row of its own here, so its reason
+			// names it.
+			for _, sub := range subagentsByParent[sr.SessionID] {
+				if sub.Error != nil {
+					printReason(fmt.Errorf("subagent %s: %w", sub.SessionID, sub.Error), "")
+				}
 			}
 		}
 	}

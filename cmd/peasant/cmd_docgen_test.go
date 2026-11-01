@@ -34,6 +34,9 @@ func TestDocgenUsesPortableConfigDefault(t *testing.T) {
 	if !strings.Contains(contents, "~/.config/peasant/config.yaml") {
 		t.Error("generated docs do not contain the portable config default")
 	}
+	if !strings.Contains(contents, "](../cli-contract.md)") {
+		t.Error("the generated root page does not link the CLI contract")
+	}
 
 	configFlag := root.PersistentFlags().Lookup("config")
 	if got := configFlag.DefValue; got != runtimeConfigPath {

@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
@@ -269,7 +270,8 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 
 	// 5. Handle empty-result states.
 	if len(sessions) == 0 {
-		return &PushResult{BaseCandidateCount: baseCount, EmptyReason: p.emptyReason(ctx, baseCount)}, nil
+		code, reason := p.emptyReason(ctx, baseCount)
+		return &PushResult{BaseCandidateCount: baseCount, EmptyCode: code, EmptyReason: reason}, nil
 	}
 
 	result = &PushResult{BaseCandidateCount: baseCount}
@@ -394,8 +396,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	}
 	if result.Skipped > 0 && result.New == 0 && result.Updated == 0 && result.Errors == 0 && result.Held == 0 {
 		if p.runCfg.Repository != nil {
-			result.EmptyReason = p.emptyReason(ctx, baseCount)
+			result.EmptyCode, result.EmptyReason = p.emptyReason(ctx, baseCount)
 		} else {
+			result.EmptyCode = clicontract.EmptyNothingChanged
 			result.EmptyReason = "All selected sessions already pushed with unchanged content and publication settings."
 		}
 	}
@@ -510,6 +513,7 @@ func (p *Pipeline) getTargetSessions(ctx context.Context, parentSpanID string) (
 
 	selectionSpan := rec.StartChildSpan(perf.StagePushSelection, parentSpanID, nil)
 	kept, withheld := NarrowCandidates(base, p.runCfg)
+	kept = p.dropInheritedWithUnreadyRoot(ctx, kept)
 	p.noticeWithheld(withheld)
 	selectionSpan.End(perf.OutcomeOK, nil)
 	return kept, baseCount, nil
@@ -562,8 +566,63 @@ func NarrowCandidates(sessions []ingest.PushSessionRow, runCfg PipelineConfig) (
 	if runCfg.PinnedSessionIDs != nil {
 		sessions = keepSessions(sessions, runCfg.PinnedSessionIDs)
 	}
-	kept, withheld = ApplySelection(sessions, runCfg.Selection)
-	return ApplyRepositoryScope(kept, runCfg.Repository), ApplyRepositoryScope(withheld, runCfg.Repository)
+	kept, withheld = ApplySelection(sessions, runCfg.inheritingSelection())
+	kept = ApplyRepositoryScope(kept, runCfg.Repository)
+	return dropInheritedWithoutRoot(kept, runCfg), ApplyRepositoryScope(withheld, runCfg.Repository)
+}
+
+// dropInheritedWithoutRoot removes each session admitted only by its root's
+// selection when the root itself is not among the sessions kept: a subagent
+// session inherits the selection of a parent the run sends, never of one it
+// leaves out.
+func dropInheritedWithoutRoot(kept []ingest.PushSessionRow, runCfg PipelineConfig) []ingest.PushSessionRow {
+	if len(runCfg.InheritSelection) == 0 {
+		return kept
+	}
+	present := make(map[string]bool, len(kept))
+	for _, session := range kept {
+		present[session.SessionID] = true
+	}
+	out := make([]ingest.PushSessionRow, 0, len(kept))
+	for _, session := range kept {
+		if root, inherited := runCfg.SelectionInheritedFrom(session.SessionID); inherited && !present[root] {
+			continue
+		}
+		out = append(out, session)
+	}
+	return out
+}
+
+// dropInheritedWithUnreadyRoot removes each session admitted only by its
+// root's selection when the root is not ready to publish. The root's readiness
+// is the same check its own upload makes; it is read once per root.
+func (p *Pipeline) dropInheritedWithUnreadyRoot(ctx context.Context, kept []ingest.PushSessionRow) []ingest.PushSessionRow {
+	if len(p.runCfg.InheritSelection) == 0 {
+		return kept
+	}
+	rows := make(map[string]ingest.PushSessionRow, len(kept))
+	for _, session := range kept {
+		rows[session.SessionID] = session
+	}
+	ready := map[string]bool{}
+	out := make([]ingest.PushSessionRow, 0, len(kept))
+	for _, session := range kept {
+		root, inherited := p.runCfg.SelectionInheritedFrom(session.SessionID)
+		if !inherited {
+			out = append(out, session)
+			continue
+		}
+		rootReady, known := ready[root]
+		if !known {
+			input, _, err := p.readPublicationInput(ctx, rows[root])
+			rootReady = err == nil && ValidatePublicationInput(input) == nil
+			ready[root] = rootReady
+		}
+		if rootReady {
+			out = append(out, session)
+		}
+	}
+	return out
 }
 
 // keepSessions returns the sessions keep names, in order, in a new slice.
@@ -628,7 +687,10 @@ func ApplySelection(sessions []ingest.PushSessionRow, sel *SessionSelection) (ke
 // make its sessions "recorded", and that it could push without --repository,
 // which is the containment the flag exists to provide. The three states a scope
 // can actually be in are read off the scope's own recorded sessions instead.
-func (p *Pipeline) emptyReason(ctx context.Context, baseCount int) string {
+//
+// The code beside the reason is the same answer in the closed set a --json
+// document carries, so a program can branch on it without reading the prose.
+func (p *Pipeline) emptyReason(ctx context.Context, baseCount int) (clicontract.EmptyCode, string) {
 	if p.runCfg.Repository != nil {
 		all, allErr := p.allPushable(ctx)
 		return p.scopedEmptyReason(all, allErr, baseCount)
@@ -637,15 +699,15 @@ func (p *Pipeline) emptyReason(ctx context.Context, baseCount int) string {
 	// "already pushed, use --force" there would be the opposite of the truth and
 	// would point at a flag that cannot widen a selection.
 	if p.runCfg.Selection != nil && baseCount > 0 {
-		return p.renderEmpty(
+		return clicontract.EmptyFiltersExcludedAll, p.renderEmpty(
 			"No sessions match the configured selection. Widen the selection in your config (or run 'peasant kickstart') to include the projects and branches you want pushed.",
 			fmt.Sprintf("%d candidate session(s) were eligible before it. --force re-pushes already-pushed sessions; it cannot widen a selection.", baseCount))
 	}
 	all, allErr := p.allPushable(ctx)
 	if allErr != nil || len(all) == 0 {
-		return "Nothing to push. Run 'peasant ingest' first to import your sessions."
+		return clicontract.EmptyStoreHasNoSessions, "Nothing to push. Run 'peasant ingest' first to import your sessions."
 	}
-	return "All sessions already pushed. Use --force to re-push."
+	return clicontract.EmptyNothingChanged, "All sessions already pushed. Use --force to re-push."
 }
 
 // allPushable reads every session that could ever be pushed, reporting a read
@@ -688,10 +750,13 @@ func (p *Pipeline) renderEmpty(summary string, detail ...string) string {
 // each: nothing recorded here (ingest), recorded but excluded by another
 // narrowing (widen that narrowing), and recorded and already published (--force,
 // or new work). None of them is ever answered by dropping the scope.
-func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, baseCount int) string {
+//
+// A read failure carries no code: none of the closed set is true of it, and
+// the reason says the cause could not be determined.
+func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, baseCount int) (clicontract.EmptyCode, string) {
 	scope := p.runCfg.Repository
 	if allErr != nil {
-		return p.renderEmpty(
+		return "", p.renderEmpty(
 			fmt.Sprintf(
 				"Nothing was pushed for scope %s: the recorded sessions could not be read to say why. Check the analytics store, then re-run '%s'.",
 				scope.Summary(), p.manualPushCommand("--dry-run")),
@@ -706,7 +771,14 @@ func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, 
 	stale := p.staleIdentityNote(all)
 	recorded := ApplyRepositoryScope(all, scope)
 	if len(recorded) == 0 {
-		return p.renderEmpty(
+		// The prose is the scope's, but the code names the cause: a store
+		// with no session at all has nothing for any filter to exclude, and
+		// the same store reports the same code without --repository.
+		code := clicontract.EmptyFiltersExcludedAll
+		if len(all) == 0 {
+			code = clicontract.EmptyStoreHasNoSessions
+		}
+		return code, p.renderEmpty(
 			joinSentences(
 				fmt.Sprintf("No sessions are recorded for scope %s.", scope.Summary()),
 				stale,
@@ -720,7 +792,7 @@ func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, 
 	// doing rather than as an empty repository.
 	selected, _ := ApplySelection(recorded, p.runCfg.Selection)
 	if len(selected) == 0 {
-		return p.renderEmpty(
+		return clicontract.EmptyFiltersExcludedAll, p.renderEmpty(
 			joinSentences(
 				fmt.Sprintf(
 					"No sessions match the configured selection inside scope %s: %d session(s) are recorded for this repository and the selection excluded every one of them. Widen the selection in your config (or run 'peasant kickstart').",
@@ -730,7 +802,7 @@ func (p *Pipeline) scopedEmptyReason(all []ingest.PushSessionRow, allErr error, 
 			"--force re-pushes already-pushed sessions; it cannot widen a selection, and it cannot widen a repository scope.",
 			priorCandidateNote(baseCount))
 	}
-	return p.renderEmpty(
+	return clicontract.EmptyNothingChanged, p.renderEmpty(
 		joinSentences(
 			fmt.Sprintf(
 				"No new sessions to push for scope %s: %d session(s) are recorded for it and none changed since they were published. Re-push them with '%s'.",
@@ -941,8 +1013,13 @@ func (p *Pipeline) pushSession(
 	if err == nil {
 		err = ValidatePublicationInput(input)
 	}
-	if err != nil {
+	if reason, _ := NotReadyReasonOf(err); reason == NotReadyNoModelReply {
+		// No ingest can clear it, so the refusal names no ingest to retry.
+		err = fmt.Errorf("%w; after run-level capability negotiation and before redaction, content construction, or upload; the ordinary local run audit still records this failed session", err)
+	} else if err != nil {
 		err = fmt.Errorf("%w; after run-level capability negotiation and before redaction, content construction, or upload; the ordinary local run audit still records this failed session; retry normal ingest in this command context: %s", err, p.ingestCommand("--session "+shellQuote(sess.SessionID)))
+	}
+	if err != nil {
 		return SessionPushResult{
 			SessionID: sess.SessionID,
 			HostSlug:  sess.HostSlug,
@@ -1122,10 +1199,32 @@ func (p *Pipeline) pushSession(
 	// receiver. It reports the derived requirements, not a receiver's answer.
 	// The forecast status mirrors the real classify: a previously-pushed session
 	// would be an update, otherwise a new upload.
+	//
+	// The comparison with the receipt is local, so the forecast makes it too: a
+	// session the village already holds unchanged is forecast as skipped, the
+	// status the real run gives it, rather than as an update it would not send.
+	//
+	// A session the real run would ask UpdateHold about is asked here too,
+	// through the same updateHeldReason, so the forecast holds what the real
+	// run holds. The question is a read; nothing is written.
 	if p.runCfg.DryRun {
 		status := PushStatusNew
 		if sess.PushedAt != nil {
 			status = PushStatusUpdated
+		}
+		held := false
+		if !p.runCfg.Force && sess.PushedAt != nil && previous != nil {
+			if operation, opErr := schema.CanonicalizePublishRequest(request); opErr == nil {
+				if fingerprint, fpErr := schema.FingerprintPublishOperation(operation); fpErr == nil {
+					held = alreadyHeld(previous.Receipt, operation, fingerprint)
+				}
+			}
+		}
+		if held && !p.changesVisibility() {
+			status = PushStatusSkipped
+		}
+		if reason := p.updateHeldReason(ctx, sess.SessionID, held, publishedBefore); reason != "" {
+			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusHeld, HeldReason: reason}
 		}
 		return SessionPushResult{
 			SessionID:            sess.SessionID,
@@ -1222,10 +1321,8 @@ func (p *Pipeline) pushSession(
 	// An update is asked about here, where the run knows it is one and has
 	// sent nothing yet, so a run asks once per session it updates and never
 	// for a session it skips as unchanged.
-	if !held && publishedBefore && p.runCfg.UpdateHold != nil {
-		if reason := p.runCfg.UpdateHold(ctx, sess.SessionID); reason != "" {
-			return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusHeld, HeldReason: reason}
-		}
+	if reason := p.updateHeldReason(ctx, sess.SessionID, held, publishedBefore); reason != "" {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusHeld, HeldReason: reason}
 	}
 	var (
 		receipt    schema.AuthoritativePublishResponse
@@ -1361,6 +1458,18 @@ func (p *Pipeline) pushSession(
 		Status:               status,
 		RequiredCapabilities: scan.Required,
 	}
+}
+
+// updateHeldReason is the one place a run decides whether to hold an update:
+// a session it would send again (not already held unchanged) that was
+// published before is asked about through the run's UpdateHold. The real run
+// and the dry-run forecast both call it, so they hold the same sessions. It
+// returns "" when the update goes ahead.
+func (p *Pipeline) updateHeldReason(ctx context.Context, sessionID string, held, publishedBefore bool) string {
+	if held || !publishedBefore || p.runCfg.UpdateHold == nil {
+		return ""
+	}
+	return p.runCfg.UpdateHold(ctx, sessionID)
 }
 
 // alreadyHeld reports whether the village already holds what this operation

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/proc"
 	"github.com/spf13/cobra"
@@ -159,7 +160,7 @@ func buildUpgradeCommand(deps upgradeDeps) *cobra.Command {
 	cmd.Flags().StringVar(&opts.Version, "version", "", "Install a specific release tag or version")
 	cmd.Flags().BoolVar(&opts.IncludePrerelease, "prerelease", false, "Allow the newest prerelease when --version is not set")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Print the upgrade plan without changing files")
-	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Accept the raw archive replacement plan without an interactive prompt")
+	clicontract.AddYesFlag(cmd, &opts.Yes, "Accept the raw archive replacement plan without an interactive prompt")
 	cmd.Flags().BoolVar(&opts.AllowDowngrade, "allow-downgrade", false, "Allow installing an older release when paired with --version")
 	return cmd
 }

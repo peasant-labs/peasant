@@ -823,7 +823,7 @@ func TestExportSession_MissingSourceFile(t *testing.T) {
 		t.Fatal("ExportSession: expected error for missing source file, got nil")
 	}
 	// A legacy preview cannot establish authority, even when it is short.
-	if !strings.Contains(err.Error(), "harvest index --force") {
+	if !strings.Contains(err.Error(), "harvest index --session "+sessionID) {
 		t.Errorf("ExportSession error should explain capture remediation, got: %v", err)
 	}
 	// It should NOT be ErrSessionNotFound (the session exists, the file does not).
