@@ -1,11 +1,29 @@
 package store
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
+
+// SchemaVersion reports the version through the already-open store connection.
+func (s *Store) SchemaVersion() (int, error) {
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	defer s.pool.Put(conn)
+	var version int
+	err = sqlitex.ExecuteTransient(conn, "PRAGMA user_version", &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error { version = int(stmt.ColumnInt64(0)); return nil },
+	})
+	if err != nil {
+		return 0, fmt.Errorf("store: read schema version: %w", err)
+	}
+	return version, nil
+}
 
 // CurrentSchemaVersion is the PRAGMA user_version an up-to-date database
 // carries. The migration framework applies one migration per version and stamps

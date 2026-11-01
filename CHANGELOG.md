@@ -28,11 +28,28 @@ Release, which holds the signed artifacts and checksums.
   root session, `forkedFrom` becomes a `context_from` relationship, and
   prompt-cache read and write token counts are recorded. Existing Strike
   sessions re-extract and re-index on the next harvest.
-
+- **Exit code:** `peasant harvest --json` now exits 1 when a session fails,
+  as the human output already did. Stdout is still one JSON document
+  (`summary.Errors` counts the failures) and stderr gets
+  `Error: N session(s) failed`. Scripts that treated exit 0 as "JSON was
+  printed" should read `summary.Errors` or accept exit 1.
 - `sessions list` shows main sessions only by default, so a script that counts
   its rows now sees fewer. `--include-subagents` lists every session, and
   `--session <id>` still finds a subagent session. Each `--json` row now states
   `parentSessionId`, `parentUnresolved` and `rootSessionId`.
+- `export sessions` exits 1 when it refuses any session, not only when it refuses all of them. The sessions it could export stay written. Its summary line counts refusals by reason, and `--json` carries the same counts in `refused` and `refusal_reasons`.
+- The local web commands accept decimal TCP ports from 1 to 65535 and reject
+  invalid values before starting a server. Base-prefixed values such as `0x50`
+  are refused; `080` means port 80.
+- `peasant harvest --json`: `Summary.Unchanged` no longer counts sessions
+  the saved selection leaves out. They are counted in a new
+  `Summary.ExcludedBySelection` key, and each such session in `Sessions`
+  carries a new `excludedBySelection: true` key; its `status` stays
+  `"unchanged"`, so readers of `status` see no change. Scripts that add up
+  `Unchanged` to get the total must add `ExcludedBySelection`. The text
+  summary and kickstart's completion screen show "N excluded by
+  selection". The local web API's sync status is unchanged: its
+  `unchanged` count still includes excluded sessions.
 
 ### Fixed
 - Only one writing harvest runs at a time per data directory. Two harvests
@@ -70,29 +87,11 @@ Release, which holds the signed artifacts and checksums.
 - A session `export sessions` or publication refuses now states the reason stored for its capture and the one command that repairs it, `peasant harvest index --session <id>`, or says that this build cannot lift the refusal. Damaged content names `peasant harvest index --force`, the only run that replaces it.
 - `harvest --since` reports the stored sessions outside its window that still need index maintenance, which it used to skip without saying so. Run `peasant harvest index` to process them; this is what repairs sessions an older build stored as bounded previews.
 - A stale session the index stage repairs is no longer reported, in the same run, as a capture that stays incomplete.
-
-### Changed
-- `export sessions` exits 1 when it refuses any session, not only when it refuses all of them. The sessions it could export stay written. Its summary line counts refusals by reason, and `--json` carries the same counts in `refused` and `refusal_reasons`.
-
-### Fixed
 - `--data-dir` now keeps default transcript copies beside its database under
   `<data-dir>/peasant/peasant-sync`, including web publication and reindexing.
   A configured custom output path is preserved. Existing copies are not moved;
   installations that previously used `--data-dir` can run `harvest --force`
   with that same data directory once to recreate them in the corrected location.
-### Changed
-- The local web commands accept decimal TCP ports from 1 to 65535 and reject
-  invalid values before starting a server. Base-prefixed values such as `0x50`
-  are refused; `080` means port 80.
-- `peasant harvest --json`: `Summary.Unchanged` no longer counts sessions
-  the saved selection leaves out. They are counted in a new
-  `Summary.ExcludedBySelection` key, and each such session in `Sessions`
-  carries a new `excludedBySelection: true` key; its `status` stays
-  `"unchanged"`, so readers of `status` see no change. Scripts that add up
-  `Unchanged` to get the total must add `ExcludedBySelection`. The text
-  summary and kickstart's completion screen show "N excluded by
-  selection". The local web API's sync status is unchanged: its
-  `unchanged` count still includes excluded sessions.
 
 ## [0.13.5] - 2026-10-29
 
