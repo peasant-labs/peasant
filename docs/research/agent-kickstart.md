@@ -8,11 +8,12 @@ curl -fsSL https://peasantlabs.org/install | bash -s -- --kickstart
 
 Then tell Claude or your coding agent:
 
-> Publish this session with Peasant. Ask which collective if needed.
+> Open this session in Peasant.
 
 Installation adds no project-picker window, account screen, or publishing step.
-Kickstart keeps its existing interactive setup. Publishing is a separate explicit
-request from the agent, with the destination resolved before anything leaves.
+Kickstart keeps its existing interactive setup. Open the session in the local
+web app and review it first. Publishing online is a separate explicit action,
+with the destination resolved before anything leaves.
 
 ## Implementation
 
@@ -27,8 +28,11 @@ Reuse canonical Kickstart selection, validation, atomic save, retention, and
 ingest. Preserve existing data and untouched settings. Do not install hooks,
 log in, or publish as an installation side effect.
 
-The current Claude `/peasant` plugin opens this session locally; it does not
-mean upload. The publishing request must use a supported CLI or the canonical
+The current Claude Code `/peasant` plugin opens this session locally; it does
+not upload it. The natural-language prompt relies on a supported agent integration;
+installing the Peasant binary alone does not install that plugin. Without an
+integration, use `peasant web start` to open the local dashboard and choose the
+session. A later publishing request must use a supported CLI or the canonical
 publish view, ask for missing audience information, and preserve explicit consent.
 
 [Interactive proposal](https://peasant-kickstart-proposal.handysoftwarestudios.chatgpt.site).
