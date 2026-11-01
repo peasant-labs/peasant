@@ -1,0 +1,230 @@
+# Native sessions run through the real harvest command. Mirror sessions are
+# stored directly, each in the store named by its case.
+nativeSessions:
+  - key: alpha
+    id: 44444444-2222-4333-8444-000000000001
+    records:
+      - { type: user, content: "literal a.b here" }
+      - { type: user, content: "regex would hit aXb here" }
+      - { type: user, content: "key AKIA1234 printed" }
+      - { type: user, content: "Hello Shouty" }
+      - type: assistant
+        content:
+          - { type: text, text: "CONTENTMARK from the model" }
+          - { type: tool_use, id: toolu_1, name: Bash, input: { command: "cat INPUTMARK.txt" } }
+      - type: user
+        content:
+          - { type: tool_result, tool_use_id: toolu_1, content: "OUTPUTMARK and more" }
+      - { type: user, content: "tail 日本語MULTI日本語 tail" }
+      - { type: user, longText: { lead: "", rune: "é", repeat: 3000, tail: "DEEPNATIVE" } }
+  - key: beta
+    id: 44444444-2222-4333-8444-000000000002
+    records:
+      - { type: user, content: "filler", count: 250 }
+      - { type: user, content: "LATENATIVE" }
+      - { type: user, content: "REPEATMARK one" }
+      - { type: user, content: "REPEATMARK two" }
+      - { type: user, content: "REPEATMARK three" }
+mirrorSessions:
+  - key: mirror_full
+    id: 55555555-2222-4333-8444-000000000001
+    capture: full
+    entries:
+      - { role: user, type: text, longText: { lead: "", rune: "é", repeat: 3000, tail: "DEEPMIRROR" } }
+  - key: mirror_preview
+    id: 55555555-2222-4333-8444-000000000002
+    capture: preview
+    entries:
+      - { role: user, type: text, text: "PREVIEWMARK" }
+  - key: mirror_child
+    id: 55555555-2222-4333-8444-000000000003
+    capture: full
+    parent: 55555555-2222-4333-8444-000000000001
+    entries:
+      - { role: assistant, type: text, text: "CHILDMARK" }
+  - key: mirror_long
+    id: 55555555-2222-4333-8444-000000000004
+    capture: full
+    entries:
+      - { role: user, type: text, text: "filler", count: 250 }
+      - { role: user, type: text, text: "LATEMIRROR" }
+  - key: unsupported
+    id: 55555555-2222-4333-8444-000000000005
+    capture: full
+    indexFormat: 999
+    entries:
+      - { role: user, type: text, text: "NEVERSERVED" }
+  - key: unreadable
+    id: 55555555-2222-4333-8444-000000000006
+    capture: preview
+    unreadableFrom: 3
+    entries:
+      - { role: user, type: text, text: "POISONMARK", count: 5 }
+cases:
+  - name: literal_default
+    pattern: "a.b"
+    want: [{ session: alpha, role: user, depth: 0, field: content, snippet: "a.b" }]
+    wantCount: 1
+  - name: regexp_flag
+    pattern: "AKIA[0-9A-Z]{4}"
+    args: [--regexp]
+    wantMode: regexp
+    want: [{ session: alpha, field: content, snippet: "AKIA1234" }]
+  - { name: ignore_case_off, pattern: "hello shouty", wantCount: 0, wantEmptyCode: no_matching_entries }
+  - name: ignore_case
+    pattern: "hello shouty"
+    args: [--ignore-case]
+    wantCount: 1
+  - name: fields_covered
+    pattern: "(CONTENTMARK|INPUTMARK|OUTPUTMARK)"
+    args: [--regexp]
+    want:
+      - { session: alpha, role: assistant, depth: 1, field: content, snippet: CONTENTMARK }
+      - { session: alpha, role: assistant, depth: 1, field: tool_input, snippet: INPUTMARK }
+      - { session: alpha, role: tool, depth: 1, field: tool_output, snippet: OUTPUTMARK }
+    wantCount: 3
+  - name: tool_output_reported_once
+    pattern: OUTPUTMARK
+    wantCount: 1
+  - name: role_filter
+    pattern: "(key AKIA|OUTPUTMARK)"
+    args: [--regexp, --role, user]
+    want: [{ session: alpha, role: user, field: content, snippet: AKIA }]
+    wantCount: 1
+  - name: entry_type_filter
+    pattern: "(key AKIA|OUTPUTMARK)"
+    args: [--regexp, --entry-type, tool_result]
+    want: [{ session: alpha, role: tool, field: tool_output, snippet: OUTPUTMARK }]
+    wantCount: 1
+  - name: depth_reported
+    pattern: INPUTMARK
+    want: [{ session: alpha, role: assistant, depth: 1, field: tool_input, snippet: INPUTMARK }]
+  - name: limits_total
+    pattern: REPEATMARK
+    args: [--max-matches, "2"]
+    wantCount: 2
+    wantTruncated: true
+    wantReason: "--max-matches 2"
+  - name: limits_per_session
+    pattern: REPEATMARK
+    args: [--max-per-session, "1"]
+    wantCount: 1
+    wantTruncated: true
+    wantReason: "--max-per-session 1"
+  - name: snippet_rune_boundary
+    pattern: "MULTI"
+    args: [--snippet-chars, "7"]
+    want: [{ session: alpha, snippet: "語MULTI日" }]
+    wantSnippetTruncated: true
+  - name: snippet_bound
+    pattern: "(?s)é+DEEPNATIVE"
+    args: [--regexp, --snippet-chars, "50"]
+    wantMaxSnippetRunes: 52
+    wantSnippetTruncated: true
+  - name: snippet_fills_window_at_text_end
+    pattern: DEEPNATIVE
+    args: [--snippet-chars, "20"]
+    wantSnippetRunes: 21
+  - name: match_past_preview_native
+    pattern: DEEPNATIVE
+    want: [{ session: alpha, field: content, snippet: DEEPNATIVE }]
+    wantNoWarning: true
+  - name: sessions_from_scope
+    pattern: REPEATMARK
+    sessionsFrom: [alpha, 66666666-2222-4333-8444-000000000001]
+    wantCount: 0
+    wantScanned: 1
+    wantEmptyCode: no_matching_entries
+    wantWarning: { code: session_refused, session: 66666666-2222-4333-8444-000000000001 }
+  - name: sessions_from_intersects_scope
+    pattern: REPEATMARK
+    sessionsFrom: [beta]
+    args: [--harness, codex]
+    wantCount: 0
+    wantScanned: 0
+    wantEmptyCode: filters_excluded_all
+    wantNoWarning: true
+  - name: sessions_from_all_excluded
+    pattern: REPEATMARK
+    sessionsFrom: [66666666-2222-4333-8444-000000000002]
+    wantEmptyCode: filters_excluded_all
+    wantReason: "scope selected 0 sessions"
+  - name: session_flag_scope
+    pattern: REPEATMARK
+    sessionArg: alpha
+    wantCount: 0
+    wantScanned: 1
+    wantEmptyCode: no_matching_entries
+  - { name: harness_scope, pattern: REPEATMARK, args: [--harness, claude-code], wantScanned: 2 }
+  - name: scope_selected_nothing
+    pattern: REPEATMARK
+    args: [--harness, codex]
+    wantEmptyCode: filters_excluded_all
+    wantReason: "scope selected 0 sessions"
+  - { name: store_has_no_sessions, store: empty, pattern: x, wantEmptyCode: store_has_no_sessions, wantReason: "holds no session" }
+  - name: empty_says_why
+    pattern: NOTANYWHERE
+    wantEmptyCode: no_matching_entries
+    wantReason: "no entry in 2 sessions matched"
+  - { name: match_after_first_batch_native, pattern: LATENATIVE, wantCount: 1 }
+  - name: match_past_preview_mirror
+    store: mirror
+    pattern: DEEPMIRROR
+    want: [{ session: mirror_full, field: content, snippet: DEEPMIRROR }]
+  - name: bounded_capture_warns
+    store: mirror
+    pattern: PREVIEWMARK
+    want: [{ session: mirror_preview, snippet: PREVIEWMARK }]
+    wantWarning: { code: capture_bounded, session: mirror_preview }
+  - name: full_capture_no_warning
+    store: mirror
+    pattern: DEEPMIRROR
+    sessionArg: mirror_full
+    wantNoWarning: true
+  - { name: match_after_first_batch_mirror, store: mirror, pattern: LATEMIRROR, wantCount: 1 }
+  - name: subagent_sessions_searched
+    store: mirror
+    pattern: CHILDMARK
+    want: [{ session: mirror_child, role: assistant, snippet: CHILDMARK }]
+  - name: unsupported_session_skipped
+    store: mirror
+    pattern: DEEPMIRROR
+    want: [{ session: mirror_full, snippet: DEEPMIRROR }]
+    wantWarning: { code: session_refused, session: unsupported }
+  - name: unreadable_row_skipped_keeps_matches
+    store: mirror
+    pattern: POISONMARK
+    sessionArg: unreadable
+    args: [--max-per-session, "0"]
+    wantCount: 3
+    wantScanned: 0
+    wantWarning: { code: session_refused, session: unreadable }
+  - name: limit_stops_before_unreadable_row
+    store: mirror
+    pattern: POISONMARK
+    sessionArg: unreadable
+    args: [--max-matches, "1"]
+    wantCount: 1
+    wantTruncated: true
+    wantNoRefusal: true
+usage:
+  - { name: regexp_invalid, args: ["(unclosed", --regexp], error: "invalid regular expression" }
+  - { name: bad_role_is_usage, args: [x, --role, wizard], error: "--role" }
+  - { name: bad_entry_type_is_usage, args: [x, --entry-type, wizard], error: "--entry-type" }
+  - { name: negative_max_matches_is_usage, args: [x, --max-matches, "-1"], error: "--max-matches" }
+  - { name: negative_per_session_is_usage, args: [x, --max-per-session, "-1"], error: "--max-per-session" }
+  - { name: snippet_zero_is_usage, args: [x, --snippet-chars, "0"], error: "--snippet-chars" }
+  - { name: snippet_over_cap_is_usage, args: [x, --snippet-chars, "2001"], error: "--snippet-chars" }
+  - { name: bad_since_is_usage, args: [x, --since, nonsense], error: "--since" }
+  - { name: bad_harness_is_usage, args: [x, --harness, wizard], error: "--harness" }
+  - { name: empty_pattern_is_usage, args: [""], error: "pattern is empty" }
+  - { name: missing_pattern_is_usage, args: [], error: "takes one pattern" }
+  - name: sessions_from_and_session_is_usage
+    args: [x, --sessions-from, "-", --session, 44444444-2222-4333-8444-000000000001]
+    stdin: "44444444-2222-4333-8444-000000000001\n"
+    error: "conflicting flags"
+  - { name: sessions_from_unreadable_is_usage, args: [x, --sessions-from, /nonexistent/list], error: "--sessions-from" }
+  - name: sessions_from_bad_id_is_usage
+    args: [x, --sessions-from, "-"]
+    stdin: "../bad\n"
+    error: "invalid session id"

@@ -26,6 +26,7 @@ peasant sessions [flags]
 
 * [peasant](peasant.md)	 - Developer observability for AI coding agent sessions
 * [peasant sessions context](peasant_sessions_context.md)	 - Show entries around a target entry in a session transcript
+* [peasant sessions grep](peasant_sessions_grep.md)	 - Search entries across sessions
 * [peasant sessions list](peasant_sessions_list.md)	 - List sessions
 * [peasant sessions prompts](peasant_sessions_prompts.md)	 - Print only what the person typed in a session
 * [peasant sessions tag](peasant_sessions_tag.md)	 - Manage session tags

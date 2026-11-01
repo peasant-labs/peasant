@@ -52,7 +52,8 @@ at all is refused: a list that selects nothing never widens to every session.
 `--sessions-from` replaces the other ways to choose sessions. It cannot be
 combined with `--session` or `--all`, except on `village push`, where
 `--session` adds to the list: the repeated `--session` ids come first, then the
-list, each id once.
+list, each id once. A filter such as `--since` on `sessions grep` is not a way
+to choose sessions: it intersects with the list.
 
 ```sh
 peasant sessions list --json --limit 20 | peasant export sessions --sessions-from - --output-dir out --json
@@ -200,6 +201,7 @@ resolves the names), or a `--collective` confirmation it cannot ask for. Under
 | `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, `refused` and `refusal_reasons` counts in the document, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused: 1 strict_capture_refused; peasant harvest index re-indexes 1 of them`. It exits 1 when it refuses any session, and the sessions it did export stay written |
 | `redact` | `--sessions-from` |
 | `sessions prompts` | `--json` with `warnings`, `empty_code` and `empty_reason`; a refused call exits 2 before the store opens |
+| `sessions grep` | `--json` with `warnings`, `empty_code` and `empty_reason`; `--sessions-from`, which intersects with `--project`, `--since`, `--until` and `--harness`; a refused call exits 2 before the store opens |
 | `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`, with a per-session `plan` (below) |
 | `upgrade` | `-y` |
 

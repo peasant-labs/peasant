@@ -16,6 +16,11 @@ Release, which holds the signed artifacts and checksums.
   session, with `--json`, `--max-chars` and `--include-commands`. It reads both
   stored representations, and it warns with `capture_bounded` when a session's
   stored text is a bounded preview.
+- `sessions grep <pattern>` searches entry content, tool input and tool output
+  across sessions, by literal string or regular expression, and prints each
+  match with a bounded snippet. It streams the store in batches, reads both
+  stored representations, and warns with `capture_bounded` when a session's
+  stored text is a bounded preview. It does not redact its output.
 
 ### Changed
 - `sessions list` shows main sessions only by default, so a script that counts
