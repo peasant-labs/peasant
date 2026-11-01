@@ -72,6 +72,7 @@ Release, which holds the signed artifacts and checksums.
   A configured custom output path is preserved. Existing copies are not moved;
   installations that previously used `--data-dir` can run `harvest --force`
   with that same data directory once to recreate them in the corrected location.
+
 ## [0.13.5] - 2026-10-29
 
 ### Fixed
