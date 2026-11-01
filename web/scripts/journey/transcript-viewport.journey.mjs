@@ -120,7 +120,7 @@ test('canonical compact tools preserve reading width and visible keyboard tabs',
   const pagePosition = await page.evaluate(() => ({ x: scrollX, y: scrollY }));
   await page.keyboard.press('End');
   await expect(tabs.getByRole('tab', { name: /^annotations/ })).toBeFocused();
-  expect(await tabs.evaluate(strip => {
+  await expect.poll(() => tabs.evaluate(strip => {
     const tab = document.activeElement, box = tab.getBoundingClientRect(), clip = strip.getBoundingClientRect();
     const style = getComputedStyle(tab), extent = Math.max(0, parseFloat(style.outlineOffset) + parseFloat(style.outlineWidth));
     return box.left - extent >= clip.left - 1 && box.right + extent <= clip.right + 1 && box.top - extent >= clip.top - 1 && box.bottom + extent <= clip.bottom + 1;
