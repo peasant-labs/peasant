@@ -907,7 +907,7 @@ func verifyTablePresence(out io.Writer, db *store.Store, dbPath string, expected
 		return fmt.Errorf("get table names: %w", err)
 	}
 
-	foundVersion, err := store.SchemaVersionAt(dbPath)
+	foundVersion, err := db.SchemaVersion()
 	if err != nil {
 		return err
 	}
@@ -964,7 +964,11 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 	ctx := cmd.Context()
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 
-	db, err := store.Open(dbPath)
+	// Verify only reads: use read-only mode when the data directory is unwritable.
+	db, err := openReadOnlyIfUnwritable(cmd)
+	if err == nil && db == nil {
+		db, err = store.Open(dbPath)
+	}
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
