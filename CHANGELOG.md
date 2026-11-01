@@ -18,6 +18,11 @@ Release, which holds the signed artifacts and checksums.
   stored text is a bounded preview.
 
 ### Changed
+- **Exit code:** `peasant harvest --json` now exits 1 when a session fails,
+  as the human output already did. Stdout is still one JSON document
+  (`summary.Errors` counts the failures) and stderr gets
+  `Error: N session(s) failed`. Scripts that treated exit 0 as "JSON was
+  printed" should read `summary.Errors` or accept exit 1.
 - `sessions list` shows main sessions only by default, so a script that counts
   its rows now sees fewer. `--include-subagents` lists every session, and
   `--session <id>` still finds a subagent session. Each `--json` row now states
@@ -26,14 +31,6 @@ Release, which holds the signed artifacts and checksums.
 - The local web commands accept decimal TCP ports from 1 to 65535 and reject
   invalid values before starting a server. Base-prefixed values such as `0x50`
   are refused; `080` means port 80.
-- `harvest --since`, `sessions list --since/--until` and `prune --before/--after`
-  now share positive unsigned Go durations (such as `30m` and `1h30m`), integer
-  calendar units `d`, `w`, `mo`, `y`, and `YYYY-MM-DD`/RFC3339 dates. Harvest
-  formerly interpreted `m` as months; use `mo` for months. `prune` accepts
-  relative values and `harvest --since` accepts dates for the first time.
-  For `sessions list --until`, a date includes the whole UTC day, while an
-  RFC3339 timestamp is the exact exclusive cutoff; timestamps previously had
-  24 hours incorrectly added.
 - `peasant harvest --json`: `Summary.Unchanged` no longer counts sessions
   the saved selection leaves out. They are counted in a new
   `Summary.ExcludedBySelection` key, and each such session in `Sessions`
@@ -43,6 +40,14 @@ Release, which holds the signed artifacts and checksums.
   summary and kickstart's completion screen show "N excluded by
   selection". The local web API's sync status is unchanged: its
   `unchanged` count still includes excluded sessions.
+- `harvest --since`, `sessions list --since/--until` and `prune --before/--after`
+  now share positive unsigned Go durations (such as `30m` and `1h30m`), integer
+  calendar units `d`, `w`, `mo`, `y`, and `YYYY-MM-DD`/RFC3339 dates. Harvest
+  formerly interpreted `m` as months; use `mo` for months. `prune` accepts
+  relative values and `harvest --since` accepts dates for the first time.
+  For `sessions list --until`, a date includes the whole UTC day, while an
+  RFC3339 timestamp is the exact exclusive cutoff; timestamps previously had
+  24 hours incorrectly added.
 
 ### Fixed
 - Only one writing harvest runs at a time per data directory. Two harvests
@@ -86,7 +91,6 @@ Release, which holds the signed artifacts and checksums.
   A configured custom output path is preserved. Existing copies are not moved;
   installations that previously used `--data-dir` can run `harvest --force`
   with that same data directory once to recreate them in the corrected location.
-
 ## [0.13.5] - 2026-10-29
 
 ### Fixed

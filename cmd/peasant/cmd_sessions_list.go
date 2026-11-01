@@ -66,7 +66,7 @@ func buildSessionsListCommand() *cobra.Command {
 				return err
 			}
 
-			db, cleanup, err := openDB(cmd)
+			db, cleanup, err := openDBForRead(cmd)
 			if err != nil {
 				return err
 			}
