@@ -140,7 +140,7 @@ func TestPruneCmd_InvalidHarness_Error(t *testing.T) {
 	}
 }
 
-func TestPruneCmd_InvalidDate_Error(t *testing.T) {
+func TestPruneCmd_InvalidTime_Error(t *testing.T) {
 	t.Parallel()
 	_, _, err := executePruneCmd(t, t.TempDir(), []string{"--before", "not-a-date"})
 	if err == nil {

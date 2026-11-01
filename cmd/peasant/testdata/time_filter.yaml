@@ -1,6 +1,7 @@
 # The one grammar behind every --since, --until, --before and --after flag.
 # accepted runs through harvest, sessions list and prune; a span is in whole
-# days ago. refused runs through all three.
+# days ago. refused runs through all three; sessionBounds pins the session-list
+# parser and filter builder's absolute cutoff instants.
 accepted:
   - { name: hours, input: 48h, minDays: 1, maxDays: 3 }
   - { name: days, input: 7d, minDays: 6, maxDays: 8 }

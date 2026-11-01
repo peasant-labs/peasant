@@ -33,12 +33,31 @@ func runVerifyContent(cmd *cobra.Command, repair bool) error {
 		return err
 	}
 	defer closeStore()
+	// Presence first: content verification on a database that is missing a
+	// table would report PASSED over it. This runs on the store opened above so
+	// the migration consent gate stays in front of any upgrade.
+	expectedTables, err := store.ExpectedTableNames()
+	if err != nil {
+		return err
+	}
+	if err := verifyTablePresence(cmd.OutOrStdout(), db, dbPath, expectedTables, true); err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout())
 
 	report, err := db.VerifyContent(cmd.Context(), repair)
 	if err != nil {
 		return fmt.Errorf("verify content: %w", err)
 	}
-	return writeVerifyContentReport(cmd, report, repair)
+	stored, err := db.StoredArtifactHashes(cmd.Context())
+	if err != nil {
+		return err
+	}
+	saved, err := verifySavedTranscripts(cmd.Context(), string(ownedRoot), stored)
+	if err != nil {
+		return err
+	}
+	return writeVerifyContentReport(cmd, report, saved, string(ownedRoot), repair)
 }
 
 // openVerifyContentStore opens the analytics store for content
@@ -66,7 +85,7 @@ func openVerifyContentStore(cmd *cobra.Command, ownedRoot, dbPath string) (*stor
 // non-empty damage list fails the command, so scripts and CI can gate on
 // it; the fix for each session is the repair activation on its next
 // harvest.
-func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyReport, repair bool) error {
+func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyReport, saved []savedTranscriptDamage, savedRoot string, repair bool) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "Content verification")
 	fmt.Fprintf(out, "sessions checked: %d\n", report.SessionsChecked)
@@ -75,6 +94,21 @@ func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyRepo
 	fmt.Fprintf(out, "unflagged orphan sessions: %d\n", len(report.UnflaggedOrphanSessions))
 	for _, id := range report.UnflaggedOrphanSessions {
 		fmt.Fprintf(out, "  - %s: run peasant harvest --force --session %s to re-index and sweep orphan content; peasant migrate also drains owned directory leftovers\n", id, id)
+	}
+	fmt.Fprintf(out, "sessions with content but no sessions row: %d\n", len(report.OwnerlessSessions))
+	if len(report.OwnerlessSessions) > 0 {
+		fmt.Fprintln(out, "  (their bodies are also counted in the orphan content totals above)")
+	}
+	for _, id := range report.OwnerlessSessions {
+		fmt.Fprintf(out, "  - %s: its sessions row is missing; run peasant harvest --force --session %s to re-index it from its transcript\n", id, id)
+	}
+	fmt.Fprintf(out, "saved transcripts damaged or missing: %d\n", len(saved))
+	if len(saved) > 0 {
+		// Every session reads as missing when the output directory moved.
+		fmt.Fprintf(out, "  (checked under %s)\n", savedRoot)
+	}
+	for _, damage := range saved {
+		fmt.Fprintf(out, "  - %s: %s; run peasant harvest --force --session %s to save it again from the source\n", damage.SessionID, damage.Reason, damage.SessionID)
 	}
 	if report.IndexRebuilt {
 		fmt.Fprintln(out, "search index rebuilt: pending health flag cleared")
@@ -107,6 +141,12 @@ func writeVerifyContentReport(cmd *cobra.Command, report store.ContentVerifyRepo
 		}
 	} else if len(report.Damaged) > 0 {
 		fmt.Fprintln(out, "re-run with --repair to mark the damaged sessions for the repair activation")
+	}
+	if len(report.OwnerlessSessions) > 0 {
+		return fmt.Errorf("content verification failed: %d session(s) have content but no sessions row", len(report.OwnerlessSessions))
+	}
+	if len(saved) > 0 {
+		return fmt.Errorf("content verification failed: %d saved transcript(s) damaged or missing", len(saved))
 	}
 	if len(report.Damaged) > 0 {
 		return fmt.Errorf("content verification failed: %d damaged session(s); re-run with --repair and harvest to heal them", len(report.Damaged))
