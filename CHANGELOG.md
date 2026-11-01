@@ -18,6 +18,11 @@ Release, which holds the signed artifacts and checksums.
   stored text is a bounded preview.
 
 ### Changed
+- **Exit code:** `peasant harvest --json` now exits 1 when a session fails,
+  as the human output already did. Stdout is still one JSON document
+  (`summary.Errors` counts the failures) and stderr gets
+  `Error: N session(s) failed`. Scripts that treated exit 0 as "JSON was
+  printed" should read `summary.Errors` or accept exit 1.
 - Strike sessions holding lifecycle, control or metadata events
   (permissions, questions, child and team events, phases, verification,
   scheduling, retries, engine errors, selections and the `session.header`
@@ -28,11 +33,6 @@ Release, which holds the signed artifacts and checksums.
   root session, `forkedFrom` becomes a `context_from` relationship, and
   prompt-cache read and write token counts are recorded. Existing Strike
   sessions re-extract and re-index on the next harvest.
-- **Exit code:** `peasant harvest --json` now exits 1 when a session fails,
-  as the human output already did. Stdout is still one JSON document
-  (`summary.Errors` counts the failures) and stderr gets
-  `Error: N session(s) failed`. Scripts that treated exit 0 as "JSON was
-  printed" should read `summary.Errors` or accept exit 1.
 - `sessions list` shows main sessions only by default, so a script that counts
   its rows now sees fewer. `--include-subagents` lists every session, and
   `--session <id>` still finds a subagent session. Each `--json` row now states
