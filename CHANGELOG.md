@@ -48,7 +48,25 @@ Release, which holds the signed artifacts and checksums.
   no lock. Other commands that write the data directory, such as `prune`,
   `redact` and `kickstart --reset`, do not take this lock; do not run them
   during a harvest.
+- A Claude subagent left out because another session's subagent has the same
+  agent id now raises a `claude_agent_id_collision` warning naming both, in the
+  summary and in `discoveryDiagnostics`. The subagent is still not stored.
 - Claude discovery skips harness-injected `isMeta` notices when choosing session titles. Existing cached transcripts are read again once to refresh their titles.
+- `harvest verify` checks every table of the current schema instead of a fixed
+  list of 35, prints the expected and found schema versions, and `--content`
+  fails on a missing table. A database that passed before can now fail.
+- `harvest verify --content` now fails on content whose `sessions` row is gone
+  and on saved transcripts that are deleted, truncated or no longer match the
+  database, and it names each session with the command that repairs it.
+- Two Claude or Codex source files that claim one session id now fail that
+  session with a reason naming both files, instead of storing a row mixed from
+  both while reporting 0 errors. Neither file is ingested until one is moved
+  aside; a copy stored earlier stays as it was. `harvest` and `harvest
+  --dry-run` count one error and exit 1, and a run scoped to another session
+  is not affected.
+- Claude Code main sessions keep their harness version when the transcript starts with a record that has no version.
+- Claude Code entries stored as managed generations keep `rawByteLength`, and thinking blocks keep their thinking flag. The next harvest refreshes existing sessions; a session that is already published needs `peasant village push --force` to send the new values.
+- A harvest now applies an adapter revision bump to a session whose stored row already has an older revision. Before, the refresh was skipped and the session stayed stale.
 - A session `export sessions` or publication refuses now states the reason stored for its capture and the one command that repairs it, `peasant harvest index --session <id>`, or says that this build cannot lift the refusal. Damaged content names `peasant harvest index --force`, the only run that replaces it.
 - `harvest --since` reports the stored sessions outside its window that still need index maintenance, which it used to skip without saying so. Run `peasant harvest index` to process them; this is what repairs sessions an older build stored as bounded previews.
 - A stale session the index stage repairs is no longer reported, in the same run, as a capture that stays incomplete.

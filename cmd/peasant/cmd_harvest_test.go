@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/spf13/cobra"
 )
@@ -1120,9 +1121,9 @@ func TestHarvestVerify_AnnotationEngineSection(t *testing.T) {
 		t.Fatalf("ingest verify: unexpected error: %v\noutput: %s", err, output)
 	}
 
-	// Schema version updated to v1-v16.
-	if !strings.Contains(output, "v1-v20 (migrations)") {
-		t.Errorf("verify output should show 'v1-v20 (migrations)' schema version\noutput: %s", output)
+	// The header names the current schema version.
+	if want := fmt.Sprintf("Expected schema: v%d", store.CurrentSchemaVersion()); !strings.Contains(output, want) {
+		t.Errorf("verify output should show %q\noutput: %s", want, output)
 	}
 
 	// Annotation Engine subsection header present (subsection of section 4).
