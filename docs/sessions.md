@@ -41,7 +41,7 @@ Flags:
 | `--project <name>` | — | Filter by project name (matches git remote URL or directory basename) |
 | `--tag <tag>` | — | Filter by session tag (see [Tags](#peasant-sessions-tag)) |
 | `--since <when>` | — | Sessions starting after a date (`7d`, `24h`, `2026-01-01`) |
-| `--until <when>` | — | Sessions starting before a date |
+| `--until <when>` | — | Sessions starting before a cutoff; a date includes its entire UTC day, while an RFC3339 timestamp is the exact exclusive cutoff |
 | `--has <facet>[,<facet>...]` | — | Only sessions where every named facet holds; repeat it or use commas |
 | `--min-turns <n>` | — | Only sessions with at least `n` turns, using the `turns` column |
 | `--max-turns <n>` | — | Only sessions with at most `n` turns, using the `turns` column |
@@ -51,6 +51,9 @@ Flags:
 
 Use `--harness` with the canonical harness values; see
 [`docs/bestiary.md`](bestiary.md) for the full harness set and display names.
+
+An RFC3339 `--until` timestamp no longer has 24 hours added to it. Use a date
+alone when you want to include the whole UTC day.
 
 ### Workflow facets
 

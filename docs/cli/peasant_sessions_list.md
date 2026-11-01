@@ -24,10 +24,10 @@ peasant sessions list [flags]
       --project string      Filter by project name (matches git remote URL or directory basename)
       --reverse             Reverse sort order (ascending instead of descending)
       --session string      Filter to one exact session id
-      --since string        Show sessions starting after this date (e.g. 7d, 24h, 2026-01-01)
+      --since string        Show sessions starting after this time (positive Go duration (e.g. 30m, 1h30m), integer d, w, mo (months), y, YYYY-MM-DD (UTC), or RFC3339)
       --sort string         Sort by field (date, turns, tokens, project) (default "date")
       --tag string          Filter by session tag
-      --until string        Show sessions starting before this date (e.g. 7d, 24h, 2026-01-01)
+      --until string        Show sessions starting before this time (positive Go duration (e.g. 30m, 1h30m), integer d, w, mo (months), y, YYYY-MM-DD (UTC), or RFC3339)
 ```
 
 ### Options inherited from parent commands

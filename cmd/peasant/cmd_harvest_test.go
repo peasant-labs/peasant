@@ -1297,8 +1297,8 @@ func TestParseSinceDuration_Valid(t *testing.T) {
 		{"2w", 14},
 		{"1w", 7},
 		{"4w", 28},
-		{"3m", 90}, // approximate
-		{"1m", 30}, // approximate
+		{"3mo", 90}, // approximate
+		{"1mo", 30}, // approximate
 	}
 
 	for _, tc := range tests {
@@ -1327,11 +1327,11 @@ func TestParseSinceDuration_Invalid(t *testing.T) {
 	}{
 		{"", "invalid duration"},
 		{"d", "invalid duration"},
-		{"abc", "positive integer"},
-		{"0d", "positive integer"},
-		{"-1w", "positive integer"},
-		{"2x", "invalid duration unit"},
-		{"2y", "invalid duration unit"},
+		{"abc", "invalid duration"},
+		{"0d", "invalid duration"},
+		{"-1w", "invalid duration"},
+		{"2x", "invalid duration"},
+		{"2x5", "invalid duration"},
 	}
 
 	for _, tc := range tests {

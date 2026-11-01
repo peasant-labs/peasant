@@ -1,0 +1,35 @@
+# Every name here must stay in time_filter.yaml.
+required:
+  - hours
+  - days
+  - weeks
+  - months_mo
+  - years
+  - zero
+  - negative
+  - unknown_unit
+  - compound_duration
+  - seconds
+  - bad_number_quotes_input_as_typed
+  - minutes
+  - exact_minutes
+  - exact_seconds
+  - exact_compound
+  - exact_fraction
+  - month_end_normalizes
+  - duration_overflow
+  - calendar_overflow
+  - trailing_garbage
+  - signed_positive
+  - zero_duration
+  - command_minutes
+  - command_compound
+  - weeks_overflow
+  - fractional_calendar
+  - exact_microseconds
+  - exact_nanosecond
+  - since_date_midnight
+  - until_date_next_midnight
+  - since_timestamp_exact
+  - until_timestamp_exact
+  - until_timestamp_offset_exact

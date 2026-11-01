@@ -1,0 +1,43 @@
+# The one grammar behind every --since, --until, --before and --after flag.
+# accepted runs through harvest, sessions list and prune; a span is in whole
+# days ago. refused runs through all three; sessionBounds pins the session-list
+# parser and filter builder's absolute cutoff instants.
+accepted:
+  - { name: hours, input: 48h, minDays: 1, maxDays: 3 }
+  - { name: days, input: 7d, minDays: 6, maxDays: 8 }
+  - { name: weeks, input: 3w, minDays: 20, maxDays: 22 }
+  - { name: months_mo, input: 3mo, minDays: 88, maxDays: 93 }
+  - { name: years, input: 1y, minDays: 364, maxDays: 367 }
+  - { name: minutes, input: 30m, minDays: 0, maxDays: 0 }
+  - { name: compound_duration, input: 1h30m, minDays: 0, maxDays: 0 }
+  - { name: seconds, input: 90s, minDays: 0, maxDays: 0 }
+refused:
+  - { name: zero, input: 0d, wantError: '"0d"' }
+  - { name: negative, input: -1w, wantError: '"-1w"' }
+  - { name: unknown_unit, input: 2x, wantError: '"2x"' }
+  - { name: bad_number_quotes_input_as_typed, input: 3xmo, wantError: '"3xmo"' }
+  - { name: duration_overflow, input: 999999999999999999999h, wantError: '"999999999999999999999h"' }
+  - { name: calendar_overflow, input: 999999999999999999999w, wantError: '"999999999999999999999w"' }
+  - { name: trailing_garbage, input: 30mgarbage, wantError: '"30mgarbage"' }
+  - { name: signed_positive, input: '+1h', wantError: '"+1h"' }
+  - { name: zero_duration, input: 0s, wantError: '"0s"' }
+  - { name: weeks_overflow, input: 999999999w, wantError: '"999999999w"' }
+  - { name: fractional_calendar, input: 1.5mo, wantError: '"1.5mo"' }
+pruneOnly: []
+exact:
+  - {name: exact_minutes, now: '2024-03-31T12:00:00Z', input: 30m, want: '2024-03-31T11:30:00Z'}
+  - {name: exact_seconds, now: '2024-03-31T12:00:00Z', input: 90s, want: '2024-03-31T11:58:30Z'}
+  - {name: exact_compound, now: '2024-03-31T12:00:00Z', input: 1h30m, want: '2024-03-31T10:30:00Z'}
+  - {name: exact_fraction, now: '2024-03-31T12:00:00Z', input: 1.5h, want: '2024-03-31T10:30:00Z'}
+  - {name: exact_microseconds, now: '2024-03-31T12:00:00Z', input: 2µs, want: '2024-03-31T11:59:59.999998Z'}
+  - {name: exact_nanosecond, now: '2024-03-31T12:00:00Z', input: 1ns, want: '2024-03-31T11:59:59.999999999Z'}
+  - {name: month_end_normalizes, now: '2024-03-31T12:00:00Z', input: 1mo, want: '2024-03-02T12:00:00Z'}
+commands:
+  - {name: command_minutes, input: 30m}
+  - {name: command_compound, input: 1h30m}
+sessionBounds:
+  - {name: since_date_midnight, side: since, input: '2026-01-02', want: '2026-01-02T00:00:00Z'}
+  - {name: until_date_next_midnight, side: until, input: '2026-01-02', want: '2026-01-03T00:00:00Z'}
+  - {name: since_timestamp_exact, side: since, input: '2026-01-02T13:45:12Z', want: '2026-01-02T13:45:12Z'}
+  - {name: until_timestamp_exact, side: until, input: '2026-01-02T13:45:12Z', want: '2026-01-02T13:45:12Z'}
+  - {name: until_timestamp_offset_exact, side: until, input: '2026-01-02T13:45:12+05:30', want: '2026-01-02T08:15:12Z'}

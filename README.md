@@ -177,7 +177,7 @@ are replayed once through the ordinary push candidate path.
 | `--force` | Force re-process sessions that match current filters |
 | `--all` | Process ALL sessions (clears filters, implies `--force`) |
 | `--session <ids>` | Filter to specific session IDs (repeatable, comma-separated). Overrides the selection index. |
-| `--since <duration>` | Filter to sessions from the last N period (e.g. `2w`, `3m`, `7d`) |
+| `--since <time>` | Only sessions newer than this: positive Go durations such as `30m`, `1h30m`, or integer calendar units `7d`, `2w`, `3mo` (months), `1y`, or `YYYY-MM-DD`/RFC3339. `sessions list --since/--until` and `prune --before/--after` accept the same values. Relative spans must be positive and unsigned. Harvest formerly treated `m` as months; use `mo` for months now. |
 | `--source-harness <h>` | Discover only this harness using its configured or default path (`claude-code`, `opencode`, `codex`, `cursor`, `strike`, `pi`) |
 | `--source-path <path>` | Override the named harness's source paths (requires `--source-harness`; replaces config, not additive) |
 | `--output <path>` | Override output base path |
@@ -188,6 +188,8 @@ are replayed once through the ordinary push candidate path.
 | `--include-active` | Deprecated and has no effect: active sessions are processed by default |
 | `--config <path>` | Path to config file (global flag) |
 | `--data-dir`, `--config-dir`, `--state-dir` | Override the data, config and state directories (global flags; see [`peasant`](docs/cli/peasant.md)) |
+
+For `sessions list --until`, a date includes the whole UTC day; an RFC3339 timestamp is the exact exclusive cutoff. Previously, timestamp cutoffs incorrectly included another 24 hours.
 
 When a selection index is configured (via `peasant kickstart`), harvest automatically filters to only
 the selected projects, branches, and sessions. The `--session` flag overrides this filter.

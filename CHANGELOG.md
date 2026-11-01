@@ -40,6 +40,14 @@ Release, which holds the signed artifacts and checksums.
   summary and kickstart's completion screen show "N excluded by
   selection". The local web API's sync status is unchanged: its
   `unchanged` count still includes excluded sessions.
+- `harvest --since`, `sessions list --since/--until` and `prune --before/--after`
+  now share positive unsigned Go durations (such as `30m` and `1h30m`), integer
+  calendar units `d`, `w`, `mo`, `y`, and `YYYY-MM-DD`/RFC3339 dates. Harvest
+  formerly interpreted `m` as months; use `mo` for months. `prune` accepts
+  relative values and `harvest --since` accepts dates for the first time.
+  For `sessions list --until`, a date includes the whole UTC day, while an
+  RFC3339 timestamp is the exact exclusive cutoff; timestamps previously had
+  24 hours incorrectly added.
 
 ### Fixed
 - Only one writing harvest runs at a time per data directory. Two harvests
