@@ -32,6 +32,7 @@ peasant [flags]
 * [peasant prune](peasant_prune.md)	 - Remove sessions from local store and database
 * [peasant reclaim](peasant_reclaim.md)	 - Reclaim superseded managed generations (rows and blob directories)
 * [peasant redact](peasant_redact.md)	 - Redact local transcripts
+* [peasant service](peasant_service.md)	 - Run harvest on a schedule with a systemd user timer (Linux)
 * [peasant sessions](peasant_sessions.md)	 - Manage sessions
 * [peasant upgrade](peasant_upgrade.md)	 - Upgrade Peasant
 * [peasant version](peasant_version.md)	 - Print the version

@@ -16,6 +16,12 @@ Release, which holds the signed artifacts and checksums.
   session, with `--json`, `--max-chars` and `--include-commands`. It reads both
   stored representations, and it warns with `capture_bounded` when a session's
   stored text is a bounded preview.
+- `peasant service install|status|uninstall` (Linux) manages a systemd user
+  timer that runs `peasant harvest` and then `peasant redact --all` on a
+  schedule (`--interval`, default 1h, or `--on-calendar`; `--randomized-delay`;
+  `--no-redact` for harvest only). Scheduled runs are local and never publish.
+  `--dry-run` prints the units. `uninstall` removes only the units peasant
+  wrote. Redact runs as `ExecStopPost=`, so it runs after a failed harvest too.
 
 ### Changed
 - **Exit code:** `peasant harvest --json` now exits 1 when a session fails,
@@ -85,12 +91,17 @@ Release, which holds the signed artifacts and checksums.
 - A session `export sessions` or publication refuses now states the reason stored for its capture and the one command that repairs it, `peasant harvest index --session <id>`, or says that this build cannot lift the refusal. Damaged content names `peasant harvest index --force`, the only run that replaces it.
 - `harvest --since` reports the stored sessions outside its window that still need index maintenance, which it used to skip without saying so. Run `peasant harvest index` to process them; this is what repairs sessions an older build stored as bounded previews.
 - A stale session the index stage repairs is no longer reported, in the same run, as a capture that stays incomplete.
-
 - `--data-dir` now keeps default transcript copies beside its database under
   `<data-dir>/peasant/peasant-sync`, including web publication and reindexing.
   A configured custom output path is preserved. Existing copies are not moved;
   installations that previously used `--data-dir` can run `harvest --force`
   with that same data directory once to recreate them in the corrected location.
+- `peasant redact` now reads and redacts the transcript copies in
+  `output.basePath` when the config sets one. Before, it reported those
+  sessions "not ingested" and left the copies as recorded. Redact now writes
+  the redacted transcript and metadata by rename, so an interrupted run never
+  leaves a truncated file.
+
 ## [0.13.5] - 2026-10-29
 
 ### Fixed

@@ -764,3 +764,73 @@ func TestRedactCommand_JSON_StatusValues(t *testing.T) {
 		t.Errorf("round 2: session A: expected status=%q, got %q", RedactStatus.Skipped, got)
 	}
 }
+
+// TestRedactCommand_ReplacesFilesByRename: redact writes a new file and
+// renames it over the copy, so a reader (or a crash) sees the old file whole
+// or the new one, never a truncated one. A second link to the old copy
+// keeps the old bytes; an in-place truncate+write would change both.
+func TestRedactCommand_ReplacesFilesByRename(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	seedRedactTestSession(t, dataHome)
+	sessionDir := filepath.Join(dataHome, "peasant", "peasant-sync", redactTestHostSlug, redactTestSessionA)
+	transcriptPath := filepath.Join(sessionDir, fmt.Sprintf("%s%s%s", redactTestSessionA, defaults.TranscriptPrefix, schema.SourceFormatJSONL))
+	held := filepath.Join(dataHome, "held-old-transcript")
+	if err := os.Link(transcriptPath, held); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, err := executeRedactCmd(t, dataHome, []string{"--all"}); err != nil || !strings.Contains(out, "redacted 1 session(s)") {
+		t.Fatalf("redact: %v\n%s", err, out)
+	}
+	old, err := os.ReadFile(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(old) != redactTestTranscript {
+		t.Errorf("the old copy was rewritten in place:\n%s", old)
+	}
+	entries, err := os.ReadDir(sessionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+}
+
+// TestRedactCommand_HonorsConfiguredBasePath: harvest writes the copies to
+// output.basePath, so redact must read them there instead of reporting the
+// session "not ingested" and leaving the copy as recorded.
+func TestRedactCommand_HonorsConfiguredBasePath(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	seedRedactTestSession(t, dataHome)
+	custom := filepath.Join(dataHome, "custom out", "sync")
+	if err := os.MkdirAll(filepath.Dir(custom), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dataHome, "peasant", "peasant-sync"), custom); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dataHome, "peasant", "config.yaml")
+	if err := os.WriteFile(configPath, []byte("output:\n  basePath: "+custom+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := executeRedactCmd(t, dataHome, []string{"--all"})
+	if err != nil || !strings.Contains(out, "redacted 1 session(s)") {
+		t.Fatalf("redact with output.basePath: %v\n%s", err, out)
+	}
+	metaBytes, err := os.ReadFile(filepath.Join(custom, redactTestHostSlug, redactTestSessionA, redactTestSessionA+defaults.MetadataSuffix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta schema.UnifiedMetadata
+	if err := json.Unmarshal(metaBytes, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if !meta.Redaction.Applied {
+		t.Error("the copy under output.basePath was not marked redacted")
+	}
+}
