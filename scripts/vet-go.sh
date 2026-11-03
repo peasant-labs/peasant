@@ -32,6 +32,6 @@ if [ "${found_native}" != true ] || [ "${#default_packages[@]}" -eq 0 ]; then
   exit 1
 fi
 go vet "${default_packages[@]}"
-# The hash-audited upstream tests carry three %q/integer directives rejected
-# by Go 1.26's printf analyzer; do not patch vendored tests to fix diagnostics.
-go vet -unsafeptr=false -printf=false "${native_package}"
+# -unsafeptr only: the native package's modernc address conversions are audited
+# upstream source, not a defect we can fix without forking them.
+go vet -unsafeptr=false "${native_package}"

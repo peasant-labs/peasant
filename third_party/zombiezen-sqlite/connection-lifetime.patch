@@ -651,3 +651,33 @@
  )
  
  func ExampleVTable() {
+
+# Go 1.26's printf analyzer rejects these upstream %q directives on integer
+# operands. %d is what the message means; behaviour is unchanged.
+--- a/func_test.go
++++ b/func_test.go
+@@ -98,10 +98,10 @@
+ 	for _, val := range cVals {
+ 		stmt.SetInt64("$c", int64(val))
+ 		if _, err = stmt.Step(); err != nil {
+-			t.Errorf("INSERT %q: %v", val, err)
++			t.Errorf("INSERT %d: %v", val, err)
+ 		}
+ 		if err = stmt.Reset(); err != nil {
+-			t.Errorf("INSERT reset %q: %v", val, err)
++			t.Errorf("INSERT reset %d: %v", val, err)
+ 		}
+ 	}
+ 
+
+--- a/sqlite_test.go
++++ b/sqlite_test.go
+@@ -104,7 +104,7 @@
+ 		}
+ 		intVal := stmt.ColumnInt64(1)
+ 		if getIntVal := stmt.GetInt64("foo2"); getIntVal != intVal {
+-			t.Errorf(`GetText("foo2")=%q, want %q`, getIntVal, intVal)
++			t.Errorf(`GetText("foo2")=%d, want %d`, getIntVal, intVal)
+ 		}
+ 		typ := stmt.ColumnType(0)
+ 		if typ != sqlite.TypeText {
