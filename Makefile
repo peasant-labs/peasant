@@ -275,12 +275,18 @@ docs-cli: go
 
 # The reference pages are committed, so a command change must ship its pages.
 # `git status` rather than `git diff` because a new command also produces a new,
-# untracked page that a diff would miss.
+# untracked page that a diff would miss. A checkout where git cannot answer must
+# fail closed: an unreadable status looks identical to a clean one.
 docs-cli-check: go
 	@./peasant docgen docs/cli >/dev/null
-	@if [ -n "$$(git status --porcelain -- docs/cli)" ]; then \
+	@status="$$(git status --porcelain -- docs/cli)"; \
+	if [ "$$?" -ne 0 ]; then \
+		echo "::error::cannot verify docs/cli freshness: git status failed in this checkout"; \
+		exit 1; \
+	fi; \
+	if [ -n "$$status" ]; then \
 		echo "::error::docs/cli is stale; run 'make docs-cli' and commit the regenerated pages"; \
-		git status --porcelain -- docs/cli; \
+		printf '%s\n' "$$status"; \
 		exit 1; \
 	fi
 
