@@ -70,7 +70,7 @@ cases:
     args: [caching, --limit, abc]
     wantExit: 2
     wantStdoutEmpty: true
-    wantStderrContains: ['invalid --limit value "abc"', 1..50]
+    wantStderrContains: ['invalid --limit value "abc"', values above 500 are clamped]
     wantNoDBFile: true
   - name: limit_not_integer_unopenable_datadir
     setup: *unopenable
@@ -84,27 +84,25 @@ cases:
     args: [caching, --limit, '0']
     wantExit: 2
     wantStdoutEmpty: true
-    wantStderrContains: [1..50, 0 does not mean no limit]
+    wantStderrContains: [values above 500 are clamped, 0 does not mean no limit]
     wantNoDBFile: true
   - name: limit_negative
     setup: *none
     args: [caching, --limit, '-1']
     wantExit: 2
     wantStdoutEmpty: true
-    wantStderrContains: ['invalid --limit value "-1"', 1..50]
+    wantStderrContains: ['invalid --limit value "-1"', values above 500 are clamped]
     wantNoDBFile: true
   - name: limit_at_bound
     setup: *seeded
-    args: [caching, --limit, '50', --json]
+    args: [caching, --limit, '500', --json]
     wantStdoutContains: ['"score":']
     wantStderrEmpty: true
-  - name: limit_above_bound
-    setup: *none
-    args: [caching, --limit, '51']
-    wantExit: 2
-    wantStdoutEmpty: true
-    wantStderrContains: ['invalid --limit value "51"', 1..50]
-    wantNoDBFile: true
+  - name: limit_above_cap_clamped
+    setup: *seeded
+    args: [caching, --limit, '501', --json]
+    wantStdoutContains: ['"score":']
+    wantStderrEmpty: true
   - name: offset_not_integer
     setup: *none
     args: [caching, --offset, abc]

@@ -84,7 +84,7 @@ const (
 	// Search caps. A query shorter than searchMinQueryLen (after
 	// trimming) short-circuits to an empty payload without touching the index.
 	searchDefaultLimit = 20
-	searchMaxLimit     = 50
+	searchMaxLimit     = 500
 	searchMinQueryLen  = 2
 
 	// SearchDefaultLimit and SearchMaxLimit publish the flat search route's page
@@ -94,6 +94,13 @@ const (
 	// keeps the grouped page and the flat page in the same units.
 	SearchDefaultLimit = searchDefaultLimit
 	SearchMaxLimit     = searchMaxLimit
+
+	// SearchPageWindow is the read granularity the grouped view uses while it
+	// accumulates a page. It is deliberately independent of SearchMaxLimit: the
+	// user-facing cap bounds what a caller may ask for, while this bounds how
+	// much one ranked read materialises. Coupling them would make every grouped
+	// request for a small page read the whole maximum.
+	SearchPageWindow = 50
 )
 
 // Service computes the Map/Review payloads for one peasant store.
@@ -250,13 +257,21 @@ func (s *Service) ChangeDiff(ctx context.Context, projectHash schema.ProjectHash
 // clamped to searchMaxLimit. Search is global (no projectHash), so it has no
 // ErrProjectNotFound path.
 func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.SearchPayload, error) {
+	return s.searchRankedWindow(ctx, query, ClampSearchLimit(limit), 0, SearchFilters{})
+}
+
+// ClampSearchLimit applies the one page-size rule every search consumer shares:
+// a non-positive limit means "use the default", and a limit above the maximum
+// is clamped rather than refused. Callers reject a non-integer before this;
+// they must not invent their own bound.
+func ClampSearchLimit(limit int) int {
 	switch {
 	case limit <= 0:
-		limit = searchDefaultLimit
+		return searchDefaultLimit
 	case limit > searchMaxLimit:
-		limit = searchMaxLimit
+		return searchMaxLimit
 	}
-	return s.searchRankedWindow(ctx, query, limit, 0, SearchFilters{})
+	return limit
 }
 
 // SearchRankedWindow reads ONE page of the same ranked global full-text search

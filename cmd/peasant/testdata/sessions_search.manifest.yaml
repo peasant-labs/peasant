@@ -11,7 +11,7 @@ requiredNames:
   - limit_not_positive
   - limit_negative
   - limit_at_bound
-  - limit_above_bound
+  - limit_above_cap_clamped
   - offset_not_integer
   - offset_negative
   - offset_zero

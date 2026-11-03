@@ -46,7 +46,8 @@ ingest and potentially preview-capped. FTS matches whole tokens, not substrings
 or regular expressions. Quote multi-word queries. Session ids and project hashes
 resolve directly, ignoring scope filters with a warning.
 
-At most 50 rows are returned per page. Unlike sessions list, --limit 0 is refused
+At most 500 rows are returned per page; a larger --limit is clamped. Unlike sessions list,
+--limit 0 is refused
 and subagent sessions are not hidden. A date-only --until covers that whole day.
 Output is local and receives no publish-time redaction pass. --json preserves the
 search payload (including score) alongside warnings and explicit empty reasons.`,
@@ -60,7 +61,7 @@ search payload (including score) alongside warnings and explicit empty reasons.`
 			return runSessionsSearch(cmd, plan)
 		},
 	}
-	cmd.Flags().StringVar(&f.limit, "limit", strconv.Itoa(codemap.SearchDefaultLimit), "Maximum ranked rows per page (integer 1..50; 0 is refused)")
+	cmd.Flags().StringVar(&f.limit, "limit", strconv.Itoa(codemap.SearchDefaultLimit), "Maximum ranked rows per page (integer >= 1; values above 500 are clamped; 0 is refused)")
 	cmd.Flags().StringVar(&f.offset, "offset", "0", "Ranked rows to skip (integer >= 0)")
 	cmd.Flags().StringVar(&f.project, "project", "", "Filter by project using the sessions list match (git remote URL or directory basename)")
 	cmd.Flags().StringVar(&f.harness, "harness", "", "Filter by harness ("+joinHarnesses(defaults.AllHarnesses)+")")
@@ -81,9 +82,10 @@ func buildSessionsSearchPlan(cmd *cobra.Command, args []string, f sessionsSearch
 		return nil, clicontract.NewUsageError("The search request could not start because the query has fewer than two non-whitespace characters in cmd/peasant.runSessionsSearch. No store was opened. Enter at least two characters and retry.")
 	}
 	window, err := strconv.Atoi(f.limit)
-	if err != nil || window < 1 || window > codemap.SearchMaxLimit {
-		return nil, clicontract.NewUsageError(fmt.Sprintf("invalid --limit value %q: use an integer in 1..%d; 0 does not mean no limit for sessions search. No store was opened.", f.limit, codemap.SearchMaxLimit))
+	if err != nil || window < 1 {
+		return nil, clicontract.NewUsageError(fmt.Sprintf("invalid --limit value %q: use an integer >= 1; values above %d are clamped, and 0 does not mean no limit for sessions search. No store was opened.", f.limit, codemap.SearchMaxLimit))
 	}
+	window = codemap.ClampSearchLimit(window)
 	offset, err := strconv.Atoi(f.offset)
 	if err != nil || offset < 0 {
 		return nil, clicontract.NewUsageError(fmt.Sprintf("invalid --offset value %q: use an integer >= 0 counting ranked rows to skip. No store was opened.", f.offset))

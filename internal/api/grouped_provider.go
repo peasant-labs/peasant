@@ -98,7 +98,7 @@ func (p *StoreDataProvider) groupedSearchRows(ctx context.Context, query string,
 	entries := 0
 	offset := 0
 	for {
-		page, err := p.codemap.SearchRankedWindow(ctx, query, codemap.SearchMaxLimit, offset)
+		page, err := p.codemap.SearchRankedWindow(ctx, query, codemap.SearchPageWindow, offset)
 		if err != nil {
 			return nil, nil, fmt.Errorf("store adapter: grouped search ranked window at offset %d: %w", offset, err)
 		}
@@ -117,7 +117,7 @@ func (p *StoreDataProvider) groupedSearchRows(ctx context.Context, query string,
 			entries++
 		}
 		offset += len(window)
-		if entries >= limit || len(window) < codemap.SearchMaxLimit {
+		if entries >= limit || len(window) < codemap.SearchPageWindow {
 			break
 		}
 	}
