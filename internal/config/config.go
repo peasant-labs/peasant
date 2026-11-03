@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
+	"regexp/syntax"
 	"runtime"
 	"slices"
 	"sort"
@@ -906,7 +906,11 @@ func CustomPatternsToUserPatterns(patterns []CustomPattern) ([]redact.UserPatter
 		if !cat.IsValid() {
 			return nil, fmt.Errorf("config: custom pattern %q: unknown category %q", p.ID, p.Category)
 		}
-		if _, err := regexp.Compile(p.Pattern); err != nil {
+		// Deliberately keep the stdlib parser: the pinned redact executor uses
+		// stdlib regexp, which rejects RE2-only syntax such as \C. regexp.Compile's
+		// accept set is syntax.Parse with Perl flags: simplifying the parsed tree
+		// and syntax.Compile add no errors. Remove when redact uses go-re2.
+		if _, err := syntax.Parse(p.Pattern, syntax.Perl); err != nil {
 			return nil, fmt.Errorf("config: custom pattern %q: invalid regex: %w", p.ID, err)
 		}
 		out = append(out, redact.UserPattern{

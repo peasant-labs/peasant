@@ -1,0 +1,15 @@
+cases:
+  - name: re2-only-byte-escape-refused
+    pattern: 'PRIVATE-\C'
+    wantError: 'invalid escape sequence: `\C`'
+  - name: malformed-capture-refused
+    pattern: '(PRIVATE-'
+    wantError: 'missing closing )'
+  - name: ordinary-capture-executes
+    pattern: 'PRIVATE-([0-9]+)'
+    input: 'label PRIVATE-2048'
+    wantRedacted: 'label <PROJECT_ALIAS>'
+  - name: case-folded-pattern-executes
+    pattern: '(?i)PRIVATE-[a-z]+'
+    input: 'label private-AbC'
+    wantRedacted: 'label <PROJECT_ALIAS>'
