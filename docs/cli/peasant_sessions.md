@@ -28,5 +28,6 @@ peasant sessions [flags]
 * [peasant sessions context](peasant_sessions_context.md)	 - Show entries around a target entry in a session transcript
 * [peasant sessions list](peasant_sessions_list.md)	 - List sessions
 * [peasant sessions prompts](peasant_sessions_prompts.md)	 - Print only what the person typed in a session
+* [peasant sessions search](peasant_sessions_search.md)	 - Search indexed session text by relevance
 * [peasant sessions tag](peasant_sessions_tag.md)	 - Manage session tags
 
