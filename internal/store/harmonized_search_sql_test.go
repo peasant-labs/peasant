@@ -154,7 +154,10 @@ func assertSearchSQL(t *testing.T, golden string, ranked, exists func(SearchFilt
 		t.Fatalf("existence args = %#v, want %#v", probeArgs, args)
 	}
 	lower := strings.ToLower(probe)
-	if strings.Contains(lower, "bm25(") || strings.Contains(lower, "snippet(") || strings.Contains(lower, "order by") || strings.Contains(lower, "union") {
+	if strings.Contains(lower, "bm25(") ||
+		strings.Contains(lower, "snippet(") ||
+		strings.Contains(lower, "order by") ||
+		strings.Contains(lower, "union") {
 		t.Fatalf("existence probe ranks, shapes, orders or merges: %s", probe)
 	}
 }
