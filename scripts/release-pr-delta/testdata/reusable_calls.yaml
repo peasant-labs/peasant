@@ -7,8 +7,8 @@
 # declares them here. A call with no declaration fails the manifest parity test
 # instead of guessing the name, and a declaration no workflow uses fails too.
 #
-# The key is the exact `uses` value, including the pinned tag, so the names
+# The key is the exact `uses` value, including the pinned ref, so the names
 # stay fixed for the immutable ref.
 calls:
-  peasant-labs/infra/.github/workflows/runner-router.yml@runner-router-v1:
+  peasant-labs/infra/.github/workflows/runner-router.yml@0233bce3b714e3200a63fab0568a9815e8fca72f:
     - pick

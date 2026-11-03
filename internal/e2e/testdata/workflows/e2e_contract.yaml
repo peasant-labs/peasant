@@ -174,7 +174,7 @@ reusable_callers:
             value: read
 router:
   workflow: peasant-labs/infra/.github/workflows/runner-router.yml
-  ref: runner-router-v1
+  ref: 0233bce3b714e3200a63fab0568a9815e8fca72f
   secret_key: RUNNER_STATUS_TOKEN
   routed_workflows:
     - .github/workflows/tests.yml

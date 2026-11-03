@@ -123,16 +123,16 @@ grant the Blacksmith GitHub App access to it and verify that a smoke workflow ca
 acquire each declared label. Jobs remaining queued indicate missing runner access,
 not a test failure; do not cut a release until all required labels schedule.
 
-A self-hosted container pool (`self-hosted` / `container`) serves the
-architecture-neutral jobs through an inline `determine-runner` router. Two x86_64
-jobs stay pinned to amd64 Blacksmith runners because the pool cannot host them:
+A self-hosted MicroVM pool (`self-hosted` / `linux` / `x64` / `microvm`) serves
+architecture-neutral jobs through the shared `determine-runner` workflow, with
+each caller's Blacksmith fallback when the pool is unavailable. Routed container
+workloads use Podman inside the guest, not the host runtime. Two x86_64 jobs
+remain pinned to amd64 Blacksmith runners:
 
-- the **full-stack podman e2e driver** (`e2e.yml`): rootless podman and the
-  disposable Village stack do not come up inside the pool containers, so the
-  harness skips and the gate fails without coverage;
-- the **goreleaser snapshot** (`release-validate.yml`): the pool keeps a runner's
-  workspace between jobs, and root-owned `dist/` residue from an earlier container
-  run defeats goreleaser's `--clean` with `EACCES`.
+- the **full-stack podman e2e driver** (`e2e.yml`), preserving its existing
+  hosted runner and full-stack coverage;
+- the **goreleaser snapshot** (`release-validate.yml`), preserving its existing
+  hosted runner and clean workspace.
 
 ### Maintainer gating
 
