@@ -58,6 +58,14 @@ func classifyDirectLookup(query string) (directLookupKind, string, schema.Projec
 	return directLookupNone, "", ""
 }
 
+// IsIdentityQuery reports whether search resolves query as a complete session id
+// or project hash without consulting the full-text index. Session filters do not
+// narrow an identity lookup; callers can use this predicate to explain that fact.
+func IsIdentityQuery(query string) bool {
+	kind, _, _ := classifyDirectLookup(query)
+	return kind != directLookupNone
+}
+
 // directLookup resolves one well-formed session id or project hash without
 // touching the FTS index, reusing the store's by-id and project reads. A
 // ranked-window page past the first reports exhaustion (empty, not an error)

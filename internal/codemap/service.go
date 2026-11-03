@@ -29,6 +29,10 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// SearchFilters narrows the session set before transcript ranking and pagination.
+// Store owns the predicates; the zero value preserves unfiltered search.
+type SearchFilters = store.SearchFilters
+
 // Sentinel errors. The API layer maps ErrProjectNotFound to 404; the others
 // surface as request errors on the Review endpoints.
 var (
