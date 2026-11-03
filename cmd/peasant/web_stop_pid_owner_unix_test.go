@@ -144,6 +144,11 @@ func TestStopWebLeavesAnotherProgramWithServerArgsAlone(t *testing.T) {
 
 // commandLineShows reports whether ps shows want in pid's command line.
 func commandLineShows(pid int, want string) bool {
+	// The kernel's own view first: no external process-listing tool, so this
+	// also works in minimal build sandboxes that carry no procps.
+	if raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline"); err == nil {
+		return strings.Contains(strings.ReplaceAll(string(raw), "\x00", " "), want)
+	}
 	out, err := exec.Command("ps", "-ww", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
 	return err == nil && strings.Contains(string(out), want)
 }
