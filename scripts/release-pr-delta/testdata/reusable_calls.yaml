@@ -10,5 +10,5 @@
 # The key is the exact `uses` value, including the pinned ref, so the names
 # stay fixed for the immutable ref.
 calls:
-  peasant-labs/infra/.github/workflows/runner-router.yml@0233bce3b714e3200a63fab0568a9815e8fca72f:
+  peasant-labs/infra/.github/workflows/runner-router.yml@71e687cef7eede9a63659be98ce9adac3c563398:
     - pick

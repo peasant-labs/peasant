@@ -19,7 +19,7 @@ jobs:
   # Blacksmith amd64 fallback when the pool is unavailable. Routing comes from
   # the shared runner-router reusable workflow.
   determine-runner:
-    uses: peasant-labs/infra/.github/workflows/runner-router.yml@0233bce3b714e3200a63fab0568a9815e8fca72f
+    uses: peasant-labs/infra/.github/workflows/runner-router.yml@71e687cef7eede9a63659be98ce9adac3c563398
     with:
       fallback: '["blacksmith-4vcpu-ubuntu-2404"]'
     secrets:
