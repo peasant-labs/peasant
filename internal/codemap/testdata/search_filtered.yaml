@@ -1,0 +1,130 @@
+sessions:
+  - id: 11111111-1111-1111-1111-111111111111
+    entries: [cache cache cache]
+  - id: 22222222-2222-2222-2222-222222222222
+    entries: [cache neutral, cache neutral, cache neutral]
+cases:
+  - name: zero_filter_preserves_payload
+    query: cache
+    window: 50
+    want: ["11111111-1111-1111-1111-111111111111:0", "22222222-2222-2222-2222-222222222222:0", "22222222-2222-2222-2222-222222222222:1", "22222222-2222-2222-2222-222222222222:2"]
+    wantAny: true
+  - name: filter_before_page
+    query: cache
+    window: 2
+    filters: {ids: [22222222-2222-2222-2222-222222222222]}
+    want: ["22222222-2222-2222-2222-222222222222:0", "22222222-2222-2222-2222-222222222222:1"]
+    wantAny: true
+    walk: true
+  - name: filtered_offset
+    query: cache
+    window: 2
+    offset: 2
+    filters: {ids: [22222222-2222-2222-2222-222222222222]}
+    want: ["22222222-2222-2222-2222-222222222222:2"]
+    wantAny: true
+  - name: empty_page_still_has_matches
+    query: cache
+    window: 2
+    offset: 10
+    filters: {ids: [22222222-2222-2222-2222-222222222222]}
+    want: []
+    wantAny: true
+  - name: filters_exclude_all
+    query: cache
+    window: 2
+    filters: {project: missing, harness: codex, since: 1, until: 2, tag: absent, ids: [22222222-2222-2222-2222-222222222222]}
+    want: []
+  - name: query_matches_nowhere
+    query: absent
+    window: 2
+    want: []
+  - name: direct_session_ignores_filters
+    query: " 11111111-1111-1111-1111-111111111111 "
+    window: 2
+    filters: {project: missing, harness: codex, since: 1, until: 2, tag: absent, ids: [22222222-2222-2222-2222-222222222222]}
+    want: ["11111111-1111-1111-1111-111111111111:0"]
+    identity: true
+  - name: direct_project_ignores_filters
+    query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678
+    window: 2
+    filters: {project: missing}
+    want: ["22222222-2222-2222-2222-222222222222:0"]
+    identity: true
+  - name: direct_unknown_is_identity
+    query: 99999999-9999-9999-9999-999999999999
+    window: 2
+    filters: {project: missing}
+    want: []
+    identity: true
+  - name: direct_offset_exhausted
+    query: 11111111-1111-1111-1111-111111111111
+    window: 2
+    offset: 1
+    filters: {project: missing}
+    want: []
+    identity: true
+  - name: transition_legacy_fallback
+    query: cache
+    window: 2
+    state: legacy_fallback
+    filters: {ids: [22222222-2222-2222-2222-222222222222]}
+    want: ["22222222-2222-2222-2222-222222222222:0", "22222222-2222-2222-2222-222222222222:1"]
+    wantAny: true
+  - name: legacy_only
+    query: cache
+    window: 2
+    state: legacy_only
+    filters: {ids: [22222222-2222-2222-2222-222222222222]}
+    want: ["22222222-2222-2222-2222-222222222222:0", "22222222-2222-2222-2222-222222222222:1"]
+    wantAny: true
+  - name: unified_only
+    query: cache
+    window: 2
+    state: unified_only
+    filters: {ids: [22222222-2222-2222-2222-222222222222]}
+    want: ["22222222-2222-2222-2222-222222222222:0", "22222222-2222-2222-2222-222222222222:1"]
+    wantAny: true
+  - name: rebuild_refused
+    query: cache
+    window: 2
+    state: needs_rebuild
+    filters: {project: repo}
+    errorContains: harvest verify --content
+  - name: no_index_refused
+    query: cache
+    window: 2
+    state: no_index
+    filters: {project: repo}
+    errorContains: harvest index
+  - name: identity_bypasses_unhealthy_index
+    query: 11111111-1111-1111-1111-111111111111
+    window: 2
+    state: needs_rebuild
+    filters: {project: missing}
+    want: ["11111111-1111-1111-1111-111111111111:0"]
+    identity: true
+    probeErrorContains: harvest verify --content
+  - name: punctuation_needs_no_index
+    query: '* ()'
+    window: 2
+    state: no_index
+    want: []
+  - name: short_query_needs_no_index
+    query: ' z '
+    window: 2
+    state: no_index
+    want: []
+guards:
+  - {name: window_zero, window: 0, errorContains: '1..50'}
+  - {name: window_negative, window: -1, errorContains: '1..50'}
+  - {name: window_above_max, window: 51, errorContains: '1..50'}
+  - {name: offset_negative, window: 1, offset: -1, errorContains: 'negative'}
+identities:
+  - {name: ses_identity, query: ses_3cd91f52effeXd3QAJ54jOyzv5, want: true}
+  - {name: uuid_identity, query: ' 11111111-1111-1111-1111-111111111111 ', want: true}
+  - {name: hash_identity, query: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678, want: true}
+  - {name: uppercase_uuid_content, query: aaaaaaaa-AAAA-aaaa-aaaa-aaaaaaaaaaaa}
+  - {name: short_hash_content, query: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+  - {name: bare_ses_content, query: ses_}
+  - {name: plain_content, query: cache}
