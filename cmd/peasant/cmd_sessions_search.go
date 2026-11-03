@@ -79,7 +79,7 @@ func buildSessionsSearchPlan(cmd *cobra.Command, args []string, f sessionsSearch
 	}
 	// Count bytes, as the HTTP route and codemap's query guard do.
 	if len(strings.TrimSpace(args[0])) < 2 {
-		return nil, clicontract.NewUsageError("The search request could not start because the query has fewer than two non-whitespace characters in cmd/peasant.runSessionsSearch. No store was opened. Enter at least two characters and retry.")
+		return nil, clicontract.NewUsageError("The search request could not start because the query has fewer than two non-whitespace characters in cmd/peasant.buildSessionsSearchPlan. No store was opened. Enter at least two characters and retry.")
 	}
 	window, err := strconv.Atoi(f.limit)
 	if err != nil || window < 1 {
@@ -212,7 +212,7 @@ func renderSessionsSearchTable(cmd *cobra.Command, payload *schema.SearchPayload
 		if utf8.RuneCountInString(snippet) > 120 {
 			snippet = store.TruncateToRunes(snippet, 120) + "…"
 		}
-		rows = append(rows, [5]string{id, searchTableCell(project), string(result.Role), strconv.Itoa(result.EntryIndex), snippet})
+		rows = append(rows, [5]string{id, searchTableCell(project), searchTableCell(string(result.Role)), strconv.Itoa(result.EntryIndex), snippet})
 	}
 	var widths [4]int
 	for _, row := range rows {
