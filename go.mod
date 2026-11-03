@@ -30,7 +30,7 @@ require (
 	golang.org/x/crypto v0.51.0
 	golang.org/x/mod v0.35.0
 	golang.org/x/sync v0.21.0
-	golang.org/x/sys v0.46.0
+	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.43.0
 	golang.org/x/text v0.37.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -87,6 +87,7 @@ require (
 	github.com/tree-sitter/tree-sitter-go v0.25.0 // indirect
 	github.com/tree-sitter/tree-sitter-javascript v0.25.0 // indirect
 	github.com/tree-sitter/tree-sitter-python v0.25.0 // indirect
+	github.com/wasilibs/go-re2 v1.13.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
