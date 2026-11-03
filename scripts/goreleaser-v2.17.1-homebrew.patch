@@ -45,3 +45,9 @@ index e586be4..5b93230 100644
 @@ -108 +107 @@ cask "{{ .Name }}" do
 -  {{ with .Caveats -}}
 +  {{- with .Caveats -}}
+diff --git a/internal/pipe/cask/template.go b/internal/pipe/cask/template.go
+--- a/internal/pipe/cask/template.go
++++ b/internal/pipe/cask/template.go
+@@ -96 +96 @@ func zapString(u config.HomebrewCaskUninstall) string {
+-	return cmp.Or(makeUninstallLikeBlock("zap", u), "# No zap stanza required")
++	return cmp.Or(makeUninstallLikeBlock("zap", u), "zap :not_required")
