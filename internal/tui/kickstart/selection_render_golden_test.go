@@ -4,8 +4,8 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 

@@ -1,10 +1,10 @@
 package e2e
 
 import (
+	regexp "github.com/wasilibs/go-re2"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )

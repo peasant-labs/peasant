@@ -17,9 +17,9 @@ package coveragemap_test
 import (
 	_ "embed"
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 

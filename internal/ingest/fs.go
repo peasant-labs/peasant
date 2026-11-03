@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 )
 

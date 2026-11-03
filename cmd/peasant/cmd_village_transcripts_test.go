@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	regexp "github.com/wasilibs/go-re2"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"

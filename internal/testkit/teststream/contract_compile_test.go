@@ -1,8 +1,8 @@
 package teststream
 
 import (
+	regexp "github.com/wasilibs/go-re2"
 	"io"
-	"regexp"
 	"time"
 )
 

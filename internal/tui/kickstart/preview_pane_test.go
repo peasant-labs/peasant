@@ -2,8 +2,8 @@ package kickstart_test
 
 import (
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"image/color"
-	"regexp"
 	"strings"
 	"testing"
 

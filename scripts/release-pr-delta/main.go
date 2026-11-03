@@ -31,11 +31,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 

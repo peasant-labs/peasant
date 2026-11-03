@@ -3,8 +3,8 @@ package transcriptview_test
 import (
 	_ "embed"
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"image/color"
-	"regexp"
 	"strings"
 	"testing"
 
