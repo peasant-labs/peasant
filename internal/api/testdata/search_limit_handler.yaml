@@ -11,12 +11,12 @@ cases:
     mutation: {description: provide one positive integer limit}
     input: {raw_query: "q=pipeline&limit=5"}
     expected: {status: 200, provider_limit: 5, provider_called: true}
-  - name: oversized_is_forwarded_for_service_clamp
+  - name: oversized_is_clamped_to_documented_cap
     classification: must-pass
     provenance: {source: boundary, ref: search-limit-max-clamp}
-    mutation: {description: provide a valid integer above the documented service maximum}
+    mutation: {description: provide a valid integer above the documented contract cap}
     input: {raw_query: "q=pipeline&limit=999"}
-    expected: {status: 200, provider_limit: 999, provider_called: true}
+    expected: {status: 200, provider_limit: 50, provider_called: true}
   - name: malformed_is_bad_request
     classification: must-fail
     provenance: {source: requirement, ref: search-limit-malformed}

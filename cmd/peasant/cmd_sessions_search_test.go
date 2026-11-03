@@ -86,13 +86,15 @@ type searchFixtureCase struct {
 	WantSnippetRunes      int                     `yaml:"wantSnippetRunes"`
 }
 
+type searchParityCase struct {
+	Query string `yaml:"query"`
+	Limit string `yaml:"limit"`
+}
+
 type searchFixtureFamily struct {
 	Seeds  []searchFixtureSeed `yaml:"seeds"`
 	Cases  []searchFixtureCase `yaml:"cases"`
-	Parity struct {
-		Query string `yaml:"query"`
-		Limit string `yaml:"limit"`
-	} `yaml:"parity"`
+	Parity []searchParityCase  `yaml:"parity"`
 }
 
 func loadSessionsSearchFixtures(t *testing.T) searchFixtureFamily {

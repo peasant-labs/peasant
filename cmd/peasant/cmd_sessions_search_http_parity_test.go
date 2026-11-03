@@ -65,32 +65,36 @@ func TestSessionsSearchHTTPParity(t *testing.T) {
 			t.Error("server did not stop after cancellation")
 		}
 	})
-	query := url.Values{"q": {family.Parity.Query}, "limit": {family.Parity.Limit}}
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("http://" + srv.Addr().String() + "/api/v1/search?" + query.Encode())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("search route returned %s", resp.Status)
-	}
-	var want schema.SearchPayload
-	if err := json.NewDecoder(resp.Body).Decode(&want); err != nil {
-		t.Fatal(err)
-	}
-	stdout, stderr, err := executeWithDataDirStreams(t, BuildSessionsCommand(), dir, []string{"search", family.Parity.Query, "--limit", family.Parity.Limit, "--json"})
-	if err != nil || stderr != "" {
-		t.Fatalf("CLI: %v; stderr=%s", err, stderr)
-	}
-	var got sessionsSearchOutput
-	if err := json.NewDecoder(strings.NewReader(stdout)).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if len(want.Results) < 2 {
-		t.Fatal("parity must compare multiple ordered results, not an empty response")
-	}
-	if !reflect.DeepEqual(got.SearchPayload, want) {
-		t.Fatalf("CLI payload: %+v\nHTTP payload: %+v", got.SearchPayload, want)
+	for _, parity := range family.Parity {
+		t.Run("limit="+parity.Limit, func(t *testing.T) {
+			query := url.Values{"q": {parity.Query}, "limit": {parity.Limit}}
+			resp, err := client.Get("http://" + srv.Addr().String() + "/api/v1/search?" + query.Encode())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("search route returned %s", resp.Status)
+			}
+			var want schema.SearchPayload
+			if err := json.NewDecoder(resp.Body).Decode(&want); err != nil {
+				t.Fatal(err)
+			}
+			stdout, stderr, err := executeWithDataDirStreams(t, BuildSessionsCommand(), dir, []string{"search", parity.Query, "--limit", parity.Limit, "--json"})
+			if err != nil || stderr != "" {
+				t.Fatalf("CLI: %v; stderr=%s", err, stderr)
+			}
+			var got sessionsSearchOutput
+			if err := json.NewDecoder(strings.NewReader(stdout)).Decode(&got); err != nil {
+				t.Fatal(err)
+			}
+			if len(want.Results) < 2 {
+				t.Fatal("parity must compare multiple ordered results, not an empty response")
+			}
+			if !reflect.DeepEqual(got.SearchPayload, want) {
+				t.Fatalf("CLI payload: %+v\nHTTP payload: %+v", got.SearchPayload, want)
+			}
+		})
 	}
 }

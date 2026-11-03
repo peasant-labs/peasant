@@ -95,12 +95,11 @@ const (
 	SearchDefaultLimit = searchDefaultLimit
 	SearchMaxLimit     = searchMaxLimit
 
-	// SearchPageWindow is the read granularity the grouped view uses while it
-	// accumulates a page. It is deliberately independent of SearchMaxLimit: the
-	// user-facing cap bounds what a caller may ask for, while this bounds how
-	// much one ranked read materialises. Coupling them would make every grouped
-	// request for a small page read the whole maximum.
-	SearchPageWindow = 50
+	// SearchHTTPMaxLimit is the cap the local HTTP route enforces. The published
+	// schema contract documents this number, so raising it is a contract change
+	// (schema PR, tag, re-pin), not a local edit. Local callers that are not
+	// bound by that contract — the CLI — use SearchMaxLimit.
+	SearchHTTPMaxLimit = 50
 )
 
 // Service computes the Map/Review payloads for one peasant store.

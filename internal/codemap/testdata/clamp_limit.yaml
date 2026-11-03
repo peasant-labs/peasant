@@ -1,0 +1,9 @@
+# The one page-size rule every search consumer shares. Values are the caller's
+# requested limit; want is what reaches the ranked read.
+cases:
+  - {name: below_zero, input: -1, want: 20}
+  - {name: zero, input: 0, want: 20}
+  - {name: one, input: 1, want: 1}
+  - {name: inside_range, input: 50, want: 50}
+  - {name: at_max, input: 500, want: 500}
+  - {name: above_max, input: 501, want: 500}

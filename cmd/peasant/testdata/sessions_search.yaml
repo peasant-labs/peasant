@@ -18,7 +18,8 @@ seeds:
     harness: opencode
     startMs: 0
     entries: [caching with detailed notes]
-parity: {query: caching, limit: '20'}
+parity:
+  - {query: caching, limit: '20'}
 cases:
   - name: happy_path_ranked_columns
     setup: &seeded {dataDir: directory, store: seeded}
