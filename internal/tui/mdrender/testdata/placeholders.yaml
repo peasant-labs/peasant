@@ -1,0 +1,10 @@
+cases:
+  - name: capture-expansion
+    input: '<EMAIL>'
+    want: '&lt;EMAIL&gt;'
+  - name: multiple-captures
+    input: 'before <EMAIL> and <API_KEY_2> after'
+    want: 'before &lt;EMAIL&gt; and &lt;API_KEY_2&gt; after'
+  - name: ordinary-html-unchanged
+    input: '<span>text</span>'
+    want: '<span>text</span>'

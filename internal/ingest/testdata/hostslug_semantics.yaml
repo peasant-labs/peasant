@@ -1,0 +1,12 @@
+# {{FF}} represents one raw invalid UTF-8 byte, not the valid U+00FF rune.
+# Keep the hash bound to the original path; only the display basename is sanitized.
+cases:
+  - name: invalid-byte-inside-basename
+    basename: 're{{FF}}po'
+    wantBasename: 're-po'
+  - name: invalid-byte-at-end
+    basename: 'repo{{FF}}'
+    wantBasename: 'repo'
+  - name: invalid-only-basename
+    basename: '{{FF}}'
+    wantBasename: 'unknown'

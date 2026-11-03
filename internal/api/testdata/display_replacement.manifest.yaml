@@ -1,0 +1,4 @@
+requiredNames:
+  - numbered-and-braced-backrefs
+  - preserve-replacement-label
+  - ordinary-dollar-text-unchanged
