@@ -164,7 +164,7 @@ type searchRow struct {
 // consolidated index over the union view. Both are read and merged by rank
 // with the representation filter, so a converted session never returns a
 // duplicate pair. After consolidation only the unified index is read.
-func (s *Service) querySearch(ctx context.Context, match string, limit, offset int) (_ []searchRow, retErr error) {
+func (s *Service) querySearch(ctx context.Context, match string, limit, offset int, filters SearchFilters) (_ []searchRow, retErr error) {
 	conn, err := s.store.Pool().Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("codemap: take connection: %w", err)
@@ -172,15 +172,10 @@ func (s *Service) querySearch(ctx context.Context, match string, limit, offset i
 	defer s.store.Pool().Put(conn)
 	endSnapshot := sqlitex.Save(conn)
 	defer endSnapshot(&retErr)
-	if err := s.store.ValidateAllIndexFormatsOnConn(conn); err != nil {
+	if err := s.validateSearchOnConn(conn); err != nil {
 		return nil, err
 	}
-	if refuse, err := searchNeedsRebuildOnConn(conn); err != nil {
-		return nil, err
-	} else if refuse {
-		return nil, store.SearchRefusalError()
-	}
-	hits, err := store.SearchMergedOnConn(conn, match, limit, offset, store.SearchFilters{})
+	hits, err := store.SearchMergedOnConn(conn, match, limit, offset, filters)
 	if err != nil {
 		return nil, err
 	}
@@ -198,6 +193,36 @@ func (s *Service) querySearch(ctx context.Context, match string, limit, offset i
 		})
 	}
 	return rows, nil
+}
+
+// querySearchMatchesAny keeps the ranked read's snapshot and readiness checks,
+// but delegates to the bounded existence reader instead of materializing hits.
+func (s *Service) querySearchMatchesAny(ctx context.Context, match string, filters SearchFilters) (_ bool, retErr error) {
+	conn, err := s.store.Pool().Take(ctx)
+	if err != nil {
+		return false, fmt.Errorf("codemap: take connection to check for a transcript match: %w; no match determination was made; retry the search when the store is available", err)
+	}
+	defer s.store.Pool().Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateSearchOnConn(conn); err != nil {
+		return false, err
+	}
+	return store.SearchMatchesAnyOnConn(conn, match, filters)
+}
+
+// validateSearchOnConn applies the same readiness contract to ranked and
+// existence reads inside their snapshot. Neither path repairs the index.
+func (s *Service) validateSearchOnConn(conn *sqlite.Conn) error {
+	if err := s.store.ValidateAllIndexFormatsOnConn(conn); err != nil {
+		return err
+	}
+	if refuse, err := searchNeedsRebuildOnConn(conn); err != nil {
+		return err
+	} else if refuse {
+		return store.SearchRefusalError()
+	}
+	return nil
 }
 
 // searchNeedsRebuildOnConn reports whether search must refuse on the

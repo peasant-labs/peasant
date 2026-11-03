@@ -6,11 +6,14 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/codemap"
+	"github.com/peasant-labs/peasant/internal/indexformat"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -68,6 +71,7 @@ type filteredSearchFamily struct {
 	Sessions []struct {
 		ID      string   `yaml:"id"`
 		Entries []string `yaml:"entries"`
+		Body    bool     `yaml:"body"`
 	} `yaml:"sessions"`
 	Cases  []filteredSearchCase `yaml:"cases"`
 	Guards []struct {
@@ -175,15 +179,62 @@ func searchCoordinates(results []schema.SearchResult) []string {
 	return coords
 }
 
+func openFilteredSearchStore(t *testing.T) *store.Store {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "artifacts")
+	artifacts, err := store.NewOSGenerationArtifactStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locker, err := store.NewFileSessionLocker(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return storetest.OpenWith(t, store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
+}
+
+func seedFilteredSearchBody(t *testing.T, s *store.Store, sid schema.SessionID, start int64, texts []string) {
+	t.Helper()
+	entries := make([]schema.SessionEntry, 0, len(texts))
+	content := make([]indexformat.ContentRecord, 0, len(texts))
+	blobs := make(map[schema.SourceEntryRef][]byte, len(texts))
+	for i, text := range texts {
+		ref := schema.SourceEntryRef(fmt.Sprintf("filtered-%d", i))
+		entries = append(entries, schema.SessionEntry{
+			SessionID: sid, EntryIndex: i, Harness: ingest.HarnessClaudeCode,
+			EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &text, SourceEntryRef: ref,
+		})
+		content = append(content, indexformat.ContentRecord{Ref: ref})
+		blobs[ref] = []byte(text)
+	}
+	inputCount := int64(len(texts))
+	generation := indexformat.Generation{
+		ID: "filtered-search", Completeness: indexformat.GenerationCompletenessComplete,
+		Metadata: schema.UnifiedMetadata{
+			SchemaVersion: ingest.CurrentSchemaVersion, SessionID: sid, ModelHarness: ingest.HarnessClaudeCode,
+			Stats:     schema.SessionStats{TurnCount: len(entries), InputSubmissionCount: &inputCount},
+			Timestamp: schema.TimestampInfo{Start: start, End: start + 500},
+		},
+		Main: indexformat.Partition{Entries: entries}, Content: content,
+		SourceEvidenceDigest: strings.Repeat("a", 64), TitleRefs: []schema.SourceEntryRef{entries[0].SourceEntryRef},
+	}
+	if _, err := s.ActivateGeneration(t.Context(), store.GenerationActivation{
+		Generation: indexformat.V2{Generation: generation}, Blobs: blobs, IndexerVersion: 1, IndexedAtMs: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSearchFilteredFixtures(t *testing.T) {
 	t.Parallel()
 	family := loadFilteredSearchFixtures(t)
 	for _, c := range family.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
-			s := storetest.Open(t)
+			s := openFilteredSearchStore(t)
 			for i, session := range family.Sessions {
-				if _, err := schema.NewSessionID(session.ID); err != nil {
+				sid, err := schema.NewSessionID(session.ID)
+				if err != nil {
 					t.Fatal(err)
 				}
 				start := fxBase() + int64(i)*1000
@@ -192,7 +243,11 @@ func TestSearchFilteredFixtures(t *testing.T) {
 				for _, text := range session.Entries {
 					specs = append(specs, userTurn(start, text))
 				}
-				seedEntries(t, s, session.ID, specs)
+				if session.Body {
+					seedFilteredSearchBody(t, s, sid, start, session.Entries)
+				} else {
+					seedEntries(t, s, session.ID, specs)
+				}
 			}
 			// Search needs neither repository nor graph dependencies.
 			svc := codemap.NewService(s, nil, nil)
