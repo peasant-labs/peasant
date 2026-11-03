@@ -16,3 +16,4 @@ required:
   - no_match
   - mirror_only_match
   - filtered_out
+  - legacy_fallback_match

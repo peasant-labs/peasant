@@ -19,6 +19,9 @@ func TestSearchFiltersBeforePagination(t *testing.T) {
 			t.Parallel()
 			s, _ := openGenerationStore(t)
 			ctx := context.Background()
+			if any, err := s.HasAnySessions(ctx); err != nil || any {
+				t.Fatalf("empty store has sessions = %v, err = %v", any, err)
+			}
 			for _, p := range family.Projects {
 				if _, err := schema.NewProjectHash(p.Hash); err != nil {
 					t.Fatal(err)
@@ -52,6 +55,14 @@ func TestSearchFiltersBeforePagination(t *testing.T) {
 					t.Fatal(err)
 				}
 				recallExec(t, s, `UPDATE sessions SET start_ms = ?, model_harness = ?, tags = ? WHERE session_id = ?`, session.Start, session.Harness, string(tags), session.ID)
+			}
+			if c.ClearUnified {
+				// Model the transition before unified postings have been filled.
+				// Both tables remain present, so only the legacy probe can find it.
+				recallExec(t, s, `INSERT INTO session_search_fts(session_search_fts) VALUES('delete-all')`)
+			}
+			if any, err := s.HasAnySessions(ctx); err != nil || !any {
+				t.Fatalf("seeded store has sessions = %v, err = %v", any, err)
 			}
 			conn, err := s.Pool().Take(ctx)
 			if err != nil {

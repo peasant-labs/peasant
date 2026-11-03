@@ -38,13 +38,14 @@ func (f searchFilterSpec) filter() SearchFilters {
 }
 
 type searchFilterCase struct {
-	Name      string           `yaml:"name"`
-	Filters   searchFilterSpec `yaml:"filters"`
-	IDSetSize int              `yaml:"idSetSize"`
-	Query     string           `yaml:"query"`
-	Limit     int              `yaml:"limit"`
-	Offset    int              `yaml:"offset"`
-	Want      []string         `yaml:"want"`
+	Name         string           `yaml:"name"`
+	Filters      searchFilterSpec `yaml:"filters"`
+	IDSetSize    int              `yaml:"idSetSize"`
+	ClearUnified bool             `yaml:"clearUnified"`
+	Query        string           `yaml:"query"`
+	Limit        int              `yaml:"limit"`
+	Offset       int              `yaml:"offset"`
+	Want         []string         `yaml:"want"`
 }
 
 type searchFilterFixtures struct {
@@ -107,7 +108,9 @@ func TestSearchFilterSQL(t *testing.T) {
 			if f.IsZero() != (len(conditions) == 0 && len(args) == 0) {
 				t.Fatal("zero filter and predicates disagree")
 			}
-			if len(f.SessionIDs) > 0 && f.ProjectName == nil && f.Harness == nil && f.Tag == nil && f.StartFromMs == nil && f.StartBeforeMs == nil {
+			nonIDFilters := f
+			nonIDFilters.SessionIDs = nil
+			if len(f.SessionIDs) > 0 && nonIDFilters.IsZero() {
 				if len(args) != 1 {
 					t.Fatalf("session set uses %d binds, want one JSON array", len(args))
 				}

@@ -217,7 +217,7 @@ func runRepairIdenticalCandidate(t *testing.T, c contentCorruptionCase) {
 	}
 	if c.WantFoundOnce {
 		conn := searchTestConn(t, s)
-		hits, err := SearchMergedOnConn(conn, `"`+c.Query+`"`, 50, 0)
+		hits, err := SearchMergedOnConn(conn, `"`+c.Query+`"`, 50, 0, SearchFilters{})
 		if err != nil {
 			t.Fatalf("production search after repair: %v", err)
 		}

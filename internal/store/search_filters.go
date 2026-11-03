@@ -16,8 +16,12 @@ type SearchFilters struct {
 
 // IsZero reports whether no session constraint is set.
 func (f SearchFilters) IsZero() bool {
-	return f.ProjectName == nil && f.Harness == nil && f.StartFromMs == nil &&
-		f.StartBeforeMs == nil && f.Tag == nil && len(f.SessionIDs) == 0
+	return f.ProjectName == nil &&
+		f.Harness == nil &&
+		f.StartFromMs == nil &&
+		f.StartBeforeMs == nil &&
+		f.Tag == nil &&
+		len(f.SessionIDs) == 0
 }
 
 func (f SearchFilters) where() (conditions []string, args []any) {
