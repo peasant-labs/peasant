@@ -37,6 +37,11 @@ func BuildDocgenCommand() *cobra.Command {
 					configFlag.Usage = originalUsage
 				}()
 			}
+			// The generator stamps the run date into every page footer, so any
+			// regeneration rewrites all pages even when no command changed.
+			// Disable it: these pages are committed, and a date-only diff hides
+			// the real change and collides across concurrent CLI work.
+			cmd.Root().DisableAutoGenTag = true
 			if err := doc.GenMarkdownTree(cmd.Root(), dir); err != nil {
 				return fmt.Errorf("generate docs: %w", err)
 			}

@@ -1,6 +1,6 @@
 # Run release-validate's per-distribution snapshot matrix on release pull
 # requests before a tag is minted.
-.PHONY: build run clean web web-stub fmt fmt-check lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
+.PHONY: build run clean web web-stub fmt fmt-check lint check dev docs docs-cli-check docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
 
 VERSION ?=
 
@@ -99,7 +99,7 @@ lint: web-stub
 	# golangci-lint run ./...
 	./scripts/vet-go.sh
 
-check: fmt-check lint sqlite-source-audit
+check: fmt-check lint sqlite-source-audit docs-cli-check
 	@set -e; \
 	export CHECK_START_NS="$(CHECK_START_NS)"; \
 	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
@@ -272,6 +272,17 @@ docs: docs-cli
 docs-cli: go
 	./peasant docgen docs/cli
 	@echo "CLI docs generated in docs/cli/"
+
+# The reference pages are committed, so a command change must ship its pages.
+# `git status` rather than `git diff` because a new command also produces a new,
+# untracked page that a diff would miss.
+docs-cli-check: go
+	@./peasant docgen docs/cli >/dev/null
+	@if [ -n "$$(git status --porcelain -- docs/cli)" ]; then \
+		echo "::error::docs/cli is stale; run 'make docs-cli' and commit the regenerated pages"; \
+		git status --porcelain -- docs/cli; \
+		exit 1; \
+	fi
 
 docs-open: docs
 	xdg-open docs/api/index.html
