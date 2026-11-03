@@ -157,6 +157,13 @@ cases:
     wantReasonContains: peasant harvest
     wantResults: []
     wantStderrEmpty: true
+  - name: empty_store_before_identity_offset
+    setup: {store: empty}
+    args: [11111111-1111-1111-1111-111111111111, --offset, '5', --project, nonexistent, --json]
+    wantEmptyCode: store_has_no_sessions
+    wantReasonContains: peasant harvest
+    wantStdoutNotContains: [smaller --offset]
+    wantStderrEmpty: true
   - name: filter_excluded_query_matches_elsewhere
     setup: *seeded
     args: [caching, --project, nonexistent, --json]
@@ -204,6 +211,11 @@ cases:
     wantStderrEmpty: true
   - name: direct_session_id
     setup: *seeded
+    args: [11111111-1111-1111-1111-111111111111, --json]
+    wantResults: ['11111111-1111-1111-1111-111111111111:0']
+    wantStderrEmpty: true
+  - name: direct_lookup_without_index
+    setup: {store: noIndex}
     args: [11111111-1111-1111-1111-111111111111, --json]
     wantResults: ['11111111-1111-1111-1111-111111111111:0']
     wantStderrEmpty: true
@@ -304,6 +316,13 @@ cases:
     args: [caching, --project, beta, --limit, '2', --json]
     wantResults: ['22222222-2222-2222-2222-222222222222:0', '22222222-2222-2222-2222-222222222222:1']
     wantStderrEmpty: true
+  - name: filter_all_combined
+    setup:
+      store: seeded
+      sessionsFrom: {path: '{{dir}}/ids.txt', write: ids, ids: [22222222-2222-2222-2222-222222222222]}
+    args: [caching, --project, beta, --harness, codex, --since, '2026-01-02', --until, '2026-01-02', --sessions-from, '{{dir}}/ids.txt', --json]
+    wantResults: *betaResults
+    wantStderrEmpty: true
   - name: filter_paging_no_skip
     setup: *seeded
     args: [caching, --project, beta, --limit, '2', --offset, '2', --json]
@@ -339,6 +358,14 @@ cases:
     wantColumns: *columns
     wantSnippetSuffix: '…'
     wantSnippetRunes: 121
+    wantStderrEmpty: true
+  - name: snippet_json_unclipped
+    setup: *seeded
+    seeds:
+      - <<: *longSeed
+        entries: [caching xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]
+    args: [caching, --json]
+    wantStdoutContains: ['[caching] xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx']
     wantStderrEmpty: true
   - name: control_chars_project_and_snippet
     setup: *seeded

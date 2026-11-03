@@ -227,7 +227,11 @@ func TestSessionsSearchFixtures(t *testing.T) {
 			dir := t.TempDir()
 			args := setupSearchFixture(t, family, c, dir)
 			stdout, stderr, err := executeWithDataDirStreams(t, BuildSessionsCommand(), dir, args)
-			if got := exitCodeFor(err); got != c.WantExit {
+			gotExit := defaults.ExitOK
+			if err != nil {
+				gotExit = exitCodeFor(err)
+			}
+			if got := gotExit; got != c.WantExit {
 				t.Fatalf("exit %d, want %d: %v\nstdout=%s\nstderr=%s", got, c.WantExit, err, stdout, stderr)
 			}
 			if c.WantStdoutEmpty && stdout != "" {
@@ -272,6 +276,9 @@ func TestSessionsSearchFixtures(t *testing.T) {
 				}
 				if doc.Warnings == nil || doc.Results == nil {
 					t.Fatal("warnings/results must be arrays, not null")
+				}
+				if doc.Query != c.Args[0] {
+					t.Errorf("query %q, want original %q", doc.Query, c.Args[0])
 				}
 				if doc.EmptyCode != c.WantEmptyCode || !strings.Contains(doc.EmptyReason, c.WantReasonContains) {
 					t.Errorf("meta: %+v", doc.Meta)

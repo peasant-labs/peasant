@@ -20,6 +20,7 @@ requiredNames:
   - empty_no_match
   - empty_table_reason
   - empty_store
+  - empty_store_before_identity_offset
   - filter_excluded_query_matches_elsewhere
   - filter_no_match_anywhere
   - filter_empty_stream_with_offset
@@ -28,6 +29,7 @@ requiredNames:
   - offset_past_end
   - filtered_offset_past_end
   - direct_session_id
+  - direct_lookup_without_index
   - direct_project_hash
   - direct_table_full_id
   - direct_session_id_unknown_empty_reason
@@ -45,10 +47,12 @@ requiredNames:
   - filter_until_unknown_start
   - filter_sessions_from
   - filter_excludes_higher_ranked
+  - filter_all_combined
   - filter_paging_no_skip
   - full_page_next_offset
   - snippet_fts_truncated_single_marker
   - snippet_renderer_clipped
+  - snippet_json_unclipped
   - control_chars_project_and_snippet
   - sessions_from_missing_file
   - sessions_from_empty_file
