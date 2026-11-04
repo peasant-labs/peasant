@@ -44,16 +44,16 @@ func buildSessionsSearchCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search indexed session text by relevance",
-		Long: `Search ranked full-text over indexed transcript text, already redacted at
-ingest and potentially preview-capped. FTS matches whole tokens, not substrings
-or regular expressions. Quote multi-word queries. Session ids and project hashes
-resolve directly, ignoring scope filters with a warning.
-
-At most 500 rows are returned per page; a larger --limit is clamped. Unlike sessions list,
---limit 0 is refused
-and subagent sessions are not hidden. A date-only --until covers that whole day.
-Output is local and receives no publish-time redaction pass. --json preserves the
-search payload (including score) alongside warnings and explicit empty reasons.`,
+		Long: "Search ranked full-text over indexed transcript text, already redacted at\n" +
+			"ingest and potentially preview-capped. FTS matches whole tokens, not substrings\n" +
+			"or regular expressions. Quote multi-word queries. Session ids and project hashes\n" +
+			"resolve directly, ignoring scope filters with a warning.\n\n" +
+			"At most " + strconv.Itoa(codemap.SearchMaxLimit) + " rows are returned per page; a larger --limit is clamped, and\n" +
+			"--offset addresses at most " + strconv.Itoa(codemap.SearchMaxOffset) + " rows into the ranked stream. Unlike sessions\n" +
+			"list, --limit 0 is refused, and subagent sessions are never hidden. A date-only\n" +
+			"--until covers that whole day. Output is local and receives no publish-time\n" +
+			"redaction pass. --json preserves the search payload (including score) alongside\n" +
+			"warnings and explicit empty reasons.",
 		// Errors belong on stderr, never a usage dump on JSON's stdout.
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -64,8 +64,8 @@ search payload (including score) alongside warnings and explicit empty reasons.`
 			return runSessionsSearch(cmd, plan)
 		},
 	}
-	cmd.Flags().StringVar(&f.limit, "limit", strconv.Itoa(codemap.SearchDefaultLimit), "Maximum ranked rows per page (integer >= 1; values above 500 are clamped; 0 is refused)")
-	cmd.Flags().StringVar(&f.offset, "offset", "0", "Ranked rows to skip (integer >= 0)")
+	cmd.Flags().StringVar(&f.limit, "limit", strconv.Itoa(codemap.SearchDefaultLimit), "Maximum ranked rows per page (integer >= 1; values above "+strconv.Itoa(codemap.SearchMaxLimit)+" are clamped; 0 is refused)")
+	cmd.Flags().StringVar(&f.offset, "offset", "0", "Ranked rows to skip (integer 0.."+strconv.Itoa(codemap.SearchMaxOffset)+")")
 	cmd.Flags().StringVar(&f.project, "project", "", "Filter by project using the sessions list match (git remote URL or directory basename)")
 	cmd.Flags().StringVar(&f.harness, "harness", "", "Filter by harness ("+joinHarnesses(defaults.AllHarnesses)+")")
 	cmd.Flags().StringVar(&f.since, "since", "", "Only sessions starting after this time ("+timeFilterHelp+")")
@@ -92,6 +92,9 @@ func buildSessionsSearchPlan(cmd *cobra.Command, args []string, f sessionsSearch
 	offset, err := strconv.Atoi(f.offset)
 	if err != nil || offset < 0 {
 		return nil, clicontract.NewUsageError(fmt.Sprintf("invalid --offset value %q: use an integer >= 0 counting ranked rows to skip. No store was opened.", f.offset))
+	}
+	if offset > codemap.SearchMaxOffset {
+		return nil, clicontract.NewUsageError(fmt.Sprintf("invalid --offset value %q: a ranked page can start at most %d rows into the stream, because one page materialises limit+offset rows per index before it pages them. Narrow the query instead of paging deeper. No store was opened.", f.offset, codemap.SearchMaxOffset))
 	}
 	list, err := buildSessionListFilter(f.project, "", f.since, f.until, f.harness, "", string(defaults.SessionSortDate), false, 0)
 	if err != nil {

@@ -123,6 +123,19 @@ cases:
     args: [caching, --offset, '0', --json]
     wantStdoutContains: ['"score":']
     wantStderrEmpty: true
+  - name: offset_above_bound
+    setup: *none
+    args: [caching, --offset, '5001']
+    wantExit: 2
+    wantStdoutEmpty: true
+    wantStderrContains: ['invalid --offset value "5001"', 'at most 5000 rows into the stream', No store was opened]
+    wantNoDBFile: true
+  - name: offset_at_bound
+    setup: *seeded
+    args: [caching, --offset, '5000', --json]
+    wantEmptyCode: no_matching_entries
+    wantReasonContains: smaller --offset
+    wantStderrEmpty: true
   - name: index_needs_rebuild_surfaces
     setup: {store: needsRebuild}
     args: [caching, --json]
