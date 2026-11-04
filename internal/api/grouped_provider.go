@@ -83,41 +83,27 @@ func scopeGroupedRowsToProject(rows []store.SessionRow, project schema.ProjectHa
 	return scoped
 }
 
-// groupedSearchRows reads the flat ranked search stream in windows and keeps the
-// first `limit` matched entries, exactly like the flat search page. No
-// eligibility judgement is applied: the grouped view shows the same stored
-// matches the flat route shows, so an ingested hit can never be displaced by a
-// selection decision. A session whose entries were never indexed keeps no
-// entries; the returned rows follow first-seen ranked order.
+// groupedSearchRows reads the flat ranked search page and groups its matched
+// entries by session. The requested page IS the read: the ranked window is the
+// clamped page size, so one read serves the grouped view and the grouped page
+// measures its limit in the same units as the flat page. No eligibility
+// judgement is applied: the grouped view shows the same stored matches the flat
+// route shows, so an ingested hit can never be displaced by a selection
+// decision. A session whose entries were never indexed keeps no entries; the
+// returned rows follow first-seen ranked order.
 func (p *StoreDataProvider) groupedSearchRows(ctx context.Context, query string, limit int) (map[string][]schema.SearchResult, []store.SessionRow, error) {
 	limit = codemap.ClampSearchLimit(limit)
 	matches := make(map[string][]schema.SearchResult)
-	rankedIDs := make([]string, 0)
-	entries := 0
-	offset := 0
-	for {
-		page, err := p.codemap.SearchRankedWindow(ctx, query, limit, offset)
-		if err != nil {
-			return nil, nil, fmt.Errorf("store adapter: grouped search ranked window at offset %d: %w", offset, err)
+	page, err := p.codemap.SearchRankedWindow(ctx, query, limit, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("store adapter: grouped search ranked page: %w", err)
+	}
+	rankedIDs := make([]string, 0, len(page.Results))
+	for _, result := range page.Results {
+		if _, kept := matches[result.SessionID]; !kept {
+			rankedIDs = append(rankedIDs, result.SessionID)
 		}
-		results := page.Results
-		if len(results) == 0 {
-			break
-		}
-		for _, result := range results {
-			if entries >= limit {
-				break
-			}
-			if _, kept := matches[result.SessionID]; !kept {
-				rankedIDs = append(rankedIDs, result.SessionID)
-			}
-			matches[result.SessionID] = append(matches[result.SessionID], result)
-			entries++
-		}
-		offset += len(results)
-		if entries >= limit || len(results) < limit {
-			break
-		}
+		matches[result.SessionID] = append(matches[result.SessionID], result)
 	}
 	if len(rankedIDs) == 0 {
 		return matches, []store.SessionRow{}, nil
