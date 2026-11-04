@@ -21,8 +21,10 @@
 # the one failure this file must not have. The separate copyleft guard
 # (go-licenses check, in CI) owns license CLASSIFICATION.
 #
-# Scope: Go modules only. The embedded web dashboard (web/out) bundles npm
-# packages whose notices are tracked as a separate follow-on.
+# Scope: the Go modules the binary links, plus the C and C++ components the
+# embedded regex engine's WebAssembly build contains. The embedded web dashboard
+# (web/out) bundles npm packages whose notices are tracked as a separate
+# follow-on.
 #
 # Requirements: run inside the Nix devShell. This uses GNU findutils (find
 # -printf) and bash >= 4 (mapfile), which the devShell provides; the stock

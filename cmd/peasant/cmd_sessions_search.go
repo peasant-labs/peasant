@@ -94,7 +94,7 @@ func buildSessionsSearchPlan(cmd *cobra.Command, args []string, f sessionsSearch
 		return nil, clicontract.NewUsageError(fmt.Sprintf("invalid --offset value %q: use an integer >= 0 counting ranked rows to skip. No store was opened.", f.offset))
 	}
 	if offset > codemap.SearchMaxOffset {
-		return nil, clicontract.NewUsageError(fmt.Sprintf("invalid --offset value %q: a ranked page can start at most %d rows into the stream, because one page materialises limit+offset rows per index before it pages them. Narrow the query instead of paging deeper. No store was opened.", f.offset, codemap.SearchMaxOffset))
+		return nil, clicontract.NewUsageError(fmt.Sprintf("invalid --offset value %q: a ranked page can start at most %d rows into the stream, and a deeper position makes the read do work proportional to the rows it skips. Narrow the query instead of paging deeper. No store was opened.", f.offset, codemap.SearchMaxOffset))
 	}
 	list, err := buildSessionListFilter(f.project, "", f.since, f.until, f.harness, "", string(defaults.SessionSortDate), false, 0)
 	if err != nil {

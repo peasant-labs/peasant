@@ -88,9 +88,10 @@ const (
 	searchMinQueryLen  = 2
 
 	// searchMaxOffset bounds how far into the ranked stream one page may start.
-	// The merged read materialises limit+offset rows per index before it pages
-	// them, so an unbounded offset turns one page request into an unbounded
-	// read. A caller that needs a deeper position narrows the query instead.
+	// Reading a page at an offset does work proportional to the rows it skips:
+	// the merged path materialises limit+offset rows from every index while both
+	// indexes exist, and the SQL path still walks the rows an FTS offset skips.
+	// A caller that needs a deeper position narrows the query instead.
 	searchMaxOffset = 5000
 
 	// SearchDefaultLimit and SearchMaxLimit publish the page bounds every search
@@ -314,7 +315,7 @@ func (s *Service) SearchRankedWindowFiltered(ctx context.Context, query string, 
 	}
 	if offset > searchMaxOffset {
 		return nil, fmt.Errorf(
-			"codemap: ranked search offset %d exceeds the supported maximum %d in codemap.Service.SearchRankedWindowFiltered (also used by codemap.Service.SearchRankedWindow); one page materialises limit+offset rows per index before it pages them, so a deeper position is unbounded work, and no search results were read; narrow the query or start from a smaller offset and page forward",
+			"codemap: ranked search offset %d exceeds the supported maximum %d in codemap.Service.SearchRankedWindowFiltered (also used by codemap.Service.SearchRankedWindow); reading a page at an offset does work proportional to the rows it skips, so a deeper position is unbounded work, and no search results were read; narrow the query or start from a smaller offset and page forward",
 			offset, searchMaxOffset,
 		)
 	}
