@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/clicontract"
+	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -334,4 +335,20 @@ func searchTableCells(line string) []string {
 		}
 	}
 	return cells
+}
+
+// TestNextPageHintStopsAtTheOffsetBound keeps the continuation hint from
+// suggesting a command the reader refuses. A full page that ends at the bound
+// has no next page to offer, only a narrower query.
+func TestNextPageHintStopsAtTheOffsetBound(t *testing.T) {
+	t.Parallel()
+	if got := nextPageHint(codemap.SearchMaxOffset-10, 5); !strings.Contains(got, "--offset 4995") {
+		t.Fatalf("hint inside the bound = %q, want the next offset 4995", got)
+	}
+	if got := nextPageHint(codemap.SearchMaxOffset, 500); strings.Contains(got, "--offset") {
+		t.Fatalf("hint past the bound = %q, want no offset a reader would refuse", got)
+	}
+	if got := nextPageHint(codemap.SearchMaxOffset, 500); !strings.Contains(got, "narrow the query") {
+		t.Fatalf("hint past the bound = %q, want the narrowing guidance", got)
+	}
 }

@@ -204,6 +204,17 @@ func searchTableCell(text string) string {
 	return strings.Join(strings.Fields(escapePromptControls(text)), " ")
 }
 
+// nextPageHint tells the reader how to continue, and never prints an offset the
+// ranked reader refuses: a full last page at the bound would otherwise suggest a
+// command that fails.
+func nextPageHint(offset, rows int) string {
+	next := offset + rows
+	if next > codemap.SearchMaxOffset {
+		return fmt.Sprintf("\nnarrow the query: a ranked page cannot start past %d rows\n", codemap.SearchMaxOffset)
+	}
+	return fmt.Sprintf("\nnext page: --offset %d\n", next)
+}
+
 func renderSessionsSearchTable(cmd *cobra.Command, payload *schema.SearchPayload, plan *sessionsSearchPlan) {
 	rows := make([][5]string, 0, len(payload.Results)+1)
 	rows = append(rows, [5]string{"SESSION", "PROJECT", "ROLE", "ENTRY", "SNIPPET"})
@@ -239,6 +250,6 @@ func renderSessionsSearchTable(cmd *cobra.Command, payload *schema.SearchPayload
 		}
 	}
 	if len(payload.Results) == plan.window && !codemap.IsIdentityQuery(plan.query) {
-		fmt.Fprintf(out, "\nnext page: --offset %d\n", plan.offset+len(payload.Results))
+		fmt.Fprint(out, nextPageHint(plan.offset, len(payload.Results)))
 	}
 }
