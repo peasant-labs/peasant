@@ -130,9 +130,9 @@ cases:
       selection: selected
       selectedIds: [agent-b3]
       sessions:
-        - {id: agent-b1, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle needle needle"}
+        - {id: agent-b1, startMs: 460, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle needle needle"}
         - {id: agent-b2, startMs: 470, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle needle"}
-        - {id: agent-b3, startMs: 460, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
+        - {id: agent-b3, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
     expected:
       statusCode: 200
       totalItems: 1
