@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -218,6 +219,13 @@ func assertForbiddenImportsAbsent(t *testing.T, root string, forbidden []string)
 	}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
+			// The repository root is walked while local tooling creates and
+			// removes its own scratch files there (the test gate writes a CPU
+			// profile it moves when the run ends). An entry that vanished
+			// between readdir and lstat is not a boundary violation.
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return nil
+			}
 			return walkErr
 		}
 		if entry.IsDir() {
