@@ -7,5 +7,7 @@ requiredNames:
   - invalid-safe-code
   - empty-safe-message
   - unsafe-safe-message-defense
+  - mixed-case-secret-message-defense
+  - mixed-case-windows-path-message-defense
   - generic-error-prose-never-read
   - unsafe-safe-code-defense

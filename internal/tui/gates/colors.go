@@ -2,10 +2,10 @@ package gates
 
 import (
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 )

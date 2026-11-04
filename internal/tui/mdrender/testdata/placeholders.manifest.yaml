@@ -1,0 +1,4 @@
+requiredNames:
+  - capture-expansion
+  - multiple-captures
+  - ordinary-html-unchanged

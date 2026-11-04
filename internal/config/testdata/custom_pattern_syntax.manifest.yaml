@@ -1,0 +1,5 @@
+requiredNames:
+  - re2-only-byte-escape-refused
+  - malformed-capture-refused
+  - ordinary-capture-executes
+  - case-folded-pattern-executes

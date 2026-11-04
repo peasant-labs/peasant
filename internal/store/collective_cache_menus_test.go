@@ -4,8 +4,8 @@ import (
 	_ "embed"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	regexp "github.com/wasilibs/go-re2"
 	"reflect"
-	"regexp"
 	"sort"
 	"testing"
 

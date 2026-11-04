@@ -1,9 +1,9 @@
 package htmlpage_test
 
 import (
+	regexp "github.com/wasilibs/go-re2"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 

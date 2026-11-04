@@ -104,7 +104,7 @@ func TestConn(t *testing.T) {
 		}
 		intVal := stmt.ColumnInt64(1)
 		if getIntVal := stmt.GetInt64("foo2"); getIntVal != intVal {
-			t.Errorf(`GetText("foo2")=%q, want %q`, getIntVal, intVal)
+			t.Errorf(`GetText("foo2")=%d, want %d`, getIntVal, intVal)
 		}
 		typ := stmt.ColumnType(0)
 		if typ != sqlite.TypeText {

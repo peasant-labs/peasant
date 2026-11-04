@@ -1,7 +1,7 @@
 package ingest
 
 import (
-	"regexp"
+	regexp "github.com/wasilibs/go-re2"
 	"strings"
 	"testing"
 )

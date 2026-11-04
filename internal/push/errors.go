@@ -3,7 +3,7 @@ package push
 import (
 	"context"
 	"errors"
-	"regexp"
+	regexp "github.com/wasilibs/go-re2"
 	"sort"
 	"strings"
 

@@ -3,7 +3,7 @@ package mdrender_test
 import (
 	_ "embed"
 	"fmt"
-	"regexp"
+	regexp "github.com/wasilibs/go-re2"
 	"strings"
 	"sync"
 	"testing"

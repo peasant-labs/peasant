@@ -90,7 +90,7 @@
     "shell/example_test.go": "3a07fef3be676d6bca9290f42632e4158ce0835e2d9f5de8d4abc741942d8052",
     "shell/shell.go": "1797b1eb73efa8936eac05f3177effdb5c4cbbb10c1158b1105c22372941621d",
     "sqlite.go": "95e5132bd6afcd23912e8e9ba9e60c3d9ec7fd4dc7d44a67648590eab908466c",
-    "sqlite_test.go": "0e312e63c65935f39a771649a87be88e8ea25ac547f1839b67b4135387c3fca9",
+    "sqlite_test.go": "df62fe9b29a158a4790ec48b56180820b99895836bcf8b20a2dc2f1b05f24840",
     "sqlitefile/buffer.go": "0024aad0b9b8f28c1dbf77d53fc14dc1bf8f6ced1ce7d05e2192f7ac2736db18",
     "sqlitefile/buffer_test.go": "3476d33d8817eedb2edaccda68856ce177ffbc16f99278f74374b1e98a5d8c13",
     "sqlitefile/file.go": "c92b66ef3436efc2a6757bf87f8219d78a66eaffba0e23f9ab26429f163f0a2f",
@@ -109,7 +109,8 @@
     "sqlitex/rand_id_test.go": "627f03e738083ef590e0a91c87532ed94ba52d81ca54ed163431552486b5f3db",
     "sqlitex/savepoint.go": "bc26daf3cf109f5636d2c31e2070d4747b0f7d75c81c8426e65782bcf3413416",
     "sqlitex/savepoint_test.go": "2937787e6e709d8f24f0109ff88bd9c7136d2c3b5d7780bee84ac070c819f332",
-    "vtable_example_test.go": "cb57597c35b9c152b5ff46aed58d7e4f912bbb20a810c38de0ffd6fba37271f4"
+    "vtable_example_test.go": "cb57597c35b9c152b5ff46aed58d7e4f912bbb20a810c38de0ffd6fba37271f4",
+    "func_test.go": "78e89a6f6b424d0f0c9f4e7e2a56778d47f61241371b8d49804bfdfb7deefef9"
   },
   "renamed_files": {
     "go.mod": "UPSTREAM.go.mod.txt",
@@ -117,7 +118,7 @@
     "go.work": "UPSTREAM.go.work.txt",
     "go.work.sum": "UPSTREAM.go.work.sum.txt"
   },
-  "patch_sha256": "6af897dfc46621273f3dfae74a1942746572b1cd3c456fc27e54d41b8493a8ed",
+  "patch_sha256": "7c1c54f7b79e2c26e8ac931d8f13926c7837348ca3ebd43eeb87dcef7c98ef11",
   "native_pointer_lines": {
     "blob.go": [
       "blobPtr := *(*uintptr)(unsafe.Pointer(blobPtrPtr))"

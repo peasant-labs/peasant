@@ -1,0 +1,10 @@
+cases:
+  - name: numbered-and-braced-backrefs
+    input: 'x $1 ${2}'
+    want: 'x  '
+  - name: preserve-replacement-label
+    input: '$1<EMAIL>${12}'
+    want: '<EMAIL>'
+  - name: ordinary-dollar-text-unchanged
+    input: 'cost $ and ${name}'
+    want: 'cost $ and ${name}'

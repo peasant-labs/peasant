@@ -17,7 +17,7 @@ package perf
 import (
 	"errors"
 	"fmt"
-	"regexp"
+	regexp "github.com/wasilibs/go-re2"
 	"sort"
 	"strings"
 	"sync"

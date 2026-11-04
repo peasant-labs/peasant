@@ -32,4 +32,6 @@ if [ "${found_native}" != true ] || [ "${#default_packages[@]}" -eq 0 ]; then
   exit 1
 fi
 go vet "${default_packages[@]}"
+# -unsafeptr only: the native package's modernc address conversions are audited
+# upstream source, not a defect we can fix without forking them.
 go vet -unsafeptr=false "${native_package}"

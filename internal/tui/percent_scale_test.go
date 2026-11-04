@@ -1,7 +1,7 @@
 package tui_test
 
 import (
-	"regexp"
+	regexp "github.com/wasilibs/go-re2"
 	"strings"
 	"testing"
 

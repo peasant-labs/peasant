@@ -1,6 +1,6 @@
 package ingest
 
-import "regexp"
+import regexp "github.com/wasilibs/go-re2"
 
 // CommandParser scans transcript bytes for git command patterns to validate
 // whether a session contained intentional git activity.

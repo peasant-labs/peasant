@@ -3,10 +3,10 @@ package ingest
 import (
 	"context"
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"log/slog"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -100,6 +100,11 @@ func deriveHostSlugFromPath(s salt.Salt, fallbackPath string) (HostSlug, error) 
 
 	// basename = filepath.Base(fallbackPath), sanitized to slug-safe characters.
 	basename := filepath.Base(fallbackPath)
+	// go-re2 stops at invalid UTF-8 where stdlib substituted U+FFFD. Without
+	// normalization NewHostSlug rejects the surviving byte, failing identity
+	// derivation. Consecutive invalid bytes collapse to one replacement rune;
+	// the original path remains salted/hashed, so the run count is not a contract.
+	basename = strings.ToValidUTF8(basename, "\uFFFD")
 	basename = slugUnsafeChar.ReplaceAllString(basename, "-")
 	basename = strings.Trim(basename, "-")
 	if basename == "" {

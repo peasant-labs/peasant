@@ -2,9 +2,9 @@ package store_test
 
 import (
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )

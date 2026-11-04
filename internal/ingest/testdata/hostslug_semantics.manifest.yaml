@@ -1,0 +1,4 @@
+requiredNames:
+  - invalid-byte-inside-basename
+  - invalid-byte-at-end
+  - invalid-only-basename

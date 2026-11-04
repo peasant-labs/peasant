@@ -8,7 +8,9 @@ file hashes, modified Go files, and metadata renames; `connection-lifetime.patch
 complete changes to upstream files. Go import literals are mechanically rewritten to the in-module package path.
 The original go.mod, go.sum, go.work and go.work.sum bytes are retained as
 UPSTREAM.*.txt, so they do not create an excluded nested module. All other
-upstream bytes are unchanged.
+upstream bytes are unchanged, except three formatting directives in `func_test.go` and
+`sqlite_test.go` that Go 1.26's printf analyzer rejects (`%q` on integer operands,
+now `%d`); behaviour is unchanged and the changes are part of the patch.
 
 This is an ordinary package in the Peasant module; no local replace or nested
 module is used. A real Go module ZIP therefore carries this source and supports

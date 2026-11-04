@@ -3,7 +3,7 @@ package mock
 import (
 	"context"
 	"errors"
-	"regexp"
+	regexp "github.com/wasilibs/go-re2"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/codemap"

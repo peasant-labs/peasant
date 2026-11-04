@@ -2,7 +2,7 @@ package push_test
 
 import (
 	"encoding/json"
-	"regexp"
+	regexp "github.com/wasilibs/go-re2"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"

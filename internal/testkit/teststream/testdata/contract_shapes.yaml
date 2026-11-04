@@ -30,6 +30,9 @@ shapes:
   - name: teststream.ReportOptions
     fields:
       - { name: Top,        type: int }
-      - { name: FamilyRe,   type: "*regexp.Regexp" }
+      # go-re2 exports Regexp from its own internal package, so reflect prints
+      # the engine type as internal.Regexp; the peasant-side import alias does
+      # not change the printed name.
+      - { name: FamilyRe,   type: "*internal.Regexp" }
       - { name: NoFamilies, type: bool }
       - { name: WarnPct,    type: float64 }

@@ -61,6 +61,22 @@ cases:
     expectedCode: response_decode
     expectedMessage: *generic
     forbiddenValues: ["The synthetic password could not be decoded"]
+  # A trusted carrier reaches unsafeErrorRE, unlike attribute token validation.
+  # Removing case folding must expose this prose and fail the exact expectation.
+  - name: mixed-case-secret-message-defense
+    carrier: true
+    code: response_decode
+    message: 'The synthetic PaSsWoRd could not be decoded'
+    expectedCode: response_decode
+    expectedMessage: *generic
+    forbiddenValues: ['The synthetic PaSsWoRd could not be decoded']
+  - name: mixed-case-windows-path-message-defense
+    carrier: true
+    code: response_decode
+    message: 'Retry C:\Synthetic\Project'
+    expectedCode: response_decode
+    expectedMessage: *generic
+    forbiddenValues: ['Retry C:\Synthetic\Project']
   - name: generic-error-prose-never-read
     rejectErrorCall: true
     expectedCode: error_code
