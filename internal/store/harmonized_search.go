@@ -183,13 +183,7 @@ type UnifiedSearchHit struct {
 	GitWorktree string
 }
 
-// unifiedSearchSQLTemplate is the consolidated transcript search over the
-// one index, with the rowid-space split as parameters: below the body base
-// a hit joins the mirror row, at or above it joins the body row plus the
-// active-generation main-partition mapping row by digest. The DDL keeps its
-// own literal (SQLite cannot reference a Go constant); every Go use builds
-// from BodyRowIDBase below, so the constant stays the one home.
-const unifiedSearchSQLTemplate = `SELECT
+const unifiedSearchColumns = `
     f.session_id,
     f.entry_index,
     COALESCE(e.role, b.role) AS role,
@@ -201,7 +195,13 @@ const unifiedSearchSQLTemplate = `SELECT
     COALESCE(s.git_branch, ''),
     COALESCE(p.canonical_remote, ''),
     COALESCE(p.canonical_cwd, ''),
-    COALESCE(s.git_worktree, '')
+    COALESCE(s.git_worktree, '')`
+
+// unifiedSearchSQLTemplate shares the consolidated row universe between ranked
+// and existence reads. Below BodyRowIDBase a hit joins the mirror row; above it
+// the digest join admits only active-generation, main-partition bodies. The DDL
+// keeps its own literal because SQLite cannot reference a Go constant.
+const unifiedSearchSQLTemplate = `SELECT%s
 FROM session_search_fts f
 LEFT JOIN session_entries e ON e.rowid = f.rowid AND f.rowid < %d
 LEFT JOIN session_entry_bodies b ON b.body_id = f.rowid AND f.rowid >= %d
@@ -251,28 +251,42 @@ WHERE session_search_fts MATCH ?
         )
       )
     )
-  )
-ORDER BY rank, f.session_id, f.entry_index
-LIMIT ? OFFSET ?`
+  )%s
+%s`
 
-// UnifiedSearchSQL is the consolidated transcript search over the one index,
-// built from BodyRowIDBase: a body hit counts only through the digest join,
-// so staged bodies, superseded-only bodies, and earlier-partition bodies
-// never return. The depth-echo de-duplication compares full stored previews,
-// and the mirror branch carries the representation filter so a converted
-// session's leftover mirror rows never duplicate a body hit.
-var UnifiedSearchSQL = fmt.Sprintf(
-	unifiedSearchSQLTemplate,
-	BodyRowIDBase, BodyRowIDBase, BodyRowIDBase, BodyRowIDBase,
-)
+const searchRankedTail = "ORDER BY rank, f.session_id, f.entry_index\nLIMIT ? OFFSET ?"
 
-// SearchUnifiedOnConn runs the consolidated-index query on the caller's
+func searchFilterSQL(filters SearchFilters) (string, []any) {
+	conditions, args := filters.where()
+	if len(conditions) == 0 {
+		return "", args
+	}
+	return "\n  AND (" + strings.Join(conditions, " AND ") + ")", args
+}
+
+func renderUnifiedSearchSQL(filters SearchFilters, columns, tail string) (string, []any) {
+	predicate, args := searchFilterSQL(filters)
+	return fmt.Sprintf(unifiedSearchSQLTemplate, columns,
+		BodyRowIDBase, BodyRowIDBase, BodyRowIDBase, BodyRowIDBase, predicate, tail), args
+}
+
+func unifiedSearchSQL(filters SearchFilters) (string, []any) {
+	return renderUnifiedSearchSQL(filters, unifiedSearchColumns, searchRankedTail)
+}
+
+func unifiedSearchExistsSQL(filters SearchFilters) (string, []any) {
+	return renderUnifiedSearchSQL(filters, " 1", "LIMIT 1")
+}
+
+// searchUnifiedOnConn runs the consolidated-index query on the caller's
 // connection. The caller checks the rebuild flag first: while it is set
 // search refuses instead of serving postings that may be stale.
-func SearchUnifiedOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]UnifiedSearchHit, error) {
+func searchUnifiedOnConn(conn *sqlite.Conn, match string, limit, offset int, filters SearchFilters) ([]UnifiedSearchHit, error) {
+	query, args := unifiedSearchSQL(filters)
+	args = append(append([]any{match}, args...), limit, offset)
 	var hits []UnifiedSearchHit
-	if err := sqlitex.Execute(conn, UnifiedSearchSQL, &sqlitex.ExecOptions{
-		Args: []any{match, limit, offset},
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			hits = append(hits, UnifiedSearchHit{
 				SessionID:   stmt.ColumnText(0),
@@ -296,10 +310,7 @@ func SearchUnifiedOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]
 	return hits, nil
 }
 
-// LegacyMirrorSearchSQL is the transition-window mirror query over the
-// legacy index. It carries the representation filter, so a converted
-// session's leftover mirror rows never return beside the body hit.
-const LegacyMirrorSearchSQL = `SELECT
+const legacySearchColumns = `
     f.session_id,
     f.entry_index,
     e.role,
@@ -311,7 +322,12 @@ const LegacyMirrorSearchSQL = `SELECT
     COALESCE(s.git_branch, ''),
     COALESCE(p.canonical_remote, ''),
     COALESCE(p.canonical_cwd, ''),
-    COALESCE(s.git_worktree, '')
+    COALESCE(s.git_worktree, '')`
+
+// legacySearchSQLTemplate shares the legacy row universe between ranked and
+// existence reads. The representation filter keeps converted sessions' leftover
+// mirror rows from returning beside body hits.
+const legacySearchSQLTemplate = `SELECT%s
 FROM session_entries_fts f
 JOIN session_entries e ON e.rowid = f.rowid
 JOIN sessions s        ON s.session_id = f.session_id
@@ -330,9 +346,21 @@ WHERE session_entries_fts MATCH ?
       SELECT pe.content_preview FROM session_entries pe
       WHERE pe.session_id = e.session_id AND pe.entry_index = e.parent_index
     )
-  )
-ORDER BY rank, f.session_id, f.entry_index
-LIMIT ? OFFSET ?`
+  )%s
+%s`
+
+func renderLegacySearchSQL(filters SearchFilters, columns, tail string) (string, []any) {
+	predicate, args := searchFilterSQL(filters)
+	return fmt.Sprintf(legacySearchSQLTemplate, columns, predicate, tail), args
+}
+
+func legacySearchSQL(filters SearchFilters) (string, []any) {
+	return renderLegacySearchSQL(filters, legacySearchColumns, searchRankedTail)
+}
+
+func legacySearchExistsSQL(filters SearchFilters) (string, []any) {
+	return renderLegacySearchSQL(filters, " 1", "LIMIT 1")
+}
 
 // searchTableExists reports whether a table exists on the caller's connection.
 func searchTableExists(conn *sqlite.Conn, table string) bool {
@@ -363,17 +391,19 @@ func UnifiedSearchIndexExists(conn *sqlite.Conn) bool {
 // exists. Both sides are read with the full window so the merged pagination
 // never skips a row that ranks past one side's bound. Pairs deduplicate by
 // session and entry, with the unified body hit winning.
-func SearchMergedOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]UnifiedSearchHit, error) {
+// Filters narrow both indexes before ranking and pagination; their zero value
+// preserves the unfiltered SQL byte for byte.
+func SearchMergedOnConn(conn *sqlite.Conn, match string, limit, offset int, filters SearchFilters) ([]UnifiedSearchHit, error) {
 	legacy := LegacySearchIndexExists(conn)
 	unified := UnifiedSearchIndexExists(conn)
 	switch {
 	case legacy && unified:
 		window := limit + offset
-		legacyHits, err := searchLegacyOnConn(conn, match, window, 0)
+		legacyHits, err := searchLegacyOnConn(conn, match, window, 0, filters)
 		if err != nil {
 			return nil, err
 		}
-		unifiedHits, err := SearchUnifiedOnConn(conn, match, window, 0)
+		unifiedHits, err := searchUnifiedOnConn(conn, match, window, 0, filters)
 		if err != nil {
 			return nil, err
 		}
@@ -398,18 +428,20 @@ func SearchMergedOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]U
 		}
 		return append([]UnifiedSearchHit(nil), deduped[offset:end]...), nil
 	case unified:
-		return SearchUnifiedOnConn(conn, match, limit, offset)
+		return searchUnifiedOnConn(conn, match, limit, offset, filters)
 	case legacy:
-		return searchLegacyOnConn(conn, match, limit, offset)
+		return searchLegacyOnConn(conn, match, limit, offset, filters)
 	default:
 		return nil, fmt.Errorf("store: search %q at offset %d with limit %d: no search index exists; run `peasant harvest index` to build one", match, offset, limit)
 	}
 }
 
-func searchLegacyOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]UnifiedSearchHit, error) {
+func searchLegacyOnConn(conn *sqlite.Conn, match string, limit, offset int, filters SearchFilters) ([]UnifiedSearchHit, error) {
+	query, args := legacySearchSQL(filters)
+	args = append(append([]any{match}, args...), limit, offset)
 	var hits []UnifiedSearchHit
-	if err := sqlitex.Execute(conn, LegacyMirrorSearchSQL, &sqlitex.ExecOptions{
-		Args: []any{match, limit, offset},
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			hits = append(hits, UnifiedSearchHit{
 				SessionID:   stmt.ColumnText(0),
@@ -431,6 +463,57 @@ func searchLegacyOnConn(conn *sqlite.Conn, match string, limit, offset int) ([]U
 		return nil, fmt.Errorf("store: search the legacy mirror index for %q at offset %d with limit %d: %w", match, offset, limit, err)
 	}
 	return hits, nil
+}
+
+// SearchMatchesAnyOnConn checks the same row universe as ranked search without
+// ranking, snippets, ordering or merging. Each index read stops at its first
+// match. The caller owns the snapshot, format validation and rebuild refusal.
+func SearchMatchesAnyOnConn(conn *sqlite.Conn, match string, filters SearchFilters) (bool, error) {
+	legacy := LegacySearchIndexExists(conn)
+	unified := UnifiedSearchIndexExists(conn)
+	if !legacy && !unified {
+		return false, fmt.Errorf("store: check for search matches for %q: no search index exists; run `peasant harvest index` to build one", match)
+	}
+	if unified {
+		query, args := unifiedSearchExistsSQL(filters)
+		found, err := searchExistsOnConn(conn, query, append([]any{match}, args...))
+		if err != nil || found {
+			return found, err
+		}
+	}
+	if legacy {
+		query, args := legacySearchExistsSQL(filters)
+		return searchExistsOnConn(conn, query, append([]any{match}, args...))
+	}
+	return false, nil
+}
+
+func searchExistsOnConn(conn *sqlite.Conn, query string, args []any) (bool, error) {
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+		Args:       args,
+		ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+	}); err != nil {
+		return false, fmt.Errorf("store: check for an indexed transcript match: %w; no match determination was made; run `peasant harvest verify --content` to inspect the index before retrying", err)
+	}
+	return found, nil
+}
+
+// HasAnySessions reports whether the store contains a session without counting
+// the full table. It is used to explain an empty search result.
+func (s *Store) HasAnySessions(ctx context.Context) (bool, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return false, fmt.Errorf("store: take connection to check for sessions: %w", err)
+	}
+	defer s.pool.Put(conn)
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM sessions LIMIT 1`, &sqlitex.ExecOptions{
+		ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
+	}); err != nil {
+		return false, fmt.Errorf("store: check whether any sessions exist: %w; could not diagnose the empty result; retry the read", err)
+	}
+	return found, nil
 }
 
 func sortUnifiedHits(hits []UnifiedSearchHit) {

@@ -1,0 +1,88 @@
+projects:
+  - hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    cwd: /workspace/alpha
+    remote: https://example.invalid/team/remote-alpha
+  - hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    cwd: /workspace/beta
+    remote: https://example.invalid/team/unrelated
+sessions:
+  - id: 11111111-1111-4111-8111-111111111111
+    project: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    harness: claude-code
+    start: 100
+    tags: [work]
+    entries: [cache cache cache]
+  - id: 22222222-2222-4222-8222-222222222222
+    project: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    harness: claude-code
+    start: 200
+    tags: [bug, chosen]
+    body: true
+    entries: [cache neutral, cache neutral, cache neutral]
+  - id: 33333333-3333-4333-8333-333333333333
+    project: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    harness: codex
+    start: 0
+    tags: [other]
+    entries: [cache neutral]
+cases:
+  - name: zero_filter
+    filters: {}
+    want: ["11111111-1111-4111-8111-111111111111:0", "33333333-3333-4333-8333-333333333333:0", "22222222-2222-4222-8222-222222222222:0", "22222222-2222-4222-8222-222222222222:1", "22222222-2222-4222-8222-222222222222:2"]
+  - name: project_remote_substring
+    filters: {project: remote-alpha}
+    want: ["11111111-1111-4111-8111-111111111111:0"]
+  - name: project_basename
+    filters: {project: beta}
+    want: ["33333333-3333-4333-8333-333333333333:0", "22222222-2222-4222-8222-222222222222:0", "22222222-2222-4222-8222-222222222222:1", "22222222-2222-4222-8222-222222222222:2"]
+  - name: harness
+    filters: {harness: codex}
+    want: &unknown ["33333333-3333-4333-8333-333333333333:0"]
+  - name: since_inclusive
+    filters: {since: 200}
+    want: &body ["22222222-2222-4222-8222-222222222222:0", "22222222-2222-4222-8222-222222222222:1", "22222222-2222-4222-8222-222222222222:2"]
+  - name: until_exclusive
+    filters: {until: 100}
+    want: *unknown
+  - name: tag_among_several
+    filters: {tag: chosen}
+    want: *body
+  - name: session_id_set
+    filters: {ids: ["22222222-2222-4222-8222-222222222222"]}
+    want: *body
+  - name: session_id_set_200
+    filters: {ids: ["22222222-2222-4222-8222-222222222222"]}
+    idSetSize: 200
+    want: *body
+  - name: all_combined
+    filters: {project: beta, harness: claude-code, since: 200, until: 201, tag: chosen, ids: ["22222222-2222-4222-8222-222222222222"]}
+    want: *body
+  - name: filter_excludes_higher_ranked
+    filters: {tag: chosen}
+    limit: 2
+    want: ["22222222-2222-4222-8222-222222222222:0", "22222222-2222-4222-8222-222222222222:1"]
+  - name: filter_paging_no_skip
+    filters: {tag: chosen}
+    limit: 2
+    offset: 2
+    want: ["22222222-2222-4222-8222-222222222222:2"]
+  - name: filter_since_unknown_start
+    filters: {harness: codex, since: 1}
+    want: []
+  - name: filter_until_unknown_start
+    filters: {harness: codex, until: 1}
+    want: *unknown
+  - name: no_match
+    query: absent
+    filters: {project: beta}
+    want: []
+  - name: mirror_only_match
+    filters: {project: alpha}
+    want: ["11111111-1111-4111-8111-111111111111:0"]
+  - name: filtered_out
+    filters: {project: missing}
+    want: []
+  - name: legacy_fallback_match
+    clearUnified: true
+    filters: {project: alpha}
+    want: ["11111111-1111-4111-8111-111111111111:0"]

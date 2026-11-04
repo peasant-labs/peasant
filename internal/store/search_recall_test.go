@@ -198,7 +198,7 @@ func recallProduction(t *testing.T, s *Store, term string) []UnifiedSearchHit {
 		t.Fatalf("take connection: %v", err)
 	}
 	defer s.pool.Put(conn)
-	hits, err := SearchMergedOnConn(conn, `"`+term+`"`, 50, 0)
+	hits, err := SearchMergedOnConn(conn, `"`+term+`"`, 50, 0, SearchFilters{})
 	if err != nil {
 		t.Fatalf("production search for %q: %v", term, err)
 	}

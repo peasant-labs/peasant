@@ -12,9 +12,8 @@ import (
 
 // SQL for the codemap read path. These queries run over existing tables only
 // without a migration; they live here, not in internal/store,
-// because they are Map/Review-specific aggregation inputs. The two search
-// queries alias the store's canonical text (built from the rowid-base
-// constant there), so this block is vars, not consts.
+// because they are Map/Review-specific aggregation inputs. Transcript search
+// delegates to the store's canonical reader instead of carrying SQL here.
 var (
 	// sqlProjectCwd resolves a project's canonical working directory and its
 	// git remote (for the projectlabel display-name preference). No row =>
@@ -99,32 +98,6 @@ ORDER BY v.target_session_id, v.type_id,
       ELSE 0
     END) DESC,
   v.created_at DESC, v.id`
-
-	// sqlSearch is the FTS5 transcript search. Ranked by bm25 (lower is
-	// better), then stable session and entry coordinates, and paged by the
-	// bound LIMIT/OFFSET. snippet()
-	// brackets the matched terms in the first indexed column group; -1 lets
-	// FTS5 pick the best-matching column. The JOIN back to session_entries by
-	// rowid (external-content) recovers the entry's role; the LEFT JOIN to
-	// projects resolves a display name (raw canonical_cwd, else the hash).
-	//
-	// The NOT-EXISTS clause de-duplicates the message-text echo: full-depth
-	// indexing stores a message's text on BOTH the depth=0 parent row
-	// (content_preview) AND its depth=1 text child (the same block, same
-	// truncation — claude_indexer/opencode_indexer), and the FTS triggers index
-	// every row. Without this filter a single message returns two hits and the
-	// LIMIT fills with duplicates. We drop a depth>0 row only when its
-	// content_preview exactly equals its parent's (the echo): unique
-	// multi-block depth>0 text (parent preview = first block only) and
-	// tool_input/tool_output matches (content_preview NULL or distinct) survive.
-	// The parent lookup is a PK point lookup on (session_id, entry_index).
-	sqlSearch = store.LegacyMirrorSearchSQL
-
-	// sqlSearchUnified is the consolidated transcript search over the one
-	// index. Its text lives in store.UnifiedSearchSQL so store tests prove
-	// the same production query the service runs; this name stays as the
-	// codemap alias.
-	sqlSearchUnified = store.UnifiedSearchSQL
 )
 
 // projectRow is one projects row.
@@ -165,7 +138,7 @@ type commitRow struct {
 	associationID schema.AssociationID
 }
 
-// searchRow is one FTS5 hit row (sqlSearch).
+// searchRow is one FTS5 hit row from the store's ranked search.
 type searchRow struct {
 	sessionID   string
 	entryIndex  int
@@ -191,7 +164,7 @@ type searchRow struct {
 // consolidated index over the union view. Both are read and merged by rank
 // with the representation filter, so a converted session never returns a
 // duplicate pair. After consolidation only the unified index is read.
-func (s *Service) querySearch(ctx context.Context, match string, limit, offset int) (_ []searchRow, retErr error) {
+func (s *Service) querySearch(ctx context.Context, match string, limit, offset int, filters SearchFilters) (_ []searchRow, retErr error) {
 	conn, err := s.store.Pool().Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("codemap: take connection: %w", err)
@@ -199,26 +172,57 @@ func (s *Service) querySearch(ctx context.Context, match string, limit, offset i
 	defer s.store.Pool().Put(conn)
 	endSnapshot := sqlitex.Save(conn)
 	defer endSnapshot(&retErr)
-	if err := s.store.ValidateAllIndexFormatsOnConn(conn); err != nil {
+	if err := s.validateSearchOnConn(conn); err != nil {
 		return nil, err
+	}
+	hits, err := store.SearchMergedOnConn(conn, match, limit, offset, filters)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]searchRow, 0, len(hits))
+	for _, hit := range hits {
+		projectHash, hashErr := schema.NewProjectHash(hit.ProjectHash)
+		if hashErr != nil {
+			return nil, fmt.Errorf("codemap: search row %q has invalid stored project hash at raw offset %d: %w; run `peasant ingest verify` and repair the store before retrying", hit.SessionID, offset, hashErr)
+		}
+		rows = append(rows, searchRow{
+			sessionID: hit.SessionID, entryIndex: hit.EntryIndex, role: hit.Role,
+			project: hit.Project, hash: projectHash, snippet: hit.Snippet, bm25: hit.Rank,
+			harness: hit.Harness, gitBranch: hit.GitBranch, gitRemote: hit.GitRemote,
+			projectName: hit.ProjectName, gitWorktree: hit.GitWorktree,
+		})
+	}
+	return rows, nil
+}
+
+// querySearchMatchesAny keeps the ranked read's snapshot and readiness checks,
+// but delegates to the bounded existence reader instead of materializing hits.
+func (s *Service) querySearchMatchesAny(ctx context.Context, match string, filters SearchFilters) (_ bool, retErr error) {
+	conn, err := s.store.Pool().Take(ctx)
+	if err != nil {
+		return false, fmt.Errorf("codemap: take connection to check for a transcript match: %w; no match determination was made; retry the search when the store is available", err)
+	}
+	defer s.store.Pool().Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateSearchOnConn(conn); err != nil {
+		return false, err
+	}
+	return store.SearchMatchesAnyOnConn(conn, match, filters)
+}
+
+// validateSearchOnConn applies the same readiness contract to ranked and
+// existence reads inside their snapshot. Neither path repairs the index.
+func (s *Service) validateSearchOnConn(conn *sqlite.Conn) error {
+	if err := s.store.ValidateAllIndexFormatsOnConn(conn); err != nil {
+		return err
 	}
 	if refuse, err := searchNeedsRebuildOnConn(conn); err != nil {
-		return nil, err
+		return err
 	} else if refuse {
-		return nil, store.SearchRefusalError()
+		return store.SearchRefusalError()
 	}
-	legacy := legacySearchIndexExists(conn)
-	unified := unifiedSearchIndexExists(conn)
-	switch {
-	case legacy && unified:
-		return s.querySearchMerged(conn, match, limit, offset)
-	case unified:
-		return runSearchQuery(conn, sqlSearchUnified, match, limit, offset)
-	case legacy:
-		return runSearchQuery(conn, sqlSearch, match, limit, offset)
-	default:
-		return nil, fmt.Errorf("codemap: search %q at raw offset %d with page limit %d: no search index exists; run `peasant harvest index` to build one", match, offset, limit)
-	}
+	return nil
 }
 
 // searchNeedsRebuildOnConn reports whether search must refuse on the
@@ -244,86 +248,6 @@ func searchNeedsRebuildOnConn(conn *sqlite.Conn) (bool, error) {
 		return false, fmt.Errorf("codemap: read the search rebuild flag: %w; run `peasant harvest verify --content` to inspect the index", err)
 	}
 	return needs, nil
-}
-
-func legacySearchIndexExists(conn *sqlite.Conn) bool {
-	found := false
-	_ = sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_entries_fts'`, &sqlitex.ExecOptions{
-		ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
-	})
-	return found
-}
-
-func unifiedSearchIndexExists(conn *sqlite.Conn) bool {
-	found := false
-	_ = sqlitex.ExecuteTransient(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_search_fts'`, &sqlitex.ExecOptions{
-		ResultFunc: func(*sqlite.Stmt) error { found = true; return nil },
-	})
-	return found
-}
-
-// querySearchMerged reads both indexes and merges by rank. It delegates to
-// the store's production merged search so codemap and store tests prove one
-// query, then shapes the hits into search rows.
-func (s *Service) querySearchMerged(conn *sqlite.Conn, match string, limit, offset int) ([]searchRow, error) {
-	hits, err := store.SearchMergedOnConn(conn, match, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	rows := make([]searchRow, 0, len(hits))
-	for _, hit := range hits {
-		projectHash, hashErr := schema.NewProjectHash(hit.ProjectHash)
-		if hashErr != nil {
-			return nil, fmt.Errorf("codemap: search row %q has invalid stored project hash at raw offset %d: %w; run `peasant ingest verify` and repair the store before retrying", hit.SessionID, offset, hashErr)
-		}
-		rows = append(rows, searchRow{
-			sessionID:   hit.SessionID,
-			entryIndex:  hit.EntryIndex,
-			role:        hit.Role,
-			project:     hit.Project,
-			hash:        projectHash,
-			snippet:     hit.Snippet,
-			bm25:        hit.Rank,
-			harness:     hit.Harness,
-			gitBranch:   hit.GitBranch,
-			gitRemote:   hit.GitRemote,
-			projectName: hit.ProjectName,
-			gitWorktree: hit.GitWorktree,
-		})
-	}
-	return rows, nil
-}
-
-func runSearchQuery(conn *sqlite.Conn, sql, match string, limit, offset int) ([]searchRow, error) {
-	var rows []searchRow
-	err := sqlitex.ExecuteTransient(conn, sql, &sqlitex.ExecOptions{
-		Args: []any{match, limit, offset},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			projectHash, hashErr := schema.NewProjectHash(stmt.ColumnText(4))
-			if hashErr != nil {
-				return fmt.Errorf("codemap: search row %q has invalid stored project hash at raw offset %d: %w; run `peasant ingest verify` and repair the store before retrying", stmt.ColumnText(0), offset, hashErr)
-			}
-			rows = append(rows, searchRow{
-				sessionID:   stmt.ColumnText(0),
-				entryIndex:  stmt.ColumnInt(1),
-				role:        stmt.ColumnText(2),
-				project:     stmt.ColumnText(3),
-				hash:        projectHash,
-				snippet:     stmt.ColumnText(5),
-				bm25:        stmt.ColumnFloat(6),
-				harness:     stmt.ColumnText(7),
-				gitBranch:   stmt.ColumnText(8),
-				gitRemote:   stmt.ColumnText(9),
-				projectName: stmt.ColumnText(10),
-				gitWorktree: stmt.ColumnText(11),
-			})
-			return nil
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("codemap: search %q at raw offset %d with page limit %d: %w", match, offset, limit, err)
-	}
-	return rows, nil
 }
 
 // queryProjectCwd returns (canonicalCwd, canonicalRemote, found). found=false

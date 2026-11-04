@@ -1402,22 +1402,18 @@ func TestPushCmd_JSONOutput(t *testing.T) {
 	dir := t.TempDir()
 	writeTestCredentials(t, dir)
 
-	output, err := executePushCmd(t, dir, []string{"--dry-run", "--json"})
+	args := []string{"--dry-run", "--json"}
+	seedClosedStoreForForecast(t, dir, args)
+	output, stderr, err := executeWithDataDirStreams(t, BuildPushCommand(), dir, args)
 	if err != nil {
-		t.Fatalf("push --dry-run --json: unexpected error: %v\noutput: %s", err, output)
+		t.Fatalf("push --dry-run --json: unexpected error: %v\nstdout: %s\nstderr: %s", err, output, stderr)
 	}
 
-	// The dry-run header is printed before the JSON body even with --json.
-	// Extract only the JSON portion (starts at the first '{').
-	jsonStart := strings.Index(output, "{")
-	if jsonStart < 0 {
-		t.Fatalf("--json output contains no JSON object; got: %q", output)
-	}
-	jsonPart := output[jsonStart:]
-
+	// Config notices belong to stderr and must not be parsed as part of the
+	// document, nor should a header or other text be tolerated on stdout.
 	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonPart), &result); err != nil {
-		t.Fatalf("--json output is not valid JSON: %v\njson portion: %q", err, jsonPart)
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("--json output is not valid JSON: %v\nstdout: %q", err, output)
 	}
 
 	// The empty-store case returns {"empty_reason": "...", "sessions": null, ...}.

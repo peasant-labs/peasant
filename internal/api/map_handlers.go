@@ -295,6 +295,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
+	// The published contract documents this cap; the flat and grouped views
+	// share one route and therefore one number.
+	if limit > codemap.SearchHTTPMaxLimit {
+		limit = codemap.SearchHTTPMaxLimit
+	}
 
 	// view is opt-in. Omission preserves the exact legacy search payload; only
 	// the published grouped value selects the grouped response.

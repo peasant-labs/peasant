@@ -1,0 +1,7 @@
+requiredNames:
+  - below_zero
+  - zero
+  - one
+  - inside_range
+  - at_max
+  - above_max

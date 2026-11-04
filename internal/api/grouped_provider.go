@@ -90,23 +90,21 @@ func scopeGroupedRowsToProject(rows []store.SessionRow, project schema.ProjectHa
 // selection decision. A session whose entries were never indexed keeps no
 // entries; the returned rows follow first-seen ranked order.
 func (p *StoreDataProvider) groupedSearchRows(ctx context.Context, query string, limit int) (map[string][]schema.SearchResult, []store.SessionRow, error) {
-	if limit <= 0 {
-		limit = codemap.SearchDefaultLimit
-	}
+	limit = codemap.ClampSearchLimit(limit)
 	matches := make(map[string][]schema.SearchResult)
 	rankedIDs := make([]string, 0)
 	entries := 0
 	offset := 0
 	for {
-		page, err := p.codemap.SearchRankedWindow(ctx, query, codemap.SearchMaxLimit, offset)
+		page, err := p.codemap.SearchRankedWindow(ctx, query, limit, offset)
 		if err != nil {
 			return nil, nil, fmt.Errorf("store adapter: grouped search ranked window at offset %d: %w", offset, err)
 		}
-		window := page.Results
-		if len(window) == 0 {
+		results := page.Results
+		if len(results) == 0 {
 			break
 		}
-		for _, result := range window {
+		for _, result := range results {
 			if entries >= limit {
 				break
 			}
@@ -116,8 +114,8 @@ func (p *StoreDataProvider) groupedSearchRows(ctx context.Context, query string,
 			matches[result.SessionID] = append(matches[result.SessionID], result)
 			entries++
 		}
-		offset += len(window)
-		if entries >= limit || len(window) < codemap.SearchMaxLimit {
+		offset += len(results)
+		if entries >= limit || len(results) < limit {
 			break
 		}
 	}

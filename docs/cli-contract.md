@@ -200,6 +200,7 @@ resolves the names), or a `--collective` confirmation it cannot ask for. Under
 | `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, `refused` and `refusal_reasons` counts in the document, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused: 1 strict_capture_refused; peasant harvest index re-indexes 1 of them`. It exits 1 when it refuses any session, and the sessions it did export stay written |
 | `redact` | `--sessions-from` |
 | `sessions prompts` | `--json` with `warnings`, `empty_code` and `empty_reason`; a refused call exits 2 before the store opens |
+| `sessions search` | `--json` preserves the ranked search payload alongside `warnings`, `empty_code` and `empty_reason`; `--sessions-from`; invocation refusals exit 2 before the store opens |
 | `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`, with a per-session `plan` (below) |
 | `upgrade` | `-y` |
 

@@ -1,0 +1,19 @@
+required:
+  - zero_filter
+  - project_remote_substring
+  - project_basename
+  - harness
+  - since_inclusive
+  - until_exclusive
+  - tag_among_several
+  - session_id_set
+  - session_id_set_200
+  - all_combined
+  - filter_excludes_higher_ranked
+  - filter_paging_no_skip
+  - filter_since_unknown_start
+  - filter_until_unknown_start
+  - no_match
+  - mirror_only_match
+  - filtered_out
+  - legacy_fallback_match

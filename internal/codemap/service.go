@@ -29,6 +29,10 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// SearchFilters narrows the session set before transcript ranking and pagination.
+// Store owns the predicates; the zero value preserves unfiltered search.
+type SearchFilters = store.SearchFilters
+
 // Sentinel errors. The API layer maps ErrProjectNotFound to 404; the others
 // surface as request errors on the Review endpoints.
 var (
@@ -80,7 +84,7 @@ const (
 	// Search caps. A query shorter than searchMinQueryLen (after
 	// trimming) short-circuits to an empty payload without touching the index.
 	searchDefaultLimit = 20
-	searchMaxLimit     = 50
+	searchMaxLimit     = 500
 	searchMinQueryLen  = 2
 
 	// SearchDefaultLimit and SearchMaxLimit publish the flat search route's page
@@ -90,6 +94,12 @@ const (
 	// keeps the grouped page and the flat page in the same units.
 	SearchDefaultLimit = searchDefaultLimit
 	SearchMaxLimit     = searchMaxLimit
+
+	// SearchHTTPMaxLimit is the cap the local HTTP route enforces. The published
+	// schema contract documents this number, so raising it is a contract change
+	// (schema PR, tag, re-pin), not a local edit. Local callers that are not
+	// bound by that contract — the CLI — use SearchMaxLimit.
+	SearchHTTPMaxLimit = 50
 )
 
 // Service computes the Map/Review payloads for one peasant store.
@@ -246,13 +256,21 @@ func (s *Service) ChangeDiff(ctx context.Context, projectHash schema.ProjectHash
 // clamped to searchMaxLimit. Search is global (no projectHash), so it has no
 // ErrProjectNotFound path.
 func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.SearchPayload, error) {
+	return s.searchRankedWindow(ctx, query, ClampSearchLimit(limit), 0, SearchFilters{})
+}
+
+// ClampSearchLimit applies the one page-size rule every search consumer shares:
+// a non-positive limit means "use the default", and a limit above the maximum
+// is clamped rather than refused. Callers reject a non-integer before this;
+// they must not invent their own bound.
+func ClampSearchLimit(limit int) int {
 	switch {
 	case limit <= 0:
-		limit = searchDefaultLimit
+		return searchDefaultLimit
 	case limit > searchMaxLimit:
-		limit = searchMaxLimit
+		return searchMaxLimit
 	}
-	return s.searchRankedWindow(ctx, query, limit, 0)
+	return limit
 }
 
 // SearchRankedWindow reads ONE page of the same ranked global full-text search
@@ -267,25 +285,34 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.
 // unchanged. window is the raw ranked row cap, exactly like the flat route's
 // limit: a window shorter than requested means the ranked stream is exhausted.
 func (s *Service) SearchRankedWindow(ctx context.Context, query string, window, offset int) (*schema.SearchPayload, error) {
+	return s.SearchRankedWindowFiltered(ctx, query, window, offset, SearchFilters{})
+}
+
+// SearchRankedWindowFiltered reads one ranked page after narrowing the session
+// set in SQL. Identity lookups remain filter-blind. window must be in
+// 1..SearchMaxLimit and offset must be non-negative; neither is silently clamped.
+func (s *Service) SearchRankedWindowFiltered(ctx context.Context, query string, window, offset int, filters SearchFilters) (*schema.SearchPayload, error) {
+	// Name the actual guard site for both entry points: SearchRankedWindow
+	// delegates here, so a refusal identifies the function that rejected it.
 	if window <= 0 || window > searchMaxLimit {
 		return nil, fmt.Errorf(
-			"codemap: ranked search window %d is outside the supported 1..%d range in codemap.Service.SearchRankedWindow; a caller iterating the ranked stream cannot page a window the flat search contract does not allow, and no search results were read; clamp the window to the flat search bounds and retry",
+			"codemap: ranked search window %d is outside the supported 1..%d range in codemap.Service.SearchRankedWindowFiltered (also used by codemap.Service.SearchRankedWindow); a caller iterating the ranked stream cannot page a window the flat search contract does not allow, and no search results were read; clamp the window to the flat search bounds and retry",
 			window, searchMaxLimit,
 		)
 	}
 	if offset < 0 {
 		return nil, fmt.Errorf(
-			"codemap: ranked search offset %d is negative in codemap.Service.SearchRankedWindow; a ranked offset addresses a position in the search stream and cannot be negative, and no search results were read; pass the count of ranked rows already consumed and retry",
+			"codemap: ranked search offset %d is negative in codemap.Service.SearchRankedWindowFiltered (also used by codemap.Service.SearchRankedWindow); a ranked offset addresses a position in the search stream and cannot be negative, and no search results were read; pass the count of ranked rows already consumed and retry",
 			offset,
 		)
 	}
-	return s.searchRankedWindow(ctx, query, window, offset)
+	return s.searchRankedWindow(ctx, query, window, offset, filters)
 }
 
 // searchRankedWindow is the shared implementation behind Search and
 // SearchRankedWindow: classify a raw id or hash ahead of the FTS path, then
 // sanitize, read one ranked page, and shape the payload.
-func (s *Service) searchRankedWindow(ctx context.Context, query string, limit, offset int) (*schema.SearchPayload, error) {
+func (s *Service) searchRankedWindow(ctx context.Context, query string, limit, offset int, filters SearchFilters) (*schema.SearchPayload, error) {
 	payload := schema.NewSearchPayload(query)
 
 	if len(strings.TrimSpace(query)) < searchMinQueryLen {
@@ -299,7 +326,7 @@ func (s *Service) searchRankedWindow(ctx context.Context, query string, limit, o
 		return payload, nil
 	}
 
-	rows, err := s.querySearch(ctx, match, limit, offset)
+	rows, err := s.querySearch(ctx, match, limit, offset, filters)
 	if err != nil {
 		return nil, err
 	}
@@ -317,6 +344,20 @@ func (s *Service) searchRankedWindow(ctx context.Context, query string, limit, o
 		})
 	}
 	return payload, nil
+}
+
+// SearchMatchesAny reports whether indexed transcript text matches query within
+// filters, without ranking, snippets, or payload shaping. This diagnostic probe
+// is independent of page offset and does not perform identity lookups.
+func (s *Service) SearchMatchesAny(ctx context.Context, query string, filters SearchFilters) (bool, error) {
+	if len(strings.TrimSpace(query)) < searchMinQueryLen {
+		return false, nil
+	}
+	match := sanitizeFTSQuery(query)
+	if match == "" {
+		return false, nil
+	}
+	return s.querySearchMatchesAny(ctx, match, filters)
 }
 
 // sanitizeFTSQuery turns raw user input into a safe FTS5 MATCH string: each

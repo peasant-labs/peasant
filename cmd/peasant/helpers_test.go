@@ -29,14 +29,22 @@ func newTestRoot() *cobra.Command {
 // file is read; commands fall back to built-in defaults).
 func executeWithDataDir(t *testing.T, sub *cobra.Command, dir string, args []string) (string, error) {
 	t.Helper()
+	stdout, stderr, err := executeWithDataDirStreams(t, sub, dir, args)
+	return stdout + stderr, err
+}
+
+// executeWithDataDirStreams is the single invocation driver. Separate streams
+// let machine-readable commands prove that diagnostics never pollute stdout.
+func executeWithDataDirStreams(t *testing.T, sub *cobra.Command, dir string, args []string) (string, string, error) {
+	t.Helper()
 	root := newTestRoot()
 	root.AddCommand(sub)
-	var buf bytes.Buffer
-	root.SetOut(&buf)
-	root.SetErr(&buf)
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
 	root.SetArgs(append([]string{"--data-dir", dir, "--config-dir", dir, "--state-dir", dir, sub.Name()}, args...))
 	err := root.Execute()
-	return buf.String(), err
+	return stdout.String(), stderr.String(), err
 }
 
 // buildTestRootCmd constructs the root command tree for testing using the real
