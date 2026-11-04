@@ -63,10 +63,10 @@ func TestSearchServesAtMostTheDocumentedCap(t *testing.T) {
 
 // TestGroupedSearchServesAtMostTheDocumentedCap pins the same cap on the grouped
 // view. The clamp runs before the view is dispatched, so this is the test that
-// fails if it moves below the `view=grouped` branch: the grouped read would then
-// hand the ranked reader an oversized window and answer with more matches than
-// the contract documents. Each seeded session contributes one matching entry, so
-// the number of returned items IS the number of matches kept.
+// fails if it moves below the `view=grouped` branch: the grouped read then hands
+// the ranked reader an oversized window, which it refuses, and the request fails
+// instead of being served at the cap. Each seeded session contributes one
+// matching entry, so the number of returned items IS the number of matches kept.
 func TestGroupedSearchServesAtMostTheDocumentedCap(t *testing.T) {
 	db := storetest.Open(t)
 	seedCapSessions(t, db)

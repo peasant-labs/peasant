@@ -85,14 +85,19 @@ func scopeGroupedRowsToProject(rows []store.SessionRow, project schema.ProjectHa
 
 // groupedSearchRows reads the flat ranked search page and groups its matched
 // entries by session. The requested page IS the read: the ranked window is the
-// clamped page size, so one read serves the grouped view and the grouped page
-// measures its limit in the same units as the flat page. No eligibility
-// judgement is applied: the grouped view shows the same stored matches the flat
-// route shows, so an ingested hit can never be displaced by a selection
-// decision. A session whose entries were never indexed keeps no entries; the
-// returned rows follow first-seen ranked order.
+// page size, so one read serves the grouped view and the grouped page measures
+// its limit in the same units as the flat page. Only the absent limit is filled
+// in here; a positive limit is passed through, because the route clamps it to
+// the documented cap and the ranked reader refuses a window above that cap, so a
+// caller that skips the route fails closed instead of being silently widened. No
+// eligibility judgement is applied: the grouped view shows the same stored
+// matches the flat route shows, so an ingested hit can never be displaced by a
+// selection decision. A session whose entries were never indexed keeps no
+// entries; the returned rows follow first-seen ranked order.
 func (p *StoreDataProvider) groupedSearchRows(ctx context.Context, query string, limit int) (map[string][]schema.SearchResult, []store.SessionRow, error) {
-	limit = codemap.ClampSearchLimit(limit)
+	if limit <= 0 {
+		limit = codemap.SearchDefaultLimit
+	}
 	matches := make(map[string][]schema.SearchResult)
 	page, err := p.codemap.SearchRankedWindow(ctx, query, limit, 0)
 	if err != nil {
