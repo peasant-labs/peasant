@@ -1,6 +1,6 @@
 # Run release-validate's per-distribution snapshot matrix on release pull
 # requests before a tag is minted.
-.PHONY: build run clean web web-stub fmt fmt-check lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
+.PHONY: build run clean web web-stub fmt fmt-check lint check dev docs docs-cli-check docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
 
 VERSION ?=
 
@@ -99,7 +99,7 @@ lint: web-stub
 	# golangci-lint run ./...
 	./scripts/vet-go.sh
 
-check: fmt-check lint sqlite-source-audit
+check: fmt-check lint sqlite-source-audit docs-cli-check
 	@set -e; \
 	export CHECK_START_NS="$(CHECK_START_NS)"; \
 	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
@@ -272,6 +272,23 @@ docs: docs-cli
 docs-cli: go
 	./peasant docgen docs/cli
 	@echo "CLI docs generated in docs/cli/"
+
+# The reference pages are committed, so a command change must ship its pages.
+# `git status` rather than `git diff` because a new command also produces a new,
+# untracked page that a diff would miss. A checkout where git cannot answer must
+# fail closed: an unreadable status looks identical to a clean one.
+docs-cli-check:
+	@VERSION=0.0.0-dev $(MAKE) --no-print-directory docs-cli >/dev/null
+	@status="$$(git status --porcelain -- docs/cli)"; \
+	if [ "$$?" -ne 0 ]; then \
+		echo "::error::cannot verify docs/cli freshness: git status failed in this checkout"; \
+		exit 1; \
+	fi; \
+	if [ -n "$$status" ]; then \
+		echo "::error::docs/cli is stale; run 'make docs-cli' and commit the regenerated pages"; \
+		printf '%s\n' "$$status"; \
+		exit 1; \
+	fi
 
 docs-open: docs
 	xdg-open docs/api/index.html
