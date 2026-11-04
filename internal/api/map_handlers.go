@@ -295,10 +295,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	// The published contract documents this cap; the flat and grouped views
-	// share one route and therefore one number.
-	if limit > codemap.SearchHTTPMaxLimit {
-		limit = codemap.SearchHTTPMaxLimit
+	// The published contract documents this cap, so the route enforces exactly
+	// that number. The flat and grouped views share one route and one clamp; the
+	// clamp runs before the view branch so neither view can widen it.
+	if limit > codemap.SearchMaxLimit {
+		limit = codemap.SearchMaxLimit
 	}
 
 	// view is opt-in. Omission preserves the exact legacy search payload; only

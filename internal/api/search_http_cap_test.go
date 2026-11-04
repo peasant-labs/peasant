@@ -19,7 +19,7 @@ import (
 // seeded session contributes exactly one matching entry.
 func seedCapSessions(t *testing.T, db *store.Store) {
 	t.Helper()
-	for i := 0; i < codemap.SearchHTTPMaxLimit+10; i++ {
+	for i := 0; i < codemap.SearchMaxLimit+10; i++ {
 		seedHelperGroupSession(t, db, helperGroupListingSession{
 			ID:      fmt.Sprintf("cap-%03d", i),
 			StartMs: int64(1000 + i),
@@ -56,8 +56,8 @@ func TestSearchServesAtMostTheDocumentedCap(t *testing.T) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("decode search payload: %v", err)
 	}
-	if len(payload.Results) != codemap.SearchHTTPMaxLimit {
-		t.Fatalf("results = %d, want exactly %d (the documented cap)", len(payload.Results), codemap.SearchHTTPMaxLimit)
+	if len(payload.Results) != codemap.SearchMaxLimit {
+		t.Fatalf("results = %d, want exactly %d (the documented cap)", len(payload.Results), codemap.SearchMaxLimit)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestGroupedSearchServesAtMostTheDocumentedCap(t *testing.T) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("decode grouped search payload: %v", err)
 	}
-	if len(payload.Items) != codemap.SearchHTTPMaxLimit {
-		t.Fatalf("grouped items = %d, want exactly %d (the documented cap)", len(payload.Items), codemap.SearchHTTPMaxLimit)
+	if len(payload.Items) != codemap.SearchMaxLimit {
+		t.Fatalf("grouped items = %d, want exactly %d (the documented cap)", len(payload.Items), codemap.SearchMaxLimit)
 	}
 }

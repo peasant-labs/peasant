@@ -93,21 +93,17 @@ const (
 	// read. A caller that needs a deeper position narrows the query instead.
 	searchMaxOffset = 5000
 
-	// SearchDefaultLimit and SearchMaxLimit publish the search page bounds. The
-	// flat route, the grouped local view and the CLI all page in the same units,
-	// so one pair of numbers describes every search surface.
+	// SearchDefaultLimit and SearchMaxLimit publish the page bounds every search
+	// surface shares: the flat HTTP route, the grouped local view and the CLI all
+	// page in the same units. The HTTP route enforces SearchMaxLimit because the
+	// published contract documents that number, so changing it is a contract
+	// change (schema PR, tag, re-pin), not a local edit.
 	SearchDefaultLimit = searchDefaultLimit
 	SearchMaxLimit     = searchMaxLimit
 
 	// SearchMaxOffset publishes the offset bound so a caller can name it in its
 	// refusal instead of repeating the number.
 	SearchMaxOffset = searchMaxOffset
-
-	// SearchHTTPMaxLimit is the cap the local HTTP route enforces. The published
-	// schema contract documents this number, so raising it is a contract change
-	// (schema PR, tag, re-pin), not a local edit. Local callers that are not
-	// bound by that contract — the CLI — use SearchMaxLimit.
-	SearchHTTPMaxLimit = 50
 )
 
 // Service computes the Map/Review payloads for one peasant store.
