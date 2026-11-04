@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Generate THIRD_PARTY_NOTICES: the license texts of every third-party Go module
-# compiled into the peasant binary.
+# Generate THIRD_PARTY_NOTICES: the license texts of every third-party component
+# the peasant binary redistributes — the Go modules it links, and the C and C++
+# components compiled into the embedded regular-expression engine.
 #
 # WHY: `go build` produces a static binary that keeps none of its dependencies'
 # license files. peasant ships that binary through Homebrew, deb, and rpm. The
