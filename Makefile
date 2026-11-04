@@ -277,8 +277,8 @@ docs-cli: go
 # `git status` rather than `git diff` because a new command also produces a new,
 # untracked page that a diff would miss. A checkout where git cannot answer must
 # fail closed: an unreadable status looks identical to a clean one.
-docs-cli-check: go
-	@./peasant docgen docs/cli >/dev/null
+docs-cli-check:
+	@VERSION=0.0.0-dev $(MAKE) --no-print-directory docs-cli >/dev/null
 	@status="$$(git status --porcelain -- docs/cli)"; \
 	if [ "$$?" -ne 0 ]; then \
 		echo "::error::cannot verify docs/cli freshness: git status failed in this checkout"; \
