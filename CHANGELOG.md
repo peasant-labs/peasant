@@ -7,7 +7,13 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-04
+
 ### Added
+- Every publish to Village states which client built it: `client.name` is `peasant` and `client.version` is the running
+  binary's version. A build whose version is not SemVer, such as a `dev`
+  build, leaves `client` out. The field does not change a held transcript's
+  fingerprint, so an upgrade does not make a published transcript look changed.
 - `sessions list` selects sessions by what happened inside them. `--has` takes
   `subagent`, `skill`, `mcp`, `compact`, `clear`, `model-switch`, `background`
   and `partial`, and every named facet must hold. `--min-turns` and `--max-turns`
@@ -1048,6 +1054,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.14.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.14.0
 [0.13.5]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.5
 [0.13.4]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.4
 [0.13.3]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.3
