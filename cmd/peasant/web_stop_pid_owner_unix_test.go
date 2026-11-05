@@ -206,9 +206,9 @@ func TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone(t *testing.T) {
 	assertNotSignalled(t, "a same-named executable at another path", cmd, exited, stopWeb(port))
 }
 
-// TestCommandLineShowsFallsBackToPs keeps the non-Linux path working: with the
-// kernel's view unavailable, the helper still reads this process's own command
-// line, and still refuses a string no argument carries.
+// TestCommandLineShowsFallsBackToPs covers the helper's own fallback: with the
+// kernel's view unavailable it still reads this process's command line through
+// ps, and still refuses a string no argument carries.
 func TestCommandLineShowsFallsBackToPs(t *testing.T) {
 	if _, err := exec.LookPath("ps"); err != nil {
 		t.Skip("this host has no ps, so the fallback cannot run; the kernel path is covered by the tests above")

@@ -14,9 +14,8 @@ At most 500 rows are returned per page; a larger --limit is clamped, and
 list, --limit 0 is refused, and subagent sessions are never hidden. Scope filters
 narrow the ranked set before ranking; an identity query ignores them with a warning.
 A date-only --until covers that whole day. Output is local and receives no
-publish-time
-redaction pass. --json preserves the search payload (including score) alongside
-warnings and explicit empty reasons.
+publish-time redaction pass. --json preserves the search payload (including
+score) alongside warnings and explicit empty reasons.
 
 ```
 peasant sessions search <query> [flags]
