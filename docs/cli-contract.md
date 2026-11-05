@@ -49,8 +49,21 @@ space:
   each element carrying `sessionId` and `status`. Any other object is refused.
 
 From a review document only the sessions with status `clean` are taken. The same
-rule holds for an array of objects that carry both `sessionId` and `status`, so
-`jq .sessions` does not remove it. Each session left out is reported by the
+rule holds for any array object whose `status` is a review status (`clean`,
+`findings` or `error`), whichever of `id`, `session_id` or `sessionId` names
+it, so `jq .sessions` or renaming the key does not remove it. An object with
+`sessionId` and a status outside that set is refused. A reshaped review is
+refused rather than read:
+
+- an object shaped as a review finding (it carries `entryIndex`, or `kind` and
+  `rule`), such as a `jq` projection of `.findings[]`;
+- a review row that lost its `status` but kept its `findings`;
+- an object whose `id`, `session_id` and `sessionId` keys disagree;
+- an object that gives a key twice, or a key that differs from `id`,
+  `session_id`, `sessionId`, `status`, `sessions`, `findings`, `entryIndex`,
+  `kind` or `rule` only in case. Keys are matched exactly.
+
+Each session left out is reported by the
 receiving command as a `session_refused` warning, and a run continues with the
 clean ones. When no session is clean the input is refused with exit status 2,
 and the refusal names each session and its status (`village push` exits 3 for
