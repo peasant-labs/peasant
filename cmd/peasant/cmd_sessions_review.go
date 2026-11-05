@@ -111,8 +111,9 @@ func buildSessionsReviewCommandWith(deps sessionsReviewDeps) *cobra.Command {
 		Use:   "review",
 		Short: "Check sessions for what redaction leaves behind before you publish them",
 		Long: `Read each named session, run the configured redactor on it in memory, and
-report what is left: credentials in formats no rule knows, tool results that
-printed a credential file, other people's email addresses, links that anyone
+report what is left: credentials in formats no rule knows, passwords on a
+command line, tool calls that read or wrote a credential file, other people's
+email addresses, links that anyone
 holding them can open, and the redaction module's own advisory hits.
 
 Nothing is written. Findings hold a masked preview, never the matched text. A

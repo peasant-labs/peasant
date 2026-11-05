@@ -31,6 +31,11 @@ closedLists:
     - service-account.json
     - service_account.json
     - token.json
+  credentialFileNamePrefixes: [.env.]
+  credentialFileTemplateSuffixes: [.dist, .example, .sample, .template]
+  credentialFilePaths: [.kube/config]
+  passwordNameSuffixes: [password, passwd, passphrase, secret, token]
+  inlinePasswordCommands: [mysql, mysqldump, mysqladmin, mariadb, mariadb-dump]
   shareableHosts:
     - docs.google.com
     - drive.google.com
@@ -205,3 +210,88 @@ cases:
       - { kind: redaction_residue, entry: 1, role: tool, rule: residue_go_import_path, preview: "residue_go_import_path: ****", advisory: true }
       - { kind: redaction_residue, entry: 2, role: assistant, rule: residue_base64_long, preview: "residue_base64_long: ****", advisory: true }
       - { kind: redaction_residue, entry: 2, role: assistant, rule: residue_hex_long, preview: "residue_hex_long: ****", advisory: true }
+
+  # A Read tool prints its file with line-number prefixes, as cat -n does or as
+  # "1→". The line patterns see the line after the prefix.
+  - name: read_output_line_numbers_cat_n
+    entries:
+      - { role: tool, output: "     1\tACCESS_KEY=FAKEcanary0access1key\n     2\tSECRET_KEY=FAKE-canary-value-not-real-0123456789-abcd\n" }
+    want:
+      - { kind: credential_file_output, entry: 0, role: tool, rule: secret_env_listing, preview: "2 secret-named lines=****" }
+
+  - name: read_output_line_numbers_arrow
+    entries:
+      - { role: tool, output: "1→ACCESS_KEY=FAKEcanary0access1key\n2→SECRET_KEY=FAKE-canary-value-not-real-0123456789-abcd" }
+    want:
+      - { kind: credential_file_output, entry: 0, role: tool, rule: secret_env_listing, preview: "2 secret-named lines=****" }
+
+  - name: env_variant_and_kube_config_reads
+    entries:
+      - { role: assistant, toolCallId: call-1, toolInput: '{"file_path": "/srv/app/.env.local"}', toolKind: read }
+      - { role: tool, toolCallId: call-1, output: "     1\tFEATURE=on" }
+      - { role: assistant, toolCallId: call-2, toolInput: '{"file_path": "/srv/app/.env.production"}', toolKind: read }
+      - { role: tool, toolCallId: call-2, output: "     1\tFEATURE=on" }
+      - { role: assistant, toolCallId: call-3, toolInput: '{"file_path": "/home/dev/.kube/config"}', toolKind: read }
+      - { role: tool, toolCallId: call-3, output: "apiVersion: v1\nkind: Config" }
+    want:
+      - { kind: credential_file_output, entry: 1, role: tool, rule: credential_file_name, preview: ".env.local: content=****" }
+      - { kind: credential_file_output, entry: 3, role: tool, rule: credential_file_name, preview: ".env.production: content=****" }
+      - { kind: credential_file_output, entry: 5, role: tool, rule: credential_file_name, preview: ".kube/config: content=****" }
+
+  - name: env_template_and_plain_config_are_not_credentials
+    entries:
+      - { role: assistant, toolCallId: call-1, toolInput: '{"file_path": "/srv/app/.env.example"}', toolKind: read }
+      - { role: tool, toolCallId: call-1, output: "     1\tFEATURE=on" }
+      - { role: assistant, toolCallId: call-2, toolInput: '{"file_path": "/srv/app/config"}', toolKind: read }
+      - { role: tool, toolCallId: call-2, output: "     1\tFEATURE=on" }
+      - { role: assistant, toolCallId: call-3, toolInput: '{"file_path": "/srv/app/.environment"}', toolKind: read }
+      - { role: tool, toolCallId: call-3, output: "     1\tFEATURE=on" }
+
+  # A Write or Edit tool call carries the file content in its input, so writing a
+  # credential file publishes its content as reading one does.
+  - name: env_written_through_write_and_edit
+    entries:
+      - { role: assistant, toolCallId: call-1, toolInput: '{"file_path": "/srv/app/.env", "content": "FEATURE=on\n"}', toolKind: edit }
+      - { role: tool, toolCallId: call-1, output: "file written" }
+      - { role: assistant, toolCallId: call-2, toolInput: '{"file_path": "/srv/app/.env.production", "old_string": "FEATURE=off", "new_string": "FEATURE=on"}', toolKind: edit }
+      - { role: tool, toolCallId: call-2, output: "file edited" }
+    want:
+      - { kind: credential_file_output, entry: 0, role: assistant, rule: credential_file_write, preview: ".env: written content=****" }
+      - { kind: credential_file_output, entry: 2, role: assistant, rule: credential_file_write, preview: ".env.production: written content=****" }
+
+  - name: tool_output_json_array_is_decoded
+    entries:
+      - { role: tool, output: '[{"type": "text", "text": "ACCESS_KEY=FAKEcanary0access1key\nSECRET_KEY=FAKE-canary-value-not-real-0123456789-abcd"}]' }
+    want:
+      - { kind: credential_file_output, entry: 0, role: tool, rule: secret_env_listing, preview: "2 secret-named lines=****" }
+
+  # A password-named value is caught with symbols in it or with no digit.
+  - name: password_named_value_with_symbols_or_no_digit
+    entries:
+      - { role: user, text: "db_password = Xy7!kL9#mN2$pQ4%rS6^tU8&" }
+      - { role: user, text: "DB_PASSWORD=correct-horse-battery-staple-river" }
+      - { role: assistant, text: 'client_secret: "FAKE canary"' }
+    want:
+      - { kind: credential_assignment, entry: 0, role: user, rule: credential_name_value, preview: "db_password=**** (len<32)" }
+      - { kind: credential_assignment, entry: 1, role: user, rule: credential_name_value, preview: "DB_PASSWORD=**** (len 32-63)" }
+
+  - name: inline_mysql_password
+    entries:
+      - { role: assistant, toolInput: '{"command": "mysql -h db.internal -u root -pFAKEcanaryPw1 appdb"}', toolKind: execute }
+      - { role: user, text: "run mysqldump --user=root -pFAKE!canary appdb > dump.sql" }
+    want:
+      - { kind: credential_assignment, entry: 0, role: assistant, rule: inline_password_flag, preview: "mysql -p**** (len<32)" }
+      - { kind: credential_assignment, entry: 1, role: user, rule: inline_password_flag, preview: "mysqldump -p**** (len<32)" }
+
+  # Credential-like names on configuration, code and prompts are not values.
+  - name: password_like_names_without_a_value_ignored
+    entries:
+      - { role: tool, output: "PASSWORD_MIN_LENGTH=12\nTOKEN_TTL=3600\nPWD=/home/dev/projects/service-api" }
+      - { role: assistant, toolInput: '{"command": "mysql -u root -p appdb"}', toolKind: execute }
+      - { role: assistant, text: "const login = { password: hashedPassword, token: request.headers.authorization };" }
+      - { role: assistant, text: 'password = os.Getenv("DB_PASSWORD") and token: ${{ secrets.DEPLOY_TOKEN }}' }
+      - { role: assistant, text: "password: true, secret: null, api_token: $API_TOKEN, db_password: ********" }
+      - { role: assistant, text: "secret: https://vault.example.org/v1/app" }
+      - { role: assistant, text: "SECRET_MANAGER_REGION=us-west-2b" }
+      - { role: assistant, text: "PASSWORD_HASH_ALGORITHM=argon2id-v19" }
+      - { role: assistant, toolInput: '{"command": "mysql -u root -p\"\" appdb"}', toolKind: execute }

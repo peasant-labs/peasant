@@ -7,6 +7,7 @@
 package sessionreview
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/url"
@@ -72,7 +73,9 @@ func NewFindingKind(raw string) (FindingKind, error) {
 const (
 	ruleCredentialNameValue = "credential_name_value"
 	ruleCredentialFileName  = "credential_file_name"
+	ruleCredentialFileWrite = "credential_file_write"
 	ruleSecretEnvListing    = "secret_env_listing"
+	ruleInlinePassword      = "inline_password_flag"
 	ruleForeignEmail        = "foreign_email"
 )
 
@@ -107,6 +110,10 @@ type Options struct {
 const (
 	minAssignmentValueLength = 20
 	minAssignmentEntropy     = 3.5
+	// A value of a password-named name may hold symbols and no digit, so it is
+	// held to a shorter length and a lower entropy.
+	minPasswordValueLength   = 8
+	minPasswordEntropy       = 3.0
 	minEnvListingLines       = 2
 	minEnvListingValueLength = 12
 	maxPreviewNameLength     = 20
@@ -116,6 +123,18 @@ const (
 
 // secretNameParts is the closed list of words that make a name secret-shaped.
 var secretNameParts = []string{"key", "secret", "token", "password", "credential"}
+
+// PasswordNameSuffixes is the closed list of name endings, compared in lower
+// case, that name one credential value: DB_PASSWORD, pgpassword,
+// client_secret, GITHUB_TOKEN. The value of such a name is caught with symbols
+// in it or with no digit. A name that only contains the word, such as
+// PASSWORD_MIN_LENGTH or TOKEN_TTL, does not end with it.
+var PasswordNameSuffixes = []string{"password", "passwd", "passphrase", "secret", "token"}
+
+// InlinePasswordCommands is the closed list of commands whose -p<value> flag
+// is a password written on the command line. A -p followed by a space asks
+// for the password instead and is not a finding.
+var InlinePasswordCommands = []string{"mysql", "mysqldump", "mysqladmin", "mariadb", "mariadb-dump"}
 
 // CredentialFileNames is the closed list of file names whose content is a
 // credential. Names are compared in lower case.
@@ -139,6 +158,27 @@ var CredentialFileNames = []string{
 	"service_account.json",
 	"token.json",
 }
+
+// CredentialFileNamePrefixes is the closed list of file name beginnings whose
+// file is a credential, such as .env.local and .env.production. A name that
+// also ends with one of CredentialFileTemplateSuffixes is a template that
+// holds no values, and is not one.
+var CredentialFileNamePrefixes = []string{".env."}
+
+// CredentialFileTemplateSuffixes is the closed list of endings that make a
+// prefixed credential file name a template.
+var CredentialFileTemplateSuffixes = []string{".dist", ".example", ".sample", ".template"}
+
+// CredentialFilePaths is the closed list of path endings whose file is a
+// credential although its base name alone is common.
+var CredentialFilePaths = []string{".kube/config"}
+
+// writePathKeys and writeContentKeys are the tool input keys of a call that
+// writes a file: its path, and the content it writes.
+var (
+	writePathKeys    = []string{"file_path", "filePath", "path", "notebook_path"}
+	writeContentKeys = []string{"content", "new_string", "newString", "new_source", "edits"}
+)
 
 // ShareableHost is one document host whose URLs of a path shape grant access
 // to anyone holding the link. The first path segment of every shape is a fixed
@@ -170,6 +210,15 @@ var (
 	emailPattern    = regexp.MustCompile(`[\p{L}\p{N}._%+\-]+@[\p{L}\p{N}.\-]+\.\p{L}{2,}`)
 	urlPattern      = regexp.MustCompile(`https?://[^\s"'<>)\]]+`)
 	pathTokenSplits = regexp.MustCompile(`[\s"'=:,;()]+`)
+	// passwordAssignmentPattern takes a quoted value whole, or an unquoted one
+	// up to a space, quote, comma or semicolon, so symbols stay in it.
+	passwordAssignmentPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])["']?([A-Za-z_][A-Za-z0-9_.-]{0,63})["']?\s*[:=]\s*(?:"([^"\s]{8,128})"|'([^'\s]{8,128})'|([^\s"',;]{8,128}))`)
+	inlinePasswordPattern     = regexp.MustCompile(`(?:^|[^A-Za-z0-9_-])(` + strings.Join(InlinePasswordCommands, "|") + `)(?:[ \t][^\n|;&]*?)?[ \t]-p(\S+)`)
+	// lineNumberPrefix is the line number a Read tool prints ahead of each
+	// line, as cat -n does ("     1<TAB>") or as "1→".
+	lineNumberPrefix = regexp.MustCompile(`(?m)^[ \t]*[0-9]+(?:\t|→)`)
+	dottedIdentifier = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$`)
+	bareIdentifier   = regexp.MustCompile(`^[A-Za-z_]+$`)
 )
 
 // span is a byte range of a redacted text that a detector has reported.
@@ -203,6 +252,70 @@ func Review(entries []schema.SessionEntry, r redact.Redactor, opts Options) []Fi
 	return rv.findings
 }
 
+// reviewText is the text the detectors read: a JSON document decoded to its
+// strings, so an escaped newline is a line again, with the line numbers a Read
+// tool prints removed, so a line pattern sees the line itself.
+func reviewText(text string) string {
+	if decoded, ok := decodeJSONText(text); ok {
+		text = decoded
+	}
+	return lineNumberPrefix.ReplaceAllString(text, "")
+}
+
+// decodeJSONText renders a JSON document as text: an object member as
+// "key: value", in key order, and an array element on its own line. A string
+// that holds a newline starts on its own line, so its lines are lines.
+func decodeJSONText(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || !strings.ContainsRune(`[{"`, rune(trimmed[0])) {
+		return "", false
+	}
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil || decoder.More() {
+		return "", false
+	}
+	var out strings.Builder
+	writeJSONText(&out, "", value)
+	return out.String(), true
+}
+
+func writeJSONText(out *strings.Builder, key string, value any) {
+	prefix := ""
+	if key != "" {
+		prefix = key + ": "
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			writeJSONText(out, k, v[k])
+		}
+	case []any:
+		for _, element := range v {
+			writeJSONText(out, key, element)
+		}
+	case string:
+		if strings.Contains(v, "\n") {
+			if key != "" {
+				out.WriteString(key + ":\n")
+			}
+			out.WriteString(v + "\n")
+			return
+		}
+		out.WriteString(prefix + v + "\n")
+	case nil:
+		out.WriteString(prefix + "null\n")
+	default:
+		out.WriteString(prefix + fmt.Sprint(v) + "\n")
+	}
+}
+
 // toolCalls maps each tool call id to the redacted input of the call, so a
 // result can be paired with the call that produced it.
 func (rv *reviewer) toolCalls(entries []schema.SessionEntry) map[string]schema.SessionEntry {
@@ -220,15 +333,21 @@ func (rv *reviewer) toolCalls(entries []schema.SessionEntry) map[string]schema.S
 
 func (rv *reviewer) reviewEntry(entry *schema.SessionEntry, calls map[string]schema.SessionEntry) {
 	if entry.ContentPreview != nil {
-		rv.scan(entry, rv.redactor.RedactText(*entry.ContentPreview), entry.Role == schema.RoleUser, false)
+		rv.scan(entry, reviewText(rv.redactor.RedactText(*entry.ContentPreview)), entry.Role == schema.RoleUser, false)
 	}
 	if entry.ToolInput != nil {
-		rv.scan(entry, rv.redactor.RedactText(*entry.ToolInput), false, false)
+		input := rv.redactor.RedactText(*entry.ToolInput)
+		covered := false
+		if name, ok := credentialFileWrite(input); ok {
+			rv.add(newFinding(entry, KindCredentialFileOutput, ruleCredentialFileWrite, name+": written content="+masked))
+			covered = true
+		}
+		rv.scan(entry, reviewText(input), false, covered)
 	}
 	if entry.ToolOutput == nil {
 		return
 	}
-	output := rv.redactor.RedactText(*entry.ToolOutput)
+	output := reviewText(rv.redactor.RedactText(*entry.ToolOutput))
 	covered := false
 	if finding, ok := credentialFileFinding(entry, output, calls); ok {
 		rv.add(finding)
@@ -281,7 +400,59 @@ func (rv *reviewer) assignments(entry *schema.SessionEntry, text string) []span 
 		rv.add(newFinding(entry, KindCredentialAssignment, ruleCredentialNameValue, preview))
 		spans = append(spans, span{match[0], match[1]})
 	}
+	for _, match := range passwordAssignmentPattern.FindAllStringSubmatchIndex(text, -1) {
+		name := text[match[2]:match[3]]
+		var value string
+		for group := 4; group < len(match); group += 2 {
+			if match[group] >= 0 {
+				value = text[match[group]:match[group+1]]
+			}
+		}
+		if !passwordNamed(name) || !passwordShapedValue(value) {
+			continue
+		}
+		preview := previewName(name) + "=" + masked + " " + lengthClass(len(value))
+		rv.add(newFinding(entry, KindCredentialAssignment, ruleCredentialNameValue, preview))
+		spans = append(spans, span{match[0], match[1]})
+	}
+	for _, match := range inlinePasswordPattern.FindAllStringSubmatchIndex(text, -1) {
+		command := text[match[2]:match[3]]
+		value := strings.Trim(text[match[4]:match[5]], `"'`)
+		if value == "" || strings.HasPrefix(value, "$") || strings.ContainsAny(value, "<>") {
+			continue
+		}
+		preview := command + " -p" + masked + " " + lengthClass(len(value))
+		rv.add(newFinding(entry, KindCredentialAssignment, ruleInlinePassword, preview))
+		spans = append(spans, span{match[0], match[1]})
+	}
 	return spans
+}
+
+func passwordNamed(name string) bool {
+	lower := strings.ToLower(name)
+	return slices.ContainsFunc(PasswordNameSuffixes, func(suffix string) bool { return strings.HasSuffix(lower, suffix) })
+}
+
+// passwordShapedValue is a value a password-named name may hold: long enough,
+// not low in entropy, and not a placeholder, a reference, a path, a URL or a
+// code expression. It may hold symbols and need not hold a digit, but a value
+// of letters alone is an identifier, such as hashedPassword.
+func passwordShapedValue(value string) bool {
+	if len(value) < minPasswordValueLength || shannonEntropy(value) < minPasswordEntropy {
+		return false
+	}
+	if strings.ContainsAny(value, "<>(") || strings.Contains(value, "://") {
+		return false
+	}
+	for _, prefix := range []string{"$", "%", "{", "[", "/", "~/", "./", "../"} {
+		if strings.HasPrefix(value, prefix) {
+			return false
+		}
+	}
+	if dottedIdentifier.MatchString(value) || bareIdentifier.MatchString(value) {
+		return false
+	}
+	return strings.IndexFunc(value, unicode.IsLetter) >= 0
 }
 
 func secretNamed(name string) bool {
@@ -352,7 +523,8 @@ func credentialFileFinding(entry *schema.SessionEntry, output string, calls map[
 }
 
 // credentialFileRead returns the credential file name a tool call read. A call
-// that writes a file does not print it, so it never counts.
+// that writes a file does not print it, so it never counts here: its input is
+// reported by credentialFileWrite instead.
 func credentialFileRead(call schema.SessionEntry) (string, bool) {
 	if call.ToolInput == nil {
 		return "", false
@@ -360,13 +532,94 @@ func credentialFileRead(call schema.SessionEntry) (string, bool) {
 	if call.ToolKind != nil && (*call.ToolKind == schema.ToolCallKindEdit || *call.ToolKind == schema.ToolCallKindDelete) {
 		return "", false
 	}
+	if _, writes := writeInput(*call.ToolInput); writes {
+		return "", false
+	}
 	for _, token := range pathTokenSplits.Split(*call.ToolInput, -1) {
-		base := strings.ToLower(path.Base(strings.ReplaceAll(token, `\`, "/")))
-		if slices.Contains(CredentialFileNames, base) {
-			return base, true
+		if name, ok := credentialFileName(token); ok {
+			return name, true
 		}
 	}
 	return "", false
+}
+
+// credentialFileName returns how a preview names a credential file path: its
+// base name, or the path ending that makes it one.
+func credentialFileName(raw string) (string, bool) {
+	cleaned := strings.ToLower(strings.ReplaceAll(raw, `\`, "/"))
+	base := path.Base(cleaned)
+	if slices.Contains(CredentialFileNames, base) {
+		return base, true
+	}
+	if slices.ContainsFunc(CredentialFileNamePrefixes, func(prefix string) bool { return strings.HasPrefix(base, prefix) && len(base) > len(prefix) }) &&
+		!slices.ContainsFunc(CredentialFileTemplateSuffixes, func(suffix string) bool { return strings.HasSuffix(base, suffix) }) {
+		return base, true
+	}
+	for _, ending := range CredentialFilePaths {
+		if cleaned == ending || strings.HasSuffix(cleaned, "/"+ending) {
+			return ending, true
+		}
+	}
+	return "", false
+}
+
+// writeInput returns the path a tool call's JSON input writes content to. A
+// call writes when its input names a path and carries non-empty content, as a
+// Write or an Edit call does.
+func writeInput(input string) (string, bool) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(input), &fields); err != nil {
+		return "", false
+	}
+	content := slices.ContainsFunc(writeContentKeys, func(key string) bool {
+		raw, ok := fields[key]
+		return ok && hasText(raw)
+	})
+	if !content {
+		return "", false
+	}
+	for _, key := range writePathKeys {
+		var target string
+		if raw, ok := fields[key]; ok && json.Unmarshal(raw, &target) == nil && target != "" {
+			return target, true
+		}
+	}
+	return "", false
+}
+
+// hasText reports whether a JSON value holds a non-blank string anywhere.
+func hasText(raw json.RawMessage) bool {
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return false
+	}
+	var walk func(any) bool
+	walk = func(v any) bool {
+		switch v := v.(type) {
+		case string:
+			return strings.TrimSpace(v) != ""
+		case []any:
+			return slices.ContainsFunc(v, walk)
+		case map[string]any:
+			for _, element := range v {
+				if walk(element) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(value)
+}
+
+// credentialFileWrite returns the credential file name a tool call's input
+// writes content to.
+func credentialFileWrite(input string) (string, bool) {
+	target, ok := writeInput(input)
+	if !ok {
+		return "", false
+	}
+	return credentialFileName(target)
 }
 
 // secretEnvListing counts the secret-named NAME=value lines of an output. A

@@ -197,11 +197,37 @@ peasant sessions list --json --limit 20 | peasant sessions review --sessions-fro
 
 | kind | what it found |
 |---|---|
-| `credential_assignment` | A secret-named `name: value` whose value is long, high in entropy, and known to no rule. |
-| `credential_file_output` | A tool result from reading a credential-shaped file, or one listing two or more secret-named `NAME=value` lines. |
+| `credential_assignment` | A secret-named `name: value` whose value is long, high in entropy, and known to no rule; a password-named value with symbols in it or no digit; or a password written on a `mysql -p<password>` command line. |
+| `credential_file_output` | A tool result from reading a credential-shaped file, a tool call that writes content to one, or a tool result listing two or more secret-named `NAME=value` lines. |
 | `foreign_email` | An address that survived redaction and is not yours. Your addresses are your git identity and each `--owner-email`. |
 | `shareable_document_link` | A link on a closed list of document hosts that anyone holding it can open. |
 | `redaction_residue` | A hit from the redaction module's advisory rules. Advisory: see below. |
+
+The rules are closed lists, kept in `internal/sessionreview`:
+
+- A credential-shaped file is one named `.env`, `.netrc`, `.npmrc`, `.pgpass`,
+  `.pypirc`, `credentials`, `credentials.json`, `.credentials.json`,
+  `application_default_credentials.json`, `auth.json`, `id_rsa`, `id_ed25519`,
+  `secrets.json`, `secrets.yaml`, `secrets.yml`, `service-account.json`,
+  `service_account.json` or `token.json`; any `.env.<name>`, such as
+  `.env.local` or `.env.production`, except a template ending in `.example`,
+  `.sample`, `.template` or `.dist`; and a path ending in `.kube/config`. A
+  Write or Edit call that writes content to one is a finding on the call, as
+  reading one is a finding on its result.
+- A password-named value belongs to a name ending in `password`, `passwd`,
+  `passphrase`, `secret` or `token`, such as `DB_PASSWORD` or `client_secret`.
+  Its value may hold symbols and no digit, but it must be at least 8
+  characters, not low in entropy, and not a placeholder, a `$` reference, a
+  path, a URL, an identifier such as `hashedPassword`, or a code expression.
+  A name that only contains the word, such as `PASSWORD_MIN_LENGTH` or
+  `TOKEN_TTL`, does not count.
+- An inline password is the value of `-p` written against the flag on a
+  `mysql`, `mysqldump`, `mysqladmin`, `mariadb` or `mariadb-dump` command line.
+  A `-p` followed by a space asks for the password and is not a finding.
+
+Before the patterns run, a JSON tool result or input is decoded to its
+strings, so an escaped newline is a line again, and the line numbers a Read
+tool prints ahead of each line (`     1<TAB>` or `1→`) are removed.
 
 `redaction_residue` findings are advisory. The redaction module's rules are
 broad on purpose and also hit ordinary coding output, such as commit ids,

@@ -25,3 +25,12 @@ requiredNames:
   - repeated_finding_reported_once
   - preview_max_length
   - git_and_go_output_is_advisory_only
+  - read_output_line_numbers_cat_n
+  - read_output_line_numbers_arrow
+  - env_variant_and_kube_config_reads
+  - env_template_and_plain_config_are_not_credentials
+  - env_written_through_write_and_edit
+  - tool_output_json_array_is_decoded
+  - password_named_value_with_symbols_or_no_digit
+  - inline_mysql_password
+  - password_like_names_without_a_value_ignored

@@ -51,9 +51,14 @@ type detectorCase struct {
 
 type detectorsFixture struct {
 	ClosedLists struct {
-		FindingKinds        []string `yaml:"findingKinds"`
-		CredentialFileNames []string `yaml:"credentialFileNames"`
-		ShareableHosts      []string `yaml:"shareableHosts"`
+		FindingKinds                   []string `yaml:"findingKinds"`
+		CredentialFileNames            []string `yaml:"credentialFileNames"`
+		CredentialFileNamePrefixes     []string `yaml:"credentialFileNamePrefixes"`
+		CredentialFileTemplateSuffixes []string `yaml:"credentialFileTemplateSuffixes"`
+		CredentialFilePaths            []string `yaml:"credentialFilePaths"`
+		PasswordNameSuffixes           []string `yaml:"passwordNameSuffixes"`
+		InlinePasswordCommands         []string `yaml:"inlinePasswordCommands"`
+		ShareableHosts                 []string `yaml:"shareableHosts"`
 	} `yaml:"closedLists"`
 	Cases []detectorCase `yaml:"cases"`
 }
@@ -177,6 +182,17 @@ func TestDetectorClosedLists(t *testing.T) {
 	fixture := loadDetectorsFixture(t)
 	if !slices.Equal(sessionreview.CredentialFileNames, fixture.ClosedLists.CredentialFileNames) {
 		t.Errorf("CredentialFileNames = %v", sessionreview.CredentialFileNames)
+	}
+	for name, pair := range map[string][2][]string{
+		"CredentialFileNamePrefixes":     {sessionreview.CredentialFileNamePrefixes, fixture.ClosedLists.CredentialFileNamePrefixes},
+		"CredentialFileTemplateSuffixes": {sessionreview.CredentialFileTemplateSuffixes, fixture.ClosedLists.CredentialFileTemplateSuffixes},
+		"CredentialFilePaths":            {sessionreview.CredentialFilePaths, fixture.ClosedLists.CredentialFilePaths},
+		"PasswordNameSuffixes":           {sessionreview.PasswordNameSuffixes, fixture.ClosedLists.PasswordNameSuffixes},
+		"InlinePasswordCommands":         {sessionreview.InlinePasswordCommands, fixture.ClosedLists.InlinePasswordCommands},
+	} {
+		if !slices.Equal(pair[0], pair[1]) {
+			t.Errorf("%s = %v, want %v", name, pair[0], pair[1])
+		}
 	}
 	hosts := make([]string, 0, len(sessionreview.ShareableHosts))
 	for _, host := range sessionreview.ShareableHosts {
