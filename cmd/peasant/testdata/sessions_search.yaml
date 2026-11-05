@@ -11,6 +11,7 @@ seeds:
     projectPath: /synthetic/beta
     harness: codex
     startMs: 1767398399999 # final millisecond of Jan 2
+    tags: [bugfix, wip]
     entries: [caching with detailed notes, caching with detailed notes, caching with detailed notes]
   - sessionID: 33333333-3333-3333-3333-333333333333
     projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -432,10 +433,15 @@ cases:
     wantStdoutEmpty: true
     wantStderrContains: [invalid --until value]
     wantNoDBFile: true
-  - name: tag_not_exposed
-    setup: *none
-    args: [caching, --tag, example]
-    wantExit: 1
-    wantStdoutEmpty: true
-    wantStderrContains: ['unknown flag: --tag']
-    wantNoDBFile: true
+  - name: filter_tag_matches_one_session
+    setup: *seeded
+    args: [caching, --tag, bugfix, --json]
+    wantStdoutContains: ['22222222-222', '"results"']
+    wantStdoutNotContains: ['11111111-111']
+    wantStderrEmpty: true
+  - name: filter_tag_excludes_ranked_matches
+    setup: *seeded
+    args: [caching, --tag, absent, --json]
+    wantEmptyCode: filters_excluded_all
+    wantReasonContains: inside the filters
+    wantStderrEmpty: true

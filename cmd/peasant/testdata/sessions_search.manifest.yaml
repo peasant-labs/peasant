@@ -62,4 +62,5 @@ requiredNames:
   - harness_invalid
   - since_invalid
   - until_invalid
-  - tag_not_exposed
+  - filter_tag_matches_one_session
+  - filter_tag_excludes_ranked_matches

@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
@@ -52,6 +54,7 @@ type searchFixtureSeed struct {
 	Remote  *string          `yaml:"gitRemote"`
 	Harness defaults.Harness `yaml:"harness"`
 	Start   int64            `yaml:"startMs"`
+	Tags    []string         `yaml:"tags"`
 	Entries []string         `yaml:"entries"`
 }
 
@@ -156,6 +159,11 @@ func seedSearchFixtures(t *testing.T, db *store.Store, seeds []searchFixtureSeed
 	t.Helper()
 	for _, seed := range seeds {
 		seedOne(t, t.Context(), db, "search", seedOpts{SessionID: seed.ID, ProjectHash: seed.Hash, ProjectPath: seed.Path, GitRemote: seed.Remote, Harness: seed.Harness, StartMs: seed.Start})
+		if len(seed.Tags) > 0 {
+			if err := db.SetTags(t.Context(), ingest.SessionID(seed.ID), seed.Tags); err != nil {
+				t.Fatal(err)
+			}
+		}
 		var entries []schema.SessionEntry
 		for i, text := range seed.Entries {
 			entries = append(entries, schema.SessionEntry{SessionID: schema.SessionID(seed.ID), EntryIndex: i, Harness: seed.Harness, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &text})
@@ -342,13 +350,32 @@ func searchTableCells(line string) []string {
 // has no next page to offer, only a narrower query.
 func TestNextPageHintStopsAtTheOffsetBound(t *testing.T) {
 	t.Parallel()
-	if got := nextPageHint(codemap.SearchMaxOffset-10, 5); !strings.Contains(got, "--offset 4995") {
-		t.Fatalf("hint inside the bound = %q, want the next offset 4995", got)
+	atBound := strconv.Itoa(codemap.SearchMaxOffset)
+	if got := nextPageHint(codemap.SearchMaxOffset-5, 5); !strings.Contains(got, "--offset "+atBound) {
+		t.Fatalf("hint whose next page is exactly the bound = %q, want --offset %s", got, atBound)
 	}
-	if got := nextPageHint(codemap.SearchMaxOffset, 500); strings.Contains(got, "--offset") {
-		t.Fatalf("hint past the bound = %q, want no offset a reader would refuse", got)
+	if got := nextPageHint(codemap.SearchMaxOffset-4, 5); strings.Contains(got, "--offset") {
+		t.Fatalf("hint whose next page is past the bound = %q, want no offset a reader would refuse", got)
 	}
-	if got := nextPageHint(codemap.SearchMaxOffset, 500); !strings.Contains(got, "narrow the query") {
+	if got := nextPageHint(codemap.SearchMaxOffset-4, 5); !strings.Contains(got, "narrow the query") {
 		t.Fatalf("hint past the bound = %q, want the narrowing guidance", got)
+	}
+}
+
+// TestSearchWindowClampsToTheDocumentedCap observes the value the CLI actually
+// sends to the reader. A clamp that stops being applied, or an off-by-one that
+// lets the cap through, fails here rather than in a 500-row fixture.
+func TestSearchWindowClampsToTheDocumentedCap(t *testing.T) {
+	t.Parallel()
+	atCap, err := searchWindow(strconv.Itoa(codemap.SearchMaxLimit))
+	if err != nil || atCap != codemap.SearchMaxLimit {
+		t.Fatalf("searchWindow(%d) = %d, %v; want the cap unchanged", codemap.SearchMaxLimit, atCap, err)
+	}
+	aboveCap, err := searchWindow(strconv.Itoa(codemap.SearchMaxLimit + 1))
+	if err != nil || aboveCap != codemap.SearchMaxLimit {
+		t.Fatalf("searchWindow(%d) = %d, %v; want the documented cap", codemap.SearchMaxLimit+1, aboveCap, err)
+	}
+	if _, err := searchWindow("0"); err == nil {
+		t.Fatal("searchWindow(0) was accepted; sessions search refuses a zero page")
 	}
 }
