@@ -24,3 +24,4 @@ requiredNames:
   - link_is_not_also_residue
   - repeated_finding_reported_once
   - preview_max_length
+  - git_and_go_output_is_advisory_only

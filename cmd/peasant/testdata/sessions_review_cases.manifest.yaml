@@ -17,3 +17,4 @@ requiredNames:
   - level_refusals_match_redact
   - output_never_contains_value
   - read_only
+  - advisory_hits_leave_the_session_clean

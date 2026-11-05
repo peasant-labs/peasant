@@ -32,11 +32,12 @@ type detectorEntry struct {
 }
 
 type detectorWant struct {
-	Kind    string `yaml:"kind"`
-	Entry   int    `yaml:"entry"`
-	Role    string `yaml:"role"`
-	Rule    string `yaml:"rule"`
-	Preview string `yaml:"preview"`
+	Kind     string `yaml:"kind"`
+	Entry    int    `yaml:"entry"`
+	Role     string `yaml:"role"`
+	Rule     string `yaml:"rule"`
+	Preview  string `yaml:"preview"`
+	Advisory bool   `yaml:"advisory"`
 }
 
 type detectorCase struct {
@@ -44,6 +45,8 @@ type detectorCase struct {
 	OwnerEmails []string        `yaml:"ownerEmails"`
 	Entries     []detectorEntry `yaml:"entries"`
 	Want        []detectorWant  `yaml:"want"`
+	// WantClean, when set, asserts whether the findings leave the session clean.
+	WantClean *bool `yaml:"wantClean"`
 }
 
 type detectorsFixture struct {
@@ -128,6 +131,9 @@ func TestReviewDetectors(t *testing.T) {
 				}
 				return
 			}
+			if tc.WantClean != nil && sessionreview.Blocking(got) == *tc.WantClean {
+				t.Errorf("Blocking = %v, want clean = %v: %+v", sessionreview.Blocking(got), *tc.WantClean, got)
+			}
 			if len(got) != len(tc.Want) {
 				t.Fatalf("findings = %+v, want %+v", got, tc.Want)
 			}
@@ -136,6 +142,7 @@ func TestReviewDetectors(t *testing.T) {
 				wanted := sessionreview.Finding{
 					Kind: sessionreview.FindingKind(want.Kind), EntryIndex: want.Entry,
 					Role: schema.Role(want.Role), Rule: want.Rule, Preview: want.Preview,
+					Advisory: want.Advisory,
 				}
 				if finding != wanted {
 					t.Errorf("finding %d = %+v, want %+v", i, finding, wanted)

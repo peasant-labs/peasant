@@ -2,7 +2,8 @@
 # through the real redactor at the standard level, so a case that says nothing
 # is found proves the redactor removed it first. An entry's index is its
 # position. ownerEmails is the owner set. want lists the findings in order, and
-# an absent want means none. kinds lists finding kinds for a case that asserts
+# an absent want means none. advisory marks a finding of an advisory kind.
+# wantClean asserts that no finding blocks. kinds lists finding kinds for a case that asserts
 # only those.
 closedLists:
   findingKinds:
@@ -149,13 +150,13 @@ cases:
     entries:
       - { role: tool, output: "Bearer FAKEcanaryNOTaTOKEN" }
     want:
-      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****" }
+      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****", advisory: true }
 
   - name: git_remote_is_not_also_an_email_residue
     entries:
       - { role: user, text: "clone git@gitlab.com:acme/tools.git" }
     want:
-      - { kind: redaction_residue, entry: 0, role: user, rule: residue_git_remote_ssh, preview: "residue_git_remote_ssh: ****" }
+      - { kind: redaction_residue, entry: 0, role: user, rule: residue_git_remote_ssh, preview: "residue_git_remote_ssh: ****", advisory: true }
 
   - name: assignment_is_not_also_residue
     entries:
@@ -173,10 +174,34 @@ cases:
     entries:
       - { role: tool, output: "Bearer FAKEcanaryNOTaTOKEN then Bearer FAKEcanaryNOTaTOKEN" }
     want:
-      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****" }
+      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****", advisory: true }
 
   - name: preview_max_length
     entries:
       - { role: user, text: "an_extremely_long_secret_key_name_that_keeps_going_for_a_while: FAKE-canary-value-not-real-0123456789-abcd" }
       - { role: user, text: "write to andré@a-very-long-department-name.of-a-university.example.edu" }
       - { role: user, text: "https://a-very-long-tenant-name-of-a-company-somewhere.sharepoint.com/:w:/FAKEdocument" }
+
+  # Ordinary coding output: commit ids, module downloads, image digests, and
+  # long repository paths. The redact module's advisory rules hit on these, and
+  # their hits are reported as advisory only, so the session stays clean.
+  - name: git_and_go_output_is_advisory_only
+    entries:
+      - { role: assistant, toolCallId: call-1, toolInput: '{"command": "git log -3 --format=%H && go mod download -x"}', toolKind: execute }
+      - role: tool
+        toolCallId: call-1
+        output: |
+          3514f651c0ffee1234567890abcdef1234567890
+          6782d9af0badc0de9876543210fedcba98765432
+          go: downloading github.com/wasilibs/go-re2 v1.13.0
+          go: downloading golang.org/x/term v0.36.0
+          FROM docker.io/library/golang@sha256:4f1c8f2b9e0d7a6c5b3a29180f7e6d5c4b3a291807f6e5d4c3b2a1908f7e6d5c
+          ok  	github.com/example/project/internal/storage/migrations/sqlite/schema	0.412s
+      - { role: assistant, text: "HEAD is now at 3514f651c0ffee1234567890abcdef1234567890, and the module graph resolved" }
+    wantClean: true
+    want:
+      - { kind: redaction_residue, entry: 1, role: tool, rule: residue_base64_long, preview: "residue_base64_long: ****", advisory: true }
+      - { kind: redaction_residue, entry: 1, role: tool, rule: residue_hex_long, preview: "residue_hex_long: ****", advisory: true }
+      - { kind: redaction_residue, entry: 1, role: tool, rule: residue_go_import_path, preview: "residue_go_import_path: ****", advisory: true }
+      - { kind: redaction_residue, entry: 2, role: assistant, rule: residue_base64_long, preview: "residue_base64_long: ****", advisory: true }
+      - { kind: redaction_residue, entry: 2, role: assistant, rule: residue_hex_long, preview: "residue_hex_long: ****", advisory: true }

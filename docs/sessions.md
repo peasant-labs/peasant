@@ -201,22 +201,32 @@ peasant sessions list --json --limit 20 | peasant sessions review --sessions-fro
 | `credential_file_output` | A tool result from reading a credential-shaped file, or one listing two or more secret-named `NAME=value` lines. |
 | `foreign_email` | An address that survived redaction and is not yours. Your addresses are your git identity and each `--owner-email`. |
 | `shareable_document_link` | A link on a closed list of document hosts that anyone holding it can open. |
-| `redaction_residue` | A hit from the redaction module's advisory rules. These are broad on purpose, so expect some on ordinary text such as long paths and hashes. |
+| `redaction_residue` | A hit from the redaction module's advisory rules. Advisory: see below. |
+
+`redaction_residue` findings are advisory. The redaction module's rules are
+broad on purpose and also hit ordinary coding output, such as commit ids,
+`sha256:` digests, `go: downloading` lines and long repository paths. An
+advisory finding is listed with `"advisory": true`, and it never changes a
+session's status from `clean` or makes the review exit 4. Every other kind is
+blocking and carries `"advisory": false`. The summary's `findings` counts every
+finding and its `advisory` counts the advisory ones.
 
 A finding shows a masked preview, such as `secret_key=**** (len 32-63)`, and
 never the matched text. Text output is one line per finding,
-`<session> entry <n> <role> <kind> <preview>`, then a total.
+`<session> entry <n> <role> <kind> <preview>`, with ` (advisory)` after an
+advisory one, then a total.
 
-Each session gets a status. `clean` means it was read in full and nothing was
-found. `findings` means it has at least one finding. `error` means it could not
+Each session gets a status. `clean` means it was read in full and nothing
+blocking was found; it can still list advisory findings. `findings` means it
+has at least one blocking finding. `error` means it could not
 be reviewed, and `reason` says why: a session stored only as a bounded preview
 is an error, never clean. A session's subagent sessions are reviewed with it, as
 `village push` sends them with it, so its status covers them. A finding's
 `sessionId` names the session it is in, and `subagents` counts the subagent
 sessions reviewed.
 
-The exit status is 0 when every session is clean, 4 when at least one has
-findings and none failed, and 1 when at least one could not be reviewed. With
+The exit status is 0 when every session is clean, advisory findings or not, 4
+when at least one has blocking findings and none failed, and 1 when at least one could not be reviewed. With
 no session named it exits 2 and reads nothing.
 
 The `--json` document can be piped into a command that takes `--sessions-from`,

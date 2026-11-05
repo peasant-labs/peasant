@@ -28,7 +28,7 @@ commands do today.
 | 1 | The command failed after it had started its work. |
 | 2 | The command refused how it was called: flags that cannot be combined, a flag value outside its closed set, a `--sessions-from` input it cannot read, or a confirmation it cannot ask for. Nothing was attempted. Fix the call; retrying it unchanged fails again. |
 | 3 | `village push` or `village share` stopped before it sent peasant online anything to change. Nothing was published or shared, and nothing was recorded as published. |
-| 4 | `sessions review` ran to the end and found residue. No session failed, and at least one has findings. A session it could not review makes it exit 1 instead. |
+| 4 | `sessions review` ran to the end and found residue. No session failed, and at least one has blocking findings. Advisory findings alone never make it exit 4. A session it could not review makes it exit 1 instead. |
 
 Status 2 is raised by the refusals that `internal/clicontract` owns. An unknown
 flag or a flag with a missing value is reported by the flag parser and still

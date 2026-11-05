@@ -40,6 +40,15 @@ const (
 	KindRedactionResidue FindingKind = "redaction_residue"
 )
 
+// Advisory reports whether findings of kind k are advisory. The redact
+// module's residue rules are broad on purpose and hit on commit ids, digests,
+// module paths and long repository paths, so their hits are reported but never
+// make a session's status findings. Every other kind comes from a detector of
+// this package and is blocking.
+func (k FindingKind) Advisory() bool {
+	return k == KindRedactionResidue
+}
+
 // AllFindingKinds is the closed set of finding kinds.
 var AllFindingKinds = []FindingKind{
 	KindCredentialAssignment,
@@ -72,13 +81,20 @@ const (
 const redactResidueEmailRule = "residue_email"
 
 // Finding is one thing a detector found. Preview is masked and at most
-// redact.PreviewMaxLength bytes.
+// redact.PreviewMaxLength bytes. Advisory is Kind.Advisory(): an advisory
+// finding is reported and does not block.
 type Finding struct {
 	Kind       FindingKind
 	EntryIndex int
 	Role       schema.Role
 	Rule       string
 	Preview    string
+	Advisory   bool
+}
+
+// Blocking reports whether any of findings is not advisory.
+func Blocking(findings []Finding) bool {
+	return slices.ContainsFunc(findings, func(f Finding) bool { return !f.Advisory })
 }
 
 // Options configures a review.
@@ -251,7 +267,7 @@ func (rv *reviewer) add(finding Finding) {
 }
 
 func newFinding(entry *schema.SessionEntry, kind FindingKind, rule, preview string) Finding {
-	return Finding{Kind: kind, EntryIndex: entry.EntryIndex, Role: entry.Role, Rule: rule, Preview: preview}
+	return Finding{Kind: kind, EntryIndex: entry.EntryIndex, Role: entry.Role, Rule: rule, Preview: preview, Advisory: kind.Advisory()}
 }
 
 func (rv *reviewer) assignments(entry *schema.SessionEntry, text string) []span {
