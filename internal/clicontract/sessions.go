@@ -153,12 +153,14 @@ func ReadSessionIDs(r io.Reader) ([]string, error) {
 // detects them from the first non-space byte: newline text (blank lines
 // skipped, '#' lines skipped), a JSON array of strings, a JSON array of
 // objects, or a `sessions review --json` document. An array object contributes
-// its "id" key, else its "session_id" key, else its "sessionId" key. Any other
-// shape is an error naming the line or index. Duplicates collapse, first
-// occurrence wins. An input that names no id returns ErrNoSessionIDs.
+// its "id", "session_id" or "sessionId" key, which must agree when more than
+// one is given. Keys are matched exactly. Any other shape is an error naming
+// the line or index. Duplicates collapse, first occurrence wins. An input that
+// names no id returns ErrNoSessionIDs.
 //
-// From review entries, the document's or those of a `jq .sessions` of it, only
-// status clean is taken. The rest are kept in Dropped so that the receiving
+// From review entries, the document's or any array object whose status is a
+// review status, only status clean is taken. A reshaped review entry, such as
+// a finding or a row without its status, is refused. The rest are kept in Dropped so that the receiving
 // command can say so, and when nothing is left the error is a
 // *NoCleanSessionsError, which is also ErrNoSessionIDs.
 func ReadSessionList(r io.Reader) (SessionList, error) {
@@ -258,43 +260,85 @@ func readJSONSessionIDs(data []byte) ([]parsedSession, error) {
 // readReviewDocument reads the one object shape the reader accepts. Every
 // element must carry sessionId and a status from the closed set, so a document
 // that is not a review, or one that lost its statuses, is refused rather than
-// taken as a list of clean sessions.
+// taken as a list of clean sessions. Keys are matched exactly, as everywhere
+// in this reader.
 func readReviewDocument(data []byte) ([]parsedSession, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	var document struct {
-		Sessions *[]json.RawMessage `json:"sessions"`
-	}
-	if err := decoder.Decode(&document); err != nil {
+	var raw json.RawMessage
+	if err := decoder.Decode(&raw); err != nil {
 		return nil, fmt.Errorf("JSON object: %w", err)
 	}
 	if err := refuseTrailingContent(data, decoder, "object"); err != nil {
 		return nil, err
 	}
-	if document.Sessions == nil {
+	document, err := decodeObject(raw)
+	if err != nil {
+		return nil, fmt.Errorf("line 1: %w", err)
+	}
+	rawSessions, ok := document["sessions"]
+	if !ok {
 		return nil, errors.New(`line 1: the JSON object has no "sessions" array; give a sessions review document, one JSON array, or one id per line`)
 	}
-	ids := make([]parsedSession, 0, len(*document.Sessions))
-	for index, raw := range *document.Sessions {
-		var entry struct {
-			SessionID *string `json:"sessionId"`
-			Status    *string `json:"status"`
-		}
-		if err := json.Unmarshal(raw, &entry); err != nil {
+	var sessions []json.RawMessage
+	if err := json.Unmarshal(rawSessions, &sessions); err != nil || sessions == nil {
+		return nil, errors.New(`line 1: "sessions" is not an array`)
+	}
+	ids := make([]parsedSession, 0, len(sessions))
+	for index, element := range sessions {
+		object, err := decodeObject(element)
+		if err != nil {
 			return nil, fmt.Errorf("index %d: %w", index, err)
 		}
-		if entry.SessionID == nil {
+		if _, ok := object["sessionId"]; !ok {
 			return nil, fmt.Errorf(`index %d: object has no "sessionId" key`, index)
 		}
-		if entry.Status == nil {
+		if _, ok := object["status"]; !ok {
 			return nil, fmt.Errorf(`index %d: object has no "status" key`, index)
 		}
-		session, err := newReviewedSession(*entry.SessionID, *entry.Status)
+		session, err := sessionFromObject(object)
 		if err != nil {
 			return nil, fmt.Errorf("index %d: %w", index, err)
 		}
 		ids = append(ids, session)
 	}
 	return ids, nil
+}
+
+// knownKeys are the keys this reader gives a meaning to. A key that differs
+// from one of them only in case is refused: Go's struct decoding would match
+// it case-insensitively, and reading it as the key, or ignoring it, would both
+// let a reshaped document choose which value counts.
+var knownKeys = []string{"id", "session_id", "sessionId", "status", "sessions", "findings", "entryIndex", "kind", "rule"}
+
+// decodeObject decodes one JSON object with its keys exactly as written. It
+// refuses a key given twice and a key that is a case variant of a known key.
+func decodeObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, errors.New("not a JSON object")
+	}
+	object := map[string]json.RawMessage{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, _ := token.(string)
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		if _, repeated := object[key]; repeated {
+			return nil, fmt.Errorf("the key %q is given twice", key)
+		}
+		for _, known := range knownKeys {
+			if key != known && strings.EqualFold(key, known) {
+				return nil, fmt.Errorf("the key %q is not %q; keys are matched exactly", key, known)
+			}
+		}
+		object[key] = value
+	}
+	return object, nil
 }
 
 func newReviewedSession(rawID, rawStatus string) (parsedSession, error) {
@@ -334,8 +378,8 @@ func sessionFromElement(raw json.RawMessage) (parsedSession, error) {
 		id, err := nonEmptyID(id)
 		return parsedSession{ID: id}, err
 	case '{':
-		var object map[string]json.RawMessage
-		if err := json.Unmarshal(trimmed, &object); err != nil {
+		object, err := decodeObject(trimmed)
+		if err != nil {
 			return parsedSession{}, err
 		}
 		return sessionFromObject(object)
@@ -344,31 +388,66 @@ func sessionFromElement(raw json.RawMessage) (parsedSession, error) {
 	}
 }
 
-// sessionFromObject reads one array object. The sessionId key is the review
-// spelling, so an object carrying it and a status is a review entry whatever
-// other key names it: `jq .sessions` must not strip the clean-only rule.
+var errReviewFinding = errors.New("the object is a review finding, not a session; give the sessions review document itself")
+
+// sessionFromObject reads one object. It takes its "id", "session_id" or
+// "sessionId" key, and refuses an object whose id keys disagree. A status from
+// the review set makes it a review entry, held to the clean-only rule, whatever
+// key names the session: a renamed or projected review document must not strip
+// the rule. A review entry's other shapes are refused: a review finding, a
+// review row without its status, and a sessionId with a status outside the set.
 func sessionFromObject(object map[string]json.RawMessage) (parsedSession, error) {
+	id, named := "", false
 	for _, key := range []string{"id", "session_id", "sessionId"} {
 		value, ok := object[key]
 		if !ok {
 			continue
 		}
-		var id string
-		if err := json.Unmarshal(value, &id); err != nil {
+		var given string
+		if err := json.Unmarshal(value, &given); err != nil {
 			return parsedSession{}, fmt.Errorf("%q is not a string", key)
 		}
-		rawStatus, reviewed := object["status"]
-		if _, spelled := object["sessionId"]; !spelled || !reviewed {
-			id, err := nonEmptyID(id)
-			return parsedSession{ID: id}, err
+		given = strings.TrimSpace(given)
+		if named && given != id {
+			return parsedSession{}, fmt.Errorf("the id keys disagree (%q and %q); give one session per object", id, given)
 		}
-		var status string
-		if err := json.Unmarshal(rawStatus, &status); err != nil {
+		id, named = given, true
+	}
+	if _, ok := object["entryIndex"]; ok {
+		return parsedSession{}, errReviewFinding
+	}
+	if _, kind := object["kind"]; kind {
+		if _, rule := object["rule"]; rule {
+			return parsedSession{}, errReviewFinding
+		}
+	}
+	if !named {
+		return parsedSession{}, errors.New(`object has neither an "id" nor a "session_id" nor a "sessionId" key`)
+	}
+	if id == "" {
+		return parsedSession{}, errors.New("empty session id")
+	}
+	rawStatus, hasStatus := object["status"]
+	_, camel := object["sessionId"]
+	if !hasStatus {
+		if _, ok := object["findings"]; ok {
+			return parsedSession{}, errors.New(`the object is a review entry without its "status"; give the sessions review document itself`)
+		}
+		return parsedSession{ID: id}, nil
+	}
+	var status string
+	if err := json.Unmarshal(rawStatus, &status); err != nil {
+		if camel {
 			return parsedSession{}, errors.New(`"status" is not a string`)
 		}
-		return newReviewedSession(id, status)
+		return parsedSession{ID: id}, nil
 	}
-	return parsedSession{}, errors.New(`object has neither an "id" nor a "session_id" nor a "sessionId" key`)
+	if _, err := NewReviewStatus(status); err != nil && !camel {
+		if _, ok := object["findings"]; !ok {
+			return parsedSession{ID: id}, nil
+		}
+	}
+	return newReviewedSession(id, status)
 }
 
 func nonEmptyID(id string) (string, error) {

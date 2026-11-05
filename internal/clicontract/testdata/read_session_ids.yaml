@@ -77,9 +77,13 @@ cases:
     input: '[{"sessionId": "s-1"}, {"sessionId": "s-2", "note": "no status"}]'
     wantIDs: [s-1, s-2]
 
-  - name: session_id_snake_key_keeps_its_own_status
-    input: '[{"session_id": "s-1", "status": "findings"}]'
-    wantIDs: [s-1]
+  # A status from the review set is a review status whatever key names the
+  # session, so a renamed id key does not strip the clean-only rule.
+  - name: session_id_snake_key_held_to_clean_only
+    input: '[{"session_id": "s-1", "status": "findings"}, {"id": "ok-1"}]'
+    wantIDs: [ok-1]
+    wantDropped:
+      - { id: s-1, status: findings }
 
   - name: review_document_takes_only_clean
     input: |
@@ -150,3 +154,51 @@ cases:
       {"sessions": [{"sessionId": "s-1", "status": "clean"}]}
       {"sessions": [{"sessionId": "s-2", "status": "findings"}]}
     wantErrContains: line 2
+
+  - name: id_key_with_review_status_held_to_clean_only
+    input: '[{"id": "bad-1", "status": "error"}, {"id": "ok-1", "status": "clean"}]'
+    wantIDs: [ok-1]
+    wantDropped:
+      - { id: bad-1, status: error }
+
+  - name: conflicting_id_keys_refused
+    input: '[{"id": "ok-1"}, {"id": "a-1", "sessionId": "b-1", "status": "clean"}]'
+    wantErrContains: index 1
+
+  - name: conflicting_id_keys_refused_in_document
+    input: '{"sessions": [{"sessionId": "b-1", "id": "a-1", "status": "clean"}]}'
+    wantErrContains: index 0
+
+  - name: review_finding_projection_refused
+    input: '[{"kind": "foreign_email", "sessionId": "bad-1", "entryIndex": 4, "role": "user", "rule": "foreign_email", "preview": "a***"}]'
+    wantErrContains: index 0
+
+  - name: review_row_without_status_refused
+    input: '[{"sessionId": "bad-1", "findings": [{"kind": "foreign_email"}]}]'
+    wantErrContains: index 0
+
+  # Keys are matched case-sensitively: a key that differs from a known key
+  # only in case is refused, never read as that key or ignored.
+  - name: case_variant_status_refused_in_array
+    input: '[{"sessionId": "bad-1", "Status": "findings"}]'
+    wantErrContains: index 0
+
+  - name: case_variant_status_refused_in_document
+    input: '{"sessions": [{"sessionId": "bad-1", "status": "findings", "Status": "clean"}]}'
+    wantErrContains: index 0
+
+  - name: case_variant_session_id_refused_in_document
+    input: '{"sessions": [{"sessionId": "bad-1", "SessionId": "ok-1", "status": "clean"}]}'
+    wantErrContains: index 0
+
+  - name: case_variant_sessions_key_refused
+    input: '{"Sessions": [{"sessionId": "ok-1", "status": "clean"}]}'
+    wantErrContains: line 1
+
+  - name: repeated_key_refused
+    input: '[{"sessionId": "bad-1", "status": "findings", "status": "clean"}]'
+    wantErrContains: index 0
+
+  - name: review_finding_partial_projection_refused
+    input: '[{"sessionId": "bad-1", "entryIndex": 4}]'
+    wantErrContains: index 0

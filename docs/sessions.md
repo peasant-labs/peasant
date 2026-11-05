@@ -197,26 +197,70 @@ peasant sessions list --json --limit 20 | peasant sessions review --sessions-fro
 
 | kind | what it found |
 |---|---|
-| `credential_assignment` | A secret-named `name: value` whose value is long, high in entropy, and known to no rule. |
-| `credential_file_output` | A tool result from reading a credential-shaped file, or one listing two or more secret-named `NAME=value` lines. |
-| `foreign_email` | An address that survived redaction and is not yours. Your addresses are your git identity and each `--owner-email`. |
+| `credential_assignment` | A secret-named `name: value` whose value is long, high in entropy, and known to no rule; a password-named value with symbols in it or no digit; or a password written on a `mysql -p<password>` command line. |
+| `credential_file_output` | A tool result from reading a credential-shaped file, a tool call that writes content to one, or a tool result listing two or more secret-named `NAME=value` lines. |
+| `foreign_email` | An address that survived redaction and is not yours, in a prompt, an assistant reply, a tool call's input or a tool result. Your addresses are your git identity and each `--owner-email`. |
 | `shareable_document_link` | A link on a closed list of document hosts that anyone holding it can open. |
-| `redaction_residue` | A hit from the redaction module's advisory rules. These are broad on purpose, so expect some on ordinary text such as long paths and hashes. |
+| `redaction_residue` | A hit from the redaction module's residue rules. Some are advisory: see below. |
+
+The rules are closed lists, kept in `internal/sessionreview`:
+
+- A credential-shaped file is one named `.env`, `.netrc`, `.npmrc`, `.pgpass`,
+  `.pypirc`, `credentials`, `credentials.json`, `.credentials.json`,
+  `application_default_credentials.json`, `auth.json`, `id_rsa`, `id_ed25519`,
+  `secrets.json`, `secrets.yaml`, `secrets.yml`, `service-account.json`,
+  `service_account.json` or `token.json`; any `.env.<name>`, such as
+  `.env.local` or `.env.production`, except a template ending in `.example`,
+  `.sample`, `.template` or `.dist`; and a path ending in `.kube/config`. A
+  Write or Edit call that writes content to one is a finding on the call, as
+  reading one is a finding on its result.
+- A password-named value belongs to a name ending in `password`, `passwd`,
+  `passphrase`, `secret` or `token`, such as `DB_PASSWORD` or `client_secret`.
+  Its value may hold symbols and no digit, but it must be at least 8
+  characters, not low in entropy, and not a placeholder, a `$` reference, a
+  path, a URL, an identifier such as `hashedPassword`, or a code expression.
+  A name that only contains the word, such as `PASSWORD_MIN_LENGTH` or
+  `TOKEN_TTL`, does not count.
+- An inline password is the value of `-p` written against the flag on a
+  `mysql`, `mysqldump`, `mysqladmin`, `mariadb` or `mariadb-dump` command line.
+  A `-p` followed by a space asks for the password and is not a finding.
+
+Before the patterns run, a JSON tool result or input is decoded to its
+strings, so an escaped newline is a line again, and the line numbers a Read
+tool prints ahead of each line (`     1<TAB>` or `1→`) are removed.
+
+Some `redaction_residue` findings are advisory. A closed allowlist of the
+redaction module's residue rules hits ordinary git, go and build output
+(commit ids, `sha256:` digests, `go: downloading` and test lines, and the git
+branch and remote listings that standard redaction keeps on purpose):
+`residue_base64_long`, `residue_hex_long`, `residue_go_import_path`,
+`residue_git_branch_output`, `residue_git_remote_ssh` and
+`residue_git_remote_https`. A finding from one of them is listed with
+`"advisory": true`, and it never changes a session's status from `clean` or
+makes the review exit 4. Every other finding blocks and carries
+`"advisory": false`, including every other residue rule, such as
+`residue_bearer_token`, and any residue rule the module adds later until it is
+allowlisted. The summary's `findings` counts every
+finding and its `advisory` counts the advisory ones.
 
 A finding shows a masked preview, such as `secret_key=**** (len 32-63)`, and
-never the matched text. Text output is one line per finding,
-`<session> entry <n> <role> <kind> <preview>`, then a total.
+never the matched text. An address keeps only its top-level domain
+(`***@***.de`), and a link on a tenant host only the host's fixed suffix
+(`****.sharepoint.com/:w:/****`). Text output is one line per finding,
+`<session> entry <n> <role> <kind> <preview>`, with ` (advisory)` after an
+advisory one, then a total.
 
-Each session gets a status. `clean` means it was read in full and nothing was
-found. `findings` means it has at least one finding. `error` means it could not
+Each session gets a status. `clean` means it was read in full and nothing
+blocking was found; it can still list advisory findings. `findings` means it
+has at least one blocking finding. `error` means it could not
 be reviewed, and `reason` says why: a session stored only as a bounded preview
 is an error, never clean. A session's subagent sessions are reviewed with it, as
 `village push` sends them with it, so its status covers them. A finding's
 `sessionId` names the session it is in, and `subagents` counts the subagent
 sessions reviewed.
 
-The exit status is 0 when every session is clean, 4 when at least one has
-findings and none failed, and 1 when at least one could not be reviewed. With
+The exit status is 0 when every session is clean, advisory findings or not, 4
+when at least one has blocking findings and none failed, and 1 when at least one could not be reviewed. With
 no session named it exits 2 and reads nothing.
 
 The `--json` document can be piped into a command that takes `--sessions-from`,

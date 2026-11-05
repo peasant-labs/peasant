@@ -12,7 +12,7 @@ requiredNames:
   - text_line_with_json_refused
   - non_string_element_refused
   - session_id_camel_key_in_array
-  - session_id_snake_key_keeps_its_own_status
+  - session_id_snake_key_held_to_clean_only
   - review_document_takes_only_clean
   - review_document_nothing_clean_refused
   - review_entries_keep_the_rule_without_the_document
@@ -25,3 +25,14 @@ requiredNames:
   - review_document_needs_session_id_camel_key
   - object_without_sessions_refused
   - object_with_content_after_it_refused
+  - id_key_with_review_status_held_to_clean_only
+  - conflicting_id_keys_refused
+  - conflicting_id_keys_refused_in_document
+  - review_finding_projection_refused
+  - review_row_without_status_refused
+  - case_variant_status_refused_in_array
+  - case_variant_status_refused_in_document
+  - case_variant_session_id_refused_in_document
+  - case_variant_sessions_key_refused
+  - repeated_key_refused
+  - review_finding_partial_projection_refused

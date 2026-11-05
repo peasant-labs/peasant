@@ -41,7 +41,8 @@ func (e *sessionsReviewFindingsError) Error() string {
 
 // sessionReviewFinding is one finding in the document. SessionID names the
 // session it is in, which is a subagent session of the row's session when it
-// differs from the row's.
+// differs from the row's. An advisory finding is reported and never makes the
+// row's status findings.
 type sessionReviewFinding struct {
 	Kind       sessionreview.FindingKind `json:"kind"`
 	SessionID  string                    `json:"sessionId,omitempty"`
@@ -49,6 +50,12 @@ type sessionReviewFinding struct {
 	Role       schema.Role               `json:"role"`
 	Rule       string                    `json:"rule"`
 	Preview    string                    `json:"preview"`
+	Advisory   bool                      `json:"advisory"`
+}
+
+// blockingFindings reports whether any finding is not advisory.
+func blockingFindings(findings []sessionReviewFinding) bool {
+	return slices.ContainsFunc(findings, func(f sessionReviewFinding) bool { return !f.Advisory })
 }
 
 // sessionReviewRow is one requested session. Its status covers its whole
@@ -61,12 +68,15 @@ type sessionReviewRow struct {
 	Findings  []sessionReviewFinding   `json:"findings"`
 }
 
+// sessionsReviewSummary counts the rows by status. Findings counts every
+// finding, Advisory the advisory ones among them.
 type sessionsReviewSummary struct {
 	Sessions     int `json:"sessions"`
 	Clean        int `json:"clean"`
 	WithFindings int `json:"withFindings"`
 	Errors       int `json:"errors"`
 	Findings     int `json:"findings"`
+	Advisory     int `json:"advisory"`
 }
 
 // sessionsReviewDocument is the sessions review --json document.
@@ -101,13 +111,21 @@ func buildSessionsReviewCommandWith(deps sessionsReviewDeps) *cobra.Command {
 		Use:   "review",
 		Short: "Check sessions for what redaction leaves behind before you publish them",
 		Long: `Read each named session, run the configured redactor on it in memory, and
-report what is left: credentials in formats no rule knows, tool results that
-printed a credential file, other people's email addresses, links that anyone
-holding them can open, and the redaction module's own advisory hits.
+report what is left: credentials in formats no rule knows, passwords on a
+command line, tool calls that read or wrote a credential file, other people's
+email addresses, links that anyone
+holding them can open, and the redaction module's own residue hits.
 
 Nothing is written. Findings hold a masked preview, never the matched text. A
 session's subagent sessions are reviewed with it, because they are published
 with it, and its status covers them.
+
+Hits from these residue rules of the redaction module are advisory: they are
+listed, marked advisory, and leave a session clean, because they also hit
+ordinary git, go and build output: residue_base64_long, residue_hex_long,
+residue_go_import_path, residue_git_branch_output, residue_git_remote_ssh and
+residue_git_remote_https. Every other finding, every other residue rule
+included, makes a session's status findings.
 
 Exit status: 0 every session is clean, 4 at least one has findings and none
 failed, 1 at least one could not be reviewed.`,
@@ -285,7 +303,7 @@ func (r *sessionsReview) reviewTree(ctx context.Context, id string) sessionRevie
 	switch {
 	case len(failures) > 0:
 		row.Status, row.Reason = clicontract.ReviewError, strings.Join(failures, "; ")
-	case len(row.Findings) > 0:
+	case blockingFindings(row.Findings):
 		row.Status = clicontract.ReviewFindings
 	default:
 		row.Status = clicontract.ReviewClean
@@ -328,7 +346,10 @@ func (r *sessionsReview) readAndScan(ctx context.Context, id string) sessionRevi
 		row.Findings = append(row.Findings, sessionReviewFinding{
 			Kind: finding.Kind, SessionID: id, EntryIndex: finding.EntryIndex,
 			Role: finding.Role, Rule: finding.Rule, Preview: finding.Preview,
+			Advisory: finding.Advisory,
 		})
+	}
+	if blockingFindings(row.Findings) {
 		row.Status = clicontract.ReviewFindings
 	}
 	return row
@@ -338,6 +359,11 @@ func summarizeReview(rows []sessionReviewRow) sessionsReviewSummary {
 	summary := sessionsReviewSummary{Sessions: len(rows)}
 	for _, row := range rows {
 		summary.Findings += len(row.Findings)
+		for _, finding := range row.Findings {
+			if finding.Advisory {
+				summary.Advisory++
+			}
+		}
 		switch row.Status {
 		case clicontract.ReviewClean:
 			summary.Clean++
@@ -357,12 +383,16 @@ func printSessionsReview(cmd *cobra.Command, document sessionsReviewDocument) {
 			fmt.Fprintf(out, "%s error %s\n", row.SessionID, row.Reason)
 		}
 		for _, finding := range row.Findings {
-			fmt.Fprintf(out, "%s entry %d %s %s %s\n", finding.SessionID, finding.EntryIndex, finding.Role, finding.Kind, finding.Preview)
+			line := fmt.Sprintf("%s entry %d %s %s %s", finding.SessionID, finding.EntryIndex, finding.Role, finding.Kind, finding.Preview)
+			if finding.Advisory {
+				line += " (advisory)"
+			}
+			fmt.Fprintln(out, line)
 		}
 	}
 	summary := document.Summary
-	fmt.Fprintf(out, "%d session(s) reviewed: %d clean, %d with findings, %d errors, %d findings\n",
-		summary.Sessions, summary.Clean, summary.WithFindings, summary.Errors, summary.Findings)
+	fmt.Fprintf(out, "%d session(s) reviewed: %d clean, %d with findings, %d errors, %d findings (%d advisory)\n",
+		summary.Sessions, summary.Clean, summary.WithFindings, summary.Errors, summary.Findings, summary.Advisory)
 }
 
 // reviewOutcome is the exit status: an error wins over findings.

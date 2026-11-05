@@ -6,7 +6,8 @@
     "clean": 0,
     "withFindings": 1,
     "errors": 0,
-    "findings": 6
+    "findings": 6,
+    "advisory": 0
   },
   "sessions": [
     {
@@ -21,7 +22,8 @@
           "entryIndex": 0,
           "role": "user",
           "rule": "credential_name_value",
-          "preview": "secret_key=**** (len 32-63)"
+          "preview": "secret_key=**** (len 32-63)",
+          "advisory": false
         },
         {
           "kind": "credential_file_output",
@@ -29,7 +31,8 @@
           "entryIndex": 2,
           "role": "tool",
           "rule": "credential_file_name",
-          "preview": "credentials.json: content=****"
+          "preview": "credentials.json: content=****",
+          "advisory": false
         },
         {
           "kind": "credential_file_output",
@@ -37,7 +40,8 @@
           "entryIndex": 3,
           "role": "tool",
           "rule": "secret_env_listing",
-          "preview": "2 secret-named lines=****"
+          "preview": "2 secret-named lines=****",
+          "advisory": false
         },
         {
           "kind": "foreign_email",
@@ -45,7 +49,8 @@
           "entryIndex": 4,
           "role": "user",
           "rule": "foreign_email",
-          "preview": "a***@univ.example.edu"
+          "preview": "***@***.edu",
+          "advisory": false
         },
         {
           "kind": "shareable_document_link",
@@ -53,7 +58,8 @@
           "entryIndex": 5,
           "role": "user",
           "rule": "share_google_docs",
-          "preview": "docs.google.com/document/****"
+          "preview": "docs.google.com/document/****",
+          "advisory": false
         },
         {
           "kind": "redaction_residue",
@@ -61,7 +67,8 @@
           "entryIndex": 6,
           "role": "tool",
           "rule": "residue_bearer_token",
-          "preview": "residue_bearer_token: ****"
+          "preview": "residue_bearer_token: ****",
+          "advisory": false
         }
       ]
     }

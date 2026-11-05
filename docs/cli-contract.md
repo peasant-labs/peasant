@@ -27,8 +27,8 @@ commands do today.
 | 0 | The command succeeded. An empty result is a success. |
 | 1 | The command failed after it had started its work. |
 | 2 | The command refused how it was called: flags that cannot be combined, a flag value outside its closed set, a `--sessions-from` input it cannot read, or a confirmation it cannot ask for. Nothing was attempted. Fix the call; retrying it unchanged fails again. |
-| 3 | `village push` failed before it made a single request to peasant online. Nothing was published and nothing was recorded as published. |
-| 4 | `sessions review` ran to the end and found residue. No session failed, and at least one has findings. A session it could not review makes it exit 1 instead. |
+| 3 | `village push` or `village share` stopped before it sent peasant online anything to change. Nothing was published or shared, and nothing was recorded as published. |
+| 4 | `sessions review` ran to the end and found residue. No session failed, and at least one has blocking findings. Advisory findings alone never make it exit 4. A session it could not review makes it exit 1 instead. |
 
 Status 2 is raised by the refusals that `internal/clicontract` owns. An unknown
 flag or a flag with a missing value is reported by the flag parser and still
@@ -49,8 +49,21 @@ space:
   each element carrying `sessionId` and `status`. Any other object is refused.
 
 From a review document only the sessions with status `clean` are taken. The same
-rule holds for an array of objects that carry both `sessionId` and `status`, so
-`jq .sessions` does not remove it. Each session left out is reported by the
+rule holds for any array object whose `status` is a review status (`clean`,
+`findings` or `error`), whichever of `id`, `session_id` or `sessionId` names
+it, so `jq .sessions` or renaming the key does not remove it. An object with
+`sessionId` and a status outside that set is refused. A reshaped review is
+refused rather than read:
+
+- an object shaped as a review finding (it carries `entryIndex`, or `kind` and
+  `rule`), such as a `jq` projection of `.findings[]`;
+- a review row that lost its `status` but kept its `findings`;
+- an object whose `id`, `session_id` and `sessionId` keys disagree;
+- an object that gives a key twice, or a key that differs from `id`,
+  `session_id`, `sessionId`, `status`, `sessions`, `findings`, `entryIndex`,
+  `kind` or `rule` only in case. Keys are matched exactly.
+
+Each session left out is reported by the
 receiving command as a `session_refused` warning, and a run continues with the
 clean ones. When no session is clean the input is refused with exit status 2,
 and the refusal names each session and its status (`village push` exits 3 for
@@ -61,8 +74,8 @@ is refused with the line or array index of the fault. An input that names no id
 at all is refused: a list that selects nothing never widens to every session.
 
 `--sessions-from` replaces the other ways to choose sessions. It cannot be
-combined with `--session` or `--all`, except on `village push`, where
-`--session` adds to the list: the repeated `--session` ids come first, then the
+combined with `--session` or `--all`, except on `village push` and
+`village share`, where `--session` adds to the list: the repeated `--session` ids come first, then the
 list, each id once.
 
 ```sh
@@ -153,6 +166,46 @@ Every command that has `--yes` also accepts `-y`.
 a public push is refused before any request to peasant online, exits 3, and
 names `--yes` in the document's `refusal` field.
 
+`village share` has no consent exception and follows the same order, with one
+difference: its refusal exits 3, like the other `village share` stops, and under
+`--json` it names `--yes` in the document's `refusal` field. A run with nothing
+to ask, because every collective already has a share, shows no prompt.
+
+## The `village share` document
+
+`village share` offers transcripts you already published to collectives. It
+calls only the share route and reads, so it uploads nothing, changes no
+visibility or license, reads no auto-publish rule, and takes nothing back. Its
+`--json` document has these keys, with `warnings` and the empty fields beside
+them:
+
+| key | meaning |
+|---|---|
+| `dry_run` | Whether the run was a dry run. |
+| `needsConfirmation` | On a dry run only: whether the same run needs a confirmation, because `--yes` is absent. |
+| `collectives` | The collectives `--collective` named, as `{id, name}`. |
+| `transcripts` | One entry per transcript, with `transcript_id`, `steps`, and when known `session_id`, `url` and `visibility`. |
+| `errors` | One `{ref, message}` per reference or session that did not resolve to a transcript. |
+| `refusal` | Why a run stopped before it shared anything. Only on such a run. |
+
+Each step is the Local API's step object, with its camelCase `collectiveId`. A
+collective that already has a share is `skipped` with a reason: an approved or
+pending share is held, and a rejected or taken-back share is not asked again. A
+dry run reports `not_attempted` with the reason `dry run: would share`, makes
+only reads, and writes nothing. With nothing to ask, `empty_code` is
+`nothing_changed`.
+
+The command exits 0 when every step is `succeeded`, `pending_approval` or
+`skipped`, and also when a prompt is declined. A target that does not resolve,
+or whose transcript cannot be read, does not stop the other targets. When the run
+sent at least one share request and a step failed or a target did not resolve,
+it exits 1. When it sent no share request, it exits 3 whatever stopped it: a
+refused call, a confirmation it cannot ask for, a missing login, an unreadable
+store, a `--collective` that is unknown, ambiguous, or not one you belong to, or
+every target failing before a request. A dry run sends no request, so a dry run
+with a failed target also exits 3. Every exit-3 run names its cause in the
+document's `refusal` field.
+
 ## The `village push` plan
 
 When `village push` is given `--session` or `--sessions-from`, its `--json`
@@ -235,6 +288,7 @@ resolves the names), or a `--collective` confirmation it cannot ask for. Under
 | `redact` | `--sessions-from`, with `warnings` in its `--json` document only when a review document left sessions out |
 | `sessions review` | `--sessions-from`, `--json` with `warnings` |
 | `village push` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`, with a per-session `plan` (below) |
+| `village share` | `--json` with `warnings`, `empty_code` and `empty_reason`; `-y`; `--sessions-from`; `--dry-run` |
 | `upgrade` | `-y` |
 
 `sessions list --json` prints a bare array, which has no place for `warnings`.

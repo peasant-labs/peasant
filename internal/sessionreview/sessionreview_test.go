@@ -32,11 +32,12 @@ type detectorEntry struct {
 }
 
 type detectorWant struct {
-	Kind    string `yaml:"kind"`
-	Entry   int    `yaml:"entry"`
-	Role    string `yaml:"role"`
-	Rule    string `yaml:"rule"`
-	Preview string `yaml:"preview"`
+	Kind     string `yaml:"kind"`
+	Entry    int    `yaml:"entry"`
+	Role     string `yaml:"role"`
+	Rule     string `yaml:"rule"`
+	Preview  string `yaml:"preview"`
+	Advisory bool   `yaml:"advisory"`
 }
 
 type detectorCase struct {
@@ -44,13 +45,26 @@ type detectorCase struct {
 	OwnerEmails []string        `yaml:"ownerEmails"`
 	Entries     []detectorEntry `yaml:"entries"`
 	Want        []detectorWant  `yaml:"want"`
+	// WantClean, when set, asserts whether the findings leave the session clean.
+	WantClean *bool `yaml:"wantClean"`
 }
 
 type detectorsFixture struct {
+	Advisory []struct {
+		Kind     string `yaml:"kind"`
+		Rule     string `yaml:"rule"`
+		Advisory bool   `yaml:"advisory"`
+	} `yaml:"advisory"`
 	ClosedLists struct {
-		FindingKinds        []string `yaml:"findingKinds"`
-		CredentialFileNames []string `yaml:"credentialFileNames"`
-		ShareableHosts      []string `yaml:"shareableHosts"`
+		FindingKinds                   []string `yaml:"findingKinds"`
+		CredentialFileNames            []string `yaml:"credentialFileNames"`
+		CredentialFileNamePrefixes     []string `yaml:"credentialFileNamePrefixes"`
+		CredentialFileTemplateSuffixes []string `yaml:"credentialFileTemplateSuffixes"`
+		CredentialFilePaths            []string `yaml:"credentialFilePaths"`
+		PasswordNameSuffixes           []string `yaml:"passwordNameSuffixes"`
+		InlinePasswordCommands         []string `yaml:"inlinePasswordCommands"`
+		AdvisoryResidueRules           []string `yaml:"advisoryResidueRules"`
+		ShareableHosts                 []string `yaml:"shareableHosts"`
 	} `yaml:"closedLists"`
 	Cases []detectorCase `yaml:"cases"`
 }
@@ -128,6 +142,9 @@ func TestReviewDetectors(t *testing.T) {
 				}
 				return
 			}
+			if tc.WantClean != nil && sessionreview.Blocking(got) == *tc.WantClean {
+				t.Errorf("Blocking = %v, want clean = %v: %+v", sessionreview.Blocking(got), *tc.WantClean, got)
+			}
 			if len(got) != len(tc.Want) {
 				t.Fatalf("findings = %+v, want %+v", got, tc.Want)
 			}
@@ -136,6 +153,7 @@ func TestReviewDetectors(t *testing.T) {
 				wanted := sessionreview.Finding{
 					Kind: sessionreview.FindingKind(want.Kind), EntryIndex: want.Entry,
 					Role: schema.Role(want.Role), Rule: want.Rule, Preview: want.Preview,
+					Advisory: want.Advisory,
 				}
 				if finding != wanted {
 					t.Errorf("finding %d = %+v, want %+v", i, finding, wanted)
@@ -171,6 +189,18 @@ func TestDetectorClosedLists(t *testing.T) {
 	if !slices.Equal(sessionreview.CredentialFileNames, fixture.ClosedLists.CredentialFileNames) {
 		t.Errorf("CredentialFileNames = %v", sessionreview.CredentialFileNames)
 	}
+	for name, pair := range map[string][2][]string{
+		"CredentialFileNamePrefixes":     {sessionreview.CredentialFileNamePrefixes, fixture.ClosedLists.CredentialFileNamePrefixes},
+		"CredentialFileTemplateSuffixes": {sessionreview.CredentialFileTemplateSuffixes, fixture.ClosedLists.CredentialFileTemplateSuffixes},
+		"CredentialFilePaths":            {sessionreview.CredentialFilePaths, fixture.ClosedLists.CredentialFilePaths},
+		"PasswordNameSuffixes":           {sessionreview.PasswordNameSuffixes, fixture.ClosedLists.PasswordNameSuffixes},
+		"InlinePasswordCommands":         {sessionreview.InlinePasswordCommands, fixture.ClosedLists.InlinePasswordCommands},
+		"AdvisoryResidueRules":           {sessionreview.AdvisoryResidueRules, fixture.ClosedLists.AdvisoryResidueRules},
+	} {
+		if !slices.Equal(pair[0], pair[1]) {
+			t.Errorf("%s = %v, want %v", name, pair[0], pair[1])
+		}
+	}
 	hosts := make([]string, 0, len(sessionreview.ShareableHosts))
 	for _, host := range sessionreview.ShareableHosts {
 		hosts = append(hosts, host.Host)
@@ -188,6 +218,21 @@ func TestDetectorClosedLists(t *testing.T) {
 	for _, host := range hosts {
 		if !slices.ContainsFunc(perHost.Entries, func(e detectorEntry) bool { return strings.Contains(e.Text, host) }) {
 			t.Errorf("no shareable_link_each_host entry for host %q", host)
+		}
+	}
+}
+
+// TestAdvisoryClassification pins which findings are advisory: an allowlisted
+// residue rule only, so an unknown rule blocks.
+func TestAdvisoryClassification(t *testing.T) {
+	t.Parallel()
+	fixture := loadDetectorsFixture(t)
+	if len(fixture.Advisory) == 0 {
+		t.Fatal("no advisory classification cases")
+	}
+	for _, c := range fixture.Advisory {
+		if got := sessionreview.Advisory(sessionreview.FindingKind(c.Kind), c.Rule); got != c.Advisory {
+			t.Errorf("Advisory(%s, %q) = %v, want %v", c.Kind, c.Rule, got, c.Advisory)
 		}
 	}
 }
