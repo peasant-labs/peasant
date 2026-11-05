@@ -352,47 +352,98 @@ func checkPointerLines(goSources map[string][]byte, expected map[string][]string
 	return nil
 }
 
+// symlinkCycleFound aborts the owned-source walk when a directory resolves
+// to one of its ancestors: descending into it would recurse forever.
+type symlinkCycleFound struct {
+	rel string
+}
+
+func (e *symlinkCycleFound) Error() string {
+	return "directory symlink cycle at " + e.rel
+}
+
 // checkOwnedImports fails on the first Go source under repoRoot that imports
 // the upstream driver module. Paths with a .git or node_modules part are not
 // owned source and are skipped.
 func checkOwnedImports(repoRoot string) error {
-	walkErr := filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(repoRoot, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
-			if part == ".git" || part == "node_modules" {
-				if entry.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-		}
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
-			return nil
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if unauditedDriverImport.FindString(string(content)) != "" {
-			return &unauditedImportFound{rel: filepath.ToSlash(rel)}
-		}
-		return nil
-	})
+	rootInfo, err := os.Stat(repoRoot)
+	if err != nil {
+		return fmt.Errorf("scan owned Go sources under %s: %w; restore a readable tree and rerun", repoRoot, err)
+	}
+	if !rootInfo.IsDir() {
+		return fmt.Errorf("scan owned Go sources under %s: not a directory; restore a readable tree and rerun", repoRoot)
+	}
+	walkErr := walkOwnedTree(repoRoot, ".", []os.FileInfo{rootInfo})
 	if walkErr != nil {
 		var found *unauditedImportFound
 		if errors.As(walkErr, &found) {
 			return found
 		}
+		var cycle *symlinkCycleFound
+		if errors.As(walkErr, &cycle) {
+			return fmt.Errorf("scan owned Go sources under %s: %s; remove the symlink loop and rerun", repoRoot, cycle.Error())
+		}
 		return fmt.Errorf("scan owned Go sources under %s: %w; restore a readable tree and rerun", repoRoot, walkErr)
+	}
+	return nil
+}
+
+// walkOwnedTree scans the directory at fsPath, whose logical repo-relative
+// name is rel, with ancestors holding the Stat identity of every directory
+// above it. Every entry is resolved with os.Stat, so a symlink to a
+// directory is descended into: the Go compiler resolves imports through such
+// links, and an audit that never descends passes while the build sees the
+// import. The logical (symlink-through) path is what the .git/node_modules
+// skip and the failure report use. A directory resolving to an ancestor
+// (compared with os.SameFile, which is a device+inode comparison on Unix)
+// fails with symlinkCycleFound instead of hanging; an unresolvable entry
+// fails with its Stat error.
+func walkOwnedTree(fsPath, rel string, ancestors []os.FileInfo) error {
+	entries, err := os.ReadDir(fsPath)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		childRel := entry.Name()
+		if rel != "." {
+			childRel = rel + "/" + entry.Name()
+		}
+		skipped := false
+		for _, part := range strings.Split(childRel, "/") {
+			if part == ".git" || part == "node_modules" {
+				skipped = true
+				break
+			}
+		}
+		if skipped {
+			continue
+		}
+		childFS := filepath.Join(fsPath, entry.Name())
+		info, err := os.Stat(childFS)
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			for _, ancestor := range ancestors {
+				if os.SameFile(info, ancestor) {
+					return &symlinkCycleFound{rel: childRel}
+				}
+			}
+			if err := walkOwnedTree(childFS, childRel, append(ancestors, info)); err != nil {
+				return err
+			}
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		content, err := os.ReadFile(childFS)
+		if err != nil {
+			return err
+		}
+		if unauditedDriverImport.FindString(string(content)) != "" {
+			return &unauditedImportFound{rel: childRel}
+		}
 	}
 	return nil
 }
