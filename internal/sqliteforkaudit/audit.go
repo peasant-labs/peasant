@@ -183,9 +183,12 @@ func audit(forkRoot, repoRoot string) error {
 		}
 		content, err := os.ReadFile(filepath.Join(forkRoot, filepath.FromSlash(diskName)))
 		if err != nil {
-			// Fail closed: a digest that cannot be computed differs from the
-			// recorded one, so the file is an undocumented change.
-			return fmt.Errorf("undocumented SQLite source change: %s", name)
+			// Fail closed with the read error, not a digest mismatch: the
+			// file could not be read, so no digest comparison ran. Keep
+			// "undocumented SQLite source change" for a computed digest
+			// that differs.
+			diskPath := filepath.Join(forkRoot, filepath.FromSlash(diskName))
+			return fmt.Errorf("read the SQLite fork file at %s: %w; restore third_party/zombiezen-sqlite/%s and rerun", diskPath, err, diskName)
 		}
 		actualDigest := sha256.Sum256(content)
 		if hex.EncodeToString(actualDigest[:]) != expectedDigest {
