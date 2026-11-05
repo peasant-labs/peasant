@@ -143,7 +143,8 @@ func TestStopWebLeavesAnotherProgramWithServerArgsAlone(t *testing.T) {
 }
 
 // procCmdlineRoot is the kernel's process view. A test points it at an empty
-// directory to exercise the ps fallback that non-Linux hosts rely on.
+// directory to exercise the fallback the helper takes where that view is
+// absent.
 var procCmdlineRoot = "/proc"
 
 // commandLineShows reports whether pid's command line contains want, reading the

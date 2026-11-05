@@ -53,8 +53,8 @@ func buildSessionsSearchCommand() *cobra.Command {
 			"--offset addresses at most " + strconv.Itoa(codemap.SearchMaxOffset) + " rows into the ranked stream. Unlike sessions\n" +
 			"list, --limit 0 is refused, and subagent sessions are never hidden. Scope filters\n" +
 			"narrow the ranked set before ranking; an identity query ignores them with a warning.\n" +
-			"A date-only\n" +
-			"--until covers that whole day. Output is local and receives no publish-time\n" +
+			"A date-only --until covers that whole day. Output is local and receives no\n" +
+			"publish-time\n" +
 			"redaction pass. --json preserves the search payload (including score) alongside\n" +
 			"warnings and explicit empty reasons.",
 		// Errors belong on stderr, never a usage dump on JSON's stdout.
