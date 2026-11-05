@@ -1,0 +1,89 @@
+# Mutation cases for the vendored driver audit. Each case copies the fork into a
+# temporary directory, applies its steps in order, and runs the audit over the
+# copy, expecting the failure text in want (empty want means the audit passes).
+#
+# A step applies to the fork copy, except repo-import, which writes a Go file
+# into a temporary repository root instead. Step kinds:
+#
+#   manifest-field        set a top-level manifest string field (field, value)
+#   manifest-drop-modified  delete a key from modified_files (key)
+#   manifest-drop-renamed   delete a key from renamed_files (key)
+#   manifest-digest-match   set files[path] to the on-disk digest, so a file
+#                           tampered by an earlier step matches its upstream
+#                           entry but still misses its modified_files entry
+#   patch-append          append text to connection-lifetime.patch (text)
+#   file-remove           delete a fork file (path)
+#   file-add              create a fork file that must not exist (path, text)
+#   file-append           append text to a fork file (path, text)
+#   repo-import           write a Go file importing a module (path, import)
+#
+# Deleting a case fails mutations.manifest.yaml. Every failure text the audit
+# can report appears in some case's want.
+cases:
+  - name: clean-copy-passes
+    steps: []
+    want: ""
+  - name: manifest-commit-tampered
+    steps:
+      - kind: manifest-field
+        field: commit
+        value: "0000000000000000000000000000000000000000"
+    want: "unexpected SQLite upstream origin"
+  - name: patch-bytes-changed
+    steps:
+      - kind: patch-append
+        text: "\n# probe\n"
+    want: "SQLite documented patch changed"
+  - name: manifest-modified-set-drops-sqlite-go
+    steps:
+      - kind: manifest-drop-modified
+        key: sqlite.go
+    want: "unexpected SQLite modified-file set"
+  - name: manifest-renamed-map-tampered
+    steps:
+      - kind: manifest-drop-renamed
+        key: go.work.sum
+    want: "unexpected SQLite metadata renames"
+  - name: fork-file-missing
+    steps:
+      - kind: file-remove
+        path: session.go
+    want: "SQLite file set changed: missing={'session.go'}, extra=set()"
+  - name: fork-file-extra
+    steps:
+      - kind: file-add
+        path: extra_probe.go
+        text: "package sqlite\n"
+    want: "SQLite file set changed: missing=set(), extra={'extra_probe.go'}"
+  - name: upstream-file-byte-changed
+    steps:
+      - kind: file-append
+        path: session.go
+        text: "\n// probe\n"
+    want: "undocumented SQLite source change: session.go"
+  - name: manifest-digest-matches-tampered-file
+    steps:
+      - kind: file-append
+        path: shell/shell.go
+        text: "\n// probe\n"
+      - kind: manifest-digest-match
+        path: shell/shell.go
+    want: "undocumented SQLite source change: shell/shell.go"
+  - name: added-pointer-line
+    steps:
+      - kind: file-append
+        path: connection_lifetime_test.go
+        text: "\nvar probePtr = unsafe.Pointer(probeBase)\n"
+    want: "SQLite native pointer expressions differ from audited upstream source"
+  - name: repo-import-unaudited-driver
+    steps:
+      - kind: repo-import
+        path: probe.go
+        import: zombiezen.com/go/sqlite
+    want: "Peasant still imports the unaudited driver: probe.go"
+  - name: repo-import-unaudited-driver-subpath
+    steps:
+      - kind: repo-import
+        path: probe_subpath.go
+        import: zombiezen.com/go/sqlite/sqlitex
+    want: "Peasant still imports the unaudited driver: probe_subpath.go"
