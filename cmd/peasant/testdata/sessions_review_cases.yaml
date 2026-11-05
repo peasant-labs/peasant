@@ -47,6 +47,8 @@ bodies:
         go: downloading github.com/wasilibs/go-re2 v1.13.0
         FROM docker.io/library/golang@sha256:4f1c8f2b9e0d7a6c5b3a29180f7e6d5c4b3a291807f6e5d4c3b2a1908f7e6d5c
         ok  	github.com/example/project/internal/storage/migrations/sqlite/schema	0.412s
+  bearer:
+    - { role: tool, output: "Bearer FAKEcanaryNOTaTOKEN" }
   every_kind:
     - { role: user, text: "secret_key: FAKE-canary-value-not-real-0123456789-abcd" }
     - { role: assistant, toolCallId: call-1, toolInput: '{"file_path": "/srv/app/credentials.json"}' }
@@ -101,6 +103,17 @@ cases:
         wantStatus: { 7a7a7a7a-0000-4000-8000-00000000000a: clean }
         wantKinds:
           7a7a7a7a-0000-4000-8000-00000000000a: [redaction_residue, redaction_residue, redaction_residue]
+
+  # A bearer token residue hit is not on the advisory allowlist, so it alone
+  # makes the session findings and the review exit 4.
+  - name: bearer_token_residue_blocks
+    seeds:
+      - { id: 7a7a7a7a-0000-4000-8000-00000000000a, body: bearer }
+    runs:
+      - args: [--session, 7a7a7a7a-0000-4000-8000-00000000000a, --json]
+        wantExit: 4
+        wantStatus: { 7a7a7a7a-0000-4000-8000-00000000000a: findings }
+        wantKinds: { 7a7a7a7a-0000-4000-8000-00000000000a: [redaction_residue] }
 
   - name: no_session_selected
     runs:

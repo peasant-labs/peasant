@@ -7,7 +7,7 @@
     "withFindings": 1,
     "errors": 0,
     "findings": 6,
-    "advisory": 1
+    "advisory": 0
   },
   "sessions": [
     {
@@ -68,7 +68,7 @@
           "role": "tool",
           "rule": "residue_bearer_token",
           "preview": "residue_bearer_token: ****",
-          "advisory": true
+          "advisory": false
         }
       ]
     }

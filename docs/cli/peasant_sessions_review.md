@@ -8,15 +8,18 @@ Read each named session, run the configured redactor on it in memory, and
 report what is left: credentials in formats no rule knows, passwords on a
 command line, tool calls that read or wrote a credential file, other people's
 email addresses, links that anyone
-holding them can open, and the redaction module's own advisory hits.
+holding them can open, and the redaction module's own residue hits.
 
 Nothing is written. Findings hold a masked preview, never the matched text. A
 session's subagent sessions are reviewed with it, because they are published
 with it, and its status covers them.
 
-The redaction module's hits are advisory: they are listed, marked advisory, and
-leave a session clean. They are broad on purpose and also hit commit ids,
-digests and long paths. Every other finding makes a session's status findings.
+Hits from these residue rules of the redaction module are advisory: they are
+listed, marked advisory, and leave a session clean, because they also hit
+ordinary git, go and build output: residue_base64_long, residue_hex_long,
+residue_go_import_path, residue_git_branch_output, residue_git_remote_ssh and
+residue_git_remote_https. Every other finding, every other residue rule
+included, makes a session's status findings.
 
 Exit status: 0 every session is clean, 4 at least one has findings and none
 failed, 1 at least one could not be reviewed.

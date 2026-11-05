@@ -36,3 +36,5 @@ requiredNames:
   - password_like_names_without_a_value_ignored
   - previews_hold_no_domain_or_tenant
   - foreign_email_in_assistant_text_and_tool_input
+  - git_branch_and_remote_output_is_advisory_only
+  - bearer_token_residue_blocks

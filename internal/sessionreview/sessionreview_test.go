@@ -50,6 +50,11 @@ type detectorCase struct {
 }
 
 type detectorsFixture struct {
+	Advisory []struct {
+		Kind     string `yaml:"kind"`
+		Rule     string `yaml:"rule"`
+		Advisory bool   `yaml:"advisory"`
+	} `yaml:"advisory"`
 	ClosedLists struct {
 		FindingKinds                   []string `yaml:"findingKinds"`
 		CredentialFileNames            []string `yaml:"credentialFileNames"`
@@ -58,6 +63,7 @@ type detectorsFixture struct {
 		CredentialFilePaths            []string `yaml:"credentialFilePaths"`
 		PasswordNameSuffixes           []string `yaml:"passwordNameSuffixes"`
 		InlinePasswordCommands         []string `yaml:"inlinePasswordCommands"`
+		AdvisoryResidueRules           []string `yaml:"advisoryResidueRules"`
 		ShareableHosts                 []string `yaml:"shareableHosts"`
 	} `yaml:"closedLists"`
 	Cases []detectorCase `yaml:"cases"`
@@ -189,6 +195,7 @@ func TestDetectorClosedLists(t *testing.T) {
 		"CredentialFilePaths":            {sessionreview.CredentialFilePaths, fixture.ClosedLists.CredentialFilePaths},
 		"PasswordNameSuffixes":           {sessionreview.PasswordNameSuffixes, fixture.ClosedLists.PasswordNameSuffixes},
 		"InlinePasswordCommands":         {sessionreview.InlinePasswordCommands, fixture.ClosedLists.InlinePasswordCommands},
+		"AdvisoryResidueRules":           {sessionreview.AdvisoryResidueRules, fixture.ClosedLists.AdvisoryResidueRules},
 	} {
 		if !slices.Equal(pair[0], pair[1]) {
 			t.Errorf("%s = %v, want %v", name, pair[0], pair[1])
@@ -211,6 +218,21 @@ func TestDetectorClosedLists(t *testing.T) {
 	for _, host := range hosts {
 		if !slices.ContainsFunc(perHost.Entries, func(e detectorEntry) bool { return strings.Contains(e.Text, host) }) {
 			t.Errorf("no shareable_link_each_host entry for host %q", host)
+		}
+	}
+}
+
+// TestAdvisoryClassification pins which findings are advisory: an allowlisted
+// residue rule only, so an unknown rule blocks.
+func TestAdvisoryClassification(t *testing.T) {
+	t.Parallel()
+	fixture := loadDetectorsFixture(t)
+	if len(fixture.Advisory) == 0 {
+		t.Fatal("no advisory classification cases")
+	}
+	for _, c := range fixture.Advisory {
+		if got := sessionreview.Advisory(sessionreview.FindingKind(c.Kind), c.Rule); got != c.Advisory {
+			t.Errorf("Advisory(%s, %q) = %v, want %v", c.Kind, c.Rule, got, c.Advisory)
 		}
 	}
 }

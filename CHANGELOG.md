@@ -16,10 +16,13 @@ Release, which holds the signed artifacts and checksums.
   hits. A finding shows a masked preview, never the matched text; an address
   keeps only its top-level domain and a tenant link host only its fixed suffix.
   It exits 4 on findings and 1 when a session could not be reviewed.
-- The redaction module's hits are advisory: listed with `"advisory": true`, and
-  they never change a session's status from `clean` or make the review exit 4.
-  Those rules also hit commit ids, `sha256:` digests, `go: downloading` lines
-  and long paths, so ordinary coding sessions review clean.
+- Residue hits that ordinary git, go and build output triggers are advisory:
+  `residue_base64_long`, `residue_hex_long`, `residue_go_import_path`,
+  `residue_git_branch_output`, `residue_git_remote_ssh` and
+  `residue_git_remote_https` are listed with `"advisory": true` and never change
+  a session's status from `clean` or make the review exit 4, so ordinary coding
+  sessions review clean. Every other residue rule blocks, `residue_bearer_token`
+  and any rule added later included.
 - Review credential coverage: line numbers a Read tool prints are removed and
   JSON tool output is decoded before the line patterns run; `.env.<name>`
   files (templates excepted) and `.kube/config` count as credential files,

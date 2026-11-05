@@ -41,13 +41,26 @@ const (
 	KindRedactionResidue FindingKind = "redaction_residue"
 )
 
-// Advisory reports whether findings of kind k are advisory. The redact
-// module's residue rules are broad on purpose and hit on commit ids, digests,
-// module paths and long repository paths, so their hits are reported but never
-// make a session's status findings. Every other kind comes from a detector of
-// this package and is blocking.
-func (k FindingKind) Advisory() bool {
-	return k == KindRedactionResidue
+// AdvisoryResidueRules is the closed allowlist of the redact module's residue
+// rules whose hits are advisory: they hit ordinary git, go and build output
+// (commit ids, sha256 digests, module download and test lines, git branch and
+// remote listings, which standard redaction keeps on purpose), so they are
+// reported but never make a session's status findings.
+var AdvisoryResidueRules = []string{
+	"residue_base64_long",
+	"residue_hex_long",
+	"residue_go_import_path",
+	"residue_git_branch_output",
+	"residue_git_remote_ssh",
+	"residue_git_remote_https",
+}
+
+// Advisory reports whether a finding of kind and rule is advisory. Only a
+// residue finding whose rule is on AdvisoryResidueRules is. Every other
+// residue rule, residue_bearer_token and any rule the module adds later
+// included, blocks: the allowlist fails closed.
+func Advisory(kind FindingKind, rule string) bool {
+	return kind == KindRedactionResidue && slices.Contains(AdvisoryResidueRules, rule)
 }
 
 // AllFindingKinds is the closed set of finding kinds.
@@ -84,7 +97,7 @@ const (
 const redactResidueEmailRule = "residue_email"
 
 // Finding is one thing a detector found. Preview is masked and at most
-// redact.PreviewMaxLength bytes. Advisory is Kind.Advisory(): an advisory
+// redact.PreviewMaxLength bytes. Advisory is Advisory(Kind, Rule): an advisory
 // finding is reported and does not block.
 type Finding struct {
 	Kind       FindingKind
@@ -385,7 +398,7 @@ func (rv *reviewer) add(finding Finding) {
 }
 
 func newFinding(entry *schema.SessionEntry, kind FindingKind, rule, preview string) Finding {
-	return Finding{Kind: kind, EntryIndex: entry.EntryIndex, Role: entry.Role, Rule: rule, Preview: preview, Advisory: kind.Advisory()}
+	return Finding{Kind: kind, EntryIndex: entry.EntryIndex, Role: entry.Role, Rule: rule, Preview: preview, Advisory: Advisory(kind, rule)}
 }
 
 func (rv *reviewer) assignments(entry *schema.SessionEntry, text string) []span {

@@ -201,7 +201,7 @@ peasant sessions list --json --limit 20 | peasant sessions review --sessions-fro
 | `credential_file_output` | A tool result from reading a credential-shaped file, a tool call that writes content to one, or a tool result listing two or more secret-named `NAME=value` lines. |
 | `foreign_email` | An address that survived redaction and is not yours, in a prompt, an assistant reply, a tool call's input or a tool result. Your addresses are your git identity and each `--owner-email`. |
 | `shareable_document_link` | A link on a closed list of document hosts that anyone holding it can open. |
-| `redaction_residue` | A hit from the redaction module's advisory rules. Advisory: see below. |
+| `redaction_residue` | A hit from the redaction module's residue rules. Some are advisory: see below. |
 
 The rules are closed lists, kept in `internal/sessionreview`:
 
@@ -229,12 +229,18 @@ Before the patterns run, a JSON tool result or input is decoded to its
 strings, so an escaped newline is a line again, and the line numbers a Read
 tool prints ahead of each line (`     1<TAB>` or `1→`) are removed.
 
-`redaction_residue` findings are advisory. The redaction module's rules are
-broad on purpose and also hit ordinary coding output, such as commit ids,
-`sha256:` digests, `go: downloading` lines and long repository paths. An
-advisory finding is listed with `"advisory": true`, and it never changes a
-session's status from `clean` or makes the review exit 4. Every other kind is
-blocking and carries `"advisory": false`. The summary's `findings` counts every
+Some `redaction_residue` findings are advisory. A closed allowlist of the
+redaction module's residue rules hits ordinary git, go and build output
+(commit ids, `sha256:` digests, `go: downloading` and test lines, and the git
+branch and remote listings that standard redaction keeps on purpose):
+`residue_base64_long`, `residue_hex_long`, `residue_go_import_path`,
+`residue_git_branch_output`, `residue_git_remote_ssh` and
+`residue_git_remote_https`. A finding from one of them is listed with
+`"advisory": true`, and it never changes a session's status from `clean` or
+makes the review exit 4. Every other finding blocks and carries
+`"advisory": false`, including every other residue rule, such as
+`residue_bearer_token`, and any residue rule the module adds later until it is
+allowlisted. The summary's `findings` counts every
 finding and its `advisory` counts the advisory ones.
 
 A finding shows a masked preview, such as `secret_key=**** (len 32-63)`, and

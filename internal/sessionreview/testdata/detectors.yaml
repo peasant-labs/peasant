@@ -1,10 +1,21 @@
 # Detector cases. Every value here is an obviously fake canary. entries run
 # through the real redactor at the standard level, so a case that says nothing
 # is found proves the redactor removed it first. An entry's index is its
-# position. ownerEmails is the owner set. want lists the findings in order, and
+# position. advisory lists how a kind and rule classify: only an allowlisted
+# residue rule is advisory, and an unknown one blocks. ownerEmails is the owner set. want lists the findings in order, and
 # an absent want means none. advisory marks a finding of an advisory kind.
 # wantClean asserts that no finding blocks. kinds lists finding kinds for a case that asserts
 # only those.
+advisory:
+  - { kind: redaction_residue, rule: residue_base64_long, advisory: true }
+  - { kind: redaction_residue, rule: residue_git_remote_https, advisory: true }
+  - { kind: redaction_residue, rule: residue_bearer_token, advisory: false }
+  - { kind: redaction_residue, rule: residue_jwt_token, advisory: false }
+  # A rule the redact module adds later blocks until it is allowlisted.
+  - { kind: redaction_residue, rule: residue_some_future_rule, advisory: false }
+  - { kind: redaction_residue, rule: "", advisory: false }
+  # The allowlist names residue rules only; another kind never matches it.
+  - { kind: credential_assignment, rule: residue_hex_long, advisory: false }
 closedLists:
   findingKinds:
     - credential_assignment
@@ -36,6 +47,13 @@ closedLists:
   credentialFilePaths: [.kube/config]
   passwordNameSuffixes: [password, passwd, passphrase, secret, token]
   inlinePasswordCommands: [mysql, mysqldump, mysqladmin, mariadb, mariadb-dump]
+  advisoryResidueRules:
+    - residue_base64_long
+    - residue_hex_long
+    - residue_go_import_path
+    - residue_git_branch_output
+    - residue_git_remote_ssh
+    - residue_git_remote_https
   shareableHosts:
     - docs.google.com
     - drive.google.com
@@ -155,7 +173,7 @@ cases:
     entries:
       - { role: tool, output: "Bearer FAKEcanaryNOTaTOKEN" }
     want:
-      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****", advisory: true }
+      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****" }
 
   - name: git_remote_is_not_also_an_email_residue
     entries:
@@ -179,7 +197,7 @@ cases:
     entries:
       - { role: tool, output: "Bearer FAKEcanaryNOTaTOKEN then Bearer FAKEcanaryNOTaTOKEN" }
     want:
-      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****", advisory: true }
+      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****" }
 
   - name: preview_max_length
     entries:
@@ -315,3 +333,24 @@ cases:
     want:
       - { kind: foreign_email, entry: 0, role: assistant, rule: foreign_email, preview: "***@***.edu" }
       - { kind: foreign_email, entry: 1, role: assistant, rule: foreign_email, preview: "***@***.org" }
+
+  # git branch and remote listings hit the git-context residue rules, which
+  # standard redaction keeps on purpose; those hits are advisory.
+  - name: git_branch_and_remote_output_is_advisory_only
+    entries:
+      - { role: tool, output: "* main\n  feature/parser-fix\n  remotes/origin/main" }
+      - { role: tool, output: "origin\thttps://github.com/example/project.git (fetch)" }
+    wantClean: true
+    want:
+      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_git_branch_output, preview: "residue_git_branch_output: ****", advisory: true }
+      - { kind: redaction_residue, entry: 1, role: tool, rule: residue_git_remote_https, preview: "residue_git_remote_https: ****", advisory: true }
+      - { kind: redaction_residue, entry: 1, role: tool, rule: residue_go_import_path, preview: "residue_go_import_path: ****", advisory: true }
+
+  # A bearer token that redaction missed is a credential leak, so its residue
+  # hit blocks.
+  - name: bearer_token_residue_blocks
+    entries:
+      - { role: tool, output: "curl -H 'Authorization: Bearer FAKEcanaryNOTaTOKEN' https://api.example.org" }
+    wantClean: false
+    want:
+      - { kind: redaction_residue, entry: 0, role: tool, rule: residue_bearer_token, preview: "residue_bearer_token: ****" }
