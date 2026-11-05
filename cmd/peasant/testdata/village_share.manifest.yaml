@@ -32,3 +32,6 @@ requiredNames:
   - no_collective_named_exit_3
   - auto_publish_rules_are_not_read
   - review_document_reports_each_session_left_out
+  - every_target_unresolved_exit_3
+  - every_transcript_read_failed_exit_3
+  - dry_run_with_a_failed_target_exit_3

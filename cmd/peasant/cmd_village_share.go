@@ -249,6 +249,9 @@ func runVillageShare(cmd *cobra.Command, deps pushCommandDependencies, opts vill
 		doc.Transcripts = append(doc.Transcripts, entry)
 	}
 
+	// sent says a change request went out. Without one the run changed nothing
+	// on peasant online, so a failure exits 3, not 1.
+	sent := false
 	if !opts.dryRun {
 		asked, askedNames := shareAsked(doc.Transcripts, doc.Collectives)
 		if asked > 0 {
@@ -272,6 +275,7 @@ func runVillageShare(cmd *cobra.Command, deps pushCommandDependencies, opts vill
 				if !hasPlannedShare(entry.Steps) {
 					continue
 				}
+				sent = true
 				steps, shareErr := push.ShareExisting(ctx, sharer, entry.TranscriptID, ids, false)
 				if shareErr != nil {
 					steps = failedShareSteps(ids, shareErr)
@@ -287,6 +291,12 @@ func runVillageShare(cmd *cobra.Command, deps pushCommandDependencies, opts vill
 		reason = "every collective already has a share of every transcript, so nothing was asked"
 	}
 	doc.Meta = warnings.Meta(empty, reason)
+	failures := shareFailures(doc)
+	var stopped error
+	if failures > 0 && !sent {
+		stopped = fmt.Errorf("village share: %d of the requested shares failed and no share request was sent; nothing was shared", failures)
+		doc.Refusal = stopped.Error()
+	}
 	if opts.jsonOutput {
 		if err := clicontract.WriteJSON(cmd.OutOrStdout(), doc); err != nil {
 			return err
@@ -294,7 +304,10 @@ func runVillageShare(cmd *cobra.Command, deps pushCommandDependencies, opts vill
 	} else {
 		printShareDocument(cmd.OutOrStdout(), cmd.ErrOrStderr(), doc, reason)
 	}
-	if failures := shareFailures(doc); failures > 0 {
+	if stopped != nil {
+		return &pushNothingAttemptedError{cause: stopped}
+	}
+	if failures > 0 {
 		return fmt.Errorf("village share: %d of the requested shares failed; the rest are as listed", failures)
 	}
 	return nil

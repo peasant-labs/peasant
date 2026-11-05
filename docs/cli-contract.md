@@ -183,10 +183,15 @@ only reads, and writes nothing. With nothing to ask, `empty_code` is
 `nothing_changed`.
 
 The command exits 0 when every step is `succeeded`, `pending_approval` or
-`skipped`, and also when a prompt is declined. It exits 1 when a step failed or a
-target did not resolve; the other targets still run. It exits 3 for a refused
-call, a confirmation it cannot ask for, a missing login, an unreadable store, or
-a `--collective` that is unknown, ambiguous, or not one you belong to.
+`skipped`, and also when a prompt is declined. A target that does not resolve,
+or whose transcript cannot be read, does not stop the other targets. When the run
+sent at least one share request and a step failed or a target did not resolve,
+it exits 1. When it sent no share request, it exits 3 whatever stopped it: a
+refused call, a confirmation it cannot ask for, a missing login, an unreadable
+store, a `--collective` that is unknown, ambiguous, or not one you belong to, or
+every target failing before a request. A dry run sends no request, so a dry run
+with a failed target also exits 3. Every exit-3 run names its cause in the
+document's `refusal` field.
 
 ## The `village push` plan
 

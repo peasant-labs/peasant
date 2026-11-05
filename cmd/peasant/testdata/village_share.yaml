@@ -227,3 +227,26 @@ cases:
       - {transcript: "{a}", collective: research, outcome: succeeded, session: "{a}"}
     wantWarnings:
       - {code: session_refused, session: "{b}"}
+  # A run that sent no share request exits 3, whatever stopped it: the general
+  # exit-status table promises it. Exit 1 needs at least one request sent.
+  - name: every_target_unresolved_exit_3
+    args: [--session, "{unpublished}", --collective, research, --yes]
+    wantExit: 3
+    wantRefusal: true
+    wantErrors:
+      - {ref: "{unpublished}", contains: "peasant village push --session {unpublished}"}
+  - name: every_transcript_read_failed_exit_3
+    args: ["{stranger}", --collective, research, --yes]
+    wantExit: 3
+    wantRefusal: true
+    wantSteps:
+      - {transcript: "{stranger}", collective: research, outcome: failed, reasonContains: Transcript not found}
+  - name: dry_run_with_a_failed_target_exit_3
+    args: ["{a}", --session, "{unpublished}", --collective, research, --dry-run]
+    wantExit: 3
+    wantRefusal: true
+    wantStoreUnchanged: true
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: not_attempted, reasonContains: "dry run: would share"}
+    wantErrors:
+      - {ref: "{unpublished}", contains: "no publication receipt"}
