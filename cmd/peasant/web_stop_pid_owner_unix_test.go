@@ -209,6 +209,9 @@ func TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone(t *testing.T) {
 // kernel's view unavailable, the helper still reads this process's own command
 // line, and still refuses a string no argument carries.
 func TestCommandLineShowsFallsBackToPs(t *testing.T) {
+	if _, err := exec.LookPath("ps"); err != nil {
+		t.Skip("this host has no ps, so the fallback cannot run; the kernel path is covered by the tests above")
+	}
 	previous := procCmdlineRoot
 	procCmdlineRoot = t.TempDir()
 	t.Cleanup(func() { procCmdlineRoot = previous })

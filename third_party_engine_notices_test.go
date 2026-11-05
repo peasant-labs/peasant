@@ -61,7 +61,15 @@ func engineModuleDir(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve the pinned engine module: %v; the notice provenance cannot be verified", err)
 	}
-	return strings.TrimSpace(string(out))
+	dir := strings.TrimSpace(string(out))
+	if dir == "" {
+		// A vendored, pruned build carries only the module's Go files, so the
+		// build recipe this check reads is not in the tree. The check runs where
+		// the module source is available (the dev shell and CI), which is where a
+		// version bump is reviewed.
+		t.Skip("the pinned module's source is not in this build; the notices are verified in the dev shell and CI")
+	}
+	return dir
 }
 
 func readEngineFile(t *testing.T, path string) string {
