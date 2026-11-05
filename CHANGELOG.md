@@ -7,6 +7,40 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Added
+- `peasant sessions review` checks named sessions for what redaction leaves
+  behind, in memory and writing nothing: credentials in formats no rule knows,
+  passwords on a `mysql -p<password>` command line, tool calls that read or
+  wrote a credential file, other people's email addresses in any message or
+  tool call, link-shareable documents, and the redaction module's advisory
+  hits. A finding shows a masked preview, never the matched text; an address
+  keeps only its top-level domain and a tenant link host only its fixed suffix.
+  It exits 4 on findings and 1 when a session could not be reviewed.
+- The redaction module's hits are advisory: listed with `"advisory": true`, and
+  they never change a session's status from `clean` or make the review exit 4.
+  Those rules also hit commit ids, `sha256:` digests, `go: downloading` lines
+  and long paths, so ordinary coding sessions review clean.
+- Review credential coverage: line numbers a Read tool prints are removed and
+  JSON tool output is decoded before the line patterns run; `.env.<name>`
+  files (templates excepted) and `.kube/config` count as credential files,
+  written through Write or Edit as well as read; and a value with symbols or
+  no digit is caught when its name ends in `password`, `passwd`, `passphrase`,
+  `secret` or `token`.
+- `--sessions-from` accepts a `sessions review --json` document and takes only
+  its clean sessions. Each session left out is a `session_refused` warning, and
+  a document with no clean session is refused. Any object whose `status` is a
+  review status is held to that rule whatever key names it, and a reshaped
+  review is refused: a finding, a row without its status, conflicting id keys,
+  a repeated key, or a key that differs from a known key only in case.
+- `village share` offers transcripts you already published to collectives, named
+  by UUID, page URL, `--session` or `--sessions-from`, without pushing again. It
+  asks once; `--yes` confirms in advance, and with `--json` or no terminal and no
+  `--yes` it refuses, exits 3 and shares nothing. A collective that already has a
+  share, live, rejected or taken back, is not asked again. `--dry-run --json`
+  prints the plan. It uploads nothing and changes no visibility or license. It
+  exits 3 whenever it sent no share request, every target failing included,
+  and 1 only when it sent one and something failed.
+
 ## [0.14.0] - 2026-11-04
 
 ### Added
@@ -28,21 +62,6 @@ Release, which holds the signed artifacts and checksums.
   `--no-redact` for harvest only). Scheduled runs are local and never publish.
   `--dry-run` prints the units. `uninstall` removes only the units peasant
   wrote. Redact runs as `ExecStopPost=`, so it runs after a failed harvest too.
-- `peasant sessions review` checks named sessions for what redaction leaves
-  behind, in memory and writing nothing: credentials in formats no rule knows,
-  tool results that printed a credential file, other people's email addresses,
-  link-shareable documents, and the redaction module's advisory hits. A finding
-  shows a masked preview, never the matched text. It exits 4 on findings and 1
-  when a session could not be reviewed.
-- `--sessions-from` accepts a `sessions review --json` document and takes only
-  its clean sessions. Each session left out is a `session_refused` warning, and
-  a document with no clean session is refused.
-- `village share` offers transcripts you already published to collectives, named
-  by UUID, page URL, `--session` or `--sessions-from`, without pushing again. It
-  asks once; `--yes` confirms in advance, and with `--json` or no terminal and no
-  `--yes` it refuses, exits 3 and shares nothing. A collective that already has a
-  share, live, rejected or taken back, is not asked again. `--dry-run --json`
-  prints the plan. It uploads nothing and changes no visibility or license.
 
 ### Changed
 - **Exit code:** `peasant harvest --json` now exits 1 when a session fails,
