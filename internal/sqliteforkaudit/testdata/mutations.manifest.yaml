@@ -1,0 +1,24 @@
+# Required-name manifest for testdata/mutations.yaml. Name-only:
+# testutil.ValidateRequiredNames compares the name sets.
+requiredNames:
+  - clean-copy-passes
+  - manifest-commit-tampered
+  - patch-bytes-changed
+  - manifest-modified-set-drops-sqlite-go
+  - manifest-modified-set-non-go
+  - manifest-renamed-map-tampered
+  - fork-file-missing
+  - fork-file-extra
+  - fork-root-missing
+  - fork-file-unreadable
+  - upstream-file-byte-changed
+  - modified-file-change-undocumented
+  - modified-file-change-documented
+  - added-pointer-line
+  - pointer-line-duplicated-in-modified-file
+  - repo-import-unaudited-driver
+  - repo-import-unaudited-driver-subpath
+  - repo-import-nested-file
+  - repo-import-through-symlinked-dir
+  - repo-symlinked-dir-cycle
+  - repo-symlink-unresolvable-loop

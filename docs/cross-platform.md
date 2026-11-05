@@ -108,8 +108,7 @@ the host.
 ## CI gates
 
 - **`windows-latest` job** (`.github/workflows/tests.yml`, runs on every PR): `go build
-  ./...`; a typecheck of every Windows test file (`go vet` via `scripts/vet-go.sh
-  --skip-sqlite-audit`); the whole `internal/defaults`, `internal/config`, `internal/proc`
+  ./...`; a typecheck of every Windows test file (`go vet` via `scripts/vet-go.sh`); the whole `internal/defaults`, `internal/config`, `internal/proc`
   packages; a named Windows test set; and `go build -o peasant.exe ./cmd/peasant` followed
   by `peasant.exe version`.
 - **Cross-compile from Linux** (`check-arm64`, release-gated): `CGO_ENABLED=0 GOOS=windows

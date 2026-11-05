@@ -29,7 +29,7 @@ on:
       - "go.mod"
       - "go.sum"
       - "third_party/zombiezen-sqlite/**"
-      - "scripts/check-sqlite-fork.py"
+      - "internal/sqliteforkaudit/**"
       - "scripts/vet-go.sh"
       - "scripts/check-module-install/**"
       - "Makefile"
@@ -65,7 +65,7 @@ on:
       - "go.mod"
       - "go.sum"
       - "third_party/zombiezen-sqlite/**"
-      - "scripts/check-sqlite-fork.py"
+      - "internal/sqliteforkaudit/**"
       - "scripts/vet-go.sh"
       - "scripts/check-module-install/**"
       - "Makefile"
@@ -187,8 +187,8 @@ jobs:
        !startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
     # Routed to the x86_64 pool. `make check` needs only the Go toolchain, a C
-    # compiler for `go vet`/cgo, Python for the SQLite source audit, and the
-    # ast-grep binary. It does not need the Nix devShell. The pool hands a lone
+    # compiler for `go vet`/cgo, and the ast-grep binary. It does not need the
+    # Nix devShell. The pool hands a lone
     # job the whole 24-core pool budget
     # (hosts/desktop/configuration.nix: pool cpuQuota 2400%, per-runner
     # cpuWeight with no quota), against 2 vCPU on the arm64 Blacksmith runner.
@@ -243,14 +243,6 @@ jobs:
           # there only re-downloads that host's own snapshot, and a key miss tars
           # the whole shared cache for an upload over the 10 GB limit.
           cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
-
-      # The SQLite source audit uses Python's standard library. The minimal
-      # pool image has no interpreter, so provision it before the quality gate.
-      - name: Install Python for the SQLite source audit
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y python3
 
       # `make check` shells out to `ast-grep scan`. The pool image does not
       # provide ast-grep, so install the prebuilt npm binary (glibc, linux-x64-gnu).
@@ -575,8 +567,8 @@ jobs:
        github.event_name == 'workflow_dispatch') &&
       (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
-    # Routed to the x86_64 pool: Go handles build/test/module ZIP installation;
-    # Python supplies the SQLite source audit. No Nix devShell is required.
+    # Routed to the x86_64 pool: Go handles build/test/module ZIP installation.
+    # No Nix devShell is required.
     needs: determine-runner
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 20
@@ -594,13 +586,6 @@ jobs:
           # there only re-downloads that host's own snapshot, and a key miss tars
           # the whole shared cache for an upload over the 10 GB limit.
           cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
-
-      # The real module-install target also audits the SQLite source first.
-      - name: Install Python for the SQLite source audit
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y python3
 
       # Already namespaced `-go-cgo0-` on both the key and the restore-key, so
       # this release-only lane never collided with the shared prefix; kept as the
@@ -804,7 +789,7 @@ jobs:
       # request, unlike the cross-compile lane's release-gated copy.
       - name: Typecheck Windows test files
         shell: bash
-        run: ./scripts/vet-go.sh --skip-sqlite-audit
+        run: ./scripts/vet-go.sh
 
       # One `go test` command for every package: the default pwsh shell returns
       # the last command's exit code, so two commands here would discard the
