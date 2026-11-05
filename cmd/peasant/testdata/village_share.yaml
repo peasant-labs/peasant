@@ -250,3 +250,9 @@ cases:
       - {transcript: "{a}", collective: research, outcome: not_attempted, reasonContains: "dry run: would share"}
     wantErrors:
       - {ref: "{unpublished}", contains: "no publication receipt"}
+  - name: empty_collective_value_refused_in_share_words
+    args: ["{a}", --collective, " ", --yes]
+    wantExit: 3
+    wantNoRequests: true
+    wantRefusal: true
+    wantErr: a --collective value is empty

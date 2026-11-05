@@ -35,3 +35,4 @@ requiredNames:
   - every_target_unresolved_exit_3
   - every_transcript_read_failed_exit_3
   - dry_run_with_a_failed_target_exit_3
+  - empty_collective_value_refused_in_share_words

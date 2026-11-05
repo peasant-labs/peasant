@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -191,6 +192,9 @@ func runVillageShare(cmd *cobra.Command, deps pushCommandDependencies, opts vill
 	}
 	if len(opts.collectives) == 0 {
 		return refuse(shareUsage(cmd, "no collective was named", "pass --collective with a name, UUID or page URL"))
+	}
+	if slices.ContainsFunc(opts.collectives, func(value string) bool { return strings.TrimSpace(value) == "" }) {
+		return refuse(shareUsage(cmd, "a --collective value is empty", "give each --collective the name, UUID or page URL of a collective to offer the transcripts to"))
 	}
 	if len(args) == 0 && len(selection.IDs) == 0 {
 		return refuse(shareUsage(cmd, "no transcript was named", "pass a transcript UUID or URL, --session, or --sessions-from"))
