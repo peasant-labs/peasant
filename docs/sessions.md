@@ -199,7 +199,7 @@ peasant sessions list --json --limit 20 | peasant sessions review --sessions-fro
 |---|---|
 | `credential_assignment` | A secret-named `name: value` whose value is long, high in entropy, and known to no rule; a password-named value with symbols in it or no digit; or a password written on a `mysql -p<password>` command line. |
 | `credential_file_output` | A tool result from reading a credential-shaped file, a tool call that writes content to one, or a tool result listing two or more secret-named `NAME=value` lines. |
-| `foreign_email` | An address that survived redaction and is not yours. Your addresses are your git identity and each `--owner-email`. |
+| `foreign_email` | An address that survived redaction and is not yours, in a prompt, an assistant reply, a tool call's input or a tool result. Your addresses are your git identity and each `--owner-email`. |
 | `shareable_document_link` | A link on a closed list of document hosts that anyone holding it can open. |
 | `redaction_residue` | A hit from the redaction module's advisory rules. Advisory: see below. |
 

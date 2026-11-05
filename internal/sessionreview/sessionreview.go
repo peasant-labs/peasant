@@ -333,7 +333,7 @@ func (rv *reviewer) toolCalls(entries []schema.SessionEntry) map[string]schema.S
 
 func (rv *reviewer) reviewEntry(entry *schema.SessionEntry, calls map[string]schema.SessionEntry) {
 	if entry.ContentPreview != nil {
-		rv.scan(entry, reviewText(rv.redactor.RedactText(*entry.ContentPreview)), entry.Role == schema.RoleUser, false)
+		rv.scan(entry, reviewText(rv.redactor.RedactText(*entry.ContentPreview)), false)
 	}
 	if entry.ToolInput != nil {
 		input := rv.redactor.RedactText(*entry.ToolInput)
@@ -342,7 +342,7 @@ func (rv *reviewer) reviewEntry(entry *schema.SessionEntry, calls map[string]sch
 			rv.add(newFinding(entry, KindCredentialFileOutput, ruleCredentialFileWrite, name+": written content="+masked))
 			covered = true
 		}
-		rv.scan(entry, reviewText(input), false, covered)
+		rv.scan(entry, reviewText(input), covered)
 	}
 	if entry.ToolOutput == nil {
 		return
@@ -353,13 +353,14 @@ func (rv *reviewer) reviewEntry(entry *schema.SessionEntry, calls map[string]sch
 		rv.add(finding)
 		covered = true
 	}
-	rv.scan(entry, output, true, covered)
+	rv.scan(entry, output, covered)
 }
 
-// scan runs the text detectors on one redacted text. covered says a finding
-// already accounts for the whole text, so its secret-shaped lines are not
-// reported a second time.
-func (rv *reviewer) scan(entry *schema.SessionEntry, text string, scanEmails, covered bool) {
+// scan runs the text detectors on one redacted text: every role's text, tool
+// input and tool output alike, since all of it is published. covered says a
+// finding already accounts for the whole text, so its secret-shaped lines are
+// not reported a second time.
+func (rv *reviewer) scan(entry *schema.SessionEntry, text string, covered bool) {
 	if text == "" {
 		return
 	}
@@ -367,9 +368,7 @@ func (rv *reviewer) scan(entry *schema.SessionEntry, text string, scanEmails, co
 	if !covered {
 		spans = append(spans, rv.assignments(entry, text)...)
 	}
-	if scanEmails {
-		rv.emails(entry, text)
-	}
+	rv.emails(entry, text)
 	spans = append(spans, rv.links(entry, text)...)
 	if !covered {
 		rv.residuePassthrough(entry, text, spans)

@@ -305,3 +305,13 @@ cases:
     want:
       - { kind: foreign_email, entry: 0, role: user, rule: foreign_email, preview: "***@***.de" }
       - { kind: shareable_document_link, entry: 1, role: user, rule: share_sharepoint, preview: "****.sharepoint.com/:x:/****" }
+
+  # An address the assistant writes, or puts in a tool call, is published as
+  # one in a prompt is.
+  - name: foreign_email_in_assistant_text_and_tool_input
+    entries:
+      - { role: assistant, text: "I will mail andré@univ.example.edu the results" }
+      - { role: assistant, toolInput: '{"command": "git commit --author \"Andre <andré@univ.example.org>\""}', toolKind: execute }
+    want:
+      - { kind: foreign_email, entry: 0, role: assistant, rule: foreign_email, preview: "***@***.edu" }
+      - { kind: foreign_email, entry: 1, role: assistant, rule: foreign_email, preview: "***@***.org" }
