@@ -2,8 +2,8 @@
 # temporary directory, applies its steps in order, and runs the audit over the
 # copy, expecting the failure text in want (empty want means the audit passes).
 #
-# A step applies to the fork copy, except repo-import, which writes a Go file
-# into a temporary repository root instead. Step kinds:
+# A step applies to the fork copy, except repo-import and repo-symlink, which
+# write into a temporary repository root instead. Step kinds:
 #
 #   manifest-field        set a top-level manifest string field (field, value)
 #   manifest-drop-modified  delete a key from modified_files (key)
@@ -11,11 +11,26 @@
 #   manifest-digest-match   set files[path] to the on-disk digest, so a file
 #                           tampered by an earlier step matches its upstream
 #                           entry but still misses its modified_files entry
+#   manifest-modified-match set modified_files[path] to the on-disk digest, so
+#                           a tampered modified file passes the digest check
+#                           and a later check must catch the mutation (path)
+#   manifest-set-modified   set modified_files[key] to value (key, value)
 #   patch-append          append text to connection-lifetime.patch (text)
 #   file-remove           delete a fork file (path)
 #   file-add              create a fork file that must not exist (path, text)
 #   file-append           append text to a fork file (path, text)
-#   repo-import           write a Go file importing a module (path, import)
+#   file-unreadable       replace a fork file with a dangling symlink, so its
+#                           read fails even for a test run as root (path)
+#   fork-delete           delete the whole fork copy, so the manifest read fails
+#   repo-import           write a Go file importing a module (path, import);
+#                           parent directories are created, so nested paths work
+#   repo-symlink          symlink a repository path to a target (path, value)
+#
+# Want comparison is exact by default: want holds the full failure text.
+# A case whose failure text embeds a variable part (a temporary path, an
+# operating-system error) sets match: contains and states the variable part
+# in because. A case that mutates the tree yet expects success (an honestly
+# documented change) leaves want empty and states in because why it passes.
 #
 # Deleting a case fails mutations.manifest.yaml. Every failure text the audit
 # can report appears in some case's want.
@@ -39,6 +54,12 @@ cases:
       - kind: manifest-drop-modified
         key: sqlite.go
     want: "unexpected SQLite modified-file set"
+  - name: manifest-modified-set-non-go
+    steps:
+      - kind: manifest-set-modified
+        key: NOTES.txt
+        value: "0000000000000000000000000000000000000000000000000000000000000000"
+    want: "unexpected SQLite modified-file set"
   - name: manifest-renamed-map-tampered
     steps:
       - kind: manifest-drop-renamed
@@ -55,25 +76,53 @@ cases:
         path: extra_probe.go
         text: "package sqlite\n"
     want: "SQLite file set changed: missing=set(), extra={'extra_probe.go'}"
+  - name: fork-root-missing
+    steps:
+      - kind: fork-delete
+    match: contains
+    want: "read the SQLite fork manifest at"
+    because: "the failure text embeds the case's temporary copy path and the operating-system error, so only the stable prefix is asserted"
+  - name: fork-file-unreadable
+    steps:
+      - kind: file-unreadable
+        path: CHANGELOG.md
+    match: contains
+    want: "read the SQLite fork file at"
+    because: "the failure text embeds the case's temporary copy path and the operating-system error, so only the stable prefix is asserted"
   - name: upstream-file-byte-changed
     steps:
       - kind: file-append
         path: session.go
         text: "\n// probe\n"
     want: "undocumented SQLite source change: session.go"
-  - name: manifest-digest-matches-tampered-file
+  - name: modified-file-change-undocumented
     steps:
       - kind: file-append
         path: shell/shell.go
         text: "\n// probe\n"
-      - kind: manifest-digest-match
-        path: shell/shell.go
     want: "undocumented SQLite source change: shell/shell.go"
+  - name: modified-file-change-documented
+    steps:
+      - kind: file-append
+        path: shell/shell.go
+        text: "\n// probe\n"
+      - kind: manifest-modified-match
+        path: shell/shell.go
+    want: ""
+    because: "re-recording the new digest in modified_files is the honest documentation path; the hardcoded upstream tuple and review anchor the change, not a self-consistent digest"
   - name: added-pointer-line
     steps:
       - kind: file-append
         path: connection_lifetime_test.go
         text: "\nvar probePtr = unsafe.Pointer(probeBase)\n"
+    want: "SQLite native pointer expressions differ from audited upstream source"
+  - name: pointer-line-duplicated-in-modified-file
+    steps:
+      - kind: file-append
+        path: sqlite.go
+        text: "\n\t\tconn:       *(*uintptr)(unsafe.Pointer(connPtr)),\n"
+      - kind: manifest-modified-match
+        path: sqlite.go
     want: "SQLite native pointer expressions differ from audited upstream source"
   - name: repo-import-unaudited-driver
     steps:
@@ -87,3 +136,37 @@ cases:
         path: probe_subpath.go
         import: zombiezen.com/go/sqlite/sqlitex
     want: "Peasant still imports the unaudited driver: probe_subpath.go"
+  - name: repo-import-nested-file
+    steps:
+      - kind: repo-import
+        path: subdir/probe.go
+        import: zombiezen.com/go/sqlite
+    want: "Peasant still imports the unaudited driver: subdir/probe.go"
+  - name: repo-import-through-symlinked-dir
+    steps:
+      - kind: repo-import
+        path: node_modules/hidden/probe.go
+        import: zombiezen.com/go/sqlite
+      - kind: repo-symlink
+        path: link
+        value: node_modules/hidden
+    want: "Peasant still imports the unaudited driver: link/probe.go"
+  - name: repo-symlinked-dir-cycle
+    steps:
+      - kind: repo-symlink
+        path: loop
+        value: .
+    match: contains
+    want: "directory symlink cycle at loop"
+    because: "the failure text prefixes the case's temporary repository path, which varies per run"
+  - name: repo-symlink-unresolvable-loop
+    steps:
+      - kind: repo-symlink
+        path: a
+        value: b
+      - kind: repo-symlink
+        path: b
+        value: a
+    match: contains
+    want: "restore a readable tree and rerun"
+    because: "the failure text embeds the case's temporary repository path and the operating-system link error, so only the stable repair hint is asserted"
