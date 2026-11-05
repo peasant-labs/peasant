@@ -31,3 +31,4 @@ requiredNames:
   - no_transcript_named_exit_3
   - no_collective_named_exit_3
   - auto_publish_rules_are_not_read
+  - review_document_reports_each_session_left_out

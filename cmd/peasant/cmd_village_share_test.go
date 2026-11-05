@@ -66,6 +66,11 @@ type villageShareCase struct {
 		Ref      string `yaml:"ref"`
 		Contains string `yaml:"contains"`
 	} `yaml:"wantErrors"`
+	// WantWarnings lists the document's warnings in order, as code and session.
+	WantWarnings []struct {
+		Code    string `yaml:"code"`
+		Session string `yaml:"session"`
+	} `yaml:"wantWarnings"`
 	WantErr               string `yaml:"wantErr"`
 	WantRefusal           bool   `yaml:"wantRefusal"`
 	WantPrompt            string `yaml:"wantPrompt"`
@@ -316,6 +321,16 @@ func assertVillageShareDocument(t *testing.T, tc villageShareCase, stdout, villa
 	for i, want := range tc.WantErrors {
 		if i >= len(doc.Errors) || doc.Errors[i].Ref != expandVillageShare(want.Ref) || !strings.Contains(doc.Errors[i].Message, expandVillageShare(want.Contains)) {
 			t.Fatalf("errors = %+v, want %+v", doc.Errors, want)
+		}
+	}
+	if tc.WantWarnings != nil {
+		if len(doc.Warnings) != len(tc.WantWarnings) {
+			t.Fatalf("warnings = %+v, want %+v", doc.Warnings, tc.WantWarnings)
+		}
+		for i, want := range tc.WantWarnings {
+			if string(doc.Warnings[i].Code) != want.Code || doc.Warnings[i].SessionID != expandVillageShare(want.Session) {
+				t.Fatalf("warning %d = %+v, want %+v", i, doc.Warnings[i], want)
+			}
 		}
 	}
 	if tc.Golden != "" {

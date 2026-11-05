@@ -218,3 +218,12 @@ cases:
     wantPosts: 1
     wantSteps:
       - {transcript: "{a}", collective: research, outcome: succeeded}
+  # A session a review document leaves out is reported, never dropped silently.
+  - name: review_document_reports_each_session_left_out
+    stdin: '{"sessions": [{"sessionId": "{a}", "status": "clean"}, {"sessionId": "{b}", "status": "findings"}]}'
+    args: [--sessions-from, "-", --collective, research, --yes]
+    wantPosts: 1
+    wantSteps:
+      - {transcript: "{a}", collective: research, outcome: succeeded, session: "{a}"}
+    wantWarnings:
+      - {code: session_refused, session: "{b}"}

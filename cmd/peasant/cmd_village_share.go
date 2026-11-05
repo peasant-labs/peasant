@@ -184,6 +184,11 @@ func runVillageShare(cmd *cobra.Command, deps pushCommandDependencies, opts vill
 	if err != nil {
 		return refuse(err)
 	}
+	// A session a review document left out is reported at once, as push does,
+	// so a run that stops later has still said so.
+	for _, warning := range selection.Warnings {
+		warnings.Warn(warning)
+	}
 	if len(opts.collectives) == 0 {
 		return refuse(shareUsage(cmd, "no collective was named", "pass --collective with a name, UUID or page URL"))
 	}
