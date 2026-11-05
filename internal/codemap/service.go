@@ -87,19 +87,24 @@ const (
 	searchMaxLimit     = 500
 	searchMinQueryLen  = 2
 
-	// SearchDefaultLimit and SearchMaxLimit publish the flat search route's page
-	// bounds. The grouped local search view pages ranked windows of at most
-	// SearchMaxLimit entries through SearchRankedWindow and applies
-	// SearchDefaultLimit when the request named no limit. Sharing the constants
-	// keeps the grouped page and the flat page in the same units.
+	// searchMaxOffset bounds how far into the ranked stream one page may start.
+	// Reading a page at an offset does work proportional to the rows it skips:
+	// the merged path materialises limit+offset rows from every index while both
+	// indexes exist, and the SQL path still walks the rows an FTS offset skips.
+	// A caller that needs a deeper position narrows the query instead.
+	searchMaxOffset = 5000
+
+	// SearchDefaultLimit and SearchMaxLimit publish the page bounds every search
+	// surface shares: the flat HTTP route, the grouped local view and the CLI all
+	// page in the same units. The HTTP route enforces SearchMaxLimit because the
+	// published contract documents that number, so changing it is a contract
+	// change (schema PR, tag, re-pin), not a local edit.
 	SearchDefaultLimit = searchDefaultLimit
 	SearchMaxLimit     = searchMaxLimit
 
-	// SearchHTTPMaxLimit is the cap the local HTTP route enforces. The published
-	// schema contract documents this number, so raising it is a contract change
-	// (schema PR, tag, re-pin), not a local edit. Local callers that are not
-	// bound by that contract — the CLI — use SearchMaxLimit.
-	SearchHTTPMaxLimit = 50
+	// SearchMaxOffset publishes the offset bound so a caller can name it in its
+	// refusal instead of repeating the number.
+	SearchMaxOffset = searchMaxOffset
 )
 
 // Service computes the Map/Review payloads for one peasant store.
@@ -275,22 +280,24 @@ func ClampSearchLimit(limit int) int {
 
 // SearchRankedWindow reads ONE page of the same ranked global full-text search
 // Search serves, addressed by a raw offset into the ranked stream rather than a
-// position inside an already-filtered set. The grouped local search view walks
-// successive windows and counts its page limit over the entries it keeps, so a
-// grouped page and the flat page stay in the same units.
+// position inside an already-filtered set. The grouped local search view reads
+// one page sized to its requested limit, so a grouped page and the flat page
+// stay in the same units.
 //
-// window must be within (0, SearchMaxLimit]; offset must be non-negative. The
-// ordering is the same deterministic (rank, session, entry) order Search uses,
-// so successive windows neither skip nor repeat a row while the index is
-// unchanged. window is the raw ranked row cap, exactly like the flat route's
-// limit: a window shorter than requested means the ranked stream is exhausted.
+// window must be within (0, SearchMaxLimit]; offset must be within
+// 0..SearchMaxOffset. The ordering is the same deterministic
+// (rank, session, entry) order Search uses, so successive pages neither skip nor
+// repeat a row while the index is unchanged. window is the raw ranked row cap,
+// exactly like the flat route's limit: a window shorter than requested means the
+// ranked stream is exhausted.
 func (s *Service) SearchRankedWindow(ctx context.Context, query string, window, offset int) (*schema.SearchPayload, error) {
 	return s.SearchRankedWindowFiltered(ctx, query, window, offset, SearchFilters{})
 }
 
 // SearchRankedWindowFiltered reads one ranked page after narrowing the session
 // set in SQL. Identity lookups remain filter-blind. window must be in
-// 1..SearchMaxLimit and offset must be non-negative; neither is silently clamped.
+// 1..SearchMaxLimit and offset must be in 0..SearchMaxOffset; neither is
+// silently clamped.
 func (s *Service) SearchRankedWindowFiltered(ctx context.Context, query string, window, offset int, filters SearchFilters) (*schema.SearchPayload, error) {
 	// Name the actual guard site for both entry points: SearchRankedWindow
 	// delegates here, so a refusal identifies the function that rejected it.
@@ -304,6 +311,12 @@ func (s *Service) SearchRankedWindowFiltered(ctx context.Context, query string, 
 		return nil, fmt.Errorf(
 			"codemap: ranked search offset %d is negative in codemap.Service.SearchRankedWindowFiltered (also used by codemap.Service.SearchRankedWindow); a ranked offset addresses a position in the search stream and cannot be negative, and no search results were read; pass the count of ranked rows already consumed and retry",
 			offset,
+		)
+	}
+	if offset > searchMaxOffset {
+		return nil, fmt.Errorf(
+			"codemap: ranked search offset %d exceeds the supported maximum %d in codemap.Service.SearchRankedWindowFiltered (also used by codemap.Service.SearchRankedWindow); reading a page at an offset does work proportional to the rows it skips, so a deeper position is unbounded work, and no search results were read; narrow the query or start from a smaller offset and page forward",
+			offset, searchMaxOffset,
 		)
 	}
 	return s.searchRankedWindow(ctx, query, window, offset, filters)

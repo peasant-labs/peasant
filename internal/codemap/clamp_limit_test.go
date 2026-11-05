@@ -53,15 +53,16 @@ func TestClampSearchLimitFixtures(t *testing.T) {
 	}
 }
 
-// TestSearchPageWindowFitsTheCap keeps the grouped view's read window inside the
-// range the ranked reader accepts; a window above the cap fails every grouped
-// search at the reader's guard.
-func TestSearchPageWindowFitsTheCap(t *testing.T) {
+// TestSearchPageBoundsFitTheReadRange keeps the published page bounds inside the
+// range the ranked reader accepts; a bound above the reader's guard fails every
+// search at that guard. The published contract names one cap, and this is the
+// constant that enforces it.
+func TestSearchPageBoundsFitTheReadRange(t *testing.T) {
 	t.Parallel()
-	if codemap.SearchHTTPMaxLimit > codemap.SearchMaxLimit {
-		t.Fatalf("documented HTTP cap %d exceeds the engine cap %d", codemap.SearchHTTPMaxLimit, codemap.SearchMaxLimit)
-	}
 	if codemap.SearchDefaultLimit > codemap.SearchMaxLimit {
 		t.Fatalf("default page %d exceeds the cap %d", codemap.SearchDefaultLimit, codemap.SearchMaxLimit)
+	}
+	if codemap.SearchDefaultLimit < 1 {
+		t.Fatalf("default page %d is not a page size", codemap.SearchDefaultLimit)
 	}
 }

@@ -263,12 +263,11 @@ func TestSearch_UniqueMultiBlockTextSurvives(t *testing.T) {
 	}
 }
 
-// TestSearchRankedWindowWalkMatchesTheWholeRankedStream proves the seam the
-// grouped local search iterator reads: consecutive ranked windows of one query
-// reconstruct exactly the ordered stream a single Search call returns, so a
-// caller that applies its own eligibility to successive windows never skips or
-// repeats a match. A window outside the flat route's bound and a negative offset
-// are refused instead of silently served.
+// TestSearchRankedWindowWalkMatchesTheWholeRankedStream proves the reader's paging
+// contract: consecutive ranked windows of one query reconstruct exactly the
+// ordered stream a single Search call returns, so a caller that pages the reader
+// never skips or repeats a match. A window outside the page bound, a negative
+// offset and an offset past the bound are refused instead of silently served.
 func TestSearchRankedWindowWalkMatchesTheWholeRankedStream(t *testing.T) {
 	t.Parallel()
 	svc, _ := newFixtureService(t, fxStubRepo())
@@ -305,6 +304,9 @@ func TestSearchRankedWindowWalkMatchesTheWholeRankedStream(t *testing.T) {
 	}
 	if _, err := svc.SearchRankedWindow(ctx, "pipeline", 1, -1); err == nil {
 		t.Fatal("negative ranked offset was served, want a refusal")
+	}
+	if _, err := svc.SearchRankedWindow(ctx, "pipeline", 1, codemap.SearchMaxOffset+1); err == nil {
+		t.Fatal("ranked offset past the bound was served, want a refusal")
 	}
 }
 

@@ -689,8 +689,10 @@ func awaitHarvestEvent[T any](t *testing.T, ch <-chan T) T {
 	return testwait.Receive(t, ch, "harvest lifecycle reached the expected dependency boundary")
 }
 
+// TestHarvestCommandCanceledBeforeSetup asserts on the process-global logger, so
+// it cannot run concurrently with the tests in this package that install one;
+// that interleaving made it fail as "pre-canceled command changed logger".
 func TestHarvestCommandCanceledBeforeSetup(t *testing.T) {
-	t.Parallel()
 	for _, c := range loadIngestProgressFixtures(t).CommandStartup.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			dir := t.TempDir()

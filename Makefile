@@ -279,16 +279,7 @@ docs-cli: go
 # fail closed: an unreadable status looks identical to a clean one.
 docs-cli-check:
 	@VERSION=0.0.0-dev $(MAKE) --no-print-directory docs-cli >/dev/null
-	@status="$$(git status --porcelain -- docs/cli)"; \
-	if [ "$$?" -ne 0 ]; then \
-		echo "::error::cannot verify docs/cli freshness: git status failed in this checkout"; \
-		exit 1; \
-	fi; \
-	if [ -n "$$status" ]; then \
-		echo "::error::docs/cli is stale; run 'make docs-cli' and commit the regenerated pages"; \
-		printf '%s\n' "$$status"; \
-		exit 1; \
-	fi
+	@./scripts/check-docs-fresh.sh docs/cli
 
 docs-open: docs
 	xdg-open docs/api/index.html

@@ -21,6 +21,7 @@ requiredNames:
   - window_negative
   - window_above_max
   - offset_negative
+  - offset_above_max
   - ses_identity
   - uuid_identity
   - hash_identity

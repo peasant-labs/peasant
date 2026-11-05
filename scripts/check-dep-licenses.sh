@@ -17,9 +17,9 @@
 #   modernc.org/mathutil -- BSD-3-Clause ("The mathutil Authors"); its text ships
 #     in THIRD_PARTY_NOTICES, so the notice obligation is still met.
 #
-# The check runs across every shipped platform (CGO_ENABLED=0, the release build
-# mode) so a platform-specific dependency cannot evade it, matching the module
-# set enumerated by gen-third-party-notices.sh.
+# The check runs across every platform .goreleaser.yml ships (CGO_ENABLED=0, the
+# release build mode) so a platform-specific dependency cannot evade it, matching
+# the module set enumerated by gen-third-party-notices.sh.
 #
 # Requirements: run inside the Nix devShell.
 set -euo pipefail
@@ -36,7 +36,7 @@ trap 'rm -rf "${gobin}"' EXIT
 GOBIN="${gobin}" go install "${pinned_go_licenses}"
 
 status=0
-for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
   if ! CGO_ENABLED=0 GOOS="${pair%/*}" GOARCH="${pair#*/}" \
       "${gobin}/go-licenses" check "${pkg}" \
         --disallowed_types=forbidden,restricted,unknown \

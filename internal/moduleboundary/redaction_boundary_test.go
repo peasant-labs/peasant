@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -212,12 +214,31 @@ func assertForbiddenTreesAbsent(t *testing.T, root string, trees []string) {
 
 func assertForbiddenImportsAbsent(t *testing.T, root string, forbidden []string) {
 	t.Helper()
+	if err := walkForbiddenImports(root, forbidden); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// walkForbiddenImports returns the first walk error or the first source file that
+// imports a retired package. It is separate from the assertion so the fail-closed
+// behaviour can be tested directly.
+func walkForbiddenImports(root string, forbidden []string) error {
 	forbiddenSet := make(map[string]struct{}, len(forbidden))
 	for _, importPath := range forbidden {
 		forbiddenSet[importPath] = struct{}{}
 	}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
+			// WalkDir reports a directory it could not read, and an entry it
+			// could not classify when the filesystem reports no type. The test
+			// gate writes a CPU profile in the repository root and moves it when
+			// the run ends, so an entry can vanish mid-walk. Such an entry
+			// cannot be inspected and is not a boundary violation. A missing
+			// root, an unreadable entry and every other class stay fatal: the
+			// scan must never pass by reading nothing.
+			if entry != nil && errors.Is(walkErr, fs.ErrNotExist) {
+				return nil
+			}
 			return walkErr
 		}
 		if entry.IsDir() {
@@ -244,8 +265,43 @@ func assertForbiddenImportsAbsent(t *testing.T, root string, forbidden []string)
 		}
 		return nil
 	})
-	if err != nil {
+}
+
+// TestForbiddenImportWalkFailsOnAnUnreadableEntry keeps the other half of the
+// fail-closed rule: an entry that is present but cannot be read is an error, not
+// a vanished entry. Without it, widening the tolerance to every error on a
+// present entry would leave the suite green and the scan would skip a subtree.
+func TestForbiddenImportWalkFailsOnAnUnreadableEntry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mode bits do not deny reads on Windows, so the fixture cannot express an unreadable entry")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores mode bits, so no entry is unreadable for this process")
+	}
+	root := t.TempDir()
+	locked := filepath.Join(root, "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "source.go"), []byte("package locked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	if err := walkForbiddenImports(root, nil); err == nil {
+		t.Fatal("the forbidden-import walk passed over an unreadable directory; an unreadable entry must fail the scan")
+	}
+}
+
+// TestForbiddenImportWalkFailsOnAMissingRoot keeps the tolerance for a vanished
+// entry from becoming a scan that reads nothing: when the tree itself is absent,
+// the walk must still fail closed.
+func TestForbiddenImportWalkFailsOnAMissingRoot(t *testing.T) {
+	absent := filepath.Join(t.TempDir(), "absent")
+	if err := walkForbiddenImports(absent, []string{"github.com/peasant-labs/peasant/internal/redact"}); err == nil {
+		t.Fatal("the forbidden-import walk passed on a missing root; a scan that reads no file must not pass")
 	}
 }
 

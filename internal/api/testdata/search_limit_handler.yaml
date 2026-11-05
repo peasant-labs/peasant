@@ -16,7 +16,7 @@ cases:
     provenance: {source: boundary, ref: search-limit-max-clamp}
     mutation: {description: provide a valid integer above the documented contract cap}
     input: {raw_query: "q=pipeline&limit=999"}
-    expected: {status: 200, provider_limit: 50, provider_called: true}
+    expected: {status: 200, provider_limit: 500, provider_called: true}
   - name: malformed_is_bad_request
     classification: must-fail
     provenance: {source: requirement, ref: search-limit-malformed}

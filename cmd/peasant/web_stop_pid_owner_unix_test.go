@@ -142,11 +142,17 @@ func TestStopWebLeavesAnotherProgramWithServerArgsAlone(t *testing.T) {
 	assertNotSignalled(t, "python3 with the server's arguments", cmd, exited, stopWeb(port))
 }
 
-// commandLineShows reports whether ps shows want in pid's command line.
+// procCmdlineRoot is the kernel's process view. A test points it at an empty
+// directory to exercise the fallback the helper takes where that view is
+// absent.
+var procCmdlineRoot = "/proc"
+
+// commandLineShows reports whether pid's command line contains want, reading the
+// kernel's own view first and falling back to ps where that view is absent.
 func commandLineShows(pid int, want string) bool {
-	// The kernel's own view first: no external process-listing tool, so this
-	// also works in minimal build sandboxes that carry no procps.
-	if raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline"); err == nil {
+	// No external process-listing tool in the common case, so this also works in
+	// minimal build sandboxes that carry no procps.
+	if raw, err := os.ReadFile(filepath.Join(procCmdlineRoot, strconv.Itoa(pid), "cmdline")); err == nil {
 		return strings.Contains(strings.ReplaceAll(string(raw), "\x00", " "), want)
 	}
 	out, err := exec.Command("ps", "-ww", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
@@ -198,4 +204,24 @@ func TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone(t *testing.T) {
 	writePIDFile(t, port, cmd.Process.Pid)
 	waitForCommandLine(t, cmd.Process.Pid, port)
 	assertNotSignalled(t, "a same-named executable at another path", cmd, exited, stopWeb(port))
+}
+
+// TestCommandLineShowsFallsBackToPs covers the helper's own fallback: with the
+// kernel's view unavailable it still reads this process's command line through
+// ps, and still refuses a string no argument carries.
+func TestCommandLineShowsFallsBackToPs(t *testing.T) {
+	if _, err := exec.LookPath("ps"); err != nil {
+		t.Skip("this host has no ps, so the fallback cannot run; the kernel path is covered by the tests above")
+	}
+	previous := procCmdlineRoot
+	procCmdlineRoot = t.TempDir()
+	t.Cleanup(func() { procCmdlineRoot = previous })
+
+	self := os.Getpid()
+	if !commandLineShows(self, filepath.Base(os.Args[0])) {
+		t.Fatalf("ps fallback did not find %q in the command line of pid %d", filepath.Base(os.Args[0]), self)
+	}
+	if commandLineShows(self, "no-process-argument-carries-this-string") {
+		t.Fatal("ps fallback matched a string that is not in the command line")
+	}
 }
