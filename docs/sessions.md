@@ -238,7 +238,9 @@ blocking and carries `"advisory": false`. The summary's `findings` counts every
 finding and its `advisory` counts the advisory ones.
 
 A finding shows a masked preview, such as `secret_key=**** (len 32-63)`, and
-never the matched text. Text output is one line per finding,
+never the matched text. An address keeps only its top-level domain
+(`***@***.de`), and a link on a tenant host only the host's fixed suffix
+(`****.sharepoint.com/:w:/****`). Text output is one line per finding,
 `<session> entry <n> <role> <kind> <preview>`, with ` (advisory)` after an
 advisory one, then a total.
 

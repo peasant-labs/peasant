@@ -34,3 +34,4 @@ requiredNames:
   - password_named_value_with_symbols_or_no_digit
   - inline_mysql_password
   - password_like_names_without_a_value_ignored
+  - previews_hold_no_domain_or_tenant

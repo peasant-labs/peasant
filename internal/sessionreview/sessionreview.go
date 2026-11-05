@@ -649,10 +649,21 @@ func (rv *reviewer) emails(entry *schema.SessionEntry, text string) {
 	}
 }
 
+// maskEmail keeps only the shape of an address and its top-level domain, so
+// a preview names no person and no organisation.
 func maskEmail(address string) string {
-	local, domain, _ := strings.Cut(address, "@")
-	first, _ := utf8.DecodeRuneInString(local)
-	return string(first) + "***@" + domain
+	_, domain, _ := strings.Cut(address, "@")
+	tld := domain[strings.LastIndex(domain, ".")+1:]
+	return masked[:3] + "@" + masked[:3] + "." + tld
+}
+
+// maskHost keeps a host that is one of the closed list's exact hosts, and
+// replaces the tenant part of a suffix host, such as contoso.sharepoint.com.
+func maskHost(h ShareableHost, host string) string {
+	if strings.HasPrefix(h.Host, ".") {
+		return masked + h.Host
+	}
+	return host
 }
 
 func (rv *reviewer) links(entry *schema.SessionEntry, text string) []span {
@@ -671,7 +682,7 @@ func (rv *reviewer) links(entry *schema.SessionEntry, text string) []span {
 		if index < 0 {
 			continue
 		}
-		rv.add(newFinding(entry, KindShareableDocumentLink, ShareableHosts[index].Rule, host+"/"+firstSegment(parsed.EscapedPath())+"/"+masked))
+		rv.add(newFinding(entry, KindShareableDocumentLink, ShareableHosts[index].Rule, maskHost(ShareableHosts[index], host)+"/"+firstSegment(parsed.EscapedPath())+"/"+masked))
 		spans = append(spans, span{loc[0], loc[1]})
 	}
 	return spans

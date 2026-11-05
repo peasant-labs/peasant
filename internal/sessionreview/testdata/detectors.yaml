@@ -111,13 +111,13 @@ cases:
     entries:
       - { role: user, text: "write to andré@univ.example.edu" }
     want:
-      - { kind: foreign_email, entry: 0, role: user, rule: foreign_email, preview: "a***@univ.example.edu" }
+      - { kind: foreign_email, entry: 0, role: user, rule: foreign_email, preview: "***@***.edu" }
 
   - name: foreign_email_in_tool_result
     entries:
       - { role: tool, output: "owner: andré@univ.example.edu" }
     want:
-      - { kind: foreign_email, entry: 0, role: tool, rule: foreign_email, preview: "a***@univ.example.edu" }
+      - { kind: foreign_email, entry: 0, role: tool, rule: foreign_email, preview: "***@***.edu" }
 
   - name: redacted_email_not_reported
     entries:
@@ -142,7 +142,7 @@ cases:
       - { kind: shareable_document_link, entry: 2, role: user, rule: share_dropbox, preview: "dropbox.com/s/****" }
       - { kind: shareable_document_link, entry: 3, role: user, rule: share_dropbox, preview: "www.dropbox.com/scl/****" }
       - { kind: shareable_document_link, entry: 4, role: user, rule: share_onedrive, preview: "1drv.ms/u/****" }
-      - { kind: shareable_document_link, entry: 5, role: user, rule: share_sharepoint, preview: "acme.sharepoint.com/:w:/****" }
+      - { kind: shareable_document_link, entry: 5, role: user, rule: share_sharepoint, preview: "****.sharepoint.com/:w:/****" }
       - { kind: shareable_document_link, entry: 6, role: user, rule: share_box, preview: "app.box.com/s/****" }
 
   - name: private_link_ignored
@@ -295,3 +295,13 @@ cases:
       - { role: assistant, text: "SECRET_MANAGER_REGION=us-west-2b" }
       - { role: assistant, text: "PASSWORD_HASH_ALGORITHM=argon2id-v19" }
       - { role: assistant, toolInput: '{"command": "mysql -u root -p\"\" appdb"}', toolKind: execute }
+
+  # A preview never holds the matched value: an address keeps only its top
+  # level domain, and a tenant host only its fixed suffix.
+  - name: previews_hold_no_domain_or_tenant
+    entries:
+      - { role: user, text: "write to j.doe@bücher.de" }
+      - { role: user, text: "https://contoso-legal.sharepoint.com/:x:/r/FAKEdocument" }
+    want:
+      - { kind: foreign_email, entry: 0, role: user, rule: foreign_email, preview: "***@***.de" }
+      - { kind: shareable_document_link, entry: 1, role: user, rule: share_sharepoint, preview: "****.sharepoint.com/:x:/****" }

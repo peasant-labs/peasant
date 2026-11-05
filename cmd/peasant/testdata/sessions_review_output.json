@@ -49,7 +49,7 @@
           "entryIndex": 4,
           "role": "user",
           "rule": "foreign_email",
-          "preview": "a***@univ.example.edu",
+          "preview": "***@***.edu",
           "advisory": false
         },
         {
