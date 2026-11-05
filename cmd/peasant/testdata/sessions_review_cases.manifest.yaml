@@ -1,0 +1,19 @@
+# Required-name manifest for sessions_review_cases.yaml: deletion protection by NAME.
+requiredNames:
+  - clean_session
+  - exit_status_matrix
+  - no_session_selected
+  - session_flag_and_list_refused
+  - preview_only_capture_is_error
+  - native_session_reviewed
+  - full_tool_output_scanned
+  - owner_email_ignored
+  - flag_owner_email_ignored
+  - foreign_email_in_prompt
+  - subagent_findings_hold_the_parent
+  - subagent_error_holds_the_parent
+  - sessions_list_output_piped_in
+  - review_document_piped_into_review
+  - level_refusals_match_redact
+  - output_never_contains_value
+  - read_only

@@ -204,6 +204,12 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 			if selectionErr != nil {
 				return &pushNothingAttemptedError{cause: selectionErr}
 			}
+			// A session a review document left out is reported at once, so a
+			// run that stops later has still said so.
+			inputWarnings := clicontract.NewCollector(cmd.ErrOrStderr(), false)
+			for _, warning := range selection.Warnings {
+				inputWarnings.Warn(warning)
+			}
 			explicitCollective := len(collectiveRefs) > 0
 			collectiveDecision := clicontract.ConfirmSkippedDryRun
 			if explicitCollective {
@@ -217,7 +223,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				if collectiveDecision == clicontract.ConfirmRefusedNoTTY {
 					refusal := collectiveConfirmationRefusal(cmd)
 					if jsonOutput {
-						if err := printPushRefusalJSON(cmd.OutOrStdout(), refusal.Error()); err != nil {
+						if err := printPushRefusalJSON(cmd.OutOrStdout(), refusal.Error(), selection.Warnings); err != nil {
 							return err
 						}
 					}
@@ -507,7 +513,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 					if len(unknown) > 0 && !dryRun {
 						refusal := unknownSessionRefusal(unknown)
 						if jsonOutput {
-							if err := printPushRefusalJSON(cmd.OutOrStdout(), refusal.Error()); err != nil {
+							if err := printPushRefusalJSON(cmd.OutOrStdout(), refusal.Error(), selection.Warnings); err != nil {
 								return err
 							}
 						}
@@ -600,7 +606,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 					if refErr != nil {
 						refusal := fmt.Errorf("village push: %w", refErr)
 						if jsonOutput {
-							if err := printPushRefusalJSON(cmd.OutOrStdout(), refusal.Error()); err != nil {
+							if err := printPushRefusalJSON(cmd.OutOrStdout(), refusal.Error(), selection.Warnings); err != nil {
 								return err
 							}
 						}
@@ -717,7 +723,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				// the refusal exits as "nothing attempted".
 				publicPush := !dryRun && effectiveVisibility == config.VisibilityPublic
 				if publicPush && jsonOutput && !nonInteractive {
-					if err := printPushRefusalJSON(cmd.OutOrStdout(), publicConsentJSONRefusal); err != nil {
+					if err := printPushRefusalJSON(cmd.OutOrStdout(), publicConsentJSONRefusal, selection.Warnings); err != nil {
 						return err
 					}
 					return errors.New("village push: " + publicConsentJSONRefusal)
@@ -912,6 +918,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 						Visibility:        string(config.EffectiveVisibility(runCfg.Visibility, cfg).Effective),
 						NeedsConfirmation: explicitCollective && !nonInteractive,
 						Plan:              entries,
+						inputWarnings:     selection.Warnings,
 					}
 					for i, id := range collectiveIDs {
 						plan.Collectives = append(plan.Collectives, planCollective{ID: id, Name: collectiveNames[i]})
@@ -1811,10 +1818,12 @@ const publicConsentJSONRefusal = "a public push needs explicit consent, and --js
 
 // printPushRefusalJSON writes the one JSON document of a push refused before
 // any peasant online request: zero counts, no sessions, and the refusal.
-func printPushRefusalJSON(w io.Writer, refusal string) error {
+func printPushRefusalJSON(w io.Writer, refusal string, warnings []clicontract.Warning) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(jsonPushResult{Sessions: []jsonPushSession{}, Meta: clicontract.NewMeta(), Refusal: refusal})
+	meta := clicontract.NewMeta()
+	meta.Warnings = append(meta.Warnings, warnings...)
+	return enc.Encode(jsonPushResult{Sessions: []jsonPushSession{}, Meta: meta, Refusal: refusal})
 }
 
 // jsonAnnotResult is the JSON-safe annotation push summary.
@@ -1871,6 +1880,8 @@ type jsonPushPlan struct {
 	NotReady       int `json:"not_ready"`
 	Excluded       int `json:"excluded"`
 	UnknownSession int `json:"unknown_session"`
+	// inputWarnings goes into the document's warnings, beside the plan.
+	inputWarnings []clicontract.Warning
 }
 
 // printPushJSON outputs the push result as JSON including annotation summary.
@@ -1914,6 +1925,7 @@ func printPushJSONWithPlan(w io.Writer, result *push.PushResult, annSummary *pus
 	}
 	counts := runCounts(result, plan)
 	if plan != nil {
+		meta.Warnings = append(meta.Warnings, plan.inputWarnings...)
 		counted := *plan
 		counted.NotReady, counted.Excluded, counted.UnknownSession = counts.NotReady, counts.Excluded, counts.UnknownSession
 		plan = &counted

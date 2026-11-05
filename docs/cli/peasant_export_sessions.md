@@ -39,7 +39,7 @@ peasant export sessions [flags]
       --last-good              Export the last-good full transcript when a newer incomplete attempt is kept beside it. Without it such a session is refused rather than exporting the incomplete attempt; the store resolves the last-good authority server-side, so no session or generation identifier is accepted
       --output-dir string      Directory to write exported session JSON files (default ".")
       --session string         Single session ID to export
-      --sessions-from string   Read session ids from a file, or from standard input when the value is -. Accepts one id per line, a JSON array of ids, or the JSON array that a --json listing prints
+      --sessions-from string   Read session ids from a file, or from standard input when the value is -. Accepts one id per line, a JSON array of ids, the JSON array that a --json listing prints, or a sessions review --json document, which gives only its clean sessions
 ```
 
 ### Options inherited from parent commands

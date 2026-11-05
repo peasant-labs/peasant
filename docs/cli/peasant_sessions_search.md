@@ -28,7 +28,7 @@ peasant sessions search <query> [flags]
       --limit string           Maximum ranked rows per page (integer >= 1; values above 500 are clamped; 0 is refused) (default "20")
       --offset string          Ranked rows to skip (integer >= 0) (default "0")
       --project string         Filter by project using the sessions list match (git remote URL or directory basename)
-      --sessions-from string   Read session ids from a file, or from standard input when the value is -. Accepts one id per line, a JSON array of ids, or the JSON array that a --json listing prints
+      --sessions-from string   Read session ids from a file, or from standard input when the value is -. Accepts one id per line, a JSON array of ids, the JSON array that a --json listing prints, or a sessions review --json document, which gives only its clean sessions
       --since string           Only sessions starting after this time (positive Go duration (e.g. 30m, 1h30m), integer d, w, mo (months), y, YYYY-MM-DD (UTC), or RFC3339)
       --until string           Only sessions starting before this time; a date includes that whole day (positive Go duration (e.g. 30m, 1h30m), integer d, w, mo (months), y, YYYY-MM-DD (UTC), or RFC3339)
 ```

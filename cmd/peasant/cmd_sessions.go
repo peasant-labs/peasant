@@ -164,5 +164,6 @@ func BuildSessionsCommand() *cobra.Command {
 	sessionsCmd.AddCommand(buildSessionsContextCommand())
 	sessionsCmd.AddCommand(buildSessionsPromptsCommand())
 	sessionsCmd.AddCommand(buildSessionsSearchCommand())
+	sessionsCmd.AddCommand(buildSessionsReviewCommand())
 	return sessionsCmd
 }

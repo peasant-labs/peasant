@@ -1,0 +1,70 @@
+{
+  "level": "standard",
+  "ruleSetVersion": "RULE_SET_VERSION",
+  "summary": {
+    "sessions": 1,
+    "clean": 0,
+    "withFindings": 1,
+    "errors": 0,
+    "findings": 6
+  },
+  "sessions": [
+    {
+      "sessionId": "7a7a7a7a-0000-4000-8000-00000000000a",
+      "status": "findings",
+      "reason": "",
+      "subagents": 0,
+      "findings": [
+        {
+          "kind": "credential_assignment",
+          "sessionId": "7a7a7a7a-0000-4000-8000-00000000000a",
+          "entryIndex": 0,
+          "role": "user",
+          "rule": "credential_name_value",
+          "preview": "secret_key=**** (len 32-63)"
+        },
+        {
+          "kind": "credential_file_output",
+          "sessionId": "7a7a7a7a-0000-4000-8000-00000000000a",
+          "entryIndex": 2,
+          "role": "tool",
+          "rule": "credential_file_name",
+          "preview": "credentials.json: content=****"
+        },
+        {
+          "kind": "credential_file_output",
+          "sessionId": "7a7a7a7a-0000-4000-8000-00000000000a",
+          "entryIndex": 3,
+          "role": "tool",
+          "rule": "secret_env_listing",
+          "preview": "2 secret-named lines=****"
+        },
+        {
+          "kind": "foreign_email",
+          "sessionId": "7a7a7a7a-0000-4000-8000-00000000000a",
+          "entryIndex": 4,
+          "role": "user",
+          "rule": "foreign_email",
+          "preview": "a***@univ.example.edu"
+        },
+        {
+          "kind": "shareable_document_link",
+          "sessionId": "7a7a7a7a-0000-4000-8000-00000000000a",
+          "entryIndex": 5,
+          "role": "user",
+          "rule": "share_google_docs",
+          "preview": "docs.google.com/document/****"
+        },
+        {
+          "kind": "redaction_residue",
+          "sessionId": "7a7a7a7a-0000-4000-8000-00000000000a",
+          "entryIndex": 6,
+          "role": "tool",
+          "rule": "residue_bearer_token",
+          "preview": "residue_bearer_token: ****"
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

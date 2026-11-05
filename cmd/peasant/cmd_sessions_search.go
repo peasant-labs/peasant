@@ -29,6 +29,9 @@ type sessionsSearchPlan struct {
 	offset  int
 	filters codemap.SearchFilters
 	asJSON  bool
+	// inputWarnings names each session a --sessions-from review document
+	// left out, so the run reports it rather than dropping it silently.
+	inputWarnings []clicontract.Warning
 }
 
 type sessionsSearchOutput struct {
@@ -94,10 +97,11 @@ func buildSessionsSearchPlan(cmd *cobra.Command, args []string, f sessionsSearch
 	if err != nil {
 		return nil, clicontract.NewUsageError(err.Error() + "; correct the filter and retry. No store was opened.")
 	}
-	ids, _, err := clicontract.ResolveSessionsFrom(cmd)
+	fromList, _, err := clicontract.ResolveSessionsFrom(cmd)
 	if err != nil {
 		return nil, err
 	}
+	ids := fromList.IDs
 	for i, id := range ids {
 		if _, err := ingest.NewSessionID(id); err != nil {
 			return nil, clicontract.NewUsageError(fmt.Sprintf("invalid session id %q at position %d in --sessions-from: %v; correct the input list and retry. No store was opened.", id, i+1, err))
@@ -105,7 +109,8 @@ func buildSessionsSearchPlan(cmd *cobra.Command, args []string, f sessionsSearch
 	}
 	return &sessionsSearchPlan{
 		query: args[0], window: window, offset: offset, asJSON: f.asJSON,
-		filters: codemap.SearchFilters{ProjectName: list.ProjectName, Harness: list.ModelHarness, StartFromMs: list.StartFrom, StartBeforeMs: list.StartBefore, SessionIDs: ids},
+		filters:       codemap.SearchFilters{ProjectName: list.ProjectName, Harness: list.ModelHarness, StartFromMs: list.StartFrom, StartBeforeMs: list.StartBefore, SessionIDs: ids},
+		inputWarnings: fromList.Warnings(),
 	}, nil
 }
 
@@ -121,6 +126,9 @@ func runSessionsSearch(cmd *cobra.Command, plan *sessionsSearchPlan) error {
 		return fmt.Errorf("sessions search: %w", err)
 	}
 	warnings := clicontract.NewCollector(cmd.ErrOrStderr(), plan.asJSON)
+	for _, warning := range plan.inputWarnings {
+		warnings.Warn(warning)
+	}
 	if len(payload.Results) > 0 && codemap.IsIdentityQuery(plan.query) && !plan.filters.IsZero() {
 		warnings.Warn(clicontract.Warning{Code: clicontract.WarningFilterIgnored, Message: "the query names a session id or project hash, so the filters did not apply", SessionID: string(payload.Results[0].SessionID)})
 	}
