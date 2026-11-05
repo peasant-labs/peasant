@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -264,6 +265,34 @@ func walkForbiddenImports(root string, forbidden []string) error {
 		}
 		return nil
 	})
+}
+
+// TestForbiddenImportWalkFailsOnAnUnreadableEntry keeps the other half of the
+// fail-closed rule: an entry that is present but cannot be read is an error, not
+// a vanished entry. Without it, widening the tolerance to every error on a
+// present entry would leave the suite green and the scan would skip a subtree.
+func TestForbiddenImportWalkFailsOnAnUnreadableEntry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mode bits do not deny reads on Windows, so the fixture cannot express an unreadable entry")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores mode bits, so no entry is unreadable for this process")
+	}
+	root := t.TempDir()
+	locked := filepath.Join(root, "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "source.go"), []byte("package locked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	if err := walkForbiddenImports(root, nil); err == nil {
+		t.Fatal("the forbidden-import walk passed over an unreadable directory; an unreadable entry must fail the scan")
+	}
 }
 
 // TestForbiddenImportWalkFailsOnAMissingRoot keeps the tolerance for a vanished
