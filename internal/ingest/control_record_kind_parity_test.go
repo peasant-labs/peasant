@@ -66,8 +66,8 @@ func TestControlRecordKindParity(t *testing.T) {
 			t.Errorf("Codex stored control kind %q classified as %q, want %q", kind, got, kind)
 		}
 	}
-	if got := ControlRecordKindFor(schema.HarnessCodex, codexTypeCompacted); got != "" {
-		t.Errorf("Codex compaction notice %q classified as %q, want no control kind", codexTypeCompacted, got)
+	if got := ControlRecordKindFor(schema.HarnessCodex, CodexTypeCompacted); got != "" {
+		t.Errorf("Codex compaction notice %q classified as %q, want no control kind", CodexTypeCompacted, got)
 	}
 
 	// The classification is harness-keyed: a kind one harness stores is not a

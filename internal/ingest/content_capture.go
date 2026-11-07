@@ -87,7 +87,7 @@ func codexStrictEnvelopeKinds() []string {
 		codexTypeTurnContext,
 		codexTypeEventMsg,
 		codexTypeResponse,
-		codexTypeCompacted,
+		CodexTypeCompacted,
 		codexTypeWorldState,
 	}
 }

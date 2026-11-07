@@ -14,7 +14,7 @@ import "github.com/peasant-labs/schema"
 //
 // The returned set IS controlRowKinds — the render authorisation vocabulary —
 // because it excludes the compaction notices a writer still stores as system
-// rows: ClaudeCompactBoundaryLabel ("compact-boundary") and codexTypeCompacted
+// rows: ClaudeCompactBoundaryLabel ("compact-boundary") and CodexTypeCompacted
 // ("compacted"). The record-kind registry's OutcomeControl storage set includes
 // those notices and is deliberately NOT the render set, so adding a kind there
 // can never widen what a consumer paints as a control row.

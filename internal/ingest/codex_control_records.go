@@ -12,7 +12,12 @@ const codexControlPayloadLimit = 8192
 
 const (
 	codexTypeWorldState = "world_state"
-	codexTypeCompacted  = "compacted"
+
+	// CodexTypeCompacted is the rollout envelope type of a Codex compaction
+	// notice. The writer stores that same string as the entry's part type, so
+	// package store spells its compaction facet from here and the vocabulary
+	// has one definition.
+	CodexTypeCompacted = "compacted"
 
 	codexEventSubAgentActivity      = "sub_agent_activity"
 	codexEventPatchApplyEnd         = "patch_apply_end"
@@ -37,7 +42,7 @@ func codexControlRecordKind(env codexRolloutLine) (kind string, payload json.Raw
 		return "", nil, false, fmt.Errorf("rollout payload: %w", err)
 	}
 	switch env.Type {
-	case codexTypeWorldState, codexTypeCompacted:
+	case codexTypeWorldState, CodexTypeCompacted:
 		return env.Type, env.Payload, true, nil
 	case codexTypeEventMsg:
 		var header struct {
@@ -121,7 +126,7 @@ func codexControlPreview(kind string, raw json.RawMessage) string {
 		return "Sub-agent activity"
 	case codexEventPatchApplyEnd:
 		return "Patch application completed"
-	case codexTypeCompacted:
+	case CodexTypeCompacted:
 		return "Context compacted"
 	case codexEventWebSearchEnd:
 		if payload.Query != "" {
