@@ -195,7 +195,7 @@ func buildLegacyExportPayload(ctx context.Context, db *store.Store, fs ingest.Fi
 	if err != nil {
 		return nil, fmt.Errorf("export.ExportSession: load full transcript before export: %w", err)
 	}
-	payload.TurnCount = len(payload.Turns)
+	payload.TurnCount = transcript.ConversationTurnCount(payload.Turns)
 
 	return payload, nil
 }

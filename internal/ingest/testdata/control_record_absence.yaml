@@ -1,0 +1,11 @@
+required_names:
+  - managed-last-prompt-and-file-history-snapshot
+cases:
+  - name: managed-last-prompt-and-file-history-snapshot
+    managed: true
+    absent_records: [last-prompt, file-history-snapshot]
+    transcript: |
+      {"sessionId":"SESSION_ID","type":"user","uuid":"entry-first","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"inspect the fixture"}}
+      {"sessionId":"SESSION_ID","type":"assistant","uuid":"entry-second","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"I will inspect the fixture now."}]}}
+      {"sessionId":"SESSION_ID","type":"last-prompt","uuid":"entry-third","timestamp":"2026-01-01T00:00:02Z","lastPrompt":"inspect the fixture"}
+      {"sessionId":"SESSION_ID","type":"file-history-snapshot","uuid":"entry-fourth","timestamp":"2026-01-01T00:00:03Z","messageId":"entry-second","snapshot":{"trackedFileBackups":{}},"isSnapshotUpdate":false}

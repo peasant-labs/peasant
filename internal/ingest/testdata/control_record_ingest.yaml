@@ -13,6 +13,7 @@
 # publishes.
 required_names:
   - control-records-certify
+  - managed-attachment-null-preview-certifies
   - codex-control-records-certify
   - codex-managed-controls-certify
   - unknown-record-refused
@@ -69,6 +70,20 @@ cases:
     control_preview: "Web search completed: synthetic query"
     control_extra_members:
       control: '{"call_id":"search-1","query":"synthetic query"}'
+    export_accepted: true
+    publication_ready: true
+    preflight_accepts: true
+  - name: managed-attachment-null-preview-certifies
+    managed: true
+    transcript: |
+      {"sessionId":"SESSION_ID","type":"user","uuid":"entry-first","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"inspect the fixture"}}
+      {"sessionId":"SESSION_ID","type":"assistant","uuid":"entry-second","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"I will inspect the fixture now."}]}}
+      {"sessionId":"SESSION_ID","type":"attachment","attachment":{"type":"hook_success"},"uuid":"entry-third","timestamp":"2026-01-01T00:00:02Z"}
+    capture_status: complete
+    capture_format: full
+    failure_code: ""
+    control_part_type: attachment
+    control_preview_absent: true
     export_accepted: true
     publication_ready: true
     preflight_accepts: true

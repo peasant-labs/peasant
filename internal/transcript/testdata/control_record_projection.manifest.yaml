@@ -1,0 +1,18 @@
+requiredNames:
+  - claude_attachment_no_preview_suppressed
+  - claude_control_whitespace_only_suppressed
+  - claude_last_prompt_empty_suppressed
+  - claude_file_history_snapshot_empty_suppressed
+  - claude_permission_mode_with_preview_kept
+  - claude_mode_with_preview_kept
+  - claude_compact_boundary_is_system_notice
+  - claude_artifact_prefixed_kept
+  - claude_ordinary_system_message_with_content_kept
+  - codex_compacted_kept
+  - codex_empty_control_suppressed
+  - codex_expected_turn_list_unchanged
+  - opencode_orphan_part_not_control
+  - pi_carrier_never_a_turn
+  - surviving_turn_indices_unchanged
+  - control_kind_present_only_on_control_turns
+  - earlier_history_control_kind_present
