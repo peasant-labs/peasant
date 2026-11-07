@@ -74,6 +74,9 @@ describe('session_detail controlKind through the local client', () => {
     const control = vm.turns.find((turn) => turn.index === 1);
     expect(control?.controlKind).toBe('permission-mode');
     expect(control?.isControl).toBe(true);
+    // The recorded bytes survive the cook unchanged; only the row's display drops the
+    // leading phrase that repeats the kind.
+    expect(control?.content).toBe('permission mode: auto');
 
     const { container } = render(
       <TranscriptViewer
@@ -91,6 +94,6 @@ describe('session_detail controlKind through the local client', () => {
     );
     expect(container.querySelector('#turn-1 .txn-control-row')).not.toBeNull();
     expect(container.querySelector('#turn-1 .txn-control-kind')?.textContent).toBe('permission-mode');
-    expect(container.querySelector('#turn-1 .txn-control-value')?.textContent).toBe('permission mode: auto');
+    expect(container.querySelector('#turn-1 .txn-control-value')?.textContent).toBe('auto');
   });
 });
