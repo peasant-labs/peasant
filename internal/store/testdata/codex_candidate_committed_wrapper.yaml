@@ -18,7 +18,13 @@ generation:
   submissionRefs:
     - s_wrap1
 expected:
+  # Durable stored count: every projected main record, including the system
+  # entry. The committed detail row and generation stats keep this number.
   turnCount: 3
+  # Served SessionDetailPayload count. e_wrap2 stays in main (role=system,
+  # entryType=system, agents_md.instructions) but is harness bookkeeping, not
+  # a conversation turn, so the header reports 2.
+  conversationTurnCount: 2
   inputSubmissionCount: 1
   title: "<thinking>literal excerpt</thinking>"
   titleRefs:
