@@ -27,7 +27,6 @@ var controlRecordAbsenceYAML []byte
 // generation writes and the legacy read clears.
 type controlRecordAbsenceCase struct {
 	Name          string   `yaml:"name"`
-	Managed       bool     `yaml:"managed"`
 	Transcript    string   `yaml:"transcript"`
 	AbsentRecords []string `yaml:"absent_records"`
 }

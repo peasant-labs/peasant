@@ -3,6 +3,7 @@ package ingest
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
@@ -25,36 +26,55 @@ const (
 	codexEventWebSearchEnd          = "web_search_end"
 )
 
+// codexRolloutControlKinds and codexEventControlKinds are the one census of the
+// Codex part types the writer stores as control records, split by the two
+// dispatch shapes it reads. The writer dispatch below, isCodexNativeControlKind
+// and the parity test all read these slices, so a widened writer arm cannot
+// ship unclassified and the test cannot restate a stale hand copy.
+var codexRolloutControlKinds = []string{
+	codexTypeWorldState,
+}
+
+var codexEventControlKinds = []string{
+	codexEventSubAgentActivity,
+	codexEventPatchApplyEnd,
+	codexEventThreadSettingsApplied,
+	codexEventWebSearchEnd,
+}
+
+// codexNativeControlKinds is both writer censuses as one set: the stored
+// vocabulary ControlRecordKindFor classifies as a rendered control kind.
+func codexNativeControlKinds() []string {
+	return append(append([]string{}, codexRolloutControlKinds...), codexEventControlKinds...)
+}
+
 func isCodexNativeControlKind(kind string) bool {
-	switch kind {
-	case codexTypeWorldState, codexEventSubAgentActivity, codexEventPatchApplyEnd, codexEventThreadSettingsApplied, codexEventWebSearchEnd:
-		return true
-	default:
-		return false
-	}
+	return slices.Contains(codexRolloutControlKinds, kind) || slices.Contains(codexEventControlKinds, kind)
 }
 
 // codexControlRecordKind names the known rollout-level and event-level
 // annotations represented as depth-0 system entries. Unknown records return
 // ok=false so the retained-unknown boundary can preserve them as opaque evidence.
+// CodexTypeCompacted is a notice the writer stores as a system row, never a
+// control record.
 func codexControlRecordKind(env codexRolloutLine) (kind string, payload json.RawMessage, ok bool, err error) {
 	if err := requireJSONObject(env.Payload); err != nil {
 		return "", nil, false, fmt.Errorf("rollout payload: %w", err)
 	}
-	switch env.Type {
-	case codexTypeWorldState, CodexTypeCompacted:
-		return env.Type, env.Payload, true, nil
-	case codexTypeEventMsg:
+	if env.Type == codexTypeEventMsg {
 		var header struct {
 			Type string `json:"type"`
 		}
 		if err := json.Unmarshal(env.Payload, &header); err != nil {
 			return "", nil, false, err
 		}
-		switch header.Type {
-		case codexEventSubAgentActivity, codexEventPatchApplyEnd, codexEventThreadSettingsApplied, codexEventWebSearchEnd:
+		if slices.Contains(codexEventControlKinds, header.Type) {
 			return header.Type, env.Payload, true, nil
 		}
+		return "", nil, false, nil
+	}
+	if env.Type == CodexTypeCompacted || slices.Contains(codexRolloutControlKinds, env.Type) {
+		return env.Type, env.Payload, true, nil
 	}
 	return "", nil, false, nil
 }

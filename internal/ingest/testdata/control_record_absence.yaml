@@ -2,7 +2,6 @@ required_names:
   - managed-last-prompt-and-file-history-snapshot
 cases:
   - name: managed-last-prompt-and-file-history-snapshot
-    managed: true
     absent_records: [last-prompt, file-history-snapshot]
     transcript: |
       {"sessionId":"SESSION_ID","type":"user","uuid":"entry-first","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"inspect the fixture"}}

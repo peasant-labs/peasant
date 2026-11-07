@@ -6,6 +6,7 @@ requiredNames:
   - claude_permission_mode_with_preview_kept
   - claude_mode_with_preview_kept
   - claude_compact_boundary_is_system_notice
+  - claude_depth_one_control_part_type_not_classified
   - claude_artifact_prefixed_kept
   - claude_ordinary_system_message_with_content_kept
   - codex_compacted_kept

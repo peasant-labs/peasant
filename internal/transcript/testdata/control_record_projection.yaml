@@ -17,6 +17,11 @@ cases:
     expected:
       turns:
         - {index: 0, role: user, content: "run the checks"}
+  # Two origin records (Claude's last-prompt and file-history-snapshot) share one
+  # projected shape: a depth-0 system text row with no part type and no content.
+  # The origin-specific proof lives in internal/ingest/testdata/control_record_absence.yaml;
+  # these two names pin that one shape from both origins deliberately, so neither
+  # origin can drift into a different stored shape.
   - name: claude_last_prompt_empty_suppressed
     level: entries_to_turns
     harness: claude-code
@@ -67,6 +72,21 @@ cases:
       turns:
         - {index: 0, role: user, content: "run the checks"}
         - {index: 1, role: system, content: "Conversation compacted"}
+  - name: claude_depth_one_control_part_type_not_classified
+    level: entries_to_turns
+    harness: claude-code
+    # The producer classification is depth-0 only. A depth-1 block that carries
+    # a control part type is conversation structure, so it must survive with no
+    # control kind; this fails if the depth guard is dropped from the fold.
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: assistant, entry_type: text, content: "reading the fixture", source_ref: "source:1"}
+      - {index: 2, role: system, entry_type: text, part_type: mode, content: "mode: normal", source_ref: "source:2", depth: 1}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 1, role: assistant, content: "reading the fixture"}
+        - {index: 2, role: system, content: "mode: normal"}
   - name: claude_artifact_prefixed_kept
     level: entries_to_turns
     harness: claude-code

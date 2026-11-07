@@ -12,8 +12,8 @@ import (
 // as a rendered control kind. It enumerates the Claude census
 // (claudeControlKindLabels) through the wire→stored-part-type alias rather than
 // a hand-written list, expands the artifact- prefix family with one
-// representative, and does the same for the Codex kind constants. The
-// compaction notices are negatives: a writer stores them as system rows, and
+// representative, and reads the Codex writer census (codexNativeControlKinds).
+// The compaction notices are negatives: a writer stores them as system rows, and
 // the reader must never classify them as control rows.
 func TestControlRecordKindParity(t *testing.T) {
 	t.Parallel()
@@ -52,14 +52,12 @@ func TestControlRecordKindParity(t *testing.T) {
 		}
 	}
 
-	// Codex: the constants the writer's switch names, plus the compaction
-	// notice as the negative row.
-	codexPositives := []string{
-		codexTypeWorldState,
-		codexEventSubAgentActivity,
-		codexEventPatchApplyEnd,
-		codexEventThreadSettingsApplied,
-		codexEventWebSearchEnd,
+	// Codex: iterate the writer's own census (codexNativeControlKinds), not a
+	// hand copy, plus the compaction notice as the one negative row. A widened
+	// writer arm must extend a census slice, so this test sees it.
+	codexPositives := codexNativeControlKinds()
+	if len(codexPositives) == 0 {
+		t.Fatal("Codex control census produced no positives; the parity test would be vacuous")
 	}
 	for _, kind := range codexPositives {
 		if got := ControlRecordKindFor(schema.HarnessCodex, kind); got != kind {
