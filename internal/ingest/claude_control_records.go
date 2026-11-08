@@ -86,6 +86,12 @@ func isClaudeControlRecordType(recordType string) bool {
 	return claudeControlRecordTypes[recordType]
 }
 
+// ClaudeCompactBoundaryLabel is the stored part type of a Claude Code
+// compact_boundary system record. The writer stores it, ControlRecordKindFor
+// names it as a notice rather than a control kind, and package store spells its
+// compaction facet from here, so the vocabulary has one definition.
+const ClaudeCompactBoundaryLabel = "compact-boundary"
+
 // claudeControlKindLabels names every provider kind this build retains as a
 // control entry: the closed control map, the artifact- prefix family, and the
 // compact_boundary system subtype (named by its wire form; the retained
@@ -105,7 +111,7 @@ func claudeControlKindLabels() []string {
 // compact_boundary system subtype is labeled "compact-boundary".
 func claudeControlRecordKind(line claudeIndexLine) string {
 	if line.Type == "system" && line.Subtype == "compact_boundary" {
-		return "compact-boundary"
+		return ClaudeCompactBoundaryLabel
 	}
 	if isClaudeControlRecordType(line.Type) {
 		return line.Type
@@ -250,7 +256,7 @@ func claudeControlPreview(kind string, payload map[string]json.RawMessage) strin
 			return "PR linked (" + repository + ")"
 		}
 		return "PR linked"
-	case "compact-boundary":
+	case ClaudeCompactBoundaryLabel:
 		return claudeCompactBoundaryPreview(payload)
 	case "cost-state":
 		return claudeCostStatePreview(payload)

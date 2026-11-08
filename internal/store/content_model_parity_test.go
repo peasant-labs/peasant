@@ -32,6 +32,11 @@ func TestContentModelParityFixtureManifest(t *testing.T) {
 	LoadContentModelParityFixtures(t)
 }
 
+// The three named captures were regenerated when conversation-turn counting
+// replaced stored projected-turn counting. System entries are harness
+// bookkeeping and are not turns, and a depth-0 tool wrapper that is not
+// projected is not a turn either. Exact equality on the whole payload remains;
+// only the served turnCount moved.
 func TestContentModelParity(t *testing.T) {
 	for _, c := range LoadContentModelParityFixtures(t) {
 		t.Run(c.Name, func(t *testing.T) {

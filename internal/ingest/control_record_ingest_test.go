@@ -26,21 +26,22 @@ import (
 var controlRecordIngestYAML []byte
 
 type controlRecordIngestCase struct {
-	Name                string            `yaml:"name"`
-	Managed             bool              `yaml:"managed"`
-	Harness             ingest.Harness    `yaml:"harness"`
-	Transcript          string            `yaml:"transcript"`
-	CaptureStatus       string            `yaml:"capture_status"`
-	CaptureFormat       string            `yaml:"capture_format"`
-	FailureCode         string            `yaml:"failure_code"`
-	ControlPartType     string            `yaml:"control_part_type"`
-	ControlPartTypes    []string          `yaml:"control_part_types"`
-	ControlPreview      string            `yaml:"control_preview"`
-	ControlExtraMembers map[string]string `yaml:"control_extra_members"`
-	ExportAccepted      bool              `yaml:"export_accepted"`
-	PublicationReady    bool              `yaml:"publication_ready"`
-	PreflightAccepts    bool              `yaml:"preflight_accepts"`
-	RetainedKind        string            `yaml:"retained_kind"`
+	Name                 string            `yaml:"name"`
+	Managed              bool              `yaml:"managed"`
+	Harness              ingest.Harness    `yaml:"harness"`
+	Transcript           string            `yaml:"transcript"`
+	CaptureStatus        string            `yaml:"capture_status"`
+	CaptureFormat        string            `yaml:"capture_format"`
+	FailureCode          string            `yaml:"failure_code"`
+	ControlPartType      string            `yaml:"control_part_type"`
+	ControlPartTypes     []string          `yaml:"control_part_types"`
+	ControlPreview       string            `yaml:"control_preview"`
+	ControlPreviewAbsent bool              `yaml:"control_preview_absent"`
+	ControlExtraMembers  map[string]string `yaml:"control_extra_members"`
+	ExportAccepted       bool              `yaml:"export_accepted"`
+	PublicationReady     bool              `yaml:"publication_ready"`
+	PreflightAccepts     bool              `yaml:"preflight_accepts"`
+	RetainedKind         string            `yaml:"retained_kind"`
 }
 
 func loadControlRecordIngestFixtures(t *testing.T) []controlRecordIngestCase {
@@ -235,11 +236,33 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 							t.Fatalf("the full-content reader lost %q control", kind)
 						}
 					}
-					entry := findControlIngestEntry(snapshot.Entries, fixture)
+					// A managed generation carries the source ref on its stored
+					// row; the legacy complete-content read clears it, so the
+					// production-shape assertions read the generation itself.
+					shapeEntries := snapshot.Entries
+					if fixture.Managed && len(nativeEntries) > 0 {
+						shapeEntries = nativeEntries
+					}
+					entry := findControlIngestEntry(shapeEntries, fixture)
 					if entry == nil {
 						t.Fatalf("the stored session lost its %q control record", fixture.ControlPartType)
 					}
-					if entry.ContentPreview == nil || *entry.ContentPreview != fixture.ControlPreview {
+					if fixture.ControlPreviewAbsent {
+						// The production shape the projection rule removes: a
+						// stored control record whose writer produced no preview.
+						if entry.Role != ingest.RoleSystem || entry.EntryType != ingest.EntryTypeText || entry.Depth != 0 {
+							t.Fatalf("preview-less control record has shape role=%s entry_type=%s depth=%d, want system/text/0", entry.Role, entry.EntryType, entry.Depth)
+						}
+						if entry.PartType == nil || *entry.PartType != fixture.ControlPartType {
+							t.Fatalf("preview-less control record part type = %v, want %q", entry.PartType, fixture.ControlPartType)
+						}
+						if entry.ContentPreview != nil {
+							t.Fatalf("stored control preview = %q, want absent", *entry.ContentPreview)
+						}
+						if entry.SourceEntryRef == "" {
+							t.Fatal("preview-less control record has no source ref; the managed generation must write one")
+						}
+					} else if entry.ContentPreview == nil || *entry.ContentPreview != fixture.ControlPreview {
 						t.Fatalf("stored control preview = %v, want %q", entry.ContentPreview, fixture.ControlPreview)
 					}
 					if entry.Extra == nil {
@@ -269,7 +292,7 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 				if fixture.RetainedKind != "" && (exported.Diagnostics == nil || !exported.Diagnostics.Partial || len(exported.RetainedUnknown) != 1) {
 					t.Fatal("export lost partial evidence")
 				}
-				if exported == nil || !strings.Contains(exportPayloadText(t, exported), fixture.ControlPreview) {
+				if exported == nil || (!fixture.ControlPreviewAbsent && !strings.Contains(exportPayloadText(t, exported), fixture.ControlPreview)) {
 					t.Fatalf("exported detail does not carry the control preview %q", fixture.ControlPreview)
 				}
 			}

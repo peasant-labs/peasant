@@ -6,7 +6,7 @@ import "github.com/peasant-labs/schema"
 // summary evidence remains exclusively in detailed usage, never repriced.
 func piLegacyMirrors(detail *schema.SessionDetailPayload) error {
 	detail.TokensIn, detail.TokensOut, detail.TotalTokens = 0, 0, 0
-	detail.TurnCount = len(detail.Turns)
+	detail.TurnCount = ConversationTurnCount(detail.Turns)
 	detail.ToolCallCount = 0
 	for i := range detail.Turns {
 		t := &detail.Turns[i]
