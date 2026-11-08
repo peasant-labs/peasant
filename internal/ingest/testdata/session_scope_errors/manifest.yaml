@@ -10,5 +10,6 @@ requiredNames:
   - store_not_attached
   - store_unstated
   - no_misses
+  - unstated_miss_reason
   - harvest_index
   - lookup_failed_multiline_detail

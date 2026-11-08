@@ -94,7 +94,14 @@ type SessionScopeError struct {
 // Error returns the full labelled block for the screen. Its first line is the
 // bare "peasant:" label with the command and headline; its last line is the
 // fix. The searched detail appears once, and the fix appears once.
+//
+// A value with no miss describes no refusal, so it prints one self-describing
+// line instead of a block: every line of the block would assert a run that
+// never reached this renderer.
 func (e *SessionScopeError) Error() string {
+	if len(e.Misses) == 0 {
+		return fmt.Sprintf("peasant: %s failed: %s", e.commandName(), e.headline())
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "peasant: %s failed: %s\n", e.commandName(), e.headline())
 	b.WriteString(labelBlock("what:", e.whatLine(), false))
@@ -214,9 +221,6 @@ func (e *SessionScopeError) missClause(miss ScopeMiss) string {
 // whatLine names the kind of run and what it looked for. It never rebuilds a
 // command, so it cannot drop the user's other flags.
 func (e *SessionScopeError) whatLine() string {
-	if len(e.Misses) == 0 {
-		return "this scope error carries no miss, so it cannot say what the run looked for"
-	}
 	if len(e.Misses) != 1 {
 		return fmt.Sprintf("this session-scoped %s looked for %d sessions", e.commandName(), len(e.Misses))
 	}

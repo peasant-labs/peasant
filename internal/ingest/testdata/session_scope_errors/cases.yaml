@@ -629,20 +629,38 @@ cases:
         fix: build the error with the misses the session lookup recorded, then report it
         block: |-
             peasant: harvest failed: a scope error was raised without a miss, so it cannot say which session was refused
-              what:     this scope error carries no miss, so it cannot say what the run looked for
-              where:    session lookup (ingest scoped locate)
-              when:     before any session was swept, recorded, or indexed
-              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
-                        store migration, search-index repair) may still have run. No full scan was run.
-              fix:      build the error with the misses the session lookup recorded, then report it
       prefixed:
         reason: a scope error was raised without a miss, so it cannot say which session was refused
         fix: build the error with the misses the session lookup recorded, then report it
         block: |-
             peasant: harvest failed: a scope error was raised without a miss, so it cannot say which session was refused
-              what:     this scope error carries no miss, so it cannot say what the run looked for
+    - name: unstated_miss_reason
+      command: harvest
+      store: attached
+      misses:
+        - id: 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+          reason: unstated
+      bare:
+        reason: session 0f3c... could not be used for an unstated reason, so nothing was recorded
+        fix: check the id and the run's filters, then retry
+        block: |-
+            peasant: harvest failed: session 0f3c... could not be used for an unstated reason, so nothing was recorded
+              what:     this session-scoped harvest looked for session 0f3c...
+              why:      the session could not be used for an unstated reason
               where:    session lookup (ingest scoped locate)
               when:     before any session was swept, recorded, or indexed
               impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
                         store migration, search-index repair) may still have run. No full scan was run.
-              fix:      build the error with the misses the session lookup recorded, then report it
+              fix:      check the id and the run's filters, then retry
+      prefixed:
+        reason: session 0f3c... could not be used for an unstated reason, so nothing was recorded
+        fix: check the id and the run's filters, then retry
+        block: |-
+            peasant: harvest failed: session 0f3c... could not be used for an unstated reason, so nothing was recorded
+              what:     this session-scoped harvest looked for session 0f3c...
+              why:      the session could not be used for an unstated reason
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      check the id and the run's filters, then retry

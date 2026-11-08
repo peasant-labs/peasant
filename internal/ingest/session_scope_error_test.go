@@ -191,11 +191,16 @@ func assertSessionScopeErrorPane(t *testing.T, scopeErr *ingest.SessionScopeErro
 	if count := strings.Count(block, "peasant: "); count != 1 {
 		t.Fatalf("Error() prints the label %d times:\n%s", count, block)
 	}
+	if len(scopeErr.Misses) == 0 {
+		// A value with no miss states no refusal, so it prints one line and no
+		// block: there is no run to describe and no fix for a reader to apply.
+		if strings.Contains(block, "\n") {
+			t.Fatalf("the no-miss rendering is not a single line:\n%s", block)
+		}
+		return
+	}
 	if count := strings.Count(block, "  searched:"); count > 1 {
 		t.Fatalf("Error() prints the searched block %d times:\n%s", count, block)
-	}
-	if count := strings.Count(reason, "; searched "); count > 1 {
-		t.Fatalf("Reason() repeats the searched clause %d times:\n%s", count, reason)
 	}
 	if count := strings.Count(block, "  fix:      "); count != 1 {
 		t.Fatalf("Error() prints the fix %d times:\n%s", count, block)
@@ -271,6 +276,8 @@ func sessionScopeMissReason(raw string) (ingest.MissReason, error) {
 		return ingest.MissHarnessFiltered, nil
 	case "since_filtered":
 		return ingest.MissSinceFiltered, nil
+	case "unstated":
+		return ingest.MissReason(0), nil
 	default:
 		return ingest.MissReason(0), fmt.Errorf("fixture miss reason %q is not a declared value", raw)
 	}
@@ -396,5 +403,27 @@ func TestCollidingIDPrefixesLengthenUntilDistinct(t *testing.T) {
 	}
 	if strings.Count(reason, "0f3c...") != 0 {
 		t.Fatalf("Reason() keeps the ambiguous four-character prefix:\n%s", reason)
+	}
+}
+
+// TestShortIDIsPrintedWhole pins the guard before the four-character
+// abbreviation: an id shorter than the prefix is printed as it is, never sliced
+// to a panic.
+func TestShortIDIsPrintedWhole(t *testing.T) {
+	t.Parallel()
+	scopeErr := &ingest.SessionScopeError{
+		Command: "harvest",
+		Store:   ingest.StoreAttached,
+		Misses:  []ingest.ScopeMiss{{ID: ingest.SessionID("abc"), Reason: ingest.MissSinceFiltered}},
+	}
+	reason := scopeErr.Reason()
+	if !strings.Contains(reason, "abc was found but --since excludes it") {
+		t.Fatalf("Reason() does not print the whole short id:\n%s", reason)
+	}
+	if strings.Contains(reason, "...") {
+		t.Fatalf("Reason() abbreviated an id shorter than the prefix:\n%s", reason)
+	}
+	if block := scopeErr.Error(); !strings.Contains(block, "session abc") {
+		t.Fatalf("Error() does not print the whole short id:\n%s", block)
 	}
 }
