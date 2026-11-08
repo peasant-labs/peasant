@@ -71,6 +71,17 @@ var claudeOwnerRotationRecordTypes = map[string]bool{
 	"file-history-snapshot": true,
 }
 
+// claudeUnscopedRequestRecordTypes are the request-accounting record kinds
+// Claude Code writes into subagent transcripts carrying sessionId and agentId
+// but no isSidechain scope marker. An absent marker on these kinds does not
+// break native subagent proof; an explicit false still contradicts it, and the
+// agentId must still agree with every other record.
+var claudeUnscopedRequestRecordTypes = map[string]bool{
+	"api-request":       true,
+	"api-request-blob":  true,
+	"api-request-shape": true,
+}
+
 // isClaudeOwnerRotationRecord reports whether a record kind is one this build
 // reads as owner-rotation evidence rather than conversation content.
 func isClaudeOwnerRotationRecord(recordType string) bool {

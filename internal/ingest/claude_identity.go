@@ -65,6 +65,9 @@ func addClaudeIdentityRecord(value map[string]any, evidence *ClaudeTranscriptEvi
 	evidence.Records = append(evidence.Records, record)
 	agent, _ := value["agentId"].(string)
 	sidechain, _ := value["isSidechain"].(bool)
+	if record.Sidechain == nil && claudeUnscopedRequestRecordTypes[record.Type] {
+		sidechain = true
+	}
 	if agent == "" || !sidechain {
 		evidence.NativeAgentValid = false
 	}
