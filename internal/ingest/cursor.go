@@ -18,7 +18,13 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-const cursorAgentTranscriptsDir = "agent-transcripts"
+const (
+	cursorAgentTranscriptsDir = "agent-transcripts"
+	// cursorAncestorProbeKind is this adapter's one declared ancestor-probe
+	// kind: one stat of the parent's exact file, derived from the child's own
+	// path, and never a directory read.
+	cursorAncestorProbeKind = ProbePath
+)
 
 // CursorAdapter discovers and extracts metadata from Cursor agent JSONL transcripts.
 type CursorAdapter struct {
@@ -185,8 +191,8 @@ func (a *CursorAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 
 // enumerateCursorRoot walks one configured root and returns the native Cursor
 // session files it holds. It reads names only; the shared build reads each one.
-// Roots are returned before their subagents, which is the order Discover's
-// output has always had.
+// Roots precede their subagents in the result, so the build links a subagent to
+// its root without reordering the walk.
 func (a *CursorAdapter) enumerateCursorRoot(ctx context.Context, root ResolvedPath) ([]cursorSource, error) {
 	var roots, subagents []cursorSource
 	rootText := string(root)
@@ -227,12 +233,18 @@ func (a *CursorAdapter) enumerateCursorRoot(ctx context.Context, root ResolvedPa
 // tries the two known layouts under each configured root and never walks a
 // workspace: one directory read names the workspaces, one names the session
 // directories, and one stat per candidate confirms the file.
+//
+// A failed search is recorded ONCE, by the core: on a returned error the core
+// appends the SearchFailed entry and carries the miss, so this method never
+// appends one itself. It returns the entries it gathered for the roots it
+// completed, so the miss still names where else the id was searched. Every
+// adapter's lookup obeys the same convention.
 func (a *CursorAdapter) LookupSessionSources(ctx context.Context, cfg SourceConfig, id SessionID) (SourceLookup, error) {
 	if err := ctx.Err(); err != nil {
 		return SourceLookup{}, err
 	}
 	if _, err := NewSessionID(string(id)); err != nil {
-		return SourceLookup{}, fmt.Errorf("cursor lookup: %q is not a valid session id, so no source can be searched for it; where: ingest.CursorAdapter.LookupSessionSources; fix: pass a session id Cursor recorded; %w", id, err)
+		return SourceLookup{}, fmt.Errorf("ingest: CursorAdapter.LookupSessionSources was given %q, which is not a session id; no Cursor source can be searched under a name no session can hold; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: locating a named session by name; impact: no Cursor source is searched; fix: pass the session id the user named: %w", id, err)
 	}
 	ext := defaults.ExtJSONL.String()
 	var lookup SourceLookup
@@ -242,31 +254,25 @@ func (a *CursorAdapter) LookupSessionSources(ctx context.Context, cfg SourceConf
 		}
 		root := string(basePath)
 		transcriptsDirName := cursorAgentTranscriptsDir
-		searchStart := len(lookup.Searched)
-		lookup.Searched = append(lookup.Searched,
-			SearchedSource{
+		rootEntries := []SearchedSource{
+			{
 				Harness:  HarnessCursor,
 				Method:   SearchNamePattern,
 				Location: cursorDisplayPath(filepath.Join(root, "*", transcriptsDirName, string(id), string(id)+ext)),
 			},
-			SearchedSource{
+			{
 				Harness:  HarnessCursor,
 				Method:   SearchNamePattern,
 				Location: cursorDisplayPath(filepath.Join(root, "*", transcriptsDirName, "*", defaults.DirSubagents.String(), string(id)+ext)),
 			},
-		)
-		failRoot := func(err error) (SourceLookup, error) {
-			// Replace this root's two pattern entries with one failure entry:
-			// a failed search is neither hidden nor doubled.
-			lookup.Searched = append(lookup.Searched[:searchStart], cursorFailedSearch(root, err))
-			return lookup, fmt.Errorf("cursor lookup: searching %q for session %q failed: %w; where: ingest.CursorAdapter.LookupSessionSources; when: reading the source directory or a candidate transcript path; impact: the session was not searched in this source, so the id may still be there and the miss text names the failure; fix: make the directory readable and retry", root, id, err)
 		}
 		workspaces, err := a.fs.ReadDir(root)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
+				lookup.Searched = append(lookup.Searched, rootEntries...)
 				continue
 			}
-			return failRoot(err)
+			return lookup, fmt.Errorf("ingest: the Cursor lookup for session %s could not list %q; a directory that cannot be read may still hold the transcript, so the id cannot be reported absent from this source; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: locating the named session by name; impact: this source was not fully searched, and the miss text names the failure; fix: make the directory readable and retry: %w", id, root, err)
 		}
 
 		transcriptDirs := make([]string, 0, len(workspaces))
@@ -279,12 +285,12 @@ func (a *CursorAdapter) LookupSessionSources(ctx context.Context, cfg SourceConf
 			candidate := filepath.Join(dir, string(id), string(id)+ext)
 			hit, err := a.cursorSourceExists(candidate)
 			if err != nil {
-				return failRoot(err)
+				return lookup, fmt.Errorf("ingest: the Cursor lookup for session %s could not stat %q; the search stopped before this source was fully covered, so the id cannot be reported absent from it; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: checking one candidate transcript path; impact: this source was not fully searched, and the miss text names the failure; fix: make the path readable and retry: %w", id, candidate, err)
 			}
 			if hit {
 				resolved, err := NewResolvedPath(candidate)
 				if err != nil {
-					return lookup, fmt.Errorf("cursor lookup: resolve %q: %w", candidate, err)
+					return lookup, fmt.Errorf("ingest: the Cursor lookup found %q for session %s but could not resolve it as an absolute path; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: recording a lookup hit; impact: the hit is dropped from this lookup; fix: report the path form that cannot be resolved: %w", candidate, id, err)
 				}
 				lookup.Sources = append(lookup.Sources, resolved)
 			}
@@ -295,7 +301,7 @@ func (a *CursorAdapter) LookupSessionSources(ctx context.Context, cfg SourceConf
 				if errors.Is(err, fs.ErrNotExist) {
 					continue
 				}
-				return failRoot(err)
+				return lookup, fmt.Errorf("ingest: the Cursor lookup for session %s could not list %q; a directory that cannot be read may hold a subagent transcript named by the id, so the id cannot be reported absent from this source; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: locating the named session by name; impact: this source was not fully searched, and the miss text names the failure; fix: make the directory readable and retry: %w", id, dir, err)
 			}
 			for _, session := range sessions {
 				if !session.IsDir() {
@@ -304,17 +310,18 @@ func (a *CursorAdapter) LookupSessionSources(ctx context.Context, cfg SourceConf
 				candidate := filepath.Join(dir, session.Name(), defaults.DirSubagents.String(), string(id)+ext)
 				hit, err := a.cursorSourceExists(candidate)
 				if err != nil {
-					return failRoot(err)
+					return lookup, fmt.Errorf("ingest: the Cursor lookup for session %s could not stat %q; the search stopped before this source was fully covered, so the id cannot be reported absent from it; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: checking one candidate subagent transcript path; impact: this source was not fully searched, and the miss text names the failure; fix: make the path readable and retry: %w", id, candidate, err)
 				}
 				if hit {
 					resolved, err := NewResolvedPath(candidate)
 					if err != nil {
-						return lookup, fmt.Errorf("cursor lookup: resolve %q: %w", candidate, err)
+						return lookup, fmt.Errorf("ingest: the Cursor lookup found %q for session %s but could not resolve it as an absolute path; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: recording a lookup hit; impact: the hit is dropped from this lookup; fix: report the path form that cannot be resolved: %w", candidate, id, err)
 					}
 					lookup.Sources = append(lookup.Sources, resolved)
 				}
 			}
 		}
+		lookup.Searched = append(lookup.Searched, rootEntries...)
 	}
 	return lookup, nil
 }
@@ -332,42 +339,39 @@ func (a *CursorAdapter) cursorSourceExists(path string) (bool, error) {
 	return !info.IsDir(), nil
 }
 
-// cursorFailedSearch records a lookup failure where a miss can name it.
-func cursorFailedSearch(root string, err error) SearchedSource {
-	return SearchedSource{
-		Harness:  HarnessCursor,
-		Method:   SearchFailed,
-		Location: cursorDisplayPath(root),
-		Detail:   firstLine(err.Error()),
-	}
-}
-
 // DiscoverSessionAt builds the members for one located Cursor source. It reads
 // the source, the subagents its layout names, and the stored children the core
-// passed in; it never writes, so a refused run has nothing to undo. Stored
-// children whose file is gone come back with no source and their reason rather
+// passed in; it never writes, so a refused run has nothing to undo. A stored
+// child that cannot be read comes back with no source and its reason rather
 // than being dropped.
+//
+// The role and the outcome of every member are the core's: only the core knows
+// whether a member was requested, related-only, or an ancestor, so the adapter
+// leaves both at their zero value.
 func (a *CursorAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig, at LocatedSource) (LocatedBuild, error) {
 	if err := ctx.Err(); err != nil {
 		return LocatedBuild{}, err
 	}
+	if at.ID == "" {
+		return LocatedBuild{}, fmt.Errorf("ingest: CursorAdapter.DiscoverSessionAt was given a located source with no session id at %q; a located source must name the session it holds so the member can be matched to its store row; where: ingest.CursorAdapter.DiscoverSessionAt in internal/ingest/cursor.go; when: building a located source; impact: nothing was read and no member was built; fix: pass the id the store or the lookup resolved", at.Path)
+	}
 	parsed, ok := parseCursorSourcePath(at.Path.String())
 	if !ok || parsed.ID != at.ID {
-		return LocatedBuild{}, fmt.Errorf("cursor: source %q does not hold session %q; the stored path is outside Cursor's two layouts or names another id; where: ingest.CursorAdapter.DiscoverSessionAt; fix: let the run look the session up by name and record it again; %w", at.Path, at.ID, ErrSourceGone)
+		return LocatedBuild{}, cursorSourceGoneError(at.Path, at.ID, "the path is outside Cursor's two transcript layouts or names another session id")
+	}
+	root, ok := cursorEnumeratedRoot(cfg, parsed.Root)
+	if !ok {
+		return LocatedBuild{}, fmt.Errorf("ingest: the located Cursor path %q lies outside every configured Cursor source root; a Cursor workspace sits directly below its configured root, so a source no root contains would carry an OriginalRoot no full walk gives it; where: ingest.CursorAdapter.DiscoverSessionAt in internal/ingest/cursor.go; when: resolving the source root of the located path; impact: nothing was read and no member was built; fix: restore the transcript under a configured Cursor source path, or add the path's root to the configured source paths", at.Path)
 	}
 	info, err := a.fs.Stat(at.Path.String())
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return LocatedBuild{}, fmt.Errorf("cursor: source %q no longer exists for session %q; where: ingest.CursorAdapter.DiscoverSessionAt; fix: let the run look the session up by name; %w", at.Path, at.ID, ErrSourceGone)
+			return LocatedBuild{}, cursorSourceGoneError(at.Path, at.ID, "the file no longer exists")
 		}
-		return LocatedBuild{}, fmt.Errorf("cursor: read source %q for session %q: %w", at.Path, at.ID, err)
+		return LocatedBuild{}, fmt.Errorf("ingest: the Cursor transcript %q for session %s could not be read; the path exists but its state cannot be observed, so the member cannot be built from it; where: ingest.CursorAdapter.DiscoverSessionAt in internal/ingest/cursor.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path, and the core records the read failure; fix: make the file readable and retry: %w", at.Path, at.ID, err)
 	}
 	if info.IsDir() {
-		return LocatedBuild{}, fmt.Errorf("cursor: source %q is a directory, not a transcript for session %q; %w", at.Path, at.ID, ErrSourceGone)
-	}
-	root, err := NewResolvedPath(parsed.Root)
-	if err != nil {
-		return LocatedBuild{}, fmt.Errorf("cursor: source %q names project root %q, which is not an absolute path; %w", at.Path, parsed.Root, ErrSourceGone)
+		return LocatedBuild{}, cursorSourceGoneError(at.Path, at.ID, "the path is a directory, not a transcript file")
 	}
 	source := cursorSource{root: root, workspace: parsed.Workspace, id: at.ID, path: at.Path.String(), info: info}
 	if parsed.ParentID != "" {
@@ -375,39 +379,51 @@ func (a *CursorAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig,
 		source.parent = &parent
 	}
 	sources := []cursorSource{source}
-	if source.parent == nil {
-		children, err := a.enumerateCursorSubagents(root, parsed.Workspace, at.ID)
-		if err != nil {
-			return LocatedBuild{}, err
-		}
-		sources = append(sources, children...)
-	}
-	missing, err := a.appendCursorStoredChildren(&sources, at)
+	children, err := a.enumerateCursorSubagents(root, parsed.Workspace, at.ID)
 	if err != nil {
 		return LocatedBuild{}, err
 	}
+	sources = append(sources, children...)
+	unreadable := a.appendCursorStoredChildren(&sources, cfg, at)
 	sessions, built := a.buildCursorSessions(sources)
-	members := make([]LocatedMember, 0, len(sources)+len(missing))
+	members := make([]LocatedMember, 0, len(sources)+len(unreadable))
 	for index, enumerated := range sources {
 		builtIndex := built[index]
 		if builtIndex < 0 {
 			continue
 		}
-		member := LocatedMember{ID: enumerated.id, Harness: HarnessCursor, Source: &sessions[builtIndex], Role: CohortChild}
-		if enumerated.id == at.ID {
-			// The core knows why it located this source and sets the role.
-			member.Role = cohortRoleUnset
-			if at.Stored.Parent == nil {
-				member.ParentProbe = cursorAncestorProbe(parsed)
-			}
+		member := LocatedMember{ID: enumerated.id, Harness: HarnessCursor, Source: &sessions[builtIndex]}
+		if enumerated.id == at.ID && at.Stored.Parent == nil {
+			member.ParentProbe = cursorAncestorProbe(parsed)
 		}
 		members = append(members, member)
 	}
-	members = append(members, missing...)
+	members = append(members, unreadable...)
 	return LocatedBuild{Members: members, Deferred: NoDeferredWrites{}}, nil
 }
 
-// enumerateCursorSubagents reads one root session's subagents directory. A
+// cursorSourceGoneError is the one statement of "this recorded path no longer
+// holds the session it was recorded for". It wraps ErrSourceGone, so the core
+// takes the by-name lookup path for the id.
+func cursorSourceGoneError(path ResolvedPath, id SessionID, because string) error {
+	return fmt.Errorf("ingest: the located Cursor path %q no longer holds session %s because %s; a Cursor transcript is named by the session id it holds, so this path is not that session's source; where: ingest.CursorAdapter.DiscoverSessionAt in internal/ingest/cursor.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path; fix: let the by-name lookup find the source the session is in now: %w", path, id, because, ErrSourceGone)
+}
+
+// cursorEnumeratedRoot returns the configured source root a located path hangs
+// from. A Cursor workspace sits directly below its configured root, so the root
+// the path layout names must be configured exactly; that is the only shape a
+// full walk admits, and therefore the only OriginalRoot it would record.
+func cursorEnumeratedRoot(cfg SourceConfig, parsedRoot string) (ResolvedPath, bool) {
+	for _, configured := range cfg.Paths {
+		if string(configured) == parsedRoot {
+			return configured, true
+		}
+	}
+	return "", false
+}
+
+// enumerateCursorSubagents reads the subagents directory a located session's
+// own id names, so a subagent of a subagent is built as the walk builds it. A
 // missing directory is no children, not a failure; every other read error is
 // returned so the core can name it.
 func (a *CursorAdapter) enumerateCursorSubagents(root ResolvedPath, workspace string, parent SessionID) ([]cursorSource, error) {
@@ -417,7 +433,7 @@ func (a *CursorAdapter) enumerateCursorSubagents(root ResolvedPath, workspace st
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("cursor: read subagents directory %q for session %q: %w", dir, parent, err)
+		return nil, fmt.Errorf("ingest: the Cursor subagents directory %q for session %s could not be listed; a directory that cannot be read may hold child transcripts, so the build cannot claim this session has none; where: ingest.CursorAdapter.DiscoverSessionAt in internal/ingest/cursor.go; when: enumerating a located source's layout relatives; impact: nothing was built for this located source; fix: make the directory readable and retry: %w", dir, parent, err)
 	}
 	ext := defaults.ExtJSONL.String()
 	sources := make([]cursorSource, 0, len(entries))
@@ -442,64 +458,81 @@ func (a *CursorAdapter) enumerateCursorSubagents(root ResolvedPath, workspace st
 }
 
 // appendCursorStoredChildren adds the stored children the build must re-read.
-// A stored child whose file is gone or is not a transcript comes back as an
-// unreadable member, because the store still records it and the run's upkeep
-// set must see it.
-func (a *CursorAdapter) appendCursorStoredChildren(sources *[]cursorSource, at LocatedSource) ([]LocatedMember, error) {
+// A child whose file is gone, belongs to another harness, or cannot be observed
+// comes back as a member with no source and its reason, because the store still
+// records it and the run's upkeep set must see it.
+func (a *CursorAdapter) appendCursorStoredChildren(sources *[]cursorSource, cfg SourceConfig, at LocatedSource) []LocatedMember {
 	seen := make(map[SessionID]struct{}, len(*sources))
 	for _, source := range *sources {
 		seen[source.id] = struct{}{}
 	}
-	var missing []LocatedMember
+	var unreadable []LocatedMember
 	for _, child := range at.Stored.Children {
 		if _, duplicate := seen[child.ID]; duplicate {
 			continue
 		}
 		seen[child.ID] = struct{}{}
-		parsed, ok := parseCursorSourcePath(child.Path.String())
-		if !ok || parsed.ID != child.ID {
-			missing = append(missing, cursorStoredChildUnreadable(child, UnreadableSourceGone))
+		member, source, ok := a.buildCursorStoredChild(cfg, child)
+		if ok {
+			*sources = append(*sources, source)
 			continue
 		}
-		info, err := a.fs.Stat(child.Path.String())
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				missing = append(missing, cursorStoredChildUnreadable(child, UnreadableSourceGone))
-				continue
-			}
-			return nil, fmt.Errorf("cursor: read stored child %q for session %q: %w", child.Path, child.ID, err)
-		}
-		if info.IsDir() {
-			missing = append(missing, cursorStoredChildUnreadable(child, UnreadableSourceGone))
-			continue
-		}
-		root, err := NewResolvedPath(parsed.Root)
-		if err != nil {
-			missing = append(missing, cursorStoredChildUnreadable(child, UnreadableSourceGone))
-			continue
-		}
-		source := cursorSource{root: root, workspace: parsed.Workspace, id: child.ID, path: child.Path.String(), info: info}
-		if parsed.ParentID != "" {
-			parent := parsed.ParentID
-			source.parent = &parent
-		}
-		*sources = append(*sources, source)
+		unreadable = append(unreadable, member)
 	}
-	return missing, nil
+	return unreadable
 }
 
-func cursorStoredChildUnreadable(child StoredSessionSource, reason UnreadableReason) LocatedMember {
-	harness := child.Harness
-	if harness == "" {
-		harness = HarnessCursor
+// buildCursorStoredChild resolves one stored child either to a source the
+// shared build reads or to an unreadable member that names why. A readable
+// child is built from its path, exactly as the full walk builds it, so its
+// OriginalRoot, title and parent come from the source and not from the store's
+// link.
+func (a *CursorAdapter) buildCursorStoredChild(cfg SourceConfig, child StoredSessionSource) (LocatedMember, cursorSource, bool) {
+	member := LocatedMember{ID: child.ID, Harness: child.Harness}
+	if child.Harness != HarnessCursor {
+		// Another harness owns this source. The child's own adapter can read it,
+		// so the source is not gone and the harness is not disabled: this is a
+		// local read failure the run continues past.
+		member.Unreadable = UnreadableSourceFailed
+		if child.Harness == "" {
+			member.Detail = "the store records no harness for this child, so the cursor adapter cannot attribute its source"
+		} else {
+			member.Detail = "a " + string(child.Harness) + " source cannot be read by the cursor adapter"
+		}
+		return member, cursorSource{}, false
 	}
-	return LocatedMember{
-		ID:         child.ID,
-		Harness:    harness,
-		Outcome:    LocateStoredUnreadable,
-		Role:       CohortChild,
-		Unreadable: reason,
+	parsed, ok := parseCursorSourcePath(child.Path.String())
+	if !ok || parsed.ID != child.ID {
+		member.Unreadable = UnreadableSourceGone
+		return member, cursorSource{}, false
 	}
+	root, ok := cursorEnumeratedRoot(cfg, parsed.Root)
+	if !ok {
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = "the recorded path is outside every configured Cursor source root"
+		return member, cursorSource{}, false
+	}
+	info, err := a.fs.Stat(child.Path.String())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			member.Unreadable = UnreadableSourceGone
+			return member, cursorSource{}, false
+		}
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = firstLine(err.Error())
+		return member, cursorSource{}, false
+	}
+	if info.IsDir() {
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = "the recorded path is a directory, not a Cursor transcript file"
+		return member, cursorSource{}, false
+	}
+	source := cursorSource{root: root, workspace: parsed.Workspace, id: child.ID, path: child.Path.String(), info: info}
+	if parsed.ParentID != "" {
+		parent := parsed.ParentID
+		source.parent = &parent
+	}
+	return LocatedMember{}, source, true
 }
 
 // cursorAncestorProbe derives one unstored parent's exact source file from the
@@ -513,7 +546,7 @@ func cursorAncestorProbe(parsed cursorSourcePath) *AncestorProbe {
 	if err != nil {
 		return nil
 	}
-	return &AncestorProbe{Kind: ProbePath, Harness: HarnessCursor, Path: path}
+	return &AncestorProbe{Kind: cursorAncestorProbeKind, Harness: HarnessCursor, Path: path}
 }
 
 // buildCursorSessions is the one construction path for Discover and
