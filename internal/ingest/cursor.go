@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -27,6 +28,7 @@ type CursorAdapter struct {
 }
 
 var _ SourceAdapter = (*CursorAdapter)(nil)
+var _ SessionLocator = (*CursorAdapter)(nil)
 
 // NewCursorAdapter creates a CursorAdapter with injected dependencies.
 func NewCursorAdapter(fs FileSystem, git GitResolver, s salt.Salt) *CursorAdapter {
@@ -78,147 +80,527 @@ type cursorContentBlock struct {
 	IsError   bool            `json:"is_error"`
 }
 
+// cursorSourcePath is one native Cursor session file read from its path
+// layout:
+//
+//	{root}/{workspace}/agent-transcripts/{id}/{id}.jsonl
+//	{root}/{workspace}/agent-transcripts/{parent}/subagents/{id}.jsonl
+//
+// The path alone names the session, its workspace, its project root and, for a
+// subagent, its parent, so one parser serves the walk, the by-name lookup and
+// the derived ancestor probe.
+type cursorSourcePath struct {
+	Root      string
+	Workspace string
+	ID        SessionID
+	ParentID  SessionID // empty for a root session
+}
+
+// parseCursorSourcePath reads a Cursor transcript path without touching the
+// filesystem. It returns false for a path outside the two known layouts, so a
+// caller never guesses that an unrelated file holds a session.
+func parseCursorSourcePath(path string) (cursorSourcePath, bool) {
+	clean := filepath.Clean(path)
+	ext := defaults.ExtJSONL.String()
+	base := filepath.Base(clean)
+	if !strings.HasSuffix(base, ext) {
+		return cursorSourcePath{}, false
+	}
+	id, err := NewSessionID(strings.TrimSuffix(base, ext))
+	if err != nil {
+		return cursorSourcePath{}, false
+	}
+	dir := filepath.Dir(clean)
+
+	// Subagent session: {parent}/subagents/{id}.jsonl under agent-transcripts.
+	if filepath.Base(dir) == defaults.DirSubagents.String() {
+		parentDir := filepath.Dir(dir)
+		transcriptsDir := filepath.Dir(parentDir)
+		if filepath.Base(transcriptsDir) != cursorAgentTranscriptsDir {
+			return cursorSourcePath{}, false
+		}
+		parentID, err := NewSessionID(filepath.Base(parentDir))
+		if err != nil {
+			return cursorSourcePath{}, false
+		}
+		workspaceDir := filepath.Dir(transcriptsDir)
+		return cursorSourcePath{
+			Root:      filepath.Dir(workspaceDir),
+			Workspace: filepath.Base(workspaceDir),
+			ID:        id,
+			ParentID:  parentID,
+		}, true
+	}
+
+	// Root session: {id}/{id}.jsonl under agent-transcripts.
+	if filepath.Base(dir) != string(id) {
+		return cursorSourcePath{}, false
+	}
+	transcriptsDir := filepath.Dir(dir)
+	if filepath.Base(transcriptsDir) != cursorAgentTranscriptsDir {
+		return cursorSourcePath{}, false
+	}
+	workspaceDir := filepath.Dir(transcriptsDir)
+	return cursorSourcePath{
+		Root:      filepath.Dir(workspaceDir),
+		Workspace: filepath.Base(workspaceDir),
+		ID:        id,
+	}, true
+}
+
+// cursorSource is one native Cursor session file the enumeration found, before
+// the shared build reads it.
+type cursorSource struct {
+	root      ResolvedPath
+	workspace string
+	id        SessionID
+	path      string
+	parent    *SessionID
+	// info is the stat a caller already observed, so the build never stats one
+	// path twice when the caller needed the result first.
+	info os.FileInfo
+}
+
 // Discover walks configured Cursor IDE project roots looking for transcripts.
 // With the default source root ~/.cursor/projects, Cursor IDE stores transcripts at:
 //
 //	~/.cursor/projects/{workspace}/agent-transcripts/{sessionId}/{sessionId}.jsonl
 //	~/.cursor/projects/{workspace}/agent-transcripts/{parentId}/subagents/{sessionId}.jsonl
+//
+// It enumerates by walking each root and hands every file it finds to the same
+// build DiscoverSessionAt uses, so the two paths cannot describe one session
+// two ways.
 func (a *CursorAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	var sessions []DiscoveredSession
-
 	for _, basePath := range cfg.Paths {
-		root := string(basePath)
-		type rootEntry struct {
-			path      string
-			workspace string
-			sessionID string
+		sources, err := a.enumerateCursorRoot(ctx, basePath)
+		if err != nil {
+			return nil, err
 		}
-		type subagentEntry struct {
-			path       string
-			workspace  string
-			parentID   string
-			subagentID string
+		built, _ := a.buildCursorSessions(sources)
+		sessions = append(sessions, built...)
+	}
+	return sessions, nil
+}
+
+// enumerateCursorRoot walks one configured root and returns the native Cursor
+// session files it holds. It reads names only; the shared build reads each one.
+// Roots are returned before their subagents, which is the order Discover's
+// output has always had.
+func (a *CursorAdapter) enumerateCursorRoot(ctx context.Context, root ResolvedPath) ([]cursorSource, error) {
+	var roots, subagents []cursorSource
+	rootText := string(root)
+	walkErr := a.fs.WalkDir(rootText, func(path string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		var rootEntries []rootEntry
-		var subagentEntries []subagentEntry
-
-		walkErr := a.fs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if err != nil {
-				return nil
-			}
-			if d.Type()&os.ModeSymlink != 0 || d.IsDir() {
-				return nil
-			}
-			if !strings.HasSuffix(path, defaults.ExtJSONL.String()) {
-				return nil
-			}
-
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return nil
-			}
-			parts := strings.Split(rel, string(filepath.Separator))
-
-			// Root session: {workspace}/agent-transcripts/{uuid}/{uuid}.jsonl.
-			if len(parts) == 4 && parts[1] == cursorAgentTranscriptsDir {
-				sessionIDStr := parts[2]
-				filenameID := strings.TrimSuffix(parts[3], defaults.ExtJSONL.String())
-				if sessionIDStr != filenameID {
-					return nil
-				}
-				if _, err := NewSessionID(sessionIDStr); err == nil {
-					rootEntries = append(rootEntries, rootEntry{path: path, workspace: parts[0], sessionID: sessionIDStr})
-				}
-				return nil
-			}
-
-			// Subagent session: {workspace}/agent-transcripts/{parent}/subagents/{uuid}.jsonl.
-			if len(parts) == 5 && parts[1] == cursorAgentTranscriptsDir && parts[3] == defaults.DirSubagents.String() {
-				parentIDStr := parts[2]
-				subagentIDStr := strings.TrimSuffix(parts[4], defaults.ExtJSONL.String())
-				if _, err := NewSessionID(parentIDStr); err == nil {
-					if _, err := NewSessionID(subagentIDStr); err == nil {
-						subagentEntries = append(subagentEntries, subagentEntry{
-							path:       path,
-							workspace:  parts[0],
-							parentID:   parentIDStr,
-							subagentID: subagentIDStr,
-						})
-					}
-				}
-				return nil
-			}
-
+		if err != nil {
 			return nil
-		})
-		if walkErr != nil {
-			return nil, fmt.Errorf("cursor discover: walk %q: %w", root, walkErr)
+		}
+		if d.Type()&os.ModeSymlink != 0 || d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, defaults.ExtJSONL.String()) {
+			return nil
+		}
+		parsed, ok := parseCursorSourcePath(path)
+		if !ok || parsed.Root != rootText {
+			return nil
+		}
+		source := cursorSource{root: root, workspace: parsed.Workspace, id: parsed.ID, path: path}
+		if parsed.ParentID != "" {
+			parent := parsed.ParentID
+			source.parent = &parent
+			subagents = append(subagents, source)
+			return nil
+		}
+		roots = append(roots, source)
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("cursor discover: walk %q: %w", rootText, walkErr)
+	}
+	return append(roots, subagents...), nil
+}
+
+// LookupSessionSources finds the transcript paths that can hold id BY NAME. It
+// tries the two known layouts under each configured root and never walks a
+// workspace: one directory read names the workspaces, one names the session
+// directories, and one stat per candidate confirms the file.
+func (a *CursorAdapter) LookupSessionSources(ctx context.Context, cfg SourceConfig, id SessionID) (SourceLookup, error) {
+	if err := ctx.Err(); err != nil {
+		return SourceLookup{}, err
+	}
+	if _, err := NewSessionID(string(id)); err != nil {
+		return SourceLookup{}, fmt.Errorf("cursor lookup: %q is not a valid session id, so no source can be searched for it; where: ingest.CursorAdapter.LookupSessionSources; fix: pass a session id Cursor recorded; %w", id, err)
+	}
+	ext := defaults.ExtJSONL.String()
+	var lookup SourceLookup
+	for _, basePath := range cfg.Paths {
+		if err := ctx.Err(); err != nil {
+			return SourceLookup{}, err
+		}
+		root := string(basePath)
+		transcriptsDirName := cursorAgentTranscriptsDir
+		searchStart := len(lookup.Searched)
+		lookup.Searched = append(lookup.Searched,
+			SearchedSource{
+				Harness:  HarnessCursor,
+				Method:   SearchNamePattern,
+				Location: cursorDisplayPath(filepath.Join(root, "*", transcriptsDirName, string(id), string(id)+ext)),
+			},
+			SearchedSource{
+				Harness:  HarnessCursor,
+				Method:   SearchNamePattern,
+				Location: cursorDisplayPath(filepath.Join(root, "*", transcriptsDirName, "*", defaults.DirSubagents.String(), string(id)+ext)),
+			},
+		)
+		failRoot := func(err error) (SourceLookup, error) {
+			// Replace this root's two pattern entries with one failure entry:
+			// a failed search is neither hidden nor doubled.
+			lookup.Searched = append(lookup.Searched[:searchStart], cursorFailedSearch(root, err))
+			return lookup, fmt.Errorf("cursor lookup: searching %q for session %q failed: %w; where: ingest.CursorAdapter.LookupSessionSources; when: reading the source directory or a candidate transcript path; impact: the session was not searched in this source, so the id may still be there and the miss text names the failure; fix: make the directory readable and retry", root, id, err)
+		}
+		workspaces, err := a.fs.ReadDir(root)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return failRoot(err)
 		}
 
-		rootIndex := make(map[string]int, len(rootEntries))
-		for _, entry := range rootEntries {
-			sid, _ := NewSessionID(entry.sessionID)
-			info, err := a.fs.Stat(entry.path)
-			if err != nil {
+		transcriptDirs := make([]string, 0, len(workspaces))
+		for _, workspace := range workspaces {
+			if !workspace.IsDir() {
 				continue
 			}
-			sourcePath, err := NewResolvedPath(entry.path)
+			dir := filepath.Join(root, workspace.Name(), transcriptsDirName)
+			transcriptDirs = append(transcriptDirs, dir)
+			candidate := filepath.Join(dir, string(id), string(id)+ext)
+			hit, err := a.cursorSourceExists(candidate)
 			if err != nil {
-				continue
+				return failRoot(err)
 			}
-			projectDir, projectName := a.decodeCursorWorkspace(root, entry.workspace)
-			hints := a.extractCursorHints(entry.path)
-			rootIndex[entry.sessionID] = len(sessions)
-			sessions = append(sessions, DiscoveredSession{
-				SessionID:     sid,
-				Harness:       HarnessCursor,
-				SourcePath:    sourcePath,
-				SourceFormat:  SourceFormatJSONL,
-				OriginalRoot:  basePath,
-				SubagentPaths: []ResolvedPath{},
-				DebugPaths:    []ResolvedPath{},
-				ModTime:       info.ModTime(),
-				ProjectName:   projectName,
-				Title:         hints.title,
-				CWD:           projectDir,
-			})
+			if hit {
+				resolved, err := NewResolvedPath(candidate)
+				if err != nil {
+					return lookup, fmt.Errorf("cursor lookup: resolve %q: %w", candidate, err)
+				}
+				lookup.Sources = append(lookup.Sources, resolved)
+			}
 		}
-
-		for _, entry := range subagentEntries {
-			parentSID, _ := NewSessionID(entry.parentID)
-			subSID, _ := NewSessionID(entry.subagentID)
-			info, err := a.fs.Stat(entry.path)
+		for _, dir := range transcriptDirs {
+			sessions, err := a.fs.ReadDir(dir)
 			if err != nil {
-				continue
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return failRoot(err)
 			}
-			rp, err := NewResolvedPath(entry.path)
-			if err != nil {
-				continue
+			for _, session := range sessions {
+				if !session.IsDir() {
+					continue
+				}
+				candidate := filepath.Join(dir, session.Name(), defaults.DirSubagents.String(), string(id)+ext)
+				hit, err := a.cursorSourceExists(candidate)
+				if err != nil {
+					return failRoot(err)
+				}
+				if hit {
+					resolved, err := NewResolvedPath(candidate)
+					if err != nil {
+						return lookup, fmt.Errorf("cursor lookup: resolve %q: %w", candidate, err)
+					}
+					lookup.Sources = append(lookup.Sources, resolved)
+				}
 			}
-			if idx, ok := rootIndex[entry.parentID]; ok {
-				sessions[idx].SubagentPaths = append(sessions[idx].SubagentPaths, rp)
-			}
-			projectDir, projectName := a.decodeCursorWorkspace(root, entry.workspace)
-			sessions = append(sessions, DiscoveredSession{
-				SessionID:     subSID,
-				Harness:       HarnessCursor,
-				SourcePath:    rp,
-				SourceFormat:  SourceFormatJSONL,
-				OriginalRoot:  basePath,
-				ParentUUID:    &parentSID,
-				SubagentPaths: []ResolvedPath{},
-				DebugPaths:    []ResolvedPath{},
-				ModTime:       info.ModTime(),
-				ProjectName:   projectName,
-				CWD:           projectDir,
-			})
 		}
 	}
+	return lookup, nil
+}
 
-	return sessions, nil
+// cursorSourceExists reports whether path is a readable file. A missing path is
+// not a failure: it is simply not a hit.
+func (a *CursorAdapter) cursorSourceExists(path string) (bool, error) {
+	info, err := a.fs.Stat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return !info.IsDir(), nil
+}
+
+// cursorFailedSearch records a lookup failure where a miss can name it.
+func cursorFailedSearch(root string, err error) SearchedSource {
+	return SearchedSource{
+		Harness:  HarnessCursor,
+		Method:   SearchFailed,
+		Location: cursorDisplayPath(root),
+		Detail:   firstLine(err.Error()),
+	}
+}
+
+// DiscoverSessionAt builds the members for one located Cursor source. It reads
+// the source, the subagents its layout names, and the stored children the core
+// passed in; it never writes, so a refused run has nothing to undo. Stored
+// children whose file is gone come back with no source and their reason rather
+// than being dropped.
+func (a *CursorAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig, at LocatedSource) (LocatedBuild, error) {
+	if err := ctx.Err(); err != nil {
+		return LocatedBuild{}, err
+	}
+	parsed, ok := parseCursorSourcePath(at.Path.String())
+	if !ok || parsed.ID != at.ID {
+		return LocatedBuild{}, fmt.Errorf("cursor: source %q does not hold session %q; the stored path is outside Cursor's two layouts or names another id; where: ingest.CursorAdapter.DiscoverSessionAt; fix: let the run look the session up by name and record it again; %w", at.Path, at.ID, ErrSourceGone)
+	}
+	info, err := a.fs.Stat(at.Path.String())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return LocatedBuild{}, fmt.Errorf("cursor: source %q no longer exists for session %q; where: ingest.CursorAdapter.DiscoverSessionAt; fix: let the run look the session up by name; %w", at.Path, at.ID, ErrSourceGone)
+		}
+		return LocatedBuild{}, fmt.Errorf("cursor: read source %q for session %q: %w", at.Path, at.ID, err)
+	}
+	if info.IsDir() {
+		return LocatedBuild{}, fmt.Errorf("cursor: source %q is a directory, not a transcript for session %q; %w", at.Path, at.ID, ErrSourceGone)
+	}
+	root, err := NewResolvedPath(parsed.Root)
+	if err != nil {
+		return LocatedBuild{}, fmt.Errorf("cursor: source %q names project root %q, which is not an absolute path; %w", at.Path, parsed.Root, ErrSourceGone)
+	}
+	source := cursorSource{root: root, workspace: parsed.Workspace, id: at.ID, path: at.Path.String(), info: info}
+	if parsed.ParentID != "" {
+		parent := parsed.ParentID
+		source.parent = &parent
+	}
+	sources := []cursorSource{source}
+	if source.parent == nil {
+		children, err := a.enumerateCursorSubagents(root, parsed.Workspace, at.ID)
+		if err != nil {
+			return LocatedBuild{}, err
+		}
+		sources = append(sources, children...)
+	}
+	missing, err := a.appendCursorStoredChildren(&sources, at)
+	if err != nil {
+		return LocatedBuild{}, err
+	}
+	sessions, built := a.buildCursorSessions(sources)
+	members := make([]LocatedMember, 0, len(sources)+len(missing))
+	for index, enumerated := range sources {
+		builtIndex := built[index]
+		if builtIndex < 0 {
+			continue
+		}
+		member := LocatedMember{ID: enumerated.id, Harness: HarnessCursor, Source: &sessions[builtIndex], Role: CohortChild}
+		if enumerated.id == at.ID {
+			// The core knows why it located this source and sets the role.
+			member.Role = cohortRoleUnset
+			if at.Stored.Parent == nil {
+				member.ParentProbe = cursorAncestorProbe(parsed)
+			}
+		}
+		members = append(members, member)
+	}
+	members = append(members, missing...)
+	return LocatedBuild{Members: members, Deferred: NoDeferredWrites{}}, nil
+}
+
+// enumerateCursorSubagents reads one root session's subagents directory. A
+// missing directory is no children, not a failure; every other read error is
+// returned so the core can name it.
+func (a *CursorAdapter) enumerateCursorSubagents(root ResolvedPath, workspace string, parent SessionID) ([]cursorSource, error) {
+	dir := filepath.Join(string(root), workspace, cursorAgentTranscriptsDir, string(parent), defaults.DirSubagents.String())
+	entries, err := a.fs.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("cursor: read subagents directory %q for session %q: %w", dir, parent, err)
+	}
+	ext := defaults.ExtJSONL.String()
+	sources := make([]cursorSource, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ext) {
+			continue
+		}
+		id, err := NewSessionID(strings.TrimSuffix(entry.Name(), ext))
+		if err != nil {
+			continue
+		}
+		parentID := parent
+		sources = append(sources, cursorSource{
+			root:      root,
+			workspace: workspace,
+			id:        id,
+			path:      filepath.Join(dir, entry.Name()),
+			parent:    &parentID,
+		})
+	}
+	return sources, nil
+}
+
+// appendCursorStoredChildren adds the stored children the build must re-read.
+// A stored child whose file is gone or is not a transcript comes back as an
+// unreadable member, because the store still records it and the run's upkeep
+// set must see it.
+func (a *CursorAdapter) appendCursorStoredChildren(sources *[]cursorSource, at LocatedSource) ([]LocatedMember, error) {
+	seen := make(map[SessionID]struct{}, len(*sources))
+	for _, source := range *sources {
+		seen[source.id] = struct{}{}
+	}
+	var missing []LocatedMember
+	for _, child := range at.Stored.Children {
+		if _, duplicate := seen[child.ID]; duplicate {
+			continue
+		}
+		seen[child.ID] = struct{}{}
+		parsed, ok := parseCursorSourcePath(child.Path.String())
+		if !ok || parsed.ID != child.ID {
+			missing = append(missing, cursorStoredChildUnreadable(child, UnreadableSourceGone))
+			continue
+		}
+		info, err := a.fs.Stat(child.Path.String())
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				missing = append(missing, cursorStoredChildUnreadable(child, UnreadableSourceGone))
+				continue
+			}
+			return nil, fmt.Errorf("cursor: read stored child %q for session %q: %w", child.Path, child.ID, err)
+		}
+		if info.IsDir() {
+			missing = append(missing, cursorStoredChildUnreadable(child, UnreadableSourceGone))
+			continue
+		}
+		root, err := NewResolvedPath(parsed.Root)
+		if err != nil {
+			missing = append(missing, cursorStoredChildUnreadable(child, UnreadableSourceGone))
+			continue
+		}
+		source := cursorSource{root: root, workspace: parsed.Workspace, id: child.ID, path: child.Path.String(), info: info}
+		if parsed.ParentID != "" {
+			parent := parsed.ParentID
+			source.parent = &parent
+		}
+		*sources = append(*sources, source)
+	}
+	return missing, nil
+}
+
+func cursorStoredChildUnreadable(child StoredSessionSource, reason UnreadableReason) LocatedMember {
+	harness := child.Harness
+	if harness == "" {
+		harness = HarnessCursor
+	}
+	return LocatedMember{
+		ID:         child.ID,
+		Harness:    harness,
+		Outcome:    LocateStoredUnreadable,
+		Role:       CohortChild,
+		Unreadable: reason,
+	}
+}
+
+// cursorAncestorProbe derives one unstored parent's exact source file from the
+// child's own path. It is a pure value: no stat, no directory read.
+func cursorAncestorProbe(parsed cursorSourcePath) *AncestorProbe {
+	if parsed.ParentID == "" {
+		return nil
+	}
+	parentPath := filepath.Join(parsed.Root, parsed.Workspace, cursorAgentTranscriptsDir, string(parsed.ParentID), string(parsed.ParentID)+defaults.ExtJSONL.String())
+	path, err := NewResolvedPath(parentPath)
+	if err != nil {
+		return nil
+	}
+	return &AncestorProbe{Kind: ProbePath, Harness: HarnessCursor, Path: path}
+}
+
+// buildCursorSessions is the one construction path for Discover and
+// DiscoverSessionAt. It builds a session per source in source order and links
+// each subagent's path onto its root's SubagentPaths, so a walk and a located
+// source cannot describe the same session two ways. built[i] is the index in
+// the returned sessions for sources[i], or -1 when the file was gone by the
+// time the build read it.
+func (a *CursorAdapter) buildCursorSessions(sources []cursorSource) ([]DiscoveredSession, []int) {
+	built := make([]int, len(sources))
+	rootIndex := make(map[SessionID]int, len(sources))
+	sessions := make([]DiscoveredSession, 0, len(sources))
+	for index, source := range sources {
+		built[index] = -1
+		session, ok := a.buildCursorSession(source)
+		if !ok {
+			continue
+		}
+		built[index] = len(sessions)
+		sessions = append(sessions, session)
+		if source.parent == nil {
+			rootIndex[source.id] = len(sessions) - 1
+		}
+	}
+	for index := range sessions {
+		if sessions[index].ParentUUID == nil {
+			continue
+		}
+		if root, ok := rootIndex[*sessions[index].ParentUUID]; ok {
+			sessions[root].SubagentPaths = append(sessions[root].SubagentPaths, sessions[index].SourcePath)
+		}
+	}
+	return sessions, built
+}
+
+// buildCursorSession constructs one discovered session. A root reads its cheap
+// title hint; a subagent carries its parent instead, exactly as a full walk
+// records them.
+func (a *CursorAdapter) buildCursorSession(source cursorSource) (DiscoveredSession, bool) {
+	info := source.info
+	if info == nil {
+		observed, err := a.fs.Stat(source.path)
+		if err != nil {
+			return DiscoveredSession{}, false
+		}
+		info = observed
+	}
+	resolved, err := NewResolvedPath(source.path)
+	if err != nil {
+		return DiscoveredSession{}, false
+	}
+	projectDir, projectName := a.decodeCursorWorkspace(string(source.root), source.workspace)
+	session := DiscoveredSession{
+		SessionID:     source.id,
+		Harness:       HarnessCursor,
+		SourcePath:    resolved,
+		SourceFormat:  SourceFormatJSONL,
+		OriginalRoot:  source.root,
+		SubagentPaths: []ResolvedPath{},
+		DebugPaths:    []ResolvedPath{},
+		ModTime:       info.ModTime(),
+		ProjectName:   projectName,
+		CWD:           projectDir,
+	}
+	if source.parent != nil {
+		parent := *source.parent
+		session.ParentUUID = &parent
+	} else {
+		session.Title = a.extractCursorHints(source.path).title
+	}
+	return session, true
+}
+
+// cursorDisplayPath shortens a path under the user's home for a rendered
+// searched location. It never holds transcript text.
+func cursorDisplayPath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+string(filepath.Separator)) {
+		return "~" + path[len(home):]
+	}
+	return path
 }
 
 type cursorSessionHints struct {
