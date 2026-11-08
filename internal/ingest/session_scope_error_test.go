@@ -191,6 +191,12 @@ func assertSessionScopeErrorPane(t *testing.T, scopeErr *ingest.SessionScopeErro
 	if count := strings.Count(block, "peasant: "); count != 1 {
 		t.Fatalf("Error() prints the label %d times:\n%s", count, block)
 	}
+	if count := strings.Count(block, "  searched:"); count > 1 {
+		t.Fatalf("Error() prints the searched block %d times:\n%s", count, block)
+	}
+	if count := strings.Count(reason, "; searched "); count > 1 {
+		t.Fatalf("Reason() repeats the searched clause %d times:\n%s", count, reason)
+	}
 	if count := strings.Count(block, "  fix:      "); count != 1 {
 		t.Fatalf("Error() prints the fix %d times:\n%s", count, block)
 	}
@@ -201,7 +207,7 @@ func assertSessionScopeErrorPane(t *testing.T, scopeErr *ingest.SessionScopeErro
 	if fixSection != fix {
 		t.Fatalf("Error()'s fix section is not FixLine()\n--- got ---\n%s\n--- want ---\n%s", fixSection, fix)
 	}
-	for _, label := range []string{"what:", "why:", "where:", "when:", "impact:", "fix:", "searched:", "also:"} {
+	for _, label := range []string{"what:", "why:", "where:", "when:", "impact:", "fix:", "searched:"} {
 		if strings.Contains(block[strings.Index(block, "  fix:")+1:], "  "+label) {
 			t.Fatalf("Error() prints %q after the fix:\n%s", label, block)
 		}
@@ -306,7 +312,88 @@ func sessionScopeStoreAttachment(raw string) (ingest.StoreAttachment, error) {
 		return ingest.StoreAttached, nil
 	case "not_attached":
 		return ingest.StoreNotAttached, nil
+	case "unset":
+		return ingest.StoreAttachment(0), nil
 	default:
 		return ingest.StoreAttachment(0), fmt.Errorf("fixture store attachment %q is not a declared value", raw)
+	}
+}
+
+// TestUnreadableAndUnsupportedReasonString pins the two String methods the
+// contract declares. A single "unknown" arm would otherwise stay green.
+func TestUnreadableAndUnsupportedReasonString(t *testing.T) {
+	t.Parallel()
+	if got := ingest.UnreadableSourceGone.String(); got != "source gone" {
+		t.Errorf("UnreadableSourceGone.String() = %q", got)
+	}
+	if got := ingest.UnreadableHarnessDisabled.String(); got != "harness disabled" {
+		t.Errorf("UnreadableHarnessDisabled.String() = %q", got)
+	}
+	if got := ingest.UnreadableSourceFailed.String(); got != "source failed" {
+		t.Errorf("UnreadableSourceFailed.String() = %q", got)
+	}
+	if got := ingest.UnreadableReason(0).String(); got != "unknown" {
+		t.Errorf("the zero UnreadableReason renders %q, want the unstated name", got)
+	}
+	if got := ingest.IDOnlyInFileHeader.String(); got != "id only in file header" {
+		t.Errorf("IDOnlyInFileHeader.String() = %q", got)
+	}
+	if got := ingest.IDOnlyInFileBody.String(); got != "id only in file body" {
+		t.Errorf("IDOnlyInFileBody.String() = %q", got)
+	}
+	if got := ingest.UnsupportedReason(0).String(); got != "unknown" {
+		t.Errorf("the zero UnsupportedReason renders %q, want the unstated name", got)
+	}
+}
+
+// TestUnstatedSearchMethodStillNamesItsHarness pins the fail-closed arm: a
+// method this build does not know must not vanish from the miss message, and it
+// must not be reported as a source that was searched.
+func TestUnstatedSearchMethodStillNamesItsHarness(t *testing.T) {
+	t.Parallel()
+	scopeErr := &ingest.SessionScopeError{
+		Command: "harvest",
+		Store:   ingest.StoreAttached,
+		Misses: []ingest.ScopeMiss{{
+			ID:     ingest.SessionID("0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60"),
+			Reason: ingest.MissNotFound,
+			Searched: []ingest.SearchedSource{{
+				Harness: ingest.HarnessCodex,
+				Method:  ingest.SearchMethod(200),
+			}},
+		}},
+	}
+	reason := scopeErr.Reason()
+	if !strings.Contains(reason, "search state unstated: codex") {
+		t.Fatalf("Reason() drops an unstated-method harness:\n%s", reason)
+	}
+	if strings.Contains(reason, "searched store, codex") {
+		t.Fatalf("Reason() claims the harness searched:\n%s", reason)
+	}
+	block := scopeErr.Error()
+	if !strings.Contains(block, "codex") || !strings.Contains(block, "search state unstated") {
+		t.Fatalf("Error() drops an unstated-method harness:\n%s", block)
+	}
+}
+
+// TestCollidingIDPrefixesLengthenUntilDistinct pins the abbreviation rule: the
+// pinned four characters are kept unless two misses in one message share them,
+// in which case each id grows until the reader can tell the clauses apart.
+func TestCollidingIDPrefixesLengthenUntilDistinct(t *testing.T) {
+	t.Parallel()
+	scopeErr := &ingest.SessionScopeError{
+		Command: "harvest",
+		Store:   ingest.StoreAttached,
+		Misses: []ingest.ScopeMiss{
+			{ID: ingest.SessionID("0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60"), Reason: ingest.MissSinceFiltered},
+			{ID: ingest.SessionID("0f3c9f8e-1d2c-4b3a-8c7d-6e5f4a3b2c1d"), Reason: ingest.MissSinceFiltered},
+		},
+	}
+	reason := scopeErr.Reason()
+	if !strings.Contains(reason, "0f3c1...") || !strings.Contains(reason, "0f3c9...") {
+		t.Fatalf("colliding ids were not lengthened apart:\n%s", reason)
+	}
+	if strings.Count(reason, "0f3c...") != 0 {
+		t.Fatalf("Reason() keeps the ambiguous four-character prefix:\n%s", reason)
 	}
 }

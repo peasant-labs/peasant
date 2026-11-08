@@ -6,5 +6,9 @@ requiredNames:
   - harness_disabled
   - several_misses
   - several_misses_lookup_failed
+  - several_misses_shared_search
   - store_not_attached
+  - store_unstated
+  - no_misses
   - harvest_index
+  - lookup_failed_multiline_detail

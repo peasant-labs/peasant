@@ -73,17 +73,21 @@ type ScopeMiss struct {
 //
 // A stored session whose source is merely unreadable is NOT a ScopeMiss: it is
 // a LocateStoredUnreadable member, and the run continues.
+//
+// At least one miss is required: a value with none describes no refusal, so it
+// renders that fact instead of posing as one.
 type SessionScopeError struct {
 	Misses []ScopeMiss
-	// Command is the words the user typed: "harvest" or "harvest index". `open`
-	// sets "harvest", because it re-enters harvest.
+	// Command is the words the user typed: "harvest", "harvest index", or
+	// "harvest logs". `open` sets "harvest", because it re-enters harvest.
 	Command string
 	// Prefix is the command that reaches this store, for example
 	// "peasant --data-dir '/srv/peasant'". It is used only inside suggested
 	// commands; the empty value renders a bare "peasant".
 	Prefix string
 	// Store says whether the run had a store attached. The fix line differs
-	// when none was.
+	// when none was. The zero value states no attachment, and every renderer
+	// says so rather than guessing.
 	Store StoreAttachment
 }
 
@@ -128,18 +132,26 @@ func (e *SessionScopeError) FixLine() string {
 	if fix := e.lookupFailedFix(); fix != "" {
 		return fix
 	}
+	if len(e.Misses) == 0 {
+		return "build the error with the misses the session lookup recorded, then report it"
+	}
+	notFound := e.countReason(MissNotFound)
 	fixes := make([]string, 0, 3)
-	switch {
-	case e.countReason(MissNotFound) > 0:
-		if e.Store == StoreNotAttached {
+	if notFound > 0 {
+		idWord := "id"
+		if notFound > 1 {
+			idWord = "ids"
+		}
+		switch e.Store {
+		case StoreNotAttached:
 			fixes = append(fixes, fmt.Sprintf("no store is attached to this run, so a pi or legacy-JSON OpenCode session can be found only by running `%s` once without --session",
 				e.command("harvest", "logs")))
-		} else if namesSeveral := e.countReason(MissNotFound) > 1; namesSeveral {
-			fixes = append(fixes, fmt.Sprintf("check the ids with `%s`, or run `%s` once without --session",
-				e.command("sessions", "list"), e.command(e.commandName())))
-		} else {
-			fixes = append(fixes, fmt.Sprintf("check the id with `%s`, or run `%s` once without --session",
-				e.command("sessions", "list"), e.command(e.commandName())))
+		case StoreAttached:
+			fixes = append(fixes, fmt.Sprintf("check the %s with `%s`, or run `%s` once without --session",
+				idWord, e.command("sessions", "list"), e.command(e.commandName())))
+		default:
+			fixes = append(fixes, fmt.Sprintf("check the %s with `%s` if this run has a store, or run `%s` once without --session",
+				idWord, e.command("sessions", "list"), e.command(e.commandName())))
 		}
 	}
 	if e.countReason(MissHarnessFiltered) > 0 {
@@ -156,7 +168,7 @@ func (e *SessionScopeError) FixLine() string {
 		return "check the id and the run's filters, then retry"
 	}
 	if len(fixes) == 1 {
-		if e.countReason(MissNotFound) > 0 {
+		if notFound > 0 {
 			return fixes[0] + ", then retry"
 		}
 		return fixes[0]
@@ -168,7 +180,7 @@ func (e *SessionScopeError) FixLine() string {
 func (e *SessionScopeError) headline() string {
 	switch len(e.Misses) {
 	case 0:
-		return "no session could be used, so nothing was recorded"
+		return "a scope error was raised without a miss, so it cannot say which session was refused"
 	case 1:
 		return "session " + e.missClause(e.Misses[0]) + ", so nothing was recorded"
 	}
@@ -183,7 +195,7 @@ func (e *SessionScopeError) headline() string {
 // missClause is one miss stated in a sentence fragment, without the leading
 // "session" word the single-miss headline adds.
 func (e *SessionScopeError) missClause(miss ScopeMiss) string {
-	id := shortSessionID(miss.ID)
+	id := e.shortID(miss.ID)
 	switch miss.Reason {
 	case MissNotFound:
 		if failedLookup(miss.Searched) != nil {
@@ -202,15 +214,18 @@ func (e *SessionScopeError) missClause(miss ScopeMiss) string {
 // whatLine names the kind of run and what it looked for. It never rebuilds a
 // command, so it cannot drop the user's other flags.
 func (e *SessionScopeError) whatLine() string {
+	if len(e.Misses) == 0 {
+		return "this scope error carries no miss, so it cannot say what the run looked for"
+	}
 	if len(e.Misses) != 1 {
 		return fmt.Sprintf("this session-scoped %s looked for %d sessions", e.commandName(), len(e.Misses))
 	}
 	miss := e.Misses[0]
-	base := fmt.Sprintf("this session-scoped %s looked for session %s", e.commandName(), shortSessionID(miss.ID))
+	base := fmt.Sprintf("this session-scoped %s looked for session %s", e.commandName(), e.shortID(miss.ID))
 	switch miss.Reason {
 	case MissNotFound:
 		if failed := failedLookup(miss.Searched); failed != nil {
-			return fmt.Sprintf("%s; no source that was searched holds it, and the %s lookup failed", base, failed.Harness)
+			return fmt.Sprintf("%s; no source that was searched holds it, and the lookup in %s failed", base, failed.Harness)
 		}
 		return base + " and no enabled source holds it"
 	case MissHarnessFiltered:
@@ -228,7 +243,7 @@ func (e *SessionScopeError) whyLines() []string {
 	for _, miss := range e.Misses {
 		text := e.whyText(miss)
 		if len(e.Misses) > 1 {
-			text = "session " + shortSessionID(miss.ID) + ": " + text
+			text = "session " + e.shortID(miss.ID) + ": " + text
 		}
 		lines = append(lines, text)
 	}
@@ -238,9 +253,14 @@ func (e *SessionScopeError) whyLines() []string {
 func (e *SessionScopeError) whyText(miss ScopeMiss) string {
 	switch miss.Reason {
 	case MissNotFound:
-		storeClause := "the store has no row for this id"
-		if e.Store == StoreNotAttached {
+		var storeClause string
+		switch e.Store {
+		case StoreAttached:
+			storeClause = "the store has no row for this id"
+		case StoreNotAttached:
 			storeClause = "no store is attached to this run"
+		default:
+			storeClause = "this error does not state whether a store was attached"
 		}
 		if failed := failedLookup(miss.Searched); failed != nil {
 			return fmt.Sprintf("%s, and the %s lookup could not run, so the session may be there", storeClause, failed.Harness)
@@ -278,6 +298,10 @@ func (e *SessionScopeError) searchedLines() []searchedLine {
 				"not enabled (config.yaml excludes it); enable it with `%s`", e.command("kickstart"))})
 		case searched.Method == SearchFailed:
 			lines = append(lines, searchedLine{name: name, text: "lookup failed: " + firstLineOr(searched.Detail, "no error detail")})
+		default:
+			// A method this build does not know still names its harness: dropping
+			// the row would silently hide a source from the miss message.
+			lines = append(lines, searchedLine{name: name, text: "search state unstated (unknown method)"})
 		}
 	}
 	return lines
@@ -286,8 +310,11 @@ func (e *SessionScopeError) searchedLines() []searchedLine {
 // searchedClause is the one-clause summary of the same values the searched
 // block renders, grouped by what the search could do.
 func (e *SessionScopeError) searchedClause() string {
-	searchedNames := []string{storeClauseName(e.Store)}
-	var unsupported, disabled, failed []string
+	var searchedNames []string
+	if name := storeClauseName(e.Store); name != "" {
+		searchedNames = append(searchedNames, name)
+	}
+	var unsupported, disabled, failed, unstated []string
 	for _, searched := range e.uniqueSearched() {
 		name := string(searched.Harness)
 		switch searched.Method {
@@ -305,10 +332,21 @@ func (e *SessionScopeError) searchedClause() string {
 			disabled = appendUniqueString(disabled, name)
 		case SearchFailed:
 			failed = appendUniqueString(failed, fmt.Sprintf("%s (%s)", name, firstLineOr(searched.Detail, "no error detail")))
+		default:
+			unstated = appendUniqueString(unstated, name)
 		}
 	}
 
-	parts := []string{"searched " + strings.Join(searchedNames, ", ")}
+	parts := make([]string, 0, 6)
+	if len(searchedNames) > 0 {
+		parts = append(parts, "searched "+strings.Join(searchedNames, ", "))
+	}
+	if !e.Store.IsValid() {
+		// A value this build does not know says nothing about the store. It is
+		// never listed as a harness that searched, because that would claim a
+		// search that may not have run.
+		parts = append(parts, "store state unstated")
+	}
 	if len(unsupported) > 0 {
 		parts = append(parts, "cannot search by id: "+strings.Join(unsupported, ", "))
 	}
@@ -317,6 +355,12 @@ func (e *SessionScopeError) searchedClause() string {
 	}
 	if len(failed) > 0 {
 		parts = append(parts, "lookup failed: "+strings.Join(failed, ", "))
+	}
+	if len(unstated) > 0 {
+		parts = append(parts, "search state unstated: "+strings.Join(unstated, ", "))
+	}
+	if len(parts) == 0 {
+		return "no source state was recorded"
 	}
 	return strings.Join(parts, "; ")
 }
@@ -345,15 +389,17 @@ func (e *SessionScopeError) lookupFailedFix() string {
 }
 
 // uniqueSearched returns the recorded searches across every miss, in first-seen
-// order and without repeats (several misses share one harness report). An entry
-// with no harness name or an invalid method is skipped: the store row is
-// synthesized, not recorded by an adapter.
+// order and without repeats: several misses carry the one harness report, and a
+// scoped run records the whole list on every not-found miss. An entry with no
+// harness name is skipped because there is nothing to print; an entry whose
+// method this build does not know is kept, and the renderers name its harness
+// under a neutral arm.
 func (e *SessionScopeError) uniqueSearched() []SearchedSource {
 	var unique []SearchedSource
 	seen := make(map[SearchedSource]struct{})
 	for _, miss := range e.Misses {
 		for _, searched := range miss.Searched {
-			if searched.Harness == "" || !searched.Method.IsValid() {
+			if searched.Harness == "" {
 				continue
 			}
 			if _, duplicate := seen[searched]; duplicate {
@@ -373,15 +419,21 @@ func (e *SessionScopeError) storeLineText() string {
 	case StoreNotAttached:
 		return "not attached (logs-only run)"
 	default:
-		return "not searched"
+		return "state unstated (this error does not carry whether a store was attached)"
 	}
 }
 
+// storeClauseName is the store's name inside the searched clause. The zero
+// value has no name there: it did not search, and it must not claim to.
 func storeClauseName(store StoreAttachment) string {
-	if store == StoreNotAttached {
+	switch store {
+	case StoreAttached:
+		return "store"
+	case StoreNotAttached:
 		return "no store (logs-only)"
+	default:
+		return ""
 	}
-	return "store"
 }
 
 // anyNotFound reports whether any miss is MissNotFound, which is what decides
@@ -464,14 +516,39 @@ func firstLineOr(detail, fallback string) string {
 	return line
 }
 
-// shortSessionID abbreviates an id for prose. A suggested command always
-// carries the full id, because an abbreviated one would not run.
-func shortSessionID(id SessionID) string {
+// shortID abbreviates an id for prose. It keeps the pinned four characters
+// unless another miss in this message shares them, in which case it lengthens
+// the prefix until the ids are distinguishable: two identical clauses would
+// tell the reader nothing. A suggested command always carries the full id,
+// because an abbreviated one would not run.
+func (e *SessionScopeError) shortID(id SessionID) string {
 	raw := string(id)
-	if len(raw) <= 8 {
+	length := 4
+	if len(raw) < length {
 		return raw
 	}
-	return raw[:4] + "..."
+	for length < len(raw) {
+		prefix := raw[:length]
+		collides := false
+		for _, other := range e.Misses {
+			if other.ID == id {
+				continue
+			}
+			otherRaw := string(other.ID)
+			if len(otherRaw) >= length && otherRaw[:length] == prefix {
+				collides = true
+				break
+			}
+		}
+		if !collides {
+			break
+		}
+		length++
+	}
+	if length == len(raw) {
+		return raw
+	}
+	return raw[:length] + "..."
 }
 
 func (e *SessionScopeError) commandName() string {
@@ -494,9 +571,9 @@ func (e *SessionScopeError) command(args ...string) string {
 
 // Label column and wrap rules for the block. The block is the method's pinned
 // rendering, so these values are part of it: labels occupy the first 12
-// columns, and the long fields wrap at 89 text columns with a hanging indent
-// that lines up under the label. A backtick span is never split, because a
-// command a user copies must stay whole.
+// columns, and the two fields that grow into paragraphs (impact and fix) wrap
+// at 89 text columns with a hanging indent that lines up under the label. A
+// backtick span is never split, because a command a user copies must stay whole.
 const (
 	blockLabelColumn   = 12
 	blockTextWrapWidth = 89
@@ -505,9 +582,9 @@ const (
 const blockImpactText = "no session was recorded or changed. Start-up maintenance (recovery of " +
 	"interrupted writes, store migration, search-index repair) may still have run. No full scan was run."
 
-// labelBlock renders one labelled line. A wrapped field (the two long prose
-// fields) continues under the label column; the short fields stay on one line
-// so a path or a cause is never split.
+// labelBlock renders one labelled line. Only the two paragraph fields wrap; the
+// other fields stay whole, because a cause or a searched path reads better on
+// one line than split mid-phrase, and a reader copies a path as one unit.
 func labelBlock(label, text string, wrap bool) string {
 	lines := []string{text}
 	if wrap {
