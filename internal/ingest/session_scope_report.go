@@ -127,11 +127,16 @@ type LocatedMember struct {
 	ParentProbe *AncestorProbe
 }
 
-// ScopeReport records what a scoped run located. It is carried on
-// PipelineResult, tagged json:"-" so `harvest --format json` keeps exactly
-// today's fields; a scoped run's counts cover only its cohort, so the bytes
-// differ. The report is not printed: tests read it, and the stored-but-
-// unreadable warning is rendered from it.
+// ScopeReport records what a scoped run located. A scoped run reports it on
+// PipelineResult under a field tagged json:"-", so `harvest --format json`
+// keeps exactly today's fields (a scoped run's counts cover only its cohort, so
+// the bytes differ); that field lands with the scoped path, and this type is
+// the report it carries. The report is not printed: tests read it, and the
+// stored-but-unreadable warning is rendered from it.
+//
+// Members holds at most one member per id. Processed and Upkeep collapse a
+// repeated id in case a caller violates that, because DIFF through INDEX must
+// never see the same session twice from one report.
 type ScopeReport struct {
 	// Members holds the selected members first, then children, ancestors, and
 	// context members.
@@ -142,10 +147,15 @@ type ScopeReport struct {
 // LOCATE built a source for. A context member is never processed.
 func (r ScopeReport) Processed() []SessionID {
 	var ids []SessionID
+	seen := make(map[SessionID]struct{}, len(r.Members))
 	for _, member := range r.Members {
 		if member.Role == CohortContext || !member.Outcome.located() {
 			continue
 		}
+		if _, duplicate := seen[member.ID]; duplicate {
+			continue
+		}
+		seen[member.ID] = struct{}{}
 		ids = append(ids, member.ID)
 	}
 	return ids
@@ -160,16 +170,26 @@ func (r ScopeReport) Processed() []SessionID {
 // in neither set.
 func (r ScopeReport) Upkeep() []SessionID {
 	var ids []SessionID
+	seen := make(map[SessionID]struct{}, len(r.Members))
 	for _, member := range r.Members {
+		var included bool
 		switch {
 		case member.Role == CohortContext:
-			continue
+			included = false
 		case member.Outcome.located():
-			ids = append(ids, member.ID)
+			included = true
 		case member.Outcome == LocateStoredUnreadable &&
 			(member.Role == CohortSelected || member.Role == CohortChild):
-			ids = append(ids, member.ID)
+			included = true
 		}
+		if !included {
+			continue
+		}
+		if _, duplicate := seen[member.ID]; duplicate {
+			continue
+		}
+		seen[member.ID] = struct{}{}
+		ids = append(ids, member.ID)
 	}
 	return ids
 }
