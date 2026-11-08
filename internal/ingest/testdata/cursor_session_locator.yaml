@@ -1,0 +1,204 @@
+# Adapter parity for Cursor discovery: for every case id, DiscoverSessionAt
+# must reproduce exactly the sessions Discover records for the same tree, field
+# for field, with no known gap to excuse a difference.
+#
+# The read, readdir and stat sets are exact (set equality, never a subset) and
+# every listed path is touched exactly once. Paths under "~" are expanded
+# against the running user's home, and a "~" searched location is what the
+# adapter renders. Zero WalkDir is asserted for every case.
+#
+# wantProbe names the one ancestor probe a subagent case must carry. ProbePath
+# costs one stat of the parent path, which the runner performs after the build,
+# and never a readdir; the build itself must perform no I/O for it.
+#
+# A case with a stored child whose file is gone lists that id under
+# wantUnreadable: the member must come back with no source and the reason,
+# never dropped.
+requiredNames:
+  - root-with-layout-subagents
+  - root-with-stored-child-gone
+  - subagent-with-stored-parent
+  - subagent-with-unstored-parent
+  - lookup-root-by-name
+  - lookup-subagent-by-name
+  - lookup-miss
+  - lookup-readdir-failure
+
+root: ~/.cursor/projects
+
+cases:
+  - name: root-with-layout-subagents
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+        subagents:
+          - 22222222-2222-4222-8222-222222222222
+          - 33333333-3333-4333-8333-333333333333
+    discoverAt:
+      id: 11111111-1111-4111-8111-111111111111
+      workspace: test-workspace-a
+      wantMembers:
+        - 11111111-1111-4111-8111-111111111111
+        - 22222222-2222-4222-8222-222222222222
+        - 33333333-3333-4333-8333-333333333333
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/33333333-3333-4333-8333-333333333333.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents
+      wantReads:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+
+  - name: root-with-stored-child-gone
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+        subagents:
+          - 22222222-2222-4222-8222-222222222222
+    discoverAt:
+      id: 11111111-1111-4111-8111-111111111111
+      workspace: test-workspace-a
+      stored:
+        children:
+          - workspace: test-workspace-a
+            session: 33333333-3333-4333-8333-333333333333
+            parent: 11111111-1111-4111-8111-111111111111
+      wantMembers:
+        - 11111111-1111-4111-8111-111111111111
+        - 22222222-2222-4222-8222-222222222222
+        - 33333333-3333-4333-8333-333333333333
+      wantUnreadable:
+        - id: 33333333-3333-4333-8333-333333333333
+          reason: source-gone
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/33333333-3333-4333-8333-333333333333.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents
+      wantReads:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+
+  - name: subagent-with-stored-parent
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+        subagents:
+          - 22222222-2222-4222-8222-222222222222
+    discoverAt:
+      id: 22222222-2222-4222-8222-222222222222
+      workspace: test-workspace-a
+      parent: 11111111-1111-4111-8111-111111111111
+      stored:
+        parent: 11111111-1111-4111-8111-111111111111
+      wantMembers:
+        - 22222222-2222-4222-8222-222222222222
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
+
+  - name: subagent-with-unstored-parent
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+        subagents:
+          - 22222222-2222-4222-8222-222222222222
+    discoverAt:
+      id: 22222222-2222-4222-8222-222222222222
+      workspace: test-workspace-a
+      parent: 11111111-1111-4111-8111-111111111111
+      wantMembers:
+        - 22222222-2222-4222-8222-222222222222
+      wantProbe:
+        kind: path
+        path: ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+      # The child's stat, then the probe's one stat of the parent path.
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+
+  - name: lookup-root-by-name
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+        subagents:
+          - 22222222-2222-4222-8222-222222222222
+    lookup:
+      id: 11111111-1111-4111-8111-111111111111
+      wantSources:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+      wantSearched:
+        - harness: cursor
+          method: name-pattern
+          location: ~/.cursor/projects/*/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+        - harness: cursor
+          method: name-pattern
+          location: ~/.cursor/projects/*/agent-transcripts/*/subagents/11111111-1111-4111-8111-111111111111.jsonl
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/11111111-1111-4111-8111-111111111111.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts
+
+  - name: lookup-subagent-by-name
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+        subagents:
+          - 22222222-2222-4222-8222-222222222222
+    lookup:
+      id: 22222222-2222-4222-8222-222222222222
+      wantSources:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
+      wantSearched:
+        - harness: cursor
+          method: name-pattern
+          location: ~/.cursor/projects/*/agent-transcripts/22222222-2222-4222-8222-222222222222/22222222-2222-4222-8222-222222222222.jsonl
+        - harness: cursor
+          method: name-pattern
+          location: ~/.cursor/projects/*/agent-transcripts/*/subagents/22222222-2222-4222-8222-222222222222.jsonl
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/22222222-2222-4222-8222-222222222222/22222222-2222-4222-8222-222222222222.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts
+
+  - name: lookup-miss
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+    lookup:
+      id: 33333333-3333-4333-8333-333333333333
+      wantSearched:
+        - harness: cursor
+          method: name-pattern
+          location: ~/.cursor/projects/*/agent-transcripts/33333333-3333-4333-8333-333333333333/33333333-3333-4333-8333-333333333333.jsonl
+        - harness: cursor
+          method: name-pattern
+          location: ~/.cursor/projects/*/agent-transcripts/*/subagents/33333333-3333-4333-8333-333333333333.jsonl
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/33333333-3333-4333-8333-333333333333/33333333-3333-4333-8333-333333333333.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/33333333-3333-4333-8333-333333333333.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts
+
+  - name: lookup-readdir-failure
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+    lookup:
+      id: 11111111-1111-4111-8111-111111111111
+      fault:
+        op: ReadDir
+        path: ~/.cursor/projects
+        detail: permission denied
+      wantSearched:
+        - harness: cursor
+          method: failed
+          location: ~/.cursor/projects
+          detail: permission denied
+      wantReaddirs:
+        - ~/.cursor/projects
