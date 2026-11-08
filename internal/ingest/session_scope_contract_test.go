@@ -3,11 +3,14 @@ package ingest_test
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -169,7 +172,9 @@ func TestPipelineRunRefusesUnusableScope(t *testing.T) {
 					cfg.AllowedSessionIDs[ingest.SessionID(id)] = true
 				}
 			}
-			pipeline, err := newTestPipeline(nil, nil, ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(store))
+			lockPath := filepath.Join(t.TempDir(), "harvest.lock")
+			pipeline, err := newTestPipeline(nil, nil, ingest.DefaultAdapterRegistry, cfg,
+				ingest.WithStore(store), ingest.WithRunLock(lockPath))
 			if err != nil {
 				t.Fatalf("build pipeline: %v", err)
 			}
@@ -185,6 +190,9 @@ func TestPipelineRunRefusesUnusableScope(t *testing.T) {
 			}
 			if len(store.calls) > 0 {
 				t.Fatalf("the refusal touched the store: %v", store.calls)
+			}
+			if _, statErr := os.Stat(lockPath); !errors.Is(statErr, fs.ErrNotExist) {
+				t.Fatalf("the refusal took the run lock at %s (stat error %v)", lockPath, statErr)
 			}
 			for stage, state := range progress.Snapshot() {
 				if state.Started || state.Ended {
