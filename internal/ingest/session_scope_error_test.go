@@ -363,15 +363,16 @@ func TestUnstatedSearchMethodStillNamesItsHarness(t *testing.T) {
 			}},
 		}},
 	}
+	harness := string(ingest.HarnessCodex)
 	reason := scopeErr.Reason()
-	if !strings.Contains(reason, "search state unstated: codex") {
+	if !strings.Contains(reason, "search state unstated: "+harness) {
 		t.Fatalf("Reason() drops an unstated-method harness:\n%s", reason)
 	}
-	if strings.Contains(reason, "searched store, codex") {
+	if strings.Contains(reason, "searched store, "+harness) {
 		t.Fatalf("Reason() claims the harness searched:\n%s", reason)
 	}
 	block := scopeErr.Error()
-	if !strings.Contains(block, "codex") || !strings.Contains(block, "search state unstated") {
+	if !strings.Contains(block, harness) || !strings.Contains(block, "search state unstated") {
 		t.Fatalf("Error() drops an unstated-method harness:\n%s", block)
 	}
 }
