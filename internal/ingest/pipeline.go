@@ -228,6 +228,21 @@ type PipelineConfig struct {
 	// selected parent cannot re-admit an exactly denied child. nil means no exact
 	// exclusion filter.
 	SessionExclusionFilter func(DiscoveredSession) bool
+	// Scope narrows the run to named sessions and their related members. nil
+	// means the full run. Build it with NewSessionScope; a scope with no ids or
+	// an unset policy is refused at the start of Run.
+	Scope *SessionScope
+	// Command is the words the user typed that entered this run: "harvest",
+	// "harvest index", or "harvest logs". `open` sets "harvest", because it
+	// re-enters harvest. It exists only to render a scope miss in the words the
+	// user typed.
+	Command string
+	// CommandPrefix is the shell-quoted command that reaches this store, for
+	// example "peasant --data-dir '/srv/peasant'". It is used only inside the
+	// commands a scope message suggests, never in the message label. Empty is
+	// the zero value and renders a bare "peasant"; every command caller sets
+	// it, and the dashboard always sets --data-dir.
+	CommandPrefix string
 }
 
 // Discoverer discovers sessions from configured sources.
@@ -724,6 +739,12 @@ func (p *Pipeline) storedParentSet(ctx context.Context, entries []DiffEntry) map
 //  8. REPORT: Return PipelineResult
 //  9. AUDIT: Write ingest_log entry (best-effort)
 func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) {
+	// A scope that cannot narrow a run, or that narrows it twice, is refused
+	// before the run lock and before any stage: a refused run reads no source
+	// and touches no store row.
+	if err := p.config.validateScope(); err != nil {
+		return nil, err
+	}
 	p.resetDiagnostics()
 	p.resetUnavailableSettledThisRun()
 	p.resetUnroutedRepairs()
