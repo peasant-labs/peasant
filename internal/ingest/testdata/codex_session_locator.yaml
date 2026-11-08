@@ -18,6 +18,7 @@ requiredNames:
   - stored-child-read-failed
   - stored-child-readable
   - stored-child-other-harness
+  - nested-roots-prefer-the-sessions-tree
   - located-source-gone
   - located-source-id-mismatch
   - nested-thread-spawn-parent
@@ -303,11 +304,44 @@ cases:
           path: sessions/2026/11/07/rollout-2026-11-07T10-00-00-66666666-6666-4666-8666-666666666666.jsonl
           unreadable: SourceFailed
           detailContains: cannot be read by the codex adapter
+        # A stored child whose harness was never recorded: the sentence must read
+        # as one sentence, not carry a gap where the harness would be.
+        - id: "77777777-7777-4777-8777-777777777777"
+          harness: ""
+          path: sessions/2026/11/07/rollout-2026-11-07T11-00-00-77777777-7777-4777-8777-777777777777.jsonl
+          unreadable: SourceFailed
+          detailContains: a source with no recorded harness cannot be read by the codex adapter
       reads:
         - session_index.jsonl
         - sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
       stats:
         - sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+      expect: {}
+
+  - name: nested-roots-prefer-the-sessions-tree
+    # The Codex home and its sessions tree can both be configured. Only the
+    # sessions tree admits the rollout at the walked depth, so the located member
+    # must carry that root and the full discovery must agree.
+    roots:
+      - codex
+      - codex/sessions
+    files:
+      - path: codex/sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        kind: rollout
+        sessionID: "11111111-1111-4111-8111-111111111111"
+        cwd: /work/project
+      - path: codex/session_index.jsonl
+        kind: index
+        body: |
+          {"id":"11111111-1111-4111-8111-111111111111","thread_name":"Plan the day"}
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: codex/sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+      reads:
+        - codex/session_index.jsonl
+        - codex/sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+      stats:
+        - codex/sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
       expect: {}
 
   - name: located-source-gone
