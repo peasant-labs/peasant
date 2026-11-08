@@ -1,0 +1,90 @@
+# V70 adds the derived lookup tables: a partial root-identity index on
+# claude_transcript_evidence, the claude_teammate_spawns projection with its
+# backfill, and the codex_rollout_catalog file catalog. The fixture seeds a V69
+# store through raw SQL, then asserts what the migration and the rebuild leave.
+#
+# Deletion protection is by required NAME, never a declared count. The
+# `evidence` rows are the authoritative input; `expected_spawns` is the
+# projection a correct derivation leaves and `walk` is the enumerated rollout
+# set the rebuild is handed.
+
+requiredNames:
+  - upgrade-backfills-spawns-from-root-evidence
+  - duplicate-team-name-pair-is-deduped
+  - upgrade-leaves-codex-catalog-empty
+  - rebuild-replaces-a-corrupted-spawns-table
+  - rebuild-replaces-a-corrupted-rollout-catalog
+  - pruning-evidence-cascades-to-spawns
+
+expectations:
+  - name: upgrade-backfills-spawns-from-root-evidence
+    kind: spawns-backfill
+  - name: duplicate-team-name-pair-is-deduped
+    kind: duplicate-dedupe
+  - name: upgrade-leaves-codex-catalog-empty
+    kind: catalog-empty
+  - name: rebuild-replaces-a-corrupted-spawns-table
+    kind: rebuild-spawns
+  - name: rebuild-replaces-a-corrupted-rollout-catalog
+    kind: rebuild-catalog
+  - name: pruning-evidence-cascades-to-spawns
+    kind: prune-cascade
+
+# Two root transcripts declare identity and record spawns; one subagent
+# transcript records nothing projectable. The first root deliberately repeats
+# one (team, name), which is the state mining can produce.
+evidence:
+  - source_path: /synthetic/claude/root-a.jsonl
+    scope: root
+    identity_team: alpha
+    identity_name: lead
+    spawns:
+      - {team: beta, name: reviewer}
+      - {team: beta, name: reviewer}
+      - {team: gamma, name: tester}
+  - source_path: /synthetic/claude/child-a.jsonl
+    scope: subagent
+    identity_team: beta
+    identity_name: reviewer
+    spawns: []
+  - source_path: /synthetic/claude/root-b.jsonl
+    scope: root
+    identity_team: null
+    identity_name: null
+    spawns:
+      - {team: delta, name: builder}
+
+expected_spawns:
+  - {spawner_path: /synthetic/claude/root-a.jsonl, team: beta, name: reviewer}
+  - {spawner_path: /synthetic/claude/root-a.jsonl, team: gamma, name: tester}
+  - {spawner_path: /synthetic/claude/root-b.jsonl, team: delta, name: builder}
+
+# The pair the first root records twice; exactly one projected row may carry it.
+duplicate_probe:
+  spawner_path: /synthetic/claude/root-a.jsonl
+  team: beta
+  name: reviewer
+
+# The evidence row whose deletion must take its spawn rows with it.
+prune_probe:
+  spawner_path: /synthetic/claude/root-b.jsonl
+
+# The full walk's enumerated rollouts. A stored path and a discovered path that
+# was never stored both belong in the catalog.
+walk:
+  - {path: /synthetic/codex/2026/01/01/rollout-2026-01-01T00-00-00-11111111.jsonl, session_id: 11111111-1111-4111-8111-111111111111}
+  - {path: /synthetic/codex/2026/01/02/rollout-2026-01-02T00-00-00-22222222.jsonl, session_id: 22222222-2222-4222-8222-222222222222}
+
+expected_catalog:
+  - {path: /synthetic/codex/2026/01/01/rollout-2026-01-01T00-00-00-11111111.jsonl, session_id: 11111111-1111-4111-8111-111111111111}
+  - {path: /synthetic/codex/2026/01/02/rollout-2026-01-02T00-00-00-22222222.jsonl, session_id: 22222222-2222-4222-8222-222222222222}
+
+# Rows no source derives: a pair the root never spawned, and a pair attributed
+# to the subagent transcript. The rebuild must remove both.
+corrupt_spawns:
+  - {spawner_path: /synthetic/claude/root-a.jsonl, team: omega, name: ghost}
+  - {spawner_path: /synthetic/claude/child-a.jsonl, team: shadow, name: stale}
+
+# A rollout path the walk does not enumerate. The rebuild must remove it.
+corrupt_catalog:
+  - {path: /synthetic/codex/2026/01/03/rollout-2026-01-03T00-00-00-33333333.jsonl, session_id: 33333333-3333-4333-8333-333333333333}
