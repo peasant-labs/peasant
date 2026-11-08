@@ -47,9 +47,15 @@ const (
 	// UnreadableHarnessDisabled means the harness that recorded the session is
 	// not enabled.
 	UnreadableHarnessDisabled
-	// UnreadableSourceFailed means the source exists but reading it failed (for
-	// example an OpenCode database that does not open). Detail holds the first
-	// error line. A full run treats this as a local failure and continues.
+	// UnreadableSourceFailed means this adapter cannot read the recorded source
+	// as its harness's transcript: an OpenCode database that does not open, a
+	// path that is a directory rather than a file, a stored child another harness
+	// recorded (or one whose harness was never recorded), or a path outside the
+	// configured roots. Detail holds the first error line or the reason. A full
+	// run treats this as a local failure and continues. UnreadableSourceGone is
+	// only for a path that does not exist or whose name no longer holds this id
+	// in this harness's layout; a file may be exactly where the store says, so a
+	// foreign harness or an unattributable path is never described as gone.
 	UnreadableSourceFailed
 )
 
