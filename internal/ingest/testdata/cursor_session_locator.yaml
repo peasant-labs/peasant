@@ -4,8 +4,11 @@
 #
 # The read, readdir and stat sets are exact (set equality, never a subset) and
 # every listed path is touched exactly once. Paths under "~" are expanded
-# against the running user's home, and a "~" searched location is what the
-# adapter renders. Zero WalkDir is asserted for every case.
+# against the running user's home. Zero WalkDir is asserted for every case.
+#
+# A looked-up root contributes ONE pattern-shaped Location per configured root,
+# the shape the miss renderer prints: the root session and the subagent
+# transcript in a single brace pattern. A root named twice is searched once.
 #
 # wantProbe names the one ancestor probe a subagent case must carry. ProbePath
 # costs one stat of the parent path, which the runner performs after the build,
@@ -19,17 +22,21 @@
 #
 # "path" overrides the located path so a case can present a path outside every
 # configured root; wantError is the substring its refusal must name.
+# "directories" pre-create directory nodes, which is how a stored child whose
+# recorded path is a directory rather than a file is exercised.
 requiredNames:
   - root-with-layout-subagents
   - root-with-stored-child-gone
   - root-with-readable-stored-child
   - root-with-foreign-stored-child
+  - root-with-directory-stored-child
   - subagent-with-stored-parent
   - subagent-with-unstored-parent
   - located-path-outside-root
   - lookup-root-by-name
   - lookup-subagent-by-name
   - lookup-miss
+  - lookup-duplicate-root
   - lookup-failure-after-completed-root
   - lookup-readdir-failure
 
@@ -163,6 +170,38 @@ cases:
       wantReads:
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
 
+  - name: root-with-directory-stored-child
+    # The recorded path exists but is a directory, not a transcript. That is a
+    # read failure with a detail, never "source gone": the path is exactly where
+    # the store says.
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+    directories:
+      - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/77777777-7777-4777-8777-777777777777.jsonl
+    discoverAt:
+      id: 11111111-1111-4111-8111-111111111111
+      workspace: test-workspace-a
+      stored:
+        children:
+          - workspace: test-workspace-a
+            session: 77777777-7777-4777-8777-777777777777
+            parent: 11111111-1111-4111-8111-111111111111
+      wantMembers:
+        - 11111111-1111-4111-8111-111111111111
+        - 77777777-7777-4777-8777-777777777777
+      wantUnreadable:
+        - id: 77777777-7777-4777-8777-777777777777
+          reason: SourceFailed
+          detail: is a directory
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/77777777-7777-4777-8777-777777777777.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents
+      wantReads:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+
   - name: subagent-with-stored-parent
     tree:
       - workspace: test-workspace-a
@@ -229,10 +268,7 @@ cases:
       wantSearched:
         - harness: cursor
           method: name-pattern
-          location: ~/.cursor/projects/*/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
-        - harness: cursor
-          method: name-pattern
-          location: ~/.cursor/projects/*/agent-transcripts/*/subagents/11111111-1111-4111-8111-111111111111.jsonl
+          location: ~/.cursor/projects/*/agent-transcripts/{11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111,*/subagents/11111111-1111-4111-8111-111111111111}.jsonl
       wantStats:
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/11111111-1111-4111-8111-111111111111.jsonl
@@ -253,10 +289,7 @@ cases:
       wantSearched:
         - harness: cursor
           method: name-pattern
-          location: ~/.cursor/projects/*/agent-transcripts/22222222-2222-4222-8222-222222222222/22222222-2222-4222-8222-222222222222.jsonl
-        - harness: cursor
-          method: name-pattern
-          location: ~/.cursor/projects/*/agent-transcripts/*/subagents/22222222-2222-4222-8222-222222222222.jsonl
+          location: ~/.cursor/projects/*/agent-transcripts/{22222222-2222-4222-8222-222222222222/22222222-2222-4222-8222-222222222222,*/subagents/22222222-2222-4222-8222-222222222222}.jsonl
       wantStats:
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/22222222-2222-4222-8222-222222222222/22222222-2222-4222-8222-222222222222.jsonl
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
@@ -273,10 +306,7 @@ cases:
       wantSearched:
         - harness: cursor
           method: name-pattern
-          location: ~/.cursor/projects/*/agent-transcripts/33333333-3333-4333-8333-333333333333/33333333-3333-4333-8333-333333333333.jsonl
-        - harness: cursor
-          method: name-pattern
-          location: ~/.cursor/projects/*/agent-transcripts/*/subagents/33333333-3333-4333-8333-333333333333.jsonl
+          location: ~/.cursor/projects/*/agent-transcripts/{33333333-3333-4333-8333-333333333333/33333333-3333-4333-8333-333333333333,*/subagents/33333333-3333-4333-8333-333333333333}.jsonl
       wantStats:
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/33333333-3333-4333-8333-333333333333/33333333-3333-4333-8333-333333333333.jsonl
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/33333333-3333-4333-8333-333333333333.jsonl
@@ -284,10 +314,33 @@ cases:
         - ~/.cursor/projects
         - ~/.cursor/projects/test-workspace-a/agent-transcripts
 
+  - name: lookup-duplicate-root
+    # A root named twice is configured once: one hit, one searched entry, one
+    # set of operations, so it cannot read downstream as a duplicate session.
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+    lookup:
+      id: 11111111-1111-4111-8111-111111111111
+      roots:
+        - ~/.cursor/projects
+        - ~/.cursor/projects
+      wantSources:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+      wantSearched:
+        - harness: cursor
+          method: name-pattern
+          location: ~/.cursor/projects/*/agent-transcripts/{11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111,*/subagents/11111111-1111-4111-8111-111111111111}.jsonl
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/11111111-1111-4111-8111-111111111111.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts
+
   - name: lookup-failure-after-completed-root
-    # The first root completes and its two searched entries must survive the
-    # second root's failure; the failure itself is recorded by the core, not
-    # here.
+    # The first root completes and its searched entry must survive the second
+    # root's failure; the failure itself is recorded by the core, not here.
     tree:
       - workspace: test-workspace-a
         session: 11111111-1111-4111-8111-111111111111
@@ -305,10 +358,7 @@ cases:
       wantSearched:
         - harness: cursor
           method: name-pattern
-          location: ~/.cursor/projects/*/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
-        - harness: cursor
-          method: name-pattern
-          location: ~/.cursor/projects/*/agent-transcripts/*/subagents/11111111-1111-4111-8111-111111111111.jsonl
+          location: ~/.cursor/projects/*/agent-transcripts/{11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111,*/subagents/11111111-1111-4111-8111-111111111111}.jsonl
       wantStats:
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/11111111-1111-4111-8111-111111111111.jsonl

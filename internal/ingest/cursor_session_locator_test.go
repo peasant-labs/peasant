@@ -28,10 +28,11 @@ type cursorLocatorFixture struct {
 }
 
 type cursorLocatorCase struct {
-	Name       string              `yaml:"name"`
-	Tree       []cursorTreeEntry   `yaml:"tree"`
-	DiscoverAt *cursorDiscoverCase `yaml:"discoverAt"`
-	Lookup     *cursorLookupCase   `yaml:"lookup"`
+	Name        string              `yaml:"name"`
+	Tree        []cursorTreeEntry   `yaml:"tree"`
+	Directories []string            `yaml:"directories"`
+	DiscoverAt  *cursorDiscoverCase `yaml:"discoverAt"`
+	Lookup      *cursorLookupCase   `yaml:"lookup"`
 }
 
 type cursorTreeEntry struct {
@@ -304,6 +305,16 @@ func runCursorLookupParity(t *testing.T, defaultRoot, rootText string, testCase 
 	}
 
 	lookup, err := adapter.LookupSessionSources(context.Background(), cfg, ingest.SessionID(lookupCase.ID))
+
+	// The convention every adapter's lookup obeys: a reported failure is
+	// recorded once, by the core, from the returned error. No entry may carry
+	// the failure method.
+	for _, searched := range lookup.Searched {
+		if searched.Method == ingest.SearchFailed {
+			t.Errorf("lookup recorded a SearchFailed entry itself: the core appends it from the returned error, so one search is reported once")
+		}
+	}
+
 	if lookupCase.Fault != nil {
 		if err == nil {
 			t.Fatalf("LookupSessionSources returned no error after a failed %s; the failure must not vanish", lookupCase.Fault.Op)
@@ -406,6 +417,11 @@ func assertCursorParentProbe(t *testing.T, located ingest.SessionID, members []i
 func newCursorLocatorCountingFS(t *testing.T, rootText string, testCase cursorLocatorCase) *testutil.CountingFS {
 	t.Helper()
 	mfs := testutil.NewMemFS()
+	for _, directory := range testCase.Directories {
+		if err := mfs.MkdirAll(cursorLocatorExpandedPath(t, directory), 0755); err != nil {
+			t.Fatalf("create directory %s: %v", directory, err)
+		}
+	}
 	for _, entry := range testCase.Tree {
 		data := cursorLocatorTranscript(entry.Title)
 		if !entry.NoRoot {
@@ -513,4 +529,61 @@ var cursorSearchMethods = map[string]ingest.SearchMethod{
 var cursorUnreadableReasons = map[string]ingest.UnreadableReason{
 	"SourceGone":   ingest.UnreadableSourceGone,
 	"SourceFailed": ingest.UnreadableSourceFailed,
+}
+
+// cursorCancelingFS cancels a lookup's context during the first root's listing,
+// so a later iteration meets the cancellation after one root has completed.
+type cursorCancelingFS struct {
+	*testutil.MemFS
+	root   string
+	cancel context.CancelFunc
+	fired  bool
+}
+
+func (f *cursorCancelingFS) ReadDir(path string) ([]os.DirEntry, error) {
+	if !f.fired && path == f.root {
+		f.fired = true
+		f.cancel()
+	}
+	return f.MemFS.ReadDir(path)
+}
+
+// TestCursorLookupKeepsCompletedRootsOnCancellation pins the promise the method
+// makes: a completed root's searched entry and hit survive a later
+// cancellation, so the miss still names where the id was looked for.
+func TestCursorLookupKeepsCompletedRootsOnCancellation(t *testing.T) {
+	t.Parallel()
+	rootText := cursorLocatorExpandedPath(t, "~/.cursor/projects")
+	id := ingest.SessionID("11111111-1111-4111-8111-111111111111")
+	mfs := testutil.NewMemFS()
+	source := filepath.Join(rootText, "test-workspace-a", cursorLocatorAgentTranscriptsDir, string(id), string(id)+".jsonl")
+	if err := mfs.WriteFile(source, cursorLocatorTranscript("Hello"), 0644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	canceling := &cursorCancelingFS{MemFS: mfs, root: rootText, cancel: cancel}
+	adapter := ingest.NewCursorAdapter(canceling, testutil.NoGitResolver(), salt.Salt{})
+
+	first, err := ingest.NewResolvedPath(rootText)
+	if err != nil {
+		t.Fatalf("resolve first root: %v", err)
+	}
+	second, err := ingest.NewResolvedPath(filepath.Join(rootText, "..", "other-projects"))
+	if err != nil {
+		t.Fatalf("resolve second root: %v", err)
+	}
+	cfg := ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{first, second}}
+
+	lookup, err := adapter.LookupSessionSources(ctx, cfg, id)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("LookupSessionSources error = %v, want context.Canceled", err)
+	}
+	if len(lookup.Searched) != 1 {
+		t.Fatalf("cancelled lookup reported %d searched entries, want the one completed root's entry: %+v", len(lookup.Searched), lookup.Searched)
+	}
+	if len(lookup.Sources) != 1 || lookup.Sources[0] != ingest.ResolvedPath(source) {
+		t.Fatalf("cancelled lookup sources = %v, want the completed root's hit %q", lookup.Sources, source)
+	}
 }
