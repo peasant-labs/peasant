@@ -12,8 +12,11 @@ requiredNames:
   - previous-day-folder-hit
   - outside-window-miss
   - suffix-match-only
+  - duplicate-root-listed-once
+  - lookup-failure-keeps-searched-set
   - stored-child-source-gone
   - stored-child-read-failed
+  - stored-child-readable
   - stored-child-other-harness
   - located-source-gone
   - located-source-id-mismatch
@@ -142,6 +145,51 @@ cases:
         - sessions/2026/11/08
         - sessions/2026/11/07
 
+  - name: duplicate-root-listed-once
+    # The same root written twice must be listed once: two claims on one file
+    # would read downstream as a duplicate session.
+    roots:
+      - sessions
+      - sessions
+    files:
+      - path: sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        kind: rollout
+        sessionID: "11111111-1111-4111-8111-111111111111"
+        cwd: /work/project
+    lookup:
+      id: "11111111-1111-4111-8111-111111111111"
+      hits:
+        - sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+      folders:
+        - sessions/2026/11/08
+        - sessions/2026/11/07
+
+  - name: lookup-failure-keeps-searched-set
+    roots:
+      - sessions
+      - archive
+    files:
+      - path: sessions/2026/11/08/rollout-2026-11-08T09-00-00-33333333-3333-4333-8333-333333333333.jsonl
+        kind: rollout
+        sessionID: "33333333-3333-4333-8333-333333333333"
+        cwd: /work/other
+      - path: archive/2026/11/07/rollout-2026-11-07T10-00-00-44444444-4444-4444-8444-444444444444.jsonl
+        kind: rollout
+        sessionID: "44444444-4444-4444-8444-444444444444"
+        cwd: /work/archive
+    lookup:
+      id: "11111111-1111-4111-8111-111111111111"
+      faultFolder: archive/2026/11/08
+      errorContains: could not be listed
+      # The first root completed, so its searched entry is still returned; the
+      # failing root's entry is the core's SearchFailed, added from the error.
+      searchedRoots:
+        - sessions
+      folders:
+        - sessions/2026/11/08
+        - sessions/2026/11/07
+        - archive/2026/11/08
+
   - name: stored-child-source-gone
     roots:
       - sessions
@@ -193,6 +241,42 @@ cases:
           faultRead: true
           unreadable: SourceFailed
           detailContains: the child source could not be read
+      reads:
+        - session_index.jsonl
+        - sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        - sessions/2026/11/07/rollout-2026-11-07T10-00-00-66666666-6666-4666-8666-666666666666.jsonl
+      stats:
+        - sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        - sessions/2026/11/07/rollout-2026-11-07T10-00-00-66666666-6666-4666-8666-666666666666.jsonl
+      expect: {}
+
+  - name: stored-child-readable
+    roots:
+      - sessions
+    files:
+      - path: sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        kind: rollout
+        sessionID: "11111111-1111-4111-8111-111111111111"
+        cwd: /work/project
+      - path: sessions/2026/11/07/rollout-2026-11-07T10-00-00-66666666-6666-4666-8666-666666666666.jsonl
+        kind: rollout
+        sessionID: "66666666-6666-4666-8666-666666666666"
+        cwd: /work/child
+      - path: session_index.jsonl
+        kind: index
+        body: |
+          {"id":"11111111-1111-4111-8111-111111111111","thread_name":"Plan the day"}
+          {"id":"66666666-6666-4666-8666-666666666666","thread_name":"Follow the plan"}
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+      # A readable child is built like any other member: its source, title and
+      # recorded parent must equal what a full discovery produces.
+      storedChildren:
+        - id: "66666666-6666-4666-8666-666666666666"
+          harness: codex
+          path: sessions/2026/11/07/rollout-2026-11-07T10-00-00-66666666-6666-4666-8666-666666666666.jsonl
+          parent: "11111111-1111-4111-8111-111111111111"
       reads:
         - session_index.jsonl
         - sessions/2026/11/08/rollout-2026-11-08T09-00-00-11111111-1111-4111-8111-111111111111.jsonl

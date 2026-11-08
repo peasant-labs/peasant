@@ -60,6 +60,13 @@ type codexLocatorLookup struct {
 	ID      string   `yaml:"id"`
 	Hits    []string `yaml:"hits"`
 	Folders []string `yaml:"folders"`
+	// FaultFolder is a listed folder whose listing fails, which is how a case
+	// exercises the failed-lookup convention.
+	FaultFolder   string `yaml:"faultFolder"`
+	ErrorContains string `yaml:"errorContains"`
+	// SearchedRoots names the roots whose searched entry the failing lookup must
+	// still return: the ones it completed before the failure.
+	SearchedRoots []string `yaml:"searchedRoots"`
 }
 
 type codexLocatorLocated struct {
@@ -231,37 +238,76 @@ func runCodexLocatorLookup(t *testing.T, mfs *testutil.MemFS, tree string, ancho
 	}
 
 	counting := testutil.NewCountingFS(mfs)
+	if lookup.FaultFolder != "" {
+		counting.Fail(testutil.FSOpReadDir, filepath.Join(tree, lookup.FaultFolder), errors.New("the date folder could not be listed"))
+	}
 	adapter := ingest.NewCodexAdapter(counting, testutil.DefaultGitResolver(), salt.Salt{},
 		ingest.WithCodexWindowClock(func() time.Time { return anchor }))
 
 	sources, err := adapter.LookupSessionSources(context.Background(), cfg, id)
-	if err != nil {
-		t.Fatalf("LookupSessionSources(%s): %v", id, err)
-	}
 
-	var want []ingest.ResolvedPath
-	for _, hit := range lookup.Hits {
-		want = append(want, ingest.ResolvedPath(filepath.Join(tree, hit)))
-	}
-	if len(want) == 0 {
-		want = nil
-	}
-	if got := sources.Sources; len(got) == 0 && len(want) == 0 {
-		// Equal: no hit and no expected hit.
-	} else if !reflect.DeepEqual(got, want) {
-		t.Fatalf("lookup hits = %v, want %v", got, want)
-	}
-
-	assertCodexExactOps(t, counting, tree, nil, nil, lookup.Folders)
-	for _, write := range codexWriteOps {
-		if got := counting.Total(write); got != 0 {
-			t.Errorf("lookup performed %d %s operation(s); a lookup reads no tree it does not list and writes nothing", got, write)
+	// The convention every adapter's lookup obeys: a reported failure is
+	// recorded once, by the core, from the returned error. No entry may carry
+	// the failure method.
+	for _, searched := range sources.Searched {
+		if searched.Method == ingest.SearchFailed {
+			t.Errorf("lookup recorded a SearchFailed entry itself: the core appends it from the returned error, so one search is reported once")
 		}
 	}
 
-	if len(sources.Searched) != len(cfg.Paths) {
-		t.Fatalf("lookup recorded %d searched source(s), want one per configured root (%d)", len(sources.Searched), len(cfg.Paths))
+	switch {
+	case lookup.ErrorContains != "":
+		if err == nil {
+			t.Fatalf("LookupSessionSources accepted the faulted listing: %#v", sources)
+		}
+		if !strings.Contains(err.Error(), lookup.ErrorContains) {
+			t.Errorf("lookup error %q does not name %q", err, lookup.ErrorContains)
+		}
+		if len(sources.Sources) != 0 {
+			t.Errorf("failed lookup returned %d hit(s), want none", len(sources.Sources))
+		}
+		if len(sources.Searched) != len(lookup.SearchedRoots) {
+			t.Fatalf("failed lookup returned %d searched entr(ies), want %d: the entries collected before the failure", len(sources.Searched), len(lookup.SearchedRoots))
+		}
+		for index, root := range lookup.SearchedRoots {
+			if !strings.Contains(sources.Searched[index].Location, filepath.Join(tree, root)) {
+				t.Errorf("searched entry %d = %q, want the completed root %q", index, sources.Searched[index].Location, root)
+			}
+		}
+	default:
+		if err != nil {
+			t.Fatalf("LookupSessionSources(%s): %v", id, err)
+		}
+		var want []ingest.ResolvedPath
+		for _, hit := range lookup.Hits {
+			want = append(want, ingest.ResolvedPath(filepath.Join(tree, hit)))
+		}
+		if len(want) == 0 {
+			want = nil
+		}
+		if got := sources.Sources; len(got) == 0 && len(want) == 0 {
+			// Equal: no hit and no expected hit.
+		} else if !reflect.DeepEqual(got, want) {
+			t.Fatalf("lookup hits = %v, want %v", got, want)
+		}
+		if got, wantRoots := len(sources.Searched), distinctCodexRoots(cfg.Paths); got != wantRoots {
+			t.Fatalf("lookup recorded %d searched source(s), want one per distinct configured root (%d)", got, wantRoots)
+		}
+		// Each listed folder, and only the listed folders, is named by exactly
+		// one searched entry.
+		for _, folder := range lookup.Folders {
+			named := 0
+			for _, searched := range sources.Searched {
+				if strings.Contains(searched.Location, filepath.Join(tree, folder)) {
+					named++
+				}
+			}
+			if named != 1 {
+				t.Errorf("folder %q is named by %d searched entr(ies), want exactly 1", folder, named)
+			}
+		}
 	}
+
 	for _, searched := range sources.Searched {
 		if searched.Harness != ingest.HarnessCodex {
 			t.Errorf("searched harness = %q, want codex", searched.Harness)
@@ -272,15 +318,29 @@ func runCodexLocatorLookup(t *testing.T, mfs *testutil.MemFS, tree string, ancho
 		if searched.Reason != ingest.UnsupportedReason(0) || searched.Detail != "" {
 			t.Errorf("searched entry carries a reason %v or detail %q; the lookup neither refused nor failed", searched.Reason, searched.Detail)
 		}
-		for _, folder := range lookup.Folders {
-			if !strings.Contains(searched.Location, filepath.Join(tree, folder)) {
-				t.Errorf("searched location %q does not name the listed folder %q", searched.Location, folder)
-			}
-		}
-		if !strings.Contains(searched.Location, string(id)) || !strings.Contains(searched.Location, "rollout-") {
-			t.Errorf("searched location %q does not name the pattern it matched", searched.Location)
+		// The rendered pattern is the one a rollout file carries:
+		// rollout-{timestamp}-{id}.jsonl.
+		if want := "rollout-*-" + string(id) + ".jsonl"; !strings.Contains(searched.Location, want) {
+			t.Errorf("searched location %q does not name the matched pattern %q", searched.Location, want)
 		}
 	}
+
+	assertCodexExactOps(t, counting, tree, nil, nil, lookup.Folders)
+	for _, write := range codexWriteOps {
+		if got := counting.Total(write); got != 0 {
+			t.Errorf("lookup performed %d %s operation(s); a lookup reads no tree it does not list and writes nothing", got, write)
+		}
+	}
+}
+
+// distinctCodexRoots counts the roots a lookup may list: a root written twice is
+// listed once, so one file is never claimed twice.
+func distinctCodexRoots(paths []ingest.ResolvedPath) int {
+	seen := make(map[ingest.ResolvedPath]struct{}, len(paths))
+	for _, path := range paths {
+		seen[path] = struct{}{}
+	}
+	return len(seen)
 }
 
 func runCodexLocatorLocated(t *testing.T, mfs *testutil.MemFS, tree string, anchor time.Time, cfg ingest.SourceConfig, testCase codexLocatorCase) {
@@ -417,6 +477,10 @@ func assertCodexLocatedMembers(t *testing.T, mfs *testutil.MemFS, anchor time.Ti
 		}
 		if got.Harness != codexLocatorHarnesses[child.Harness] {
 			t.Errorf("child %q harness = %q, want %q", child.ID, got.Harness, child.Harness)
+		}
+		// The core owns the role and the outcome for every member, child or not.
+		if got.Role != ingest.CohortRole(0) || got.Outcome != ingest.LocateOutcome(0) {
+			t.Errorf("child %q carries role %v / outcome %v; the core sets both", child.ID, got.Role, got.Outcome)
 		}
 		switch child.Unreadable {
 		case "":

@@ -16,7 +16,9 @@ type SessionLocator interface {
 	// LookupSessionSources finds the native sources that can hold id BY NAME: a
 	// bounded pattern, a stat, or one row per candidate database. It never reads
 	// a transcript. No hit returns empty Sources and a nil error; a returned
-	// error means the lookup failed and the core records SearchFailed.
+	// error means the lookup failed, and the core appends the SearchFailed entry
+	// itself, so an adapter never returns a SearchFailed entry of its own for a
+	// failure it reports.
 	LookupSessionSources(ctx context.Context, cfg SourceConfig, id SessionID) (SourceLookup, error)
 
 	// DiscoverSessionAt builds the members for one located source: it enumerates
@@ -26,7 +28,8 @@ type SessionLocator interface {
 	// are returned in Deferred. It returns ErrSourceGone (wrapped) when at.Path
 	// no longer holds at.ID; any other read error is returned too. A stored
 	// child whose file is gone or unreadable comes back as a member with a nil
-	// Source and its reason, never dropped. The core sets the outcome.
+	// Source and its reason, never dropped. The core sets each member's role and
+	// outcome; the adapter leaves both at their zero value.
 	DiscoverSessionAt(ctx context.Context, cfg SourceConfig, at LocatedSource) (LocatedBuild, error)
 }
 
@@ -163,7 +166,8 @@ type StoredSessionSource struct {
 // LocatedBuild is one located source's built members plus the side effects the
 // adapter deferred.
 type LocatedBuild struct {
-	// Members are the built members. The core sets each member's Outcome.
+	// Members are the built members. The core sets each member's role and
+	// outcome; the adapter leaves both at their zero value.
 	Members  []LocatedMember
 	Deferred DeferredWrites
 }
@@ -217,7 +221,7 @@ type AncestorProbe struct {
 	Harness Harness
 	// Path is the parent's exact source file for ProbePath.
 	Path ResolvedPath
-	// ID is the parent's id for ProbeRow.
+	// ID is the parent's id, set for ProbeRow and for ProbeCatalogWindow.
 	ID SessionID
 }
 
