@@ -135,8 +135,8 @@ func loadCodexSessionLocatorFixture(t *testing.T) (codexLocatorFixture, time.Tim
 }
 
 var codexLocatorHarnesses = map[string]ingest.Harness{
-	"codex":       ingest.HarnessCodex,
-	"claude-code": ingest.HarnessClaudeCode,
+	string(ingest.HarnessCodex):      ingest.HarnessCodex,
+	string(ingest.HarnessClaudeCode): ingest.HarnessClaudeCode,
 }
 
 func storedChildrenOf(testCase codexLocatorCase) []codexLocatorChild {
