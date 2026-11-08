@@ -17,6 +17,13 @@ type RolloutFile struct {
 // maintenance write, so a dropped maintenance pass cannot be masked by the
 // rebuild: the two paths are able to disagree, which is what makes the
 // rebuild a check on derivation rather than a second copy of the same code.
+//
+// The catalog argument is the COMPLETE enumeration of the source roots being
+// rebuilt, including every rollout that was refused or never stored. The
+// rebuild replaces the catalog rather than merging into it, so a filtered or
+// partial walk deletes the rows for the paths it omits and reopens the
+// duplicate-detection gap those rows close. An empty walk is valid and means
+// the walk enumerated no rollout.
 type DerivedLookupRebuilder interface {
 	RebuildDerivedLookups(ctx context.Context, catalog []RolloutFile) error
 }

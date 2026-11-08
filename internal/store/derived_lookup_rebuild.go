@@ -25,7 +25,9 @@ const (
 	// A root row's spawns_json holds the records mining appended without
 	// deduplicating them, so a transcript may repeat a (team, name); the
 	// composite primary key collapses the repeat even without the ignore
-	// clause, and the clause keeps the statement safe on a real store.
+	// clause, and the clause keeps the statement safe on a real store. The
+	// predicate matches the migration's backfill: one definition of which
+	// stored spawn records are projectable.
 	sqlRebuildClaudeTeammateSpawns = `INSERT OR IGNORE INTO claude_teammate_spawns (spawner_path, team, name)
 SELECT e.source_path,
        json_extract(spawn.value, '$.team'),
@@ -33,8 +35,8 @@ SELECT e.source_path,
 FROM claude_transcript_evidence AS e
 JOIN json_each(e.spawns_json) AS spawn
 WHERE e.scope = 'root'
-  AND json_type(spawn.value, '$.team') = 'text'
-  AND json_type(spawn.value, '$.name') = 'text'`
+  AND json_extract(spawn.value, '$.team') IS NOT NULL
+  AND json_extract(spawn.value, '$.name') IS NOT NULL`
 
 	sqlClearCodexRolloutCatalog = `DELETE FROM codex_rollout_catalog`
 
@@ -54,7 +56,11 @@ WHERE e.scope = 'root'
 // corrupted row that no source still produces is removed instead of surviving.
 //
 // The caller supplies the rollouts it enumerated because the catalog records
-// paths that were never stored; the database cannot derive them.
+// paths that were never stored; the database cannot derive them. The walk must
+// be the complete enumeration of the source roots being rebuilt: the catalog is
+// REPLACED, so a filtered or partial walk deletes the rows for every path it
+// omits and reopens the duplicate-detection gap those rows close. The walk may
+// legitimately be empty when no rollout was enumerated.
 func (s *Store) RebuildDerivedLookups(ctx context.Context, catalog []ingest.RolloutFile) (err error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -72,9 +78,10 @@ func (s *Store) RebuildDerivedLookups(ctx context.Context, catalog []ingest.Roll
 		return fmt.Errorf("store.RebuildDerivedLookups: re-derive the teammate spawns from the stored evidence: %w; the transaction rolled back and the previous table is intact", err)
 	}
 
-	if err = sqlitex.ExecuteTransient(conn, sqlClearCodexRolloutCatalog, nil); err != nil {
-		return fmt.Errorf("store.RebuildDerivedLookups: clear the Codex rollout catalog: %w; the transaction rolled back and the previous catalog is intact", err)
-	}
+	// Validate the caller's walk before the catalog it governs is cleared. The
+	// transaction above is what makes a later failure harmless, but an
+	// incomplete entry is a caller error, so it must not be discovered after
+	// the rows it would replace are already gone.
 	for index := range catalog {
 		file := &catalog[index]
 		if file.Path == "" {
@@ -83,6 +90,12 @@ func (s *Store) RebuildDerivedLookups(ctx context.Context, catalog []ingest.Roll
 		if file.SessionID == "" {
 			return fmt.Errorf("store.RebuildDerivedLookups: enumerated rollout %q carries an empty session id; the catalog exists to answer duplicate and parent questions by id, so an id-less row is useless; the transaction rolled back and the previous catalog is intact", file.Path)
 		}
+	}
+	if err = sqlitex.ExecuteTransient(conn, sqlClearCodexRolloutCatalog, nil); err != nil {
+		return fmt.Errorf("store.RebuildDerivedLookups: clear the Codex rollout catalog: %w; the transaction rolled back and the previous catalog is intact", err)
+	}
+	for index := range catalog {
+		file := &catalog[index]
 		if err = sqlitex.Execute(conn, sqlRebuildCodexRolloutCatalog, &sqlitex.ExecOptions{
 			Args: []any{file.Path.String(), file.SessionID.String()},
 		}); err != nil {

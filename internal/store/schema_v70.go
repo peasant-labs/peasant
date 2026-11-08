@@ -24,8 +24,8 @@ package store
 // required, not stylistic: mining appends spawn records without deduplicating
 // them, and a transcript may already carry a repeated (team, name). The
 // catalog cannot be backfilled — a path that was never stored is absent from
-// the database — so it starts empty until the next full discovery walk
-// enumerates it.
+// the database. No shipped path writes it yet, so an upgraded store keeps an
+// empty catalog until a discovery walk that enumerates rollouts fills it.
 const migrationV70 = `
 CREATE INDEX idx_claude_evidence_identity_root
   ON claude_transcript_evidence(identity_team, identity_name)

@@ -2,8 +2,8 @@ package store
 
 // V70 fixture-driven tests: the fresh schema, the V69 upgrade and its spawns
 // backfill, the duplicate (team, name) a transcript may already carry, the
-// cascade from a pruned evidence row, the rebuild that replaces both derived
-// tables, and the transaction that owns the maintenance write.
+// maintenance writer behind SaveClaudeEvidence, the cascade from a pruned
+// evidence row, and the rebuild that replaces both derived tables.
 //
 // The file is package store so it can swap the spawns seam and reuse the
 // stored spawn layout. The strict fixture decode lives here directly because
@@ -62,29 +62,85 @@ type v70Rollout struct {
 	SessionID string `yaml:"session_id"`
 }
 
+// v70MaintenanceStep is one save driven through the production writer. It
+// carries the exact projection that save must leave, so a wrong row or a
+// missing delete fails the step.
+type v70MaintenanceStep struct {
+	Name           string        `yaml:"name"`
+	SourcePath     string        `yaml:"source_path"`
+	Scope          string        `yaml:"scope"`
+	Spawns         []v70SpawnRef `yaml:"spawns"`
+	ExpectedSpawns []v70Spawn    `yaml:"expected_spawns"`
+}
+
 type v70Fixture struct {
-	RequiredNames   []string         `yaml:"requiredNames"`
-	Expectations    []v70Expectation `yaml:"expectations"`
-	Evidence        []v70Evidence    `yaml:"evidence"`
-	ExpectedSpawns  []v70Spawn       `yaml:"expected_spawns"`
-	Walk            []v70Rollout     `yaml:"walk"`
-	ExpectedCatalog []v70Rollout     `yaml:"expected_catalog"`
-	CorruptSpawns   []v70Spawn       `yaml:"corrupt_spawns"`
-	CorruptCatalog  []v70Rollout     `yaml:"corrupt_catalog"`
-	DuplicateProbe  v70Spawn         `yaml:"duplicate_probe"`
-	PruneProbe      struct {
+	RequiredNames            []string             `yaml:"requiredNames"`
+	Expectations             []v70Expectation     `yaml:"expectations"`
+	Evidence                 []v70Evidence        `yaml:"evidence"`
+	ExpectedSpawns           []v70Spawn           `yaml:"expected_spawns"`
+	Walk                     []v70Rollout         `yaml:"walk"`
+	ExpectedCatalog          []v70Rollout         `yaml:"expected_catalog"`
+	ExpectedCatalogOnUpgrade []v70Rollout         `yaml:"expected_catalog_on_upgrade"`
+	InvalidWalkEntry         v70Rollout           `yaml:"invalid_walk_entry"`
+	CorruptSpawns            []v70Spawn           `yaml:"corrupt_spawns"`
+	CorruptCatalog           []v70Rollout         `yaml:"corrupt_catalog"`
+	DuplicateProbe           v70Spawn             `yaml:"duplicate_probe"`
+	RequiredMaintenanceNames []string             `yaml:"required_maintenance_names"`
+	MaintenanceSteps         []v70MaintenanceStep `yaml:"maintenance_steps"`
+	PruneProbe               struct {
 		SpawnerPath string `yaml:"spawner_path"`
 	} `yaml:"prune_probe"`
 }
 
 // v70ExpectationKinds is the closed set of assertions the fixture may name.
 var v70ExpectationKinds = map[string]struct{}{
-	"spawns-backfill":  {},
-	"duplicate-dedupe": {},
-	"catalog-empty":    {},
-	"rebuild-spawns":   {},
-	"rebuild-catalog":  {},
-	"prune-cascade":    {},
+	"spawns-backfill":                 {},
+	"duplicate-dedupe":                {},
+	"catalog-empty":                   {},
+	"rebuild-refuses-incomplete-walk": {},
+	"rebuild-spawns":                  {},
+	"rebuild-catalog":                 {},
+	"prune-cascade":                   {},
+}
+
+// requireV70NameSet fails on a blank, duplicate, missing, or undeclared name,
+// so each fixture section is protected by an exact name set rather than a
+// count.
+func requireV70NameSet(t *testing.T, label string, required, actual []string) {
+	t.Helper()
+	if len(required) == 0 {
+		t.Fatalf("v70 derived-lookups fixture declares no required %s names", label)
+	}
+	requiredSet := make(map[string]struct{}, len(required))
+	for _, name := range required {
+		if strings.TrimSpace(name) == "" {
+			t.Fatalf("v70 derived-lookups fixture declares a blank required %s name", label)
+		}
+		if _, duplicate := requiredSet[name]; duplicate {
+			t.Fatalf("v70 derived-lookups fixture repeats required %s name %q", label, name)
+		}
+		requiredSet[name] = struct{}{}
+	}
+	actualSet := make(map[string]struct{}, len(actual))
+	for _, name := range actual {
+		if strings.TrimSpace(name) == "" {
+			t.Fatalf("v70 derived-lookups fixture declares a %s row with a blank name", label)
+		}
+		if _, duplicate := actualSet[name]; duplicate {
+			t.Fatalf("v70 derived-lookups fixture repeats %s %q", label, name)
+		}
+		actualSet[name] = struct{}{}
+	}
+	for _, name := range required {
+		if _, ok := actualSet[name]; !ok {
+			t.Fatalf("v70 derived-lookups fixture requires %s %q but declares no such row", label, name)
+		}
+	}
+	for name := range actualSet {
+		if _, ok := requiredSet[name]; !ok {
+			t.Fatalf("v70 derived-lookups fixture carries undeclared %s %q; add it to its required name list", label, name)
+		}
+	}
 }
 
 func loadV70DerivedLookupsFixture(t *testing.T) v70Fixture {
@@ -99,42 +155,31 @@ func loadV70DerivedLookupsFixture(t *testing.T) v70Fixture {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("v70 derived-lookups fixture must contain exactly one YAML document: %v", err)
 	}
-	if len(fixture.RequiredNames) == 0 {
-		t.Fatal("v70 derived-lookups fixture declares no required expectation names")
-	}
-	required := make(map[string]struct{}, len(fixture.RequiredNames))
-	for _, name := range fixture.RequiredNames {
-		if strings.TrimSpace(name) == "" {
-			t.Fatal("v70 derived-lookups fixture declares a blank required name")
-		}
-		if _, duplicate := required[name]; duplicate {
-			t.Fatalf("v70 derived-lookups fixture repeats required name %q", name)
-		}
-		required[name] = struct{}{}
-	}
-	actual := make(map[string]struct{}, len(fixture.Expectations))
+
+	expectationNames := make([]string, 0, len(fixture.Expectations))
 	for _, expectation := range fixture.Expectations {
-		if strings.TrimSpace(expectation.Name) == "" {
-			t.Fatal("v70 derived-lookups fixture declares an expectation with a blank name")
-		}
-		if _, duplicate := actual[expectation.Name]; duplicate {
-			t.Fatalf("v70 derived-lookups fixture repeats expectation %q", expectation.Name)
-		}
-		actual[expectation.Name] = struct{}{}
+		expectationNames = append(expectationNames, expectation.Name)
 		if _, ok := v70ExpectationKinds[expectation.Kind]; !ok {
 			t.Fatalf("v70 derived-lookups fixture expectation %q names unknown kind %q; use one of the closed kinds", expectation.Name, expectation.Kind)
 		}
 	}
-	for _, name := range fixture.RequiredNames {
-		if _, ok := actual[name]; !ok {
-			t.Fatalf("v70 derived-lookups fixture requires expectation %q but declares no such row", name)
+	requireV70NameSet(t, "expectation", fixture.RequiredNames, expectationNames)
+
+	maintenanceNames := make([]string, 0, len(fixture.MaintenanceSteps))
+	for _, step := range fixture.MaintenanceSteps {
+		maintenanceNames = append(maintenanceNames, step.Name)
+		if strings.TrimSpace(step.SourcePath) == "" {
+			t.Fatalf("v70 derived-lookups maintenance step %q carries a blank source_path", step.Name)
+		}
+		if !ingest.ClaudeEvidenceScope(step.Scope).IsValid() {
+			t.Fatalf("v70 derived-lookups maintenance step %q names unknown scope %q", step.Name, step.Scope)
+		}
+		if len(step.ExpectedSpawns) == 0 {
+			t.Fatalf("v70 derived-lookups maintenance step %q declares no expected projection", step.Name)
 		}
 	}
-	for name := range actual {
-		if _, ok := required[name]; !ok {
-			t.Fatalf("v70 derived-lookups fixture carries undeclared expectation %q; add it to requiredNames", name)
-		}
-	}
+	requireV70NameSet(t, "maintenance", fixture.RequiredMaintenanceNames, maintenanceNames)
+
 	for _, evidence := range fixture.Evidence {
 		if strings.TrimSpace(evidence.SourcePath) == "" {
 			t.Fatal("v70 derived-lookups fixture carries evidence with a blank source_path")
@@ -154,6 +199,9 @@ func loadV70DerivedLookupsFixture(t *testing.T) v70Fixture {
 	}
 	if len(fixture.ExpectedCatalog) == 0 {
 		t.Fatal("v70 derived-lookups fixture declares no expected catalog rows")
+	}
+	if strings.TrimSpace(fixture.InvalidWalkEntry.Path) == "" {
+		t.Fatal("v70 derived-lookups fixture declares no incomplete walk entry")
 	}
 	if len(fixture.CorruptSpawns) == 0 {
 		t.Fatal("v70 derived-lookups fixture declares no spawns corruption to repair")
@@ -198,16 +246,16 @@ func seedV69WithEvidence(t *testing.T, dbPath string, fixture v70Fixture) {
 			team = *evidence.IdentityTeam
 			name = *evidence.IdentityName
 		}
-		if err := sqlitex.ExecuteTransient(conn, `
-INSERT INTO claude_transcript_evidence (
+		if err := sqlitex.Execute(conn,
+			`INSERT INTO claude_transcript_evidence (
     source_path, scope, mod_time_unix_nano, size_bytes, has_conversation,
     identity_team, identity_name, spawns_json, title, branch, cwd
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{
-			Args: []any{
-				evidence.SourcePath, evidence.Scope, int64(1), int64(2), int64(0),
-				team, name, string(spawnsJSON), "", "", "",
-			},
-		}); err != nil {
+				Args: []any{
+					evidence.SourcePath, evidence.Scope, int64(1), int64(2), int64(0),
+					team, name, string(spawnsJSON), "", "", "",
+				},
+			}); err != nil {
 			_ = conn.Close()
 			t.Fatalf("seed evidence %q: %v", evidence.SourcePath, err)
 		}
@@ -243,37 +291,63 @@ func sortedRolloutRows(rows []v70Rollout) []string {
 	return out
 }
 
-func requireSpawnRowsEqual(t *testing.T, conn *sqlite.Conn, want []v70Spawn) {
+// withV70Conn scopes one connection to one assertion, so no test puts a
+// connection back twice and the pool size never depends on the test body.
+func withV70Conn(t *testing.T, db *Store, fn func(*sqlite.Conn)) {
 	t.Helper()
-	var got []v70Spawn
-	if err := sqlitex.ExecuteTransient(conn, `SELECT spawner_path, team, name FROM claude_teammate_spawns`, &sqlitex.ExecOptions{
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			got = append(got, v70Spawn{SpawnerPath: stmt.ColumnText(0), Team: stmt.ColumnText(1), Name: stmt.ColumnText(2)})
-			return nil
-		},
-	}); err != nil {
-		t.Fatalf("read the teammate spawns projection: %v", err)
+	conn, err := db.pool.Take(t.Context())
+	if err != nil {
+		t.Fatalf("take a store connection: %v", err)
 	}
+	defer db.pool.Put(conn)
+	fn(conn)
+}
+
+func readSpawnRows(t *testing.T, db *Store) []v70Spawn {
+	t.Helper()
+	var rows []v70Spawn
+	withV70Conn(t, db, func(conn *sqlite.Conn) {
+		if err := sqlitex.ExecuteTransient(conn, `SELECT spawner_path, team, name FROM claude_teammate_spawns`, &sqlitex.ExecOptions{
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				rows = append(rows, v70Spawn{SpawnerPath: stmt.ColumnText(0), Team: stmt.ColumnText(1), Name: stmt.ColumnText(2)})
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("read the teammate spawns projection: %v", err)
+		}
+	})
+	return rows
+}
+
+func readCatalogRows(t *testing.T, db *Store) []v70Rollout {
+	t.Helper()
+	var rows []v70Rollout
+	withV70Conn(t, db, func(conn *sqlite.Conn) {
+		if err := sqlitex.ExecuteTransient(conn, `SELECT source_path, session_id FROM codex_rollout_catalog`, &sqlitex.ExecOptions{
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				rows = append(rows, v70Rollout{Path: stmt.ColumnText(0), SessionID: stmt.ColumnText(1)})
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("read the Codex rollout catalog: %v", err)
+		}
+	})
+	return rows
+}
+
+func requireSpawnRowsEqual(t *testing.T, db *Store, want []v70Spawn) {
+	t.Helper()
 	wantRows := sortedSpawnRows(want)
-	gotRows := sortedSpawnRows(got)
+	gotRows := sortedSpawnRows(readSpawnRows(t, db))
 	if strings.Join(wantRows, "\n") != strings.Join(gotRows, "\n") {
 		t.Fatalf("claude_teammate_spawns = %q, want %q", gotRows, wantRows)
 	}
 }
 
-func requireCatalogRowsEqual(t *testing.T, conn *sqlite.Conn, want []v70Rollout) {
+func requireCatalogRowsEqual(t *testing.T, db *Store, want []v70Rollout) {
 	t.Helper()
-	var got []v70Rollout
-	if err := sqlitex.ExecuteTransient(conn, `SELECT source_path, session_id FROM codex_rollout_catalog`, &sqlitex.ExecOptions{
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			got = append(got, v70Rollout{Path: stmt.ColumnText(0), SessionID: stmt.ColumnText(1)})
-			return nil
-		},
-	}); err != nil {
-		t.Fatalf("read the Codex rollout catalog: %v", err)
-	}
 	wantRows := sortedRolloutRows(want)
-	gotRows := sortedRolloutRows(got)
+	gotRows := sortedRolloutRows(readCatalogRows(t, db))
 	if strings.Join(wantRows, "\n") != strings.Join(gotRows, "\n") {
 		t.Fatalf("codex_rollout_catalog = %q, want %q", gotRows, wantRows)
 	}
@@ -292,6 +366,48 @@ func countOnConn(t *testing.T, conn *sqlite.Conn, query string, args ...any) int
 		t.Fatalf("count %q: %v", query, err)
 	}
 	return count
+}
+
+func countOnStore(t *testing.T, db *Store, query string, args ...any) int {
+	t.Helper()
+	count := 0
+	withV70Conn(t, db, func(conn *sqlite.Conn) {
+		count = countOnConn(t, conn, query, args...)
+	})
+	return count
+}
+
+// plantCorruptDerivedState writes rows no source derives. INSERT OR IGNORE
+// keeps the planting idempotent so two expectations can share it.
+func plantCorruptDerivedState(t *testing.T, db *Store, fixture v70Fixture) {
+	t.Helper()
+	withV70Conn(t, db, func(conn *sqlite.Conn) {
+		for _, row := range fixture.CorruptSpawns {
+			if err := sqlitex.Execute(conn,
+				`INSERT OR IGNORE INTO claude_teammate_spawns (spawner_path, team, name) VALUES (?, ?, ?)`,
+				&sqlitex.ExecOptions{Args: []any{row.SpawnerPath, row.Team, row.Name}}); err != nil {
+				t.Fatalf("plant corrupt spawn row %v: %v", row, err)
+			}
+		}
+		for _, row := range fixture.CorruptCatalog {
+			if err := sqlitex.Execute(conn,
+				`INSERT OR IGNORE INTO codex_rollout_catalog (source_path, session_id) VALUES (?, ?)`,
+				&sqlitex.ExecOptions{Args: []any{row.Path, row.SessionID}}); err != nil {
+				t.Fatalf("plant corrupt catalog row %v: %v", row, err)
+			}
+		}
+	})
+}
+
+func fixtureRolloutFiles(fixture v70Fixture) []ingest.RolloutFile {
+	rollouts := make([]ingest.RolloutFile, 0, len(fixture.Walk))
+	for _, row := range fixture.Walk {
+		rollouts = append(rollouts, ingest.RolloutFile{
+			Path:      ingest.ResolvedPath(row.Path),
+			SessionID: ingest.SessionID(row.SessionID),
+		})
+	}
+	return rollouts
 }
 
 // TestMigrationV70DerivedLookups upgrades a seeded V69 store through the real
@@ -313,92 +429,119 @@ func TestMigrationV70DerivedLookups(t *testing.T) {
 		}
 	}()
 
-	conn, err := db.pool.Take(t.Context())
-	if err != nil {
-		t.Fatalf("take the upgraded store's connection: %v", err)
-	}
-	defer db.pool.Put(conn)
-
-	if got := countOnConn(t, conn, `SELECT COUNT(*) FROM claude_teammate_spawns`); got != len(fixture.ExpectedSpawns) {
-		t.Fatalf("V70 backfilled %d spawn rows, want %d", got, len(fixture.ExpectedSpawns))
-	}
-
-	rollouts := make([]ingest.RolloutFile, 0, len(fixture.Walk))
-	for _, row := range fixture.Walk {
-		rollouts = append(rollouts, ingest.RolloutFile{
-			Path:      ingest.ResolvedPath(row.Path),
-			SessionID: ingest.SessionID(row.SessionID),
-		})
-	}
+	rollouts := fixtureRolloutFiles(fixture)
+	incomplete := append(append([]ingest.RolloutFile{}, rollouts...), ingest.RolloutFile{
+		Path: ingest.ResolvedPath(fixture.InvalidWalkEntry.Path),
+		// SessionID is deliberately empty: the fixture names the incomplete entry.
+	})
 
 	for _, expectation := range fixture.Expectations {
 		switch expectation.Kind {
 		case "spawns-backfill":
-			requireSpawnRowsEqual(t, conn, fixture.ExpectedSpawns)
+			requireSpawnRowsEqual(t, db, fixture.ExpectedSpawns)
 		case "duplicate-dedupe":
 			probe := fixture.DuplicateProbe
-			got := countOnConn(t, conn,
+			got := countOnStore(t, db,
 				`SELECT COUNT(*) FROM claude_teammate_spawns WHERE spawner_path = ? AND team = ? AND name = ?`,
 				probe.SpawnerPath, probe.Team, probe.Name)
 			if got != 1 {
 				t.Fatalf("the repeated (team, name) in %q produced %d rows, want 1", probe.SpawnerPath, got)
 			}
 		case "catalog-empty":
-			if got := countOnConn(t, conn, `SELECT COUNT(*) FROM codex_rollout_catalog`); got != 0 {
-				t.Fatalf("V70 backfilled %d Codex catalog rows, want 0: a path the database never stored cannot be recovered", got)
+			requireCatalogRowsEqual(t, db, fixture.ExpectedCatalogOnUpgrade)
+		case "rebuild-refuses-incomplete-walk":
+			// The planting is what makes the rollback observable: a rebuild that
+			// cleared the tables and did not roll back would replace these rows.
+			plantCorruptDerivedState(t, db, fixture)
+			beforeSpawns := readSpawnRows(t, db)
+			beforeCatalog := readCatalogRows(t, db)
+			rebuildErr := db.RebuildDerivedLookups(t.Context(), incomplete)
+			if rebuildErr == nil {
+				t.Fatal("RebuildDerivedLookups accepted a walk entry with an empty session id")
 			}
+			if !strings.Contains(rebuildErr.Error(), "empty session id") {
+				t.Fatalf("RebuildDerivedLookups error = %q, want it to name the empty session id", rebuildErr)
+			}
+			requireSpawnRowsEqual(t, db, beforeSpawns)
+			requireCatalogRowsEqual(t, db, beforeCatalog)
 		case "rebuild-spawns":
-			for _, row := range fixture.CorruptSpawns {
-				if err := sqlitex.Execute(conn,
-					`INSERT INTO claude_teammate_spawns (spawner_path, team, name) VALUES (?, ?, ?)`,
-					&sqlitex.ExecOptions{Args: []any{row.SpawnerPath, row.Team, row.Name}}); err != nil {
-					t.Fatalf("plant corrupt spawn row %v: %v", row, err)
-				}
-			}
-			for _, row := range fixture.CorruptCatalog {
-				if err := sqlitex.Execute(conn,
-					`INSERT INTO codex_rollout_catalog (source_path, session_id) VALUES (?, ?)`,
-					&sqlitex.ExecOptions{Args: []any{row.Path, row.SessionID}}); err != nil {
-					t.Fatalf("plant corrupt catalog row %v: %v", row, err)
-				}
-			}
-			db.pool.Put(conn)
+			plantCorruptDerivedState(t, db, fixture)
 			if err := db.RebuildDerivedLookups(t.Context(), rollouts); err != nil {
 				t.Fatalf("rebuild the derived lookups: %v", err)
 			}
-			conn, err = db.pool.Take(t.Context())
-			if err != nil {
-				t.Fatalf("retake the store connection after the rebuild: %v", err)
-			}
-			requireSpawnRowsEqual(t, conn, fixture.ExpectedSpawns)
+			requireSpawnRowsEqual(t, db, fixture.ExpectedSpawns)
 		case "rebuild-catalog":
-			requireCatalogRowsEqual(t, conn, fixture.ExpectedCatalog)
+			// The catalog equals the complete walk exactly: the rebuild replaces
+			// the table, so the planted row the walk does not enumerate is gone.
+			requireCatalogRowsEqual(t, db, fixture.ExpectedCatalog)
 		case "prune-cascade":
 			pruned := fixture.PruneProbe.SpawnerPath
-			if err := sqlitex.ExecuteTransient(conn,
-				`DELETE FROM claude_transcript_evidence WHERE source_path = ?`,
-				&sqlitex.ExecOptions{Args: []any{pruned}}); err != nil {
-				t.Fatalf("prune the evidence row for %q: %v", pruned, err)
+			if err := db.SaveClaudeEvidence(t.Context(), nil, []ingest.ResolvedPath{ingest.ResolvedPath(pruned)}); err != nil {
+				t.Fatalf("prune the evidence row for %q through the evidence cache: %v", pruned, err)
 			}
-			if got := countOnConn(t, conn,
-				`SELECT COUNT(*) FROM claude_teammate_spawns WHERE spawner_path = ?`, pruned); got != 0 {
-				t.Fatalf("pruning the evidence row for %q left %d spawn rows, want 0 through ON DELETE CASCADE", pruned, got)
+			if got := countOnStore(t, db, `SELECT COUNT(*) FROM claude_transcript_evidence WHERE source_path = ?`, pruned); got != 0 {
+				t.Fatalf("the evidence cache left %d evidence rows for the pruned path %q, want 0", got, pruned)
+			}
+			if got := countOnStore(t, db, `SELECT COUNT(*) FROM claude_teammate_spawns WHERE spawner_path = ?`, pruned); got != 0 {
+				t.Fatalf("deleting the evidence row for %q left %d spawn rows; the foreign key's ON DELETE CASCADE did not remove them", pruned, got)
 			}
 		default:
 			t.Fatalf("fixture expectation %q names kind %q with no runner", expectation.Name, expectation.Kind)
 		}
 	}
 
-	// The scope flip behind the projection: a subagent transcript contributes
-	// no rows, because only root records record projectable spawns.
+	// The scope filter behind the projection: the subagent transcript records
+	// spawns, and only a root record may project them.
 	for _, evidence := range fixture.Evidence {
 		if evidence.Scope != string(ingest.ClaudeEvidenceScopeSubagent) {
 			continue
 		}
-		if got := countOnConn(t, conn,
+		if got := countOnStore(t, db,
 			`SELECT COUNT(*) FROM claude_teammate_spawns WHERE spawner_path = ?`, evidence.SourcePath); got != 0 {
 			t.Fatalf("the subagent transcript %q holds %d spawn rows, want none", evidence.SourcePath, got)
 		}
+	}
+}
+
+// TestSaveClaudeEvidenceWritesTeammateSpawns drives the production writer with
+// no seam stub and compares the whole projection after each save against the
+// fixture's expectations: a root save, a re-save that drops a pair, and a
+// subagent save whose non-empty spawns must not be projected.
+func TestSaveClaudeEvidenceWritesTeammateSpawns(t *testing.T) {
+	fixture := loadV70DerivedLookupsFixture(t)
+	dbPath := filepath.Join(t.TempDir(), "v70-maintenance.db")
+	// The maintenance write is this test's subject, so the store opens through
+	// the shipped migration chain and then writes through SaveClaudeEvidence.
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open the maintenance store: %v", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close the maintenance store: %v", err)
+		}
+	}()
+
+	for _, step := range fixture.MaintenanceSteps {
+		path, err := ingest.NewResolvedPath(step.SourcePath)
+		if err != nil {
+			t.Fatalf("maintenance step %q names an invalid source path %q: %v", step.Name, step.SourcePath, err)
+		}
+		record := ingest.ClaudeTranscriptEvidence{
+			SourcePath:      path,
+			Scope:           ingest.ClaudeEvidenceScope(step.Scope),
+			ModTimeUnixNano: 1,
+			SizeBytes:       2,
+			Origin:          sessionorigin.User,
+			ProofVersion:    ingest.ClaudeIdentityProofVersion,
+		}
+		for _, spawn := range step.Spawns {
+			record.Spawns = append(record.Spawns, ingest.ClaudeTeammateIdentity{Team: spawn.Team, Name: spawn.Name})
+		}
+		if err := db.SaveClaudeEvidence(t.Context(), []ingest.ClaudeTranscriptEvidence{record}, nil); err != nil {
+			t.Fatalf("maintenance step %q: SaveClaudeEvidence: %v", step.Name, err)
+		}
+		requireSpawnRowsEqual(t, db, step.ExpectedSpawns)
 	}
 }
 
