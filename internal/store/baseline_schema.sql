@@ -155,6 +155,13 @@ CREATE TABLE annotators (
     CHECK (kind_id = 2 OR (model_id IS NULL AND provider_key IS NULL))
 ) STRICT;
 
+CREATE TABLE claude_teammate_spawns (
+  spawner_path TEXT NOT NULL REFERENCES claude_transcript_evidence(source_path) ON DELETE CASCADE,
+  team         TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  PRIMARY KEY (spawner_path, team, name)
+) STRICT;
+
 CREATE TABLE claude_transcript_evidence (
   source_path TEXT PRIMARY KEY,
   scope TEXT NOT NULL CHECK(scope IN ('root', 'subagent')),
@@ -169,6 +176,11 @@ CREATE TABLE claude_transcript_evidence (
   cwd TEXT NOT NULL, origin TEXT NOT NULL DEFAULT ''
   CHECK (origin IN ('', 'user', 'agent', 'unknown')), proof_version INTEGER NOT NULL DEFAULT 0 CHECK(proof_version >= 0), native_agent_id TEXT NOT NULL DEFAULT '', native_agent_valid INTEGER NOT NULL DEFAULT 0 CHECK(native_agent_valid IN (0, 1)), content_digest TEXT NOT NULL DEFAULT '', identity_records_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_records_json)),
   CHECK((identity_team IS NULL) = (identity_name IS NULL))
+) STRICT;
+
+CREATE TABLE codex_rollout_catalog (
+  source_path TEXT PRIMARY KEY,
+  session_id  TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE collective_attempt_sources (
@@ -1174,6 +1186,14 @@ CREATE INDEX idx_anntype_family_id ON annotation_types(family_id);
 
 CREATE INDEX idx_anntype_status ON annotation_types(status_id);
 
+CREATE INDEX idx_claude_evidence_identity_root
+  ON claude_transcript_evidence(identity_team, identity_name)
+  WHERE scope = 'root' AND identity_team IS NOT NULL;
+
+CREATE INDEX idx_claude_teammate_spawns_identity ON claude_teammate_spawns(team, name);
+
+CREATE INDEX idx_codex_rollout_catalog_session ON codex_rollout_catalog(session_id);
+
 CREATE UNIQUE INDEX idx_collective_observation_versions_current ON collective_observation_versions(village_url,user_id,collective_id) WHERE current=1;
 
 CREATE INDEX idx_daily_project_hash ON daily_summary_by_project(project_hash);
@@ -1424,4 +1444,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 69;
+PRAGMA user_version = 70;

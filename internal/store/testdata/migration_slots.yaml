@@ -73,6 +73,7 @@ slots:
   - {name: v67-latest-attempt-pointer, slot: 67, needle: "ADD COLUMN latest_attempt_generation_id TEXT"}
   - {name: v68-collective-observations, slot: 68, needle: "CREATE TABLE collective_observation_scopes"}
   - {name: v69-source-unavailability-cause, slot: 69, needle: "original-source-present-record-unusable"}
+  - {name: v70-derived-lookups, slot: 70, needle: "CREATE TABLE claude_teammate_spawns ("}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot
