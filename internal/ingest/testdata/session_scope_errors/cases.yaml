@@ -1,0 +1,467 @@
+# Method goldens for a session-scope miss. Each case states the misses the core
+# would record and the three renderings they must produce: Reason() (one line
+# for `open`), FixLine() (the fix clause alone), and Error() (the labelled
+# block). Every case is rendered twice, once with no prefix and once with the
+# prefix below, because a suggested command must carry the store the run used.
+#
+# The block's layout is part of the contract: the label column, the hanging
+# indent, the searched rows, and the wrap of the two long prose fields. A change
+# to any of them is a change to what the user reads.
+prefix: peasant --data-dir '/srv/peasant'
+cases:
+    - name: not_found
+      command: harvest
+      store: attached
+      misses:
+        - id: 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+          reason: not_found
+          searched:
+            - harness: claude-code
+              method: name_pattern
+              location: ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl and ~/.claude/projects/*/*/subagents/{,workflows/wf_*/}0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+            - harness: codex
+              method: name_pattern
+              location: ~/.codex/sessions/*/*/*/rollout-*-0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+            - harness: cursor
+              method: name_pattern
+              location: ~/.cursor/projects/*/agent-transcripts/{0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60,*/subagents/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60}.jsonl
+            - harness: opencode
+              method: sqlite_row
+              location: session row in ~/.local/share/opencode/opencode.db
+            - harness: opencode
+              method: unsupported
+              location: ""
+              reason: file_body
+            - harness: strike
+              method: name_pattern
+              location: ~/.strike/sessions/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+            - harness: pi
+              method: unsupported
+              location: ""
+              reason: file_header
+      bare:
+        reason: 'session 0f3c... was not found, so nothing was recorded; searched store, claude-code, codex, cursor, opencode (SQLite), strike; cannot search by id: opencode (legacy JSON), pi'
+        fix: check the id with `peasant sessions list`, or run `peasant harvest` once without --session, then retry
+        block: |-
+            peasant: harvest failed: session 0f3c... was not found, so nothing was recorded
+              what:     this session-scoped harvest looked for session 0f3c... and no enabled source holds it
+              why:      the store has no row for this id, and no harness that can search by id has a file or row with it
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         no recorded session with this id
+                claude-code   ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl and ~/.claude/projects/*/*/subagents/{,workflows/wf_*/}0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                codex         ~/.codex/sessions/*/*/*/rollout-*-0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                cursor        ~/.cursor/projects/*/agent-transcripts/{0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60,*/subagents/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60}.jsonl
+                opencode      session row in ~/.local/share/opencode/opencode.db
+                opencode      legacy JSON storage: cannot be searched by id (the id is only in the file body)
+                strike        ~/.strike/sessions/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                pi            cannot be searched by id (the id is only in the file header)
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      check the id with `peasant sessions list`, or run `peasant harvest` once without
+                        --session, then retry
+      prefixed:
+        reason: 'session 0f3c... was not found, so nothing was recorded; searched store, claude-code, codex, cursor, opencode (SQLite), strike; cannot search by id: opencode (legacy JSON), pi'
+        fix: check the id with `peasant --data-dir '/srv/peasant' sessions list`, or run `peasant --data-dir '/srv/peasant' harvest` once without --session, then retry
+        block: |-
+            peasant: harvest failed: session 0f3c... was not found, so nothing was recorded
+              what:     this session-scoped harvest looked for session 0f3c... and no enabled source holds it
+              why:      the store has no row for this id, and no harness that can search by id has a file or row with it
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         no recorded session with this id
+                claude-code   ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl and ~/.claude/projects/*/*/subagents/{,workflows/wf_*/}0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                codex         ~/.codex/sessions/*/*/*/rollout-*-0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                cursor        ~/.cursor/projects/*/agent-transcripts/{0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60,*/subagents/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60}.jsonl
+                opencode      session row in ~/.local/share/opencode/opencode.db
+                opencode      legacy JSON storage: cannot be searched by id (the id is only in the file body)
+                strike        ~/.strike/sessions/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                pi            cannot be searched by id (the id is only in the file header)
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      check the id with `peasant --data-dir '/srv/peasant' sessions list`, or run
+                        `peasant --data-dir '/srv/peasant' harvest` once without --session, then retry
+    - name: harness_filtered
+      command: harvest
+      store: attached
+      misses:
+        - id: 9ab1c2d3-4e5f-4a60-b71c-8d9e0f1a2b3c
+          reason: harness_filtered
+          storedHarness: codex
+      bare:
+        reason: session 9ab1... is recorded under codex, which --harness excludes, so nothing was recorded
+        fix: drop --harness, or pass --harness codex
+        block: |-
+            peasant: harvest failed: session 9ab1... is recorded under codex, which --harness excludes, so nothing was recorded
+              what:     this session-scoped harvest looked for session 9ab1... and found it recorded under codex, which this run's --harness excludes
+              why:      this session is recorded under codex, which --harness excludes
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      drop --harness, or pass --harness codex
+      prefixed:
+        reason: session 9ab1... is recorded under codex, which --harness excludes, so nothing was recorded
+        fix: drop --harness, or pass --harness codex
+        block: |-
+            peasant: harvest failed: session 9ab1... is recorded under codex, which --harness excludes, so nothing was recorded
+              what:     this session-scoped harvest looked for session 9ab1... and found it recorded under codex, which this run's --harness excludes
+              why:      this session is recorded under codex, which --harness excludes
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      drop --harness, or pass --harness codex
+    - name: since_filtered
+      command: harvest
+      store: attached
+      misses:
+        - id: c7d2e3f4-5a6b-4c70-8d1e-2f3a4b5c6d7e
+          reason: since_filtered
+      bare:
+        reason: session c7d2... was found but --since excludes it, so nothing was recorded
+        fix: drop --since, or use an earlier --since
+        block: |-
+            peasant: harvest failed: session c7d2... was found but --since excludes it, so nothing was recorded
+              what:     this session-scoped harvest looked for session c7d2... and found it, but this run's --since excludes it
+              why:      the session was found, but --since excludes it
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      drop --since, or use an earlier --since
+      prefixed:
+        reason: session c7d2... was found but --since excludes it, so nothing was recorded
+        fix: drop --since, or use an earlier --since
+        block: |-
+            peasant: harvest failed: session c7d2... was found but --since excludes it, so nothing was recorded
+              what:     this session-scoped harvest looked for session c7d2... and found it, but this run's --since excludes it
+              why:      the session was found, but --since excludes it
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      drop --since, or use an earlier --since
+    - name: lookup_failed
+      command: harvest
+      store: attached
+      misses:
+        - id: 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+          reason: not_found
+          searched:
+            - harness: claude-code
+              method: name_pattern
+              location: ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+            - harness: opencode
+              method: failed
+              location: ~/.local/share/opencode/opencode.db
+              detail: database is locked
+      bare:
+        reason: 'session 0f3c... could not be looked up in all sources, so nothing was recorded; searched store, claude-code; lookup failed: opencode (database is locked)'
+        fix: 'repair the opencode database at ~/.local/share/opencode/opencode.db (its lookup failed: database is locked), then run `peasant harvest --session 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60` again, or check the id with `peasant sessions list`'
+        block: |-
+            peasant: harvest failed: session 0f3c... could not be looked up in all sources, so nothing was recorded
+              what:     this session-scoped harvest looked for session 0f3c...; no source that was searched holds it, and the opencode lookup failed
+              why:      the store has no row for this id, and the opencode lookup could not run, so the session may be there
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         no recorded session with this id
+                claude-code   ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                opencode      lookup failed: database is locked
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      repair the opencode database at ~/.local/share/opencode/opencode.db (its lookup failed:
+                        database is locked), then run
+                        `peasant harvest --session 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60` again, or check the id
+                        with `peasant sessions list`
+      prefixed:
+        reason: 'session 0f3c... could not be looked up in all sources, so nothing was recorded; searched store, claude-code; lookup failed: opencode (database is locked)'
+        fix: 'repair the opencode database at ~/.local/share/opencode/opencode.db (its lookup failed: database is locked), then run `peasant --data-dir ''/srv/peasant'' harvest --session 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60` again, or check the id with `peasant --data-dir ''/srv/peasant'' sessions list`'
+        block: |-
+            peasant: harvest failed: session 0f3c... could not be looked up in all sources, so nothing was recorded
+              what:     this session-scoped harvest looked for session 0f3c...; no source that was searched holds it, and the opencode lookup failed
+              why:      the store has no row for this id, and the opencode lookup could not run, so the session may be there
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         no recorded session with this id
+                claude-code   ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                opencode      lookup failed: database is locked
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      repair the opencode database at ~/.local/share/opencode/opencode.db (its lookup failed:
+                        database is locked), then run
+                        `peasant --data-dir '/srv/peasant' harvest --session 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60`
+                        again, or check the id with `peasant --data-dir '/srv/peasant' sessions list`
+    - name: harness_disabled
+      command: harvest
+      store: attached
+      misses:
+        - id: c7d2e3f4-5a6b-4c70-8d1e-2f3a4b5c6d7e
+          reason: not_found
+          searched:
+            - harness: claude-code
+              method: stored_path
+              location: ~/.claude/projects/*/c7d2e3f4-5a6b-4c70-8d1e-2f3a4b5c6d7e.jsonl
+            - harness: codex
+              method: harness_disabled
+              location: ""
+      bare:
+        reason: 'session c7d2... was not found, so nothing was recorded; searched store, claude-code; not enabled: codex'
+        fix: check the id with `peasant sessions list`, or run `peasant harvest` once without --session, then retry
+        block: |-
+            peasant: harvest failed: session c7d2... was not found, so nothing was recorded
+              what:     this session-scoped harvest looked for session c7d2... and no enabled source holds it
+              why:      the store has no row for this id, and no harness that can search by id has a file or row with it
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         no recorded session with this id
+                claude-code   ~/.claude/projects/*/c7d2e3f4-5a6b-4c70-8d1e-2f3a4b5c6d7e.jsonl
+                codex         not enabled (config.yaml excludes it); enable it with `peasant kickstart`
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      check the id with `peasant sessions list`, or run `peasant harvest` once without
+                        --session, then retry
+      prefixed:
+        reason: 'session c7d2... was not found, so nothing was recorded; searched store, claude-code; not enabled: codex'
+        fix: check the id with `peasant --data-dir '/srv/peasant' sessions list`, or run `peasant --data-dir '/srv/peasant' harvest` once without --session, then retry
+        block: |-
+            peasant: harvest failed: session c7d2... was not found, so nothing was recorded
+              what:     this session-scoped harvest looked for session c7d2... and no enabled source holds it
+              why:      the store has no row for this id, and no harness that can search by id has a file or row with it
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         no recorded session with this id
+                claude-code   ~/.claude/projects/*/c7d2e3f4-5a6b-4c70-8d1e-2f3a4b5c6d7e.jsonl
+                codex         not enabled (config.yaml excludes it); enable it with `peasant --data-dir '/srv/peasant' kickstart`
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      check the id with `peasant --data-dir '/srv/peasant' sessions list`, or run
+                        `peasant --data-dir '/srv/peasant' harvest` once without --session, then retry
+    - name: several_misses
+      command: harvest
+      store: attached
+      misses:
+        - id: 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+          reason: not_found
+          searched:
+            - harness: claude-code
+              method: name_pattern
+              location: ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl and ~/.claude/projects/*/*/subagents/{,workflows/wf_*/}0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+            - harness: codex
+              method: name_pattern
+              location: ~/.codex/sessions/*/*/*/rollout-*-0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+            - harness: cursor
+              method: name_pattern
+              location: ~/.cursor/projects/*/agent-transcripts/{0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60,*/subagents/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60}.jsonl
+            - harness: opencode
+              method: sqlite_row
+              location: session row in ~/.local/share/opencode/opencode.db
+            - harness: opencode
+              method: unsupported
+              location: ""
+              reason: file_body
+            - harness: strike
+              method: name_pattern
+              location: ~/.strike/sessions/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+            - harness: pi
+              method: unsupported
+              location: ""
+              reason: file_header
+        - id: 9ab1c2d3-4e5f-4a60-b71c-8d9e0f1a2b3c
+          reason: harness_filtered
+          storedHarness: codex
+        - id: c7d2e3f4-5a6b-4c70-8d1e-2f3a4b5c6d7e
+          reason: since_filtered
+      bare:
+        reason: '3 sessions could not be used, so nothing was recorded (0f3c... was not found; 9ab1... is recorded under codex, which --harness excludes; c7d2... was found but --since excludes it); searched store, claude-code, codex, cursor, opencode (SQLite), strike; cannot search by id: opencode (legacy JSON), pi'
+        fix: check the id with `peasant sessions list`, or run `peasant harvest` once without --session; drop --harness, or pass --harness codex; drop --since, or use an earlier --since; then retry
+        block: |-
+            peasant: harvest failed: 3 sessions could not be used, so nothing was recorded (0f3c... was not found; 9ab1... is recorded under codex, which --harness excludes; c7d2... was found but --since excludes it)
+              what:     this session-scoped harvest looked for 3 sessions
+              why:      session 0f3c...: the store has no row for this id, and no harness that can search by id has a file or row with it
+              why:      session 9ab1...: this session is recorded under codex, which --harness excludes
+              why:      session c7d2...: the session was found, but --since excludes it
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         no recorded session with this id
+                claude-code   ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl and ~/.claude/projects/*/*/subagents/{,workflows/wf_*/}0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                codex         ~/.codex/sessions/*/*/*/rollout-*-0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                cursor        ~/.cursor/projects/*/agent-transcripts/{0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60,*/subagents/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60}.jsonl
+                opencode      session row in ~/.local/share/opencode/opencode.db
+                opencode      legacy JSON storage: cannot be searched by id (the id is only in the file body)
+                strike        ~/.strike/sessions/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                pi            cannot be searched by id (the id is only in the file header)
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      check the id with `peasant sessions list`, or run `peasant harvest` once without
+                        --session; drop --harness, or pass --harness codex; drop --since, or use an earlier
+                        --since; then retry
+      prefixed:
+        reason: '3 sessions could not be used, so nothing was recorded (0f3c... was not found; 9ab1... is recorded under codex, which --harness excludes; c7d2... was found but --since excludes it); searched store, claude-code, codex, cursor, opencode (SQLite), strike; cannot search by id: opencode (legacy JSON), pi'
+        fix: check the id with `peasant --data-dir '/srv/peasant' sessions list`, or run `peasant --data-dir '/srv/peasant' harvest` once without --session; drop --harness, or pass --harness codex; drop --since, or use an earlier --since; then retry
+        block: |-
+            peasant: harvest failed: 3 sessions could not be used, so nothing was recorded (0f3c... was not found; 9ab1... is recorded under codex, which --harness excludes; c7d2... was found but --since excludes it)
+              what:     this session-scoped harvest looked for 3 sessions
+              why:      session 0f3c...: the store has no row for this id, and no harness that can search by id has a file or row with it
+              why:      session 9ab1...: this session is recorded under codex, which --harness excludes
+              why:      session c7d2...: the session was found, but --since excludes it
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         no recorded session with this id
+                claude-code   ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl and ~/.claude/projects/*/*/subagents/{,workflows/wf_*/}0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                codex         ~/.codex/sessions/*/*/*/rollout-*-0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                cursor        ~/.cursor/projects/*/agent-transcripts/{0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60,*/subagents/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60}.jsonl
+                opencode      session row in ~/.local/share/opencode/opencode.db
+                opencode      legacy JSON storage: cannot be searched by id (the id is only in the file body)
+                strike        ~/.strike/sessions/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                pi            cannot be searched by id (the id is only in the file header)
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      check the id with `peasant --data-dir '/srv/peasant' sessions list`, or run
+                        `peasant --data-dir '/srv/peasant' harvest` once without --session; drop --harness, or
+                        pass --harness codex; drop --since, or use an earlier --since; then retry
+    - name: several_misses_lookup_failed
+      command: harvest
+      store: attached
+      misses:
+        - id: 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+          reason: not_found
+          searched:
+            - harness: claude-code
+              method: name_pattern
+              location: ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+            - harness: opencode
+              method: failed
+              location: ~/.local/share/opencode/opencode.db
+              detail: database is locked
+        - id: 9ab1c2d3-4e5f-4a60-b71c-8d9e0f1a2b3c
+          reason: harness_filtered
+          storedHarness: codex
+      bare:
+        reason: '2 sessions could not be used, so nothing was recorded (0f3c... could not be looked up in all sources; 9ab1... is recorded under codex, which --harness excludes); searched store, claude-code; lookup failed: opencode (database is locked)'
+        fix: 'repair the opencode database at ~/.local/share/opencode/opencode.db (its lookup failed: database is locked), then run `peasant harvest --session 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60` again, or check the id with `peasant sessions list`'
+        block: |-
+            peasant: harvest failed: 2 sessions could not be used, so nothing was recorded (0f3c... could not be looked up in all sources; 9ab1... is recorded under codex, which --harness excludes)
+              what:     this session-scoped harvest looked for 2 sessions
+              why:      session 0f3c...: the store has no row for this id, and the opencode lookup could not run, so the session may be there
+              why:      session 9ab1...: this session is recorded under codex, which --harness excludes
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         no recorded session with this id
+                claude-code   ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                opencode      lookup failed: database is locked
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      repair the opencode database at ~/.local/share/opencode/opencode.db (its lookup failed:
+                        database is locked), then run
+                        `peasant harvest --session 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60` again, or check the id
+                        with `peasant sessions list`
+      prefixed:
+        reason: '2 sessions could not be used, so nothing was recorded (0f3c... could not be looked up in all sources; 9ab1... is recorded under codex, which --harness excludes); searched store, claude-code; lookup failed: opencode (database is locked)'
+        fix: 'repair the opencode database at ~/.local/share/opencode/opencode.db (its lookup failed: database is locked), then run `peasant --data-dir ''/srv/peasant'' harvest --session 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60` again, or check the id with `peasant --data-dir ''/srv/peasant'' sessions list`'
+        block: |-
+            peasant: harvest failed: 2 sessions could not be used, so nothing was recorded (0f3c... could not be looked up in all sources; 9ab1... is recorded under codex, which --harness excludes)
+              what:     this session-scoped harvest looked for 2 sessions
+              why:      session 0f3c...: the store has no row for this id, and the opencode lookup could not run, so the session may be there
+              why:      session 9ab1...: this session is recorded under codex, which --harness excludes
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         no recorded session with this id
+                claude-code   ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                opencode      lookup failed: database is locked
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      repair the opencode database at ~/.local/share/opencode/opencode.db (its lookup failed:
+                        database is locked), then run
+                        `peasant --data-dir '/srv/peasant' harvest --session 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60`
+                        again, or check the id with `peasant --data-dir '/srv/peasant' sessions list`
+    - name: store_not_attached
+      command: harvest logs
+      store: not_attached
+      misses:
+        - id: 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+          reason: not_found
+          searched:
+            - harness: claude-code
+              method: stored_path
+              location: ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+            - harness: pi
+              method: unsupported
+              location: ""
+              reason: file_header
+      bare:
+        reason: 'session 0f3c... was not found, so nothing was recorded; searched no store (logs-only), claude-code; cannot search by id: pi'
+        fix: no store is attached to this run, so a pi or legacy-JSON OpenCode session can be found only by running `peasant harvest logs` once without --session, then retry
+        block: |-
+            peasant: harvest logs failed: session 0f3c... was not found, so nothing was recorded
+              what:     this session-scoped harvest logs looked for session 0f3c... and no enabled source holds it
+              why:      no store is attached to this run, and no harness that can search by id has a file or row with it
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         not attached (logs-only run)
+                claude-code   ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                pi            cannot be searched by id (the id is only in the file header)
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      no store is attached to this run, so a pi or legacy-JSON OpenCode session can be found
+                        only by running `peasant harvest logs` once without --session, then retry
+      prefixed:
+        reason: 'session 0f3c... was not found, so nothing was recorded; searched no store (logs-only), claude-code; cannot search by id: pi'
+        fix: no store is attached to this run, so a pi or legacy-JSON OpenCode session can be found only by running `peasant --data-dir '/srv/peasant' harvest logs` once without --session, then retry
+        block: |-
+            peasant: harvest logs failed: session 0f3c... was not found, so nothing was recorded
+              what:     this session-scoped harvest logs looked for session 0f3c... and no enabled source holds it
+              why:      no store is attached to this run, and no harness that can search by id has a file or row with it
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              searched:
+                store         not attached (logs-only run)
+                claude-code   ~/.claude/projects/*/0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60.jsonl
+                pi            cannot be searched by id (the id is only in the file header)
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      no store is attached to this run, so a pi or legacy-JSON OpenCode session can be found
+                        only by running `peasant --data-dir '/srv/peasant' harvest logs` once without --session,
+                        then retry
+    - name: harvest_index
+      command: harvest index
+      store: attached
+      misses:
+        - id: 9ab1c2d3-4e5f-4a60-b71c-8d9e0f1a2b3c
+          reason: harness_filtered
+          storedHarness: codex
+      bare:
+        reason: session 9ab1... is recorded under codex, which --harness excludes, so nothing was recorded
+        fix: drop --harness, or pass --harness codex
+        block: |-
+            peasant: harvest index failed: session 9ab1... is recorded under codex, which --harness excludes, so nothing was recorded
+              what:     this session-scoped harvest index looked for session 9ab1... and found it recorded under codex, which this run's --harness excludes
+              why:      this session is recorded under codex, which --harness excludes
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      drop --harness, or pass --harness codex
+      prefixed:
+        reason: session 9ab1... is recorded under codex, which --harness excludes, so nothing was recorded
+        fix: drop --harness, or pass --harness codex
+        block: |-
+            peasant: harvest index failed: session 9ab1... is recorded under codex, which --harness excludes, so nothing was recorded
+              what:     this session-scoped harvest index looked for session 9ab1... and found it recorded under codex, which this run's --harness excludes
+              why:      this session is recorded under codex, which --harness excludes
+              where:    session lookup (ingest scoped locate)
+              when:     before any session was swept, recorded, or indexed
+              impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+                        store migration, search-index repair) may still have run. No full scan was run.
+              fix:      drop --harness, or pass --harness codex

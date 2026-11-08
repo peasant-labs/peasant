@@ -1,0 +1,10 @@
+requiredNames:
+  - not_found
+  - harness_filtered
+  - since_filtered
+  - lookup_failed
+  - harness_disabled
+  - several_misses
+  - several_misses_lookup_failed
+  - store_not_attached
+  - harvest_index
