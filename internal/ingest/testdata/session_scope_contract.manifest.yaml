@@ -1,0 +1,9 @@
+requiredNames:
+  - sorted-deduplicated-and-copied
+  - refuses-no-ids
+  - refuses-unset-policy
+  - refuses-empty-id
+  - refuses-empty-scope
+  - refuses-scope-and-allowlist
+  - unreadable-selected-and-child-are-upkeep-not-processed
+  - context-members-are-in-neither-set
