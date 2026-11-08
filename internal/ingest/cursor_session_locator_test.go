@@ -14,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/cursor_session_locator.yaml
@@ -40,12 +39,17 @@ type cursorTreeEntry struct {
 	Session   string   `yaml:"session"`
 	Subagents []string `yaml:"subagents"`
 	Title     string   `yaml:"title"`
+	// NoRoot writes only the subagent files, so a case can place a session's
+	// child under a second workspace without duplicating the root session.
+	NoRoot bool `yaml:"noRoot"`
 }
 
 type cursorDiscoverCase struct {
 	ID             string                 `yaml:"id"`
 	Workspace      string                 `yaml:"workspace"`
 	Parent         string                 `yaml:"parent"`
+	Path           string                 `yaml:"path"`
+	WantError      string                 `yaml:"wantError"`
 	Stored         cursorStoredCase       `yaml:"stored"`
 	WantMembers    []string               `yaml:"wantMembers"`
 	WantUnreadable []cursorUnreadableCase `yaml:"wantUnreadable"`
@@ -62,14 +66,17 @@ type cursorStoredCase struct {
 }
 
 type cursorChildCase struct {
-	Workspace string `yaml:"workspace"`
-	Session   string `yaml:"session"`
-	Parent    string `yaml:"parent"`
+	Workspace    string `yaml:"workspace"`
+	Session      string `yaml:"session"`
+	Parent       string `yaml:"parent"`
+	Harness      string `yaml:"harness"`
+	HarnessUnset bool   `yaml:"harnessUnset"`
 }
 
 type cursorUnreadableCase struct {
 	ID     string `yaml:"id"`
 	Reason string `yaml:"reason"`
+	Detail string `yaml:"detail"`
 }
 
 type cursorProbeCase struct {
@@ -79,6 +86,7 @@ type cursorProbeCase struct {
 
 type cursorLookupCase struct {
 	ID           string               `yaml:"id"`
+	Roots        []string             `yaml:"roots"`
 	Fault        *cursorFaultCase     `yaml:"fault"`
 	WantSources  []string             `yaml:"wantSources"`
 	WantSearched []cursorSearchedCase `yaml:"wantSearched"`
@@ -103,19 +111,13 @@ type cursorFaultCase struct {
 func loadCursorSessionLocatorFixture(t *testing.T) cursorLocatorFixture {
 	t.Helper()
 	var fixture cursorLocatorFixture
-	if err := yaml.Unmarshal(cursorSessionLocatorYAML, &fixture); err != nil {
+	if err := testutil.DecodeNamedFixtureYAML(cursorSessionLocatorYAML, &fixture); err != nil {
 		t.Fatalf("decode cursor session locator fixture: %v", err)
 	}
-	names := make([]string, 0, len(fixture.Cases))
 	for _, testCase := range fixture.Cases {
-		names = append(names, testCase.Name)
 		if testCase.DiscoverAt == nil && testCase.Lookup == nil {
 			t.Fatalf("cursor session locator case %q asserts nothing; add discoverAt or lookup", testCase.Name)
 		}
-	}
-	manifest := testutil.RequiredNamesManifest{RequiredNames: fixture.RequiredNames}
-	if err := testutil.ValidateRequiredNames(manifest, names, "cursor session locator"); err != nil {
-		t.Fatalf("validate cursor session locator manifest: %v", err)
 	}
 	return fixture
 }
@@ -144,7 +146,7 @@ func TestCursorSessionLocatorParity(t *testing.T) {
 			}
 			if testCase.Lookup != nil {
 				t.Run("lookup", func(t *testing.T) {
-					runCursorLookupParity(t, cfg, rootText, testCase)
+					runCursorLookupParity(t, fixture.Root, rootText, testCase)
 				})
 			}
 		})
@@ -165,6 +167,21 @@ func runCursorDiscoverAtParity(t *testing.T, cfg ingest.SourceConfig, rootText s
 
 	counting.ResetCounts()
 	build, err := adapter.DiscoverSessionAt(context.Background(), cfg, at)
+	if discoverCase.WantError != "" {
+		if err == nil {
+			t.Fatalf("DiscoverSessionAt accepted a source the case says must be refused")
+		}
+		if !strings.Contains(err.Error(), discoverCase.WantError) {
+			t.Fatalf("DiscoverSessionAt error %q does not name %q", err, discoverCase.WantError)
+		}
+		assertCursorOpSet(t, counting, rootText, testutil.FSOpStat, "stat", discoverCase.WantStats)
+		assertCursorOpSet(t, counting, rootText, testutil.FSOpReadDir, "readdir", discoverCase.WantReaddirs)
+		assertCursorOpSet(t, counting, rootText, testutil.FSOpReadFile, "read", discoverCase.WantReads)
+		if walks := counting.CountUnder(testutil.FSOpWalkDir, rootText); walks != 0 {
+			t.Fatalf("a refused located source walked the root %d time(s)", walks)
+		}
+		return
+	}
 	if err != nil {
 		t.Fatalf("DiscoverSessionAt: %v", err)
 	}
@@ -205,6 +222,11 @@ func runCursorDiscoverAtParity(t *testing.T, cfg ingest.SourceConfig, rootText s
 		if _, duplicate := membersByID[member.ID]; duplicate {
 			t.Fatalf("DiscoverSessionAt returned two members for %s", member.ID)
 		}
+		// The core owns the role and the outcome: only it knows whether the
+		// member was requested, related-only, or an ancestor.
+		if member.Role != ingest.CohortRole(0) || member.Outcome != ingest.LocateOutcome(0) {
+			t.Errorf("member %s carries role %v / outcome %v; the core sets both", member.ID, member.Role, member.Outcome)
+		}
 		membersByID[member.ID] = member
 	}
 	if len(build.Members) != len(discoverCase.WantMembers) {
@@ -238,12 +260,6 @@ func runCursorDiscoverAtParity(t *testing.T, cfg ingest.SourceConfig, rootText s
 		if member.Source != nil {
 			t.Errorf("stored child %s came back with a source, want nil", unreadable.ID)
 		}
-		if member.Outcome != ingest.LocateStoredUnreadable {
-			t.Errorf("stored child %s outcome = %v, want stored-unreadable", unreadable.ID, member.Outcome)
-		}
-		if member.Role != ingest.CohortChild {
-			t.Errorf("stored child %s role = %v, want child", unreadable.ID, member.Role)
-		}
 		wantReason, ok := cursorUnreadableReasons[unreadable.Reason]
 		if !ok {
 			t.Fatalf("fixture reason %q is outside the declared set", unreadable.Reason)
@@ -251,14 +267,32 @@ func runCursorDiscoverAtParity(t *testing.T, cfg ingest.SourceConfig, rootText s
 		if member.Unreadable != wantReason {
 			t.Errorf("stored child %s unreadable = %v, want %v", unreadable.ID, member.Unreadable, wantReason)
 		}
+		if wantReason == ingest.UnreadableSourceFailed && member.Detail == "" {
+			t.Errorf("stored child %s is a read failure with no detail; name why it cannot be read", unreadable.ID)
+		}
+		if unreadable.Detail != "" && !strings.Contains(member.Detail, unreadable.Detail) {
+			t.Errorf("stored child %s detail %q does not name %q", unreadable.ID, member.Detail, unreadable.Detail)
+		}
 	}
 
 	assertCursorParentProbe(t, at.ID, build.Members, discoverCase.WantProbe)
 }
 
-func runCursorLookupParity(t *testing.T, cfg ingest.SourceConfig, rootText string, testCase cursorLocatorCase) {
+func runCursorLookupParity(t *testing.T, defaultRoot, rootText string, testCase cursorLocatorCase) {
 	t.Helper()
 	lookupCase := testCase.Lookup
+	roots := lookupCase.Roots
+	if len(roots) == 0 {
+		roots = []string{defaultRoot}
+	}
+	cfg := ingest.SourceConfig{Enabled: true, Paths: make([]ingest.ResolvedPath, 0, len(roots))}
+	for _, root := range roots {
+		resolved, err := ingest.NewResolvedPath(cursorLocatorExpandedPath(t, root))
+		if err != nil {
+			t.Fatalf("resolve configured root %q: %v", root, err)
+		}
+		cfg.Paths = append(cfg.Paths, resolved)
+	}
 	counting := newCursorLocatorCountingFS(t, rootText, testCase)
 	adapter := ingest.NewCursorAdapter(counting, testutil.NoGitResolver(), salt.Salt{})
 	if lookupCase.Fault != nil {
@@ -374,9 +408,11 @@ func newCursorLocatorCountingFS(t *testing.T, rootText string, testCase cursorLo
 	mfs := testutil.NewMemFS()
 	for _, entry := range testCase.Tree {
 		data := cursorLocatorTranscript(entry.Title)
-		rootPath := filepath.Join(rootText, entry.Workspace, cursorLocatorAgentTranscriptsDir, entry.Session, entry.Session+".jsonl")
-		if err := mfs.WriteFile(rootPath, data, 0644); err != nil {
-			t.Fatalf("write root session %s: %v", entry.Session, err)
+		if !entry.NoRoot {
+			rootPath := filepath.Join(rootText, entry.Workspace, cursorLocatorAgentTranscriptsDir, entry.Session, entry.Session+".jsonl")
+			if err := mfs.WriteFile(rootPath, data, 0644); err != nil {
+				t.Fatalf("write root session %s: %v", entry.Session, err)
+			}
 		}
 		for _, subagent := range entry.Subagents {
 			subPath := filepath.Join(rootText, entry.Workspace, cursorLocatorAgentTranscriptsDir, entry.Session, "subagents", subagent+".jsonl")
@@ -397,18 +433,28 @@ func cursorLocatorTranscript(title string) []byte {
 
 func cursorLocatorLocatedSource(t *testing.T, rootText string, testCase *cursorDiscoverCase) ingest.LocatedSource {
 	t.Helper()
+	path := cursorLocatorSessionPath(rootText, testCase.Workspace, testCase.Parent, testCase.ID)
+	if testCase.Path != "" {
+		path = cursorLocatorExpandedPath(t, testCase.Path)
+	}
 	at := ingest.LocatedSource{
 		ID:   ingest.SessionID(testCase.ID),
-		Path: ingest.ResolvedPath(cursorLocatorSessionPath(rootText, testCase.Workspace, testCase.Parent, testCase.ID)),
+		Path: ingest.ResolvedPath(path),
 	}
 	if testCase.Stored.Parent != "" {
 		parent := ingest.SessionID(testCase.Stored.Parent)
 		at.Stored.Parent = &parent
 	}
 	for _, child := range testCase.Stored.Children {
+		harness := ingest.HarnessCursor
+		if child.HarnessUnset {
+			harness = ""
+		} else if child.Harness != "" {
+			harness = ingest.Harness(child.Harness)
+		}
 		at.Stored.Children = append(at.Stored.Children, ingest.StoredSessionSource{
 			ID:      ingest.SessionID(child.Session),
-			Harness: ingest.HarnessCursor,
+			Harness: harness,
 			Path:    ingest.ResolvedPath(cursorLocatorSessionPath(rootText, child.Workspace, child.Parent, child.Session)),
 			Format:  ingest.SourceFormatJSONL,
 		})
@@ -465,7 +511,6 @@ var cursorSearchMethods = map[string]ingest.SearchMethod{
 }
 
 var cursorUnreadableReasons = map[string]ingest.UnreadableReason{
-	"source-gone":      ingest.UnreadableSourceGone,
-	"source-failed":    ingest.UnreadableSourceFailed,
-	"harness-disabled": ingest.UnreadableHarnessDisabled,
+	"SourceGone":   ingest.UnreadableSourceGone,
+	"SourceFailed": ingest.UnreadableSourceFailed,
 }

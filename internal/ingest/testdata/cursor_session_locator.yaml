@@ -11,17 +11,26 @@
 # costs one stat of the parent path, which the runner performs after the build,
 # and never a readdir; the build itself must perform no I/O for it.
 #
-# A case with a stored child whose file is gone lists that id under
-# wantUnreadable: the member must come back with no source and the reason,
-# never dropped.
+# A child the adapter cannot read lists its reason under wantUnreadable: the
+# member must come back with no source, no role and no outcome, and a failed
+# read must name its detail. A readable stored child is compared field for
+# field with the full walk, including the workspace its path names and the
+# parent its path encodes.
+#
+# "path" overrides the located path so a case can present a path outside every
+# configured root; wantError is the substring its refusal must name.
 requiredNames:
   - root-with-layout-subagents
   - root-with-stored-child-gone
+  - root-with-readable-stored-child
+  - root-with-foreign-stored-child
   - subagent-with-stored-parent
   - subagent-with-unstored-parent
+  - located-path-outside-root
   - lookup-root-by-name
   - lookup-subagent-by-name
   - lookup-miss
+  - lookup-failure-after-completed-root
   - lookup-readdir-failure
 
 root: ~/.cursor/projects
@@ -70,11 +79,85 @@ cases:
         - 33333333-3333-4333-8333-333333333333
       wantUnreadable:
         - id: 33333333-3333-4333-8333-333333333333
-          reason: source-gone
+          reason: SourceGone
       wantStats:
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/33333333-3333-4333-8333-333333333333.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents
+      wantReads:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+
+  - name: root-with-readable-stored-child
+    # The stored child's file lives under another workspace and its parent
+    # directory is not the located root's layout, so only at.Stored can supply
+    # it. Its fields must still equal the full walk's: the path, not the
+    # store's link, decides the workspace and the parent.
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+        subagents:
+          - 22222222-2222-4222-8222-222222222222
+      - workspace: test-workspace-b
+        session: 11111111-1111-4111-8111-111111111111
+        noRoot: true
+        subagents:
+          - 44444444-4444-4444-8444-444444444444
+    discoverAt:
+      id: 11111111-1111-4111-8111-111111111111
+      workspace: test-workspace-a
+      stored:
+        children:
+          - workspace: test-workspace-b
+            session: 44444444-4444-4444-8444-444444444444
+            parent: 11111111-1111-4111-8111-111111111111
+      wantMembers:
+        - 11111111-1111-4111-8111-111111111111
+        - 22222222-2222-4222-8222-222222222222
+        - 44444444-4444-4444-8444-444444444444
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
+        - ~/.cursor/projects/test-workspace-b/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/44444444-4444-4444-8444-444444444444.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents
+      wantReads:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+
+  - name: root-with-foreign-stored-child
+    # The first child belongs to another harness and the second records no
+    # harness at all. Neither source is gone and no harness is disabled, so
+    # both are read failures that must name why.
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+    discoverAt:
+      id: 11111111-1111-4111-8111-111111111111
+      workspace: test-workspace-a
+      stored:
+        children:
+          - workspace: test-workspace-a
+            session: 55555555-5555-4555-8555-555555555555
+            parent: 11111111-1111-4111-8111-111111111111
+            harness: opencode
+          - workspace: test-workspace-a
+            session: 66666666-6666-4666-8666-666666666666
+            parent: 11111111-1111-4111-8111-111111111111
+            harnessUnset: true
+      wantMembers:
+        - 11111111-1111-4111-8111-111111111111
+        - 55555555-5555-4555-8555-555555555555
+        - 66666666-6666-4666-8666-666666666666
+      wantUnreadable:
+        - id: 55555555-5555-4555-8555-555555555555
+          reason: SourceFailed
+          detail: opencode source cannot be read
+        - id: 66666666-6666-4666-8666-666666666666
+          reason: SourceFailed
+          detail: records no harness
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
       wantReaddirs:
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents
       wantReads:
@@ -96,6 +179,10 @@ cases:
         - 22222222-2222-4222-8222-222222222222
       wantStats:
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
+      # The located subagent's own subagents directory is its layout relative,
+      # not the ancestor probe: the probe itself is a pure value.
+      wantReaddirs:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/22222222-2222-4222-8222-222222222222/subagents
 
   - name: subagent-with-unstored-parent
     tree:
@@ -112,10 +199,22 @@ cases:
       wantProbe:
         kind: path
         path: ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
-      # The child's stat, then the probe's one stat of the parent path.
+      # The child's stat, then the probe's one stat of the parent path. The
+      # one readdir is the located subagent's own layout relative; the probe
+      # performs no I/O at all.
       wantStats:
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/22222222-2222-4222-8222-222222222222.jsonl
         - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/22222222-2222-4222-8222-222222222222/subagents
+
+  - name: located-path-outside-root
+    tree: []
+    discoverAt:
+      id: 11111111-1111-4111-8111-111111111111
+      path: /tmp/peasant-outside-root/elsewhere/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+      wantError: lies outside every configured Cursor source root
+      wantMembers: []
 
   - name: lookup-root-by-name
     tree:
@@ -185,7 +284,42 @@ cases:
         - ~/.cursor/projects
         - ~/.cursor/projects/test-workspace-a/agent-transcripts
 
+  - name: lookup-failure-after-completed-root
+    # The first root completes and its two searched entries must survive the
+    # second root's failure; the failure itself is recorded by the core, not
+    # here.
+    tree:
+      - workspace: test-workspace-a
+        session: 11111111-1111-4111-8111-111111111111
+    lookup:
+      id: 11111111-1111-4111-8111-111111111111
+      roots:
+        - ~/.cursor/projects
+        - ~/.cursor/other-projects
+      fault:
+        op: ReadDir
+        path: ~/.cursor/other-projects
+        detail: permission denied
+      wantSources:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+      wantSearched:
+        - harness: cursor
+          method: name-pattern
+          location: ~/.cursor/projects/*/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+        - harness: cursor
+          method: name-pattern
+          location: ~/.cursor/projects/*/agent-transcripts/*/subagents/11111111-1111-4111-8111-111111111111.jsonl
+      wantStats:
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts/11111111-1111-4111-8111-111111111111/subagents/11111111-1111-4111-8111-111111111111.jsonl
+      wantReaddirs:
+        - ~/.cursor/projects
+        - ~/.cursor/projects/test-workspace-a/agent-transcripts
+
   - name: lookup-readdir-failure
+    # The core records the failure from the returned error; the adapter must
+    # not add a SearchFailed entry of its own, and it returns the entries it
+    # gathered for the roots it completed (none here).
     tree:
       - workspace: test-workspace-a
         session: 11111111-1111-4111-8111-111111111111
@@ -195,10 +329,6 @@ cases:
         op: ReadDir
         path: ~/.cursor/projects
         detail: permission denied
-      wantSearched:
-        - harness: cursor
-          method: failed
-          location: ~/.cursor/projects
-          detail: permission denied
+      wantSearched: []
       wantReaddirs:
         - ~/.cursor/projects
