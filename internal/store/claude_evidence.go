@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
@@ -43,7 +44,61 @@ FROM claude_transcript_evidence`
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	sqlDeleteClaudeEvidence = `DELETE FROM claude_transcript_evidence WHERE source_path = ?`
+
+	sqlDeleteClaudeTeammateSpawns = `DELETE FROM claude_teammate_spawns WHERE spawner_path = ?`
+	sqlUpsertClaudeTeammateSpawn  = `INSERT OR IGNORE INTO claude_teammate_spawns (spawner_path, team, name) VALUES (?, ?, ?)`
 )
+
+// saveClaudeTeammateSpawns is the package-level seam SaveClaudeEvidence calls
+// for the spawns projection: delete one transcript's rows and re-insert the
+// ones just mined. Production never reassigns it; an in-package store test
+// swaps in a stub that fails after it has seen the evidence row on the
+// transaction's connection, which proves the evidence write and the derived
+// write commit or roll back together. Swapping it is serialized with
+// saveClaudeTeammateSpawnsMu so a parallel reader never observes a torn value.
+var saveClaudeTeammateSpawns = writeClaudeTeammateSpawns
+
+var saveClaudeTeammateSpawnsMu sync.RWMutex
+
+// swapSaveClaudeTeammateSpawns installs write as the seam and returns the
+// function it replaced. It exists for the in-package rollback test, which
+// restores the replaced function when the test finishes.
+func swapSaveClaudeTeammateSpawns(write func(*sqlite.Conn, string, []ingest.ClaudeTeammateIdentity) error) func(*sqlite.Conn, string, []ingest.ClaudeTeammateIdentity) error {
+	saveClaudeTeammateSpawnsMu.Lock()
+	defer saveClaudeTeammateSpawnsMu.Unlock()
+	previous := saveClaudeTeammateSpawns
+	saveClaudeTeammateSpawns = write
+	return previous
+}
+
+func runSaveClaudeTeammateSpawns(conn *sqlite.Conn, sourcePath string, spawns []ingest.ClaudeTeammateIdentity) error {
+	saveClaudeTeammateSpawnsMu.RLock()
+	write := saveClaudeTeammateSpawns
+	saveClaudeTeammateSpawnsMu.RUnlock()
+	return write(conn, sourcePath, spawns)
+}
+
+// writeClaudeTeammateSpawns replaces one transcript's rows in the spawns
+// projection inside the caller's transaction. The delete runs for every
+// upserted path so a transcript whose scope changed cannot leave rows behind;
+// the inserts are limited to a root record's mined spawns, which is the only
+// source the projection is derived from. INSERT OR IGNORE is required because
+// mining appends spawn records without deduplicating them.
+func writeClaudeTeammateSpawns(conn *sqlite.Conn, sourcePath string, spawns []ingest.ClaudeTeammateIdentity) error {
+	if err := sqlitex.ExecuteTransient(conn, sqlDeleteClaudeTeammateSpawns, &sqlitex.ExecOptions{
+		Args: []any{sourcePath},
+	}); err != nil {
+		return fmt.Errorf("remove the previous spawn rows for %q: %w", sourcePath, err)
+	}
+	for _, spawn := range spawns {
+		if err := sqlitex.Execute(conn, sqlUpsertClaudeTeammateSpawn, &sqlitex.ExecOptions{
+			Args: []any{sourcePath, spawn.Team, spawn.Name},
+		}); err != nil {
+			return fmt.Errorf("record spawn (%q, %q) for %q: %w", spawn.Team, spawn.Name, sourcePath, err)
+		}
+	}
+	return nil
+}
 
 // claudeSpawnRow is the stored form of one mined spawn record. The stored form
 // is explicit so a change to the discovery type cannot silently change what an
@@ -229,6 +284,16 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 			},
 		}); err != nil {
 			return fmt.Errorf("store.SaveClaudeEvidence: write evidence for transcript %q: %w", record.SourcePath, err)
+		}
+		// Only a root record contributes spawns to the projection. The delete
+		// still runs for every upserted path through the seam, so a scope change
+		// cannot leave rows that no root record derives.
+		projectedSpawns := record.Spawns
+		if record.Scope != ingest.ClaudeEvidenceScopeRoot {
+			projectedSpawns = nil
+		}
+		if err = runSaveClaudeTeammateSpawns(conn, record.SourcePath.String(), projectedSpawns); err != nil {
+			return fmt.Errorf("store.SaveClaudeEvidence: write teammate spawns for transcript %q: %w", record.SourcePath, err)
 		}
 	}
 
