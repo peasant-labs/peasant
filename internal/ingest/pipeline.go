@@ -232,9 +232,10 @@ type PipelineConfig struct {
 	// means the full run. Build it with NewSessionScope; a scope with no ids or
 	// an unset policy is refused at the start of Run.
 	Scope *SessionScope
-	// Command is the words the user typed that entered this run: "harvest" or
-	// "harvest index". `open` sets "harvest", because it re-enters harvest. It
-	// exists only to render a scope miss in the words the user typed.
+	// Command is the words the user typed that entered this run: "harvest",
+	// "harvest index", or "harvest logs". `open` sets "harvest", because it
+	// re-enters harvest. It exists only to render a scope miss in the words the
+	// user typed.
 	Command string
 	// CommandPrefix is the shell-quoted command that reaches this store, for
 	// example "peasant --data-dir '/srv/peasant'". It is used only inside the

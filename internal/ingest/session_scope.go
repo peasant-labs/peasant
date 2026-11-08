@@ -47,12 +47,10 @@ type SessionScope struct {
 // change to the caller's slice cannot change what the scope names.
 func NewSessionScope(ids []SessionID, related RelatedPolicy) (SessionScope, error) {
 	if !related.IsValid() {
-		return SessionScope{}, fmt.Errorf(
-			"ingest: NewSessionScope was given an unset related policy; a scope must say whether a selected session's children and unstored ancestors join the cohort, and the zero value is invalid so that a forgotten argument cannot silently pick one; where: ingest.NewSessionScope in internal/ingest/session_scope.go; when: building the scope before a run; impact: no scope is returned, so the caller must fix the policy rather than run with a guess; fix: pass RelatedInclude (the default) or RelatedExclude (--no-related)")
+		return SessionScope{}, scopeUnsetPolicyError(scopeConstructorWhere)
 	}
 	if len(ids) == 0 {
-		return SessionScope{}, fmt.Errorf(
-			"ingest: NewSessionScope was given no session ids; a scope with no ids would record nothing, and the empty scope must not exist because a nil scope already means the full run; where: ingest.NewSessionScope in internal/ingest/session_scope.go; when: building the scope before a run; impact: no scope is returned and no session is selected; fix: pass at least one id from --session, or leave the scope nil for a full run")
+		return SessionScope{}, scopeNoIDsError(scopeConstructorWhere)
 	}
 
 	unique := make([]SessionID, 0, len(ids))
@@ -82,10 +80,22 @@ func (s SessionScope) IDs() []SessionID {
 // Related returns the scope's related-session policy.
 func (s SessionScope) Related() RelatedPolicy { return s.related }
 
-// valid reports whether the scope can narrow a run. It is the defensive check
-// Pipeline.Run applies to a scope a caller built without NewSessionScope.
-func (s SessionScope) valid() bool {
-	return len(s.ids) > 0 && s.related.IsValid()
+// The two unusable-scope rules are stated once, here, and used by both
+// boundaries that can meet them: the constructor, and the run's refusal of a
+// scope a caller built by hand. Only the where: clause differs.
+const (
+	scopeConstructorWhere = "ingest.NewSessionScope in internal/ingest/session_scope.go"
+	scopeRunWhere         = "ingest.PipelineConfig.Scope, checked at the start of Pipeline.Run in internal/ingest/pipeline.go"
+)
+
+// scopeNoIDsError is the one statement of "a scope must name a session".
+func scopeNoIDsError(where string) error {
+	return fmt.Errorf("ingest: the session scope names no sessions; a scope with no ids would select nothing and must not exist, because a nil scope already means the full run; where: %s; when: before any session is read; impact: the run is refused before any session or store row is touched; fix: pass at least one --session id, or leave the scope nil for a full run", where)
+}
+
+// scopeUnsetPolicyError is the one statement of "a scope must carry a policy".
+func scopeUnsetPolicyError(where string) error {
+	return fmt.Errorf("ingest: the session scope carries no related policy; a scope must say whether a selected session's children and unstored ancestors join the cohort, and the zero value is invalid so a forgotten argument cannot silently pick one; where: %s; when: before any session is read; impact: the run is refused before any session or store row is touched; fix: pass RelatedInclude (the default) or RelatedExclude (--no-related)", where)
 }
 
 // validateScope refuses a pipeline configuration whose scope cannot narrow a
@@ -96,12 +106,10 @@ func (c *PipelineConfig) validateScope() error {
 		return nil
 	}
 	if len(c.Scope.ids) == 0 {
-		return fmt.Errorf(
-			"ingest: Pipeline.Run was given a session scope that names no sessions; the run would record nothing, and a scope must be built by NewSessionScope from the ids the user passed; where: ingest.PipelineConfig.Scope, checked at the start of Pipeline.Run in internal/ingest/pipeline.go; when: before the run lock and before any stage; impact: no source was read and no session or store row was touched; fix: pass at least one --session id, or set the scope to nil for a full run")
+		return scopeNoIDsError(scopeRunWhere)
 	}
 	if !c.Scope.related.IsValid() {
-		return fmt.Errorf(
-			"ingest: Pipeline.Run was given a session scope with no related policy; a scope must say whether children and unstored ancestors join the cohort, and the zero value is invalid so that a forgotten argument cannot silently pick one; where: ingest.PipelineConfig.Scope, checked at the start of Pipeline.Run in internal/ingest/pipeline.go; when: before the run lock and before any stage; impact: no source was read and no session or store row was touched; fix: build the scope with NewSessionScope and pass RelatedInclude (the default) or RelatedExclude (--no-related)")
+		return scopeUnsetPolicyError(scopeRunWhere)
 	}
 	if c.AllowedSessionIDs != nil {
 		return fmt.Errorf(

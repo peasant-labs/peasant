@@ -4,6 +4,11 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -94,7 +99,8 @@ func TestNewSessionScopeContract(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			scope, err := ingest.NewSessionScope(sessionScopeIDs(testCase.IDs), related)
+			ids := sessionScopeIDs(testCase.IDs)
+			scope, err := ingest.NewSessionScope(ids, related)
 			if testCase.WantError != "" {
 				if err == nil {
 					t.Fatalf("NewSessionScope(%v) returned a scope, want an error containing %q", testCase.IDs, testCase.WantError)
@@ -114,6 +120,12 @@ func TestNewSessionScopeContract(t *testing.T) {
 			if scope.Related() != related {
 				t.Fatalf("Related() = %d, want %d", scope.Related(), related)
 			}
+			// The scope owns its input: changing the caller's slice after
+			// construction must not change what the scope names.
+			ids[0] = ingest.SessionID("mutated-after-construction")
+			if !slices.Equal(scope.IDs(), want) {
+				t.Fatalf("mutating the caller's ids changed the scope: IDs() = %v, want %v", scope.IDs(), want)
+			}
 			if !testCase.WantCopied {
 				return
 			}
@@ -127,16 +139,18 @@ func TestNewSessionScopeContract(t *testing.T) {
 }
 
 // TestPipelineRunRefusesUnusableScope pins both refusals at the production
-// entry point: Run returns before any stage, so no source is read and no store
-// row is touched. A scope that cannot narrow the run, and a run narrowed twice,
-// are both refused.
+// entry point. The refusal must return no result and start no stage, so no
+// source is read and no store row is touched; the progress recorder is what
+// makes a check moved below the first stage go red.
 func TestPipelineRunRefusesUnusableScope(t *testing.T) {
 	t.Parallel()
 	fixture := loadSessionScopeContractFixture(t)
 	for _, testCase := range fixture.RunRefusals {
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
-			var cfg ingest.PipelineConfig
+			progress := ingest.NewProgressState()
+			cfg := ingest.PipelineConfig{Progress: progress}
+			store := &scopeRefusalStore{}
 			switch testCase.Scope {
 			case "zero":
 				cfg.Scope = &ingest.SessionScope{}
@@ -155,16 +169,27 @@ func TestPipelineRunRefusesUnusableScope(t *testing.T) {
 					cfg.AllowedSessionIDs[ingest.SessionID(id)] = true
 				}
 			}
-			pipeline, err := newTestPipeline(nil, nil, ingest.DefaultAdapterRegistry, cfg)
+			pipeline, err := newTestPipeline(nil, nil, ingest.DefaultAdapterRegistry, cfg, ingest.WithStore(store))
 			if err != nil {
 				t.Fatalf("build pipeline: %v", err)
 			}
 			result, err := pipeline.Run(context.Background())
+			if result != nil {
+				t.Fatalf("Run returned a partial result (%v); a stage ran before the refusal", result)
+			}
 			if err == nil {
-				t.Fatalf("Run returned a result (%v), want a refusal", result)
+				t.Fatal("Run returned no error, want a refusal")
 			}
 			if !strings.Contains(err.Error(), testCase.WantError) {
 				t.Fatalf("Run error does not say %q:\n%v", testCase.WantError, err)
+			}
+			if len(store.calls) > 0 {
+				t.Fatalf("the refusal touched the store: %v", store.calls)
+			}
+			for stage, state := range progress.Snapshot() {
+				if state.Started || state.Ended {
+					t.Fatalf("stage %s ran before the refusal", stage)
+				}
 			}
 		})
 	}
@@ -197,51 +222,248 @@ func TestScopeReportProcessedAndUpkeep(t *testing.T) {
 			if want := sessionScopeIDs(testCase.WantUpkeep); !slices.Equal(upkeep, want) {
 				t.Fatalf("Upkeep() = %v, want %v", upkeep, want)
 			}
-			for _, id := range processed {
-				if !slices.Contains(upkeep, id) {
-					t.Fatalf("Processed() names %s, which Upkeep() does not carry", id)
-				}
-			}
 		})
 	}
 }
 
-// TestClosedSetZeroValuesAreInvalid pins the invalid zero value of every closed
-// set this slice declares. A value inserted at the top of a constant block would
-// shift the rest, and a zero that quietly passed IsValid would let an unset
-// field claim a real choice.
-func TestClosedSetZeroValuesAreInvalid(t *testing.T) {
+// scopeClosedSets is the one list of the closed sets this package declares. The
+// census below requires every uint8 type declared in session_scope*.go to
+// appear here, so a new set cannot ship without an assertion that its zero value
+// is refused; each entry in turn names every valid member, so a constant that
+// stops validating goes red.
+var scopeClosedSets = []struct {
+	goName string
+	zero   any
+	valid  []string
+	parse  func(string) (any, error)
+}{
+	{
+		goName: "RelatedPolicy",
+		zero:   ingest.RelatedPolicy(0),
+		valid:  []string{"include", "exclude"},
+		parse: func(name string) (any, error) {
+			switch name {
+			case "include":
+				return ingest.RelatedInclude, nil
+			case "exclude":
+				return ingest.RelatedExclude, nil
+			}
+			return nil, fmt.Errorf("related policy %q is not a declared value", name)
+		},
+	},
+	{
+		goName: "LocateOutcome",
+		zero:   ingest.LocateOutcome(0),
+		valid:  []string{"stored_path", "direct_lookup", "stored_unreadable"},
+		parse: func(name string) (any, error) {
+			switch name {
+			case "stored_path":
+				return ingest.LocateStoredPath, nil
+			case "direct_lookup":
+				return ingest.LocateDirectLookup, nil
+			case "stored_unreadable":
+				return ingest.LocateStoredUnreadable, nil
+			}
+			return nil, fmt.Errorf("locate outcome %q is not a declared value", name)
+		},
+	},
+	{
+		goName: "UnreadableReason",
+		zero:   ingest.UnreadableReason(0),
+		valid:  []string{"source_gone", "harness_disabled", "source_failed"},
+		parse: func(name string) (any, error) {
+			switch name {
+			case "source_gone":
+				return ingest.UnreadableSourceGone, nil
+			case "harness_disabled":
+				return ingest.UnreadableHarnessDisabled, nil
+			case "source_failed":
+				return ingest.UnreadableSourceFailed, nil
+			}
+			return nil, fmt.Errorf("unreadable reason %q is not a declared value", name)
+		},
+	},
+	{
+		goName: "CohortRole",
+		zero:   ingest.CohortRole(0),
+		valid:  []string{"selected", "child", "ancestor", "context"},
+		parse: func(name string) (any, error) {
+			switch name {
+			case "selected":
+				return ingest.CohortSelected, nil
+			case "child":
+				return ingest.CohortChild, nil
+			case "ancestor":
+				return ingest.CohortAncestor, nil
+			case "context":
+				return ingest.CohortContext, nil
+			}
+			return nil, fmt.Errorf("cohort role %q is not a declared value", name)
+		},
+	},
+	{
+		goName: "ProbeKind",
+		zero:   ingest.ProbeKind(0),
+		valid:  []string{"path", "row", "catalog_window"},
+		parse: func(name string) (any, error) {
+			switch name {
+			case "path":
+				return ingest.ProbePath, nil
+			case "row":
+				return ingest.ProbeRow, nil
+			case "catalog_window":
+				return ingest.ProbeCatalogWindow, nil
+			}
+			return nil, fmt.Errorf("probe kind %q is not a declared value", name)
+		},
+	},
+	{
+		goName: "ClaudeBuildMode",
+		zero:   ingest.ClaudeBuildMode(0),
+		valid:  []string{"full_walk", "scoped"},
+		parse: func(name string) (any, error) {
+			switch name {
+			case "full_walk":
+				return ingest.ClaudeBuildFullWalk, nil
+			case "scoped":
+				return ingest.ClaudeBuildScoped, nil
+			}
+			return nil, fmt.Errorf("Claude build mode %q is not a declared value", name)
+		},
+	},
+	{
+		goName: "SearchMethod",
+		zero:   ingest.SearchMethod(0),
+		valid:  []string{"stored_path", "name_pattern", "sqlite_row", "unsupported", "harness_disabled", "failed"},
+		parse: func(name string) (any, error) {
+			method, err := sessionScopeSearchMethod(name)
+			return method, err
+		},
+	},
+	{
+		goName: "UnsupportedReason",
+		zero:   ingest.UnsupportedReason(0),
+		valid:  []string{"file_header", "file_body"},
+		parse: func(name string) (any, error) {
+			reason, err := sessionScopeUnsupportedReason(name)
+			return reason, err
+		},
+	},
+	{
+		goName: "MissReason",
+		zero:   ingest.MissReason(0),
+		valid:  []string{"not_found", "harness_filtered", "since_filtered"},
+		parse: func(name string) (any, error) {
+			reason, err := sessionScopeMissReason(name)
+			return reason, err
+		},
+	},
+	{
+		goName: "StoreAttachment",
+		zero:   ingest.StoreAttachment(0),
+		valid:  []string{"attached", "not_attached"},
+		parse: func(name string) (any, error) {
+			attachment, err := sessionScopeStoreAttachment(name)
+			return attachment, err
+		},
+	},
+}
+
+// TestClosedSetsDeclareAnInvalidZeroAndEveryMember pins the closed-set rule:
+// every declared set refuses its zero value, and every member it names is
+// valid and distinct. The census makes a new set in session_scope*.go fail
+// until it is added to the table above, which is what keeps this list from
+// going stale.
+func TestClosedSetsDeclareAnInvalidZeroAndEveryMember(t *testing.T) {
 	t.Parallel()
-	if ingest.RelatedPolicy(0).IsValid() {
-		t.Error("the zero RelatedPolicy is valid; an unset policy must be refused")
+	declared := scopeUint8TypeNames(t)
+	table := make(map[string]struct{}, len(scopeClosedSets))
+	for _, set := range scopeClosedSets {
+		if _, duplicate := table[set.goName]; duplicate {
+			t.Fatalf("%s appears twice in the closed-set table", set.goName)
+		}
+		table[set.goName] = struct{}{}
+		if _, ok := declared[set.goName]; !ok {
+			t.Fatalf("the closed-set table names %s, which no session_scope*.go file declares as a uint8 type", set.goName)
+		}
+
+		zero := reflect.ValueOf(set.zero)
+		if zero.Uint() != 0 {
+			t.Fatalf("%s: the table's zero value is not the zero value", set.goName)
+		}
+		if zero.Interface().(validatable).IsValid() {
+			t.Fatalf("%s: the zero value is valid; an unset field would claim a real choice", set.goName)
+		}
+
+		seen := make(map[uint64]string, len(set.valid))
+		for _, name := range set.valid {
+			member, err := set.parse(name)
+			if err != nil {
+				t.Fatalf("%s: %v", set.goName, err)
+			}
+			value := reflect.ValueOf(member)
+			if value.Type() != zero.Type() {
+				t.Fatalf("%s: %q parsed to %s, want %s", set.goName, name, value.Type(), zero.Type())
+			}
+			if !value.Interface().(validatable).IsValid() {
+				t.Fatalf("%s: member %q is not valid", set.goName, name)
+			}
+			number := value.Uint()
+			if previous, duplicate := seen[number]; duplicate {
+				t.Fatalf("%s: %q and %q share the numeric value %d", set.goName, previous, name, number)
+			}
+			seen[number] = name
+		}
 	}
-	if ingest.LocateOutcome(0).IsValid() {
-		t.Error("the zero LocateOutcome is valid")
+	for name := range declared {
+		if _, ok := table[name]; !ok {
+			t.Fatalf("session_scope*.go declares the closed set %s with no entry in the closed-set table", name)
+		}
 	}
-	if ingest.UnreadableReason(0).IsValid() {
-		t.Error("the zero UnreadableReason is valid")
+}
+
+type validatable interface{ IsValid() bool }
+
+// scopeUint8TypeNames returns every type a non-test session_scope*.go file
+// declares with an underlying uint8. That is the census's definition of a
+// closed set in these files.
+func scopeUint8TypeNames(t *testing.T) map[string]struct{} {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package directory: %v", err)
 	}
-	if ingest.CohortRole(0).IsValid() {
-		t.Error("the zero CohortRole is valid")
+	names := make(map[string]struct{})
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, "session_scope") ||
+			!strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			generic, ok := decl.(*ast.GenDecl)
+			if !ok || generic.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range generic.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				if underlying, ok := typeSpec.Type.(*ast.Ident); ok && underlying.Name == "uint8" {
+					names[typeSpec.Name.Name] = struct{}{}
+				}
+			}
+		}
 	}
-	if ingest.ProbeKind(0).IsValid() {
-		t.Error("the zero ProbeKind is valid")
+	if len(names) == 0 {
+		t.Fatal("the census found no closed sets; the pattern no longer matches the declaring files")
 	}
-	if ingest.ClaudeBuildMode(0).IsValid() {
-		t.Error("the zero ClaudeBuildMode is valid")
-	}
-	if ingest.SearchMethod(0).IsValid() {
-		t.Error("the zero SearchMethod is valid")
-	}
-	if ingest.UnsupportedReason(0).IsValid() {
-		t.Error("the zero UnsupportedReason is valid")
-	}
-	if ingest.MissReason(0).IsValid() {
-		t.Error("the zero MissReason is valid")
-	}
-	if ingest.StoreAttachment(0).IsValid() {
-		t.Error("the zero StoreAttachment is valid")
-	}
+	return names
 }
 
 func sessionScopeIDs(raw []string) []ingest.SessionID {
@@ -297,4 +519,43 @@ func sessionScopeLocatedMember(fixtureMember sessionScopeReportMember) (ingest.L
 		member.Source = &ingest.DiscoveredSession{SessionID: id}
 	}
 	return member, nil
+}
+
+// scopeRefusalStore records every SessionStore call it receives. A refused run
+// must make none, so any recorded name is the failure: this is the observable
+// "before touching the store" the refusal promises.
+type scopeRefusalStore struct {
+	calls []string
+}
+
+var _ ingest.SessionStore = (*scopeRefusalStore)(nil)
+
+func (s *scopeRefusalStore) InsertSessions(context.Context, []ingest.StoreEntry) error {
+	s.calls = append(s.calls, "InsertSessions")
+	return nil
+}
+
+func (s *scopeRefusalStore) LookupSessionLocation(context.Context, ingest.SessionID) (string, string, error) {
+	s.calls = append(s.calls, "LookupSessionLocation")
+	return "", "", nil
+}
+
+func (s *scopeRefusalStore) BulkLookupSessionLocations(context.Context, []ingest.SessionID) (map[ingest.SessionID]ingest.SessionLocation, error) {
+	s.calls = append(s.calls, "BulkLookupSessionLocations")
+	return nil, nil
+}
+
+func (s *scopeRefusalStore) UpsertSessionCommits(context.Context, ingest.SessionID, []ingest.CommitInfo) error {
+	s.calls = append(s.calls, "UpsertSessionCommits")
+	return nil
+}
+
+func (s *scopeRefusalStore) CleanupOrphanProjects(context.Context) error {
+	s.calls = append(s.calls, "CleanupOrphanProjects")
+	return nil
+}
+
+func (s *scopeRefusalStore) Close() error {
+	s.calls = append(s.calls, "Close")
+	return nil
 }
