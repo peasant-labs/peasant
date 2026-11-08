@@ -174,8 +174,12 @@ func loadV70DerivedLookupsFixture(t *testing.T) v70Fixture {
 		if !ingest.ClaudeEvidenceScope(step.Scope).IsValid() {
 			t.Fatalf("v70 derived-lookups maintenance step %q names unknown scope %q", step.Name, step.Scope)
 		}
-		if len(step.ExpectedSpawns) == 0 {
-			t.Fatalf("v70 derived-lookups maintenance step %q declares no expected projection", step.Name)
+		// An empty expected projection is meaningful: the scope-flip step ends
+		// with no rows, so only the row fields are validated here.
+		for _, row := range step.ExpectedSpawns {
+			if strings.TrimSpace(row.SpawnerPath) == "" {
+				t.Fatalf("v70 derived-lookups maintenance step %q expects a row with a blank spawner_path", step.Name)
+			}
 		}
 	}
 	requireV70NameSet(t, "maintenance", fixture.RequiredMaintenanceNames, maintenanceNames)
@@ -483,7 +487,7 @@ func TestMigrationV70DerivedLookups(t *testing.T) {
 				t.Fatalf("the evidence cache left %d evidence rows for the pruned path %q, want 0", got, pruned)
 			}
 			if got := countOnStore(t, db, `SELECT COUNT(*) FROM claude_teammate_spawns WHERE spawner_path = ?`, pruned); got != 0 {
-				t.Fatalf("deleting the evidence row for %q left %d spawn rows; the foreign key's ON DELETE CASCADE did not remove them", pruned, got)
+				t.Fatalf("the spawn rows for pruned path %q survived its evidence row's deletion: %d rows remain, want 0; the derived table was not cleared with its parent", pruned, got)
 			}
 		default:
 			t.Fatalf("fixture expectation %q names kind %q with no runner", expectation.Name, expectation.Kind)
@@ -503,10 +507,13 @@ func TestMigrationV70DerivedLookups(t *testing.T) {
 	}
 }
 
-// TestSaveClaudeEvidenceWritesTeammateSpawns drives the production writer with
-// no seam stub and compares the whole projection after each save against the
-// fixture's expectations: a root save, a re-save that drops a pair, and a
-// subagent save whose non-empty spawns must not be projected.
+// TestSaveClaudeEvidenceWritesTeammateSpawns drives the production writer and
+// compares the whole projection after each save against the fixture's
+// expectations: a root save, a re-save that drops a pair, a subagent save
+// whose non-empty spawns must not be projected, and a scope flip that ends
+// with no rows. A recorder delegates to the production writer, so the row
+// assertions still observe it, and it also proves the maintenance runs for a
+// non-root upsert: skipping it leaves the recorder short one call.
 func TestSaveClaudeEvidenceWritesTeammateSpawns(t *testing.T) {
 	fixture := loadV70DerivedLookupsFixture(t)
 	dbPath := filepath.Join(t.TempDir(), "v70-maintenance.db")
@@ -521,6 +528,17 @@ func TestSaveClaudeEvidenceWritesTeammateSpawns(t *testing.T) {
 			t.Errorf("close the maintenance store: %v", err)
 		}
 	}()
+
+	type spawnCall struct {
+		Path   string
+		Spawns []ingest.ClaudeTeammateIdentity
+	}
+	var calls []spawnCall
+	previous := swapSaveClaudeTeammateSpawns(func(conn *sqlite.Conn, sourcePath string, spawns []ingest.ClaudeTeammateIdentity) error {
+		calls = append(calls, spawnCall{Path: sourcePath, Spawns: append([]ingest.ClaudeTeammateIdentity(nil), spawns...)})
+		return writeClaudeTeammateSpawns(conn, sourcePath, spawns)
+	})
+	defer swapSaveClaudeTeammateSpawns(previous)
 
 	for _, step := range fixture.MaintenanceSteps {
 		path, err := ingest.NewResolvedPath(step.SourcePath)
@@ -542,6 +560,34 @@ func TestSaveClaudeEvidenceWritesTeammateSpawns(t *testing.T) {
 			t.Fatalf("maintenance step %q: SaveClaudeEvidence: %v", step.Name, err)
 		}
 		requireSpawnRowsEqual(t, db, step.ExpectedSpawns)
+	}
+
+	// The scope flip: a path saved as a root and then re-saved as a subagent.
+	// The fixture derives it so no test hardcodes the step name.
+	flipIndex := -1
+	rootPaths := make(map[string]struct{}, len(fixture.MaintenanceSteps))
+	for index := range fixture.MaintenanceSteps {
+		step := &fixture.MaintenanceSteps[index]
+		if step.Scope == string(ingest.ClaudeEvidenceScopeRoot) {
+			rootPaths[step.SourcePath] = struct{}{}
+			continue
+		}
+		if _, wasRoot := rootPaths[step.SourcePath]; wasRoot {
+			flipIndex = index
+		}
+	}
+	if flipIndex < 0 {
+		t.Fatal("v70 derived-lookups fixture re-saves no root path as a subagent; the scope flip is untested")
+	}
+	if len(calls) != len(fixture.MaintenanceSteps) {
+		t.Fatalf("SaveClaudeEvidence made %d spawn maintenance calls for %d saves; the maintenance must run for every upserted path, including a non-root one", len(calls), len(fixture.MaintenanceSteps))
+	}
+	flip := &fixture.MaintenanceSteps[flipIndex]
+	if calls[flipIndex].Path != flip.SourcePath {
+		t.Fatalf("spawn maintenance call %d is for %q, want the scope-flip path %q", flipIndex, calls[flipIndex].Path, flip.SourcePath)
+	}
+	if len(calls[flipIndex].Spawns) != 0 {
+		t.Fatalf("the scope flip for %q passed %d spawns to the projection, want none: a non-root record contributes no rows", flip.SourcePath, len(calls[flipIndex].Spawns))
 	}
 }
 
