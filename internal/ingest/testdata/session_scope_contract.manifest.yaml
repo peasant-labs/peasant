@@ -7,3 +7,4 @@ requiredNames:
   - refuses-scope-and-allowlist
   - unreadable-selected-and-child-are-upkeep-not-processed
   - context-members-are-in-neither-set
+  - duplicate-member-id-collapses-to-one

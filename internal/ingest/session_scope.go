@@ -47,10 +47,10 @@ type SessionScope struct {
 // change to the caller's slice cannot change what the scope names.
 func NewSessionScope(ids []SessionID, related RelatedPolicy) (SessionScope, error) {
 	if !related.IsValid() {
-		return SessionScope{}, scopeUnsetPolicyError(scopeConstructorWhere)
+		return SessionScope{}, scopeUnsetPolicyError(scopeConstructorRefusal)
 	}
 	if len(ids) == 0 {
-		return SessionScope{}, scopeNoIDsError(scopeConstructorWhere)
+		return SessionScope{}, scopeNoIDsError(scopeConstructorRefusal)
 	}
 
 	unique := make([]SessionID, 0, len(ids))
@@ -82,20 +82,38 @@ func (s SessionScope) Related() RelatedPolicy { return s.related }
 
 // The two unusable-scope rules are stated once, here, and used by both
 // boundaries that can meet them: the constructor, and the run's refusal of a
-// scope a caller built by hand. Only the where: clause differs.
-const (
-	scopeConstructorWhere = "ingest.NewSessionScope in internal/ingest/session_scope.go"
-	scopeRunWhere         = "ingest.PipelineConfig.Scope, checked at the start of Pipeline.Run in internal/ingest/pipeline.go"
+// scope a caller built by hand. Only the clauses a boundary can state
+// truthfully differ: where it was met, when, and what it prevented.
+type scopeRefusal struct {
+	where  string
+	when   string
+	impact string
+}
+
+var (
+	// scopeConstructorRefusal is NewSessionScope: no pipeline runs, so what the
+	// caller loses is the scope itself.
+	scopeConstructorRefusal = scopeRefusal{
+		where:  "ingest.NewSessionScope in internal/ingest/session_scope.go",
+		when:   "while building the scope, before any run exists",
+		impact: "no scope is returned, so nothing can be read until the input is fixed",
+	}
+	// scopeRunRefusal is Pipeline.Run's check of a scope a caller built by hand.
+	scopeRunRefusal = scopeRefusal{
+		where:  "ingest.PipelineConfig.Scope, checked at the start of Pipeline.Run in internal/ingest/pipeline.go",
+		when:   "before the run lock and before any stage",
+		impact: "no source was read and no session or store row was touched",
+	}
 )
 
 // scopeNoIDsError is the one statement of "a scope must name a session".
-func scopeNoIDsError(where string) error {
-	return fmt.Errorf("ingest: the session scope names no sessions; a scope with no ids would select nothing and must not exist, because a nil scope already means the full run; where: %s; when: before any session is read; impact: the run is refused before any session or store row is touched; fix: pass at least one --session id, or leave the scope nil for a full run", where)
+func scopeNoIDsError(refusal scopeRefusal) error {
+	return fmt.Errorf("ingest: the session scope names no sessions; a scope with no ids would select nothing and must not exist, because a nil scope already means the full run; where: %s; when: %s; impact: %s; fix: pass at least one --session id, or leave the scope nil for a full run", refusal.where, refusal.when, refusal.impact)
 }
 
 // scopeUnsetPolicyError is the one statement of "a scope must carry a policy".
-func scopeUnsetPolicyError(where string) error {
-	return fmt.Errorf("ingest: the session scope carries no related policy; a scope must say whether a selected session's children and unstored ancestors join the cohort, and the zero value is invalid so a forgotten argument cannot silently pick one; where: %s; when: before any session is read; impact: the run is refused before any session or store row is touched; fix: pass RelatedInclude (the default) or RelatedExclude (--no-related)", where)
+func scopeUnsetPolicyError(refusal scopeRefusal) error {
+	return fmt.Errorf("ingest: the session scope carries no related policy; a scope must say whether a selected session's children and unstored ancestors join the cohort, and the zero value is invalid so a forgotten argument cannot silently pick one; where: %s; when: %s; impact: %s; fix: pass RelatedInclude (the default) or RelatedExclude (--no-related)", refusal.where, refusal.when, refusal.impact)
 }
 
 // validateScope refuses a pipeline configuration whose scope cannot narrow a
@@ -106,14 +124,15 @@ func (c *PipelineConfig) validateScope() error {
 		return nil
 	}
 	if len(c.Scope.ids) == 0 {
-		return scopeNoIDsError(scopeRunWhere)
+		return scopeNoIDsError(scopeRunRefusal)
 	}
 	if !c.Scope.related.IsValid() {
-		return scopeUnsetPolicyError(scopeRunWhere)
+		return scopeUnsetPolicyError(scopeRunRefusal)
 	}
 	if c.AllowedSessionIDs != nil {
 		return fmt.Errorf(
-			"ingest: PipelineConfig sets both Scope and AllowedSessionIDs; the scope already selects this run's cohort, and a second allowlist would filter the located members by an unrelated set, so the two narrowings can disagree; where: ingest.PipelineConfig.Scope and AllowedSessionIDs, checked at the start of Pipeline.Run in internal/ingest/pipeline.go; when: before the run lock and before any stage; impact: no source was read and no session or store row was touched; fix: pass --session (Scope) or an allowlist, never both")
+			"ingest: PipelineConfig sets both Scope and AllowedSessionIDs; the scope already selects this run's cohort, and a second allowlist would filter the located members by an unrelated set, so the two narrowings can disagree; where: %s; when: %s; impact: %s; fix: pass --session (Scope) or an allowlist, never both",
+			scopeRunRefusal.where, scopeRunRefusal.when, scopeRunRefusal.impact)
 	}
 	return nil
 }

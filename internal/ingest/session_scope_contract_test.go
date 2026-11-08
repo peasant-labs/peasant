@@ -28,12 +28,11 @@ var sessionScopeContractYAML []byte
 var sessionScopeContractManifestYAML []byte
 
 type sessionScopeConstructionCase struct {
-	Name       string   `yaml:"name"`
-	IDs        []string `yaml:"ids"`
-	Related    string   `yaml:"related"`
-	WantIDs    []string `yaml:"wantIDs"`
-	WantCopied bool     `yaml:"wantCopied"`
-	WantError  string   `yaml:"wantError"`
+	Name      string   `yaml:"name"`
+	IDs       []string `yaml:"ids"`
+	Related   string   `yaml:"related"`
+	WantIDs   []string `yaml:"wantIDs"`
+	WantError string   `yaml:"wantError"`
 }
 
 type sessionScopeRunRefusalCase struct {
@@ -89,6 +88,17 @@ func loadSessionScopeContractFixture(t *testing.T) sessionScopeContractFixture {
 	return fixture
 }
 
+// Each boundary that refuses an unusable scope must state what only it knows:
+// the constructor returns no scope, and the run is refused before the run lock
+// and before any stage. The rule text is shared; these are the clauses that
+// must stay boundary-specific.
+const (
+	constructorWhenClause   = "when: while building the scope, before any run exists"
+	constructorImpactClause = "impact: no scope is returned"
+	runWhenClause           = "when: before the run lock and before any stage"
+	runImpactClause         = "impact: no source was read and no session or store row was touched"
+)
+
 // TestNewSessionScopeContract pins the boundary constructor: sorted ids, no
 // duplicates, its own copy, and a refusal for each unusable input. Dropping any
 // one of them changes what a scoped run reads.
@@ -111,6 +121,16 @@ func TestNewSessionScopeContract(t *testing.T) {
 				if !strings.Contains(err.Error(), testCase.WantError) {
 					t.Fatalf("NewSessionScope error does not say %q:\n%v", testCase.WantError, err)
 				}
+				// The two boundary-specific clauses are what the constructor
+				// knows: no pipeline runs, so what the caller loses is the scope.
+				if strings.Contains(err.Error(), "names no sessions") || strings.Contains(err.Error(), "carries no related policy") {
+					if !strings.Contains(err.Error(), constructorWhenClause) || !strings.Contains(err.Error(), constructorImpactClause) {
+						t.Fatalf("the constructor does not state its own when and impact:\n%v", err)
+					}
+				}
+				if strings.Contains(err.Error(), runWhenClause) {
+					t.Fatalf("the constructor borrowed the run's when clause:\n%v", err)
+				}
 				return
 			}
 			if err != nil {
@@ -128,9 +148,6 @@ func TestNewSessionScopeContract(t *testing.T) {
 			ids[0] = ingest.SessionID("mutated-after-construction")
 			if !slices.Equal(scope.IDs(), want) {
 				t.Fatalf("mutating the caller's ids changed the scope: IDs() = %v, want %v", scope.IDs(), want)
-			}
-			if !testCase.WantCopied {
-				return
 			}
 			returned := scope.IDs()
 			returned[0] = ingest.SessionID("mutated-outside-the-scope")
@@ -188,6 +205,14 @@ func TestPipelineRunRefusesUnusableScope(t *testing.T) {
 			if !strings.Contains(err.Error(), testCase.WantError) {
 				t.Fatalf("Run error does not say %q:\n%v", testCase.WantError, err)
 			}
+			// A run refusal says what it prevented and when: before the run lock
+			// and before any stage.
+			if !strings.Contains(err.Error(), runWhenClause) || !strings.Contains(err.Error(), runImpactClause) {
+				t.Fatalf("the run refusal does not state the ordering guarantee:\n%v", err)
+			}
+			if strings.Contains(err.Error(), constructorWhenClause) {
+				t.Fatalf("the run refusal borrowed the constructor's when clause:\n%v", err)
+			}
 			if len(store.calls) > 0 {
 				t.Fatalf("the refusal touched the store: %v", store.calls)
 			}
@@ -234,11 +259,13 @@ func TestScopeReportProcessedAndUpkeep(t *testing.T) {
 	}
 }
 
-// scopeClosedSets is the one list of the closed sets this package declares. The
-// census below requires every uint8 type declared in session_scope*.go to
-// appear here, so a new set cannot ship without an assertion that its zero value
-// is refused; each entry in turn names every valid member, so a constant that
-// stops validating goes red.
+// scopeClosedSets is the one list of the closed sets the session_scope*.go files
+// declare as uint8 types. The census below requires every such type to appear
+// here, so a new set cannot ship without an assertion that its zero value is
+// refused. The valid members are listed by hand beside each set's constants and
+// must be updated with them; the census checks that every listed member
+// validates and that no two share a value, but it does not read the const
+// blocks.
 var scopeClosedSets = []struct {
 	goName string
 	zero   any
@@ -399,7 +426,11 @@ func TestClosedSetsDeclareAnInvalidZeroAndEveryMember(t *testing.T) {
 		if zero.Uint() != 0 {
 			t.Fatalf("%s: the table's zero value is not the zero value", set.goName)
 		}
-		if zero.Interface().(validatable).IsValid() {
+		zeroValid, ok := zero.Interface().(validatable)
+		if !ok {
+			t.Fatalf("%s has no IsValid method; every declared closed set must refuse its zero value", set.goName)
+		}
+		if zeroValid.IsValid() {
 			t.Fatalf("%s: the zero value is valid; an unset field would claim a real choice", set.goName)
 		}
 
@@ -413,7 +444,11 @@ func TestClosedSetsDeclareAnInvalidZeroAndEveryMember(t *testing.T) {
 			if value.Type() != zero.Type() {
 				t.Fatalf("%s: %q parsed to %s, want %s", set.goName, name, value.Type(), zero.Type())
 			}
-			if !value.Interface().(validatable).IsValid() {
+			memberValue, ok := value.Interface().(validatable)
+			if !ok {
+				t.Fatalf("%s has no IsValid method; every declared closed set must refuse its zero value", set.goName)
+			}
+			if !memberValue.IsValid() {
 				t.Fatalf("%s: member %q is not valid", set.goName, name)
 			}
 			number := value.Uint()
