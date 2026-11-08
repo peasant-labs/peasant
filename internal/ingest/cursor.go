@@ -248,31 +248,27 @@ func (a *CursorAdapter) LookupSessionSources(ctx context.Context, cfg SourceConf
 	}
 	ext := defaults.ExtJSONL.String()
 	var lookup SourceLookup
+	listed := make(map[ResolvedPath]struct{}, len(cfg.Paths))
 	for _, basePath := range cfg.Paths {
+		if _, duplicate := listed[basePath]; duplicate {
+			// One root named twice would claim the same transcript twice, read
+			// downstream as a duplicate session, and report the same search
+			// twice.
+			continue
+		}
+		listed[basePath] = struct{}{}
 		if err := ctx.Err(); err != nil {
-			return SourceLookup{}, err
+			return lookup, err
 		}
 		root := string(basePath)
-		transcriptsDirName := cursorAgentTranscriptsDir
-		rootEntries := []SearchedSource{
-			{
-				Harness:  HarnessCursor,
-				Method:   SearchNamePattern,
-				Location: cursorDisplayPath(filepath.Join(root, "*", transcriptsDirName, string(id), string(id)+ext)),
-			},
-			{
-				Harness:  HarnessCursor,
-				Method:   SearchNamePattern,
-				Location: cursorDisplayPath(filepath.Join(root, "*", transcriptsDirName, "*", defaults.DirSubagents.String(), string(id)+ext)),
-			},
-		}
+		searched := SearchedSource{Harness: HarnessCursor, Method: SearchNamePattern, Location: cursorSearchLocation(basePath, id)}
 		workspaces, err := a.fs.ReadDir(root)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
-				lookup.Searched = append(lookup.Searched, rootEntries...)
+				lookup.Searched = append(lookup.Searched, searched)
 				continue
 			}
-			return lookup, fmt.Errorf("ingest: the Cursor lookup for session %s could not list %q; a directory that cannot be read may still hold the transcript, so the id cannot be reported absent from this source; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: locating the named session by name; impact: this source was not fully searched, and the miss text names the failure; fix: make the directory readable and retry: %w", id, root, err)
+			return lookup, cursorLookupFailure(id, "list", root, err)
 		}
 
 		transcriptDirs := make([]string, 0, len(workspaces))
@@ -280,17 +276,17 @@ func (a *CursorAdapter) LookupSessionSources(ctx context.Context, cfg SourceConf
 			if !workspace.IsDir() {
 				continue
 			}
-			dir := filepath.Join(root, workspace.Name(), transcriptsDirName)
+			dir := filepath.Join(root, workspace.Name(), cursorAgentTranscriptsDir)
 			transcriptDirs = append(transcriptDirs, dir)
 			candidate := filepath.Join(dir, string(id), string(id)+ext)
 			hit, err := a.cursorSourceExists(candidate)
 			if err != nil {
-				return lookup, fmt.Errorf("ingest: the Cursor lookup for session %s could not stat %q; the search stopped before this source was fully covered, so the id cannot be reported absent from it; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: checking one candidate transcript path; impact: this source was not fully searched, and the miss text names the failure; fix: make the path readable and retry: %w", id, candidate, err)
+				return lookup, cursorLookupFailure(id, "stat", candidate, err)
 			}
 			if hit {
 				resolved, err := NewResolvedPath(candidate)
 				if err != nil {
-					return lookup, fmt.Errorf("ingest: the Cursor lookup found %q for session %s but could not resolve it as an absolute path; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: recording a lookup hit; impact: the hit is dropped from this lookup; fix: report the path form that cannot be resolved: %w", candidate, id, err)
+					return lookup, cursorLookupFailure(id, "resolve", candidate, err)
 				}
 				lookup.Sources = append(lookup.Sources, resolved)
 			}
@@ -301,7 +297,7 @@ func (a *CursorAdapter) LookupSessionSources(ctx context.Context, cfg SourceConf
 				if errors.Is(err, fs.ErrNotExist) {
 					continue
 				}
-				return lookup, fmt.Errorf("ingest: the Cursor lookup for session %s could not list %q; a directory that cannot be read may hold a subagent transcript named by the id, so the id cannot be reported absent from this source; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: locating the named session by name; impact: this source was not fully searched, and the miss text names the failure; fix: make the directory readable and retry: %w", id, dir, err)
+				return lookup, cursorLookupFailure(id, "list", dir, err)
 			}
 			for _, session := range sessions {
 				if !session.IsDir() {
@@ -310,20 +306,43 @@ func (a *CursorAdapter) LookupSessionSources(ctx context.Context, cfg SourceConf
 				candidate := filepath.Join(dir, session.Name(), defaults.DirSubagents.String(), string(id)+ext)
 				hit, err := a.cursorSourceExists(candidate)
 				if err != nil {
-					return lookup, fmt.Errorf("ingest: the Cursor lookup for session %s could not stat %q; the search stopped before this source was fully covered, so the id cannot be reported absent from it; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: checking one candidate subagent transcript path; impact: this source was not fully searched, and the miss text names the failure; fix: make the path readable and retry: %w", id, candidate, err)
+					return lookup, cursorLookupFailure(id, "stat", candidate, err)
 				}
 				if hit {
 					resolved, err := NewResolvedPath(candidate)
 					if err != nil {
-						return lookup, fmt.Errorf("ingest: the Cursor lookup found %q for session %s but could not resolve it as an absolute path; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: recording a lookup hit; impact: the hit is dropped from this lookup; fix: report the path form that cannot be resolved: %w", candidate, id, err)
+						return lookup, cursorLookupFailure(id, "resolve", candidate, err)
 					}
 					lookup.Sources = append(lookup.Sources, resolved)
 				}
 			}
 		}
-		lookup.Searched = append(lookup.Searched, rootEntries...)
+		lookup.Searched = append(lookup.Searched, searched)
 	}
 	return lookup, nil
+}
+
+// cursorSearchLocation is the pattern one configured root was searched with,
+// for the miss error's searched block: the two transcript shapes the lookup
+// enumerates, a root session and a subagent, in one pattern. The block composes
+// one line per source from this value alone, so it carries no resolved folder or
+// file that happens to exist.
+func cursorSearchLocation(root ResolvedPath, id SessionID) string {
+	name := string(id)
+	sep := string(filepath.Separator)
+	return filepath.Join(
+		cursorDisplayPath(string(root)),
+		"*",
+		cursorAgentTranscriptsDir,
+		"{"+name+sep+name+",*"+sep+defaults.DirSubagents.String()+sep+name+"}"+defaults.ExtJSONL.String(),
+	)
+}
+
+// cursorLookupFailure is the one statement of "the by-name lookup could not
+// cover this source". The core records the failure from the returned error, and
+// the detail says why the id cannot be reported absent from this source.
+func cursorLookupFailure(id SessionID, action, path string, err error) error {
+	return fmt.Errorf("ingest: the Cursor lookup for session %s could not %s %q; the search stopped before this source was fully covered, so the id cannot be reported absent from it; where: ingest.CursorAdapter.LookupSessionSources in internal/ingest/cursor.go; when: locating the named session by name; impact: this source was not fully searched, and the miss text names the failure; fix: make the path readable and retry: %w", id, action, path, err)
 }
 
 // cursorSourceExists reports whether path is a readable file. A missing path is
@@ -490,9 +509,9 @@ func (a *CursorAdapter) appendCursorStoredChildren(sources *[]cursorSource, cfg 
 func (a *CursorAdapter) buildCursorStoredChild(cfg SourceConfig, child StoredSessionSource) (LocatedMember, cursorSource, bool) {
 	member := LocatedMember{ID: child.ID, Harness: child.Harness}
 	if child.Harness != HarnessCursor {
-		// Another harness owns this source. The child's own adapter can read it,
-		// so the source is not gone and the harness is not disabled: this is a
-		// local read failure the run continues past.
+		// Another harness owns this source, or none was recorded. That is the
+		// cross-harness read failure UnreadableSourceFailed states; the source is
+		// not gone.
 		member.Unreadable = UnreadableSourceFailed
 		if child.Harness == "" {
 			member.Detail = "the store records no harness for this child, so the cursor adapter cannot attribute its source"
