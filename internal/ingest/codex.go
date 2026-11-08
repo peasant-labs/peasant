@@ -200,7 +200,11 @@ type codexSessionBuild struct {
 type codexBuildNeed uint8
 
 const (
-	codexBuildNeedUnset codexBuildNeed = iota // invalid
+	// codexBuildNeedUnset is the invalid zero. It is unreachable rather than
+	// refusable: buildCodexSession is unexported and both of its callers name a
+	// declared value, so no caller can ask for a build without saying whether it
+	// needs the parent.
+	codexBuildNeedUnset codexBuildNeed = iota
 	// codexBuildSessionOnly is the full walk, which does not carry the parent a
 	// rollout names, so it never parses for it.
 	codexBuildSessionOnly
@@ -341,7 +345,7 @@ func (a *CodexAdapter) LookupSessionSources(ctx context.Context, cfg SourceConfi
 		lookup.Searched = append(lookup.Searched, SearchedSource{
 			Harness:  HarnessCodex,
 			Method:   SearchNamePattern,
-			Location: codexWindowLocation(folders, id),
+			Location: codexSearchLocation(root, id),
 		})
 	}
 
@@ -365,14 +369,16 @@ func codexDayFolder(root ResolvedPath, day time.Time) ResolvedPath {
 	return ResolvedPath(filepath.Join(string(root), day.Format("2006"), day.Format("01"), day.Format("02")))
 }
 
-// codexWindowLocation renders the two folders a lookup listed and the rollout
-// name pattern it matched there, for the miss error's searched block. The
-// pattern is the one a rollout file actually carries:
-// rollout-{timestamp}-{id}.jsonl.
-func codexWindowLocation(folders [2]ResolvedPath, id SessionID) string {
-	return fmt.Sprintf("%s and %s: %s*-%s%s",
-		codexDisplayPath(folders[0]), codexDisplayPath(folders[1]),
-		codexRolloutFilePrefix, id, defaults.ExtJSONL.String())
+// codexSearchLocation is the pattern one configured root was searched with, for
+// the miss error's searched block: the day folders the layout nests under the
+// root, then the rollout file name a session's id appears in. The block renders
+// one line per source and composes it from this pattern alone, so it must not
+// carry a resolved folder or a file that happens to exist.
+func codexSearchLocation(root ResolvedPath, id SessionID) string {
+	return filepath.Join(
+		codexDisplayPath(root), "*", "*", "*",
+		codexRolloutFilePrefix+"*-"+string(id)+defaults.ExtJSONL.String(),
+	)
 }
 
 // codexDisplayPath renders a source path with the home directory shortened, the
@@ -489,8 +495,12 @@ func (a *CodexAdapter) codexStoredChildMember(cfg SourceConfig, child StoredSess
 		// transcript and the store-side upkeep a full run gives it — not a gone
 		// source, because the file may be exactly where the store says, and not
 		// a disabled harness, because the harness was never the reason.
+		reason := "a source with no recorded harness cannot be read by the codex adapter"
+		if child.Harness != "" {
+			reason = fmt.Sprintf("a %s source cannot be read by the codex adapter", child.Harness)
+		}
 		member.Unreadable = UnreadableSourceFailed
-		member.Detail = firstLineOr(fmt.Sprintf("a %s source cannot be read by the codex adapter", child.Harness), "the source cannot be read by this adapter")
+		member.Detail = firstLineOr(reason, "the source cannot be read by this adapter")
 		return member
 	}
 	if nameID, ok := codexSessionIDFromFilename(filepath.Base(string(child.Path))); !ok || nameID != string(child.ID) {
@@ -525,8 +535,11 @@ func (a *CodexAdapter) codexStoredChildMember(cfg SourceConfig, child StoredSess
 }
 
 // codexEnumeratedRoot returns the configured source root that holds path,
-// preferring the deepest one when roots nest, so a located member carries the
-// OriginalRoot the full walk would have given it.
+// preferring the deepest one. A path can be inside more than one configured
+// root — a user may configure both the Codex home and its sessions tree — but
+// only the deepest root admits it at the four-segment depth the layout gives a
+// rollout, so the deepest containing root is the one the full walk would have
+// attributed it to.
 func codexEnumeratedRoot(cfg SourceConfig, path ResolvedPath) (ResolvedPath, bool) {
 	var best ResolvedPath
 	found := false
