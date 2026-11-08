@@ -79,11 +79,14 @@ func runSaveClaudeTeammateSpawns(conn *sqlite.Conn, sourcePath string, spawns []
 }
 
 // writeClaudeTeammateSpawns replaces one transcript's rows in the spawns
-// projection inside the caller's transaction. The delete runs for every
-// upserted path so a transcript whose scope changed cannot leave rows behind;
-// the inserts are limited to a root record's mined spawns, which is the only
-// source the projection is derived from. INSERT OR IGNORE is required because
-// mining appends spawn records without deduplicating them.
+// projection inside the caller's transaction. The evidence upsert is an
+// INSERT OR REPLACE, whose conflict delete already cascades the replaced
+// row's spawns away; the delete here is the belt-and-braces that keeps the
+// projection correct if the upsert ever stops replacing the row, because an
+// upsert that updates in place does not fire that cascade. The inserts are
+// limited to a root record's mined spawns, which is the only source the
+// projection is derived from. INSERT OR IGNORE is required because mining
+// appends spawn records without deduplicating them.
 func writeClaudeTeammateSpawns(conn *sqlite.Conn, sourcePath string, spawns []ingest.ClaudeTeammateIdentity) error {
 	if err := sqlitex.ExecuteTransient(conn, sqlDeleteClaudeTeammateSpawns, &sqlitex.ExecOptions{
 		Args: []any{sourcePath},
@@ -285,9 +288,10 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 		}); err != nil {
 			return fmt.Errorf("store.SaveClaudeEvidence: write evidence for transcript %q: %w", record.SourcePath, err)
 		}
-		// Only a root record contributes spawns to the projection. The delete
-		// still runs for every upserted path through the seam, so a scope change
-		// cannot leave rows that no root record derives.
+		// Only a root record contributes spawns to the projection. The
+		// maintenance runs for every upserted path, including a non-root one, so
+		// a scope flip clears the rows even if the evidence upsert stops
+		// cascading them.
 		projectedSpawns := record.Spawns
 		if record.Scope != ingest.ClaudeEvidenceScopeRoot {
 			projectedSpawns = nil
