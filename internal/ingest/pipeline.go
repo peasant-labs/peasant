@@ -2738,6 +2738,13 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		if cache, ok := p.store.(ClaudeEvidenceCache); ok && !p.config.DryRun {
 			AttachClaudeEvidenceCache(adapter, cache)
 		}
+		// The full Codex walk keeps the derived rollout catalog current, so a
+		// later scoped run can answer the duplicate and parent questions
+		// without walking the sessions tree. A dry run writes nothing, and an
+		// adapter that keeps no catalog ignores the store.
+		if catalog, ok := p.store.(CodexRolloutCatalogStore); ok && !p.config.DryRun {
+			AttachCodexRolloutCatalog(adapter, catalog)
+		}
 		// The local store also answers where a session id already lives, so
 		// cross-run linking can confirm a candidate spawner is really
 		// persisted before trusting it.

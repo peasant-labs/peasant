@@ -1,0 +1,169 @@
+# The full Codex walk keeps the derived rollout catalog current. Each case runs
+# a real walk over an in-memory source tree with a real store attached, then
+# reads the catalog back.
+requiredNames:
+  - fresh_walk_catalogs_every_enumerated_path
+  - second_walk_is_idempotent
+  - walk_prunes_a_path_whose_file_is_gone
+  - walk_keeps_a_catalogued_path_under_a_root_it_did_not_walk
+  - partial_walk_keeps_a_path_it_could_not_enumerate
+  - partial_walk_keeps_a_path_whose_stat_is_denied
+
+cases:
+  # A walked tree is catalogued path by path, not session by session: a second
+  # copy of one id is a second row, which is exactly the count the duplicate
+  # refusal reads. Neither rollout is stored by this test, which is the same
+  # state a rollout that no harvest stores leaves behind.
+  - name: fresh_walk_catalogs_every_enumerated_path
+    roots:
+      - /src/codex
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/10/rollout-2026-11-10T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-22222222-2222-4222-8222-222222222222.jsonl
+        id: 22222222-2222-4222-8222-222222222222
+    wantSessions: 3
+    wantCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/10/rollout-2026-11-10T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-22222222-2222-4222-8222-222222222222.jsonl
+        id: 22222222-2222-4222-8222-222222222222
+    wantSessionCounts:
+      11111111-1111-4111-8111-111111111111: 2
+      22222222-2222-4222-8222-222222222222: 1
+
+  # Re-walking the same tree refreshes the rows it holds instead of adding
+  # duplicates or dropping them.
+  - name: second_walk_is_idempotent
+    roots:
+      - /src/codex
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-22222222-2222-4222-8222-222222222222.jsonl
+        id: 22222222-2222-4222-8222-222222222222
+    seedCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-22222222-2222-4222-8222-222222222222.jsonl
+        id: 22222222-2222-4222-8222-222222222222
+    wantSessions: 2
+    wantCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-22222222-2222-4222-8222-222222222222.jsonl
+        id: 22222222-2222-4222-8222-222222222222
+    wantSessionCounts:
+      11111111-1111-4111-8111-111111111111: 1
+      22222222-2222-4222-8222-222222222222: 1
+
+  # A catalogued path under a walked root whose file the walk no longer finds
+  # loses its row, so a deleted rollout stops counting toward a duplicate id.
+  - name: walk_prunes_a_path_whose_file_is_gone
+    roots:
+      - /src/codex
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+    seedCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/10/rollout-2026-11-10T09-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-22222222-2222-4222-8222-222222222222.jsonl
+        id: 22222222-2222-4222-8222-222222222222
+    wantSessions: 1
+    wantCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+    wantSessionCounts:
+      11111111-1111-4111-8111-111111111111: 1
+      22222222-2222-4222-8222-222222222222: 0
+
+  # The walk prunes only the roots it re-walked. A row left by a source root
+  # this run did not visit survives even when its file is not on this tree.
+  - name: walk_keeps_a_catalogued_path_under_a_root_it_did_not_walk
+    roots:
+      - /src/codex
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+    seedCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /other/codex/2026/11/09/rollout-2026-11-09T12-00-00-33333333-3333-4333-8333-333333333333.jsonl
+        id: 33333333-3333-4333-8333-333333333333
+    wantSessions: 1
+    wantCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /other/codex/2026/11/09/rollout-2026-11-09T12-00-00-33333333-3333-4333-8333-333333333333.jsonl
+        id: 33333333-3333-4333-8333-333333333333
+    wantSessionCounts:
+      11111111-1111-4111-8111-111111111111: 1
+      33333333-3333-4333-8333-333333333333: 1
+
+  # A catalogue row whose file cannot even be stat'ed is not a row whose file is
+  # gone: a denied stat says nothing about whether the rollout is still there, so
+  # the row stays until a walk can see the file again.
+  - name: partial_walk_keeps_a_path_whose_stat_is_denied
+    roots:
+      - /src/codex
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/10/rollout-2026-11-10T09-00-00-55555555-5555-4555-8555-555555555555.jsonl
+        id: 55555555-5555-4555-8555-555555555555
+    unreadableDirs:
+      - /src/codex/2026/11/10
+    statDenied:
+      - /src/codex/2026/11/10/rollout-2026-11-10T09-00-00-55555555-5555-4555-8555-555555555555.jsonl
+    seedCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/10/rollout-2026-11-10T09-00-00-55555555-5555-4555-8555-555555555555.jsonl
+        id: 55555555-5555-4555-8555-555555555555
+    wantSessions: 1
+    wantDiagnostics:
+      - source_unreadable
+    wantCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/10/rollout-2026-11-10T09-00-00-55555555-5555-4555-8555-555555555555.jsonl
+        id: 55555555-5555-4555-8555-555555555555
+    wantSessionCounts:
+      11111111-1111-4111-8111-111111111111: 1
+      55555555-5555-4555-8555-555555555555: 1
+
+  # A directory the walk cannot read hides rollouts that still exist. The run
+  # reports the unreadable directory and keeps every row it did not re-derive.
+  - name: partial_walk_keeps_a_path_it_could_not_enumerate
+    roots:
+      - /src/codex
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/10/rollout-2026-11-10T09-00-00-44444444-4444-4444-8444-444444444444.jsonl
+        id: 44444444-4444-4444-8444-444444444444
+    unreadableDirs:
+      - /src/codex/2026/11/10
+    seedCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/10/rollout-2026-11-10T09-00-00-44444444-4444-4444-8444-444444444444.jsonl
+        id: 44444444-4444-4444-8444-444444444444
+    wantSessions: 1
+    wantDiagnostics:
+      - source_unreadable
+    wantCatalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/10/rollout-2026-11-10T09-00-00-44444444-4444-4444-8444-444444444444.jsonl
+        id: 44444444-4444-4444-8444-444444444444
+    wantSessionCounts:
+      11111111-1111-4111-8111-111111111111: 1
+      44444444-4444-4444-8444-444444444444: 1

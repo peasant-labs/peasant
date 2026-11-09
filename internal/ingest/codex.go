@@ -34,6 +34,11 @@ type CodexAdapter struct {
 	salt        salt.Salt
 	windowNow   func() time.Time
 	diagnostics []DiscoveryDiagnostic
+
+	// rolloutCatalog is the derived rollout catalog the full walk keeps
+	// current. A nil value leaves the walk writing nothing, which is the
+	// store-free run's and every test's default.
+	rolloutCatalog CodexRolloutCatalogStore
 }
 
 var _ SourceAdapter = (*CodexAdapter)(nil)
@@ -105,6 +110,7 @@ const codexAncestorProbeKind = ProbeCatalogWindow
 func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	a.diagnostics = nil
 	var sessions []DiscoveredSession
+	var enumerated []RolloutFile
 
 	for _, basePath := range cfg.Paths {
 		// Read sibling session_index.jsonl once per root. Missing/corrupt index
@@ -116,8 +122,14 @@ func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discov
 		if err != nil {
 			return nil, err
 		}
+		// Every enumerated path is catalogued, not only the ones that survive
+		// the build: the catalog answers the duplicate and parent questions,
+		// and both are about rollout files, not about stored sessions.
+		enumerated = append(enumerated, codexRolloutFiles(sources)...)
 		sessions = append(sessions, a.buildCodexSessions(sources, titles)...)
 	}
+
+	a.maintainCodexRolloutCatalog(ctx, cfg.Paths, enumerated)
 
 	return sessions, nil
 }
