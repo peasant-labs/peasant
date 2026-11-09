@@ -1,0 +1,634 @@
+# Adapter-level parity for Strike sessions: for every case, a located build must
+# reproduce exactly the sessions a full discovery records for the same tree,
+# field for field, and a by-name lookup must report exactly the places it
+# searched and the paths it hit.
+#
+# The writer's layout is confirmed, not assumed: Strike stores every session
+# directly in its source root as <id>.jsonl beside its <id>.meta.json sidecar.
+# So the lookup tries exactly {root}/{id}.jsonl, and the located build finds a
+# child its own stream names beside the located transcript. Neither step lists a
+# directory, and zero WalkDir is asserted for every case.
+#
+# The read and stat sets are exact (set equality, never a subset) and every
+# listed path is touched exactly once. A located source's transcript is read
+# once: the build reuses the read the located path made to learn its children.
+# A sidecar that exists is read by the build; a file that is absent is not.
+#
+# knownGaps states the three differences a scoped Strike run can still have,
+# each with the exact DiscoveredSession fields it may change. A case names the
+# gap it exercises and the runner refuses any allowance the gap does not
+# declare; it also asserts the declared difference actually happens, so a case
+# cannot quietly stop covering its gap. The related member a gap leaves out is
+# named under allowedMissingMembers. A case with no knownGap may declare no
+# allowance at all.
+#
+# wantProbe names the one ancestor probe a child case must carry, and miss marks
+# a probe that must not resolve. ProbePath costs one stat of the parent path,
+# which the runner performs after the build; the build itself performs no I/O
+# for it. A sidecar's forkedFrom is a context_from relationship, never a parent,
+# so it derives no parent and no probe.
+
+requiredNames:
+  - root-with-named-children
+  - child-linked-only-by-parent-stream
+  - child-with-stored-parent
+  - child-with-unstored-parent
+  - root-with-stored-child
+  - root-with-stored-child-named-by-stream
+  - stored-child-source-gone
+  - stored-child-foreign-harness
+  - named-child-missing
+  - forked-from-is-not-a-parent
+  - parent-named-only-by-another-stream
+  - child-named-only-by-its-sidecar
+  - parent-in-another-directory
+  - located-path-outside-root
+  - located-path-names-another-session
+  - located-source-gone
+  - located-path-is-directory
+  - lookup-hit
+  - lookup-miss
+  - lookup-duplicate-root
+  - lookup-two-roots
+  - lookup-stat-failure
+
+# Known differences a located build can still have from a full walk, each
+# declared with the exact DiscoveredSession fields it may change.
+knownGaps:
+  - id: R5
+    description: a parent named only by another session's stream
+    fields: [parentUUID]
+  - id: G8
+    description: a child named only by its own sidecar
+    fields: [subagentPaths, modTime]
+  - id: G15
+    description: a parent in another directory is not located
+    fields: []
+
+cases:
+  # The located root's stream names two children; both files sit beside
+  # it, so the build links them exactly as the walk does.
+  - name: root-with-named-children
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        title: parent session
+        text: fixture turn
+        children:
+          - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+          - 20260728T130000.000000002Z-CCCCCCCCCCCCCCCCCCCCCCCCCC
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+        kind: sidecar
+        parentSessionId: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      - path: 20260728T130000.000000002Z-CCCCCCCCCCCCCCCCCCCCCCCCCC.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T130000.000000002Z-CCCCCCCCCCCCCCCCCCCCCCCCCC.meta.json
+        kind: sidecar
+        parentSessionId: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      wantMembers:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+        - 20260728T130000.000000002Z-CCCCCCCCCCCCCCCCCCCCCCCCCC
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        - 20260728T130000.000000002Z-CCCCCCCCCCCCCCCCCCCCCCCCCC.jsonl
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+        - 20260728T130000.000000002Z-CCCCCCCCCCCCCCCCCCCCCCCCCC.meta.json
+      reads:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        - 20260728T130000.000000002Z-CCCCCCCCCCCCCCCCCCCCCCCCCC.jsonl
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+        - 20260728T130000.000000002Z-CCCCCCCCCCCCCCCCCCCCCCCCCC.meta.json
+
+  # The child's own sidecar names no parent, so the shared build takes
+  # the parent whose stream names it, exactly as a full walk does.
+  - name: child-linked-only-by-parent-stream
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+        children:
+          - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+        kind: sidecar
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      wantMembers:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+      reads:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+
+  # The store already records the parent, so no ancestor has to be found
+  # and the located child carries no probe.
+  - name: child-with-stored-parent
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+        children:
+          - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+        kind: sidecar
+        parentSessionId: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+    located:
+      id: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+      path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+      storedParent: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      wantMembers:
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+      stats:
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+      reads:
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+
+  # The child's sidecar names its parent, so the build derives the
+  # parent's exact file beside the child: one stat, performed by the
+  # runner, and no directory read.
+  - name: child-with-unstored-parent
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+        children:
+          - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+        kind: sidecar
+        parentSessionId: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+    located:
+      id: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+      path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+      wantMembers:
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+      wantProbe:
+        path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        miss: false
+      stats:
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      reads:
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+
+  # A stored child is re-read from its own file, so its fields come from
+  # the source and not from the store's link.
+  - name: root-with-stored-child
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+      - path: 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.meta.json
+        kind: sidecar
+        parentSessionId: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      storedChildren:
+        - id: 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ
+          path: 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.jsonl
+          harness: strike
+      wantMembers:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+        - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.jsonl
+        - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.meta.json
+      reads:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.jsonl
+        - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.meta.json
+
+  # The same child is both named by the located root's stream and recorded by
+  # the store: it is one member, built from one read, and the stored record adds
+  # no operation because the stream already reached it.
+  - name: root-with-stored-child-named-by-stream
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+        children:
+          - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+      - path: 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.meta.json
+        kind: sidecar
+        parentSessionId: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      storedChildren:
+        - id: 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ
+          path: 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.jsonl
+          harness: strike
+      wantMembers:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+        - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.jsonl
+        - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.meta.json
+      reads:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.jsonl
+        - 20260728T170000.000000007Z-JJJJJJJJJJJJJJJJJJJJJJJJJJ.meta.json
+
+  # The stored child's file is gone: it comes back as a member with no
+  # source and its reason, never dropped, so the run's upkeep still sees it.
+  - name: stored-child-source-gone
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      storedChildren:
+        - id: 20260728T140000.000000003Z-GGGGGGGGGGGGGGGGGGGGGGGGGG
+          path: 20260728T140000.000000003Z-GGGGGGGGGGGGGGGGGGGGGGGGGG.jsonl
+          harness: strike
+          unreadable: SourceGone
+      wantMembers:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+        - 20260728T140000.000000003Z-GGGGGGGGGGGGGGGGGGGGGGGGGG
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - 20260728T140000.000000003Z-GGGGGGGGGGGGGGGGGGGGGGGGGG.jsonl
+      reads:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+
+  # A first child belongs to another harness and a second records no
+  # harness at all: both are read failures that must name why, and
+  # neither source is touched.
+  - name: stored-child-foreign-harness
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      storedChildren:
+        - id: 20260728T150000.000000004Z-HHHHHHHHHHHHHHHHHHHHHHHHHH
+          path: 20260728T150000.000000004Z-HHHHHHHHHHHHHHHHHHHHHHHHHH.jsonl
+          harness: claude-code
+          unreadable: SourceFailed
+          detailContains: claude-code source cannot be read
+        - id: 20260728T150000.000000006Z-IIIIIIIIIIIIIIIIIIIIIIIIII
+          path: 20260728T150000.000000006Z-IIIIIIIIIIIIIIIIIIIIIIIIII.jsonl
+          harnessUnset: true
+          unreadable: SourceFailed
+          detailContains: records no harness
+      wantMembers:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+        - 20260728T150000.000000004Z-HHHHHHHHHHHHHHHHHHHHHHHHHH
+        - 20260728T150000.000000006Z-IIIIIIIIIIIIIIIIIIIIIIIIII
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+      reads:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+
+  # The stream names a child whose file is not there yet: a named id is
+  # not a session, so no member is invented and the one stat is all it costs.
+  - name: named-child-missing
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+        children:
+          - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      wantMembers:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+      reads:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+
+  # forkedFrom records a context_from relationship, not a parent: the
+  # located root stays a root, carries no probe, and its fork source's
+  # file is not read or stat-ed.
+  - name: forked-from-is-not-a-parent
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+        forkedFrom: 20260728T160000.000000005Z-FFFFFFFFFFFFFFFFFFFFFFFFFF
+      - path: 20260728T160000.000000005Z-FFFFFFFFFFFFFFFFFFFFFFFFFF.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T160000.000000005Z-FFFFFFFFFFFFFFFFFFFFFFFFFF.meta.json
+        kind: sidecar
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      wantMembers:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+      reads:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+
+  # R5, accepted: the parent is named only by the parent's own stream, so
+  # a run of the child alone cannot see it and the child stays a root.
+  - name: parent-named-only-by-another-stream
+    files:
+      - path: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
+        kind: transcript
+        text: fixture turn
+        children:
+          - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      - path: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.meta.json
+        kind: sidecar
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      wantMembers:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      knownGap: R5
+      allowedDifferences:
+        - member: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+          fields: [parentUUID]
+      allowedMissingMembers:
+        - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+      reads:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+
+  # G8: the child is named only by its own sidecar, so the parent's own
+  # source cannot reveal it; the parent keeps the child path list and the
+  # propagated mod time a full walk records.
+  - name: child-named-only-by-its-sidecar
+    files:
+      - path: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.meta.json
+        kind: sidecar
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+        kind: sidecar
+        parentSessionId: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
+    located:
+      id: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
+      path: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
+      wantMembers:
+        - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
+      knownGap: G8
+      allowedDifferences:
+        - member: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
+          fields: [subagentPaths, modTime]
+      allowedMissingMembers:
+        - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
+      stats:
+        - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
+        - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.meta.json
+      reads:
+        - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
+        - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.meta.json
+
+  # G15: the child's sidecar names its parent, but the parent's file is in
+  # another directory, so the derived path probe misses and no ancestor is
+  # located. The child's own link still equals the full walk's.
+  - name: parent-in-another-directory
+    roots:
+      - a
+      - b
+    files:
+      - path: a/20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: a/20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+        parentSessionId: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
+      - path: b/20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: b/20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.meta.json
+        kind: sidecar
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: a/20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      wantMembers:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      wantProbe:
+        path: a/20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
+        miss: true
+      knownGap: G15
+      allowedMissingMembers:
+        - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
+      stats:
+        - a/20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - a/20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        - a/20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
+      reads:
+        - a/20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        - a/20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+
+  # A located path no configured root contains is refused before any read.
+  - name: located-path-outside-root
+    files: []
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: /tmp/peasant-strike-outside-root/20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      wantError: lies outside every configured Strike source root
+      wantMembers: []
+      stats: []
+      reads: []
+
+  # The file name carries another id, so the path is not this session's
+  # source and the failure wraps ErrSourceGone.
+  - name: located-path-names-another-session
+    files:
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.meta.json
+        kind: sidecar
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+      wantGone: true
+      wantError: names another session
+      wantMembers: []
+      stats: []
+      reads: []
+
+  # The recorded file is gone: one stat proves it, and the failure wraps
+  # ErrSourceGone so the by-name lookup can take over.
+  - name: located-source-gone
+    files: []
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      wantGone: true
+      wantError: no longer exists
+      wantMembers: []
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      reads: []
+
+  # A directory named like a transcript is not a transcript file.
+  - name: located-path-is-directory
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: directory
+    located:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      wantGone: true
+      wantError: is a directory
+      wantMembers: []
+      stats:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      reads: []
+
+  # The lookup names exactly the file the writer lays a session down as.
+  - name: lookup-hit
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
+        kind: sidecar
+    lookup:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      hits:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+
+  # No hit is one stat per configured root and an empty Sources slice.
+  - name: lookup-miss
+    files:
+      - path: 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB.jsonl
+        kind: transcript
+        text: fixture turn
+    lookup:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      hits: []
+
+  # A root named twice is searched once: one hit, one searched entry, one
+  # set of operations, so it cannot read downstream as a duplicate session.
+  - name: lookup-duplicate-root
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+    lookup:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      roots:
+        - .
+        - .
+      hits:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+
+  # Every distinct configured root is searched, and a root that does not
+  # exist is simply not a hit.
+  - name: lookup-two-roots
+    files:
+      - path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+        kind: transcript
+        text: fixture turn
+    lookup:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      roots:
+        - .
+        - second
+      hits:
+        - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+
+  # The core records the failure from the returned error, so the adapter
+  # adds no SearchFailed entry; the completed root's entry still comes back.
+  - name: lookup-stat-failure
+    files: []
+    lookup:
+      id: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      roots:
+        - .
+        - second
+      hits: []
+      faultPath: second/20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
+      errorContains: could not stat
+      searchedRoots:
+        - .
+
