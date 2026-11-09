@@ -586,6 +586,8 @@ func (d *claudeLocatorDerivedLookup) CountClaudeIdentitySpawners(context.Context
 	return d.spawners, nil
 }
 
+// ClaudeIdentitySpawnerPaths answers the spawner-path read with the paths the
+// case declares, so a stored spawner outside the cohort is nameable.
 func (d *claudeLocatorDerivedLookup) ClaudeIdentitySpawnerPaths(context.Context, string, string) ([]string, error) {
 	return append([]string(nil), d.spawnerPaths...), nil
 }

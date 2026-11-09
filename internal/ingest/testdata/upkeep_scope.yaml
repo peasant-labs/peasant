@@ -1,4 +1,4 @@
-required_names:
+requiredNames:
   - flagged-sweep
   - stale-origin-listing
   - parent-origin-requeue
