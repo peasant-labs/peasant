@@ -221,7 +221,41 @@ func (l *scopeLocator) readStored(ctx context.Context) error {
 	}
 	l.stored = stored
 	l.children = children
+	// A Claude build decides teammate links from the indexed identity reader.
+	// Without it the build fails and every located Claude session degrades to an
+	// unreadable member, so the run would exit 0 having processed nothing while
+	// its caller believes the cohort was handled. Refuse before locating
+	// anything instead. A cohort with no reachable Claude identity does not need
+	// the reader, so it is not refused.
+	if l.derived == nil && l.cohortCanContainClaude() {
+		return fmt.Errorf(
+			"ingest: the attached store cannot answer the indexed Claude identity reads; a scoped Claude session's teammate links are decided from the stored identity counts, so every located Claude session would become unreadable and the run would finish without processing it; where: ingest.Pipeline.locateScopedRun in internal/ingest/locate.go; when: before the first session was located; impact: no source was read and no session or store row was touched; fix: attach a store that implements DerivedLookupReader (the Claude build reads AttachClaudeDerivedLookup), or narrow the run so no Claude identity is in the cohort")
+	}
 	return nil
+}
+
+// cohortCanContainClaude reports whether any build this run may perform is a
+// Claude build. Claude must be enabled to be built at all; then a stored row
+// under Claude, a stored child under Claude, or an unstored selected id (whose
+// by-name lookup can hit a Claude source) makes the derived reader necessary.
+func (l *scopeLocator) cohortCanContainClaude() bool {
+	if _, enabled := l.enabledConfig(HarnessClaudeCode); !enabled {
+		return false
+	}
+	for _, id := range l.scope.IDs() {
+		row, stored := l.stored[id]
+		if !stored || row.Harness == HarnessClaudeCode {
+			return true
+		}
+	}
+	for _, rows := range l.children {
+		for _, child := range rows {
+			if child.Harness == HarnessClaudeCode {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // adapterFor builds the adapter for one harness with the store-backed
