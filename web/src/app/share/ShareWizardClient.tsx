@@ -246,9 +246,9 @@ async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDis
  * scope. Paging and totals come from the decoded contract, never a fabricated
  * fallback.
  */
-async function loadHelperMembers(group: ShareHelperGroup, page: number, limit: number): Promise<HelperMembersPage> {
+async function loadHelperMembers(group: ShareHelperGroup, page: number, perPage: number): Promise<HelperMembersPage> {
   const path = `/api/v1/session-groups/${encodeURIComponent(group.groupId)}/members`;
-  const url = `${getApiBaseUrl()}${path}?scope=${encodeURIComponent(group.memberScope)}&page=${page}&limit=${limit}`;
+  const url = `${getApiBaseUrl()}${path}?scope=${encodeURIComponent(group.memberScope)}&page=${page}&perPage=${perPage}`;
   const response = await fetch(url);
   if (response.status === 409) {
     let code: string | undefined;
@@ -292,7 +292,7 @@ async function loadHelperMembers(group: ShareHelperGroup, page: number, limit: n
       helperGroups: mapHelperGroups(item.helperGroups),
     };
   });
-  return { members, total: payload.total, page: payload.page, limit: payload.limit };
+  return { members, total: payload.total, page: payload.page, perPage: payload.perPage };
 }
 
 
@@ -506,8 +506,8 @@ export function ShareWizardClient() {
 
   // Fetch one member page and remember the member sessions it returned, so the
   // downstream steps can resolve a selected member by its transcript id.
-  const loadMembersForWizard = useCallback(async (group: ShareHelperGroup, page: number, limit: number): Promise<HelperMembersPage> => {
-    const result = await loadHelperMembers(group, page, limit);
+  const loadMembersForWizard = useCallback(async (group: ShareHelperGroup, page: number, perPage: number): Promise<HelperMembersPage> => {
+    const result = await loadHelperMembers(group, page, perPage);
     setMemberSessions((previous) => {
       const next = new Map(previous);
       for (const member of result.members) next.set(member.id, member.session);

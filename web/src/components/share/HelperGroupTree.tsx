@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState, type ReactNode } from 'react';
+import { PageSize } from '@peasant-labs/schema';
 import { HelperGroup, HelperGroupListItem, HelperThreadRow } from '@/lib/ft-ui';
 import type { ShareHelperGroup, ShareSession } from '@/lib/share/types';
 
@@ -33,27 +34,27 @@ export interface HelperMembersPage {
   members: HelperMemberRow[];
   total: number;
   page: number;
-  limit: number;
+  perPage: PageSize;
 }
 
 interface GroupState {
   rows: HelperMemberRow[];
   total: number;
   page: number;
-  limit: number;
+  perPage: PageSize;
   loading: boolean;
   loaded: boolean;
   expired: boolean;
   error: string | null;
 }
 
-const HELPER_MEMBERS_LIMIT = 20;
+const HELPER_MEMBERS_PER_PAGE = PageSize.P25;
 
 const EMPTY_GROUP: GroupState = {
   rows: [],
   total: 0,
   page: 1,
-  limit: HELPER_MEMBERS_LIMIT,
+  perPage: HELPER_MEMBERS_PER_PAGE,
   loading: false,
   loaded: false,
   expired: false,
@@ -64,7 +65,7 @@ export interface HelperGroupTreeProps {
   groups: ShareHelperGroup[];
   selectedIds: Set<string>;
   onMemberToggle: (id: string, checked: boolean) => void;
-  loadMembers: (group: ShareHelperGroup, page: number, limit: number) => Promise<HelperMembersPage>;
+  loadMembers: (group: ShareHelperGroup, page: number, perPage: PageSize) => Promise<HelperMembersPage>;
   /**
    * The originating grouped list must be refreshed when a member scope is
    * refused. The tree never falls back to an all-members request.
@@ -78,7 +79,7 @@ interface HelperGroupBranchProps {
   groups: ShareHelperGroup[];
   selectedIds: Set<string>;
   onMemberToggle: (id: string, checked: boolean) => void;
-  loadMembers: (group: ShareHelperGroup, page: number, limit: number) => Promise<HelperMembersPage>;
+  loadMembers: (group: ShareHelperGroup, page: number, perPage: PageSize) => Promise<HelperMembersPage>;
   onScopeExpired: () => void;
 }
 
@@ -103,21 +104,21 @@ function HelperGroupBranch({ groups, selectedIds, onMemberToggle, loadMembers, o
 
   const fetchPage = useCallback(
     async (group: ShareHelperGroup, page: number) => {
-      const limit = HELPER_MEMBERS_LIMIT;
+      const perPage = HELPER_MEMBERS_PER_PAGE;
       const key = groupKey(group);
       setStateByGroup((previous) => ({
         ...previous,
         [key]: { ...(previous[key] ?? EMPTY_GROUP), loading: true, expired: false, error: null },
       }));
       try {
-        const result = await loadMembers(group, page, limit);
+        const result = await loadMembers(group, page, perPage);
         setStateByGroup((previous) => ({
           ...previous,
           [key]: {
             rows: result.members,
             total: result.total,
             page: result.page,
-            limit: result.limit,
+            perPage: result.perPage,
             loading: false,
             loaded: true,
             expired: false,
@@ -193,7 +194,7 @@ function HelperGroupBranch({ groups, selectedIds, onMemberToggle, loadMembers, o
       {groups.map((group) => {
         const key = groupKey(group);
         const state = stateByGroup[key] ?? EMPTY_GROUP;
-        const pageCount = Math.max(1, Math.ceil(state.total / state.limit));
+        const pageCount = Math.max(1, Math.ceil(state.total / state.perPage));
         return (
           <HelperGroup
             key={key}
@@ -213,7 +214,7 @@ function HelperGroupBranch({ groups, selectedIds, onMemberToggle, loadMembers, o
                 <p className="share-helper-error text-xs text-danger" role="alert">
                   {state.error}
                 </p>
-              ) : state.loaded && state.total > state.limit ? (
+              ) : state.loaded && state.total > state.perPage ? (
                 <div className="share-helper-paging flex items-center gap-3 font-mono text-xs text-ink-3">
                   <span className="tabular-nums">
                     page {state.page} of {pageCount}

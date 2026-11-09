@@ -82,8 +82,10 @@ function groupedEnvelope(search: Record<string, unknown>) {
       helperGroups: [],
     })),
     page: 1,
-    limit: 20,
-    totalItems: results.length,
+    perPage: 25,
+    total: results.length,
+    nextItems: [],
+    revision: '0',
     ordinarySessionTotal: results.length,
     helperThreadTotal: 0,
   };

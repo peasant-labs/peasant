@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchHomeSessions, fetchHomeProjects, SYNC_HOME_PATH, type LocalSyncSessionPage, type SyncSessionsQuery, type LocalSyncProjectOption, type PageToken } from '@/lib/api/home';
+import { fetchHomeSessions, fetchHomeProjects, SYNC_HOME_PATH, type LocalSyncSessionPage, type SyncSessionsQuery, type LocalSyncProjectOption } from '@/lib/api/home';
 import { DiscoveryErrorCode, DiscoveryRequestError } from '@/lib/api/errors';
 import { fetchVillageAuth } from '@/lib/api/settings';
 
@@ -9,7 +9,7 @@ export interface HomePages {
   pages: LocalSyncSessionPage[];
   loading: boolean;
   error: unknown;
-  retryToken?: PageToken;
+  retryPage?: number;
 }
 const empty = (): HomePages => ({ pages: [], loading: false, error: null });
 const ROOT = '';
@@ -59,18 +59,18 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
     setExpanded(opened.current);
     update(new Map([[ROOT, empty()]]));
   }, [update]);
-  const requestQuery = useCallback((parent: string, pageToken: PageToken): SyncSessionsQuery => parent
-    ? { maxItems: 25, pageToken, parentSessionId: parent }
-    : { ...currentQuery.current, maxItems: 25, pageToken }, []);
+  const requestQuery = useCallback((parent: string, page: number): SyncSessionsQuery => parent
+    ? { maxItems: 25, page, parentSessionId: parent }
+    : { ...currentQuery.current, maxItems: 25, page }, []);
   // A failed read keeps the loaded window on screen and records the failure on
   // its own continuation. It never resets the list: a saved ingestion selection
   // is not a browsing boundary, and an error's code does not change that.
-  const fail = useCallback((error: unknown, parent: string, retryToken?: PageToken) => {
+  const fail = useCallback((error: unknown, parent: string, retryPage?: number) => {
     const next = new Map(state.current);
-    next.set(parent, { ...(next.get(parent) ?? empty()), loading: false, error, retryToken });
+    next.set(parent, { ...(next.get(parent) ?? empty()), loading: false, error, retryPage });
     update(next);
   }, [update]);
-  const load = useCallback(async function loadPage(parent = ROOT, pageToken: PageToken = '') {
+  const load = useCallback(async function loadPage(parent = ROOT, page = 1) {
     if (controllers.current.has(parent) || (parent === ROOT && refreshing.current)) return;
     const token = generation.current;
     const controller = new AbortController();
@@ -79,11 +79,11 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
     next.set(parent, { ...(next.get(parent) ?? empty()), loading: true, error: null });
     update(next);
     try {
-      const page = await fetchHomeSessions(requestQuery(parent, pageToken), controller.signal);
+      const served = await fetchHomeSessions(requestQuery(parent, page), controller.signal);
       if (generation.current !== token || controller.signal.aborted) return;
       const result = new Map(state.current);
       const old = result.get(parent) ?? empty();
-      result.set(parent, { pages: [...old.pages, page], loading: false, error: null });
+      result.set(parent, { pages: [...old.pages, served], loading: false, error: null });
       update(result);
     } catch (error) {
       if (generation.current === token && !controller.signal.aborted) {
@@ -91,7 +91,7 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
           scopeRestarted.current = true;
           reset();
           await loadPage();
-        } else fail(error, parent, pageToken);
+        } else fail(error, parent, page);
       }
     } finally {
       if (controllers.current.get(parent) === controller) controllers.current.delete(parent);
@@ -144,14 +144,14 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
         if (parent) controllers.current.set(parent, target);
         try {
           const pages: LocalSyncSessionPage[] = [];
-          let next: PageToken = '';
+          let nextPage = 1;
           const budget = Math.max(1, group.pages.length);
           for (let index = 0; index < budget; index++) {
-            const page = await fetchHomeSessions(requestQuery(parent, next), target.signal);
+            const served = await fetchHomeSessions(requestQuery(parent, nextPage), target.signal);
             if (target.signal.aborted || token !== generation.current) return null;
-            pages.push(page);
-            next = page.next;
-            if (next === '') break;
+            pages.push(served);
+            if (served.nextItems.length === 0) break;
+            nextPage = served.page + 1;
           }
           if (target.signal.aborted) return null;
           return [parent, { pages, loading: false, error: null }] as const;
@@ -244,8 +244,8 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
   };
   const more = (parent = ROOT) => {
     const pages = state.current.get(parent)?.pages ?? [];
-    const next = pages[pages.length - 1]?.next ?? '';
-    if (next !== '') void load(parent, next);
+    const last = pages[pages.length - 1];
+    if (last && last.nextItems.length > 0) void load(parent, last.page + 1);
   };
   const loadProjects = useCallback(async () => {
     if (controllers.current.has('project-options') || projects !== null) return;
@@ -272,8 +272,8 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
   }, [hasRootPage, projects, projectsLoading, projectError, loadProjects]);
   const retry = (parent = ROOT) => {
     const group = state.current.get(parent);
-    if (group?.retryToken !== undefined) return load(parent, group.retryToken);
-    return parent ? load(parent, group?.pages.at(-1)?.next ?? '') : refresh();
+    if (group?.retryPage !== undefined) return load(parent, group.retryPage);
+    return parent ? load(parent, (group?.pages.at(-1)?.page ?? 0) + 1) : refresh();
   };
   return { groups: loadedQueryKey.current === queryKey ? groups : new Map<string, HomePages>([[ROOT, empty()]]), expanded, toggle, more, refresh, revision: generation.current, retry, projects: loadedQueryKey.current === queryKey ? projects : null, projectError, projectsLoading, loadProjects };
 }

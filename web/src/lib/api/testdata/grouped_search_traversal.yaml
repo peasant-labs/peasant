@@ -18,8 +18,10 @@ cases:
     searchLimit: 20
     searchPayload:
       page: 1
-      limit: 20
-      totalItems: 2
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 2
       ordinarySessionTotal: 1
       helperThreadTotal: 1
       items:
@@ -44,7 +46,9 @@ cases:
         outcome: ok
         body:
           page: 1
-          limit: 20
+          perPage: 25
+          nextItems: []
+          revision: '0'
           total: 1
           members:
             - kind: transcript
@@ -65,7 +69,9 @@ cases:
         outcome: ok
         body:
           page: 1
-          limit: 20
+          perPage: 25
+          nextItems: []
+          revision: '0'
           total: 1
           members:
             - kind: transcript
@@ -90,8 +96,10 @@ cases:
     searchLimit: 20
     searchPayload:
       page: 1
-      limit: 20
-      totalItems: 1
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 1
       items:
@@ -116,7 +124,9 @@ cases:
         outcome: ok
         body:
           page: 1
-          limit: 20
+          perPage: 25
+          nextItems: []
+          revision: '0'
           total: 1
           members:
             - kind: transcript
@@ -139,7 +149,9 @@ cases:
         outcome: ok
         body:
           page: 1
-          limit: 20
+          perPage: 25
+          nextItems: []
+          revision: '0'
           total: 1
           members:
             - kind: transcript
@@ -164,15 +176,17 @@ cases:
     searchLimit: 20
     searchPayload:
       page: 1
-      limit: 20
-      totalItems: 1
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 1
       ordinarySessionTotal: 0
-      helperThreadTotal: 2
+      helperThreadTotal: 26
       items:
         - kind: context_container
           context: {groupId: hg_g1, ownerStatus: unknown}
           helperGroups:
-            - {groupId: hg_g1, purpose: helper_review, helperThreadCount: 2, memberScope: scope-g1}
+            - {groupId: hg_g1, purpose: helper_review, helperThreadCount: 26, memberScope: scope-g1}
     responses:
       - groupId: hg_g1
         scope: scope-g1
@@ -180,8 +194,10 @@ cases:
         outcome: ok
         body:
           page: 1
-          limit: 1
-          total: 2
+          perPage: 25
+          nextItems: []
+          revision: '0'
+          total: 26
           members:
             - kind: transcript
               transcript:
@@ -194,16 +210,7 @@ cases:
                   totalTokens: 10
                   toolCallCount: 0
                 matches:
-                  - {sessionId: agent-m1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 0, role: user, snippet: first page, score: 1}
-      - groupId: hg_g1
-        scope: scope-g1
-        page: 2
-        outcome: ok
-        body:
-          page: 2
-          limit: 1
-          total: 2
-          members:
+                  - {sessionId: agent-m1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 1, role: user, snippet: page one 1, score: 1}
             - kind: transcript
               transcript:
                 session:
@@ -215,19 +222,320 @@ cases:
                   totalTokens: 10
                   toolCallCount: 0
                 matches:
-                  - {sessionId: agent-m2, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 1, role: assistant, snippet: second page, score: 2}
+                  - {sessionId: agent-m2, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 2, role: user, snippet: page one 2, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m3
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m3, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 3, role: user, snippet: page one 3, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m4
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m4, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 4, role: user, snippet: page one 4, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m5
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m5, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 5, role: user, snippet: page one 5, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m6
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m6, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 6, role: user, snippet: page one 6, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m7
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m7, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 7, role: user, snippet: page one 7, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m8
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m8, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 8, role: user, snippet: page one 8, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m9
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m9, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 9, role: user, snippet: page one 9, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m10
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m10, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 10, role: user, snippet: page one 10, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m11
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m11, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 11, role: user, snippet: page one 11, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m12
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m12, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 12, role: user, snippet: page one 12, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m13
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m13, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 13, role: user, snippet: page one 13, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m14
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m14, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 14, role: user, snippet: page one 14, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m15
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m15, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 15, role: user, snippet: page one 15, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m16
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m16, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 16, role: user, snippet: page one 16, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m17
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m17, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 17, role: user, snippet: page one 17, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m18
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m18, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 18, role: user, snippet: page one 18, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m19
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m19, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 19, role: user, snippet: page one 19, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m20
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m20, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 20, role: user, snippet: page one 20, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m21
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m21, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 21, role: user, snippet: page one 21, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m22
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m22, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 22, role: user, snippet: page one 22, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m23
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m23, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 23, role: user, snippet: page one 23, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m24
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m24, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 24, role: user, snippet: page one 24, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m25
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m25, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 25, role: user, snippet: page one 25, score: 1}
+      - groupId: hg_g1
+        scope: scope-g1
+        page: 2
+        outcome: ok
+        body:
+          page: 2
+          perPage: 25
+          nextItems: []
+          revision: '0'
+          total: 26
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-m26
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-m26, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 26, role: user, snippet: page two, score: 1}
     expectedMemberRequests:
       - {groupId: hg_g1, scope: scope-g1, page: 1}
       - {groupId: hg_g1, scope: scope-g1, page: 2}
-    expectedSessionIds: [agent-m1, agent-m2]
+    expectedSessionIds: [agent-m1, agent-m2, agent-m3, agent-m4, agent-m5, agent-m6, agent-m7, agent-m8, agent-m9, agent-m10, agent-m11, agent-m12, agent-m13, agent-m14, agent-m15, agent-m16, agent-m17, agent-m18, agent-m19, agent-m20, agent-m21, agent-m22, agent-m23, agent-m24, agent-m25, agent-m26]
 
   - name: expired-scope-omits-only-that-group
     query: guardian
     searchLimit: 20
     searchPayload:
       page: 1
-      limit: 20
-      totalItems: 3
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 3
       ordinarySessionTotal: 1
       helperThreadTotal: 2
       items:
@@ -261,7 +569,9 @@ cases:
         outcome: ok
         body:
           page: 1
-          limit: 20
+          perPage: 25
+          nextItems: []
+          revision: '0'
           total: 1
           members:
             - kind: transcript
@@ -286,8 +596,10 @@ cases:
     searchLimit: 20
     searchPayload:
       page: 1
-      limit: 20
-      totalItems: 2
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 2
       ordinarySessionTotal: 0
       helperThreadTotal: 2
       items:
@@ -306,7 +618,9 @@ cases:
         outcome: ok
         body:
           page: 1
-          limit: 20
+          perPage: 25
+          nextItems: []
+          revision: '0'
           total: 1
           members:
             - kind: transcript
@@ -330,15 +644,17 @@ cases:
     searchLimit: 20
     searchPayload:
       page: 1
-      limit: 20
-      totalItems: 1
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 1
       ordinarySessionTotal: 0
-      helperThreadTotal: 5
+      helperThreadTotal: 30
       items:
         - kind: context_container
           context: {groupId: hg_loop, ownerStatus: unknown}
           helperGroups:
-            - {groupId: hg_loop, purpose: helper_review, helperThreadCount: 5, memberScope: scope-loop}
+            - {groupId: hg_loop, purpose: helper_review, helperThreadCount: 30, memberScope: scope-loop}
     responses:
       - groupId: hg_loop
         scope: scope-loop
@@ -346,8 +662,10 @@ cases:
         outcome: ok
         body:
           page: 1
-          limit: 1
-          total: 5
+          perPage: 25
+          nextItems: []
+          revision: '0'
+          total: 30
           members:
             - kind: transcript
               transcript:
@@ -360,16 +678,7 @@ cases:
                   totalTokens: 10
                   toolCallCount: 0
                 matches:
-                  - {sessionId: agent-loop1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 0, role: user, snippet: loop first, score: 1}
-      - groupId: hg_loop
-        scope: scope-loop
-        page: 2
-        outcome: ok
-        body:
-          page: 1
-          limit: 1
-          total: 5
-          members:
+                  - {sessionId: agent-loop1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 1, role: user, snippet: loop first 1, score: 1}
             - kind: transcript
               transcript:
                 session:
@@ -381,19 +690,608 @@ cases:
                   totalTokens: 10
                   toolCallCount: 0
                 matches:
-                  - {sessionId: agent-loop2, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 1, role: assistant, snippet: loop second, score: 2}
+                  - {sessionId: agent-loop2, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 2, role: user, snippet: loop first 2, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop3
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop3, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 3, role: user, snippet: loop first 3, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop4
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop4, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 4, role: user, snippet: loop first 4, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop5
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop5, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 5, role: user, snippet: loop first 5, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop6
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop6, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 6, role: user, snippet: loop first 6, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop7
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop7, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 7, role: user, snippet: loop first 7, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop8
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop8, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 8, role: user, snippet: loop first 8, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop9
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop9, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 9, role: user, snippet: loop first 9, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop10
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop10, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 10, role: user, snippet: loop first 10, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop11
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop11, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 11, role: user, snippet: loop first 11, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop12
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop12, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 12, role: user, snippet: loop first 12, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop13
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop13, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 13, role: user, snippet: loop first 13, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop14
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop14, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 14, role: user, snippet: loop first 14, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop15
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop15, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 15, role: user, snippet: loop first 15, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop16
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop16, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 16, role: user, snippet: loop first 16, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop17
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop17, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 17, role: user, snippet: loop first 17, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop18
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop18, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 18, role: user, snippet: loop first 18, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop19
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop19, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 19, role: user, snippet: loop first 19, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop20
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop20, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 20, role: user, snippet: loop first 20, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop21
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop21, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 21, role: user, snippet: loop first 21, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop22
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop22, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 22, role: user, snippet: loop first 22, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop23
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop23, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 23, role: user, snippet: loop first 23, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop24
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop24, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 24, role: user, snippet: loop first 24, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop25
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop25, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 25, role: user, snippet: loop first 25, score: 1}
+      - groupId: hg_loop
+        scope: scope-loop
+        page: 2
+        outcome: ok
+        body:
+          page: 1
+          perPage: 25
+          nextItems: []
+          revision: '0'
+          total: 30
+          members:
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop1
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop1, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 1, role: user, snippet: loop first 1, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop2
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop2, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 2, role: user, snippet: loop first 2, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop3
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop3, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 3, role: user, snippet: loop first 3, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop4
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop4, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 4, role: user, snippet: loop first 4, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop5
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop5, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 5, role: user, snippet: loop first 5, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop6
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop6, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 6, role: user, snippet: loop first 6, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop7
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop7, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 7, role: user, snippet: loop first 7, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop8
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop8, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 8, role: user, snippet: loop first 8, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop9
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop9, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 9, role: user, snippet: loop first 9, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop10
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop10, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 10, role: user, snippet: loop first 10, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop11
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop11, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 11, role: user, snippet: loop first 11, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop12
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop12, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 12, role: user, snippet: loop first 12, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop13
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop13, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 13, role: user, snippet: loop first 13, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop14
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop14, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 14, role: user, snippet: loop first 14, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop15
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop15, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 15, role: user, snippet: loop first 15, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop16
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop16, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 16, role: user, snippet: loop first 16, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop17
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop17, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 17, role: user, snippet: loop first 17, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop18
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop18, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 18, role: user, snippet: loop first 18, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop19
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop19, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 19, role: user, snippet: loop first 19, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop20
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop20, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 20, role: user, snippet: loop first 20, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop21
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop21, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 21, role: user, snippet: loop first 21, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop22
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop22, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 22, role: user, snippet: loop first 22, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop23
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop23, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 23, role: user, snippet: loop first 23, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop24
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop24, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 24, role: user, snippet: loop first 24, score: 1}
+            - kind: transcript
+              transcript:
+                session:
+                  id: agent-loop25
+                  harness: codex
+                  startTime: "2026-01-01T00:00:00Z"
+                  durationMins: 1
+                  turnCount: 2
+                  totalTokens: 10
+                  toolCallCount: 0
+                matches:
+                  - {sessionId: agent-loop25, project: /work/alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, entryIndex: 25, role: user, snippet: loop first 25, score: 1}
     expectedMemberRequests:
       - {groupId: hg_loop, scope: scope-loop, page: 1}
       - {groupId: hg_loop, scope: scope-loop, page: 2}
-    expectedSessionIds: [agent-loop1, agent-loop2]
+    expectedSessionIds: [agent-loop1, agent-loop2, agent-loop3, agent-loop4, agent-loop5, agent-loop6, agent-loop7, agent-loop8, agent-loop9, agent-loop10, agent-loop11, agent-loop12, agent-loop13, agent-loop14, agent-loop15, agent-loop16, agent-loop17, agent-loop18, agent-loop19, agent-loop20, agent-loop21, agent-loop22, agent-loop23, agent-loop24, agent-loop25]
 
   - name: unreachable-group-with-no-members-adds-no-hits
     query: guardian
     searchLimit: 20
     searchPayload:
       page: 1
-      limit: 20
-      totalItems: 1
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 1
       items:
@@ -406,7 +1304,7 @@ cases:
         scope: scope-empty
         page: 1
         outcome: ok
-        body: {page: 1, limit: 20, total: 0, members: []}
+        body: {page: 1, perPage: 25, nextItems: [], revision: '0', total: 0, members: []}
     expectedMemberRequests:
       - {groupId: hg_empty, scope: scope-empty, page: 1}
     expectedSessionIds: []

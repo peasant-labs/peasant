@@ -141,9 +141,11 @@ export function buildGroupedSyncResponse(
   ];
   return {
     items,
+    nextItems: [],
     page: 1,
-    limit: items.length || 1,
-    totalItems: items.length,
+    perPage: 25,
+    total: items.length,
+    revision: '0',
     ordinarySessionTotal: sessions.length,
     helperThreadTotal: sessions.reduce((total, session) => total + (session.helperGroups?.reduce((count, group) => count + group.helperThreadCount, 0) ?? 0), 0),
   };
@@ -155,13 +157,15 @@ export function buildGroupedSyncResponse(
  */
 export function buildGroupedMembersResponse(
   members: GroupedSyncSessionSpec[],
-  options: { page?: number; limit?: number; total?: number } = {},
+  options: { page?: number; perPage?: number; total?: number } = {},
 ) {
   const items = members.map(transcriptItem);
   return {
     members: items,
+    nextItems: [],
     page: options.page ?? 1,
-    limit: options.limit ?? (items.length || 1),
+    perPage: options.perPage ?? 25,
     total: options.total ?? items.length,
+    revision: '0',
   };
 }

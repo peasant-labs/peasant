@@ -193,7 +193,7 @@ function MountedHelperGroup({
           groupId,
           scope: memberScope,
           page,
-          limit: paging.limit,
+          perPage: paging.perPage,
         });
         setMembers(payload.members);
         setPaging((current) =>
@@ -210,7 +210,7 @@ function MountedHelperGroup({
         setLoading(false);
       }
     },
-    [groupId, memberScope, paging.limit],
+    [groupId, memberScope, paging.perPage],
   );
 
   const handleExpandedChange = useCallback(

@@ -247,6 +247,23 @@ residual:
     literals: 2
     class: ddl
     reason: Immutable historical migration text for the parent lane, page indexes, and store revision.
+  - name: store-offset-page-child-filter
+    file: internal/store/offset_page_reader.go
+    declaration: offsetPageWhere
+    literals: 1
+    class: availability
+    reason: >-
+      The child page predicate reads the resolved-child projection column the
+      trigger maintains, not sessions.parent_id. It answers which resolved rows
+      belong to the page.
+  - name: store-offset-page-child-count
+    file: internal/store/offset_page_reader.go
+    declaration: Store.ResolvedChildCounts
+    literals: 2
+    class: availability
+    reason: >-
+      The grouped immediate-child count reads the resolved-child index; it never
+      answers who a session's logical parent is.
 
 routed:
   - name: store-all-sessions

@@ -29,8 +29,10 @@ function okResponse(payload: unknown) {
 function groupedPayload(over: Record<string, unknown> = {}) {
   return {
     page: 1,
-    limit: 20,
-    totalItems: 1,
+    perPage: 25,
+    total: 1,
+    nextItems: [],
+    revision: '0',
     ordinarySessionTotal: 1,
     helperThreadTotal: 2,
     items: [
@@ -71,9 +73,11 @@ describe('SessionsRouter', () => {
           members: [
             { kind: 'transcript', transcript: { session: makeSession({ id: 'helper01' }) } },
           ],
+          nextItems: [],
           page: 1,
-          limit: 20,
+          perPage: 25,
           total: 2,
+          revision: '0',
         });
       }
       return Promise.resolve({ ok: false, status: 404, text: async () => 'not found' } as Response);
@@ -123,7 +127,7 @@ describe('SessionsRouter', () => {
       const url = new URL(String(input));
       if (url.pathname === '/api/v1/sessions') {
         return okResponse(
-          groupedPayload({ items: [], totalItems: 0, ordinarySessionTotal: 0, helperThreadTotal: 0 }),
+          groupedPayload({ items: [], total: 0, ordinarySessionTotal: 0, helperThreadTotal: 0 }),
         );
       }
       return Promise.resolve({ ok: false, status: 404, text: async () => 'not found' } as Response);

@@ -258,8 +258,18 @@ function serve(specs: SessionSpec[], options: ServeOptions = {}) {
       const source = specs.filter(spec => spec.publication !== false && !spec.parentUnresolved
         && (parent ? spec.parentSessionId === parent : !spec.parentSessionId)
         && (parent || filter === 'all' || (filter === 'published' && spec.state === 'published') || (filter === 'not-published' && spec.state === 'unpublished') || (filter === 'auto' && spec.autoPublish)));
-      const start = url.searchParams.get('pageToken') === 'more-sessions' ? 25 : 0;
-      return json({ items: source.slice(start, start + 25).map((spec) => ({ sync: syncRow(spec, specs.indexOf(spec)), publication: publicationRow(spec, specs.indexOf(spec), false), title: spec.title ?? '', preview: spec.preview ?? '', childCount: specs.filter(child => child.parentSessionId === spec.id && child.publication !== false).length })), next: start + 25 < source.length ? 'more-sessions' : '' });
+      const perPage = Number(url.searchParams.get('maxItems') ?? '25');
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const start = (page - 1) * perPage;
+      const row = (spec: SessionSpec) => ({ sync: syncRow(spec, specs.indexOf(spec)), publication: publicationRow(spec, specs.indexOf(spec), false), title: spec.title ?? '', preview: spec.preview ?? '', childCount: specs.filter(child => child.parentSessionId === spec.id && child.publication !== false).length });
+      return json({
+        items: source.slice(start, start + perPage).map(row),
+        nextItems: source.slice(start + perPage, start + 2 * perPage).map(row),
+        page,
+        perPage,
+        total: source.length,
+        revision: '0',
+      });
     }
     if (url.searchParams.get('include') === 'audience') {
       for (const id of url.searchParams.get('sessionIds')!.split(',')) {
@@ -399,7 +409,7 @@ describe('root page publish filters', () => {
          items: [{ kind: 'transcript', transcript: {
            session: makeSession({ id: searchSpec.id, project: PROJECTS[searchSpec.project].name, projectHash: PROJECTS[searchSpec.project].hash }),
            matches: [{ entryIndex: 0, project: PROJECTS[searchSpec.project].name, projectHash: PROJECTS[searchSpec.project].hash, role: 'user', score: 1, sessionId: searchSpec.id, snippet: 'child search match' }],
-         }, helperGroups: [] }], page: 1, limit: 20, totalItems: 1, ordinarySessionTotal: 1, helperThreadTotal: 0,
+         }, helperGroups: [] }], page: 1, perPage: 25, total: 1, nextItems: [], revision: '0', ordinarySessionTotal: 1, helperThreadTotal: 0,
        } : undefined;
        const requests = serve(specs, { search });
        topics.quality = { sessions: specs.filter((spec) => spec.title).map((spec) => ({ id: spec.id, title: spec.title })) };
@@ -651,8 +661,10 @@ describe('root page list reads', () => {
         },
       ],
       page: 1,
-      limit: 20,
-      totalItems: 1,
+      perPage: 25,
+      total: 1,
+      nextItems: [],
+      revision: '0',
       ordinarySessionTotal: 1,
       helperThreadTotal: 0,
     };

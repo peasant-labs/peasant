@@ -6,16 +6,15 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/peasant-labs/schema"
 )
 
 const (
-	// groupedMembersDefaultLimit bounds one member page when the caller omits
-	// limit. It matches the existing list default so the chooser and the list
-	// page in the same units.
-	groupedMembersDefaultLimit = 20
-	// groupedMembersMaxLimit caps one member page. A caller requesting more is
-	// clamped rather than refused, matching the existing search limit behavior.
-	groupedMembersMaxLimit = 50
+	// groupedMembersDefaultPageSize bounds one member page when the caller omits
+	// perPage. It is the schema-owned 25-row page size, so the chooser and the
+	// list page use the same units.
+	groupedMembersDefaultPageSize = schema.PageSize25
 	// memberScopeTTL is the bounded lifetime of an opaque member scope. Fifteen
 	// minutes is long enough to open a disclosure and short enough that a stale
 	// scope is refreshed rather than silently reused.

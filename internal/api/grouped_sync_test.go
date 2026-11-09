@@ -13,15 +13,14 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// TestSyncGroupedViewIsOptInAndFlatRouteUnchanged pins the compatibility half of
-// the sync chooser contract: omitting view keeps the exact flat sync envelope,
-// only the published grouped value selects the grouped payload, and the member
-// operation replays the sync route's exact predicate for the rendered group.
-func TestSyncGroupedViewIsOptInAndFlatRouteUnchanged(t *testing.T) {
+// TestSyncGroupedViewIsOptInAndHomePageIsDefault pins the compatibility half of
+// the sync chooser contract: only the published grouped value selects the
+// grouped payload, and an omitted view serves the bounded Home offset page.
+func TestSyncGroupedViewIsOptInAndHomePageIsDefault(t *testing.T) {
 	// Runs under a forced non-UTC local zone (see RunInForcedNonUTCLocalZone):
 	// without the construction-site .UTC() the grouped-sync rows would serialize
 	// with a local offset and the exact-string assertions below would fail.
-	if RunInForcedNonUTCLocalZone(t, "TestSyncGroupedViewIsOptInAndFlatRouteUnchanged") {
+	if RunInForcedNonUTCLocalZone(t, "TestSyncGroupedViewIsOptInAndHomePageIsDefault") {
 		return
 	}
 	db := storetest.Open(t)
@@ -44,17 +43,24 @@ func TestSyncGroupedViewIsOptInAndFlatRouteUnchanged(t *testing.T) {
 
 	flat, status := helperGroupGET(t, base+"/api/v1/sync/sessions")
 	if status != http.StatusOK {
-		t.Fatalf("flat sync status = %d (body %s)", status, flat)
+		t.Fatalf("omitted-view status = %d (body %s)", status, flat)
 	}
 	var flatEnvelope map[string]json.RawMessage
 	if err := json.Unmarshal(flat, &flatEnvelope); err != nil {
-		t.Fatalf("decode flat sync: %v", err)
+		t.Fatalf("decode omitted-view page: %v", err)
 	}
-	if _, ok := flatEnvelope["sessions"]; !ok {
-		t.Fatalf("flat sync envelope = %v, want a sessions key", flatEnvelope)
+	if _, legacy := flatEnvelope["sessions"]; legacy {
+		t.Fatal("omitted view served the retired flat sync envelope")
 	}
-	if _, grouped := flatEnvelope["items"]; grouped {
-		t.Fatal("flat sync response leaked the grouped items key")
+	var home schema.LocalSyncSessionPage
+	if err := json.Unmarshal(flat, &home); err != nil {
+		t.Fatalf("decode omitted-view page: %v", err)
+	}
+	if err := home.Validate(); err != nil {
+		t.Fatalf("omitted-view page breaks the offset contract: %v", err)
+	}
+	if home.Page != 1 || home.PerPage != schema.PageSize25 || home.Items == nil || home.NextItems == nil {
+		t.Fatalf("omitted-view page = page %d perPage %d items %v nextItems %v", home.Page, home.PerPage, home.Items, home.NextItems)
 	}
 
 	grouped, status := helperGroupGET(t, base+"/api/v1/sync/sessions?view=grouped")
@@ -150,7 +156,7 @@ func TestSyncGroupedViewIsOptInAndFlatRouteUnchanged(t *testing.T) {
 		}
 	}
 
-	members := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 20)
+	members := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 25)
 	if got := helperGroupMemberIDs(members); !reflect.DeepEqual(got, []string{"agent-sync-b1"}) {
 		t.Fatalf("sync group members = %v, want exactly [agent-sync-b1]", got)
 	}

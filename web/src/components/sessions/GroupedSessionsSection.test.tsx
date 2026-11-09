@@ -22,8 +22,10 @@ function session(id: string) {
 function listResponse(): LocalSessionListPayload {
   return {
     page: 1,
-    limit: 20,
-    totalItems: 1,
+    perPage: 25,
+    total: 1,
+    nextItems: [],
+    revision: '0',
     ordinarySessionTotal: 1,
     helperThreadTotal: 2,
     items: [
@@ -48,7 +50,7 @@ describe('GroupedSessionsSection', () => {
       const url = new URL(String(input));
       if (url.pathname === '/api/v1/sessions') return okResponse(listResponse());
       if (url.pathname === '/api/v1/session-groups/hg_p1/members') {
-        return okResponse({ members: [{ kind: 'transcript', transcript: { session: session('agent-b1') } }], page: 1, limit: 20, total: 2 });
+        return okResponse({ members: [{ kind: 'transcript', transcript: { session: session('agent-b1') } }], nextItems: [], page: 1, perPage: 25, total: 2, revision: '0' });
       }
       return Promise.resolve({ ok: false, status: 404, text: async () => 'not found' } as Response);
     });

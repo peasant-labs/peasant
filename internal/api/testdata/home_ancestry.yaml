@@ -25,20 +25,20 @@ sessions:
   - {id: sess_cycle2, state: target_known, target: sess_cycle1}
 cases:
   - name: roots
-    ids: [sess_a, sess_b, sess_context, sess_none]
-    children: [4, 1, 0, 0]
+    ids: [sess_a, sess_b, sess_old]
+    children: [4, 2, 0]
   - name: general-children
     query: parentSessionId=sess_a
-    ids: [sess_cache, sess_generation, sess_old, sess_snapshot]
-    children: [0, 1, 0, 0]
+    ids: [sess_cache, sess_context, sess_generation, sess_none]
+    children: [0, 0, 1, 0]
   - name: recursive-immediate-only
     query: parentSessionId=sess_generation
     ids: [sess_grandchild]
     children: [0]
   - name: latest-attempt-children
     query: parentSessionId=sess_b
-    ids: [sess_latest]
-    children: [0]
+    ids: [sess_latest, sess_snapshot]
+    children: [0, 0]
   # The first two cases retain their required-name families and their saved
   # selector inputs. Selection is ingest-only, so an ingested parent and its
   # children stay reachable. The invalid-selection case is a genuine metadata
@@ -48,13 +48,13 @@ cases:
   - name: selected-parent-only
     selected: [sess_a]
     query: parentSessionId=sess_a
-    ids: [sess_cache, sess_generation, sess_old, sess_snapshot]
-    children: [0, 1, 0, 0]
+    ids: [sess_cache, sess_context, sess_generation, sess_none]
+    children: [0, 0, 1, 0]
   - name: hidden-parent
     selected: [sess_b]
     query: parentSessionId=sess_a
-    ids: [sess_cache, sess_generation, sess_old, sess_snapshot]
-    children: [0, 1, 0, 0]
+    ids: [sess_cache, sess_context, sess_generation, sess_none]
+    children: [0, 0, 1, 0]
   - name: invalid-selection
     invalidSelection: true
     status: 500

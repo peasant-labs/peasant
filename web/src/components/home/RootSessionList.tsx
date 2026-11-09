@@ -126,7 +126,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
   const serverPages = root?.pages;
   // A page can come back short or empty and still have more after it, so the
   // pager follows `next`, never a count.
-  const hasMore = (serverPages?.at(-1)?.next ?? '') !== '';
+  const hasMore = (serverPages?.at(-1)?.nextItems.length ?? 0) > 0;
   const reading = root?.loading ?? false;
   // A session one page repeats from an earlier page stays on the earlier one.
   const pageRows = useMemo(() => {
@@ -226,7 +226,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
                 {expandedGroups.has(row.id) && <div className="flex items-center gap-2" role="status">
                   {home.groups.get(row.id)?.loading && 'loading subagents…'}
                   {home.groups.get(row.id)?.error != null && <Button variant="secondary" size="sm" onClick={() => home.retry(row.id)}>retry subagents</Button>}
-                  {(home.groups.get(row.id)?.pages.at(-1)?.next ?? '') !== '' && <Button variant="secondary" size="sm" disabled={home.groups.get(row.id)?.loading} onClick={() => home.more(row.id)}>load more subagents</Button>}
+                  {(home.groups.get(row.id)?.pages.at(-1)?.nextItems.length ?? 0) > 0 && <Button variant="secondary" size="sm" disabled={home.groups.get(row.id)?.loading} onClick={() => home.more(row.id)}>load more subagents</Button>}
                 </div>}
               </div>
             </>

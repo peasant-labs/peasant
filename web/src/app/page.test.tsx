@@ -107,8 +107,10 @@ const GROUPED_HOME_PAYLOAD = {
     },
   ],
   page: 1,
-  limit: 20,
-  totalItems: 2,
+  perPage: 25,
+  total: 2,
+  nextItems: [],
+  revision: '0',
   ordinarySessionTotal: 2,
   helperThreadTotal: 2,
 };

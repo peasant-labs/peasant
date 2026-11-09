@@ -31,6 +31,8 @@ requiredResidual:
   - store-parent-state-projection-update
   - store-parent-state-trigger-columns
   - store-migration-v70
+  - store-offset-page-child-filter
+  - store-offset-page-child-count
 requiredRouted:
   - store-all-sessions
   - store-session-detail-query
