@@ -59,14 +59,16 @@ type claudeLocatorSearched struct {
 }
 
 type claudeLocatorDerived struct {
-	Declarers int `yaml:"declarers"`
-	Spawners  int `yaml:"spawners"`
+	Declarers    int      `yaml:"declarers"`
+	Spawners     int      `yaml:"spawners"`
+	SpawnerPaths []string `yaml:"spawnerPaths"`
 }
 
 type claudeLocatorLocated struct {
 	ID             string                    `yaml:"id"`
 	Path           string                    `yaml:"path"`
 	StoredParent   string                    `yaml:"storedParent"`
+	StoredSessions []string                  `yaml:"storedSessions"`
 	StoredChildren []claudeLocatorChild      `yaml:"storedChildren"`
 	StaleOwner     bool                      `yaml:"staleOwner"`
 	Derived        *claudeLocatorDerived     `yaml:"derived"`
@@ -74,7 +76,8 @@ type claudeLocatorLocated struct {
 	WantUnreadable []claudeLocatorUnreadable `yaml:"wantUnreadable"`
 	WantProbe      *claudeLocatorProbe       `yaml:"wantProbe"`
 	ContextPaths   []string                  `yaml:"contextPaths"`
-	AllowedDiffs   []string                  `yaml:"allowedDiffs"`
+	WantParent     string                    `yaml:"wantParent"`
+	WantNoParent   bool                      `yaml:"wantNoParent"`
 	SourceGone     bool                      `yaml:"sourceGone"`
 	WantError      string                    `yaml:"wantError"`
 	Reads          []string                  `yaml:"reads"`
@@ -213,10 +216,18 @@ func runClaudeDiscoverAtParity(t *testing.T, rootText string, cfg ingest.SourceC
 	if locatedCase.Derived != nil {
 		derived.declarers = locatedCase.Derived.Declarers
 		derived.spawners = locatedCase.Derived.Spawners
+		for _, path := range locatedCase.Derived.SpawnerPaths {
+			derived.spawnerPaths = append(derived.spawnerPaths, claudeLocatorPath(t, rootText, path))
+		}
+	}
+	location := &claudeLocatorStoredLookup{stored: make(map[ingest.SessionID]struct{})}
+	for _, id := range locatedCase.StoredSessions {
+		location.stored[ingest.SessionID(id)] = struct{}{}
 	}
 	adapter := ingest.NewClaudeAdapter(counting, testutil.NoGitResolver(), salt.Salt{})
 	ingest.AttachClaudeEvidenceCache(adapter, cache)
 	ingest.AttachClaudeDerivedLookup(adapter, derived)
+	ingest.AttachSessionLocationLookup(adapter, location)
 
 	full, err := adapter.Discover(context.Background(), cfg)
 	if err != nil {
@@ -300,9 +311,27 @@ func runClaudeDiscoverAtParity(t *testing.T, rootText string, cfg ingest.SourceC
 			continue
 		}
 		got := *member.Source
-		got = claudeLocatorApplyAllowedDiffs(got, want, locatedCase.AllowedDiffs)
+		if locatedCase.WantParent != "" || locatedCase.WantNoParent {
+			// The parent is asserted from the fixture, not copied from the full
+			// discovery, so a missing kept link cannot pass as a declared
+			// difference.
+			got.ParentUUID = want.ParentUUID
+		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("member %s differs from the full discovery field for field:\n got: %#v\nwant: %#v", wantID, got, want)
+		}
+		if ingest.SessionID(wantID) != at.ID {
+			continue
+		}
+		switch {
+		case locatedCase.WantParent != "":
+			if got := member.Source.ParentUUID; got == nil || *got != ingest.SessionID(locatedCase.WantParent) {
+				t.Errorf("located member %s parent = %v, want the kept link to %s", wantID, got, locatedCase.WantParent)
+			}
+		case locatedCase.WantNoParent:
+			if got := member.Source.ParentUUID; got != nil {
+				t.Errorf("located member %s parent = %v, want no link", wantID, *got)
+			}
 		}
 	}
 	for _, unreadable := range locatedCase.WantUnreadable {
@@ -345,21 +374,6 @@ func runClaudeDiscoverAtParity(t *testing.T, rootText string, cfg ingest.SourceC
 			t.Errorf("the stale context owner's evidence was not refreshed by the deferred write")
 		}
 	}
-}
-
-// claudeLocatorApplyAllowedDiffs copies the field a case declares may differ
-// from the full discovery, so every other field must still match exactly. An
-// undeclared field name fails loudly instead of silently widening the case.
-func claudeLocatorApplyAllowedDiffs(got, want ingest.DiscoveredSession, allowed []string) ingest.DiscoveredSession {
-	for _, field := range allowed {
-		switch field {
-		case "parentUUID":
-			got.ParentUUID = want.ParentUUID
-		default:
-			panic("claude session locator fixture declares an unknown allowed difference: " + field)
-		}
-	}
-	return got
 }
 
 func assertClaudeParentProbe(t *testing.T, rootText string, located ingest.SessionID, members []ingest.LocatedMember, want *claudeLocatorProbe) {
@@ -559,8 +573,9 @@ func (c *claudeLocatorEvidenceCache) savedPath(path ingest.ResolvedPath) bool {
 // link decision reads. The fixture states the counts a correct store would
 // return for the tree.
 type claudeLocatorDerivedLookup struct {
-	declarers int
-	spawners  int
+	declarers    int
+	spawners     int
+	spawnerPaths []string
 }
 
 func (d *claudeLocatorDerivedLookup) CountClaudeIdentityDeclarers(context.Context, ingest.ClaudeTeammateIdentity) (int, error) {
@@ -569,6 +584,10 @@ func (d *claudeLocatorDerivedLookup) CountClaudeIdentityDeclarers(context.Contex
 
 func (d *claudeLocatorDerivedLookup) CountClaudeIdentitySpawners(context.Context, ingest.ClaudeTeammateIdentity) (int, error) {
 	return d.spawners, nil
+}
+
+func (d *claudeLocatorDerivedLookup) ClaudeIdentitySpawnerPaths(context.Context, string, string) ([]string, error) {
+	return append([]string(nil), d.spawnerPaths...), nil
 }
 
 func (d *claudeLocatorDerivedLookup) CountCodexRolloutsBySession(context.Context, ingest.SessionID) (int, error) {
@@ -580,3 +599,20 @@ func (d *claudeLocatorDerivedLookup) CodexRolloutPaths(context.Context, ingest.S
 }
 
 var _ ingest.DerivedLookupReader = (*claudeLocatorDerivedLookup)(nil)
+
+// claudeLocatorStoredLookup answers whether a session id is already stored, the
+// one question the teammate step asks of the store before pointing at a
+// spawner that is not in the batch.
+type claudeLocatorStoredLookup struct {
+	stored map[ingest.SessionID]struct{}
+}
+
+func (l *claudeLocatorStoredLookup) LookupSessionLocation(_ context.Context, id ingest.SessionID) (string, string, error) {
+	if l.stored == nil {
+		return "", "", nil
+	}
+	if _, ok := l.stored[id]; ok {
+		return "fake-host", "", nil
+	}
+	return "", "", nil
+}
