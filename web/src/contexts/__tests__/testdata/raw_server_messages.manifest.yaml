@@ -14,7 +14,13 @@ requiredNames:
   - ordinary transcript text is not metadata bounded
   - unrelated dashboard metadata is not detail validated
   - unrelated sessions envelope stays compatible
+  - trends envelope stays compatible
+  - annotations envelope stays compatible
+  - project familiarity envelope stays compatible
   - unrelated message duplicate keys still reject
   - malformed JSON rejects before dispatch
   - invalid usage domain rejects before dispatch
   - legacy harness cannot carry Pi metadata
+  - payload too large names the measured bytes and the limit
+  - a rejected frame never echoes its payload
+  - payload at twice the limit reports its measured size

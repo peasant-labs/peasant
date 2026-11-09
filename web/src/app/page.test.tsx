@@ -45,7 +45,7 @@ vi.mock('@/contexts/WebSocketContext', () => ({
     return {
       data: topic === 'sessions' ? channelData : undefined,
       connected: channelConnected,
-      error: topic === 'sessions' ? channelError : null,
+      channelFault: topic === 'sessions' && channelError ? { message: channelError.message } : null,
       errorCode: topic === 'sessions' ? channelErrorCode : undefined,
     };
   },

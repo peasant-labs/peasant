@@ -204,4 +204,21 @@ describe('mounted Home opaque continuation', () => {
     }
     expect(tokens(homeReads())).toEqual(testCase.expectedTokens);
   });
+
+  it('renders the typed fault message for a failed root read', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(input, 'http://localhost');
+      if (url.pathname === '/api/v1/sync/auth') return json({ authenticated: true, username: 'first-account', villageUrl: 'https://village.example' });
+      if (url.searchParams.get('view') === 'project-options') return json({ projects });
+      return json({ error: 'temporary read failure; retry' }, 503);
+    }));
+
+    render(<PublishProvider><HomePage /></PublishProvider>);
+
+    // The typed fault names the operation, status, and server detail.
+    expect(await screen.findByText(/the sessions page request failed with status 503/)).toBeInTheDocument();
+    expect(screen.getByText(/temporary read failure; retry/)).toBeInTheDocument();
+    // The generic discovery copy is the fallback only when no typed fault exists.
+    expect(document.body.textContent).not.toContain('Discovery failed without an error message');
+  });
 });

@@ -5,14 +5,19 @@ import { EmptyState, FeedbackPanel } from "@/lib/ft-ui";
  * Peasant program. Before this, the same "disconnected" news was written three
  * different ways and leaked the word "WebSocket" to users. The model:
  *
- * - The **offline notice** (LocalOfflineNotice, under the header) is the one
- *   app-level signal. It shows only while the app is unreachable — pinned where
- *   the screen has room, scrolling with the page on a small or zoomed screen —
- *   and gives the start command and `try again`; a live region announces the
- *   change. A reachable app shows nothing.
+ * - The **page notices** (PageNotices, under the header) are the app-level
+ *   signals. The connection-fault banner states a provider-wide frame or socket
+ *   failure once, while the socket is up. The offline notice shows only while
+ *   the app is unreachable — pinned where the screen has room, scrolling with
+ *   the page on a small or zoomed screen — and gives the start command and
+ *   `try again`; a live region announces the change. They never stack: a
+ *   stopped app is the offline notice's story.
  * - A page renders <Disconnected/> only when losing the connection is the
  *   reason its content area is empty (so the user isn't left staring at an
  *   endless skeleton). It's contextual, not a second copy of the notice.
+ *
+ * A channel's own topic error is not a provider failure: it stays local to that
+ * surface, beside the rows the surface already holds.
  *
  * The connection is to a program on THIS computer — no internet — so the copy
  * leads with that, and stays plain.
