@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"io/fs"
 	"maps"
 	"os"
@@ -65,6 +66,12 @@ type codexCatalogWalkFS struct {
 }
 
 func (f *codexCatalogWalkFS) WalkDir(root string, fn fs.WalkDirFunc) error {
+	if _, err := f.MemFS.Stat(root); err != nil && errors.Is(err, fs.ErrNotExist) {
+		// filepath.WalkDir calls the callback once with the root's own stat
+		// error; MemFS walks silently. Production uses the real filesystem, so
+		// the harness reproduces that shape.
+		return fn(root, nil, err)
+	}
 	var skipped string
 	return f.MemFS.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if skipped != "" && strings.HasPrefix(path, skipped) {

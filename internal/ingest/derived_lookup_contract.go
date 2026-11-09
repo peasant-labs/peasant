@@ -30,13 +30,18 @@ const (
 	// and leaves it exactly as it is.
 	RolloutEnumerationNotWalked
 	// RolloutEnumerationPartial says a Codex walk ran and swallowed at least
-	// one directory-read or file-stat failure, so a directory or file the walk
-	// could not read may hold rollouts that are still on disk. A rebuild
-	// refuses rather than clearing rows it could not re-derive.
+	// one directory-read or file-stat FAILURE that could hide rollouts, so a
+	// directory or file the walk could not read may hold rollouts that are
+	// still on disk. A rebuild refuses rather than clearing rows it could not
+	// re-derive. A configured root that is not installed is NOT this case: it
+	// holds nothing, so it reports no path and stays complete.
 	RolloutEnumerationPartial
 	// RolloutEnumerationComplete says every configured root was walked and every
 	// rollout under it was enumerated, so the set is the whole truth for those
-	// roots.
+	// roots. A configured root whose path does not exist is complete: it
+	// contributes no path, and a rollout an earlier run recorded under it is
+	// pruned for the same reason the walk's maintenance prunes it — its file is
+	// gone.
 	RolloutEnumerationComplete
 )
 
