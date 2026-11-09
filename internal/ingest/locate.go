@@ -211,6 +211,11 @@ func (l *scopeLocator) adapterFor(harness Harness) (SourceAdapter, bool) {
 	if cache, ok := l.p.store.(ClaudeEvidenceCache); ok && !l.p.config.DryRun {
 		AttachClaudeEvidenceCache(adapter, cache)
 	}
+	if l.derived != nil {
+		// The located Claude build decides a teammate link through the indexed
+		// identity reads instead of the whole evidence table.
+		AttachClaudeDerivedLookup(adapter, l.derived)
+	}
 	if l.p.store != nil {
 		AttachSessionLocationLookup(adapter, l.p.store)
 		if parentReader, ok := l.p.store.(LogicalParentReader); ok {
