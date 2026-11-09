@@ -333,11 +333,22 @@ const (
 
 // OpenCodeSessionRecordPageRequest requests bounded session metadata. Its zero
 // selection prefers V2; discovery also pages legacy records in a mixed store.
+//
+// At most one of SessionID and ParentID is set. SessionID reads exactly that
+// row; ParentID pages the rows whose parent link names that session, so a
+// caller that has located one session can read the children the database
+// records for it. With neither set the whole table is paged.
 type OpenCodeSessionRecordPageRequest struct {
 	Selection OpenCodeSessionRecordSelection
 	PageSize  OpenCodeCurrentPageSize
 	After     *OpenCodeSessionRecordCursor
 	SessionID *OpenCodeSessionLinkID // Optional exact lookup for captured materialization.
+	// ParentID pages the rows whose parent_id names this session. The harness
+	// database is external and read-only, and parent_id carries no index
+	// upstream, so this read may be a scan of that database's session table. It
+	// is a bounded page against the harness source, never a scan of the peasant
+	// store.
+	ParentID *OpenCodeSessionLinkID
 }
 
 // OpenCodeSessionLinkID is a validated identifier from the shared session
