@@ -116,7 +116,7 @@ func buildListStaleIndexSessionsQuery(targets map[ingest.Harness]ingest.Harveste
 	}
 	predicate, narrowedArgs := narrowedSessionPredicate("s", scope)
 	args = append(args, narrowedArgs...)
-	return "SELECT s.session_id FROM sessions s WHERE " + strings.Join(conditions, " OR ") + predicate + " ORDER BY s.session_id", args, nil
+	return "SELECT s.session_id FROM sessions s WHERE (" + strings.Join(conditions, " OR ") + ")" + predicate + " ORDER BY s.session_id", args, nil
 }
 
 // ListStaleIndexSessions selects only registered harness targets. The legacy SQL
