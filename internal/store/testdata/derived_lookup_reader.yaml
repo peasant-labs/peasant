@@ -49,6 +49,33 @@ cases:
     wantDeclarers: 0
     wantSpawners: 2
 
+  - name: identity_spawner_paths_many
+    team: alpha
+    identityName: scout
+    wantDeclarers: 0
+    wantSpawners: 2
+    checkSpawnerPaths: true
+    wantSpawnerPaths:
+      - /synthetic/evidence/root-alpha.jsonl
+      - /synthetic/evidence/root-beta.jsonl
+
+  - name: identity_spawner_paths_one
+    team: gamma
+    identityName: checker
+    wantDeclarers: 0
+    wantSpawners: 1
+    checkSpawnerPaths: true
+    wantSpawnerPaths:
+      - /synthetic/evidence/root-gamma.jsonl
+
+  - name: identity_spawner_paths_none
+    team: alpha
+    identityName: worker
+    wantDeclarers: 2
+    wantSpawners: 0
+    checkSpawnerPaths: true
+    wantSpawnerPaths: []
+
   - name: codex_rollout_duplicate_count
     session: "11111111-1111-4111-8111-111111111111"
     wantRolloutCount: 2
