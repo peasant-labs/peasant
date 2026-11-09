@@ -45,7 +45,8 @@ type scopeUpkeepCase struct {
 	// DeleteSource removes the selected transcript before the scoped run.
 	DeleteSource bool `yaml:"deleteSource"`
 	// StalePaths is the path set the planted stale origin names; it must not
-	// overlap ContextPaths, or the P3 assertion could pass for the wrong reason.
+	// overlap ContextPaths, or the stale-origin read could pass for the wrong
+	// reason.
 	StalePaths   []string `yaml:"stalePaths"`
 	ContextPaths []string `yaml:"contextPaths"`
 	// WantRequested is the exact sorted union the evidence recorder must see.
@@ -286,8 +287,8 @@ func countScopeWAL(t *testing.T, dbPath string) int {
 
 // validateReadRecorderCase is the loader refusal the fixture contract names: a
 // read_recorder case whose expected evidence set is empty proves nothing, and a
-// stale path that is also a context path would make the P3 assertion red for
-// the wrong reason. Both are refused by name, not by a count.
+// stale path that is also a context path would make the stale-origin read fail
+// for the wrong reason. Both are refused by name, not by a count.
 func validateReadRecorderCase(name string, expected, stalePaths, contextPaths []string) error {
 	if len(expected) == 0 {
 		return fmt.Errorf("read_recorder case %q names an empty expected evidence set; a recorder that may request nothing cannot prove the by-path read happened; fix: name the path the pass must request", name)
@@ -298,7 +299,7 @@ func validateReadRecorderCase(name string, expected, stalePaths, contextPaths []
 	}
 	for _, path := range stalePaths {
 		if context[path] {
-			return fmt.Errorf("read_recorder case %q plants a stale origin at %q, which is also a context path; a readable related member would put that path in the P12 request set and make the P3 assertion green for the wrong reason; fix: choose a stored-but-unreadable root with no readable related member", name, path)
+			return fmt.Errorf("read_recorder case %q plants a stale origin at %q, which is also a context path; a readable related member would put that path in the cohort-build request set and make the stale-origin assertion green for the wrong reason; fix: choose a stored-but-unreadable root with no readable related member", name, path)
 		}
 	}
 	return nil
@@ -315,6 +316,9 @@ func TestSessionScopeUpkeepLoaderRefusals(t *testing.T) {
 	for _, refusal := range fixture.Refusals {
 		refusal := refusal
 		t.Run(refusal.Name, func(t *testing.T) {
+			if refusal.Guard != "read_recorder" {
+				t.Fatalf("refusal %q names guard %q; only read_recorder refusal cases exist", refusal.Name, refusal.Guard)
+			}
 			err := validateReadRecorderCase(refusal.Name, refusal.Expected, refusal.StalePaths, refusal.ContextPaths)
 			if err == nil {
 				t.Fatalf("the loader accepted %q, want a refusal naming %q", refusal.Name, refusal.WantErrorContain)

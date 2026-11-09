@@ -13,6 +13,7 @@ requiredNames:
   - related-exclude
   - project-changed
   - codex-stored-unchanged
+  - scoped-derived-write
   - stored-source-gone
   - stored-child-source-gone
   - derived-rebuild
@@ -101,3 +102,23 @@ notApplicable:
       Strike's locator and parent-directory lookup are covered by its adapter
       tests; the store-side passes this runner asserts are shared, so its tree
       is not duplicated here.
+
+# The closed pass inventory. Every scope-bearing store call the scoped
+# pipeline makes is named here; a store_scope pass that records nothing on a
+# scoped run fails, and a recorded operation absent from this list fails. The
+# uncached-child heal is the one documented exception: its target set is the
+# processed intersection with the independent-admission harnesses, and an empty
+# set records no call.
+passes:
+  - {id: flagged-sweep, operation: SweepFlaggedSessionsForHarvest, guard: store_scope}
+  - {id: stale-origin-listing, operation: ListStaleOriginSessions, guard: store_scope}
+  - {id: parent-origin-requeue, operation: InvalidateStaleParentOrigins, guard: store_scope}
+  - {id: uncached-child-heal, operation: ListUncachedChildrenOfParents, guard: parent_targets}
+  - {id: stale-adapter-listing, operation: ListStaleAdapterSessions, guard: store_scope}
+  - {id: stale-index-listing, operation: ListStaleIndexSessions, guard: store_scope}
+  - {id: repair-listing, operation: ListSessionsNeedingRepair, guard: store_scope}
+  - {id: incomplete-content-listing, operation: ListContentCaptureIncompleteSessionsAfter, guard: store_scope}
+  - {id: metric-session-listing, operation: ListMetricSessions, guard: store_scope}
+  - {id: orphan-project-cleanup, operation: CleanupOrphanProjects, guard: store_scope}
+  - {id: stored-origin-evidence, operation: LoadClaudeEvidenceFor, guard: by_path_read}
+  - {id: cohort-build-evidence, operation: LoadClaudeEvidenceFor, guard: by_path_read}

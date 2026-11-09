@@ -671,7 +671,7 @@ partition:
       interaction is not observed; the retained tests race the shared staging
       and store primitives directly. Detector-independent guarantees kept. The
       exact table multiset, operation set and evidence-read assertions stay.
-    cost: { wall_ms: 2122, cpu_ms: 4231 }
+    cost: { wall_ms: 2297, cpu_ms: 4379 }
 
   - package: internal/ingest
     test: TestSessionScopeReadRecorder
@@ -695,7 +695,7 @@ partition:
       observed here; the recorder is exercised under the pipeline's lanes in
       both passes. Detector-independent guarantees kept. The zero-load and
       exact-path assertions stay.
-    cost: { wall_ms: 1804, cpu_ms: 2802 }
+    cost: { wall_ms: 1716, cpu_ms: 2670 }
 
   - package: internal/ingest
     test: TestSessionScopeSizeIndependence
@@ -718,7 +718,7 @@ partition:
       the insert is one batched production write, and the retained store tests
       bound the writer. Detector-independent guarantees kept. The size-equality
       assertions stay exact.
-    cost: { wall_ms: 2000, cpu_ms: 2969 }
+    cost: { wall_ms: 2988, cpu_ms: 3376 }
 
 protected:
   - package: internal/ingest
