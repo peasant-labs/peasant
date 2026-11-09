@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testkit/scoperecorder"
@@ -28,20 +29,37 @@ type indexScopedFixture struct {
 }
 
 type indexScopedCase struct {
-	Name               string             `yaml:"name"`
-	Pairs              []indexPairSeed    `yaml:"pairs"`
-	Stored             []indexStoredSeed  `yaml:"stored"`
-	CodexSources       []indexCodexSource `yaml:"codexSources"`
-	Selected           []string           `yaml:"selected"`
-	Related            string             `yaml:"related"`
-	Force              bool               `yaml:"force"`
-	RebuildAll         bool               `yaml:"rebuildAll"`
-	SinceMs            int64              `yaml:"sinceMs"`
-	WantNoRecompute    bool               `yaml:"wantNoRecompute"`
-	WantMembers        []indexWantMember  `yaml:"wantMembers"`
-	WantMisses         []indexWantMiss    `yaml:"wantMisses"`
-	WantProcessed      []string           `yaml:"wantProcessed"`
-	WantRebuildCatalog []string           `yaml:"wantRebuildCatalog"`
+	Name         string             `yaml:"name"`
+	Pairs        []indexPairSeed    `yaml:"pairs"`
+	Stored       []indexStoredSeed  `yaml:"stored"`
+	CodexSources []indexCodexSource `yaml:"codexSources"`
+	// CodexEnumeration is the coverage the codex adapter reports for the walk
+	// it ran: empty (or "complete") is the whole tree; "partial" is a walk
+	// that swallowed a directory-read failure.
+	CodexEnumeration string `yaml:"codexEnumeration"`
+	// CodexEnumerationOnly names rollout files the walk enumerated that never
+	// became discovered sessions (a refused copy, a rollout no harvest
+	// stores). They belong in the rebuild input and not in the session list,
+	// which is the difference the enumeration exists to carry.
+	CodexEnumerationOnly []indexCodexSource `yaml:"codexEnumerationOnly"`
+	// SeedCatalog is the catalog the store already holds before the run, as
+	// path/id pairs; it is written through the complete-enumeration rebuild.
+	SeedCatalog []indexCodexSource `yaml:"seedCatalog"`
+	// WantRunErrorContains is the refusal a case expects; it replaces the
+	// post-run assertions.
+	WantRunErrorContains string `yaml:"wantRunErrorContains"`
+	// WantCatalogAfter is the exact catalog the store holds after the run.
+	WantCatalogAfter   []string          `yaml:"wantCatalogAfter"`
+	Selected           []string          `yaml:"selected"`
+	Related            string            `yaml:"related"`
+	Force              bool              `yaml:"force"`
+	RebuildAll         bool              `yaml:"rebuildAll"`
+	SinceMs            int64             `yaml:"sinceMs"`
+	WantNoRecompute    bool              `yaml:"wantNoRecompute"`
+	WantMembers        []indexWantMember `yaml:"wantMembers"`
+	WantMisses         []indexWantMiss   `yaml:"wantMisses"`
+	WantProcessed      []string          `yaml:"wantProcessed"`
+	WantRebuildCatalog []string          `yaml:"wantRebuildCatalog"`
 }
 
 type indexPairSeed struct {
@@ -90,7 +108,7 @@ type indexScopedStore struct {
 	logicalParents map[ingest.SessionID]ingest.SessionID
 
 	mu       sync.Mutex
-	rebuilds [][]ingest.RolloutFile
+	rebuilds []ingest.RolloutEnumeration
 }
 
 var _ ingest.DerivedLookupRebuilder = (*indexScopedStore)(nil)
@@ -122,11 +140,14 @@ func (s *indexScopedStore) ListSessionsNeedingRepair(ctx context.Context, target
 	return s.Store.ListSessionsNeedingRepair(ctx, targets, scope)
 }
 
-func (s *indexScopedStore) RebuildDerivedLookups(ctx context.Context, catalog []ingest.RolloutFile) error {
+func (s *indexScopedStore) RebuildDerivedLookups(ctx context.Context, enumeration ingest.RolloutEnumeration) error {
 	s.mu.Lock()
-	s.rebuilds = append(s.rebuilds, append([]ingest.RolloutFile(nil), catalog...))
+	s.rebuilds = append(s.rebuilds, ingest.RolloutEnumeration{
+		Status: enumeration.Status,
+		Files:  append([]ingest.RolloutFile(nil), enumeration.Files...),
+	})
 	s.mu.Unlock()
-	return s.Store.RebuildDerivedLookups(ctx, catalog)
+	return s.Store.RebuildDerivedLookups(ctx, enumeration)
 }
 
 func (s *indexScopedStore) recordScope(operation string, scope ingest.StoreScope) {
@@ -138,14 +159,46 @@ func (s *indexScopedStore) recordScope(operation string, scope ingest.StoreScope
 	s.calls.RecordStore(operation, narrowed, scope.IsAll())
 }
 
-func (s *indexScopedStore) rebuildCatalogs() [][]ingest.RolloutFile {
+func (s *indexScopedStore) rebuildCatalogs() []ingest.RolloutEnumeration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([][]ingest.RolloutFile, len(s.rebuilds))
-	for i, catalog := range s.rebuilds {
-		out[i] = append([]ingest.RolloutFile(nil), catalog...)
+	out := make([]ingest.RolloutEnumeration, len(s.rebuilds))
+	for i, enumeration := range s.rebuilds {
+		out[i] = ingest.RolloutEnumeration{
+			Status: enumeration.Status,
+			Files:  append([]ingest.RolloutFile(nil), enumeration.Files...),
+		}
 	}
 	return out
+}
+
+// indexScopedCodexAdapter is the stub Codex adapter of a scoped index case. It
+// reports the rollout enumeration the case describes, which is the input the
+// derived lookup rebuild consumes.
+type indexScopedCodexAdapter struct {
+	*testutil.StubAdapter
+	enumeration ingest.RolloutEnumeration
+}
+
+var _ ingest.RolloutEnumerator = (*indexScopedCodexAdapter)(nil)
+
+func (a *indexScopedCodexAdapter) EnumeratedRollouts() ingest.RolloutEnumeration {
+	return ingest.RolloutEnumeration{
+		Status: a.enumeration.Status,
+		Files:  append([]ingest.RolloutFile(nil), a.enumeration.Files...),
+	}
+}
+
+func makeIndexScopedCodexAdapter(sessions []ingest.DiscoveredSession, enumeration ingest.RolloutEnumeration) ingest.AdapterFactory {
+	return func(ingest.FileSystem, ingest.GitResolver, salt.Salt) ingest.SourceAdapter {
+		return &indexScopedCodexAdapter{
+			StubAdapter: &testutil.StubAdapter{
+				ProviderValue: ingest.HarnessCodex,
+				Sessions:      sessions,
+			},
+			enumeration: enumeration,
+		}
+	}
 }
 
 func loadIndexScopedFixture(t *testing.T) indexScopedFixture {
@@ -155,7 +208,8 @@ func loadIndexScopedFixture(t *testing.T) indexScopedFixture {
 		t.Fatalf("decode the session-scoped index fixture: %v", err)
 	}
 	for _, testCase := range fixture.Cases {
-		if testCase.RebuildAll && len(testCase.WantRebuildCatalog) == 0 {
+		noCatalog := testCase.WantRunErrorContains != "" || testCase.CodexEnumeration == "none"
+		if testCase.RebuildAll && len(testCase.WantRebuildCatalog) == 0 && !noCatalog {
 			t.Fatalf("case %q rebuilds the derived lookups but names no expected catalog", testCase.Name)
 		}
 		if !testCase.RebuildAll && len(testCase.Selected) == 0 {
@@ -183,6 +237,21 @@ func runIndexScopedCase(t *testing.T, testCase indexScopedCase) {
 	mfs := testutil.NewMemFS()
 	counting := testutil.NewCountingFS(mfs)
 	db := storetest.Open(t)
+	if len(testCase.SeedCatalog) > 0 {
+		seed := make([]ingest.RolloutFile, 0, len(testCase.SeedCatalog))
+		for _, row := range testCase.SeedCatalog {
+			seed = append(seed, ingest.RolloutFile{
+				Path:      ingest.ResolvedPath(row.Path),
+				SessionID: ingest.SessionID(row.Session),
+			})
+		}
+		if err := db.RebuildDerivedLookups(ctx, ingest.RolloutEnumeration{
+			Status: ingest.RolloutEnumerationComplete,
+			Files:  seed,
+		}); err != nil {
+			t.Fatalf("case %q: seed the rollout catalog: %v", testCase.Name, err)
+		}
+	}
 	recording := &indexScopedStore{Store: db}
 
 	for _, pair := range testCase.Pairs {
@@ -207,6 +276,28 @@ func runIndexScopedCase(t *testing.T, testCase indexScopedCase) {
 		session.Harness = ingest.HarnessCodex
 		codexSessions = append(codexSessions, session)
 	}
+	// The rollout enumeration a real Codex walk reports: what it enumerated,
+	// which is NOT the discovered session list (a rollout no harvest stores is
+	// still a row) and is marked partial when the walk could not read the whole
+	// tree.
+	var codexEnumeration ingest.RolloutEnumeration
+	if testCase.CodexEnumeration == "partial" {
+		codexEnumeration.Status = ingest.RolloutEnumerationPartial
+	} else {
+		codexEnumeration.Status = ingest.RolloutEnumerationComplete
+	}
+	for _, source := range testCase.CodexSources {
+		codexEnumeration.Files = append(codexEnumeration.Files, ingest.RolloutFile{
+			Path:      ingest.ResolvedPath(source.Path),
+			SessionID: ingest.SessionID(source.Session),
+		})
+	}
+	for _, source := range testCase.CodexEnumerationOnly {
+		codexEnumeration.Files = append(codexEnumeration.Files, ingest.RolloutFile{
+			Path:      ingest.ResolvedPath(source.Path),
+			SessionID: ingest.SessionID(source.Session),
+		})
+	}
 
 	cfg := makePipelineConfig(testOutputDir, func(cfg *ingest.PipelineConfig) {
 		cfg.Reindex = true
@@ -229,7 +320,7 @@ func runIndexScopedCase(t *testing.T, testCase indexScopedCase) {
 				Paths:   []ingest.ResolvedPath{ingest.ResolvedPath("/codex")},
 				Enabled: true,
 			}
-			adapters[ingest.HarnessCodex] = makeStubAdapter(codexSessions, nil)
+			adapters[ingest.HarnessCodex] = makeIndexScopedCodexAdapter(codexSessions, codexEnumeration)
 		}
 		if len(testCase.Selected) > 0 {
 			ids := make([]ingest.SessionID, 0, len(testCase.Selected))
@@ -265,6 +356,19 @@ func runIndexScopedCase(t *testing.T, testCase indexScopedCase) {
 
 	result, runErr := pipeline.Run(ctx)
 
+	// A refused rebuild writes nothing: the run fails loudly and the catalog
+	// the store already held is exactly what it still holds.
+	if testCase.WantRunErrorContains != "" {
+		if runErr == nil {
+			t.Fatalf("case %q: Run succeeded, want the refusal naming %q", testCase.Name, testCase.WantRunErrorContains)
+		}
+		if !strings.Contains(runErr.Error(), testCase.WantRunErrorContains) {
+			t.Fatalf("case %q: Run error = %v, want it to name %q", testCase.Name, runErr, testCase.WantRunErrorContains)
+		}
+		assertIndexScopedCatalog(t, testCase, ctx, db, testCase.WantCatalogAfter)
+		return
+	}
+
 	// The point of the scoped path: the retained tree is never walked. A
 	// WalkDir under the output root is forbidden outright, and no directory
 	// below the root is read either: the only enumeration is the root's host
@@ -294,7 +398,7 @@ func runIndexScopedCase(t *testing.T, testCase indexScopedCase) {
 	}
 
 	if testCase.RebuildAll {
-		assertIndexScopedRebuild(t, testCase, result, recording)
+		assertIndexScopedRebuild(t, testCase, ctx, result, recording, db)
 		return
 	}
 
@@ -379,7 +483,7 @@ func assertIndexScopedMiss(t *testing.T, testCase indexScopedCase, runErr error,
 	}
 }
 
-func assertIndexScopedRebuild(t *testing.T, testCase indexScopedCase, result *ingest.PipelineResult, recording *indexScopedStore) {
+func assertIndexScopedRebuild(t *testing.T, testCase indexScopedCase, ctx context.Context, result *ingest.PipelineResult, recording *indexScopedStore, db *store.Store) {
 	t.Helper()
 	if result.ScopeReport != nil {
 		t.Errorf("case %q: `--all` is never scoped; ScopeReport = %+v", testCase.Name, result.ScopeReport)
@@ -387,19 +491,48 @@ func assertIndexScopedRebuild(t *testing.T, testCase indexScopedCase, result *in
 	if result.Summary.RebuiltFromFiles != 1 {
 		t.Errorf("case %q: `--all` must clear the session filters and record the saved pair; RebuiltFromFiles = %d, want 1", testCase.Name, result.Summary.RebuiltFromFiles)
 	}
-	catalogs := recording.rebuildCatalogs()
-	if len(catalogs) != 1 {
-		t.Fatalf("case %q: RebuildDerivedLookups calls = %d, want 1", testCase.Name, len(catalogs))
+	enumerations := recording.rebuildCatalogs()
+	if len(enumerations) != 1 {
+		t.Fatalf("case %q: RebuildDerivedLookups calls = %d, want 1", testCase.Name, len(enumerations))
 	}
-	got := make([]string, 0, len(catalogs[0]))
-	for _, file := range catalogs[0] {
+	wantStatus := ingest.RolloutEnumerationComplete
+	if testCase.CodexEnumeration == "none" {
+		wantStatus = ingest.RolloutEnumerationNotWalked
+	}
+	if enumerations[0].Status != wantStatus {
+		t.Fatalf("case %q: rebuild input status = %v, want %v", testCase.Name, enumerations[0].Status, wantStatus)
+	}
+	got := make([]string, 0, len(enumerations[0].Files))
+	for _, file := range enumerations[0].Files {
 		got = append(got, file.Path.String()+"="+string(file.SessionID))
 	}
 	sort.Strings(got)
 	want := append([]string(nil), testCase.WantRebuildCatalog...)
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("case %q: rollout catalog = %v, want %v", testCase.Name, got, want)
+		t.Errorf("case %q: rebuild input catalog = %v, want %v", testCase.Name, got, want)
+	}
+	// The table the rebuild wrote holds exactly the enumerated set.
+	assertIndexScopedCatalog(t, testCase, ctx, db, testCase.WantCatalogAfter)
+}
+
+// assertIndexScopedCatalog compares the catalog the store holds with the
+// fixture's exact path=id set.
+func assertIndexScopedCatalog(t *testing.T, testCase indexScopedCase, ctx context.Context, db *store.Store, want []string) {
+	t.Helper()
+	rows, err := db.LoadCodexRolloutCatalog(ctx)
+	if err != nil {
+		t.Fatalf("case %q: load the rollout catalog: %v", testCase.Name, err)
+	}
+	got := make([]string, 0, len(rows))
+	for _, row := range rows {
+		got = append(got, row.Path.String()+"="+row.SessionID.String())
+	}
+	sort.Strings(got)
+	sorted := append([]string(nil), want...)
+	sort.Strings(sorted)
+	if strings.Join(got, "\n") != strings.Join(sorted, "\n") {
+		t.Errorf("case %q: stored catalog = %v, want %v", testCase.Name, got, sorted)
 	}
 }
 

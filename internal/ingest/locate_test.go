@@ -180,7 +180,7 @@ func runLocateStepCase(t *testing.T, testCase locateStepCase) {
 		for _, row := range testCase.Catalog {
 			catalog = append(catalog, ingest.RolloutFile{Path: ingest.ResolvedPath(row.Path), SessionID: ingest.SessionID(row.ID)})
 		}
-		if err := db.RebuildDerivedLookups(ctx, catalog); err != nil {
+		if err := db.RebuildDerivedLookups(ctx, ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: catalog}); err != nil {
 			t.Fatalf("seed derived lookups: %v", err)
 		}
 	}

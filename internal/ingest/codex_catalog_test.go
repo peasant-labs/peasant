@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -41,6 +42,10 @@ type codexCatalogCase struct {
 	WantDiagnostic []string               `yaml:"wantDiagnostics"`
 	WantCatalog    []codexCatalogRowSpec  `yaml:"wantCatalog"`
 	WantCounts     map[string]int         `yaml:"wantSessionCounts"`
+	// WantEnumeration is what the adapter must report about its own coverage,
+	// and WantEnumerationFiles is the exact enumerated path=id set.
+	WantEnumeration      string   `yaml:"wantEnumeration"`
+	WantEnumerationFiles []string `yaml:"wantEnumerationFiles"`
 }
 
 type codexCatalogFixture struct {
@@ -134,7 +139,7 @@ func TestCodexRolloutCatalogMaintenance(t *testing.T) {
 						SessionID: ingest.SessionID(row.ID),
 					})
 				}
-				if err := db.RebuildDerivedLookups(ctx, seed); err != nil {
+				if err := db.RebuildDerivedLookups(ctx, ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: seed}); err != nil {
 					t.Fatalf("seed the rollout catalog: %v", err)
 				}
 			}
@@ -154,6 +159,7 @@ func TestCodexRolloutCatalogMaintenance(t *testing.T) {
 				t.Fatalf("Discover returned %d sessions, want %d; a catalog write must not change discovery", len(sessions), testCase.WantSessions)
 			}
 			assertCodexCatalogDiagnostics(t, adapter, testCase.WantDiagnostic)
+			assertCodexRolloutEnumeration(t, adapter, testCase)
 
 			rows, err := db.LoadCodexRolloutCatalog(ctx)
 			if err != nil {
@@ -222,7 +228,7 @@ func TestCodexLocatedBuildWritesNoCatalogRow(t *testing.T) {
 		}
 	})
 	seed := []ingest.RolloutFile{{Path: childPath, SessionID: childID}, {Path: parentPath, SessionID: parentID}}
-	if err := db.RebuildDerivedLookups(ctx, seed); err != nil {
+	if err := db.RebuildDerivedLookups(ctx, ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: seed}); err != nil {
 		t.Fatalf("seed the rollout catalog: %v", err)
 	}
 
@@ -264,6 +270,93 @@ func TestCodexLocatedBuildWritesNoCatalogRow(t *testing.T) {
 	for index := range want {
 		if rows[index] != want[index] {
 			t.Fatalf("catalog row %d = %+v, want %+v; a scoped run reads the catalog and writes nothing", index, rows[index], want[index])
+		}
+	}
+}
+
+// TestPipelineDiscoveryAttachesTheCodexRolloutCatalog runs the production full
+// walk end to end: the pipeline builds the real Codex adapter, attaches the
+// store as its rollout-catalog writer, and the walk catalogues the rollout it
+// enumerated. Dropping the attach leaves the table empty, so this test fails.
+func TestPipelineDiscoveryAttachesTheCodexRolloutCatalog(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	output := filepath.Join(root, "managed")
+	codexRoot := filepath.Join(root, "sessions")
+	sessionID := ingest.SessionID("11111111-1111-4111-8111-111111111111")
+	path := filepath.Join(codexRoot, "2026", "11", "09", "rollout-2026-11-09T10-00-00-"+sessionID.String()+".jsonl")
+	body := `{"timestamp":"2026-11-09T10:00:00Z","type":"session_meta","payload":{"id":"` + sessionID.String() + `","cwd":"/work/project","cli_version":"0.133.0"}}` + "\n" +
+		`{"timestamp":"2026-11-09T10:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}` + "\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create the Codex source tree: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write the rollout: %v", err)
+	}
+
+	db := storetest.Open(t)
+	fs := &ingest.OSFileSystem{}
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessCodex: func(filesystem ingest.FileSystem, git ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
+			return ingest.NewCodexAdapter(filesystem, git, s)
+		},
+	}
+	cfg := makePipelineConfig(output, func(c *ingest.PipelineConfig) {
+		c.Sources = map[ingest.Harness]ingest.SourceConfig{
+			ingest.HarnessCodex: {
+				Enabled: true,
+				Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(codexRoot)},
+			},
+		}
+	})
+	pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		ingest.WithStore(db),
+		ingest.WithMetricsStore(db),
+		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		ingest.WithHarvesterVersions(maps.Clone(ingest.HarvesterVersionRegistry)),
+	)
+	if err != nil {
+		t.Fatalf("build the pipeline: %v", err)
+	}
+	if _, err := pipeline.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	rows, err := db.LoadCodexRolloutCatalog(ctx)
+	if err != nil {
+		t.Fatalf("load the rollout catalog: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("catalog holds %d rows, want the one rollout the full walk enumerated; the pipeline must attach the store as the Codex rollout-catalog writer", len(rows))
+	}
+	if rows[0].Path.String() != path || rows[0].SessionID != sessionID {
+		t.Fatalf("catalog row = %+v, want %s=%s", rows[0], path, sessionID)
+	}
+}
+
+func assertCodexRolloutEnumeration(t *testing.T, adapter *ingest.CodexAdapter, testCase codexCatalogCase) {
+	t.Helper()
+	enumeration := adapter.EnumeratedRollouts()
+	wantStatus := ingest.RolloutEnumerationComplete
+	if testCase.WantEnumeration == "partial" {
+		wantStatus = ingest.RolloutEnumerationPartial
+	}
+	if enumeration.Status != wantStatus {
+		t.Fatalf("enumerated rollout status = %v, want %v; a partial walk must say so, because the rebuild refuses on it", enumeration.Status, wantStatus)
+	}
+	got := make([]string, 0, len(enumeration.Files))
+	for _, file := range enumeration.Files {
+		got = append(got, file.Path.String()+"="+file.SessionID.String())
+	}
+	want := append([]string(nil), testCase.WantEnumerationFiles...)
+	sort.Strings(got)
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("enumerated %d rollout files, want %d\n got: %v\nwant: %v", len(got), len(want), got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("enumerated rollout %d = %q, want %q", index, got[index], want[index])
 		}
 	}
 }
