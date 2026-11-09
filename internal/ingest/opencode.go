@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -37,6 +39,15 @@ var _ SourceAdapter = (*OpenCodeAdapter)(nil)
 var _ TranscriptMaterializer = (*OpenCodeAdapter)(nil)
 var _ BoundedTranscriptMaterializer = (*OpenCodeAdapter)(nil)
 var _ FirstPageTranscriptMaterializer = (*OpenCodeAdapter)(nil)
+var _ SessionLocator = (*OpenCodeAdapter)(nil)
+
+// openCodeAncestorProbeKind is the one ancestor-probe kind this adapter
+// declares, and it is the same for both storage formats: one row by id per
+// candidate database, zero directory reads. A legacy-JSON child names its
+// parent in its own file, so it needs no different probe; only the parent's own
+// row can say whether a database holds it. A parent that exists only in legacy
+// JSON is therefore not located, because that format cannot be searched by id.
+const openCodeAncestorProbeKind = ProbeRow
 
 // OpenCodeAdapterOption configures the production OpenCodeAdapter constructor.
 type OpenCodeAdapterOption func(*openCodeAdapterOptions)
@@ -163,84 +174,7 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 	candidates := make([]openCodeSessionCandidate, 0)
 
 	for _, root := range cfg.Paths {
-		rootStr := root.String()
-
-		// Step 1: walk storage/session/{hash}/ directories
-		sessionDir := filepath.Join(rootStr, defaults.OpenCodeDirStorage.String(), defaults.OpenCodeDirSession.String())
-		hashEntries, err := a.fs.ReadDir(sessionDir)
-		if err != nil {
-			// No session directory → no sessions under this root.
-			continue
-		}
-
-		for _, hashEntry := range hashEntries {
-			if !hashEntry.IsDir() {
-				continue
-			}
-			hashDirPath := filepath.Join(sessionDir, hashEntry.Name())
-
-			sesEntries, err := a.fs.ReadDir(hashDirPath)
-			if err != nil {
-				continue
-			}
-
-			for _, sesEntry := range sesEntries {
-				name := sesEntry.Name()
-				if !strings.HasPrefix(name, defaults.OpenCodeSessionPrefix) || !strings.HasSuffix(name, defaults.ExtJSON.String()) {
-					continue
-				}
-				sesPath := filepath.Join(hashDirPath, name)
-
-				// Read session JSON to extract id and parentID.
-				data, err := a.fs.ReadFile(sesPath)
-				if err != nil {
-					continue
-				}
-				var ses openCodeSession
-				if err := json.Unmarshal(data, &ses); err != nil {
-					continue
-				}
-
-				sessionID, err := NewSessionID(ses.ID)
-				if err != nil {
-					continue
-				}
-
-				// Build DiscoveredSession.
-				var createdAt time.Time
-				if ses.Time.Created > 0 {
-					createdAt = time.UnixMilli(ses.Time.Created)
-				}
-				title := ses.Title
-				if title == "" {
-					title = ses.Slug
-				}
-				ds := DiscoveredSession{
-					SessionID:    sessionID,
-					Harness:      HarnessOpenCode,
-					SourcePath:   ResolvedPath(sesPath),
-					SourceFormat: SourceFormatJSON,
-					OriginalRoot: root,
-					Title:        title,
-					Agent:        ses.Agent,
-					Slug:         ses.Slug,
-					Version:      ses.Version,
-					ProjectName:  filepath.Base(ses.Directory),
-					CWD:          ses.Directory,
-					CreatedAt:    createdAt,
-				}
-
-				// Wire up parent for subagent sessions.
-				if ses.ParentID != "" {
-					parentID, err := NewSessionID(ses.ParentID)
-					if err == nil {
-						ds.ParentUUID = &parentID
-					}
-				}
-
-				candidates = append(candidates, openCodeSessionCandidate{session: ds, identity: OpenCodeSelectedSourceIdentity{SessionID: sessionID, Representation: OpenCodeRepresentationLegacyJSON, Path: ResolvedPath(sesPath)}, provenance: OpenCodeCandidateLegacyJSONRoot})
-			}
-		}
+		candidates = append(candidates, a.enumerateOpenCodeLegacyJSONRoot(ctx, root)...)
 	}
 	// Each supported SQLite candidate is opened once here and the one source is
 	// reused for its enumerations, its session-record read, and freshness
@@ -270,6 +204,148 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 		return nil, err
 	}
 	return a.hydrateCanonicalOpenCodeFreshness(ctx, selected, sqliteSources), nil
+}
+
+// openCodeSessionSource is one enumerated OpenCode session before the shared
+// build names it: the identity it carries, the file or database that holds it,
+// the representation it belongs to, and every attribute that representation
+// supplies. The full walk, the two SQLite projections, the legacy-JSON
+// enumeration, and the located build all construct this value and hand it to
+// one build, so no two paths can describe one session two ways.
+type openCodeSessionSource struct {
+	ID             SessionID
+	Path           ResolvedPath
+	Root           ResolvedPath
+	Format         SourceFormat
+	Representation OpenCodeCanonicalRepresentation
+	Provenance     OpenCodeCandidateProvenance
+	Origin         TranscriptOrigin
+	Title          string
+	Slug           string
+	Agent          string
+	Version        string
+	Directory      string
+	ProjectName    string
+	CreatedAt      time.Time
+	Parent         SessionID
+}
+
+// buildOpenCodeSession is the one place an OpenCode session becomes a
+// candidate. Every enumeration path calls it, so a new field is added here and
+// reaches discovery and the located build together.
+func buildOpenCodeSession(source openCodeSessionSource) openCodeSessionCandidate {
+	session := DiscoveredSession{
+		SessionID:        source.ID,
+		Harness:          HarnessOpenCode,
+		SourcePath:       source.Path,
+		SourceFormat:     source.Format,
+		OriginalRoot:     source.Root,
+		TranscriptOrigin: source.Origin,
+		Title:            source.Title,
+		Slug:             source.Slug,
+		Agent:            source.Agent,
+		Version:          source.Version,
+		ProjectName:      source.ProjectName,
+		CWD:              source.Directory,
+		CreatedAt:        source.CreatedAt,
+	}
+	if source.Parent != "" {
+		parent := source.Parent
+		session.ParentUUID = &parent
+	}
+	return openCodeSessionCandidate{
+		session:    session,
+		identity:   OpenCodeSelectedSourceIdentity{SessionID: source.ID, Representation: source.Representation, Path: source.Path},
+		provenance: source.Provenance,
+	}
+}
+
+// enumerateOpenCodeLegacyJSONRoot lists one configured root's
+// storage/session/{hash}/ directories and builds every session file they hold.
+// A missing or unreadable part of the layout contributes no session; only the
+// files it can read are built.
+func (a *OpenCodeAdapter) enumerateOpenCodeLegacyJSONRoot(ctx context.Context, root ResolvedPath) []openCodeSessionCandidate {
+	sessionDir := filepath.Join(root.String(), defaults.OpenCodeDirStorage.String(), defaults.OpenCodeDirSession.String())
+	hashEntries, err := a.fs.ReadDir(sessionDir)
+	if err != nil {
+		// No session directory means no sessions under this root.
+		return nil
+	}
+
+	var candidates []openCodeSessionCandidate
+	for _, hashEntry := range hashEntries {
+		if !hashEntry.IsDir() {
+			continue
+		}
+		hashDirPath := filepath.Join(sessionDir, hashEntry.Name())
+
+		sesEntries, err := a.fs.ReadDir(hashDirPath)
+		if err != nil {
+			continue
+		}
+
+		for _, sesEntry := range sesEntries {
+			name := sesEntry.Name()
+			if !strings.HasPrefix(name, defaults.OpenCodeSessionPrefix) || !strings.HasSuffix(name, defaults.ExtJSON.String()) {
+				continue
+			}
+			source, ok := a.readOpenCodeLegacyJSONSource(filepath.Join(hashDirPath, name), root)
+			if !ok {
+				continue
+			}
+			candidates = append(candidates, buildOpenCodeSession(source))
+		}
+	}
+	return candidates
+}
+
+// readOpenCodeLegacyJSONSource reads one legacy JSON session file into the
+// source the shared build names. A file that cannot be read, does not decode,
+// or carries an identifier Peasant cannot store is not a session source and
+// reports false, exactly as discovery skips it.
+func (a *OpenCodeAdapter) readOpenCodeLegacyJSONSource(path string, root ResolvedPath) (openCodeSessionSource, bool) {
+	data, err := a.fs.ReadFile(path)
+	if err != nil {
+		return openCodeSessionSource{}, false
+	}
+	var ses openCodeSession
+	if err := json.Unmarshal(data, &ses); err != nil {
+		return openCodeSessionSource{}, false
+	}
+	sessionID, err := NewSessionID(ses.ID)
+	if err != nil {
+		return openCodeSessionSource{}, false
+	}
+	var createdAt time.Time
+	if ses.Time.Created > 0 {
+		createdAt = time.UnixMilli(ses.Time.Created)
+	}
+	title := ses.Title
+	if title == "" {
+		title = ses.Slug
+	}
+	source := openCodeSessionSource{
+		ID:             sessionID,
+		Path:           ResolvedPath(path),
+		Root:           root,
+		Format:         SourceFormatJSON,
+		Representation: OpenCodeRepresentationLegacyJSON,
+		Provenance:     OpenCodeCandidateLegacyJSONRoot,
+		Origin:         TranscriptOriginFile,
+		Title:          title,
+		Slug:           ses.Slug,
+		Agent:          ses.Agent,
+		Version:        ses.Version,
+		Directory:      ses.Directory,
+		ProjectName:    filepath.Base(ses.Directory),
+		CreatedAt:      createdAt,
+	}
+	if ses.ParentID != "" {
+		if parentID, err := NewSessionID(ses.ParentID); err == nil {
+			source.Parent = parentID
+		}
+	}
+	return source, true
 }
 
 // closeDeferredOpenCodeSource closes a source that stayed open for the whole
@@ -339,6 +415,46 @@ func (a *OpenCodeAdapter) withOpenCodeMaterializationSource(ctx context.Context,
 	return errors.Join(fnErr, closeErr)
 }
 
+// applyOpenCodeSessionRecord copies one session row's parent link, changed
+// clock and attribution onto a built candidate. The full walk and the located
+// build both call it, so both read the same columns into the same fields.
+func applyOpenCodeSessionRecord(candidate *openCodeSessionCandidate, record openCodeSessionClock) {
+	if record.parent != "" {
+		parentID := record.parent
+		candidate.session.ParentUUID = &parentID
+	}
+	// The clock is per session, not per database. A supported database with no
+	// row for this session, or a row without a usable time_updated, leaves
+	// sessionUpdatedAt zero, so the session takes the mtime-floor path and a row
+	// deletion still moves its freshness.
+	candidate.sessionUpdatedAt = record.updatedAt
+	// Attribute the SQLite-discovered session to its working directory, title,
+	// and creation time from the session row. The JSON path sets these from the
+	// session file; the SQLite path reads them from the session table so
+	// kickstart groups the session under the project its working directory
+	// resolves to. An older session table without those columns leaves the
+	// fields empty.
+	candidate.session.CWD = record.directory
+	// Slug is the display-name fallback: a session whose row carries no title
+	// shows its harness-generated slug in the listing and metadata.
+	title := record.title
+	if title == "" {
+		title = record.slug
+	}
+	candidate.session.Title = title
+	candidate.session.Slug = record.slug
+	candidate.session.CreatedAt = record.createdAt
+	// The agent label carries a subagent OpenCode session's agent type so the
+	// kickstart listing can show it, mirroring a Claude teammate.
+	candidate.session.Agent = record.agent
+	// The session row aggregates fill the metadata statistics and version
+	// without folding entries.
+	candidate.session.Version = record.version
+	candidate.session.TokensIn = int(record.tokensIn)
+	candidate.session.TokensOut = int(record.tokensOut)
+	candidate.session.Cost = record.cost
+}
+
 // discoverSQLiteCandidate enumerates one supported SQLite candidate against a
 // single read-only source that it opens once. The one source is returned to the
 // caller so freshness hydration can reuse it and close it once, which removes
@@ -357,14 +473,13 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 	// session_message projection holds only control records. A legacy
 	// representation passes a nil map because a discovered legacy session always
 	// carries substantive rows.
-	appendRepresentation := func(sessions []DiscoveredSession, representation OpenCodeCanonicalRepresentation, controlOnly map[SessionID]bool) {
-		for _, session := range sessions {
-			candidates = append(candidates, openCodeSessionCandidate{
-				session:            session,
-				identity:           OpenCodeSelectedSourceIdentity{SessionID: session.SessionID, Representation: representation, Path: session.SourcePath},
-				provenance:         result.Candidate.Provenance,
-				currentControlOnly: controlOnly[session.SessionID],
-			})
+	appendRepresentation := func(sources []openCodeSessionSource, representation OpenCodeCanonicalRepresentation, controlOnly map[SessionID]bool) {
+		for _, source := range sources {
+			source.Representation = representation
+			source.Provenance = result.Candidate.Provenance
+			candidate := buildOpenCodeSession(source)
+			candidate.currentControlOnly = controlOnly[candidate.session.SessionID]
+			candidates = append(candidates, candidate)
 		}
 	}
 	switch result.Capability {
@@ -481,42 +596,10 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 	}
 	for index := range candidates {
 		record, known := records.bySession[candidates[index].session.SessionID]
-		if known && record.parent != "" {
-			parentID := record.parent
-			candidates[index].session.ParentUUID = &parentID
+		if !known {
+			continue
 		}
-		// The clock is per session, not per database. A supported database
-		// with no row for this session, or a row without a usable
-		// time_updated, leaves sessionUpdatedAt zero, so the session takes the
-		// mtime-floor path and a row deletion still moves its freshness.
-		if known {
-			candidates[index].sessionUpdatedAt = record.updatedAt
-			// Attribute the SQLite-discovered session to its working directory,
-			// title, and creation time from the session row. The JSON path sets
-			// these from the session file; the SQLite path reads them from the
-			// session table so kickstart groups the session under the project its
-			// working directory resolves to. An older session table without those
-			// columns leaves the fields empty.
-			candidates[index].session.CWD = record.directory
-			// Slug is the display-name fallback: a session whose row carries no
-			// title shows its harness-generated slug in the listing and metadata.
-			title := record.title
-			if title == "" {
-				title = record.slug
-			}
-			candidates[index].session.Title = title
-			candidates[index].session.Slug = record.slug
-			candidates[index].session.CreatedAt = record.createdAt
-			// The agent label carries a subagent OpenCode session's agent type so
-			// the kickstart listing can show it, mirroring a Claude teammate.
-			candidates[index].session.Agent = record.agent
-			// The session row aggregates fill the metadata statistics and version
-			// without folding entries.
-			candidates[index].session.Version = record.version
-			candidates[index].session.TokensIn = int(record.tokensIn)
-			candidates[index].session.TokensOut = int(record.tokensOut)
-			candidates[index].session.Cost = record.cost
-		}
+		applyOpenCodeSessionRecord(&candidates[index], record)
 	}
 	// The project tables refine project naming and worktree grouping when they
 	// are present. They never change a session's working directory, which stays
@@ -1291,6 +1374,21 @@ func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []Resolve
 	if a.candidateProber == nil {
 		return nil
 	}
+	evidence := a.candidateProber.Probe(ctx, a.resolveOpenCodeCandidateSources(roots))
+	a.candidateMu.Lock()
+	a.candidateEvidence = cloneOpenCodeProbeResults(evidence)
+	a.candidateMu.Unlock()
+	return cloneOpenCodeProbeResults(evidence)
+}
+
+// resolveOpenCodeCandidateSources names every source the configured roots can
+// hold, in the order a full discovery considers them: for each root, the
+// environment override database, then the channel database, then the legacy
+// JSON root. A source named twice is kept once, so one file is never claimed
+// twice and one lookup never reports the same search twice. The database and
+// the chosen channel live in the same value the prober receives, so the lookup
+// and the walk cannot disagree about which databases exist.
+func (a *OpenCodeAdapter) resolveOpenCodeCandidateSources(roots []ResolvedPath) []OpenCodeCandidate {
 	candidates := make([]OpenCodeCandidate, 0, len(roots)*3)
 	seen := make(map[string]struct{}, len(roots)*3)
 	for _, root := range roots {
@@ -1310,11 +1408,7 @@ func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []Resolve
 			candidates = append(candidates, candidate)
 		}
 	}
-	evidence := a.candidateProber.Probe(ctx, candidates)
-	a.candidateMu.Lock()
-	a.candidateEvidence = cloneOpenCodeProbeResults(evidence)
-	a.candidateMu.Unlock()
-	return cloneOpenCodeProbeResults(evidence)
+	return candidates
 }
 
 func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeResult {
@@ -1619,4 +1713,848 @@ func deriveStorageRoot(sesFilePath string) string {
 	// {hash} dir     → parent is session/ dir
 	// session/ dir   → parent is storage root ({root}/storage/)
 	return filepath.Dir(filepath.Dir(filepath.Dir(sesFilePath)))
+}
+
+// ---------- scoped lookup and located build ----------
+
+// LookupSessionSources finds the OpenCode sources that can hold id by name. The
+// two storage formats answer differently, and the difference is stated, never
+// mistaken for a miss:
+//
+//   - SQLite: one row by id per candidate database, in the order Discover
+//     considers them (environment override database, then channel database).
+//     Each candidate database is opened once and asked for its one row; a
+//     database that does not open is never queried for an id at all, because
+//     the opener takes a path.
+//   - legacy JSON: the id appears only in the file body, so this format cannot
+//     be searched by id. That is reported as unsupported for every configured
+//     root instead of being passed over in silence.
+//
+// It reads no transcript and lists no directory. A failed lookup is recorded
+// ONCE, by the core: on a returned error the core appends the SearchFailed
+// entry and carries the miss, so this method never appends one itself. It
+// returns the entries it gathered before the failure, so the miss still names
+// where else the id was looked for.
+func (a *OpenCodeAdapter) LookupSessionSources(ctx context.Context, cfg SourceConfig, id SessionID) (SourceLookup, error) {
+	if err := ctx.Err(); err != nil {
+		return SourceLookup{}, err
+	}
+	if a.candidateInitErr != nil {
+		return SourceLookup{}, a.candidateInitErr
+	}
+	if id == "" {
+		return SourceLookup{}, fmt.Errorf(
+			"ingest: OpenCodeAdapter.LookupSessionSources was given an empty session id; an empty id can never match an OpenCode row or session file, so the lookup could only ever report a miss; where: ingest.OpenCodeAdapter.LookupSessionSources in internal/ingest/opencode.go; when: locating a named session by name; impact: no OpenCode source is searched; fix: pass the session id the user named")
+	}
+	if _, err := NewSessionID(string(id)); err != nil {
+		return SourceLookup{}, fmt.Errorf(
+			"ingest: OpenCodeAdapter.LookupSessionSources was given %q, which is not a session id; no OpenCode source can be searched under a name no session can hold; where: ingest.OpenCodeAdapter.LookupSessionSources in internal/ingest/opencode.go; when: locating a named session by name; impact: no OpenCode source is searched; fix: pass the session id the user named: %w", id, err)
+	}
+
+	candidates := a.resolveOpenCodeCandidateSources(cfg.Paths)
+	var lookup SourceLookup
+	// The legacy-JSON entry is a pure value and costs no I/O, so it is recorded
+	// first: a database failure below must not hide the fact that this format
+	// cannot be searched by id at all.
+	for _, candidate := range candidates {
+		if candidate.Kind != OpenCodeSourceLegacyJSON {
+			continue
+		}
+		lookup.Searched = append(lookup.Searched, SearchedSource{
+			Harness:  HarnessOpenCode,
+			Method:   SearchUnsupported,
+			Location: openCodeLegacyJSONSearchPattern(ResolvedPath(candidate.Path), id),
+			Reason:   IDOnlyInFileBody,
+		})
+	}
+
+	for _, candidate := range candidates {
+		if candidate.Kind != OpenCodeSourceSQLite {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return lookup, err
+		}
+		location := openCodeDisplayPath(candidate.Path)
+		// A candidate database that does not exist holds no rows. It is not a
+		// failure and not a searched source: there is nothing there to search.
+		if _, statErr := a.fs.Stat(candidate.Path); statErr != nil {
+			if errors.Is(statErr, fs.ErrNotExist) {
+				continue
+			}
+			return lookup, openCodeLookupFailure(id, location, statErr)
+		}
+		source, err := a.openOpenCodeSQLiteSource(ctx, candidate.Path)
+		if err != nil {
+			// No row is read from a database that did not open: the opener takes
+			// a path, and the database was never in a state to answer for an id.
+			return lookup, openCodeLookupFailure(id, location, err)
+		}
+		present, queryErr := a.openCodeSessionRowPresent(ctx, source, id)
+		a.closeScopedOpenCodeSource(ctx, source, candidate.Path)
+		if queryErr != nil {
+			return lookup, openCodeLookupFailure(id, location, queryErr)
+		}
+		lookup.Searched = append(lookup.Searched, SearchedSource{
+			Harness:  HarnessOpenCode,
+			Method:   SearchSQLiteRow,
+			Location: location,
+		})
+		if present {
+			lookup.Sources = append(lookup.Sources, ResolvedPath(candidate.Path))
+		}
+	}
+	return lookup, nil
+}
+
+// openCodeLookupFailure is the one statement of "the OpenCode lookup could not
+// cover this database". It names the database and carries the underlying error
+// so the miss can print its first line; the core records it as SearchFailed.
+func openCodeLookupFailure(id SessionID, location string, err error) error {
+	return fmt.Errorf(
+		"ingest: the OpenCode lookup for session %s could not read database %q; the database did not answer, so the id cannot be reported absent from it; where: ingest.OpenCodeAdapter.LookupSessionSources in internal/ingest/opencode.go; when: locating the named session by name; impact: this database was not searched, and the miss text names the failure; fix: make the database readable and retry: %w", id, location, err)
+}
+
+// openCodeSessionRowPresent reports whether one database holds a session-table
+// row for id. The preferred read covers session_v2 when it is usable and the
+// legacy session table otherwise; a hybrid database whose preferred table is V2
+// is asked for the legacy row too, so a legacy-only session is not passed over.
+// One bounded row is read, never a page of the table.
+func (a *OpenCodeAdapter) openCodeSessionRowPresent(ctx context.Context, source OpenCodeSQLiteSource, id SessionID) (bool, error) {
+	pageSize, err := NewOpenCodeCurrentPageSize(1)
+	if err != nil {
+		return false, err
+	}
+	linkID, err := NewOpenCodeSessionLinkID(string(id))
+	if err != nil {
+		return false, err
+	}
+	page, err := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{Selection: OpenCodeSessionRecordsPreferred, PageSize: pageSize, SessionID: &linkID})
+	if err != nil {
+		return false, fmt.Errorf("read the session row for %s from the preferred OpenCode session table: %w", id, err)
+	}
+	if openCodeSessionRecordPageHasID(page, linkID) {
+		return true, nil
+	}
+	if page.Table != OpenCodeSessionTableV2 {
+		return false, nil
+	}
+	legacy, err := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{Selection: OpenCodeSessionRecordsLegacy, PageSize: pageSize, SessionID: &linkID})
+	if err != nil {
+		return false, fmt.Errorf("read the legacy session row for %s from the OpenCode session table: %w", id, err)
+	}
+	return openCodeSessionRecordPageHasID(legacy, linkID), nil
+}
+
+// openCodeSessionRecordPageHasID reports whether one bounded row read observed
+// the requested identifier. PresentSessionIDs counts a row whose optional
+// columns could not be decoded, so a damaged row still proves the session
+// exists.
+func openCodeSessionRecordPageHasID(page OpenCodeSessionRecordPage, id OpenCodeSessionLinkID) bool {
+	for _, present := range page.PresentSessionIDs {
+		if present == id {
+			return true
+		}
+	}
+	return false
+}
+
+// openCodeSessionRecordByID reads the one session row the located build
+// attributes a session from, preferring the V2 table exactly as the full walk
+// does. hasRecord is false when no supported table holds a row for the id; the
+// session is still built then, with no parent link and no attribution.
+func (a *OpenCodeAdapter) openCodeSessionRecordByID(ctx context.Context, source OpenCodeSQLiteSource, id SessionID) (openCodeSessionClock, bool, error) {
+	pageSize, err := NewOpenCodeCurrentPageSize(1)
+	if err != nil {
+		return openCodeSessionClock{}, false, err
+	}
+	linkID, err := NewOpenCodeSessionLinkID(string(id))
+	if err != nil {
+		return openCodeSessionClock{}, false, err
+	}
+	page, err := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{Selection: OpenCodeSessionRecordsPreferred, PageSize: pageSize, SessionID: &linkID})
+	if err != nil {
+		return openCodeSessionClock{}, false, fmt.Errorf("read the session row for %s from the preferred OpenCode session table: %w", id, err)
+	}
+	for index := range page.Records {
+		if page.Records[index].SessionID == linkID {
+			record := openCodeSessionClockFromRecord(page.Records[index])
+			return record, true, nil
+		}
+	}
+	if page.Table != OpenCodeSessionTableV2 {
+		return openCodeSessionClock{}, false, nil
+	}
+	legacy, err := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{Selection: OpenCodeSessionRecordsLegacy, PageSize: pageSize, SessionID: &linkID})
+	if err != nil {
+		return openCodeSessionClock{}, false, fmt.Errorf("read the legacy session row for %s from the OpenCode session table: %w", id, err)
+	}
+	for index := range legacy.Records {
+		if legacy.Records[index].SessionID == linkID {
+			record := openCodeSessionClockFromRecord(legacy.Records[index])
+			return record, true, nil
+		}
+	}
+	return openCodeSessionClock{}, false, nil
+}
+
+// openCodeSessionClockFromRecord copies one detached session row into the
+// internal parent-link and attribution shape the shared build consumes.
+func openCodeSessionClockFromRecord(record OpenCodeSessionRecord) openCodeSessionClock {
+	clock := openCodeSessionClock{
+		directory: record.Directory,
+		title:     record.Title,
+		agent:     record.Agent,
+		slug:      record.Slug,
+		version:   record.Version,
+		tokensIn:  record.TokensInput,
+		tokensOut: record.TokensOutput,
+		cost:      record.Cost,
+	}
+	// The full walk keeps a parent link only when it names another storable
+	// session; a self-link or an unstorable identifier is dropped.
+	if parentText := record.ParentID.String(); parentText != "" {
+		if parentID, err := NewSessionID(parentText); err == nil && parentID != SessionID(record.SessionID.String()) {
+			clock.parent = parentID
+		}
+	}
+	if record.TimeUpdated > 0 {
+		clock.updatedAt = time.UnixMilli(record.TimeUpdated)
+	}
+	if record.TimeCreated > 0 {
+		clock.createdAt = time.UnixMilli(record.TimeCreated)
+	}
+	return clock
+}
+
+// discoverOpenCodeDatabaseMember builds the members one located database
+// carries: the session itself and every stored child the core passed in. It
+// reads only the one row per session it must, plus the same attribution and
+// freshness reads the full walk makes for that session.
+func (a *OpenCodeAdapter) discoverOpenCodeDatabaseMember(ctx context.Context, cfg SourceConfig, candidate OpenCodeCandidate, at LocatedSource) (LocatedBuild, error) {
+	result := a.probeOpenCodeCandidate(ctx, candidate)
+	switch result.Support {
+	case OpenCodeSupportSupported:
+	case OpenCodeSupportCorrupt, OpenCodeSupportUnreadable:
+		// The file exists but cannot be read as this session's source. A stored
+		// session keeps its transcript and takes the store-side upkeep a full run
+		// gives it, so this is a member with its reason, never a refused run. No
+		// id was queried: the failure happened before any row read.
+		return LocatedBuild{
+			Members: []LocatedMember{{
+				ID:         at.ID,
+				Harness:    HarnessOpenCode,
+				Unreadable: UnreadableSourceFailed,
+				Detail:     firstLine(openCodeProbeDetail(result)),
+			}},
+			Deferred: NoDeferredWrites{},
+		}, nil
+	default:
+		return LocatedBuild{}, openCodeUnsupportedSourceError(at.Path, at.ID, result)
+	}
+	build, err := a.openCodeDatabaseBuild(ctx, result, at.ID, true)
+	if err != nil {
+		// The database opened but the session could not be read from it. That is
+		// the same stored-but-unreadable outcome a corrupt file gives: the stored
+		// transcript stays, the store-side upkeep still runs, and the run
+		// continues. Detail carries the first line so the warning and the
+		// one-session open can say why.
+		return LocatedBuild{
+			Members: []LocatedMember{{
+				ID:         at.ID,
+				Harness:    HarnessOpenCode,
+				Unreadable: UnreadableSourceFailed,
+				Detail:     firstLine(err.Error()),
+			}},
+			Deferred: NoDeferredWrites{},
+		}, nil
+	}
+	if !build.Found {
+		return LocatedBuild{}, openCodeSourceGoneError(at.Path, at.ID, "the database holds no live row for this session")
+	}
+	parent := build.Located.session.ParentUUID
+	if at.Stored.Parent != nil {
+		parent = nil
+	}
+	seen := make(map[SessionID]struct{}, 1+len(build.Children))
+	seen[at.ID] = struct{}{}
+	members := make([]LocatedMember, 0, 1+len(build.Children)+len(at.Stored.Children))
+	members = append(members, LocatedMember{
+		ID:          at.ID,
+		Harness:     HarnessOpenCode,
+		Source:      &build.Located.session,
+		ParentProbe: openCodeAncestorProbe(at.ID, parent),
+	})
+	for index := range build.Children {
+		child := &build.Children[index]
+		seen[child.identity.SessionID] = struct{}{}
+		members = append(members, LocatedMember{
+			ID:      child.identity.SessionID,
+			Harness: HarnessOpenCode,
+			Source:  &child.session,
+		})
+	}
+	members = append(members, a.openCodeStoredChildMembers(ctx, cfg, at, seen)...)
+	return LocatedBuild{Members: members, Deferred: NoDeferredWrites{}}, nil
+}
+
+// openCodeStoredChildMembers builds every stored child of a located source,
+// skipping one already built for the located id. A child whose source is gone
+// or unreadable comes back as a member with no source and its reason, never
+// dropped: the stored transcript stays, and the store-side upkeep a full run
+// does for the row still runs.
+func (a *OpenCodeAdapter) openCodeStoredChildMembers(ctx context.Context, cfg SourceConfig, at LocatedSource, built map[SessionID]struct{}) []LocatedMember {
+	members := make([]LocatedMember, 0, len(at.Stored.Children))
+	for _, child := range at.Stored.Children {
+		if _, duplicate := built[child.ID]; duplicate {
+			continue
+		}
+		built[child.ID] = struct{}{}
+		members = append(members, a.openCodeStoredChildMember(ctx, cfg, child))
+	}
+	return members
+}
+
+// openCodeStoredChildMember resolves one stored child either to the source the
+// shared build reads or to an unreadable member that names why. The child's own
+// recorded format decides which read applies; the store's link never does.
+func (a *OpenCodeAdapter) openCodeStoredChildMember(ctx context.Context, cfg SourceConfig, child StoredSessionSource) LocatedMember {
+	member := LocatedMember{ID: child.ID, Harness: child.Harness}
+	if child.Harness != HarnessOpenCode {
+		// Another harness owns this source, or none was recorded. The path may be
+		// exactly where the store says, so this is a read failure, not a gone
+		// source.
+		member.Unreadable = UnreadableSourceFailed
+		if child.Harness == "" {
+			member.Detail = "the store records no harness for this child, so the opencode adapter cannot attribute its source"
+		} else {
+			member.Detail = "a " + string(child.Harness) + " source cannot be read by the opencode adapter"
+		}
+		return member
+	}
+	if candidate, ok := a.openCodeCandidateDatabaseFor(cfg, child.Path); ok {
+		result := a.probeOpenCodeCandidate(ctx, candidate)
+		if result.Support != OpenCodeSupportSupported {
+			member.Unreadable = UnreadableSourceFailed
+			member.Detail = firstLine(openCodeProbeDetail(result))
+			return member
+		}
+		build, err := a.openCodeDatabaseBuild(ctx, result, child.ID, false)
+		if err != nil {
+			member.Unreadable = UnreadableSourceFailed
+			member.Detail = firstLine(err.Error())
+			return member
+		}
+		if !build.Found {
+			member.Unreadable = UnreadableSourceGone
+			return member
+		}
+		member.Source = &build.Located.session
+		return member
+	}
+	root, ok := openCodeLegacyJSONRootFor(cfg, child.Path)
+	if !ok {
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = "the recorded path is outside every configured OpenCode source root"
+		return member
+	}
+	source, ok := a.readOpenCodeLegacyJSONSource(string(child.Path), root)
+	if !ok {
+		if _, err := a.fs.Stat(string(child.Path)); err != nil {
+			member.Unreadable = UnreadableSourceGone
+			return member
+		}
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = "the recorded file does not decode as an OpenCode session"
+		return member
+	}
+	if source.ID != child.ID {
+		member.Unreadable = UnreadableSourceGone
+		return member
+	}
+	candidate := buildOpenCodeSession(source)
+	a.hydrateOpenCodeJSONFreshness(&candidate)
+	member.Source = &candidate.session
+	return member
+}
+
+// DiscoverSessionAt builds the members one located OpenCode source carries. A
+// database source builds the session from its one row; a legacy-JSON source
+// builds it from its file. Both formats call the same build, the same
+// attribution and the same freshness step the full walk calls, so a located
+// member equals the one a full discovery of the same tree produces.
+//
+// The role and the outcome of every member are the core's: only the core knows
+// whether a member was requested, related-only, or an ancestor, so this adapter
+// leaves both at their zero value. Nothing is written here.
+func (a *OpenCodeAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig, at LocatedSource) (LocatedBuild, error) {
+	if err := ctx.Err(); err != nil {
+		return LocatedBuild{}, err
+	}
+	if at.ID == "" {
+		return LocatedBuild{}, fmt.Errorf(
+			"ingest: OpenCodeAdapter.DiscoverSessionAt was given a located source with no session id at %q; a located source must name the session it holds so the member can be matched to the store row; where: ingest.OpenCodeAdapter.DiscoverSessionAt in internal/ingest/opencode.go; when: building a located source; impact: nothing was read and no member was built; fix: pass the id the store or the lookup resolved",
+			at.Path)
+	}
+	if a.candidateInitErr != nil {
+		return LocatedBuild{}, a.candidateInitErr
+	}
+	if candidate, ok := a.openCodeCandidateDatabaseFor(cfg, at.Path); ok {
+		return a.discoverOpenCodeDatabaseMember(ctx, cfg, candidate, at)
+	}
+	root, ok := openCodeLegacyJSONRootFor(cfg, at.Path)
+	if !ok {
+		return LocatedBuild{}, fmt.Errorf(
+			"ingest: the located OpenCode path %q is neither a candidate database nor a session file under a configured OpenCode root; a located source must be attributed to the root the full walk would have found it under, or the member would carry a different OriginalRoot than discovery gives it; where: ingest.OpenCodeAdapter.DiscoverSessionAt in internal/ingest/opencode.go; when: resolving the source root of the located path; impact: nothing was read and no member was built; fix: restore the recorded source under a configured OpenCode data root, or update the configured paths so the recorded location is inside one",
+			at.Path)
+	}
+	return a.discoverOpenCodeLegacyJSONMember(ctx, cfg, root, at)
+}
+
+// discoverOpenCodeLegacyJSONMember builds the members one located legacy-JSON
+// session file carries: the session itself and every stored child. A file that
+// no longer decodes as the session it was recorded for is ErrSourceGone, so the
+// core takes the by-name lookup path for the id.
+func (a *OpenCodeAdapter) discoverOpenCodeLegacyJSONMember(ctx context.Context, cfg SourceConfig, root ResolvedPath, at LocatedSource) (LocatedBuild, error) {
+	source, ok := a.readOpenCodeLegacyJSONSource(string(at.Path), root)
+	if !ok {
+		if _, err := a.fs.Stat(string(at.Path)); err != nil {
+			return LocatedBuild{}, openCodeSourceGoneError(at.Path, at.ID, "the file is gone or unreadable")
+		}
+		return LocatedBuild{}, openCodeSourceGoneError(at.Path, at.ID, "the file no longer decodes as a session")
+	}
+	if source.ID != at.ID {
+		return LocatedBuild{}, openCodeSourceGoneError(at.Path, at.ID, "the file names another session id")
+	}
+	session := buildOpenCodeSession(source)
+	a.hydrateOpenCodeJSONFreshness(&session)
+	located := LocatedMember{
+		ID:      at.ID,
+		Harness: HarnessOpenCode,
+		Source:  &session.session,
+	}
+	parent := session.session.ParentUUID
+	if at.Stored.Parent != nil {
+		parent = nil
+	}
+	located.ParentProbe = openCodeAncestorProbe(at.ID, parent)
+
+	members := make([]LocatedMember, 0, 1+len(at.Stored.Children))
+	members = append(members, located)
+	members = append(members, a.openCodeStoredChildMembers(ctx, cfg, at, map[SessionID]struct{}{at.ID: {}})...)
+	return LocatedBuild{Members: members, Deferred: NoDeferredWrites{}}, nil
+}
+
+// openCodeLocatedDatabaseBuild is one database's located build: the session the
+// caller asked for, whether the database still holds it, and every other session
+// the database records as its child.
+type openCodeLocatedDatabaseBuild struct {
+	Located  openCodeSessionCandidate
+	Found    bool
+	Children []openCodeSessionCandidate
+}
+
+// openCodeDatabaseBuild builds the located session and the new children one
+// database holds, from a single open source, with the same steps the full walk
+// runs for them: enumerate the representations that carry each id, build through
+// the shared build, apply the session row, attribute the project, read the event
+// sequence, select one canonical representation per session, then hydrate
+// freshness once for the whole set.
+//
+// A session the database no longer holds (no message row in a supported
+// projection, or a usable session table without a live row) reports Found false
+// with no error: that is the one-id form of the deletion rule the full walk
+// applies.
+//
+// withChildren asks for the session's own children. The caller that is already
+// merging stored children asks once for the located session; a stored child is
+// built without it, so one relation step never fans out into the next.
+func (a *OpenCodeAdapter) openCodeDatabaseBuild(ctx context.Context, result OpenCodeProbeResult, id SessionID, withChildren bool) (openCodeLocatedDatabaseBuild, error) {
+	source, err := a.openOpenCodeSQLiteSource(ctx, result.Candidate.Path)
+	if err != nil {
+		return openCodeLocatedDatabaseBuild{}, err
+	}
+	defer a.closeScopedOpenCodeSource(ctx, source, result.Candidate.Path)
+
+	record, hasRecord, err := a.openCodeSessionRecordByID(ctx, source, id)
+	if err != nil {
+		return openCodeLocatedDatabaseBuild{}, err
+	}
+	candidates, err := a.openCodeDatabaseCandidatesForID(ctx, source, result, id, record, hasRecord)
+	if err != nil {
+		return openCodeLocatedDatabaseBuild{}, err
+	}
+	if len(candidates) == 0 {
+		return openCodeLocatedDatabaseBuild{}, nil
+	}
+
+	// The located session's children come from its own database. A child the
+	// parent page does not name is not a child this source can reveal, so a
+	// stored child the caller passed in is merged by the caller instead.
+	var children []OpenCodeSessionRecord
+	if withChildren {
+		children, err = a.openCodeChildRecords(ctx, source, result.Candidate.Path, id)
+		if err != nil {
+			return openCodeLocatedDatabaseBuild{}, err
+		}
+	}
+	seen := map[SessionID]struct{}{id: {}}
+	for _, child := range children {
+		childID, idErr := NewSessionID(child.SessionID.String())
+		if idErr != nil {
+			continue
+		}
+		if _, duplicate := seen[childID]; duplicate {
+			continue
+		}
+		seen[childID] = struct{}{}
+		built, err := a.openCodeDatabaseCandidatesForID(ctx, source, result, childID, openCodeSessionClockFromRecord(child), true)
+		if err != nil {
+			return openCodeLocatedDatabaseBuild{}, err
+		}
+		candidates = append(candidates, built...)
+	}
+
+	if attribution, attrErr := source.ProjectAttribution(ctx); attrErr != nil {
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "project attribution could not be read; the located sessions keep git-based project resolution", attrErr)
+	} else {
+		attributeOpenCodeProjects(candidates, attribution)
+	}
+	a.attributeOpenCodeEventSequences(ctx, source, result.Candidate, candidates)
+
+	selected, err := selectCanonicalOpenCodeCandidates(candidates)
+	if err != nil {
+		return openCodeLocatedDatabaseBuild{}, err
+	}
+	hydrated := a.hydrateCanonicalOpenCodeFreshness(ctx, selected, map[string]OpenCodeSQLiteSource{filepath.Clean(result.Candidate.Path): source})
+
+	kept := make(map[SessionID]struct{}, len(hydrated))
+	for _, session := range hydrated {
+		kept[session.SessionID] = struct{}{}
+	}
+	build := openCodeLocatedDatabaseBuild{Children: make([]openCodeSessionCandidate, 0, len(hydrated))}
+	for _, candidate := range selected {
+		if _, ok := kept[candidate.identity.SessionID]; !ok {
+			// Hydration dropped this candidate: its freshness was unreadable.
+			continue
+		}
+		if candidate.identity.SessionID == id {
+			build.Located = candidate
+			build.Found = true
+			continue
+		}
+		build.Children = append(build.Children, candidate)
+	}
+	if !build.Found {
+		// The session exists, but its changed time and the database mtime floor
+		// were both unreadable, so the full walk would skip it and record the
+		// reason. Reading the source failed; the path is not gone.
+		return openCodeLocatedDatabaseBuild{}, fmt.Errorf("read the freshness of session %s from %q: neither the session clock nor the database mtime floor could be read", id, result.Candidate.Path)
+	}
+	return build, nil
+}
+
+// openCodeDatabaseCandidatesForID builds every representation this database can
+// carry for one session id. The projection presence decides which
+// representations exist, and the shared build names each one.
+func (a *OpenCodeAdapter) openCodeDatabaseCandidatesForID(ctx context.Context, source OpenCodeSQLiteSource, result OpenCodeProbeResult, id SessionID, record openCodeSessionClock, hasRecord bool) ([]openCodeSessionCandidate, error) {
+	current, legacy, err := a.openCodeRepresentationPresence(ctx, source, result.Candidate.Path, result.Capability, id)
+	if err != nil {
+		return nil, err
+	}
+	if !current && !legacy {
+		return nil, nil
+	}
+	if !hasRecord && !openCodeSessionTableAbsent(result) {
+		// The supported session table is usable and holds no live row for this
+		// id, so its remaining message rows are history, exactly as the full
+		// walk's deletion rule treats them.
+		return nil, nil
+	}
+	var candidates []openCodeSessionCandidate
+	if current {
+		enumerated := openCodeSQLiteSessionSource(result.Candidate, id, TranscriptOriginOpenCodeCurrentSQLite)
+		enumerated.Representation = OpenCodeRepresentationCurrentSQLite
+		enumerated.Provenance = result.Candidate.Provenance
+		candidate := buildOpenCodeSession(enumerated)
+		controlOnly := a.currentControlOnlySessions(ctx, source, result.Candidate, []openCodeSessionSource{enumerated})
+		candidate.currentControlOnly = controlOnly[id]
+		candidates = append(candidates, candidate)
+	}
+	if legacy {
+		enumerated := openCodeSQLiteSessionSource(result.Candidate, id, TranscriptOriginOpenCodeLegacySQLite)
+		enumerated.Representation = OpenCodeRepresentationLegacySQLite
+		enumerated.Provenance = result.Candidate.Provenance
+		candidates = append(candidates, buildOpenCodeSession(enumerated))
+	}
+	if hasRecord {
+		for index := range candidates {
+			applyOpenCodeSessionRecord(&candidates[index], record)
+		}
+	}
+	return candidates, nil
+}
+
+// openCodeChildRecords pages the located database for the rows whose parent link
+// names id. The preferred table is read first and, when it is session_v2, the
+// legacy session table is read too: a child created before OpenCode's migration
+// lives there, and an id present in both keeps its V2 record, exactly as the
+// full walk's record merge decides.
+//
+// The harness database is external and read-only. parent_id carries no index
+// upstream, so a page may be a scan of that database's session table. That is a
+// bounded read of the harness source, not a scan of the peasant store.
+func (a *OpenCodeAdapter) openCodeChildRecords(ctx context.Context, source OpenCodeSQLiteSource, database string, parent SessionID) ([]OpenCodeSessionRecord, error) {
+	preferred, table, err := a.openCodeChildRecordPages(ctx, source, database, parent, OpenCodeSessionRecordsPreferred)
+	if err != nil {
+		return nil, err
+	}
+	if table != OpenCodeSessionTableV2 {
+		return preferred, nil
+	}
+	legacy, _, err := a.openCodeChildRecordPages(ctx, source, database, parent, OpenCodeSessionRecordsLegacy)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(preferred))
+	for _, record := range preferred {
+		seen[record.SessionID.String()] = struct{}{}
+	}
+	records := preferred
+	for _, record := range legacy {
+		if _, duplicate := seen[record.SessionID.String()]; duplicate {
+			continue
+		}
+		seen[record.SessionID.String()] = struct{}{}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+// openCodeChildRecordPages pages one table's children of parent to completion,
+// one bounded page at a time. The keyset cursor is the last observed session id,
+// so a page never re-reads a row and the read always advances.
+func (a *OpenCodeAdapter) openCodeChildRecordPages(ctx context.Context, source OpenCodeSQLiteSource, database string, parent SessionID, selection OpenCodeSessionRecordSelection) ([]OpenCodeSessionRecord, OpenCodeSessionTable, error) {
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return nil, "", err
+	}
+	linkID, err := NewOpenCodeSessionLinkID(string(parent))
+	if err != nil {
+		return nil, "", err
+	}
+	var records []OpenCodeSessionRecord
+	var table OpenCodeSessionTable
+	var cursor *OpenCodeSessionRecordCursor
+	for {
+		page, readErr := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{Selection: selection, PageSize: pageSize, ParentID: &linkID, After: cursor})
+		if readErr != nil {
+			return nil, "", fmt.Errorf("read the children of session %s from %q: %w", parent, database, readErr)
+		}
+		if page.Table != "" {
+			table = page.Table
+		}
+		records = append(records, page.Records...)
+		if page.Next == nil {
+			return records, table, nil
+		}
+		if cursor != nil && page.Next.sessionID == cursor.sessionID {
+			return nil, "", fmt.Errorf("read the children of session %s from %q: the page cursor did not advance past session %s, so a bounded read could repeat forever; no partial child list is eligible; inspect the source session table and retry", parent, database, cursor.sessionID.String())
+		}
+		cursor = page.Next
+	}
+}
+
+// openCodeRepresentationPresence reports which supported projection carries the
+// id. One bounded page of one row per projection is enough: the projections the
+// capability names are exactly the ones a full walk enumerates, so nothing is
+// read from a table the schema does not declare.
+func (a *OpenCodeAdapter) openCodeRepresentationPresence(ctx context.Context, source OpenCodeSQLiteSource, database string, capability OpenCodeSchemaCapability, id SessionID) (bool, bool, error) {
+	currentPageSize, err := NewOpenCodeCurrentPageSize(1)
+	if err != nil {
+		return false, false, err
+	}
+	legacyPageSize, err := NewOpenCodeLegacyPageSize(1)
+	if err != nil {
+		return false, false, err
+	}
+	var current, legacy bool
+	switch capability {
+	case OpenCodeCapabilityCurrent, OpenCodeCapabilityHybrid:
+		currentID, idErr := NewOpenCodeCurrentSessionID(string(id))
+		if idErr != nil {
+			return false, false, idErr
+		}
+		page, readErr := source.CurrentMessages(ctx, OpenCodeCurrentPageRequest{SessionID: currentID, PageSize: currentPageSize})
+		if readErr != nil {
+			return false, false, fmt.Errorf("read the current projection of session %s from %q: %w", id, database, readErr)
+		}
+		current = len(page.Messages) > 0
+	}
+	switch capability {
+	case OpenCodeCapabilityLegacy, OpenCodeCapabilityHybrid:
+		legacyID, idErr := NewOpenCodeLegacySessionID(string(id))
+		if idErr != nil {
+			return false, false, idErr
+		}
+		page, readErr := source.LegacyMessages(ctx, OpenCodeLegacyMessagePageRequest{SessionID: legacyID, PageSize: legacyPageSize})
+		if readErr != nil {
+			return false, false, fmt.Errorf("read the legacy projection of session %s from %q: %w", id, database, readErr)
+		}
+		legacy = len(page.Messages) > 0
+	}
+	return current, legacy, nil
+}
+
+// openCodeSessionTableAbsent reports whether the probed schema has no usable
+// session metadata table, so a missing row proves nothing about deletion.
+func openCodeSessionTableAbsent(result OpenCodeProbeResult) bool {
+	return result.Evidence.SessionColumns == nil && result.Evidence.SessionV2Columns == nil
+}
+
+// hydrateOpenCodeJSONFreshness sets a legacy-JSON winner's changed time from its
+// own file mtime, the way the full walk's hydration step does.
+func (a *OpenCodeAdapter) hydrateOpenCodeJSONFreshness(candidate *openCodeSessionCandidate) {
+	if info, err := a.fs.Stat(candidate.identity.Path.String()); err == nil {
+		candidate.session.ModTime = info.ModTime()
+	}
+}
+
+// openCodeAncestorProbe is the one probe a located OpenCode source declares for
+// its unstored parent, or nil when there is nothing to locate. The probe is a
+// pure value: it names the parent id and performs no I/O.
+func openCodeAncestorProbe(id SessionID, parent *SessionID) *AncestorProbe {
+	if parent == nil || *parent == "" || *parent == id {
+		return nil
+	}
+	return &AncestorProbe{Kind: openCodeAncestorProbeKind, Harness: HarnessOpenCode, ID: *parent}
+}
+
+// probeOpenCodeCandidate inspects one candidate in isolation, so a located
+// build decides the schema capability from the same evidence the walk reads,
+// and never opens a database the candidate list does not name.
+func (a *OpenCodeAdapter) probeOpenCodeCandidate(ctx context.Context, candidate OpenCodeCandidate) OpenCodeProbeResult {
+	if a.candidateProber == nil {
+		return OpenCodeProbeResult{Candidate: candidate}
+	}
+	results := a.candidateProber.Probe(ctx, []OpenCodeCandidate{candidate})
+	if len(results) != 1 {
+		return OpenCodeProbeResult{Candidate: candidate}
+	}
+	return results[0]
+}
+
+// openCodeCandidateDatabaseFor returns the candidate database a located path
+// names, or false when the configured roots do not name it. A database the
+// candidate list does not name is never opened.
+func (a *OpenCodeAdapter) openCodeCandidateDatabaseFor(cfg SourceConfig, path ResolvedPath) (OpenCodeCandidate, bool) {
+	clean := filepath.Clean(string(path))
+	if clean == ":memory:" {
+		return OpenCodeCandidate{}, false
+	}
+	for _, candidate := range a.resolveOpenCodeCandidateSources(cfg.Paths) {
+		if candidate.Kind != OpenCodeSourceSQLite {
+			continue
+		}
+		if filepath.Clean(candidate.Path) == clean {
+			return candidate, true
+		}
+	}
+	return OpenCodeCandidate{}, false
+}
+
+// openCodeLegacyJSONRootFor returns the configured OpenCode root a legacy-JSON
+// session path hangs from. Its layout is
+// {root}/storage/session/{hash}/ses_{id}.json, the only shape the full walk
+// admits, so that is the only shape a located build accepts.
+func openCodeLegacyJSONRootFor(cfg SourceConfig, path ResolvedPath) (ResolvedPath, bool) {
+	clean := filepath.Clean(string(path))
+	base := filepath.Base(clean)
+	if !strings.HasPrefix(base, defaults.OpenCodeSessionPrefix) || !strings.HasSuffix(base, defaults.ExtJSON.String()) {
+		return "", false
+	}
+	sessionDir := filepath.Dir(filepath.Dir(clean))
+	if filepath.Base(sessionDir) != defaults.OpenCodeDirSession.String() {
+		return "", false
+	}
+	storageDir := filepath.Dir(sessionDir)
+	if filepath.Base(storageDir) != defaults.OpenCodeDirStorage.String() {
+		return "", false
+	}
+	root := filepath.Dir(storageDir)
+	for _, configured := range cfg.Paths {
+		if filepath.Clean(string(configured)) == root {
+			return configured, true
+		}
+	}
+	return "", false
+}
+
+// openCodeLegacyJSONSearchPattern is the shape the legacy-JSON lookup was asked
+// for, for the miss error's searched block. The id sits in the file body, so the
+// pattern names where a session file would be; it never names a file that
+// happens to exist.
+func openCodeLegacyJSONSearchPattern(root ResolvedPath, id SessionID) string {
+	return filepath.Join(
+		openCodeDisplayPath(string(root)),
+		defaults.OpenCodeDirStorage.String(),
+		defaults.OpenCodeDirSession.String(),
+		"*",
+		string(id)+defaults.ExtJSON.String(),
+	)
+}
+
+// openCodeDisplayPath renders a source path with the home directory shortened,
+// the way the searched block shows every location.
+func openCodeDisplayPath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+string(filepath.Separator)) {
+		return "~" + path[len(home):]
+	}
+	return path
+}
+
+// openCodeSourceGoneError is the one statement of "this recorded path no longer
+// holds the session it was recorded for". It wraps ErrSourceGone, so the core
+// takes the by-name lookup path for the id.
+func openCodeSourceGoneError(path ResolvedPath, id SessionID, because string) error {
+	return fmt.Errorf(
+		"ingest: the located OpenCode path %q no longer holds session %s because %s; an OpenCode source is named by the file or database the session is read from, so this path is not that session's source; where: ingest.OpenCodeAdapter.DiscoverSessionAt in internal/ingest/opencode.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path; fix: let the by-name lookup find the source the session is in now: %w", path, id, because, ErrSourceGone)
+}
+
+// openCodeUnsupportedSourceError states that a candidate database cannot supply
+// a session because its schema is outside the supported set. The full walk skips
+// such a database entirely; a located build says why instead of reporting a
+// miss.
+func openCodeUnsupportedSourceError(path ResolvedPath, id SessionID, result OpenCodeProbeResult) error {
+	detail := "its schema is outside the supported OpenCode set"
+	if len(result.Diagnostics) > 0 {
+		detail = result.Diagnostics[0].Why
+	}
+	return fmt.Errorf(
+		"ingest: the located OpenCode source %q cannot supply session %s because %s; a database whose schema is unsupported is not enumerated by a full harvest, so no member can be built from it; where: ingest.OpenCodeAdapter.DiscoverSessionAt in internal/ingest/opencode.go; when: building a located database source; impact: no member was built from this database; fix: let OpenCode upgrade or repair the database, or run a full harvest once it is supported", path, id, detail)
+}
+
+// openCodeProbeDetail names why a candidate could not provide a source, in one
+// line, for a member's Detail.
+func openCodeProbeDetail(result OpenCodeProbeResult) string {
+	if len(result.Diagnostics) > 0 {
+		return result.Diagnostics[0].Why
+	}
+	return "the source could not be read as a supported OpenCode database"
+}
+
+// closeScopedOpenCodeSource releases one source opened for a located build. The
+// close context is derived from context.Background, so a cancelled build still
+// releases the single connection, bounded by the source query timeout.
+func (a *OpenCodeAdapter) closeScopedOpenCodeSource(ctx context.Context, source OpenCodeSQLiteSource, path string) {
+	if err := closeDeferredOpenCodeSource(ctx, source, a.candidateOptions.queryTimeout); err != nil {
+		a.recordCandidateFailure(path, OpenCodeProbeFreshness, "located SQLite source did not close cleanly after the scoped read", err)
+	}
 }
