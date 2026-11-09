@@ -13,11 +13,10 @@ import { DiscoveryErrorCode, DiscoveryRequestError } from '@/lib/api/errors';
 import { fetchVillageAuth } from '@/lib/api/settings';
 import type { ProjectHash, PageSize as PageSizeValue } from '@peasant-labs/schema';
 import { createHomePageCache, type HomePageCache } from '@/lib/home/pageCache';
-import { HomeGroupBy } from '@/components/home/homeColumns';
 import {
   homeCacheKey,
   type BrowseView,
-  type HomeViewState,
+  type HomeCacheScope,
   type PublishFilter,
 } from '@/lib/home/viewState';
 
@@ -112,19 +111,20 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
     String(options.pageSize),
   ].join('\u0000');
 
-  const stateFor = useCallback((page: number): HomeViewState => ({
+  // The cache key is the data scope, the page size, and the page. It never has
+  // to invent a grouping or a device view the key does not use.
+  const cacheScope = useCallback((page: number): HomeCacheScope => ({
     browse: optionsRef.current.browse,
     publication: optionsRef.current.publication,
     project: optionsRef.current.projectHash,
     query: optionsRef.current.query,
     pageSize: optionsRef.current.pageSize,
     page,
-    groupBy: HomeGroupBy.Project,
   }), []);
 
   const writeCache = useCallback((page: LocalSyncSessionPage) => {
-    cache.current.write(homeCacheKey(stateFor(page.page), account.current ?? ''), page);
-  }, [stateFor]);
+    cache.current.write(homeCacheKey(cacheScope(page.page), account.current ?? ''), page);
+  }, [cacheScope]);
 
   const requestQuery = useCallback((parent: string, page: number, size: PageSizeValue): SyncSessionsQuery => parent
     ? { maxItems: size, page, parentSessionId: parent }
@@ -257,7 +257,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
         if (cancelled) return;
         account.current = key;
         if (cached === null) {
-          cached = cache.current.read(homeCacheKey(stateFor(page), key));
+          cached = cache.current.read(homeCacheKey(cacheScope(page), key));
           if (cached !== null) {
             memory.current.set(page, cached);
             // Seed the known revision from the cached page, so a revalidation
@@ -284,7 +284,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
     };
     void run();
     return () => { cancelled = true; };
-  }, [scopeSignature, options.page, stateFor, loadRoot, resetChildren]);
+  }, [scopeSignature, options.page, cacheScope, loadRoot, resetChildren]);
 
   const loadChild = useCallback(async (parent: string, page: number) => {
     if (childControllers.current.has(parent)) return;

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -229,6 +229,9 @@ describe('mounted bounded Home', () => {
         await screen.findByRole('link', { name: 'title root-50' });
         await waitFor(() => expect(screen.getByRole('button', { name: 'page 2' })).toHaveAttribute('aria-current', 'page'));
         expect(screen.queryByRole('link', { name: 'title root-0' })).not.toBeInTheDocument();
+        // groupBy=none comes from the URL, so the local list renders no project
+        // group header even though the device holds an open set.
+        expect(document.querySelector('[data-home-group]')).toBeNull();
       }
       if (testCase.name === 'stale-filter-response') {
         delayed = deferred<Response>(); delayFilter = 'published';
@@ -460,4 +463,19 @@ describe('mounted bounded Home', () => {
       }
     });
   }
+
+  it('renders only the device-selected columns and groups the rows by project', async () => {
+    roots = [row('root-0')];
+    window.localStorage.setItem('peasant.home', JSON.stringify({ visibleColumns: ['session', 'state'], open: [`project:${ALPHA_HASH}`] }));
+    mount();
+    await screen.findByRole('link', { name: 'title root-0' });
+    // The grouping is URL-owned and the local list applies it.
+    const group = document.querySelector('[data-home-group]');
+    expect(group).not.toBeNull();
+    expect(group).toHaveTextContent('fixture-project');
+    // The columns are device-owned: only the two the device names render.
+    const table = document.querySelector('.home-table') as HTMLElement;
+    const headers = within(table).getAllByRole('columnheader').map(cell => cell.textContent?.trim());
+    expect(headers).toEqual(['session', 'status']);
+  });
 });

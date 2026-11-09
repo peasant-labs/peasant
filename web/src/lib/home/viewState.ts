@@ -126,9 +126,12 @@ export function encodeHomeViewState(state: HomeViewState): string {
  */
 export type HomeCacheKey = string;
 
+/** The scope fields the tab cache is keyed by. Grouping and the device view are excluded. */
+export type HomeCacheScope = Pick<HomeViewState, 'browse' | 'publication' | 'project' | 'query' | 'pageSize' | 'page'>;
+
 const KEY_SEPARATOR = '\u0000';
 
-export function homeCacheKey(state: HomeViewState, account: string): HomeCacheKey {
+export function homeCacheKey(state: HomeCacheScope, account: string): HomeCacheKey {
   return [
     account,
     state.browse.wire,

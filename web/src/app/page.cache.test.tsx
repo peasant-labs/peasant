@@ -34,7 +34,7 @@ interface Case {
   optionsError?: { status: number; code: string };
   rejectRestart?: boolean;
 }
-const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-token-pages.yaml'), 'utf8')) as { requiredNames: string[]; projects: LocalSyncProjectOption[]; cases: Case[] };
+const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-page-cache.yaml'), 'utf8')) as { requiredNames: string[]; projects: LocalSyncProjectOption[]; cases: Case[] };
 const required = [
   'page-offset-and-next-items',
   'child-page-offset',

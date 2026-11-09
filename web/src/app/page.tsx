@@ -17,7 +17,8 @@ import type { LocalSyncProjectOption } from '@/lib/api/home';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { displayProject } from '@/lib/quality/utils';
 import { newProjectHash, type ProjectHash } from '@peasant-labs/schema';
-import { clearHomeOpenGroups } from '@/lib/home/deviceView';
+import { clearHomeOpenGroups, readHomeDeviceView } from '@/lib/home/deviceView';
+import { HOME_COLUMN_IDS, type HomeSavedView } from '@/components/home/homeColumns';
 import {
   ALL_BROWSE_VIEWS,
   BrowseView,
@@ -170,6 +171,17 @@ function HomeView() {
     if (!home.projects.some(option => option.projectHash === project)) commit({ project: null }, 'replace');
   }, [home.projects, view.project, commit]);
 
+  // The table receives ONE saved view: the URL-owned grouping composed with
+  // the device-owned columns and open groups.
+  const tableState = useMemo<HomeSavedView>(() => {
+    const device = readHomeDeviceView();
+    return {
+      groupBy: view.groupBy,
+      visibleColumns: device.visibleColumns ?? HOME_COLUMN_IDS,
+      open: device.open,
+    };
+  }, [view.groupBy]);
+
   const rows = useMemo(() => {
     const seen = new Set<string>();
     return (home.rootPage?.items ?? []).filter(row => {
@@ -290,6 +302,7 @@ function HomeView() {
             page={view.page}
             pageSize={view.pageSize}
             total={home.total}
+            viewState={tableState}
             onPageChange={next => commit({ page: next })}
             onPageSizeChange={size => commit({ pageSize: size, page: 1 })}
             loading={home.loading && home.rootPage === null}

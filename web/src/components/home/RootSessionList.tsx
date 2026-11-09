@@ -14,7 +14,8 @@ import {
   Pagination,
   type DataTableColumn,
 } from '@/lib/ft-ui';
-import type { PageSize } from '@peasant-labs/schema';
+import { isPageSize, type PageSize } from '@peasant-labs/schema';
+import { HomeGroupBy, type HomeSavedView } from './homeColumns';
 import { usePublicationAudience } from '@/hooks/useRootSessions';
 import {
   rowPublishState,
@@ -61,7 +62,9 @@ const EMPTY_FILTER_COPY: Readonly<Record<PublishFilter, string>> = {
   auto: 'no session here publishes automatically.',
 };
 
-type ListRow = RootSessionRow & { id: string; kind: 'session' | 'child'; depth: number };
+type SessionListRow = RootSessionRow & { id: string; kind: 'session' | 'child'; depth: number };
+type GroupListRow = { id: string; kind: 'group'; groupLabel: string; groupKey: string; depth: 0 };
+type ListRow = SessionListRow | GroupListRow;
 
 const NO_CHILDREN: ReadonlyMap<string, readonly RootSessionRow[]> = new Map();
 
@@ -79,6 +82,8 @@ export interface RootSessionListProps {
   page: number;
   /** The page size the URL carries. */
   pageSize: PageSize;
+  /** The one saved view: URL grouping plus device columns and open groups. */
+  viewState: HomeSavedView;
   /** The server's total for the current scope. */
   total: number;
   /** The host owns the URL; the table reports the page it wants. */
@@ -126,7 +131,7 @@ function SessionChildrenGroup({ parentId, childIds, expanded, onToggle, indent =
  * the URL to the page the server served. Page lengths never stand in for global
  * totals or the complete project catalog.
  */
-export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, page, pageSize, total, onPageChange, onPageSizeChange, loading }: RootSessionListProps) {
+export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, page, pageSize, total, viewState, onPageChange, onPageSizeChange, loading }: RootSessionListProps) {
   const expandedGroups = home.expanded;
   const reading = home.loading;
   const last = Math.max(1, Math.ceil(total / pageSize));
@@ -148,6 +153,8 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
   const renderRows = useMemo(() => {
     const out: ListRow[] = [];
     const visited = new Set<string>();
+    const seenGroups = new Set<string>();
+    const grouped = viewState.groupBy === HomeGroupBy.Project;
     const walk = (row: RootSessionRow, kind: 'session' | 'child', depth: number) => {
       if (visited.has(row.sync.id)) return;
       visited.add(row.sync.id);
@@ -155,12 +162,21 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
       if (!expandedGroups.has(row.sync.id)) return;
       for (const child of childGroups.get(row.sync.id) ?? []) walk(child, 'child', depth + 1);
     };
-    for (const row of visible) walk(row, 'session', 0);
+    for (const row of visible) {
+      if (grouped) {
+        const key = row.sync.projectHash || row.sync.projectName;
+        if (!seenGroups.has(key)) {
+          seenGroups.add(key);
+          out.push({ id: `group:${key}`, kind: 'group', groupLabel: displayProject(row.sync.projectName), groupKey: key, depth: 0 });
+        }
+      }
+      walk(row, 'session', 0);
+    }
     return out;
-  }, [visible, childGroups, expandedGroups]);
+  }, [visible, childGroups, expandedGroups, viewState.groupBy]);
 
   const publishedOnScreen = useMemo(
-    () => renderRows.filter((row) => row.publication.state === 'published').map((row) => row.id),
+    () => renderRows.filter((row) => row.kind !== 'group' && row.publication.state === 'published').map((row) => row.id),
     [renderRows],
   );
   const audience = usePublicationAudience(publishedOnScreen, rows);
@@ -169,11 +185,11 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
     return new Map(all.map(row => [row.sync.id, row.childCount]));
   }, [home.rootPage, home.children]);
 
-  const whenOf = (row: ListRow) => {
+  const whenOf = (row: SessionListRow) => {
     const started = Date.parse(row.sync.startTime);
     return Number.isNaN(started) ? null : formatRelative(started);
   };
-  const stateOf = (row: ListRow) => {
+  const stateOf = (row: SessionListRow) => {
     const state = rowPublishState(row);
     const published = state === 'published' || state === 'new-turns';
     // No approved collective is not an audience to count: "published, 0
@@ -188,6 +204,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
         key: 'session',
         label: 'session',
         render: (_, row) => {
+          if (row.kind === 'group') return <div className="home-group-head" data-home-group={row.groupKey}>{row.groupLabel}</div>;
           const children = childGroups.get(row.id);
           const hash = parseProjectHash(row.sync.projectHash);
           const title = rowTitle(row.id, titles, previews);
@@ -269,21 +286,23 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
         key: 'project',
         label: 'project',
         render: (_, row) => {
+          if (row.kind === 'group') return null;
           const name = displayProject(row.sync.projectName);
           return <span className="home-project">{name}</span>;
         },
       },
-      { key: 'turns', label: 'turns', align: 'right', render: (_, row) => row.sync.turnCount.toLocaleString('en-US') },
+      { key: 'turns', label: 'turns', align: 'right', render: (_, row) => row.kind === 'group' ? null : row.sync.turnCount.toLocaleString('en-US') },
       {
         key: 'duration',
         label: 'duration',
         align: 'right',
-        render: (_, row) => formatMinutes(Number(row.sync.durationMs) / 60_000),
+        render: (_, row) => row.kind === 'group' ? null : formatMinutes(Number(row.sync.durationMs) / 60_000),
       },
       {
         key: 'when',
         label: 'when',
         render: (_, row) => {
+          if (row.kind === 'group') return null;
           const when = whenOf(row);
           return when === null ? '—' : <span className="whitespace-nowrap">{when}</span>;
         },
@@ -291,11 +310,16 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
       {
         key: 'state',
         label: 'status',
-        render: (_, row) => stateOf(row),
+        render: (_, row) => row.kind === 'group' ? null : stateOf(row),
       },
     ],
-    [titles, previews, audience, childGroups, expandedGroups, home, childCounts],
+    [titles, previews, audience, childGroups, expandedGroups, home, childCounts, viewState.visibleColumns],
   );
+  const shownColumns = useMemo(() => {
+    if (viewState.visibleColumns.length === 0) return columns;
+    const wanted = new Set<string>(viewState.visibleColumns);
+    return columns.filter(column => wanted.has(String(column.key)));
+  }, [columns, viewState.visibleColumns]);
 
   const end = start + visible.length;
   return (
@@ -312,7 +336,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
           // instead of crushing every column into a sliver; a phone shows the
           // session column alone, its cell carrying the rest (home.css).
           className="home-table"
-          columns={columns}
+          columns={shownColumns}
           rows={renderRows}
           rowKey={(row) => row.id}
         />
@@ -329,7 +353,10 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
             <select
               aria-label="sessions per page"
               value={pageSize}
-              onChange={(event) => onPageSizeChange(Number(event.target.value) as PageSize)}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                if (isPageSize(next)) onPageSizeChange(next);
+              }}
             >
               <option value={25}>25</option>
               <option value={50}>50</option>

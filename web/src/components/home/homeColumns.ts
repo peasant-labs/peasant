@@ -32,3 +32,14 @@ export type HomeColumnId = (typeof HOME_COLUMN_IDS)[number];
 export function isHomeColumnId(value: unknown): value is HomeColumnId {
   return typeof value === 'string' && (HOME_COLUMN_IDS as readonly string[]).includes(value);
 }
+
+/**
+ * The one saved view the Home table receives: the URL-owned grouping composed
+ * with the device-owned columns and open groups. The table is controlled; the
+ * host owns the URL and the storage.
+ */
+export interface HomeSavedView {
+  readonly groupBy: HomeGroupBy;
+  readonly visibleColumns: readonly HomeColumnId[];
+  readonly open: readonly string[];
+}
