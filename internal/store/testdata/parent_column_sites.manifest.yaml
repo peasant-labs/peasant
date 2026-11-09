@@ -50,6 +50,19 @@ requiredForeign:
   - ingest-opencode-session-record-decode
   - ingest-opencode-attribution-after
   - ingest-opencode-attribution-first
+  - ingest-opencode-children-attribution
+  - ingest-opencode-children-clock
+  - ingest-opencode-children-extended-model
+  - ingest-opencode-children-extended
+  - ingest-opencode-children-parent-clock
+  - ingest-opencode-children-parent
+  - ingest-opencode-v2-children-attribution
+  - ingest-opencode-v2-children-clock
+  - ingest-opencode-v2-children-extended-model
+  - ingest-opencode-v2-children-extended
+  - ingest-opencode-v2-children-ids
+  - ingest-opencode-v2-children-parent-clock
+  - ingest-opencode-v2-children-parent
   - ingest-opencode-columns
   - ingest-opencode-extended-after
   - ingest-opencode-extended-first

@@ -105,7 +105,6 @@ const (
 // upstream, so this read may be a scan of that database's session table. That is
 // a bounded read of the harness source, never a scan of the peasant store.
 const (
-	openCodeSessionChildrenIDsStatement           = "SELECT id FROM session_v2 WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
 	openCodeSessionChildrenClockStatement         = "SELECT id, time_updated FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
 	openCodeSessionChildrenParentStatement        = "SELECT id, parent_id FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
 	openCodeSessionChildrenParentClockStatement   = "SELECT id, parent_id, time_updated FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"

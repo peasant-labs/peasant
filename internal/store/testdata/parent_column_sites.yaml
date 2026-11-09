@@ -360,6 +360,124 @@ foreign:
     literals: 1
     class: foreign-database
     reason: OpenCode's own source database schema.
+  - name: ingest-opencode-children-attribution
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionChildrenAttributionStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema. The parent column is only the filter
+      key that names the rows a located session is the parent of; it is a lookup
+      key in the harness source, not a parent answer this store renders.
+  - name: ingest-opencode-children-clock
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionChildrenClockStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema. The same lookup key, read with the
+      identifier and changed-clock projection the exact-row read uses for a child
+      row; nothing here answers who a stored session's parent is.
+  - name: ingest-opencode-children-extended-model
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionChildrenExtendedModelStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema. The same lookup key, read with the
+      extended attribution and model projection the exact-row read uses for a
+      child row; it is a selection key in the harness source, not this store's
+      parent answer.
+  - name: ingest-opencode-children-extended
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionChildrenExtendedStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema. The same lookup key, read with the
+      extended attribution projection the exact-row read uses for a child row;
+      it never supplies a parent answer this store renders.
+  - name: ingest-opencode-children-parent-clock
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionChildrenParentClockStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema. The same lookup key, read with the
+      parent link and changed-clock projection the exact-row read uses for a
+      child row, because the child's own parent link is what discovery records.
+  - name: ingest-opencode-children-parent
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionChildrenParentStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema. The same lookup key, read with the
+      identifier and parent-link projection; the link belongs to the child row,
+      not to this store's sessions table.
+  - name: ingest-opencode-v2-children-attribution
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ChildrenAttributionStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read through its migrated session_v2
+      table. The parent column is the filter key for the rows a located session
+      is the parent of, never a parent answer this store renders.
+  - name: ingest-opencode-v2-children-clock
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ChildrenClockStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read through session_v2. The same
+      lookup key with the identifier and changed-clock projection the exact-row
+      read uses for a child row.
+  - name: ingest-opencode-v2-children-extended-model
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ChildrenExtendedModelStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read through session_v2. The same
+      lookup key with the extended attribution and model projection the exact-row
+      read uses for a child row.
+  - name: ingest-opencode-v2-children-extended
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ChildrenExtendedStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read through session_v2. The same
+      lookup key with the extended attribution projection the exact-row read uses
+      for a child row.
+  - name: ingest-opencode-v2-children-ids
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ChildrenIDsStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read through session_v2. The lookup
+      key with the identifier-only projection, for a table that carries neither a
+      parent link to report nor a changed clock.
+  - name: ingest-opencode-v2-children-parent-clock
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ChildrenParentClockStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read through session_v2. The same
+      lookup key with the parent link and changed-clock projection the exact-row
+      read uses for a child row.
+  - name: ingest-opencode-v2-children-parent
+    file: internal/ingest/opencode_sqlite_source_zombiezen.go
+    declaration: openCodeSessionV2ChildrenParentStatement
+    literals: 1
+    class: foreign-database
+    reason: >-
+      OpenCode's own source database schema, read through session_v2. The same
+      lookup key with the identifier and parent-link projection; the link is the
+      child row's own, not this store's parent answer.
   - name: ingest-opencode-columns
     file: internal/ingest/opencode_sqlite_source_zombiezen.go
     declaration: openCodeSessionColumns
@@ -489,7 +607,7 @@ foreign:
   - name: ingest-opencode-session-records
     file: internal/ingest/opencode_sqlite_source_zombiezen.go
     declaration: zombiezenOpenCodeSQLiteSource.SessionRecords
-    literals: 18
+    literals: 24
     class: foreign-database
     reason: OpenCode's own source database schema, read as row statements.
   - name: ingest-testfixture-current-missing-seq
