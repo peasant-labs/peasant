@@ -748,8 +748,15 @@ func (l *scopeLocator) locateStoredChild(ctx context.Context, parentID SessionID
 }
 
 // walkAncestors follows each member's declared ancestor probe until the walk
-// reaches a stored ancestor, a root, a nil probe, a miss, or an id already in
-// the cohort.
+// reaches an ancestor the store already records, a root, a nil probe, a miss,
+// or an id already in the cohort.
+//
+// The adapter's probe is a pure value derived from the child's own source: it
+// cannot know whether the parent it names is recorded. The core owes that stop.
+// A probe hit is asked about once against the store before it is built, and a
+// recorded ancestor is never built or adopted: an ancestor is by definition
+// unstored, and a stored out-of-cohort parent must keep its own row instead of
+// being re-ingested by a run that never selected it.
 func (l *scopeLocator) walkAncestors(ctx context.Context) error {
 	startIDs := make([]SessionID, 0, len(l.members))
 	for id, member := range l.members {
@@ -786,6 +793,19 @@ func (l *scopeLocator) walkAncestors(ctx context.Context) error {
 			}
 			if _, exists := l.members[ancestorID]; exists {
 				break
+			}
+			// One primary-key read per probe hit, and only for a hit that named
+			// an ancestor. A recorded ancestor is not an ancestor this run can
+			// process; stop before building it, so a stored parent outside the
+			// cohort is never re-ingested and its link is never re-homed.
+			if l.store != nil {
+				recorded, err := l.store.StoredSessionSources(ctx, []SessionID{ancestorID})
+				if err != nil {
+					return fmt.Errorf("pipeline locate stored ancestor sources: %w", err)
+				}
+				if _, isStored := recorded[ancestorID]; isStored {
+					break
+				}
 			}
 			cfg, enabled := l.enabledConfig(probe.Harness)
 			if !enabled {

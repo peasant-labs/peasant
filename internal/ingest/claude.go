@@ -2275,7 +2275,10 @@ func (a *ClaudeAdapter) claudeStoredChild(cfg SourceConfig, child StoredSessionS
 // claudeSetLocatedLinkAndProbe gives the located member the one thing the core
 // cannot derive: the probe for an unstored ancestor, or the parent the store
 // already records. It writes no link away. The probe is a pure value derived
-// from the child's own path; nothing is read here.
+// from the child's own path; nothing is read here. The adapter does not ask
+// whether the parent it names is recorded: the core asks the store once per
+// probe hit and stops at a recorded ancestor, so a stored parent never becomes a
+// located member.
 func claudeSetLocatedLinkAndProbe(members []LocatedMember, at LocatedSource) {
 	for i := range members {
 		if members[i].ID != at.ID || members[i].Source == nil {
