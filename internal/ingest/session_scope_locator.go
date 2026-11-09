@@ -18,7 +18,9 @@ type SessionLocator interface {
 	// a transcript. No hit returns empty Sources and a nil error; a returned
 	// error means the lookup failed, and the core appends the SearchFailed entry
 	// itself, so an adapter never returns a SearchFailed entry of its own for a
-	// failure it reports.
+	// failure it reports. A lookup that could not read one candidate may return
+	// a *SourceLookupFailure naming that candidate, so the miss's fix line points
+	// at the source that failed rather than at a configured root.
 	LookupSessionSources(ctx context.Context, cfg SourceConfig, id SessionID) (SourceLookup, error)
 
 	// DiscoverSessionAt builds the members for one located source: it enumerates

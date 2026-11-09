@@ -134,5 +134,13 @@ func (c *PipelineConfig) validateScope() error {
 			"ingest: PipelineConfig sets both Scope and AllowedSessionIDs; the scope already selects this run's cohort, and a second allowlist would filter the located members by an unrelated set, so the two narrowings can disagree; where: %s; when: %s; impact: %s; fix: pass --session (Scope) or an allowlist, never both",
 			scopeRunRefusal.where, scopeRunRefusal.when, scopeRunRefusal.impact)
 	}
+	if c.Reindex && c.Scope != nil {
+		// The reindex path rebuilds from saved pairs and never locates a
+		// cohort, so a scope there would be silently ignored: the user would
+		// get a full reindex while believing it was narrowed. Refuse before the
+		// run lock; the scoped reindex is not implemented yet.
+		return fmt.Errorf(
+			"ingest: PipelineConfig sets both Reindex and Scope; the reindex path scans the saved output tree and never locates the scope's cohort, so the scope would be silently ignored and the whole output tree rebuilt; where: ingest.PipelineConfig.Reindex with .Scope, checked at the start of Pipeline.Run in internal/ingest/pipeline.go; when: before the run lock and before any stage; impact: no source was read, no output pair was rebuilt, and no store row was touched; fix: drop Reindex to harvest the named sessions, or drop the scope to rebuild the whole output tree")
+	}
 	return nil
 }

@@ -13,7 +13,9 @@ import (
 // refuseDuplicates runs every built claim, together with the extra claims a
 // stored Claude root or a stored Codex id can carry, through the same refusal a
 // full run uses. A refused id joins the run's failures and is dropped from the
-// cohort; LOCTE processes neither copy.
+// processed members; a refused row that the store still records joins the
+// report's upkeep set, because the store-side passes a full run performs for
+// that row must still reach it. LOCATE processes neither copy.
 func (l *scopeLocator) refuseDuplicates(ctx context.Context) error {
 	if err := l.collectStoredDuplicateClaims(ctx); err != nil {
 		return err
@@ -40,7 +42,9 @@ func (l *scopeLocator) refuseDuplicates(ctx context.Context) error {
 
 // removeRefused drops every member the refusal did not keep: a member whose
 // source was a refused claim, and a subagent the refusal left out with its
-// parent.
+// parent. A dropped id whose row the store still records joins refusedUpkeep:
+// the run must not process it, but the store-side passes a full run performs for
+// that row must still see it.
 func (l *scopeLocator) removeRefused(kept []DiscoveredSession, refused []SessionResult) {
 	keptPaths := make(map[ResolvedPath]struct{}, len(kept))
 	for _, session := range kept {
@@ -51,17 +55,23 @@ func (l *scopeLocator) removeRefused(kept []DiscoveredSession, refused []Session
 		refusedIDs[result.SessionID] = struct{}{}
 	}
 	for id, member := range l.members {
+		drop := false
 		if _, bad := refusedIDs[id]; bad {
-			delete(l.members, id)
+			drop = true
+		} else if member.Source != nil {
+			if _, ok := keptPaths[member.Source.SourcePath]; !ok {
+				drop = true
+			}
+		}
+		if !drop {
 			continue
 		}
-		if member.Source == nil {
-			continue
-		}
-		if _, ok := keptPaths[member.Source.SourcePath]; !ok {
-			delete(l.members, id)
+		delete(l.members, id)
+		if _, recorded := l.stored[id]; recorded {
+			l.refusedUpkeep = append(l.refusedUpkeep, id)
 		}
 	}
+	sortSessionIDs(l.refusedUpkeep)
 }
 
 // collectStoredDuplicateClaims adds the second claim a stored id can carry
@@ -159,7 +169,9 @@ func (l *scopeLocator) collectClaudeRootCopies(ctx context.Context, id SessionID
 // the refusal's newer line is deterministic.
 func (l *scopeLocator) collectCodexClaims(ctx context.Context, id SessionID, row StoredSessionSource) error {
 	if l.derived == nil {
-		return nil
+		return fmt.Errorf(
+			"ingest: the attached store cannot answer CountCodexRolloutsBySession; a stored Codex session whose id two rollout files claim can only be detected through the indexed rollout catalog, so this run would process a duplicated session as if it were unique; where: ingest.Pipeline.locateScopedRun in internal/ingest/locate.go; when: checking stored session %s for duplicate rollouts; impact: no session was processed and no store row was written; fix: attach a store that implements DerivedLookupReader, or run without a store for a logs-only run",
+			id)
 	}
 	count, err := l.derived.CountCodexRolloutsBySession(ctx, id)
 	if err != nil {

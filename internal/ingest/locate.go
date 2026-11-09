@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +12,22 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
+
+// SourceLookupFailure is the error a harness lookup returns when it could not
+// read one candidate source. Location names that candidate, so the miss's fix
+// line points at the source that actually failed rather than at the harness's
+// configured root. It wraps the underlying error, so its first line stays the
+// detail the miss prints.
+type SourceLookupFailure struct {
+	Location string
+	Err      error
+}
+
+// Error returns the underlying error's text.
+func (e *SourceLookupFailure) Error() string { return e.Err.Error() }
+
+// Unwrap exposes the underlying error.
+func (e *SourceLookupFailure) Unwrap() error { return e.Err }
 
 // scopedLocate is what one session-scoped LOCATE pass produced: the cohort
 // report, the located sources DIFF may classify, the duplicate refusals a full
@@ -59,14 +74,23 @@ func (p *Pipeline) locateScopedRun(ctx context.Context) (*scopedLocate, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The report's upkeep set is both the in-memory gate and the SQL scope, set
-	// together so the two narrowings can never disagree.
-	p.config.AllowedSessionIDs = make(map[SessionID]bool, len(located.report.Members))
-	for _, id := range located.report.Upkeep() {
-		p.config.AllowedSessionIDs[id] = true
-	}
+	p.applyScopeReport(located.report)
 	p.scopeReport = &located.report
 	return located, nil
+}
+
+// applyScopeReport sets the run's in-memory gate from the report's upkeep set.
+// The same set feeds runStoreScope, so the SQL scope and the per-row filter
+// cannot disagree. It is Upkeep, never Processed: a recorded member whose source
+// could not be read again -- or whose duplicate was refused -- must not be
+// processed, but its stored row still exists and the store-side passes a full
+// run performs for that row must still reach it.
+func (p *Pipeline) applyScopeReport(report ScopeReport) {
+	upkeep := report.Upkeep()
+	p.config.AllowedSessionIDs = make(map[SessionID]bool, len(upkeep))
+	for _, id := range upkeep {
+		p.config.AllowedSessionIDs[id] = true
+	}
 }
 
 // scopeLocator is the state one LOCATE pass carries while it builds the cohort.
@@ -95,11 +119,15 @@ type scopeLocator struct {
 	// processed as selected.
 	members map[SessionID]LocatedMember
 
-	// claims are the located sources the duplicate refusal inspects. Claims
-	// that exist only for the duplicate check (a second root copy, a catalogued
-	// rollout) are carried separately.
-	claims      []DiscoveredSession
+	// extraClaims are the located sources that exist only for the duplicate
+	// check: a second Claude root copy, or a catalogued Codex rollout. The
+	// duplicates LOCATE already built come from members.
 	extraClaims []DiscoveredSession
+
+	// refusedUpkeep names the recorded ids the duplicate refusal kept out of
+	// processing. Their rows still exist, so the store-side passes a full run
+	// performs for them must still see them.
+	refusedUpkeep []SessionID
 
 	misses   []ScopeMiss
 	refusals []SessionResult
@@ -211,6 +239,9 @@ func (l *scopeLocator) adapterFor(harness Harness) (SourceAdapter, bool) {
 	if cache, ok := l.p.store.(ClaudeEvidenceCache); ok && !l.p.config.DryRun {
 		AttachClaudeEvidenceCache(adapter, cache)
 	}
+	// The scoped Claude build decides teammate links from the indexed identity
+	// reader; without it the build errors and the located session is unusable.
+	AttachClaudeDerivedLookup(adapter, l.derived)
 	if l.p.store != nil {
 		AttachSessionLocationLookup(adapter, l.p.store)
 		if parentReader, ok := l.p.store.(LogicalParentReader); ok {
@@ -338,6 +369,7 @@ func (l *scopeLocator) locateByName(ctx context.Context, id SessionID, storedRow
 	var searched []SearchedSource
 	var built []LocatedMember
 	seenPaths := make(map[ResolvedPath]struct{})
+	var readFailure error
 	found := false
 
 	for _, harness := range l.harnessOrder() {
@@ -368,7 +400,7 @@ func (l *scopeLocator) locateByName(ctx context.Context, id SessionID, storedRow
 			searched = append(searched, SearchedSource{
 				Harness:  harness,
 				Method:   SearchFailed,
-				Location: l.failureLocation(harness, cfg, lookup),
+				Location: l.failureLocation(harness, lookup, err),
 				Detail:   firstLineOr(err.Error(), "the lookup failed"),
 			})
 			continue
@@ -390,6 +422,9 @@ func (l *scopeLocator) locateByName(ctx context.Context, id SessionID, storedRow
 				if errors.Is(buildErr, ErrSourceGone) {
 					continue
 				}
+				if readFailure == nil {
+					readFailure = buildErr
+				}
 				searched = append(searched, SearchedSource{
 					Harness:  harness,
 					Method:   SearchFailed,
@@ -410,10 +445,18 @@ func (l *scopeLocator) locateByName(ctx context.Context, id SessionID, storedRow
 
 	if !found {
 		if storedRow != nil {
-			l.addMember(LocatedMember{
+			member := LocatedMember{
 				ID: id, Harness: storedRow.Harness, Outcome: LocateStoredUnreadable, Role: CohortSelected,
 				Unreadable: UnreadableSourceGone,
-			})
+			}
+			if readFailure != nil {
+				// The id's source moved, and the source the lookup found could
+				// not be read. That is a read failure, not a gone source: the
+				// file may be exactly where the lookup named it.
+				member.Unreadable = UnreadableSourceFailed
+				member.Detail = firstLineOr(readFailure.Error(), "the located source could not be read")
+			}
+			l.addMember(member)
 			return nil
 		}
 		l.misses = append(l.misses, ScopeMiss{ID: id, Reason: MissNotFound, Searched: searched})
@@ -433,29 +476,21 @@ func (l *scopeLocator) locateByName(ctx context.Context, id SessionID, storedRow
 	return nil
 }
 
-// failureLocation names the source a failed lookup could not read. The adapter's
-// returned entries describe the roots it completed; when none names the failure,
-// the configured location is used and the message says so.
-func (l *scopeLocator) failureLocation(harness Harness, cfg SourceConfig, lookup SourceLookup) string {
+// failureLocation names the source a failed lookup could not read. A harness
+// that returns SourceLookupFailure names the exact candidate; otherwise the last
+// completed search for that harness is the best the core knows, and an empty
+// location makes the message say so rather than guessing a configured root.
+func (l *scopeLocator) failureLocation(harness Harness, lookup SourceLookup, err error) string {
+	var failure *SourceLookupFailure
+	if errors.As(err, &failure) && failure.Location != "" {
+		return failure.Location
+	}
 	for index := len(lookup.Searched) - 1; index >= 0; index-- {
 		if lookup.Searched[index].Harness == harness && lookup.Searched[index].Location != "" {
 			return lookup.Searched[index].Location
 		}
 	}
-	if len(cfg.Paths) > 0 {
-		return displaySourcePath(cfg.Paths[0])
-	}
 	return ""
-}
-
-// displaySourcePath renders a configured source path with the home directory
-// shortened, the way the searched block shows every location.
-func displaySourcePath(path ResolvedPath) string {
-	raw := string(path)
-	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(raw, home+string(filepath.Separator)) {
-		return "~" + strings.TrimPrefix(raw, home)
-	}
-	return raw
 }
 
 // harnessOrder lists the registered adapters in the canonical harness order, so
@@ -798,14 +833,19 @@ func (l *scopeLocator) executeProbe(ctx context.Context, current LocatedMember, 
 		if probe.ID == "" || current.Source == nil {
 			return "", "", false, nil
 		}
-		// The declared window is one catalog row, then the child's own date
-		// folder and the previous day: at most two listings, never a walk.
+		// One indexed catalogue read first. A catalogued rollout is the answer,
+		// and the date folders are listed only when the catalogue misses: at
+		// most two listings, never a walk.
 		if l.derived != nil {
-			if _, err := l.derived.CountCodexRolloutsBySession(ctx, probe.ID); err != nil {
+			paths, err := l.derived.CodexRolloutPaths(ctx, probe.ID)
+			if err != nil {
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					return "", "", false, ctxErr
 				}
 				return "", "", false, nil
+			}
+			if len(paths) > 0 {
+				return paths[0], probe.ID, true, nil
 			}
 		}
 		paths, err := l.codexWindowPaths(ctx, probe.ID, current.Source.SourcePath)
@@ -897,7 +937,7 @@ func (l *scopeLocator) buildReport() ScopeReport {
 			members = append(members, l.members[id])
 		}
 	}
-	return ScopeReport{Members: members}
+	return ScopeReport{Members: members, refusedUpkeep: slices.Clone(l.refusedUpkeep)}
 }
 
 // processedSources returns the sources DIFF through INDEX may work on, in report

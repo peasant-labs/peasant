@@ -1823,8 +1823,8 @@ func (a *OpenCodeAdapter) LookupSessionSources(ctx context.Context, cfg SourceCo
 // cover this database". It names the database and carries the underlying error
 // so the miss can print its first line; the core records it as SearchFailed.
 func openCodeLookupFailure(id SessionID, location string, err error) error {
-	return fmt.Errorf(
-		"ingest: the OpenCode lookup for session %s could not read database %q; the database did not answer, so the id cannot be reported absent from it; where: ingest.OpenCodeAdapter.LookupSessionSources in internal/ingest/opencode.go; when: locating the named session by name; impact: this database was not searched, and the miss text names the failure; fix: make the database readable and retry: %w", id, location, err)
+	return &SourceLookupFailure{Location: location, Err: fmt.Errorf(
+		"ingest: the OpenCode lookup for session %s could not read database %q; the database did not answer, so the id cannot be reported absent from it; where: ingest.OpenCodeAdapter.LookupSessionSources in internal/ingest/opencode.go; when: locating the named session by name; impact: this database was not searched, and the miss text names the failure; fix: make the database readable and retry: %w", id, location, err)}
 }
 
 // openCodeSessionRowPresent reports whether one database holds a session-table
