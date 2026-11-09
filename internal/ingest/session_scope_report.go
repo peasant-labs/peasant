@@ -131,6 +131,12 @@ type LocatedMember struct {
 	// member, when the run knows it. The stored-but-unreadable warning prints
 	// it because it is the only part of the message the reader can act on.
 	StoredPath ResolvedPath
+	// Parent is the cohort member this member is a child of, when the run knows
+	// it: the root whose build produced a child, or a stored child's recorded
+	// parent. It is nil for a selected member and for an ancestor. The
+	// stored-but-unreadable warning counts only children whose Parent is the
+	// selected session it describes, never another session's children.
+	Parent *SessionID
 	// ParentProbe says where one unstored ancestor can be, computed from the
 	// child's own source. nil means this harness cannot derive where its
 	// parent is.

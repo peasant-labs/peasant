@@ -11,6 +11,7 @@ required_names:
   - harvest-since_filtered
   - harvest-lookup_failed
   - harvest-source_gone
+  - harvest-source_gone_two_roots
   - harvest-harness_disabled
   - harvest-source_failed
   - harvest-index-not_found
@@ -64,6 +65,11 @@ cases:
     command: harvest
     setup: stored_gone_child
     args: ["--session", "{session}"]
+    kind: warning
+  - name: harvest-source_gone_two_roots
+    command: harvest
+    setup: stored_gone_two_roots
+    args: ["--session", "{session}", "--session", "{session2}"]
     kind: warning
   - name: harvest-harness_disabled
     command: harvest

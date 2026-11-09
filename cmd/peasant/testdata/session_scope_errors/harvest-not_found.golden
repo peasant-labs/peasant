@@ -5,9 +5,7 @@ peasant: harvest failed: session 1111... was not found, so nothing was recorded
   when:     before any session was swept, recorded, or indexed
   searched:
     store         no recorded session with this id
-    claude-code   /sandbox/recordings/*/11111111-2222-4333-8444-555566667777.jsonl
-    claude-code   /sandbox/recordings/*/*/subagents/11111111-2222-4333-8444-555566667777.jsonl
-    claude-code   /sandbox/recordings/*/*/subagents/workflows/wf_*/11111111-2222-4333-8444-555566667777.jsonl
+    claude-code   /sandbox/recordings/*/11111111-2222-4333-8444-555566667777.jsonl and /sandbox/recordings/*/*/subagents/11111111-2222-4333-8444-555566667777.jsonl and /sandbox/recordings/*/*/subagents/workflows/wf_*/11111111-2222-4333-8444-555566667777.jsonl
     codex         not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
     opencode      not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
     cursor        not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`

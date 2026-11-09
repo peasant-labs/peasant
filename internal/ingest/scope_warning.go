@@ -33,43 +33,63 @@ func (r ScopeReport) UnreadableWarnings(command, prefix string) []string {
 }
 
 // unreadableBlock renders the labelled block for one unreadable selected id.
+// A harvest re-reads a session's source; `harvest index` re-reads its saved
+// pair. The block names the artifact the command actually failed to read, so a
+// missing pair is never described as a missing transcript.
 func (r ScopeReport) unreadableBlock(member LocatedMember, command, prefix string) string {
 	id := warningShortID(member.ID)
+	index := warningIsIndex(command)
 	var b strings.Builder
-	fmt.Fprintf(&b, "peasant: session %s was not read again, so its stored transcript was kept\n", id)
-	b.WriteString(labelBlock("what:", fmt.Sprintf("this session-scoped %s kept the stored copy of session %s and did not re-read its source", warningCommandName(command), id), false))
-	why, path := unreadableWhy(member)
+	if index {
+		fmt.Fprintf(&b, "peasant: session %s was not read again, so its indexed copy was kept\n", id)
+		b.WriteString(labelBlock("what:", fmt.Sprintf("this session-scoped %s kept the indexed copy of session %s and did not re-read its saved pair", warningCommandName(command), id), false))
+	} else {
+		fmt.Fprintf(&b, "peasant: session %s was not read again, so its stored transcript was kept\n", id)
+		b.WriteString(labelBlock("what:", fmt.Sprintf("this session-scoped %s kept the stored copy of session %s and did not re-read its source", warningCommandName(command), id), false))
+	}
+	why, path := unreadableWhy(member, index)
 	b.WriteString(labelBlock("why:", why, false))
 	if path != "" {
 		b.WriteString(strings.Repeat(" ", blockLabelColumn))
 		b.WriteString(path)
 		b.WriteString("\n")
 	}
-	if member.Unreadable == UnreadableSourceGone {
+	// Claude Code's own retention is the only cause the message can state for a
+	// gone source; every other harness keeps its own retention policy, so the
+	// why line names the path and stops there. A missing saved pair is this
+	// tool's own artifact, never the harness's transcript.
+	if member.Unreadable == UnreadableSourceGone && !index && member.Harness == HarnessClaudeCode {
 		b.WriteString(strings.Repeat(" ", blockLabelColumn))
 		b.WriteString("(Claude Code removes old transcripts after its retention period; peasant keeps the stored copy)\n")
 	}
 	b.WriteString(labelBlock("where:", "session lookup (ingest scoped locate)", false))
-	b.WriteString(labelBlock("when:", "before the session was diffed; its transcript was not re-read or re-indexed", false))
+	if index {
+		b.WriteString(labelBlock("when:", "before the saved pair was indexed; its transcript was not re-read or re-indexed", false))
+	} else {
+		b.WriteString(labelBlock("when:", "before the session was diffed; its transcript was not re-read or re-indexed", false))
+	}
 	if also := r.unreadableChildrenLine(member); also != "" {
 		b.WriteString(labelBlock("also:", also, false))
 	}
 	b.WriteString(labelBlock("impact:", blockUnreadableImpactText, true))
-	b.WriteString(labelBlock("fix:", unreadableFix(member, prefix), true))
+	b.WriteString(labelBlock("fix:", unreadableFix(member, prefix, index), true))
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// unreadableChildrenLine names how many recorded children of an unreadable
-// selected session were also kept as stored. It is empty when none were.
+// unreadableChildrenLine names how many recorded children of THIS unreadable
+// selected session were also kept as stored. A child whose recorded parent is
+// not this member never contributes, so a warning about one session cannot
+// list another session's subagents. It is empty when none were.
 func (r ScopeReport) unreadableChildrenLine(parent LocatedMember) string {
 	count := 0
 	for _, member := range r.Members {
 		if member.Role != CohortChild || member.Outcome != LocateStoredUnreadable {
 			continue
 		}
-		if member.Harness == parent.Harness {
-			count++
+		if member.Parent == nil || *member.Parent != parent.ID {
+			continue
 		}
+		count++
 	}
 	switch count {
 	case 0:
@@ -82,40 +102,65 @@ func (r ScopeReport) unreadableChildrenLine(parent LocatedMember) string {
 }
 
 // unreadableWhy returns the reason line and, when the message names a path, the
-// path to print under it.
-func unreadableWhy(member LocatedMember) (why, path string) {
+// path to print under it. The subject follows the command: harvest read a
+// source, harvest index read a saved pair.
+func unreadableWhy(member LocatedMember, index bool) (why, path string) {
 	switch member.Unreadable {
 	case UnreadableSourceGone:
+		if index {
+			return "the saved pair recorded for this session is no longer there:", string(member.StoredPath)
+		}
 		return "the source path recorded for this session no longer holds it:", string(member.StoredPath)
 	case UnreadableHarnessDisabled:
+		if index {
+			return fmt.Sprintf("the harness that recorded this session (%s) is not enabled in config.yaml, so this run does not read its saved pair", harnessName(member.Harness)), ""
+		}
 		return fmt.Sprintf("the harness that recorded this session (%s) is not enabled in config.yaml, so its source cannot be read again", harnessName(member.Harness)), ""
 	case UnreadableSourceFailed:
 		detail := member.Detail
 		if detail == "" {
 			detail = "the recorded source could not be read"
 		}
+		if index {
+			return "the saved pair recorded for this session could not be read: " + detail, string(member.StoredPath)
+		}
 		return "the source recorded for this session could not be read: " + detail, string(member.StoredPath)
 	default:
+		if index {
+			return "this session is recorded, but its saved pair cannot be read again for an unstated reason", string(member.StoredPath)
+		}
 		return "this session is recorded, but its source cannot be read again for an unstated reason", string(member.StoredPath)
 	}
 }
 
-// unreadableFix is the fix clause for one unreadable selected session.
-func unreadableFix(member LocatedMember, prefix string) string {
+// unreadableFix is the fix clause for one unreadable selected session. Its
+// suggested command is the one that can read the artifact again: a harvest for
+// a source, an index run for a saved pair.
+func unreadableFix(member LocatedMember, prefix string, index bool) string {
 	command := warningCommand(prefix)
+	kept := "stored copy"
+	if index {
+		kept = "indexed copy"
+	}
 	switch member.Unreadable {
 	case UnreadableHarnessDisabled:
-		return fmt.Sprintf("enable it with `%s kickstart`, or keep using the stored copy", command)
+		return fmt.Sprintf("enable it with `%s kickstart`, or keep using the %s", command, kept)
 	case UnreadableSourceFailed:
 		path := string(member.StoredPath)
 		if path == "" {
 			path = "the recorded source path"
 		}
-		return fmt.Sprintf("nothing is needed to keep using the stored copy; to record it again, repair the source at %s, then run `%s harvest --session %s` again", path, command, member.ID)
+		if index {
+			return fmt.Sprintf("nothing is needed to keep using the %s; to index it again, repair the saved pair at %s, then run `%s harvest index --session %s` again", kept, path, command, member.ID)
+		}
+		return fmt.Sprintf("nothing is needed to keep using the %s; to record it again, repair the source at %s, then run `%s harvest --session %s` again", kept, path, command, member.ID)
 	case UnreadableSourceGone:
-		return fmt.Sprintf("nothing is needed to keep using the stored copy. To record this session again, restore a transcript at that path (or re-enable its harness), then run `%s harvest --session %s` again", command, member.ID)
+		if index {
+			return fmt.Sprintf("nothing is needed to keep using the %s. To index this session again, restore its saved pair at that path, then run `%s harvest index --session %s` again", kept, command, member.ID)
+		}
+		return fmt.Sprintf("nothing is needed to keep using the %s. To record this session again, restore a transcript at that path (or re-enable its harness), then run `%s harvest --session %s` again", kept, command, member.ID)
 	default:
-		return "nothing is needed to keep using the stored copy"
+		return fmt.Sprintf("nothing is needed to keep using the %s", kept)
 	}
 }
 
@@ -155,6 +200,12 @@ func (r ScopeReport) SelectedMember(id SessionID) (LocatedMember, bool) {
 const blockUnreadableImpactText = "the stored transcript, its index and its links were not recomputed, and `peasant open` shows the stored " +
 	"copy. The bookkeeping a full harvest does for a recorded session (its origin verdict, its metrics, and " +
 	"stored-copy maintenance) ran for it as in a full harvest. Start-up maintenance may also have run."
+
+// warningIsIndex reports whether the run's command reads saved pairs rather
+// than sources.
+func warningIsIndex(command string) bool {
+	return command == "harvest index"
+}
 
 // warningCommandName returns the words the user typed, defaulting to "harvest"
 // the way SessionScopeError does.

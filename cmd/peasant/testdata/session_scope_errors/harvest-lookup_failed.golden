@@ -7,7 +7,7 @@ peasant: harvest failed: session 1111... could not be looked up in all sources, 
     store         no recorded session with this id
     claude-code   not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
     codex         not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
-    opencode      lookup failed: ingest: the OpenCode lookup for session 11111111-2222-4333-8444-555566667777 could not read database "/sandbox/opencode/opencode.db"; the database did not answer, so the id cannot be reported absent from it; where: ingest.OpenCodeAdapter.LookupSessionSources in internal/ingest/opencode.go; when: locating the named session by name; impact: this database was not searched, and the miss text names the failure; fix: make the database readable and retry: read the session row for 11111111-2222-4333-8444-555566667777 from the preferred OpenCode session table: read bounded session record page from OpenCode SQLite source "/sandbox/opencode/opencode.db" failed while decoding the scoped pragma_table_info(session_v2/session) projection: read pragma_table_info explicit columns for "session_v2" with 64-row retained limit: prepare bounded read-only source statement: sqlite: prepare: file is not a database; no partial page or continuation cursor was returned and no history or external-output source was consulted; verify that this is a supported OpenCode session metadata schema and repair the source with OpenCode before retrying
+    opencode      lookup failed: the OpenCode lookup for session 11111111-2222-4333-8444-555566667777 could not read database "/sandbox/opencode/opencode.db"
     cursor        not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
     strike        not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
     pi            not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
@@ -15,22 +15,10 @@ peasant: harvest failed: session 1111... could not be looked up in all sources, 
             store migration, search-index repair) may still have run. No full scan was run.
   fix:      repair the opencode database at
             /sandbox/opencode/opencode.db
-            (its lookup failed: ingest: the OpenCode lookup for session
-            11111111-2222-4333-8444-555566667777 could not read database
-            "/sandbox/opencode/opencode.db";
-            the database did not answer, so the id cannot be reported absent from it; where:
-            ingest.OpenCodeAdapter.LookupSessionSources in internal/ingest/opencode.go; when:
-            locating the named session by name; impact: this database was not searched, and the miss
-            text names the failure; fix: make the database readable and retry: read the session row
-            for 11111111-2222-4333-8444-555566667777 from the preferred OpenCode session table: read
-            bounded session record page from OpenCode SQLite source
-            "/sandbox/opencode/opencode.db"
-            failed while decoding the scoped pragma_table_info(session_v2/session) projection: read
-            pragma_table_info explicit columns for "session_v2" with 64-row retained limit: prepare
-            bounded read-only source statement: sqlite: prepare: file is not a database; no partial
-            page or continuation cursor was returned and no history or external-output source was
-            consulted; verify that this is a supported OpenCode session metadata schema and repair
-            the source with OpenCode before retrying), then run
+            (its lookup failed: the OpenCode lookup for session 11111111-2222-4333-8444-555566667777
+            could not read database
+            "/sandbox/opencode/opencode.db"),
+            then run
             `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' harvest --session 11111111-2222-4333-8444-555566667777`
             again, or check the id with
             `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' sessions list`

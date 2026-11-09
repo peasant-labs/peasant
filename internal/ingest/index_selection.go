@@ -555,6 +555,9 @@ func (p *Pipeline) scanRelatedIndexPairs(ctx context.Context, reader SessionSour
 		if member.Outcome == locateOutcomeUnset {
 			continue // dropped by the run's own filters
 		}
+		// The saved-pair scan knows the recorded parent, so the warning's
+		// `also:` count names only this session's children.
+		member.Parent = row.Parent
 		scan.add(member, target)
 		scan.parents[id] = row.Parent
 	}
