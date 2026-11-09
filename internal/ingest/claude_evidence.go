@@ -140,6 +140,22 @@ type ClaudeEvidenceCache interface {
 	LoadClaudeEvidenceFor(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath]ClaudeTranscriptEvidence, error)
 }
 
+// ClaudeEvidenceCompleteness is the optional capability a cache implements to
+// say whether a whole-table load returned every stored row.
+//
+// LoadClaudeEvidence skips a row this build cannot parse, so a successful load
+// can be a STRICT SUBSET of the store. A caller that takes its identity counts
+// from the store must not read that subset as "the rows this run replaced" and
+// add its own records again: every path the load did not cover would be
+// double-booked. The production store implements it; an in-memory double that
+// returns every record it holds is complete by construction and need not.
+type ClaudeEvidenceCompleteness interface {
+	// LoadClaudeEvidenceCompletely returns every cached record and reports
+	// whether the load returned every stored row. A false second result still
+	// returns the readable rows, so a caller can fall back to its own view.
+	LoadClaudeEvidenceCompletely(ctx context.Context) (map[ResolvedPath]ClaudeTranscriptEvidence, bool, error)
+}
+
 // ClaudeEvidenceCaching is implemented by an adapter that can reuse mined
 // transcript evidence. The adapter factory signature carries only the
 // filesystem, the git resolver, and the salt, so a caller attaches the cache

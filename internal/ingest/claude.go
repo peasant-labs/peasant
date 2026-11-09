@@ -388,17 +388,30 @@ func (a *ClaudeAdapter) MineOriginEvidence(path ResolvedPath) (sessionorigin.Ori
 	return evidence.Origin, true
 }
 
-// loadCachedEvidence returns the evidence an earlier discovery mined. A missing
-// or failing cache returns an empty map, so discovery mines everything again.
-func (a *ClaudeAdapter) loadCachedEvidence(ctx context.Context) map[ResolvedPath]ClaudeTranscriptEvidence {
+// loadCachedEvidence returns the evidence an earlier discovery mined and
+// whether the load returned every stored row. A row this build cannot parse is
+// skipped by the loader, so a successful load can be a strict subset of the
+// store; the second result says whether the caller may take its identity counts
+// from the store without adding the rows this map already covers. A missing or
+// failing cache returns nil and false, so discovery mines everything again.
+func (a *ClaudeAdapter) loadCachedEvidence(ctx context.Context) (map[ResolvedPath]ClaudeTranscriptEvidence, bool) {
 	if a.evidence == nil {
-		return nil
+		return nil, false
+	}
+	if completeness, ok := a.evidence.(ClaudeEvidenceCompleteness); ok {
+		records, complete, err := completeness.LoadClaudeEvidenceCompletely(ctx)
+		if err != nil {
+			return nil, false
+		}
+		return records, complete
 	}
 	records, err := a.evidence.LoadClaudeEvidence(ctx)
 	if err != nil {
-		return nil
+		return nil, false
 	}
-	return records
+	// A cache without the capability returns every record it holds, which is
+	// the complete view by construction (the in-memory doubles).
+	return records, true
 }
 
 // DiscoveryCodeClaudeEvidenceCacheWrite is the DiscoveryDiagnostic code for a
@@ -512,7 +525,7 @@ func (a *ClaudeAdapter) linkClaudeTeammates(
 ) error {
 	evidence := mergeClaudeEvidence(cached, current)
 
-	reader := DerivedLookupReader(newClaudeEvidenceIdentityReader(evidence))
+	var reader DerivedLookupReader
 	delta := claudeIdentityCountDelta{}
 	if storedCounts {
 		if a.derivedLookup == nil {
@@ -520,6 +533,8 @@ func (a *ClaudeAdapter) linkClaudeTeammates(
 		}
 		reader = a.derivedLookup
 		delta = claudeIdentityDeltas(cached, current)
+	} else {
+		reader = newClaudeEvidenceIdentityReader(evidence)
 	}
 
 	rootByID := make(map[SessionID]int, len(sessions))
@@ -1568,8 +1583,9 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 	}
 
 	state := claudeBuildEvidence{mined: make(map[ResolvedPath]ClaudeTranscriptEvidence), missing: make(map[ResolvedPath]struct{})}
+	cacheComplete := false
 	if mode == ClaudeBuildFullWalk {
-		state.cached = a.loadCachedEvidence(ctx)
+		state.cached, cacheComplete = a.loadCachedEvidence(ctx)
 	} else {
 		cached, err := a.loadEvidenceByPath(ctx, memberPaths)
 		if err != nil {
@@ -1609,12 +1625,17 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 	}
 	sessions = linking
 
-	// The full walk uses the store's indexed identity counts whenever its
-	// evidence cache is attached: the whole-table load already happened for the
-	// cache itself, and the counts keep one rule for both build modes. A run
-	// with no cache (a logs-only harvest, a dry run) reads the counts from the
-	// evidence view it mined, so it links the same pairs without a store.
-	storedCounts := mode == ClaudeBuildScoped || a.derivedLookup != nil && a.evidence != nil
+	// The full walk uses the store's indexed identity counts only when its
+	// whole-table evidence load returned every stored row. A load that skipped a
+	// row (an unreadable record, or a failed load) is a strict subset of the
+	// store, so adding this run's records to the store count would double-book
+	// the paths the subset covers and drop a link the evidence view forms. In
+	// that case the build decides from the evidence view, exactly as it did
+	// before the indexed rewrite. A scoped build reads its named paths and
+	// always uses the stored counts; a store-free or dry run has no store to
+	// count from and uses its own view.
+	storedCounts := mode == ClaudeBuildScoped ||
+		(a.derivedLookup != nil && a.evidence != nil && cacheComplete)
 	if err := a.linkClaudeTeammates(ctx, sessions, state.cached, state.mined, located, storedCounts); err != nil {
 		return nil, nil, err
 	}

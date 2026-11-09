@@ -10,7 +10,9 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 //go:embed testdata/claude_teammate_linking.yaml
@@ -220,6 +222,68 @@ func (f *fakeClaudeLinkingEvidenceCache) SaveClaudeEvidence(_ context.Context, u
 		delete(f.evidence, path)
 	}
 	return nil
+}
+
+// TestClaudeAdapter_IncompleteEvidenceCacheStillLinks proves the full walk does
+// not take the store's identity counts when its whole-table evidence load
+// skipped a stored row. The skipped row is still counted by the store, so
+// adding this run's re-mined record on top would make a unique identity look
+// ambiguous and silently drop the link the evidence view forms.
+func TestClaudeAdapter_IncompleteEvidenceCacheStillLinks(t *testing.T) {
+	ctx := context.Background()
+	const parentID = "11111111-1111-4111-8111-111111111111"
+	const childID = "22222222-2222-4222-8222-222222222222"
+	parentPath := "/claude/-workspace/" + parentID + ".jsonl"
+	childPath := "/claude/-workspace/" + childID + ".jsonl"
+
+	database := openEvidenceStore(t, storetest.CopyGoldenDB(t))
+	mfs := testutil.NewMemFS()
+	parentLines := `{"sessionId":"` + parentID + `","type":"user","cwd":"/workspace","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn"}}` + "\n"
+	childLines := `{"sessionId":"` + childID + `","type":"user","cwd":"/workspace","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}` + "\n"
+	if err := mfs.WriteFile(parentPath, []byte(parentLines), 0o644); err != nil {
+		t.Fatalf("write the spawner transcript: %v", err)
+	}
+	if err := mfs.WriteFile(childPath, []byte(childLines), 0o644); err != nil {
+		t.Fatalf("write the declarer transcript: %v", err)
+	}
+
+	adapter := ingest.NewClaudeAdapter(mfs, testutil.DefaultGitResolver(), salt.Salt{})
+	ingest.AttachClaudeEvidenceCache(adapter, database)
+	ingest.AttachSessionLocationLookup(adapter, database)
+	ingest.AttachClaudeDerivedLookup(adapter, database)
+	cfg := ingest.SourceConfig{Paths: []ingest.ResolvedPath{"/claude"}, Enabled: true}
+
+	want := []claudeExpectedDiscovery{
+		{SessionID: parentID, SubagentPaths: []string{childPath}},
+		{SessionID: childID, ParentUUID: parentID},
+	}
+	first, err := adapter.Discover(ctx, cfg)
+	if err != nil {
+		t.Fatalf("first discovery over a healthy cache: %v", err)
+	}
+	assertClaudeTeammateDiscovery(t, first, want)
+
+	// `null` is valid JSON but carries no identity records, so the whole-table
+	// scan rejects this row as unreadable while its identity columns (and so the
+	// store's indexed count) remain valid. That is exactly the state in which
+	// "the cache is attached" and "the cache is complete" disagree.
+	conn, err := database.Pool().Take(ctx)
+	if err != nil {
+		t.Fatalf("take a connection to make one stored evidence row unreadable: %v", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn,
+		`UPDATE claude_transcript_evidence SET identity_records_json = 'null' WHERE source_path = ?`,
+		&sqlitex.ExecOptions{Args: []any{childPath}}); err != nil {
+		database.Pool().Put(conn)
+		t.Fatalf("make the declarer's stored evidence row unreadable: %v", err)
+	}
+	database.Pool().Put(conn)
+
+	second, err := adapter.Discover(ctx, cfg)
+	if err != nil {
+		t.Fatalf("second discovery over an incomplete cache: %v", err)
+	}
+	assertClaudeTeammateDiscovery(t, second, want)
 }
 
 // fakeSessionLocationLookup is a minimal in-memory double for the store's

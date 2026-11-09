@@ -16,6 +16,10 @@ import (
 // the teammate links from the transcripts, and that mining reads whole files.
 var _ ingest.ClaudeEvidenceCache = (*Store)(nil)
 
+// A whole-table load can skip an unreadable row; the caller that counts from
+// the store needs to know so it does not add the readable subset again.
+var _ ingest.ClaudeEvidenceCompleteness = (*Store)(nil)
+
 const (
 	// sqlSelectClaudeEvidenceColumns is the one column list both the whole-table
 	// read and the by-path read use, so the two shapes cannot drift.
@@ -137,26 +141,44 @@ type claudeIdentityRecordRow struct {
 // path. A row this build cannot read is skipped, so discovery mines that
 // transcript again instead of trusting a value it does not understand.
 func (s *Store) LoadClaudeEvidence(ctx context.Context) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, error) {
+	records, _, err := s.loadClaudeEvidence(ctx)
+	return records, err
+}
+
+// LoadClaudeEvidenceCompletely is LoadClaudeEvidence plus whether every stored
+// row was readable. A row the whole-table scan cannot parse is skipped by
+// LoadClaudeEvidence, and the readable map is then a strict subset of the
+// store; a caller that counts identities from the store needs to know, because
+// adding its own records for the skipped paths would double-book them.
+func (s *Store) LoadClaudeEvidenceCompletely(ctx context.Context) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, bool, error) {
+	return s.loadClaudeEvidence(ctx)
+}
+
+// loadClaudeEvidence is the one whole-table scan both readers use.
+func (s *Store) loadClaudeEvidence(ctx context.Context) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, bool, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("store.LoadClaudeEvidence: take connection: %w", err)
+		return nil, false, fmt.Errorf("store.LoadClaudeEvidence: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
 
 	records := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence)
+	skipped := 0
 	err = sqlitex.Execute(conn, sqlSelectClaudeEvidence, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			record, ok := scanClaudeEvidence(stmt)
-			if ok {
-				records[record.SourcePath] = record
+			if !ok {
+				skipped++
+				return nil
 			}
+			records[record.SourcePath] = record
 			return nil
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("store.LoadClaudeEvidence: query: %w", err)
+		return nil, false, fmt.Errorf("store.LoadClaudeEvidence: query: %w", err)
 	}
-	return records, nil
+	return records, skipped == 0, nil
 }
 
 // sqlSelectClaudeEvidenceFor renders the by-path primary-key read for the given
