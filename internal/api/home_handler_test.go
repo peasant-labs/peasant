@@ -345,6 +345,41 @@ func TestSyncHomeEmptyStoreReturnsPageOne(t *testing.T) {
 	}
 }
 
+// TestSyncHomeChildTotalsUseTheRequestFilter holds the child branch's
+// totals.sessions to the request filter. The HTTP validator refuses root
+// filters on a child request, so this drives the reader directly: a published
+// filter with no receipts counts zero while the child page still has rows. A
+// revert to CountPushableSessions(All) reports the whole 61-session store.
+func TestSyncHomeChildTotalsUseTheRequestFilter(t *testing.T) {
+	db := storetest.Open(t)
+	ids := rootIDs(60)
+	seedHomeSessions(t, db, ids)
+	seedHomeSessions(t, db, []string{"sess_parent"})
+	homeExec(t, db, `UPDATE sessions SET parent_id=? WHERE session_id<>?`, "sess_parent", "sess_parent")
+
+	sh := &syncHandler{config: newLiveConfig(config.BaseConfig())}
+	h := &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: fixtureRepositoryResolver{}}
+	parent := "sess_parent"
+	publication := schema.LocalSyncPublicationPublished
+	page, err := h.newReader(schema.LocalSyncSessionsQuery{
+		View:            "home",
+		ParentSessionID: &parent,
+		Publication:     &publication,
+	}).ReadPage(context.Background())
+	if err != nil {
+		t.Fatalf("read the filtered child page: %v", err)
+	}
+	if page.Total != 60 {
+		t.Fatalf("child total = %d, want 60", page.Total)
+	}
+	if len(page.Items) == 0 {
+		t.Fatal("the filtered child page returned no rows; the totals assertion needs a visible child page")
+	}
+	if page.Totals == nil || page.Totals.Sessions != 0 {
+		t.Fatalf("totals.sessions = %+v, want 0 for publication=published with no receipts; the store total is 61", page.Totals)
+	}
+}
+
 func TestSyncHomeKeysetTraversal(t *testing.T) {
 	for _, tc := range loadSyncPages(t).Traversals {
 		t.Run(tc.Name, func(t *testing.T) {

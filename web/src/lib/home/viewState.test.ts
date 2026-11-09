@@ -10,7 +10,7 @@ import {
   parseBrowseView,
   type HomeViewState,
 } from './viewState';
-import { clearHomeOpenGroups, readHomeDeviceView, writeHomeDeviceView } from './deviceView';
+import { clearHomeCollapsedGroups, readHomeDeviceView, writeHomeDeviceView } from './deviceView';
 
 const PROJECT = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
 
@@ -121,25 +121,25 @@ describe('device view storage', () => {
   };
 
   it('reads the default when nothing is stored', () => {
-    expect(readHomeDeviceView(storage())).toEqual({ visibleColumns: null, open: null });
+    expect(readHomeDeviceView(storage())).toEqual({ visibleColumns: null, collapsed: null });
   });
 
   it('round-trips the columns and open groups', () => {
     const store = storage();
-    writeHomeDeviceView({ visibleColumns: ['session', 'state'], open: ['project:alpha'] }, store);
-    expect(readHomeDeviceView(store)).toEqual({ visibleColumns: ['session', 'state'], open: ['project:alpha'] });
+    writeHomeDeviceView({ visibleColumns: ['session', 'state'], collapsed: ['project:alpha'] }, store);
+    expect(readHomeDeviceView(store)).toEqual({ visibleColumns: ['session', 'state'], collapsed: ['project:alpha'] });
   });
 
-  it('a group-by change clears the open set and keeps the columns', () => {
+  it('a group-by change clears the collapsed set and keeps the columns', () => {
     const store = storage();
-    writeHomeDeviceView({ visibleColumns: ['session'], open: ['project:alpha'] }, store);
-    clearHomeOpenGroups(store);
-    expect(readHomeDeviceView(store)).toEqual({ visibleColumns: ['session'], open: null });
+    writeHomeDeviceView({ visibleColumns: ['session'], collapsed: ['project:alpha'] }, store);
+    clearHomeCollapsedGroups(store);
+    expect(readHomeDeviceView(store)).toEqual({ visibleColumns: ['session'], collapsed: [] });
   });
 
   it('discards a value that is not the shape this app writes', () => {
     const store = storage();
-    store.setItem('peasant.home', JSON.stringify({ visibleColumns: ['not-a-column'], open: 'nope' }));
-    expect(readHomeDeviceView(store)).toEqual({ visibleColumns: null, open: null });
+    store.setItem('peasant.home', JSON.stringify({ visibleColumns: ['not-a-column'], collapsed: 'nope' }));
+    expect(readHomeDeviceView(store)).toEqual({ visibleColumns: null, collapsed: null });
   });
 });

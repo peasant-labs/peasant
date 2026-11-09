@@ -41,6 +41,6 @@ export function isHomeColumnId(value: unknown): value is HomeColumnId {
 export interface HomeSavedView {
   readonly groupBy: HomeGroupBy;
   readonly visibleColumns: readonly HomeColumnId[];
-  /** Qualified open group ids; `null` means every group starts open. */
-  readonly open: readonly string[] | null;
+  /** Qualified collapsed group ids; `null` or empty means nothing is collapsed. */
+  readonly collapsed: readonly string[] | null;
 }

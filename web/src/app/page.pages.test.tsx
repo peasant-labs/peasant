@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { parse } from 'yaml';
 import HomePage from './page';
 import { PublishProvider, usePublishState } from '@/contexts/PublishContext';
-import { zSyncPushRequest, zSyncPushResponse } from '@peasant-labs/schema';
+import { newProjectHash, zSyncPushRequest, zSyncPushResponse } from '@peasant-labs/schema';
 import { ALPHA_HASH, BETA_HASH, makeSession } from '@/app/review/[[...segments]]/test-fixtures';
 import type { LocalSyncSessionRow } from '@/lib/api/home';
 import { decodeHomeViewState } from '@/lib/home/viewState';
@@ -26,12 +26,12 @@ interface Fixture {
   teammate?: { team: string; name: string };
   assertTeammateLine?: boolean;
   search?: string;
-  rows?: { id: string; project: 'alpha' | 'beta' }[];
+  rows?: { id: string; project: 'alpha' | 'beta' | 'gamma' | 'delta' }[];
   visibleColumns?: string[];
   expectView?: { browse: string; publication: string; project: string | null; perPage: number; page: number; groupBy: string };
 }
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-pages.yaml'), 'utf8')) as { requiredNames: string[]; cases: Fixture[]; publish: { request: unknown; response: unknown; loadedPages: { parent: string | null; page: number }[]; failedRefreshPages: { parent: string | null; page: number }[] } };
-const required = ['numbered-pages-from-the-url', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-error-keeps-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-error-retry-failure-keeps-loaded-content', 'selection-error-account-change-refreshes-loaded-content', 'claude-teammate-line', 'no-claude-teammate-line', 'refresh-restores-view-and-page', 'interleaved-project-grouping', 'hidden-session-column-grouping'];
+const required = ['numbered-pages-from-the-url', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-error-keeps-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-error-retry-failure-keeps-loaded-content', 'selection-error-account-change-refreshes-loaded-content', 'claude-teammate-line', 'no-claude-teammate-line', 'refresh-restores-view-and-page', 'interleaved-project-grouping', 'hidden-session-column-grouping', 'collapsed-group-does-not-hide-page-two'];
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
 expect(fixture.cases.map(row => row.name).sort()).toEqual([...required].sort());
 
@@ -43,10 +43,18 @@ if (!visualTeammate) throw new Error('home-pages.yaml visual.teammate must name 
 expect(fixture.cases.find(row => row.name === 'claude-teammate-line')?.teammate).toEqual({ team: visualTeammate.team, name: visualTeammate.name });
 
 /** One fixture row; `teammate` is the identity the fixture case serves on it. */
-function row(id: string, children = 0, teammate?: { team: string; name: string }, project: 'alpha' | 'beta' = 'alpha'): LocalSyncSessionRow {
+const FIXTURE_PROJECTS = {
+  alpha: { name: 'fixture-project', hash: ALPHA_HASH },
+  beta: { name: 'beta-project', hash: BETA_HASH },
+  gamma: { name: 'gamma-project', hash: newProjectHash('c'.repeat(64)) },
+  delta: { name: 'delta-project', hash: newProjectHash('d'.repeat(64)) },
+} as const;
+
+function row(id: string, children = 0, teammate?: { team: string; name: string }, project: keyof typeof FIXTURE_PROJECTS = 'alpha'): LocalSyncSessionRow {
+  const projectRow = FIXTURE_PROJECTS[project];
   return {
     sync: {
-      id, harness: 'claude-code', projectName: project === 'beta' ? 'beta-project' : 'fixture-project', projectHash: project === 'beta' ? BETA_HASH : ALPHA_HASH, hostSlug: 'fixture-host', startTime: '2026-06-01T10:00:00Z', durationMs: BigInt(60000), totalTokens: 10, turnCount: 2, model: 'fixture', syncStatus: 'new', previouslyPushed: false,
+      id, harness: 'claude-code', projectName: projectRow.name, projectHash: projectRow.hash, hostSlug: 'fixture-host', startTime: '2026-06-01T10:00:00Z', durationMs: BigInt(60000), totalTokens: 10, turnCount: 2, model: 'fixture', syncStatus: 'new', previouslyPushed: false,
       ...(teammate ? { teammate: { team: teammate.team, name: teammate.name, evidence: 'native_dynamic_workflow' as const } } : {}),
     },
     publication: { sessionId: id, state: 'unpublished', autoPublish: false, outsideSelection: false },
@@ -131,7 +139,7 @@ describe('mounted bounded Home', () => {
   for (const testCase of fixture.cases) {
     it(testCase.name, async () => {
       if (testCase.search) window.history.replaceState({}, '', `/?${testCase.search}`);
-      if (testCase.visibleColumns) window.localStorage.setItem('peasant.home', JSON.stringify({ visibleColumns: testCase.visibleColumns, open: null }));
+      if (testCase.visibleColumns) window.localStorage.setItem('peasant.home', JSON.stringify({ visibleColumns: testCase.visibleColumns, collapsed: null }));
       const customRows = testCase.rows !== undefined;
       roots = customRows
         ? testCase.rows!.map(entry => row(entry.id, 0, undefined, entry.project))
@@ -491,9 +499,27 @@ describe('mounted bounded Home', () => {
         await waitFor(() => expect(screen.queryByRole('link', { name: 'title a1' })).not.toBeInTheDocument());
         expect(screen.getByRole('link', { name: 'title b1' })).toBeInTheDocument();
         const stored = JSON.parse(window.localStorage.getItem('peasant.home') ?? '{}');
-        expect(stored.open).toEqual([`project:${BETA_HASH}`]);
+        expect(stored.collapsed).toEqual([`project:${ALPHA_HASH}`]);
         fireEvent.click(within(alphaGroup()).getByRole('button'));
         await screen.findByRole('link', { name: 'title a1' });
+        return;
+      }
+      if (testCase.name === 'collapsed-group-does-not-hide-page-two') {
+        const alphaGroup = () => document.querySelector(`[data-home-group="project:${ALPHA_HASH}"]`) as HTMLElement;
+        fireEvent.click(within(alphaGroup()).getByRole('button'));
+        await waitFor(() => expect(screen.queryByRole('link', { name: 'title a01' })).not.toBeInTheDocument());
+        fireEvent.click(screen.getByRole('button', { name: 'next page' }));
+        await screen.findByRole('link', { name: 'title c01' });
+        // Page 2's projects were never collapsed, so they are open.
+        for (const [id, hash] of [['c01', FIXTURE_PROJECTS.gamma.hash], ['d01', FIXTURE_PROJECTS.delta.hash]] as const) {
+          expect(await screen.findByRole('link', { name: `title ${id}` })).toBeInTheDocument();
+          const header = document.querySelector(`[data-home-group="project:${hash}"]`);
+          expect(header?.querySelector('button')).toHaveAttribute('aria-expanded', 'true');
+        }
+        // Page 1 keeps its own collapsed project.
+        fireEvent.click(screen.getByRole('button', { name: 'page 1' }));
+        await screen.findByRole('link', { name: 'title b01' });
+        expect(screen.queryByRole('link', { name: 'title a01' })).not.toBeInTheDocument();
         return;
       }
       if (testCase.name === 'hidden-session-column-grouping') {

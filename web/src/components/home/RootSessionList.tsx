@@ -66,6 +66,41 @@ type SessionListRow = RootSessionRow & { id: string; kind: 'session' | 'child'; 
 type GroupListRow = { id: string; kind: 'group'; groupLabel: string; groupKey: string; open: boolean; depth: 0 };
 type ListRow = SessionListRow | GroupListRow;
 
+interface ProjectRowGroup {
+  key: string;
+  qualified: string;
+  label: string;
+  rows: RootSessionRow[];
+}
+
+/**
+ * Group the visible root rows by project in first-appearance order. The key,
+ * the qualified id, and the label are derived here ONCE so the row renderer and
+ * the collapse set cannot drift on a fallback or prefix.
+ */
+function groupProjectRows(rows: readonly RootSessionRow[]): ProjectRowGroup[] {
+  const order: string[] = [];
+  const buckets = new Map<string, RootSessionRow[]>();
+  for (const row of rows) {
+    const key = row.sync.projectHash || row.sync.projectName;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(row);
+    else {
+      buckets.set(key, [row]);
+      order.push(key);
+    }
+  }
+  return order.map((key) => {
+    const grouped = buckets.get(key)!;
+    return {
+      key,
+      qualified: `${HomeGroupBy.Project.wire}:${key}`,
+      label: displayProject(grouped[0].sync.projectName),
+      rows: grouped,
+    };
+  });
+}
+
 const NO_CHILDREN: ReadonlyMap<string, readonly RootSessionRow[]> = new Map();
 
 export interface RootSessionListProps {
@@ -89,8 +124,8 @@ export interface RootSessionListProps {
   /** The host owns the URL; the table reports the page it wants. */
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: PageSize) => void;
-  /** The host owns the device storage; the table reports the open group set. */
-  onOpenChange?: (open: readonly string[] | null) => void;
+  /** The host owns the device storage; the table reports the collapsed group set. */
+  onCollapsedChange?: (collapsed: readonly string[] | null) => void;
   loading?: boolean;
 }
 
@@ -133,7 +168,7 @@ function SessionChildrenGroup({ parentId, childIds, expanded, onToggle, indent =
  * the URL to the page the server served. Page lengths never stand in for global
  * totals or the complete project catalog.
  */
-export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, page, pageSize, total, viewState, onPageChange, onPageSizeChange, onOpenChange, loading }: RootSessionListProps) {
+export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, page, pageSize, total, viewState, onPageChange, onPageSizeChange, onCollapsedChange, loading }: RootSessionListProps) {
   const expandedGroups = home.expanded;
   const reading = home.loading;
   const last = Math.max(1, Math.ceil(total / pageSize));
@@ -150,19 +185,8 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
     if (box && box.top < 0) top.current?.scrollIntoView({ block: 'start' });
   }, [current]);
 
-  // The qualified group ids in first-appearance order, used to seed the open
-  // set when the device has no preference yet.
-  const allGroupIds = useMemo(() => {
-    const seen = new Set<string>();
-    const ids: string[] = [];
-    for (const row of visible) {
-      const key = row.sync.projectHash || row.sync.projectName;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      ids.push(`${HomeGroupBy.Project.wire}:${key}`);
-    }
-    return ids;
-  }, [visible]);
+  const projectGroups = useMemo(() => groupProjectRows(visible), [visible]);
+  const collapsedGroups = useMemo(() => new Set(viewState.collapsed ?? []), [viewState.collapsed]);
 
   // Depth-first within one project: every child follows its parent, and the
   // rows are STABLE-PARTITIONED by project before the headers are emitted, so a
@@ -182,33 +206,21 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
       for (const row of visible) walk(row, 'session', 0);
       return out;
     }
-    const order: string[] = [];
-    const buckets = new Map<string, RootSessionRow[]>();
-    for (const row of visible) {
-      const key = row.sync.projectHash || row.sync.projectName;
-      const bucket = buckets.get(key);
-      if (bucket) bucket.push(row);
-      else {
-        buckets.set(key, [row]);
-        order.push(key);
-      }
-    }
-    for (const key of order) {
-      const groupKey = `${HomeGroupBy.Project.wire}:${key}`;
-      const open = viewState.open === null || viewState.open.includes(groupKey);
+    for (const group of projectGroups) {
+      const open = !collapsedGroups.has(group.qualified);
       out.push({
-        id: groupKey,
+        id: group.qualified,
         kind: 'group',
-        groupLabel: displayProject(buckets.get(key)![0].sync.projectName),
-        groupKey,
+        groupLabel: group.label,
+        groupKey: group.qualified,
         open,
         depth: 0,
       });
       if (!open) continue;
-      for (const row of buckets.get(key) ?? []) walk(row, 'session', 0);
+      for (const row of group.rows) walk(row, 'session', 0);
     }
     return out;
-  }, [visible, childGroups, expandedGroups, viewState.groupBy, viewState.open]);
+  }, [visible, projectGroups, collapsedGroups, childGroups, expandedGroups, viewState.groupBy]);
 
   const publishedOnScreen = useMemo(
     () => renderRows.filter((row) => row.kind !== 'group' && row.publication.state === 'published').map((row) => row.id),
@@ -246,16 +258,16 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
       if (columnKey !== firstShownKey) return null;
       return (
         <div className="home-group-head" data-home-group={row.groupKey}>
-          {onOpenChange ? (
+          {onCollapsedChange ? (
             <button
               type="button"
               className="home-group-toggle"
               aria-expanded={row.open}
               onClick={() => {
-                const current = new Set(viewState.open ?? allGroupIds);
+                const current = new Set(viewState.collapsed ?? []);
                 if (current.has(row.groupKey)) current.delete(row.groupKey);
                 else current.add(row.groupKey);
-                onOpenChange([...current]);
+                onCollapsedChange([...current]);
               }}
             >
               {row.groupLabel}
@@ -378,7 +390,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
         render: (_, row) => row.kind === 'group' ? groupHeader('state', row) : stateOf(row),
       },
     ];
-  }, [titles, previews, audience, childGroups, expandedGroups, home, childCounts, viewState.visibleColumns, viewState.open, firstShownKey, allGroupIds, onOpenChange]);
+  }, [titles, previews, audience, childGroups, expandedGroups, home, childCounts, viewState.visibleColumns, viewState.collapsed, firstShownKey, onCollapsedChange]);
   const shownColumns = useMemo(() => {
     if (viewState.visibleColumns.length === 0) return columns;
     const wanted = new Set<string>(viewState.visibleColumns);

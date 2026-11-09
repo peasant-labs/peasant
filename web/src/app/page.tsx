@@ -17,7 +17,7 @@ import type { LocalSyncProjectOption } from '@/lib/api/home';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { displayProject } from '@/lib/quality/utils';
 import { newProjectHash, type ProjectHash } from '@peasant-labs/schema';
-import { clearHomeOpenGroups, readHomeDeviceView, writeHomeDeviceView, type HomeDeviceView } from '@/lib/home/deviceView';
+import { clearHomeCollapsedGroups, readHomeDeviceView, writeHomeDeviceView, type HomeDeviceView } from '@/lib/home/deviceView';
 import { HOME_COLUMN_IDS, type HomeSavedView } from '@/components/home/homeColumns';
 import {
   ALL_BROWSE_VIEWS,
@@ -122,7 +122,7 @@ function HomeView() {
       // The grouping is URL-owned; the open groups are device-owned. A new
       // grouping names different groups, so its collapsed set returns to the
       // default (all open).
-      clearHomeOpenGroups();
+      clearHomeCollapsedGroups();
       setDeviceView(readHomeDeviceView());
     }
     viewRef.current = next;
@@ -181,10 +181,10 @@ function HomeView() {
   const tableState = useMemo<HomeSavedView>(() => ({
     groupBy: view.groupBy,
     visibleColumns: deviceView.visibleColumns ?? HOME_COLUMN_IDS,
-    open: deviceView.open,
+    collapsed: deviceView.collapsed,
   }), [view.groupBy, deviceView]);
-  const onOpenChange = useCallback((open: readonly string[] | null) => {
-    writeHomeDeviceView({ visibleColumns: deviceView.visibleColumns, open });
+  const onCollapsedChange = useCallback((collapsed: readonly string[] | null) => {
+    writeHomeDeviceView({ visibleColumns: deviceView.visibleColumns, collapsed });
     setDeviceView(readHomeDeviceView());
   }, [deviceView.visibleColumns]);
 
@@ -309,7 +309,7 @@ function HomeView() {
             pageSize={view.pageSize}
             total={home.total}
             viewState={tableState}
-            onOpenChange={onOpenChange}
+            onCollapsedChange={onCollapsedChange}
             onPageChange={next => commit({ page: next })}
             onPageSizeChange={size => commit({ pageSize: size, page: 1 })}
             loading={home.loading && home.rootPage === null}

@@ -22,6 +22,7 @@ requiredNames:
   - refresh-restores-view-and-page
   - interleaved-project-grouping
   - hidden-session-column-grouping
+  - collapsed-group-does-not-hide-page-two
 publish:
   request: { sessionIds: [root-0], redactionLevel: standard }
   response: { errors: 0, new: 1, updated: 0, skipped: 0, sessions: [{ sessionId: root-0, status: new }] }
@@ -142,3 +143,35 @@ cases:
     rows:
       - {id: a1, project: alpha}
       - {id: b1, project: beta}
+  - name: collapsed-group-does-not-hide-page-two
+    # A collapsed project is a global device set, not a page-local allow-list:
+    # page 2's gamma/delta projects were never collapsed and render open.
+    search: 'groupBy=project'
+    rows:
+      - {id: a01, project: alpha}
+      - {id: a02, project: alpha}
+      - {id: a03, project: alpha}
+      - {id: a04, project: alpha}
+      - {id: a05, project: alpha}
+      - {id: a06, project: alpha}
+      - {id: a07, project: alpha}
+      - {id: a08, project: alpha}
+      - {id: a09, project: alpha}
+      - {id: a10, project: alpha}
+      - {id: a11, project: alpha}
+      - {id: a12, project: alpha}
+      - {id: a13, project: alpha}
+      - {id: b01, project: beta}
+      - {id: b02, project: beta}
+      - {id: b03, project: beta}
+      - {id: b04, project: beta}
+      - {id: b05, project: beta}
+      - {id: b06, project: beta}
+      - {id: b07, project: beta}
+      - {id: b08, project: beta}
+      - {id: b09, project: beta}
+      - {id: b10, project: beta}
+      - {id: b11, project: beta}
+      - {id: b12, project: beta}
+      - {id: c01, project: gamma}
+      - {id: d01, project: delta}
