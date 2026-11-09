@@ -60,6 +60,9 @@ func TestScopedStatementsQueryPlans(t *testing.T) {
 	}
 
 	contentSQL, contentArgs := buildListContentCaptureIncompleteSessionsQuery("", 25, narrow)
+	sweepSQL, sweepArgs := flaggedSessionsSweepSQL(narrow)
+	originSQL, originArgs := listStaleOriginSessionsSQL(0, narrow)
+	invalidateSQL, invalidateArgs := invalidateStaleParentOriginsSQL(narrow)
 
 	projects := ingest.Projects([]ingest.ProjectHash{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
 	orphanDailySQL, orphanDailyArgs := buildDeleteOrphanDailySummaryByProjectSQL(projects)
@@ -77,20 +80,20 @@ func TestScopedStatementsQueryPlans(t *testing.T) {
 	}{
 		{
 			name:      "flagged_sweep",
-			sql:       flaggedSessionsSweepSQL(narrow),
-			args:      []any{string(idA), string(idB)},
+			sql:       sweepSQL,
+			args:      sweepArgs,
 			wantIndex: "sqlite_autoindex_sessions_1",
 		},
 		{
 			name:      "stale_origin",
-			sql:       listStaleOriginSessionsSQL(narrow),
-			args:      []any{0, string(idA), string(idB)},
+			sql:       originSQL,
+			args:      originArgs,
 			wantIndex: "sqlite_autoindex_sessions_1",
 		},
 		{
 			name: "invalidate_stale_parent_origins",
-			sql:  invalidateStaleParentOriginsSQL(narrow),
-			args: []any{ingest.OriginRuleVersion, ingest.HarnessCodex.String(), ingest.HarnessOpenCode.String(), string(idA), string(idB)},
+			sql:  invalidateSQL,
+			args: invalidateArgs,
 		},
 		{name: "stale_adapter", sql: adapterSQL, args: adapterArgs},
 		{name: "stale_index", sql: indexSQL, args: indexArgs},

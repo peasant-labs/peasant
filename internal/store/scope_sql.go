@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -11,6 +12,34 @@ import (
 // predicate and such a statement is never built for it.
 func trimLeadingAnd(predicate string) string {
 	return strings.TrimPrefix(predicate, " AND ")
+}
+
+// scopedWhere composes one selection statement's WHERE terms from its
+// disjunction arms and the narrowed scope clause.
+//
+// The arms are ALWAYS grouped before the narrowed clause is appended. An
+// unparenthesised "arm OR arm AND scope" binds AND to the last arm only, so a
+// narrowed pass silently returns every row from the other arms. Grouping is
+// produced here, once, rather than by a hand-typed pair of parentheses in each
+// builder: a new pass that composes its arms through this function cannot
+// reintroduce the defect.
+//
+// narrowedClause is the rendered predicate from narrowedSessionPredicate
+// (leading " AND ", or empty for the all-store scope). arms must be non-empty:
+// a pass with no arms has no selection to narrow.
+func scopedWhere(arms []string, narrowedClause string) (string, error) {
+	if len(arms) == 0 {
+		return "", fmt.Errorf(
+			"store: compose a scoped WHERE clause: the pass supplied no selection arms; " +
+				"where: store.scopedWhere in internal/store/scope_sql.go; when: while building a narrowed selection statement; " +
+				"impact: no statement was built, so the pass cannot run; " +
+				"fix: pass at least one per-harness or per-kind arm before the narrowed clause")
+	}
+	grouped := "(" + strings.Join(arms, " OR ") + ")"
+	if strings.TrimSpace(narrowedClause) == "" {
+		return grouped, nil
+	}
+	return grouped + narrowedClause, nil
 }
 
 // Scope narrowing for the store-wide reads and writes.

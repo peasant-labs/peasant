@@ -201,7 +201,14 @@ func (s *Store) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("store.LoadClaudeEvidenceFor: take connection: %w", err)
+		return nil, fmt.Errorf(
+			"store.LoadClaudeEvidenceFor: take connection: %w; "+
+				"what: failed to obtain a database connection for the by-path evidence read; "+
+				"why: the pool is exhausted or the context was cancelled; "+
+				"where: store.LoadClaudeEvidenceFor in internal/store/claude_evidence.go; "+
+				"when: before the first by-path batch ran; "+
+				"impact: no cached transcript evidence was returned, so the caller cannot reuse the cache; "+
+				"fix: check the pool size and context deadline, then retry the scoped read", err)
 	}
 	defer s.pool.Put(conn)
 
@@ -223,7 +230,15 @@ func (s *Store) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 			},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("store.LoadClaudeEvidenceFor: query batch %d-%d of %d: %w", start, end, len(unique), err)
+			return nil, fmt.Errorf(
+				"store.LoadClaudeEvidenceFor: query batch %d-%d of %d: %w; "+
+					"what: the by-path evidence query failed; "+
+					"why: the statement could not run against the evidence table (database access or a malformed statement); "+
+					"where: store.LoadClaudeEvidenceFor in internal/store/claude_evidence.go; "+
+					"when: reading cached evidence for paths %d-%d of %d; "+
+					"impact: the returned map is incomplete, so the caller must not treat it as the full cache; "+
+					"fix: restore database access and retry the scoped read",
+				start, end, len(unique), err, start, end, len(unique))
 		}
 	}
 	return records, nil
