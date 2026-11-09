@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -88,6 +89,7 @@ type harvestFlags struct {
 	profileIndex  bool
 	sessionIDs    []string
 	since         string
+	noRelated     bool
 }
 
 // BuildHarvestCommand constructs the harvest command with logs/index subcommands.
@@ -170,6 +172,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	_ = cmd.Flags().MarkHidden("debug")
 	cmd.Flags().BoolVar(&flags.jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().StringSliceVar(&flags.sessionIDs, "session", nil, "Filter to specific session IDs (repeatable, comma-separated)")
+	cmd.Flags().BoolVar(&flags.noRelated, "no-related", false, "Process only the named sessions. By default a session-scoped run also processes each named session's child sessions and its ancestors that are not recorded yet.")
 	cmd.Flags().StringVar(&flags.since, "since", "", "Only sessions newer than this ("+timeFilterHelp+")")
 	cmd.Flags().StringVar(&flags.outputPath, "output", "", "Override output base path")
 
@@ -181,6 +184,9 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the harness (replaces config, not additive)")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", true, "Deprecated compatibility flag; active sessions are processed by default")
 	}
+	// --harness is the same flag under the name every message uses. Both names
+	// are accepted, resolve to one value, and neither is deprecated.
+	cmd.Flags().StringVar(&flags.sourceHarness, "harness", "", "Alias for --source-harness")
 
 	// Detect-commits flag (relevant for index and all modes).
 	if mode != harvestLogsOnly {
@@ -219,7 +225,30 @@ func countIndexFailures(log []ingest.IndexLogEntry) int {
 }
 
 func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, filesystem ingest.FileSystem) error {
-	return runHarvestWith(cmd, mode, flags, filesystem, outputHarvest)
+	err := runHarvestWith(cmd, mode, flags, filesystem, outputHarvest)
+	// A scope miss is a refusal, not a session failure: its labelled block is
+	// the whole output, so it goes to stderr once and nothing is printed
+	// through the summary. Cobra must not repeat it, and the exit is non-zero.
+	var scopeErr *ingest.SessionScopeError
+	if errors.As(err, &scopeErr) {
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		fmt.Fprintln(cmd.ErrOrStderr(), scopeErr.Error())
+	}
+	return err
+}
+
+// harvestCommandName is the words the user typed for this run, used only to
+// render a scope miss and the stored-but-unreadable warning.
+func harvestCommandName(mode harvestMode) string {
+	switch mode {
+	case harvestLogsOnly:
+		return "harvest logs"
+	case harvestIndexOnly:
+		return "harvest index"
+	default:
+		return "harvest"
+	}
 }
 
 // harvestReport consumes one committed harvest execution. The harvest command
@@ -370,17 +399,42 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		Progress:           progState,
 	}
 
-	// 6b. Wire --session flag into AllowedSessionIDs (unless --all clears filters).
+	// 6b. A session-scoped run builds a scope (unless --all clears filters). The
+	// scope owns the cohort: setting AllowedSessionIDs beside it is refused by
+	// the pipeline, because two narrowings can disagree.
+	if flags.noRelated && (len(flags.sessionIDs) == 0 || flags.all) {
+		cmd.SilenceUsage = true
+		return fmt.Errorf("--no-related was given, but it changes only a session-scoped run; where: the harvest command in cmd/peasant/cmd_harvest.go; when: before any session was looked up; impact: nothing was harvested, and the flag would otherwise be silently ignored; fix: add --session <id>, or remove --no-related")
+	}
 	if !flags.all && len(flags.sessionIDs) > 0 {
-		allowed := make(map[ingest.SessionID]bool, len(flags.sessionIDs))
+		ids := make([]ingest.SessionID, 0, len(flags.sessionIDs))
 		for _, raw := range flags.sessionIDs {
 			sid, err := ingest.NewSessionID(raw)
 			if err != nil {
 				return fmt.Errorf("invalid session ID %q: %w", raw, err)
 			}
-			allowed[sid] = true
+			ids = append(ids, sid)
 		}
-		pipelineCfg.AllowedSessionIDs = allowed
+		related := ingest.RelatedInclude
+		if flags.noRelated {
+			related = ingest.RelatedExclude
+		}
+		scope, err := ingest.NewSessionScope(ids, related)
+		if err != nil {
+			return err
+		}
+		pipelineCfg.Scope = &scope
+		pipelineCfg.Command = harvestCommandName(mode)
+		pipelineCfg.CommandPrefix = githooks.CommandPrefix(hookBinding(cmd))
+		// A named harness filters the scope by name, so a stored session under
+		// another harness is a stated miss instead of a disabled source.
+		if flags.sourceHarness != "" {
+			harness, err := resolveHarnessFlag(flags.sourceHarness)
+			if err != nil {
+				return err
+			}
+			pipelineCfg.Harness = &harness
+		}
 	}
 
 	// 6c. Wire --since flag into Since (unless --all clears filters).
@@ -546,6 +600,9 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler,
 		rebuildAll: reindex && flags.all,
 		upgrade:    upgradeResult,
+		scopeRun:   pipelineCfg.Scope != nil,
+		command:    pipelineCfg.Command,
+		prefix:     pipelineCfg.CommandPrefix,
 	})
 }
 
@@ -563,6 +620,11 @@ type harvestOutputOptions struct {
 	// upgrade carries the one-time upgrade pass result so its summary line
 	// prints after the renderer clears.
 	upgrade ingest.UpgradeResult
+	// scopeRun says this run named its sessions; command and prefix are the
+	// words and the store the stored-but-unreadable warning must render.
+	scopeRun bool
+	command  string
+	prefix   string
 }
 
 // errSessionsFailed ends a harvest that finished but failed at least one
@@ -584,6 +646,7 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		return fmt.Errorf("pipeline failed: %w", execution.runErr)
 	}
 	result := execution.result
+	printScopeWarnings(cmd.ErrOrStderr(), result, options)
 	if options.selectionConflicts != nil {
 		options.selectionConflicts.notice(cmd.ErrOrStderr(), options.configPath)
 	}
@@ -639,6 +702,19 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		return fmt.Errorf("%d %w", result.Summary.Errors, errSessionsFailed)
 	}
 	return nil
+}
+
+// printScopeWarnings prints the stored-but-unreadable block once per unreadable
+// selected session, on stderr and before the summary. The block is not a
+// failure: the run keeps the stored copy, prints the summary for the sessions it
+// did process, and exits 0.
+func printScopeWarnings(w io.Writer, result *ingest.PipelineResult, options harvestOutputOptions) {
+	if !options.scopeRun || result == nil || result.ScopeReport == nil {
+		return
+	}
+	for _, block := range result.ScopeReport.UnreadableWarnings(options.command, options.prefix) {
+		fmt.Fprintln(w, block)
+	}
 }
 
 func harvestCancellationError(err error) error {
