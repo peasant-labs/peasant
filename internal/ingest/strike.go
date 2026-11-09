@@ -29,6 +29,11 @@ type StrikeAdapter struct {
 var _ SourceAdapter = (*StrikeAdapter)(nil)
 var _ SessionLocator = (*StrikeAdapter)(nil)
 
+// strikeAncestorProbeKind is this adapter's one declared ancestor-probe kind:
+// one stat of the parent's exact file beside the child, derived from the child's
+// own sidecar and path, and never a directory read.
+const strikeAncestorProbeKind = ProbePath
+
 // NewStrikeAdapter creates a StrikeAdapter with injected filesystem, git, and salt dependencies.
 func NewStrikeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *StrikeAdapter {
 	return &StrikeAdapter{fs: fs, git: git, salt: s}
@@ -561,7 +566,7 @@ func (a *StrikeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 		sources = append(sources, enumerated...)
 	}
-	return a.buildStrikeSessions(sources), nil
+	return a.buildStrikeSessions(ctx, sources)
 }
 
 // enumerateStrikeRoot walks one configured root and returns the transcript files
@@ -676,12 +681,22 @@ func strikeParent(sidecar strikeSidecar) *SessionID {
 // DiscoverSessionAt. The sidecar parent stays authoritative; a child whose own
 // sidecar names no parent takes the parent whose child.* events name it, so a
 // full walk and a located source link the same sessions.
-func (a *StrikeAdapter) buildStrikeSessions(sources []strikeSource) []DiscoveredSession {
+//
+// The build performs every stat and read discovery needs, so it checks the
+// caller's context itself: a cancel after enumeration must surface as
+// ctx.Err() instead of being swallowed through the rest of the tree.
+func (a *StrikeAdapter) buildStrikeSessions(ctx context.Context, sources []strikeSource) ([]DiscoveredSession, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// childParents maps a child to the session whose child.* events name it.
 	childParents := make(map[SessionID]SessionID)
 	loaded := make([]strikeSource, 0, len(sources))
 	sessions := make([]DiscoveredSession, 0, len(sources))
 	for _, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		filled, err := a.loadStrikeSource(source)
 		if err != nil {
 			continue
@@ -692,6 +707,11 @@ func (a *StrikeAdapter) buildStrikeSessions(sources []strikeSource) []Discovered
 		}
 		loaded = append(loaded, filled)
 		sessions = append(sessions, session)
+	}
+	// A cancel during the last source's reads has no next iteration to catch
+	// it, so the loop's completion is checked as well.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	for _, source := range loaded {
 		for _, child := range source.hints.children {
@@ -709,7 +729,7 @@ func (a *StrikeAdapter) buildStrikeSessions(sources []strikeSource) []Discovered
 			sessions[i].ParentUUID = &parentCopy
 		}
 	}
-	return normalizeStrikeSessions(sessions)
+	return normalizeStrikeSessions(sessions), nil
 }
 
 // LookupSessionSources finds the transcript that can hold id BY NAME. Strike's
@@ -827,19 +847,25 @@ func (a *StrikeAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig,
 	if info.IsDir() {
 		return LocatedBuild{}, strikeSourceGoneError(at.Path, at.ID, "the path is a directory, not a transcript file")
 	}
+	if err := ctx.Err(); err != nil {
+		return LocatedBuild{}, err
+	}
 	located, err := a.loadStrikeSource(strikeSource{root: root, id: at.ID, path: at.Path.String(), info: info})
 	if err != nil {
 		return LocatedBuild{}, strikeSourceGoneError(at.Path, at.ID, "the transcript could not be read again")
 	}
 	sources := []strikeSource{located}
-	named, err := a.enumerateStrikeNamedChildren(located)
+	named, err := a.enumerateStrikeNamedChildren(ctx, located)
 	if err != nil {
 		return LocatedBuild{}, err
 	}
 	sources = append(sources, named...)
 	unreadable := a.appendStrikeStoredChildren(cfg, &sources, at)
 
-	sessions := a.buildStrikeSessions(sources)
+	sessions, err := a.buildStrikeSessions(ctx, sources)
+	if err != nil {
+		return LocatedBuild{}, err
+	}
 	byID := make(map[SessionID]int, len(sessions))
 	for index := range sessions {
 		if _, duplicate := byID[sessions[index].SessionID]; !duplicate {
@@ -876,13 +902,16 @@ func (a *StrikeAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig,
 // writer places every session directly in its source root, so a child's file is
 // <dir of the located transcript>/<child>.jsonl; a named child whose file is not
 // there is not a session yet. No directory is listed.
-func (a *StrikeAdapter) enumerateStrikeNamedChildren(located strikeSource) ([]strikeSource, error) {
+func (a *StrikeAdapter) enumerateStrikeNamedChildren(ctx context.Context, located strikeSource) ([]strikeSource, error) {
 	if len(located.hints.children) == 0 {
 		return nil, nil
 	}
 	dir := filepath.Dir(located.path)
 	sources := make([]strikeSource, 0, len(located.hints.children))
 	for _, child := range located.hints.children {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		candidate := filepath.Join(dir, string(child)+defaults.ExtJSONL.String())
 		info, err := a.fs.Stat(candidate)
 		if err != nil {
@@ -983,7 +1012,7 @@ func strikeAncestorProbe(located strikeSource) *AncestorProbe {
 	if err != nil {
 		return nil
 	}
-	return &AncestorProbe{Kind: ProbePath, Harness: HarnessStrike, Path: path}
+	return &AncestorProbe{Kind: strikeAncestorProbeKind, Harness: HarnessStrike, Path: path}
 }
 
 // strikeSourceGoneError is the one statement of "this recorded path no longer
