@@ -153,3 +153,17 @@ type BoundedFS interface {
 	// Remove, RemoveAll, CopyFile.
 	ReadOnly()
 }
+
+// RecordingFS is a FileSystem that records the exact paths every operation
+// touched, with multiplicity. It is the fourth capability: unlike CountingFS it
+// exposes the whole recorded set per operation, so a parity fixture can assert
+// set equality (and the absence of a walk) instead of a subset or a count.
+// Rename and CopyFile are recorded against their destination, matching
+// CountingFS, because the destination is the installed path a case asks about.
+type RecordingFS interface {
+	FileSystem
+	// Paths returns the sorted, de-duplicated paths recorded for op.
+	Paths(op Op) []string
+	// Count returns how many times op ran on exactly path.
+	Count(op Op, path string) int
+}

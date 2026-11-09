@@ -5,10 +5,11 @@
 # A decorator's `where` names the file that declares it today: it is updated in
 # the same change that relocates the type.
 #
-# The three capabilities:
-#   counting -> the path-keyed fault/count surface of testutil.CountingFS
-#   gated    -> the blocking gate of fsdecorator.GatedFS
-#   bounded  -> the bound/read-only surface of fsdecorator.BoundedFS
+# The four capabilities:
+#   counting  -> the path-keyed fault/count surface of testutil.CountingFS
+#   gated     -> the blocking gate of fsdecorator.GatedFS
+#   bounded   -> the bound/read-only surface of fsdecorator.BoundedFS
+#   recording -> the exact per-op path set of testutil.OpRecorderFS
 #   none     -> needs none of the three: a scripted hook, a stub, or a wrapper
 #               with no reusable behavior. Deleted or kept bespoke with the
 #               rationale recorded; the classification says which.
@@ -38,6 +39,7 @@ required_names:
   - swapPairFS
   - publicationCaptureFS
   - metadataPolicyFS
+  - OpRecorderFS
   - completionFaultFS
   - boundedCaptureFS
   - gatedPairFS
@@ -109,6 +111,12 @@ entries:
     rationale: counts reads and cancels at an ordinal; the count is the reusable capability
 
   # --- internal/testutil owner (Owner A) -----------------------------------
+  - type: OpRecorderFS
+    package: internal/testutil
+    white_box: false
+    capability: recording
+    where: internal/testutil/op_recorder_fs.go:31
+    rationale: records the exact path set each operation touches, with multiplicity; the reusable recording capability a source-root parity assertion needs
   - type: gatedInstallFS
     package: cmd/peasant
     white_box: false
