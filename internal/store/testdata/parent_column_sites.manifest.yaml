@@ -27,6 +27,10 @@ requiredResidual:
   - store-migration-v42
   - store-migration-v53
   - store-migration-v51
+  - store-parent-state-logical-parent
+  - store-parent-state-projection-update
+  - store-parent-state-trigger-columns
+  - store-migration-v70
 requiredRouted:
   - store-all-sessions
   - store-session-detail-query

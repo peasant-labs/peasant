@@ -273,6 +273,9 @@ var migrationV24 = createSessionCommands + ";\n" +
 // See schema_v67.go.
 // migrationV69 rebuilds session_source_unavailability so its reason CHECK
 // admits a present-but-unusable source as well as a missing one. See schema_v69.go.
+// migrationV70 adds the trigger-maintained parent lane (parent_state,
+// resolved_parent_id), the one-row store_state revision, the root and child
+// page indexes, and the backfill. See schema_v70.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -346,6 +349,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV67,
 		migrationV68,
 		migrationV69,
+		migrationV70,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -409,5 +413,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V67: latest-attempt pointer columns (additive, no backfill)
 		nil,                        // V68: scoped collective observations (additive, no backfill)
 		{DisableForeignKeys: true}, // V69: rebuild session_source_unavailability for the widened reason CHECK
+		nil,                        // V70: parent lane, store revision, page indexes, and backfill (additive, no FK)
 	},
 }

@@ -1,0 +1,15 @@
+# Required names for parent_state.yaml. Exact membership in both directions:
+# a listed name missing from its section fails, and a section entry with no
+# listed name fails.
+requiredCases:
+  - root-no-evidence
+  - root-explicit-none
+  - resolved-evidence-target
+  - resolved-retained-target
+  - resolved-cache-fallback
+  - resolved-unstored-parent
+  - unresolved-unknown-with-cache
+  - unresolved-conflicting
+requiredRejections:
+  - null-state
+  - unknown-state

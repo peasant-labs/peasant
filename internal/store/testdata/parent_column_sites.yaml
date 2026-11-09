@@ -223,6 +223,30 @@ residual:
     literals: 1
     class: ddl
     reason: Immutable historical trigger text.
+  - name: store-parent-state-logical-parent
+    file: internal/store/schema_v70.go
+    declaration: parentStateLogicalParentSQL
+    literals: 1
+    class: ddl
+    reason: The frozen logical-parent expression embedded in the parent-state trigger and backfill text.
+  - name: store-parent-state-projection-update
+    file: internal/store/schema_v70.go
+    declaration: parentStateProjectionUpdateSQL
+    literals: 1
+    class: ddl
+    reason: The frozen projection UPDATE shared by the parent-state triggers and the backfill.
+  - name: store-parent-state-trigger-columns
+    file: internal/store/schema_v70.go
+    declaration: parentStateSessionsTriggerFiresOn
+    literals: 1
+    class: ddl
+    reason: The frozen UPDATE OF column list that keeps the parent-state trigger from re-entering.
+  - name: store-migration-v70
+    file: internal/store/schema_v70.go
+    declaration: migrationV70
+    literals: 2
+    class: ddl
+    reason: Immutable historical migration text for the parent lane, page indexes, and store revision.
 
 routed:
   - name: store-all-sessions

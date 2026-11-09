@@ -1,0 +1,79 @@
+# Per-state parent-lane cases. Every case names one stored child and the
+# evidence and availability-cache inputs that decide its projection. The same
+# rows drive the V70 backfill test (seeded on the predecessor schema) and the
+# per-state drift test (seeded through the production writers), so the two
+# cannot describe different states.
+#
+# evidenceState is "" for a generation with no started_by evidence, otherwise
+# one of the five stored target states.
+#
+# cacheParent is "" for a NULL sessions.parent_id, otherwise "target" for a
+# stored parent row.
+#
+# evidenceTarget is "" for no target local identifier, "target" for the stored
+# parent row, or "unstored" for a logical parent the store does not hold; the
+# last case is a child that still resolves.
+target: 1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a
+unstored: 2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b
+cases:
+  - name: root-no-evidence
+    child: 3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c
+    evidenceState: ""
+    evidenceTarget: ""
+    cacheParent: ""
+    wantState: root
+    wantResolvedParent: ""
+  - name: root-explicit-none
+    child: 4d4d4d4d-4d4d-4d4d-8d4d-4d4d4d4d4d4d
+    evidenceState: explicit_none
+    evidenceTarget: ""
+    cacheParent: ""
+    wantState: root
+    wantResolvedParent: ""
+  - name: resolved-evidence-target
+    child: 5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e
+    evidenceState: target_known
+    evidenceTarget: target
+    cacheParent: ""
+    wantState: resolved
+    wantResolvedParent: target
+  - name: resolved-retained-target
+    child: 6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f
+    evidenceState: target_known_retained
+    evidenceTarget: target
+    cacheParent: ""
+    wantState: resolved
+    wantResolvedParent: target
+  - name: resolved-cache-fallback
+    child: 7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7a
+    evidenceState: ""
+    evidenceTarget: ""
+    cacheParent: target
+    wantState: resolved
+    wantResolvedParent: target
+  - name: resolved-unstored-parent
+    child: 8b8b8b8b-8b8b-4b8b-8b8b-8b8b8b8b8b8b
+    evidenceState: target_known
+    evidenceTarget: unstored
+    cacheParent: ""
+    wantState: resolved
+    wantResolvedParent: unstored
+  - name: unresolved-unknown-with-cache
+    child: 9c9c9c9c-9c9c-4c9c-8c9c-9c9c9c9c9c9c
+    evidenceState: unknown
+    evidenceTarget: ""
+    cacheParent: target
+    wantState: unresolved
+    wantResolvedParent: ""
+  - name: unresolved-conflicting
+    child: 0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d
+    evidenceState: conflicting_current_native_evidence
+    evidenceTarget: ""
+    cacheParent: ""
+    wantState: unresolved
+    wantResolvedParent: ""
+rejections:
+  - name: null-state
+    stateLiteral: "NULL"
+  - name: unknown-state
+    stateLiteral: "'not-a-parent-state'"
