@@ -30,6 +30,7 @@ peasant open [flags]
 ```
   -h, --help             help for open
       --hook             Print the Claude Code hook response JSON instead of plain lines, and exit 0 on every outcome
+      --no-related       Process only the named session. By default the harvest also processes the session's child sessions and its ancestors that are not recorded yet.
       --port int         Port of the web dashboard (1-65535) (default 8690)
       --session string   ID of the session to record and open (required)
 ```

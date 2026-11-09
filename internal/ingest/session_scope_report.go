@@ -127,6 +127,10 @@ type LocatedMember struct {
 	Unreadable UnreadableReason
 	// Detail is set only with UnreadableSourceFailed: the first error line.
 	Detail string
+	// StoredPath is the source location the store recorded for an unreadable
+	// member, when the run knows it. The stored-but-unreadable warning prints
+	// it because it is the only part of the message the reader can act on.
+	StoredPath ResolvedPath
 	// ParentProbe says where one unstored ancestor can be, computed from the
 	// child's own source. nil means this harness cannot derive where its
 	// parent is.

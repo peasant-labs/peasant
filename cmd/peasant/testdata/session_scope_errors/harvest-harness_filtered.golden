@@ -1,0 +1,8 @@
+peasant: harvest failed: session 5a1f... is recorded under claude-code, which --harness excludes, so nothing was recorded
+  what:     this session-scoped harvest looked for session 5a1f... and found it recorded under claude-code, which this run's --harness excludes
+  why:      this session is recorded under claude-code, which --harness excludes
+  where:    session lookup (ingest scoped locate)
+  when:     before any session was swept, recorded, or indexed
+  impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+            store migration, search-index repair) may still have run. No full scan was run.
+  fix:      drop --harness, or pass --harness claude-code
