@@ -1,0 +1,5 @@
+requiredNames:
+  - identity_declarer_count
+  - identity_spawner_count
+  - codex_rollout_duplicate_count
+  - codex_rollout_paths

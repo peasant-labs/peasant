@@ -1,0 +1,64 @@
+evidence:
+  - path: /synthetic/evidence/root-alpha.jsonl
+    scope: root
+    identityTeam: alpha
+    identityName: worker
+    spawns:
+      - team: alpha
+        name: scout
+      - team: alpha
+        name: scout
+  - path: /synthetic/evidence/root-beta.jsonl
+    scope: root
+    identityTeam: alpha
+    identityName: worker
+    spawns:
+      - team: alpha
+        name: scout
+  - path: /synthetic/evidence/subagent-alpha.jsonl
+    scope: subagent
+    identityTeam: alpha
+    identityName: worker
+    spawns: []
+  - path: /synthetic/evidence/root-gamma.jsonl
+    scope: root
+    identityTeam: gamma
+    identityName: reviewer
+    spawns:
+      - team: gamma
+        name: checker
+
+rollouts:
+  - path: /synthetic/rollouts/a.jsonl
+    session: "11111111-1111-4111-8111-111111111111"
+  - path: /synthetic/rollouts/b.jsonl
+    session: "11111111-1111-4111-8111-111111111111"
+  - path: /synthetic/rollouts/c.jsonl
+    session: "22222222-2222-4222-8222-222222222222"
+
+cases:
+  - name: identity_declarer_count
+    team: alpha
+    identityName: worker
+    wantDeclarers: 2
+    wantSpawners: 0
+
+  - name: identity_spawner_count
+    team: alpha
+    identityName: scout
+    wantDeclarers: 0
+    wantSpawners: 2
+
+  - name: codex_rollout_duplicate_count
+    session: "11111111-1111-4111-8111-111111111111"
+    wantRolloutCount: 2
+    wantRolloutPaths:
+      - /synthetic/rollouts/a.jsonl
+      - /synthetic/rollouts/b.jsonl
+
+  - name: codex_rollout_paths
+    session: "11111111-1111-4111-8111-111111111111"
+    wantRolloutCount: 2
+    wantRolloutPaths:
+      - /synthetic/rollouts/a.jsonl
+      - /synthetic/rollouts/b.jsonl

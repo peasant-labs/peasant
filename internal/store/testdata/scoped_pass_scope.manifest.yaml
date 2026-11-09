@@ -1,0 +1,10 @@
+requiredNames:
+  - flagged_sweep
+  - stale_origin
+  - invalidate_stale_parent_origins
+  - stale_adapter
+  - stale_index
+  - repair
+  - content_incomplete
+  - metric_sessions
+  - orphan_projects
