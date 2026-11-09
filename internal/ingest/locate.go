@@ -358,6 +358,10 @@ func (l *scopeLocator) locateSelected(ctx context.Context, id SessionID) error {
 
 	build, err := locator.DiscoverSessionAt(ctx, cfg, LocatedSource{ID: id, Path: row.Path, Stored: l.relatives(id, row)})
 	if err != nil {
+		// A gone source still hands back the prune for the evidence it can no
+		// longer justify; the deferred writes are applied only if the whole
+		// selection is located and the run proceeds.
+		l.deferred = append(l.deferred, build.Deferred)
 		return l.handleStoredBuildError(ctx, id, row, err)
 	}
 	l.deferred = append(l.deferred, build.Deferred)
@@ -463,6 +467,7 @@ func (l *scopeLocator) locateByName(ctx context.Context, id SessionID, storedRow
 			}
 			build, buildErr := locator.DiscoverSessionAt(ctx, cfg, located)
 			if buildErr != nil {
+				l.deferred = append(l.deferred, build.Deferred)
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					return ctxErr
 				}
@@ -748,6 +753,7 @@ func (l *scopeLocator) locateStoredChild(ctx context.Context, parentID SessionID
 	parent := parentID
 	build, err := locator.DiscoverSessionAt(ctx, cfg, LocatedSource{ID: child.ID, Path: child.Path, Stored: StoredRelatives{Parent: &parent, Children: l.children[child.ID]}})
 	if err != nil {
+		l.deferred = append(l.deferred, build.Deferred)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
@@ -839,6 +845,7 @@ func (l *scopeLocator) walkAncestors(ctx context.Context) error {
 			}
 			build, buildErr := locator.DiscoverSessionAt(ctx, cfg, LocatedSource{ID: ancestorID, Path: path})
 			if buildErr != nil {
+				l.deferred = append(l.deferred, build.Deferred)
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					return ctxErr
 				}

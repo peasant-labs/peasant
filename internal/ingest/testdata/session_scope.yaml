@@ -276,13 +276,6 @@ cases:
     wantUpkeep:
       - "11111111-1111-4111-8111-111111111111"
     wantOutcome: stored-unreadable
-    divergentTables:
-      claude_transcript_evidence: >-
-        A full run prunes the evidence-cache row at a walked path whose
-        transcript is gone; a scoped run marks the stored member unreadable
-        before the build and therefore never passes the missing path to the
-        adapter's prune. Recorded for the store-side evidence-prune fix; the
-        table stays compared, so any further difference still fails.
 
   - name: stored-child-source-gone
     harness: claude-code
