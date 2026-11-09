@@ -1,0 +1,421 @@
+# Parity between the full OpenCode walk and the two paths a scoped run uses: the
+# by-name lookup and the located-source build. Every case builds its own source
+# tree in a temporary directory and drives the production adapter over it.
+#
+# A case's `databases` are materialized from the named synthetic sources in
+# internal/ingest/testfixture/testdata/opencode_sqlite.yaml, so every SQLite case
+# reads a real database file in the case's own temporary directory, never an
+# in-memory filesystem. `parentLinks` sets one session row's parent on that same
+# real file, because a row's parent link is what discovery and the located build
+# both read. `directories` creates a directory where a database would be, which
+# is one way an existing path cannot be opened as a database.
+#
+# A lookup asserts, exactly:
+#   - `wantSources`, the paths it resolved;
+#   - `wantSearched`, the ordered searched block, one entry per source format;
+#   - `wantOpens`, the set of database paths it opened;
+#   - `wantQueries`, the session ids each database was asked for, with
+#     multiplicity: one row read per candidate database, and none at all for a
+#     database that did not open;
+#   - `wantStats`, the one existence check per candidate database;
+#   - zero reads, zero directory listings and zero walks: a lookup reads no
+#     transcript and lists nothing.
+#
+# A located case asserts the member list and order, the ancestor probe kind and
+# id, the unreadable reasons and details, and — for every readable member — the
+# session field for field against what a full Discover of the same tree returns
+# for that id. `allowedDiffs` names the only fields a documented gap may leave
+# different. It also asserts the exact read, stat and listing sets and zero
+# walks; `wantOpens`/`wantQueries` are asserted as sets.
+#
+# `wantProbe` names the one ancestor probe kind; both formats declare ProbeRow,
+# and the probe itself performs no I/O.
+requiredNames:
+  - sqlite-lookup-current-row
+  - sqlite-lookup-legacy-row
+  - sqlite-lookup-miss
+  - sqlite-lookup-candidate-order
+  - sqlite-lookup-failed-open
+  - sqlite-located-session
+  - sqlite-located-unstored-parent
+  - sqlite-located-stored-child
+  - sqlite-located-source-read-failed
+  - sqlite-located-not-a-candidate
+  - legacy-json-lookup-unsupported
+  - legacy-json-located-session
+  - legacy-json-located-unstored-parent
+  - legacy-json-located-source-gone
+cases:
+  - name: sqlite-lookup-current-row
+    roots:
+      - .
+    databases:
+      - path: opencode.db
+        fixture: current-session-message
+    lookup:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv5
+      wantSources:
+        - opencode.db
+      wantSearched:
+        - harness: opencode
+          method: unsupported
+          reason: IDOnlyInFileBody
+          location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv5.json
+        - harness: opencode
+          method: sqlite-row
+          location: opencode.db
+      wantStats:
+        - opencode.db
+      wantOpens:
+        - opencode.db
+      wantQueries:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv5
+
+  - name: sqlite-lookup-legacy-row
+    roots:
+      - .
+    databases:
+      - path: opencode.db
+        fixture: canonical-selection-mixed
+    lookup:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv8
+      wantSources:
+        - opencode.db
+      wantSearched:
+        - harness: opencode
+          method: unsupported
+          reason: IDOnlyInFileBody
+          location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv8.json
+        - harness: opencode
+          method: sqlite-row
+          location: opencode.db
+      wantStats:
+        - opencode.db
+      wantOpens:
+        - opencode.db
+      wantQueries:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv8
+
+  - name: sqlite-lookup-miss
+    # The database opens and is asked for its one row; the row is absent, so the
+    # miss can honestly say the id was searched for in this database.
+    roots:
+      - .
+    databases:
+      - path: opencode.db
+        fixture: current-session-message
+    lookup:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv0
+      wantSources: []
+      wantSearched:
+        - harness: opencode
+          method: unsupported
+          reason: IDOnlyInFileBody
+          location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv0.json
+        - harness: opencode
+          method: sqlite-row
+          location: opencode.db
+      wantStats:
+        - opencode.db
+      wantOpens:
+        - opencode.db
+      wantQueries:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv0
+
+  - name: sqlite-lookup-candidate-order
+    # The environment override database precedes the channel database, so the
+    # lookup considers both in the order a full discovery does. The id lives in
+    # the channel database only, and both are still asked: one row per candidate
+    # database, not a stop at the first miss.
+    roots:
+      - .
+    env:
+      OPENCODE_DB: other.db
+    databases:
+      - path: other.db
+        fixture: empty-valid
+      - path: opencode.db
+        fixture: current-session-message
+    lookup:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv5
+      wantSources:
+        - opencode.db
+      wantSearched:
+        - harness: opencode
+          method: unsupported
+          reason: IDOnlyInFileBody
+          location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv5.json
+        - harness: opencode
+          method: sqlite-row
+          location: other.db
+        - harness: opencode
+          method: sqlite-row
+          location: opencode.db
+      wantStats:
+        - other.db
+        - opencode.db
+      wantOpens:
+        - other.db
+        - opencode.db
+      wantQueries:
+        - path: other.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv5
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv5
+
+  - name: sqlite-lookup-failed-open
+    # An existing path that cannot be opened as a database is never asked for an
+    # id: the opener takes a path. The error names the database and carries the
+    # failure, which is what the miss renders as its first line.
+    roots:
+      - .
+    directories:
+      - opencode.db
+    lookup:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv5
+      wantError: could not read database
+      rendersAsMiss: true
+      wantSources: []
+      wantSearched:
+        - harness: opencode
+          method: unsupported
+          reason: IDOnlyInFileBody
+          location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv5.json
+      wantStats:
+        - opencode.db
+      wantOpens:
+        - opencode.db
+      wantQueries: []
+
+  - name: sqlite-located-session
+    # A located database session equals the one a full discovery of the same tree
+    # produces, field for field. The probe is a pure value, and the step lists no
+    # directory.
+    roots:
+      - .
+    databases:
+      - path: opencode.db
+        fixture: current-session-message
+    located:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv5
+      path: opencode.db
+      wantMembers:
+        - ses_3cd91f52effeXd3QAJ54jOyzv5
+      wantStats:
+        - opencode.db
+        - opencode.db-wal
+      wantReaddirs: []
+      wantOpens:
+        - opencode.db
+      wantQueries:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv5
+
+  - name: sqlite-located-unstored-parent
+    # The session row names a parent no source in this tree holds. The full walk
+    # clears the link because it did not discover the parent; the located build
+    # keeps it and declares the one probe that can find it, which is the
+    # documented gap: an unstored parent that exists only outside the searchable
+    # source is not located.
+    roots:
+      - .
+    databases:
+      - path: opencode.db
+        fixture: canonical-selection-mixed
+        parentLinks:
+          - id: ses_3cd91f52effeXd3QAJ54jOyzv8
+            parent: ses_absentParent000000000001
+    located:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv8
+      path: opencode.db
+      allowedDiffs:
+        - parentUUID
+      wantMembers:
+        - ses_3cd91f52effeXd3QAJ54jOyzv8
+      wantProbe: ProbeRow
+      wantProbeID: ses_absentParent000000000001
+      wantStats:
+        - opencode.db
+        - opencode.db-wal
+      wantOpens:
+        - opencode.db
+      wantQueries:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv8
+
+  - name: sqlite-located-stored-child
+    # A stored child is rebuilt from the same database and equals what the full
+    # walk produces for it, including the parent link the walk also discovered.
+    roots:
+      - .
+    databases:
+      - path: opencode.db
+        fixture: canonical-selection-mixed
+        parentLinks:
+          - id: ses_3cd91f52effeXd3QAJ54jOyzv6
+            parent: ses_3cd91f52effeXd3QAJ54jOyzv5
+    located:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv5
+      path: opencode.db
+      storedChildren:
+        - id: ses_3cd91f52effeXd3QAJ54jOyzv6
+          harness: opencode
+          path: opencode.db
+          parent: ses_3cd91f52effeXd3QAJ54jOyzv5
+      wantMembers:
+        - ses_3cd91f52effeXd3QAJ54jOyzv5
+        - ses_3cd91f52effeXd3QAJ54jOyzv6
+      wantStats:
+        - opencode.db
+        - opencode.db-wal
+      wantOpens:
+        - opencode.db
+      wantQueries:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv5
+            - ses_3cd91f52effeXd3QAJ54jOyzv6
+
+  - name: sqlite-located-source-read-failed
+    # A selected database that cannot be read yields a member with its reason and
+    # the first error line, not a refused run: a stored session keeps its
+    # transcript and takes the same store-side upkeep a full run gives it. The
+    # failure happens before any open, so no id is queried.
+    roots:
+      - .
+    databases:
+      - path: opencode.db
+        fixture: corrupt-non-sqlite
+    located:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv5
+      path: opencode.db
+      wantMembers:
+        - ses_3cd91f52effeXd3QAJ54jOyzv5
+      wantUnreadable:
+        - id: ses_3cd91f52effeXd3QAJ54jOyzv5
+          reason: SourceFailed
+      wantStats:
+        - opencode.db
+      wantOpens: []
+      wantQueries: []
+
+  - name: sqlite-located-not-a-candidate
+    # A database the candidate list does not name is never opened: the located
+    # path is outside every configured source, and the refusal says so.
+    roots:
+      - .
+    databases:
+      - path: elsewhere/opencode.db
+        fixture: current-session-message
+    located:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv5
+      path: elsewhere/opencode.db
+      wantError: neither a candidate database nor a session file
+      wantOpens: []
+      wantQueries: []
+
+  - name: legacy-json-lookup-unsupported
+    # The id appears only in the file body, so the legacy format cannot be
+    # searched by id. That is reported, never passed over as a miss.
+    roots:
+      - .
+    files:
+      - path: storage/session/hash-a/ses_legacyJSON0000000000000000.json
+        kind: session
+        id: ses_legacyJSON0000000000000000
+        slug: legacy-json
+        title: Legacy JSON
+        directory: /work/legacy
+        createdMS: 1000
+    lookup:
+      id: ses_legacyJSON0000000000000000
+      wantSources: []
+      wantSearched:
+        - harness: opencode
+          method: unsupported
+          reason: IDOnlyInFileBody
+          location: storage/session/*/ses_legacyJSON0000000000000000.json
+      wantStats:
+        - opencode.db
+      wantOpens: []
+      wantQueries: []
+
+  - name: legacy-json-located-session
+    roots:
+      - .
+    files:
+      - path: storage/session/hash-a/ses_legacyJSON0000000000000000.json
+        kind: session
+        id: ses_legacyJSON0000000000000000
+        slug: legacy-json
+        title: Legacy JSON
+        agent: build
+        version: 1.0.0
+        directory: /work/legacy
+        createdMS: 1000
+    located:
+      id: ses_legacyJSON0000000000000000
+      path: storage/session/hash-a/ses_legacyJSON0000000000000000.json
+      wantMembers:
+        - ses_legacyJSON0000000000000000
+      wantReads:
+        - storage/session/hash-a/ses_legacyJSON0000000000000000.json
+      wantStats:
+        - storage/session/hash-a/ses_legacyJSON0000000000000000.json
+      wantReaddirs: []
+      wantOpens: []
+      wantQueries: []
+
+  - name: legacy-json-located-unstored-parent
+    # A legacy-JSON child names its parent in its own file, so the same row probe
+    # serves it. The full walk clears the link because it did not discover the
+    # parent, which is the documented gap.
+    roots:
+      - .
+    files:
+      - path: storage/session/hash-a/ses_legacyChild000000000000000.json
+        kind: session
+        id: ses_legacyChild000000000000000
+        parentID: ses_unstoredParent0000000001
+        directory: /work/legacy
+        createdMS: 1000
+    located:
+      id: ses_legacyChild000000000000000
+      path: storage/session/hash-a/ses_legacyChild000000000000000.json
+      allowedDiffs:
+        - parentUUID
+      wantMembers:
+        - ses_legacyChild000000000000000
+      wantProbe: ProbeRow
+      wantProbeID: ses_unstoredParent0000000001
+      wantReads:
+        - storage/session/hash-a/ses_legacyChild000000000000000.json
+      wantStats:
+        - storage/session/hash-a/ses_legacyChild000000000000000.json
+      wantOpens: []
+      wantQueries: []
+
+  - name: legacy-json-located-source-gone
+    roots:
+      - .
+    files: []
+    located:
+      id: ses_legacyGone0000000000000000
+      path: storage/session/hash-a/ses_legacyGone0000000000000000.json
+      wantSourceGone: true
+      wantReads:
+        - storage/session/hash-a/ses_legacyGone0000000000000000.json
+      wantStats:
+        - storage/session/hash-a/ses_legacyGone0000000000000000.json
+      wantOpens: []
+      wantQueries: []
