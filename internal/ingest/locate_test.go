@@ -770,10 +770,12 @@ func assertStoreUnchanged(t *testing.T, dbPath string, before map[string][]strin
 	}
 }
 
-// TestScopedReindexIsRefused pins the one combination that would otherwise run
-// the wrong path: the reindex branch returns before LOCATE, so a scope there
-// would be silently ignored and the whole saved tree rebuilt.
-func TestScopedReindexIsRefused(t *testing.T) {
+// TestScopedReindexRequiresAStore pins the scoped reindex path's one hard
+// requirement: it resolves each named session's saved pair from the recorded
+// location, so it cannot run without the database. The old refusal of the
+// combination is gone: the scope now narrows the reindex run instead of being
+// silently ignored.
+func TestScopedReindexRequiresAStore(t *testing.T) {
 	scope, err := ingest.NewSessionScope([]ingest.SessionID{"11111111-1111-4111-8111-111111111111"}, ingest.RelatedInclude)
 	if err != nil {
 		t.Fatalf("build scope: %v", err)
@@ -787,9 +789,9 @@ func TestScopedReindexIsRefused(t *testing.T) {
 	}
 	_, runErr := pipeline.Run(context.Background())
 	if runErr == nil {
-		t.Fatalf("a reindex run with a scope was accepted")
+		t.Fatalf("a scoped reindex run without a store was accepted")
 	}
-	for _, substring := range []string{"Reindex and Scope", "silently ignored", "fix:"} {
+	for _, substring := range []string{"session-scoped index run", "no store row was written", "fix:"} {
 		if !strings.Contains(runErr.Error(), substring) {
 			t.Errorf("refusal = %q, missing %q", runErr, substring)
 		}
