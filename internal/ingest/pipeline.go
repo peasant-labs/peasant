@@ -100,6 +100,10 @@ type PipelineResult struct {
 	// enumerate. Discovery stayed non-fatal per location, so the run continued;
 	// these records make each skipped location visible to the caller.
 	DiscoveryDiagnostics []DiscoveryDiagnostic
+	// ScopeReport records what a session-scoped run located. It is nil for a
+	// full run, and tagged out of the command JSON so `harvest --format json`
+	// keeps exactly today's fields.
+	ScopeReport *ScopeReport `json:"-"`
 	// Diagnostics carries local nonfatal maintenance warnings to post-render
 	// reporting. It is not a new HTTP/WS or command JSON contract field.
 	Diagnostics []DiagnosticEntry `json:"-"`
@@ -199,10 +203,16 @@ type PipelineConfig struct {
 	// Progress receives ProgressEvents from each pipeline stage.
 	// Nil means no progress reporting.
 	Progress *ProgressState
-	// AllowedSessionIDs restricts which sessions are processed.
+	// AllowedSessionIDs restricts which sessions the run may touch.
 	// nil means all sessions pass the filter (backward compatible).
-	// Non-nil means only sessions in the map are processed.
-	// An empty non-nil map means NO sessions pass.
+	// Non-nil means every discovery-driven session must be in the map.
+	// A session-scoped run sets it to the report's upkeep set: the processed
+	// members plus every recorded member whose source could not be read again,
+	// so store-side upkeep for an unreadable session still runs. An empty
+	// non-nil map means NO session passes.
+	// The session list handed to DIFF holds only the processed members, so this
+	// gate never widens what is processed; it only keeps store passes narrowed
+	// to the set they may touch.
 	AllowedSessionIDs map[SessionID]bool
 	// AllowedSessionIDsIsSelection reports the sessions AllowedSessionIDs
 	// leaves out as excluded by selection rather than unchanged. Kickstart
@@ -398,10 +408,13 @@ type Pipeline struct {
 	// by adapters during discover(), copied into every PipelineResult so a
 	// skipped database is visible even though discovery stayed non-fatal.
 	discoveryDiagnostics []DiscoveryDiagnostic
-	diagnosticsMu        sync.Mutex
-	diagnostics          []DiagnosticEntry
-	diagnosticSessions   map[sessionDiagnostic]struct{}
-	diagnosticSet        map[DiagnosticEntry]struct{}
+	// scopeReport is what a session-scoped run's LOCATE built. It is nil for a
+	// full run and copied onto PipelineResult at REPORT.
+	scopeReport        *ScopeReport
+	diagnosticsMu      sync.Mutex
+	diagnostics        []DiagnosticEntry
+	diagnosticSessions map[sessionDiagnostic]struct{}
+	diagnosticSet      map[DiagnosticEntry]struct{}
 	// The two maps below record what this harvest has already told the user
 	// about a session's unusable source. They share one mutex because both are
 	// written from the same lanes in the same run.
@@ -774,6 +787,20 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		return p.runReindex(ctx, start)
 	}
 
+	// A session-scoped run locates its cohort first. LOCATE only reads, and it
+	// must finish before the harvest-start sweep, before any deferred write, and
+	// before the audit row: an unusable selection is refused with nothing
+	// recorded. A full run has no located value and keeps DISCOVER below.
+	located, err := p.locateScopedRun(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if located != nil {
+		if err := p.applyDeferredWrites(ctx, located); err != nil {
+			return nil, err
+		}
+	}
+
 	// Harvest-start recovery precedes discovery: every session the crash
 	// marker flags is swept before this harvest selects or commits
 	// anything, so crash leftovers recover even when the input is
@@ -784,30 +811,38 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 
 	prog := p.config.Progress
 
-	// Stage 1: DISCOVER
+	// Stage 1: DISCOVER. A session-scoped run already located its cohort, so it
+	// has nothing to discover.
 	discoverProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
-	allSessions, err := p.discover(ctx)
-	if ctx.Err() != nil {
-		err = ctx.Err()
-	}
-	if err != nil {
-		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
-		p.recordIndexProfileStage(StageDiscover, discoverProfileStart, 0, 0)
-		if ctx.Err() != nil || !p.hasUsableRetainedSession(ctx) {
-			if ctx.Err() == nil && p.hasStoredMetricRefresh() {
-				// Native discovery can fail even though stored entries remain
-				// sufficient for downstream retry. Preserve the discovery error.
-				_, _, _, days := p.refreshStoredMetrics(ctx)
-				if len(days) > 0 {
-					if insightErr := p.analyzer.ComputeInsights(ctx, slices.Collect(maps.Keys(days))); insightErr != nil {
-						slog.Warn("harvest: refresh stored-session daily summaries", "error", insightErr)
+	var allSessions []DiscoveredSession
+	var duplicateResults []SessionResult
+	if located != nil {
+		allSessions = located.sessions
+		duplicateResults = located.refusals
+	} else {
+		allSessions, err = p.discover(ctx)
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		if err != nil {
+			emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
+			p.recordIndexProfileStage(StageDiscover, discoverProfileStart, 0, 0)
+			if ctx.Err() != nil || !p.hasUsableRetainedSession(ctx) {
+				if ctx.Err() == nil && p.hasStoredMetricRefresh() {
+					// Native discovery can fail even though stored entries remain
+					// sufficient for downstream retry. Preserve the discovery error.
+					_, _, _, days := p.refreshStoredMetrics(ctx)
+					if len(days) > 0 {
+						if insightErr := p.analyzer.ComputeInsights(ctx, slices.Collect(maps.Keys(days))); insightErr != nil {
+							slog.Warn("harvest: refresh stored-session daily summaries", "error", insightErr)
+						}
 					}
 				}
+				return nil, fmt.Errorf("pipeline discover: %w", err)
 			}
-			return nil, fmt.Errorf("pipeline discover: %w", err)
+			p.reportDiagnostic(DiagnosticEntry{ErrorType: "native_discovery_unavailable", Location: "native discovery", Message: err.Error() + "; continuing maintenance of usable stored sessions", Remediation: "Restore access to the configured harness sources and retry harvest to acquire unseen native changes."})
 		}
-		p.reportDiagnostic(DiagnosticEntry{ErrorType: "native_discovery_unavailable", Location: "native discovery", Message: err.Error() + "; continuing maintenance of usable stored sessions", Remediation: "Restore access to the configured harness sources and retry harvest to acquire unseen native changes."})
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: len(allSessions), Total: len(allSessions)})
 	p.recordIndexProfileStage(StageDiscover, discoverProfileStart, len(allSessions), len(allSessions))
@@ -821,10 +856,12 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			return nil, fmt.Errorf("pipeline prepare session filter after discovery: %w", err)
 		}
 	}
-	// After the selection is prepared, so a duplicate this run does not cover
-	// is skipped by the FILTER stage like any other session instead of failing
-	// a run that was scoped to something else.
-	allSessions, duplicateResults := refuseDuplicateSessionIDs(p.fs, allSessions, p.inRunScope)
+	if located == nil {
+		// After the selection is prepared, so a duplicate this run does not cover
+		// is skipped by the FILTER stage like any other session instead of failing
+		// a run that was scoped to something else.
+		allSessions, duplicateResults = refuseDuplicateSessionIDs(p.fs, allSessions, p.inRunScope)
+	}
 	for _, refused := range duplicateResults {
 		p.reportSessionDiagnostic(refused.SessionID, DiagnosticEntry{ErrorType: "duplicate_session_id", Location: string(refused.Harness) + " " + string(refused.SessionID), Message: refused.Error.Error(), Remediation: "Move one of the files out of the harness directory (keep a copy; it may be the only one) and retry harvest."})
 	}
@@ -1115,6 +1152,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			Duration:             time.Since(start),
 			Sessions:             dryRunSessions,
 			DiscoveryDiagnostics: p.discoveryDiagnostics,
+			ScopeReport:          p.scopeReport,
 		}
 		result.Summary.ReminedEvidenceRecords = p.reminedEvidence
 		result.Summary.HarvesterVersions = maps.Clone(p.versionTargets())
@@ -4601,6 +4639,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 		Duration:             time.Since(start),
 		IndexLog:             indexLogEntries,
 		DiscoveryDiagnostics: p.discoveryDiagnostics,
+		ScopeReport:          p.scopeReport,
 	}
 	pipelineResult.Summary.StoreError = storeErr
 	pipelineResult.Summary.Indexed = indexed
