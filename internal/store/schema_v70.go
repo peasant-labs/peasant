@@ -7,8 +7,14 @@ package store
 // 'resolved' means it names one (including a parent the store does not hold),
 // and 'unresolved' means the session is a known spawned child whose parent
 // cannot be named. resolved_parent_id is the logical parent scalar, and only
-// when the state is 'resolved', so the two states cannot overlap and the
-// unresolved state does not fall back to the availability cache.
+// when the state is 'resolved', so the two states cannot overlap, the column
+// CHECK refuses the pair disagreeing, and the unresolved state does not fall
+// back to the availability cache.
+//
+// The rule itself is LogicalParentSQL/ParentUnresolvedSQL: when the session's
+// generation scope carries started_by or context_from evidence, the evidence
+// alone answers (a snapshot or cache value cannot override it); otherwise the
+// managed metadata ParentUUID snapshot answers, then the parent_id cache.
 //
 // sessions.parent_id stays the nullable FK availability cache it always was.
 // This migration adds no write site: the triggers below are the ONLY writers of
@@ -16,18 +22,19 @@ package store
 // parent_id statements keep writing the cache; the AFTER UPDATE trigger fires
 // after their row write, and the evidence triggers cover the evidence-only
 // writes (insertHarmonizedGenerationOnConn and its callers) that never touch
-// the cache.
+// the cache. The AFTER DELETE trigger covers a pruned session that leaves no
+// evidence row behind.
 //
 // store_state holds exactly one row and a monotonic revision. The page, the
 // transcript read, and the caches compare it; it is the integer rendered as a
 // decimal string on the wire.
 //
-// The projection expressions and the trigger bodies are FROZEN MIGRATION TEXT,
-// not shared renderers. They are a verbatim copy of LogicalParentSQL and
-// ParentUnresolvedSQL as they stood when this migration shipped, and editing
-// them rewrites an already-applied migration. A change to the parent rule lands
-// as a NEW migration that redefines these triggers; the per-state drift test
-// fails until it does.
+// The trigger bodies are FROZEN MIGRATION TEXT, not shared renderers: they
+// embed the LogicalParentSQL/ParentUnresolvedSQL expressions as they stood when
+// this migration shipped, and editing them rewrites an already-applied
+// migration. A change to the parent rule lands as a NEW migration that
+// redefines these triggers; TestParentStateProjectionMatchesParentRenderer and
+// the seeded drift test fail until it does.
 //
 // Re-entry: SQLite does not fire a trigger recursively by default. The
 // migrations leave recursive_triggers off and must not enable it. The two
@@ -41,34 +48,24 @@ package store
 // bumps the revision nor depends on the trigger text, and a new database
 // starts at revision 0.
 
-// parentStateLogicalParentSQL is the frozen LogicalParentSQL expression for the
-// session row an UPDATE is writing, correlated on the unaliased sessions table
-// (a trigger body cannot name an UPDATE target alias).
-const parentStateLogicalParentSQL = `COALESCE((
-  SELECT r.target_local_id FROM session_relationship_evidence r
-   WHERE r.session_id = sessions.session_id
-     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
-     AND r.kind = 'started_by'
-     AND r.target_state IN ('target_known','target_known_retained')
-     AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
-), sessions.parent_id)`
+// parentStateLogicalParentSQL is the projection's LogicalParentSQL expression
+// for the session row an UPDATE is writing, correlated on the unaliased
+// sessions table (a trigger body cannot name an UPDATE target alias). It is
+// built from the live rule, not a second copy: the migration text, the
+// parent_state column, and the Home reader's row markers all answer through
+// LogicalParentSQL.
+var parentStateLogicalParentSQL = LogicalParentSQL("sessions")
 
-// parentStateUnresolvedSQL is the frozen ParentUnresolvedSQL expression for the
-// same row: a started_by relationship in the session's generation scope whose
-// target is a known spawned child with no nameable parent.
-const parentStateUnresolvedSQL = `EXISTS (
-  SELECT 1 FROM session_relationship_evidence r
-   WHERE r.session_id = sessions.session_id
-     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
-     AND r.kind = 'started_by'
-     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
-)`
+// parentStateUnresolvedSQL is the projection's ParentUnresolvedSQL expression
+// for the same row: a started_by relationship in the session's generation scope
+// whose target is a known spawned child with no nameable parent.
+var parentStateUnresolvedSQL = ParentUnresolvedSQL("sessions")
 
 // parentStateProjectionSQL is the frozen CASE that maps the parent rule to the
 // one parent lane. ParentUnresolvedSQL wins over the cache fallback, so a known
 // unnamed child is never a root and never a resolved child of a stale cache
 // value.
-const parentStateProjectionSQL = `CASE
+var parentStateProjectionSQL = `CASE
          WHEN ` + parentStateUnresolvedSQL + ` THEN 'unresolved'
          WHEN ` + parentStateLogicalParentSQL + ` IS NOT NULL THEN 'resolved'
          ELSE 'root'
@@ -77,7 +74,7 @@ const parentStateProjectionSQL = `CASE
 // parentStateResolvedParentSQL is the frozen resolved_parent_id scalar: the
 // logical parent only while the state is 'resolved', NULL for both other
 // states.
-const parentStateResolvedParentSQL = `CASE
+var parentStateResolvedParentSQL = `CASE
          WHEN ` + parentStateUnresolvedSQL + ` THEN NULL
          WHEN ` + parentStateLogicalParentSQL + ` IS NOT NULL THEN ` + parentStateLogicalParentSQL + `
          ELSE NULL
@@ -87,7 +84,7 @@ const parentStateResolvedParentSQL = `CASE
 // no WHERE clause so the backfill can rewrite every row; a trigger appends its
 // own correlation, because a trigger body cannot alias its UPDATE target and
 // must name the unaliased table.
-const parentStateProjectionUpdateSQL = `UPDATE sessions
+var parentStateProjectionUpdateSQL = `UPDATE sessions
    SET parent_state = ` + parentStateProjectionSQL + `,
        resolved_parent_id = ` + parentStateResolvedParentSQL
 
@@ -121,10 +118,11 @@ const parentStateSessionsTriggerFiresOn = `parent_id, model_harness, model_id, o
 
 // migrationV70 adds the parent lane and the store revision, backfills the
 // projection for every stored row, and installs the only writers of both.
-const migrationV70 = `
+var migrationV70 = `
 ALTER TABLE sessions ADD COLUMN parent_state TEXT NOT NULL DEFAULT 'root'
   CHECK (parent_state IN ('root','resolved','unresolved'));
-ALTER TABLE sessions ADD COLUMN resolved_parent_id TEXT;
+ALTER TABLE sessions ADD COLUMN resolved_parent_id TEXT
+  CHECK ((parent_state = 'resolved') = (resolved_parent_id IS NOT NULL));
 
 ` + parentStateProjectionUpdateSQL + `;
 
@@ -156,6 +154,11 @@ BEGIN
   ` + parentStateRevisionBumpSQL + `
 END;
 
+CREATE TRIGGER sessions_parent_state_ad AFTER DELETE ON sessions
+BEGIN
+  ` + parentStateRevisionBumpSQL + `
+END;
+
 CREATE TRIGGER session_relationship_evidence_parent_state_ai
 AFTER INSERT ON session_relationship_evidence
 BEGIN
@@ -174,6 +177,30 @@ END;
 
 CREATE TRIGGER session_relationship_evidence_parent_state_ad
 AFTER DELETE ON session_relationship_evidence
+BEGIN
+  ` + parentStateProjectionUpdateSQL + `
+ WHERE sessions.session_id = OLD.session_id;
+  ` + parentStateRevisionBumpSQL + `
+END;
+
+CREATE TRIGGER session_publication_metadata_parent_state_ai
+AFTER INSERT ON session_publication_metadata
+BEGIN
+  ` + parentStateProjectionUpdateSQL + `
+ WHERE sessions.session_id = NEW.session_id;
+  ` + parentStateRevisionBumpSQL + `
+END;
+
+CREATE TRIGGER session_publication_metadata_parent_state_au
+AFTER UPDATE OF metadata_json ON session_publication_metadata
+BEGIN
+  ` + parentStateProjectionUpdateSQL + `
+ WHERE sessions.session_id = NEW.session_id;
+  ` + parentStateRevisionBumpSQL + `
+END;
+
+CREATE TRIGGER session_publication_metadata_parent_state_ad
+AFTER DELETE ON session_publication_metadata
 BEGIN
   ` + parentStateProjectionUpdateSQL + `
  WHERE sessions.session_id = OLD.session_id;

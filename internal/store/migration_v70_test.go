@@ -16,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,9 +32,12 @@ var parentStateManifestYAML []byte
 type parentStateCase struct {
 	Name               string `yaml:"name"`
 	Child              string `yaml:"child"`
+	EvidenceKind       string `yaml:"evidenceKind"`
 	EvidenceState      string `yaml:"evidenceState"`
 	EvidenceTarget     string `yaml:"evidenceTarget"`
 	CacheParent        string `yaml:"cacheParent"`
+	Snapshot           string `yaml:"snapshot"`
+	InactiveEvidence   bool   `yaml:"inactiveEvidence"`
 	WantState          string `yaml:"wantState"`
 	WantResolvedParent string `yaml:"wantResolvedParent"`
 }
@@ -47,6 +51,7 @@ type parentStateRejection struct {
 type parentStateFixture struct {
 	Target     string                 `yaml:"target"`
 	Unstored   string                 `yaml:"unstored"`
+	Snapshot   string                 `yaml:"snapshot"`
 	Cases      []parentStateCase      `yaml:"cases"`
 	Rejections []parentStateRejection `yaml:"rejections"`
 }
@@ -77,12 +82,17 @@ func loadParentStateFixture(t *testing.T) parentStateFixture {
 	cases := make([]string, 0, len(fixture.Cases))
 	for _, tc := range fixture.Cases {
 		cases = append(cases, tc.Name)
-		for _, token := range []string{tc.EvidenceState, tc.EvidenceTarget, tc.CacheParent, tc.WantResolvedParent} {
+		for _, token := range []string{tc.EvidenceState, tc.EvidenceTarget, tc.CacheParent, tc.Snapshot, tc.WantResolvedParent} {
 			switch token {
-			case "", "target", "unstored", "explicit_none", "target_known", "target_known_retained", "unknown", "conflicting_current_native_evidence":
+			case "", "target", "unstored", "snapshot", "explicit_none", "target_known", "target_known_retained", "unknown", "conflicting_current_native_evidence":
 			default:
 				t.Fatalf("parent state case %q names the unknown token %q", tc.Name, token)
 			}
+		}
+		switch tc.EvidenceKind {
+		case "", "started_by", "context_from":
+		default:
+			t.Fatalf("parent state case %q names the unknown evidence kind %q", tc.Name, tc.EvidenceKind)
 		}
 		if _, err := NewParentState(tc.WantState); err != nil {
 			t.Fatalf("parent state case %q: %v", tc.Name, err)
@@ -98,14 +108,14 @@ func loadParentStateFixture(t *testing.T) parentStateFixture {
 	if err := validateRecoveryRequiredNames(manifest.RequiredRejections, rejections, "parent state rejection"); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.Target == "" || fixture.Unstored == "" {
-		t.Fatal("parent state fixture must name both the stored and unstored parent identifiers")
+	if fixture.Target == "" || fixture.Unstored == "" || fixture.Snapshot == "" {
+		t.Fatal("parent state fixture must name the stored, unstored, and snapshot parent identifiers")
 	}
 	return fixture
 }
 
 // parentStateIDs resolves the fixture tokens for one case.
-func parentStateIDs(t *testing.T, fixture parentStateFixture, tc parentStateCase) (child string, cacheParent string, evidenceTarget string) {
+func parentStateIDs(t *testing.T, fixture parentStateFixture, tc parentStateCase) (child string, cacheParent string, evidenceTarget string, snapshot string) {
 	t.Helper()
 	child = tc.Child
 	switch tc.CacheParent {
@@ -124,8 +134,20 @@ func parentStateIDs(t *testing.T, fixture parentStateFixture, tc parentStateCase
 	default:
 		t.Fatalf("case %q names the unknown evidence token %q", tc.Name, tc.EvidenceTarget)
 	}
-	return child, cacheParent, evidenceTarget
+	switch tc.Snapshot {
+	case "":
+	case "snapshot":
+		snapshot = fixture.Snapshot
+	default:
+		t.Fatalf("case %q names the unknown snapshot token %q", tc.Name, tc.Snapshot)
+	}
+	return child, cacheParent, evidenceTarget, snapshot
 }
+
+// schemaSlotBeforeV70 is the migration slot the V70 test seeds on. It is pinned
+// by number, not len(Migrations)-1, so a later migration cannot silently move
+// the predecessor past V70 and turn the backfill test into a no-op.
+const schemaSlotBeforeV70 = 69
 
 // openPredecessorConn opens a database migrated through exactly the migrations
 // that shipped before V70, so the V70 test seeds the state an installed store
@@ -137,7 +159,7 @@ func openPredecessorConn(t *testing.T) *sqlite.Conn {
 		t.Fatalf("open predecessor database: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	if err := sqlitemigration.Migrate(context.Background(), conn, frozenSchema(len(dbSchema.Migrations)-1)); err != nil {
+	if err := sqlitemigration.Migrate(context.Background(), conn, frozenSchema(schemaSlotBeforeV70)); err != nil {
 		t.Fatalf("migrate predecessor schema: %v", err)
 	}
 	return conn
@@ -151,8 +173,8 @@ func TestMigrationV70BackfillsParentState(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 			conn := openPredecessorConn(t)
-			child, cacheParent, evidenceTarget := parentStateIDs(t, fixture, tc)
-			seedParentStateRow(t, conn, fixture.Target, child, cacheParent, tc.EvidenceState, evidenceTarget)
+			child, cacheParent, evidenceTarget, snapshot := parentStateIDs(t, fixture, tc)
+			seedParentStateRow(t, conn, fixture.Target, child, cacheParent, tc.EvidenceKind, tc.EvidenceState, evidenceTarget, snapshot, tc.InactiveEvidence)
 			if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
 				t.Fatalf("migrate to V70: %v", err)
 			}
@@ -163,8 +185,10 @@ func TestMigrationV70BackfillsParentState(t *testing.T) {
 }
 
 // seedParentStateRow stores one fixture row on the predecessor schema, before
-// the projection columns exist.
-func seedParentStateRow(t *testing.T, conn *sqlite.Conn, target, child, cacheParent, evidenceState, evidenceTarget string) {
+// the projection columns exist. It seeds the availability cache, the managed
+// metadata ParentUUID snapshot, and the generation evidence the case names, so
+// the backfill and the drift test describe the same stored state.
+func seedParentStateRow(t *testing.T, conn *sqlite.Conn, target, child, cacheParent, evidenceKind, evidenceState, evidenceTarget, snapshot string, inactiveEvidence bool) {
 	t.Helper()
 	if err := sqlitex.ExecuteScript(conn, `
 INSERT OR IGNORE INTO host_slugs(opaque_id, host_slug) VALUES('state-host','state-host');
@@ -186,19 +210,45 @@ VALUES(?, 'claude-code','state-model','state-host','state-project',1,2,3,'/synth
 	}); err != nil {
 		t.Fatalf("seed the child row: %v", err)
 	}
+	if snapshot != "" {
+		metadata := `{"parentUuid":"` + snapshot + `"}`
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_publication_metadata(session_id, capture_revision, schema_version, metadata_json, metadata_hash, content_hash, captured_at)
+VALUES(?, 1, 1, ?, ?, ?, 1)`, &sqlitex.ExecOptions{
+			Args: []any{child, metadata, strings.Repeat("a", 64), strings.Repeat("b", 64)},
+		}); err != nil {
+			t.Fatalf("seed the managed metadata snapshot: %v", err)
+		}
+	}
+	if inactiveEvidence {
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = 'active' WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{child}}); err != nil {
+			t.Fatalf("put the inactive child generation in scope: %v", err)
+		}
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
+VALUES(?, 'old-one', 0, 'started_by', 'explicit_none', NULL, 'native_typed', '', '', ''),
+       (?, 'old-two', 0, 'started_by', 'target_known', ?, 'native_typed', '', '', '')`, &sqlitex.ExecOptions{
+			Args: []any{child, child, target},
+		}); err != nil {
+			t.Fatalf("seed the inactive-generation evidence: %v", err)
+		}
+		return
+	}
 	if evidenceState == "" {
 		return
 	}
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = 'gen-state' WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{child}}); err != nil {
 		t.Fatalf("put the child generation in scope: %v", err)
 	}
+	kind := evidenceKind
+	if kind == "" {
+		kind = "started_by"
+	}
 	var targetValue any
 	if evidenceTarget != "" {
 		targetValue = evidenceTarget
 	}
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
-VALUES(?, 'gen-state', 0, 'started_by', ?, ?, 'native_typed', '', '', '')`, &sqlitex.ExecOptions{
-		Args: []any{child, evidenceState, targetValue},
+VALUES(?, 'gen-state', 0, ?, ?, ?, 'native_typed', '', '', '')`, &sqlitex.ExecOptions{
+		Args: []any{child, kind, evidenceState, targetValue},
 	}); err != nil {
 		t.Fatalf("seed the started_by evidence: %v", err)
 	}
@@ -235,6 +285,8 @@ func assertParentState(t *testing.T, tc parentStateCase, fixture parentStateFixt
 		want = fixture.Target
 	case "unstored":
 		want = fixture.Unstored
+	case "snapshot":
+		want = fixture.Snapshot
 	}
 	if want == "" {
 		if resolved != nil {
@@ -272,7 +324,24 @@ VALUES(?, %s, 'claude-code','state-model','reject-host','reject-project',1,2,3,'
 			if err == nil {
 				t.Fatalf("%s: the projection column accepted %s; the NOT NULL/CHECK contract is missing", rejection.Name, rejection.StateLiteral)
 			}
+			if !strings.Contains(err.Error(), "parent_state") {
+				t.Fatalf("%s: the insert failed for an unrelated reason, not the closed parent-state contract: %v", rejection.Name, err)
+			}
 		})
+	}
+	// The resolved_parent_id CHECK is a row invariant, not a trigger-only
+	// convention: neither direction of an inconsistent projection may persist.
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
+VALUES('pair-check','claude-code','state-model','reject-host','reject-project',1,2,3,'/synthetic/pair.jsonl','jsonl')`, &sqlitex.ExecOptions{}); err != nil {
+		t.Fatalf("insert the pair-check session: %v", err)
+	}
+	for _, update := range []string{
+		`UPDATE sessions SET parent_state = 'resolved', resolved_parent_id = NULL WHERE session_id = 'pair-check'`,
+		`UPDATE sessions SET parent_state = 'root', resolved_parent_id = 'some-parent' WHERE session_id = 'pair-check'`,
+	} {
+		if err := sqlitex.ExecuteTransient(conn, update, &sqlitex.ExecOptions{}); err == nil {
+			t.Fatalf("the resolved_parent_id CHECK accepted an inconsistent pair: %s", update)
+		}
 	}
 }
 
@@ -406,11 +475,15 @@ func TestMigrationV70PageQueriesUseTheirIndexes(t *testing.T) {
 		t.Fatalf("Pool.Take: %v", err)
 	}
 	defer s.pool.Put(conn)
-	rootPlan := explainQueryPlan(t, conn, `SELECT session_id FROM sessions WHERE parent_state = 'root' ORDER BY start_ms DESC, session_id ASC LIMIT 26`)
+	// Explain the statement production actually runs, including the
+	// session_metrics join and the OFFSET, not a reduced stand-in.
+	rootQuery, rootArgs := offsetPageSQL(ParentStateRoot, "", SyncWindowFilter{Publication: schema.LocalSyncPublicationAll}, 26, 0)
+	rootPlan := explainQueryPlan(t, conn, rootQuery, rootArgs...)
 	if !strings.Contains(rootPlan, "idx_sessions_root_page") {
 		t.Fatalf("the root page plan does not use idx_sessions_root_page: %s", rootPlan)
 	}
-	childPlan := explainQueryPlan(t, conn, `SELECT session_id FROM sessions WHERE resolved_parent_id = ? AND parent_state = 'resolved' ORDER BY start_ms DESC, session_id ASC LIMIT 26`, "any-parent")
+	childQuery, childArgs := offsetPageSQL(ParentStateResolved, "any-parent", SyncWindowFilter{Publication: schema.LocalSyncPublicationAll}, 26, 0)
+	childPlan := explainQueryPlan(t, conn, childQuery, childArgs...)
 	if !strings.Contains(childPlan, "idx_sessions_child_page") {
 		t.Fatalf("the child page plan does not use idx_sessions_child_page: %s", childPlan)
 	}
@@ -469,7 +542,15 @@ func TestParentStateProjectionMatchesParentRenderer(t *testing.T) {
 		t.Fatalf("Pool.Take: %v", err)
 	}
 	defer s.pool.Put(conn)
-	for _, name := range []string{"sessions_parent_state_ai", "sessions_parent_state_au"} {
+	for _, name := range []string{
+		"sessions_parent_state_ai", "sessions_parent_state_au",
+		"session_relationship_evidence_parent_state_ai",
+		"session_relationship_evidence_parent_state_au",
+		"session_relationship_evidence_parent_state_ad",
+		"session_publication_metadata_parent_state_ai",
+		"session_publication_metadata_parent_state_au",
+		"session_publication_metadata_parent_state_ad",
+	} {
 		trigger := readTriggerSQL(t, conn, name)
 		if !strings.Contains(trigger, ParentUnresolvedSQL("sessions")) {
 			t.Errorf("trigger %s no longer carries the current ParentUnresolvedSQL expression; the parent rule changed and the trigger needs a new migration", name)

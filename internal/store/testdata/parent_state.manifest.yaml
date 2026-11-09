@@ -4,9 +4,14 @@
 requiredCases:
   - root-no-evidence
   - root-explicit-none
+  - root-explicit-none-despite-snapshot-and-cache
+  - root-context-from-only-despite-snapshot
   - resolved-evidence-target
   - resolved-retained-target
   - resolved-cache-fallback
+  - resolved-snapshot-cache-null
+  - resolved-snapshot-beats-cache
+  - resolved-inactive-evidence-snapshot-decides
   - resolved-unstored-parent
   - unresolved-unknown-with-cache
   - unresolved-conflicting

@@ -212,6 +212,7 @@ type syncTraversalCase struct {
 	Pages, Maxima  []int
 	Counts, First  []int
 	Next           []bool
+	Total          int
 	DeleteBoundary bool `yaml:"deleteBoundary"`
 }
 type syncPagesFixture struct {
@@ -387,6 +388,23 @@ func TestSyncHomeKeysetTraversal(t *testing.T) {
 				}
 				if !reflect.DeepEqual(got, want) || (len(p.NextItems) > 0) != tc.Next[i] {
 					t.Fatalf("page%d got=%v next=%d want=%v next=%v", i, got, len(p.NextItems), want, tc.Next[i])
+				}
+				if tc.Total != 0 && p.Total != tc.Total {
+					t.Fatalf("page%d total = %d, want %d", i, p.Total, tc.Total)
+				}
+				// nextItems is the FOLLOWING rows, not a repeat of the page.
+				nextWant := []string{}
+				nextEnd := tc.First[i] + 2*tc.Counts[i]
+				if nextEnd > len(ids) {
+					nextEnd = len(ids)
+				}
+				nextWant = append(nextWant, ids[tc.First[i]+tc.Counts[i]:nextEnd]...)
+				nextGot := make([]string, 0, len(p.NextItems))
+				for _, row := range p.NextItems {
+					nextGot = append(nextGot, row.Sync.ID)
+				}
+				if !reflect.DeepEqual(nextGot, nextWant) {
+					t.Fatalf("page%d nextItems = %v, want the following %v", i, nextGot, nextWant)
 				}
 				hydrated := append([]string(nil), want...)
 				for _, row := range p.NextItems {

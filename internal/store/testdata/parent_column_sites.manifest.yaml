@@ -27,13 +27,13 @@ requiredResidual:
   - store-migration-v42
   - store-migration-v53
   - store-migration-v51
-  - store-parent-state-logical-parent
   - store-parent-state-projection-update
   - store-parent-state-trigger-columns
   - store-migration-v70
   - store-offset-page-child-filter
   - store-offset-page-child-count
 requiredRouted:
+  - store-parent-state-logical-parent
   - store-all-sessions
   - store-session-detail-query
   - store-child-sessions

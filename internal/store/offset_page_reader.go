@@ -22,7 +22,7 @@ type OffsetPageRead struct {
 // offsetPageWhere builds the shared pushed-session predicate for one offset
 // page. parentState and resolvedParent are the page's ordered source; the
 // publication filter is the same receipt rule the legacy window used.
-func offsetPageWhere(filter SyncWindowFilter, parentState, resolvedParent string) (string, []any) {
+func offsetPageWhere(filter SyncWindowFilter, parentState ParentState, resolvedParent string) (string, []any) {
 	where := []string{"1=1"}
 	args := []any{}
 	if parentState != "" {
@@ -54,7 +54,7 @@ func offsetPageWhere(filter SyncWindowFilter, parentState, resolvedParent string
 // offsetPageSQL is the one ordered read behind both the root and the child
 // page. The root and child indexes carry the same key order, so the planner
 // serves either page from one ordered scan.
-func offsetPageSQL(parentState, resolvedParent string, filter SyncWindowFilter, limit, offset int) (string, []any) {
+func offsetPageSQL(parentState ParentState, resolvedParent string, filter SyncWindowFilter, limit, offset int) (string, []any) {
 	where, args := offsetPageWhere(filter, parentState, resolvedParent)
 	query := `SELECT s.start_ms,s.session_id FROM sessions s JOIN session_metrics m ON m.session_id=s.session_id WHERE ` + where +
 		` ORDER BY s.start_ms DESC, s.session_id ASC LIMIT ? OFFSET ?`
@@ -85,7 +85,7 @@ func (s *Store) RootPageWindow(ctx context.Context, page, perPage int, filter Sy
 		return OffsetPageRead{IDs: []string{}}, err
 	}
 	defer s.pool.Put(conn)
-	query, args := offsetPageSQL("root", "", filter, 2*perPage+1, (page-1)*perPage)
+	query, args := offsetPageSQL(ParentStateRoot, "", filter, 2*perPage+1, (page-1)*perPage)
 	window, err := readOffsetPage(ctx, conn, query, args, 2*perPage+1)
 	if err != nil {
 		return OffsetPageRead{IDs: []string{}}, fmt.Errorf("store.RootPageWindow: read ordered root keys: %w; no page usable; inspect the store and retry", err)
@@ -108,7 +108,7 @@ func (s *Store) ChildPageWindow(ctx context.Context, parentID string, page, perP
 		return OffsetPageRead{IDs: []string{}}, err
 	}
 	defer s.pool.Put(conn)
-	query, args := offsetPageSQL("resolved", parentID, SyncWindowFilter{Publication: schema.LocalSyncPublicationAll}, 2*perPage+1, (page-1)*perPage)
+	query, args := offsetPageSQL(ParentStateResolved, parentID, SyncWindowFilter{Publication: schema.LocalSyncPublicationAll}, 2*perPage+1, (page-1)*perPage)
 	window, err := readOffsetPage(ctx, conn, query, args, 2*perPage+1)
 	if err != nil {
 		return OffsetPageRead{IDs: []string{}}, fmt.Errorf("store.ChildPageWindow: read ordered child keys: %w; no page usable; inspect the store and retry", err)
@@ -125,7 +125,7 @@ func (s *Store) RootSessionIDs(ctx context.Context, filter SyncWindowFilter) ([]
 		return nil, err
 	}
 	defer s.pool.Put(conn)
-	where, args := offsetPageWhere(filter, "root", "")
+	where, args := offsetPageWhere(filter, ParentStateRoot, "")
 	query := `SELECT s.start_ms,s.session_id FROM sessions s JOIN session_metrics m ON m.session_id=s.session_id WHERE ` + where +
 		` ORDER BY s.start_ms DESC, s.session_id ASC`
 	ids := make([]string, 0)
@@ -167,7 +167,7 @@ func (s *Store) AllPushableSessionIDs(ctx context.Context, filter SyncWindowFilt
 	return ids, nil
 }
 
-func countOffsetRows(ctx context.Context, conn *sqlite.Conn, parentState, resolvedParent string, filter SyncWindowFilter) (int, error) {
+func countOffsetRows(ctx context.Context, conn *sqlite.Conn, parentState ParentState, resolvedParent string, filter SyncWindowFilter) (int, error) {
 	where, args := offsetPageWhere(filter, parentState, resolvedParent)
 	query := `SELECT COUNT(*) FROM sessions s JOIN session_metrics m ON m.session_id=s.session_id WHERE ` + where
 	var total int
@@ -186,7 +186,7 @@ func (s *Store) CountRootSessions(ctx context.Context, filter SyncWindowFilter) 
 		return 0, err
 	}
 	defer s.pool.Put(conn)
-	total, err := countOffsetRows(ctx, conn, "root", "", filter)
+	total, err := countOffsetRows(ctx, conn, ParentStateRoot, "", filter)
 	if err != nil {
 		return 0, fmt.Errorf("store.CountRootSessions: count roots: %w; no total usable; inspect the store and retry", err)
 	}
@@ -216,7 +216,7 @@ func (s *Store) CountResolvedChildren(ctx context.Context, parentID string) (int
 		return 0, err
 	}
 	defer s.pool.Put(conn)
-	total, err := countOffsetRows(ctx, conn, "resolved", parentID, SyncWindowFilter{Publication: schema.LocalSyncPublicationAll})
+	total, err := countOffsetRows(ctx, conn, ParentStateResolved, parentID, SyncWindowFilter{Publication: schema.LocalSyncPublicationAll})
 	if err != nil {
 		return 0, fmt.Errorf("store.CountResolvedChildren: count resolved children of %q: %w; no total usable; inspect the store and retry", parentID, err)
 	}
@@ -242,7 +242,7 @@ func (s *Store) ResolvedChildCounts(ctx context.Context, parentIDs []string) (ma
 		marks[i] = "?"
 	}
 	query := `SELECT s.resolved_parent_id,COUNT(*) FROM sessions s JOIN session_metrics m ON m.session_id=s.session_id
-WHERE s.parent_state='resolved' AND s.resolved_parent_id IN (` + strings.Join(marks, ",") + `) GROUP BY s.resolved_parent_id`
+WHERE s.parent_state='` + ParentStateResolved.String() + `' AND s.resolved_parent_id IN (` + strings.Join(marks, ",") + `) GROUP BY s.resolved_parent_id`
 	err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args, ResultFunc: func(stmt *sqlite.Stmt) error {
 		counts[stmt.ColumnText(0)] = stmt.ColumnInt(1)
 		return nil
@@ -271,7 +271,7 @@ func (s *Store) RootProjectOptions(ctx context.Context) ([]RootProjectOption, er
 FROM sessions s
 JOIN session_metrics m ON m.session_id=s.session_id
 LEFT JOIN projects p ON p.project_hash=s.project_hash
-WHERE s.parent_state='root'`
+WHERE s.parent_state='` + ParentStateRoot.String() + `'`
 	options := make([]RootProjectOption, 0)
 	err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
 		if err := ctx.Err(); err != nil {

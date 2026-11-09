@@ -223,12 +223,6 @@ residual:
     literals: 1
     class: ddl
     reason: Immutable historical trigger text.
-  - name: store-parent-state-logical-parent
-    file: internal/store/schema_v70.go
-    declaration: parentStateLogicalParentSQL
-    literals: 1
-    class: ddl
-    reason: The frozen logical-parent expression embedded in the parent-state trigger and backfill text.
   - name: store-parent-state-projection-update
     file: internal/store/schema_v70.go
     declaration: parentStateProjectionUpdateSQL
@@ -259,13 +253,21 @@ residual:
   - name: store-offset-page-child-count
     file: internal/store/offset_page_reader.go
     declaration: Store.ResolvedChildCounts
-    literals: 2
+    literals: 3
     class: availability
     reason: >-
       The grouped immediate-child count reads the resolved-child index; it never
-      answers who a session's logical parent is.
+      answers who a session's logical parent is. The typed state predicate
+      splits the SELECT, the IN clause, and the GROUP BY into three literals.
 
 routed:
+  - name: store-parent-state-logical-parent
+    file: internal/store/schema_v70.go
+    declaration: parentStateLogicalParentSQL
+    class: routed
+    reason: >-
+      The migration projection embeds LogicalParentSQL directly instead of
+      re-spelling the parent rule in frozen text.
   - name: store-all-sessions
     file: internal/store/reader.go
     declaration: sqlAllSessions

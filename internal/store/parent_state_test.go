@@ -27,6 +27,19 @@ func insertParentStateSession(t *testing.T, db *Store, id schema.SessionID, logi
 	}
 }
 
+// execParentStateSQL runs one arrangement statement through the store pool.
+func execParentStateSQL(t *testing.T, db *Store, query string, args ...any) {
+	t.Helper()
+	conn, err := db.pool.Take(context.Background())
+	if err != nil {
+		t.Fatalf("Pool.Take: %v", err)
+	}
+	defer db.pool.Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args}); err != nil {
+		t.Fatalf("exec parent-state arrangement: %v", err)
+	}
+}
+
 // TestParentStateDriftAgainstLogicalParentRule stores every fixture state
 // through the production writers and holds the stored projection to the live
 // parent rule: a row is a root exactly when the rule names no child lane, is
@@ -43,6 +56,10 @@ func TestParentStateDriftAgainstLogicalParentRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fixture unstored parent: %v", err)
 	}
+	snapshotParent, err := schema.NewSessionID(fixture.Snapshot)
+	if err != nil {
+		t.Fatalf("fixture snapshot parent: %v", err)
+	}
 	db, _ := openGenerationStore(t)
 	insertParentStateSession(t, db, target, nil)
 	for _, tc := range fixture.Cases {
@@ -50,21 +67,43 @@ func TestParentStateDriftAgainstLogicalParentRule(t *testing.T) {
 		if err != nil {
 			t.Fatalf("case %q child: %v", tc.Name, err)
 		}
-		var cacheParent *ingest.SessionID
-		if tc.CacheParent == "target" {
-			parent := ingest.SessionID(target)
-			cacheParent = &parent
+		var snapshot *ingest.SessionID
+		switch tc.Snapshot {
+		case "":
+		case "snapshot":
+			value := ingest.SessionID(snapshotParent)
+			snapshot = &value
+		default:
+			t.Fatalf("case %q names the unknown snapshot token %q", tc.Name, tc.Snapshot)
 		}
-		insertParentStateSession(t, db, child, cacheParent)
-		if tc.EvidenceState != "" {
-			var evidenceTarget *schema.SessionID
-			switch tc.EvidenceTarget {
-			case "target":
-				evidenceTarget = &target
-			case "unstored":
-				evidenceTarget = &unstored
+		insertParentStateSession(t, db, child, snapshot)
+		if tc.CacheParent == "target" {
+			execParentStateSQL(t, db, `UPDATE sessions SET parent_id = ? WHERE session_id = ?`, string(target), string(child))
+		}
+		if tc.InactiveEvidence {
+			execParentStateSQL(t, db, `UPDATE sessions SET active_generation_id = 'active' WHERE session_id = ?`, string(child))
+			execParentStateSQL(t, db, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
+VALUES(?, 'old-one', 0, 'started_by', 'explicit_none', NULL, 'native_typed', '', '', ''),
+       (?, 'old-two', 0, 'started_by', 'target_known', ?, 'native_typed', '', '', '')`, string(child), string(child), string(target))
+		} else if tc.EvidenceState != "" {
+			kind := tc.EvidenceKind
+			if kind == "" {
+				kind = "started_by"
 			}
-			activateLogicalParentEvidence(t, db, child, "gen-parent-state-"+tc.Name, tc.EvidenceState, evidenceTarget)
+			if kind == "context_from" {
+				execParentStateSQL(t, db, `UPDATE sessions SET active_generation_id = 'gen-context' WHERE session_id = ?`, string(child))
+				execParentStateSQL(t, db, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
+VALUES(?, 'gen-context', 0, 'context_from', ?, ?, 'native_typed', '', '', '')`, string(child), tc.EvidenceState, string(target))
+			} else {
+				var evidenceTarget *schema.SessionID
+				switch tc.EvidenceTarget {
+				case "target":
+					evidenceTarget = &target
+				case "unstored":
+					evidenceTarget = &unstored
+				}
+				activateLogicalParentEvidence(t, db, child, "gen-parent-state-"+tc.Name, tc.EvidenceState, evidenceTarget)
+			}
 		}
 		state, resolved := parentStateForSession(t, db, string(child))
 		if state != tc.WantState {
@@ -76,6 +115,8 @@ func TestParentStateDriftAgainstLogicalParentRule(t *testing.T) {
 			wantResolved = fixture.Target
 		case "unstored":
 			wantResolved = fixture.Unstored
+		case "snapshot":
+			wantResolved = fixture.Snapshot
 		}
 		if wantResolved == "" {
 			if resolved != nil {
@@ -88,6 +129,38 @@ func TestParentStateDriftAgainstLogicalParentRule(t *testing.T) {
 	mismatches := parentStateDriftCount(t, db)
 	if mismatches != 0 {
 		t.Fatalf("%d stored session(s) disagree with the live parent rule; the trigger projection and the renderer have drifted", mismatches)
+	}
+	// The page's membership (parent_state) and the row's parent markers
+	// (SyncParentIdentities) must ship ONE answer for every stored child.
+	sessions, err := db.AllPushableSessions(context.Background())
+	if err != nil {
+		t.Fatalf("read pushable sessions: %v", err)
+	}
+	identities, err := db.SyncParentIdentities(context.Background(), sessions)
+	if err != nil {
+		t.Fatalf("read parent identities: %v", err)
+	}
+	identityByID := make(map[string]ParentIdentityRow, len(identities))
+	for _, identity := range identities {
+		identityByID[identity.SessionID] = identity
+	}
+	for _, tc := range fixture.Cases {
+		state, resolved := parentStateForSession(t, db, tc.Child)
+		identity, known := identityByID[tc.Child]
+		if !known {
+			t.Errorf("%s: SyncParentIdentities has no row for the stored child", tc.Name)
+			continue
+		}
+		rowParent := ""
+		if resolved != nil {
+			rowParent = *resolved
+		}
+		if identity.ParentIdentity != rowParent {
+			t.Errorf("%s: row parent = %q, projection resolved_parent_id = %q; the page and the row disagree", tc.Name, identity.ParentIdentity, rowParent)
+		}
+		if identity.ParentUnresolved != (state == string(ParentStateUnresolved)) {
+			t.Errorf("%s: row parentUnresolved = %t, projection state = %q; the page and the row disagree", tc.Name, identity.ParentUnresolved, state)
+		}
 	}
 }
 
@@ -202,6 +275,16 @@ VALUES(?, 'gen-revision', 0, 'started_by', 'unknown', NULL, 'native_typed', '', 
 	bumps("an evidence delete", func() {
 		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_relationship_evidence WHERE session_id = ? AND generation_id = 'gen-revision'`, &sqlitex.ExecOptions{Args: []any{sid}}); err != nil {
 			t.Fatalf("delete evidence: %v", err)
+		}
+	})
+	prunedRoot := "d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d1"
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
+VALUES(?, 'claude-code','state-model','host-gen','proj-gen',1,2,3,'/synthetic/pruned-root.jsonl','jsonl')`, &sqlitex.ExecOptions{Args: []any{prunedRoot}}); err != nil {
+		t.Fatalf("insert a session to prune: %v", err)
+	}
+	bumps("a pruned evidence-less root", func() {
+		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{prunedRoot}}); err != nil {
+			t.Fatalf("delete the evidence-less root: %v", err)
 		}
 	})
 	if state, resolved := parentStateForSession(t, db, sid); state != string(ParentStateRoot) || resolved != nil {

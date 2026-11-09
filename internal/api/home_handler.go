@@ -238,7 +238,7 @@ func (r *syncHomePageReader) ReadPage(ctx context.Context) (schema.LocalSyncSess
 			total, err = r.db.CountResolvedChildren(ctx, parent)
 		}
 		if err == nil {
-			sessions, err = r.db.CountPushableSessions(ctx, store.SyncWindowFilter{Publication: schema.LocalSyncPublicationAll})
+			sessions, err = r.db.CountPushableSessions(ctx, filter)
 		}
 		if err == nil {
 			page = clampPage(page, total, int(perPage))
