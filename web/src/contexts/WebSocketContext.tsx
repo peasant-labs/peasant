@@ -118,8 +118,6 @@ class ChannelStore {
 
 interface WebSocketContextValue {
   connected: boolean;
-  /** The connection fault's message, or null. */
-  error: string | null;
   /** The socket's fault: a frame failure, a socket error, or a non-topic refusal. */
   connectionFault: WebFault | null;
   store: ChannelStore;
@@ -425,9 +423,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [sendRaw]);
 
-  // Context value changes ONLY when connected/error change (infrequent).
-  // Channel data lives in the ChannelStore ref and is accessed via
-  // useSyncExternalStore — it never triggers context re-renders.
   // Context value changes ONLY when connected or the connection fault changes
   // (infrequent). Channel data and channel faults live in the ChannelStore ref
   // and are accessed via useSyncExternalStore — they never trigger context
@@ -435,7 +430,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const value: WebSocketContextValue = useMemo(
     () => ({
       connected,
-      error: connectionFault?.message ?? null,
       connectionFault,
       store: storeRef.current,
       wsSubscribe,
@@ -507,8 +501,10 @@ function toSubsArray(
  * on unmount. Channel data is delivered via useSyncExternalStore so that a
  * `sessions` update does NOT re-render a component subscribed to `dashboard`.
  *
- * Returns the latest data for the FIRST subscription in the array (primary).
- * Connection state (connected, error) is also returned.
+ * Returns the latest data for the FIRST subscription in the array (primary),
+ * this channel's own topic error (`channelFault`), and the provider-wide
+ * socket failure (`connectionFault`). The two faults are separate members: a
+ * socket failure is never reported as this channel's data failure.
  *
  * Accepts both the new SubscriptionMessage API and the legacy ChannelName[] + sessionId? API.
  */
@@ -547,7 +543,7 @@ export function useChannel<T = unknown>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [primaryKey, primaryOperation],
   );
-  const fault = useSyncExternalStore(channelSubscribe, getFaultSnapshot, getFaultSnapshot);
+  const channelFault = useSyncExternalStore(channelSubscribe, getFaultSnapshot, getFaultSnapshot);
   const refresh = useCallback(
     () => ctx.wsRefresh(subsArray),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -558,13 +554,11 @@ export function useChannel<T = unknown>(
     /** Latest data for the primary channel, or undefined if none received yet. */
     data,
     connected: ctx.connected,
-    /** This channel's retained data fault, or null. */
-    fault,
-    /** The socket's fault, shared by every consumer. */
+    /** This channel's own topic error, or null. A channel never reads another's. */
+    channelFault,
+    /** The socket's fault, shared by every consumer and rendered once app-wide. */
     connectionFault: ctx.connectionFault,
-    /** Back-compat message: this channel's fault, then the connection fault. */
-    error: fault?.message ?? ctx.connectionFault?.message ?? null,
-    errorCode: codeFromFault(fault),
+    errorCode: codeFromFault(channelFault),
     /** Read this channel again from the server, keeping the current data until the new snapshot lands. */
     refresh,
   };
@@ -572,9 +566,11 @@ export function useChannel<T = unknown>(
 
 /**
  * Access connection state without subscribing to any channel data, plus the
- * reconnect-now control the local offline notice's `try again` uses.
+ * reconnect-now control the local offline notice's `try again` uses. The
+ * connection fault is the one provider-wide failure signal the global banner
+ * renders.
  */
 export function useConnectionState() {
   const ctx = useWsContext();
-  return { connected: ctx.connected, reconnect: ctx.reconnect };
+  return { connected: ctx.connected, connectionFault: ctx.connectionFault, reconnect: ctx.reconnect };
 }

@@ -5,27 +5,28 @@ import { ProjectOverview } from '@peasant-labs/fairtrade/analytics';
 import { Disconnected, ConnectionStatus } from '@/components/ConnectionState';
 import { IngestTeach } from '@/components/IngestTeach';
 import { useChannel } from '@/contexts/WebSocketContext';
+import { FeedbackPanel } from '@/lib/ft-ui';
 import { adaptAnalytics } from '@/lib/adapters/analytics';
 import { adaptQualitySessions } from '@/lib/quality/types';
 import { SkeletonList } from '@/lib/skeleton';
 import { subscribe, type QualityPayload } from '@/types/messages';
 
 export function AnalyticsPageClient() {
-  const { data: quality, connected, error } = useChannel<QualityPayload>(subscribe.quality());
+  const { data: quality, connected, channelFault } = useChannel<QualityPayload>(subscribe.quality());
   const payload = useMemo(
     () => ({ sessions: adaptAnalytics(adaptQualitySessions(quality?.sessions ?? [])) }),
     [quality?.sessions],
   );
 
-  // No quality data has arrived yet. A dropped/failed quality-channel
-  // connection at this point would otherwise show an endless loading
-  // skeleton — render the app-wide "waiting for the local app" state
-  // instead so a real connection failure is visible and actionable.
+  // No quality data has arrived yet. This channel's own topic error is a data
+  // failure the page must state; a provider-wide socket or frame failure is not,
+  // and the app-level banner carries it. Either way the page never renders an
+  // endless skeleton.
   // Once quality data HAS arrived, a later disconnect shows a quiet stale-data
   // strip (below) rather than replacing the dashboard — matches the
   // "connection ≠ content" convention used on Home/Map/Review.
   if (quality === undefined) {
-    if (!connected || error) {
+    if (!connected || channelFault) {
       return (
         <div className="asb-page">
           <Disconnected />
@@ -57,7 +58,8 @@ export function AnalyticsPageClient() {
     <div className="animate-fade-up">
       <header className="asb-page analytics-head">
         <h1 className="iu-page-title page-title">analytics</h1>
-        {(!connected || error) && <ConnectionStatus connected={connected} hasData />}
+        {channelFault && <FeedbackPanel variant="error">{channelFault.message}</FeedbackPanel>}
+        {!channelFault && !connected && <ConnectionStatus connected={connected} hasData />}
       </header>
       <ProjectOverview payload={payload} contributorLimit={10} />
     </div>

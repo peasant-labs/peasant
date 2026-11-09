@@ -24,7 +24,7 @@ vi.mock('@/contexts/WebSocketContext', () => ({
   useChannel: () => ({
     data: channelData,
     connected: channelConnected,
-    error: channelError,
+    channelFault: channelError ? { message: channelError } : null,
   }),
 }));
 

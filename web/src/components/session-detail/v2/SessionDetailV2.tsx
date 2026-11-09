@@ -126,7 +126,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Host element for the mounted viewer; the per-session reading state replays
   // the inner scroller offset against it on the way back.
   const transcriptHostRef = useRef<HTMLDivElement | null>(null);
-  const { data: detail, error, refresh: refreshDetail } = useChannel<SessionDetailWire>(
+  const { data: detail, channelFault: detailFault, refresh: refreshDetail } = useChannel<SessionDetailWire>(
     subscribe.sessionDetail(sessionId),
   );
   // The canonical wire permits `null` for an empty turn collection. Normalize
@@ -449,13 +449,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   ];
 
   if (!detail) {
-    // A channel failure with nothing loaded must be VISIBLE — an endless
-    // skeleton with the error swallowed is how a dead backend hides.
-    if (error) {
+    // This channel's OWN topic error with nothing loaded must be VISIBLE — an
+    // endless skeleton with the error swallowed is how a dead backend hides.
+    // A provider-wide socket or frame failure is not this channel's failure: the
+    // app-level banner carries it, so the transcript keeps its skeleton.
+    if (detailFault) {
       return (
         <div className="asb-page">
           <FeedbackPanel variant="error" title="transcript unavailable">
-            {String(error)}
+            {detailFault.message}
           </FeedbackPanel>
         </div>
       );
@@ -526,9 +528,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           </FeedbackPanel>
         </div>
       )}
-      {error != null && (
-        <p className="text-[12px] text-danger">
-          connection error; showing the last loaded transcript.
+      {detailFault != null && (
+        <p role="status" className="text-[12px] text-danger">
+          {detailFault.message}
         </p>
       )}
     </div>

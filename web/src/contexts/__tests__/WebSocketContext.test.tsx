@@ -155,13 +155,14 @@ for (const name of channelRecoveryManifest.requiredNames) {
 }
 
 function RecoveryConsumer({ sub }: { sub: SubscriptionMessage }) {
-  const { data, error, errorCode, fault } = useChannel(sub);
+  const { data, errorCode, channelFault, connectionFault } = useChannel(sub);
   return (
     <>
       <div data-testid="data">{JSON.stringify(data ?? null)}</div>
-      <div data-testid="error">{error ?? ''}</div>
+      <div data-testid="channel-fault">{channelFault?.message ?? ''}</div>
+      <div data-testid="connection-fault">{connectionFault?.message ?? ''}</div>
       <div data-testid="error-code">{errorCode ?? ''}</div>
-      <div data-testid="fault-operation">{fault?.operation.wire ?? ''}</div>
+      <div data-testid="fault-operation">{channelFault?.operation.wire ?? ''}</div>
     </>
   );
 }
@@ -279,11 +280,15 @@ describe('WebSocketContext store keying', () => {
       expect(JSON.parse(screen.getByTestId('data').textContent!)).toEqual(expected);
       expect(JSON.parse(screen.getByTestId('typed-detail').textContent!)).toEqual(fixture.topic === 'session_detail' ? expected : null);
       if (fixture.accepted) {
-        expect(screen.getByTestId('error')).toBeEmptyDOMElement();
+        expect(screen.getByTestId('channel-fault')).toBeEmptyDOMElement();
+        expect(screen.getByTestId('connection-fault')).toBeEmptyDOMElement();
         expect(screen.getByTestId('fault-operation')).toBeEmptyDOMElement();
       } else {
         const operation = faultOperationForMessageType(fixture.faultOperation);
-        const error = screen.getByTestId('error');
+        const error = screen.getByTestId('connection-fault');
+        // A refused or oversized frame is a provider-wide failure, never this
+        // channel's data failure.
+        expect(screen.getByTestId('channel-fault')).toBeEmptyDOMElement();
         expect(error).not.toBeEmptyDOMElement();
         expect(error).toHaveTextContent('the page kept its last data');
         expect(error).toHaveTextContent(operation.label);
@@ -315,7 +320,8 @@ describe('WebSocketContext store keying', () => {
         await act(async () => ws.simulateMessage({ type: fixture.topic, data: topicRecovery }));
       }
       expect(JSON.parse(screen.getByTestId('data').textContent!)).toEqual(topicRecovery);
-      expect(screen.getByTestId('error')).toBeEmptyDOMElement();
+      expect(screen.getByTestId('channel-fault')).toBeEmptyDOMElement();
+      expect(screen.getByTestId('connection-fault')).toBeEmptyDOMElement();
       expect(screen.getByTestId('fault-operation')).toBeEmptyDOMElement();
     });
   }
@@ -345,9 +351,10 @@ describe('WebSocketContext store keying', () => {
         });
       });
       expect(JSON.parse(screen.getByTestId('data').textContent!)).toBeNull();
-      expect(screen.getByTestId('error')).toHaveTextContent(testCase.errorMessage);
-      expect(screen.getByTestId('error')).toHaveTextContent('the server refused the');
-      expect(screen.getByTestId('error')).toHaveTextContent('the page kept its last data');
+      expect(screen.getByTestId('channel-fault')).toHaveTextContent(testCase.errorMessage);
+      expect(screen.getByTestId('channel-fault')).toHaveTextContent('the server refused the');
+      expect(screen.getByTestId('channel-fault')).toHaveTextContent('the page kept its last data');
+      expect(screen.getByTestId('connection-fault')).toBeEmptyDOMElement();
     expect(screen.getByTestId('error-code')).toHaveTextContent(testCase.errorCode ?? '');
       expect(screen.getByTestId('fault-operation')).not.toBeEmptyDOMElement();
 
@@ -355,7 +362,7 @@ describe('WebSocketContext store keying', () => {
         ws.simulateMessage({ type: testCase.topic, data: testCase.recoveryData });
       });
       expect(JSON.parse(screen.getByTestId('data').textContent!)).toEqual(testCase.recoveryData);
-      expect(screen.getByTestId('error')).toBeEmptyDOMElement();
+      expect(screen.getByTestId('channel-fault')).toBeEmptyDOMElement();
       expect(screen.getByTestId('fault-operation')).toBeEmptyDOMElement();
     });
   }
@@ -595,13 +602,14 @@ describe('WebSocketContext store keying', () => {
     expect(rendered).toBeNull();
   });
 
-  it('keeps a quality fault when an unrelated sessions frame succeeds', async () => {
+  it('keeps a provider-wide quality failure when an unrelated sessions frame succeeds', async () => {
     function QualityAndSessions() {
       const quality = useChannel(mkSub.quality());
       const sessions = useChannel(mkSub.sessions());
       return (
         <>
-          <div data-testid="quality-error">{quality.error ?? ''}</div>
+          <div data-testid="quality-connection-fault">{quality.connectionFault?.message ?? ''}</div>
+          <div data-testid="quality-channel-fault">{quality.channelFault?.message ?? ''}</div>
           <div data-testid="quality-operation">{quality.connectionFault?.operation.wire ?? ''}</div>
           <div data-testid="sessions-data">{JSON.stringify(sessions.data ?? null)}</div>
         </>
@@ -619,31 +627,35 @@ describe('WebSocketContext store keying', () => {
     const oversized = JSON.stringify({ type: 'quality', data: 'x'.repeat(MAX_FRAME_BYTES) });
     await act(async () => ws.simulateRawMessage(oversized));
 
-    expect(screen.getByTestId('quality-error')).toHaveTextContent('the quality update was');
-    expect(screen.getByTestId('quality-error')).toHaveTextContent('the app accepts up to 8 MiB');
+    expect(screen.getByTestId('quality-connection-fault')).toHaveTextContent('the quality update was');
+    expect(screen.getByTestId('quality-connection-fault')).toHaveTextContent('the app accepts up to 8 MiB');
+    // An oversized frame is a provider-wide failure, not the quality channel's.
+    expect(screen.getByTestId('quality-channel-fault')).toBeEmptyDOMElement();
     expect(screen.getByTestId('quality-operation')).toHaveTextContent('quality-page');
 
     // The unrelated success must not erase the quality frame's failure.
     await act(async () => ws.simulateMessage({ type: 'sessions', data: { sessions: [] } }));
     expect(JSON.parse(screen.getByTestId('sessions-data').textContent!)).toEqual({ sessions: [] });
-    expect(screen.getByTestId('quality-error')).toHaveTextContent('the quality update was');
+    expect(screen.getByTestId('quality-connection-fault')).toHaveTextContent('the quality update was');
     expect(screen.getByTestId('quality-operation')).toHaveTextContent('quality-page');
 
     // The same operation's next good frame clears it.
     await act(async () => ws.simulateMessage({ type: 'quality', data: { sessions: [] } }));
-    expect(screen.getByTestId('quality-error')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('quality-connection-fault')).toBeEmptyDOMElement();
     expect(screen.getByTestId('quality-operation')).toBeEmptyDOMElement();
   });
 
-  it('never renders session A\'s fault on session B and never clears A on B\'s success', async () => {
+  it('never renders session A\'s channel fault on session B and never clears A on B\'s success', async () => {
     function TwoSessions() {
       const a = useChannel(mkSub.sessionDetail('session-a'));
       const b = useChannel(mkSub.sessionDetail('session-b'));
       return (
         <>
-          <div data-testid="a-error">{a.error ?? ''}</div>
-          <div data-testid="a-fault">{a.fault?.operation.wire ?? ''}</div>
-          <div data-testid="b-error">{b.error ?? ''}</div>
+          <div data-testid="a-channel-fault">{a.channelFault?.message ?? ''}</div>
+          <div data-testid="a-fault">{a.channelFault?.operation.wire ?? ''}</div>
+          <div data-testid="a-connection-fault">{a.connectionFault?.message ?? ''}</div>
+          <div data-testid="b-channel-fault">{b.channelFault?.message ?? ''}</div>
+          <div data-testid="b-connection-fault">{b.connectionFault?.message ?? ''}</div>
         </>
       );
     }
@@ -664,26 +676,29 @@ describe('WebSocketContext store keying', () => {
         message: 'session a is unavailable until the store is repaired',
       });
     });
-    expect(screen.getByTestId('a-error')).toHaveTextContent('session a is unavailable');
+    expect(screen.getByTestId('a-channel-fault')).toHaveTextContent('session a is unavailable');
     expect(screen.getByTestId('a-fault')).toHaveTextContent('session-detail-read');
-    expect(screen.getByTestId('b-error')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('b-channel-fault')).toBeEmptyDOMElement();
+    // A topic error is A's channel fault; it is never a provider-wide failure.
+    expect(screen.getByTestId('a-connection-fault')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('b-connection-fault')).toBeEmptyDOMElement();
 
     const payloadB = { ...rawMessages.legacyDetail, id: 'session-b' };
     await act(async () => ws.simulateMessage({ type: 'session_detail', data: payloadB }));
-    expect(screen.getByTestId('a-error')).toHaveTextContent('session a is unavailable');
+    expect(screen.getByTestId('a-channel-fault')).toHaveTextContent('session a is unavailable');
 
     const payloadA = { ...rawMessages.legacyDetail, id: 'session-a' };
     await act(async () => ws.simulateMessage({ type: 'session_detail', data: payloadA }));
-    expect(screen.getByTestId('a-error')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('a-channel-fault')).toBeEmptyDOMElement();
     expect(screen.getByTestId('a-fault')).toBeEmptyDOMElement();
   });
 
-  it('a retry keeps a fault on failure and clears it on success', async () => {
+  it('a retry keeps a channel fault on failure and clears it on success', async () => {
     let refresh: () => void = () => undefined;
     function RetryingConsumer() {
       const channel = useChannel(mkSub.sessions());
       refresh = channel.refresh;
-      return <div data-testid="error">{channel.error ?? ''}</div>;
+      return <div data-testid="channel-fault">{channel.channelFault?.message ?? ''}</div>;
     }
     render(
       <WebSocketProvider>
@@ -696,17 +711,17 @@ describe('WebSocketContext store keying', () => {
     await act(async () => {
       ws.simulateMessage({ type: 'error', topic: ChannelTopic.Sessions, message: 'the store is locked' });
     });
-    expect(screen.getByTestId('error')).toHaveTextContent('the server refused the sessions read');
+    expect(screen.getByTestId('channel-fault')).toHaveTextContent('the server refused the sessions read');
 
     await act(async () => refresh());
     await act(async () => {
       ws.simulateMessage({ type: 'error', topic: ChannelTopic.Sessions, message: 'the store is still locked' });
     });
-    expect(screen.getByTestId('error')).toHaveTextContent('the store is still locked');
+    expect(screen.getByTestId('channel-fault')).toHaveTextContent('the store is still locked');
 
     await act(async () => refresh());
     await act(async () => ws.simulateMessage({ type: 'sessions', data: { sessions: [] } }));
-    expect(screen.getByTestId('error')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('channel-fault')).toBeEmptyDOMElement();
   });
 
   it('a reconnect clears the connection fault and keeps a channel fault', async () => {
@@ -714,8 +729,8 @@ describe('WebSocketContext store keying', () => {
       const dashboard = useChannel(mkSub.dashboard());
       return (
         <>
-          <div data-testid="connection-error">{dashboard.connectionFault?.message ?? ''}</div>
-          <div data-testid="channel-error">{dashboard.error ?? ''}</div>
+          <div data-testid="connection-fault">{dashboard.connectionFault?.message ?? ''}</div>
+          <div data-testid="channel-fault">{dashboard.channelFault?.message ?? ''}</div>
         </>
       );
     }
@@ -730,18 +745,18 @@ describe('WebSocketContext store keying', () => {
     await act(async () => {
       ws.simulateRawMessage(JSON.stringify({ type: 'quality', data: 'x'.repeat(MAX_FRAME_BYTES) }));
     });
-    expect(screen.getByTestId('connection-error')).toHaveTextContent('the quality update was');
+    expect(screen.getByTestId('connection-fault')).toHaveTextContent('the quality update was');
 
     await act(async () => {
       ws.simulateMessage({ type: 'error', topic: ChannelTopic.Dashboard, message: 'the store is locked' });
     });
-    expect(screen.getByTestId('channel-error')).toHaveTextContent('the server refused the dashboard read');
+    expect(screen.getByTestId('channel-fault')).toHaveTextContent('the server refused the dashboard read');
 
     await act(async () => ws.simulateClose());
-    expect(screen.getByTestId('connection-error')).toHaveTextContent('the connection to peasant closed');
+    expect(screen.getByTestId('connection-fault')).toHaveTextContent('the connection to peasant closed');
 
     await act(async () => ws.simulateOpen());
-    expect(screen.getByTestId('connection-error')).toBeEmptyDOMElement();
-    expect(screen.getByTestId('channel-error')).toHaveTextContent('the server refused the dashboard read');
+    expect(screen.getByTestId('connection-fault')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('channel-fault')).toHaveTextContent('the server refused the dashboard read');
   });
 });

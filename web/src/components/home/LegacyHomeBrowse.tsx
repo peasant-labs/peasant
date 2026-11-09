@@ -25,7 +25,7 @@ const CHANNELS: ['sessions'] = ['sessions'];
  * only.
  */
 export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped' | 'flat' }) {
-  const { data, connected, error } = useChannel<SessionsPayload>(CHANNELS);
+  const { data, connected, channelFault } = useChannel<SessionsPayload>(CHANNELS);
   const titles = useSessionTitles();
   const sessions = useMemo(() => data?.sessions ?? [], [data]);
   const [summaries, setSummaries] = useState<DecodedProjectSummariesPayload | null>(() => cachedProjectSummaries());
@@ -33,7 +33,7 @@ export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped
   const [failure, setFailure] = useState<unknown>(null);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
-    if (view !== 'projects' || error) return;
+    if (view !== 'projects' || channelFault) return;
     let active = true;
     setSettled(false);
     void fetchProjectSummaries().then(next => {
@@ -46,8 +46,11 @@ export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped
       setFailure(cause);
     }).finally(() => { if (active) setSettled(true); });
     return () => { active = false; };
-  }, [view, revision, error]);
-  const blocked = !!error;
+  }, [view, revision, channelFault]);
+  // Only THIS channel's topic error blocks the browse. A provider-wide socket
+  // or frame failure is not this list's failure: the app-level banner carries
+  // it, and the project read continues from its own REST route.
+  const blocked = !!channelFault;
   const rows = blocked ? [] : summaries?.projects.length ? rowsFromSummaries(summaries) : rowsFromSessions(sessions);
   const totalSessions = sessions.length || rows.reduce((sum, row) => sum + row.sessions, 0);
   const recorded = rows.reduce((sum, row) => sum + (row.recordedFiles ?? 0), 0);
@@ -63,7 +66,7 @@ export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped
     { key: 'open', label: 'unmerged branches', value: hasOpen ? openChanges.toLocaleString() : '—', sub: times.length ? `last worked ${formatRelative(Math.max(...times))}` : undefined, icon: GitBranch },
   ];
   return <div className="flex flex-col gap-4" data-browse-view={view}>
-    {error && <FeedbackPanel variant="error">{discoveryErrorMessage(error)}</FeedbackPanel>}
+    {channelFault && <FeedbackPanel variant="error">{channelFault.message}</FeedbackPanel>}
     {failure != null && <div className="flex flex-col items-start gap-3">
       <FeedbackPanel variant="error">{discoveryErrorMessage(failure)}</FeedbackPanel>
       <Button variant="secondary" size="sm" onClick={() => setRevision(value => value + 1)}>retry project discovery</Button>

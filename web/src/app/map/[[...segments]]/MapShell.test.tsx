@@ -37,7 +37,12 @@ const ws = vi.hoisted(() => ({
 }));
 
 vi.mock('@/contexts/WebSocketContext', () => ({
-  useChannel: () => ({ data: ws.data, connected: ws.connected, error: ws.error, errorCode: ws.errorCode }),
+  useChannel: () => ({
+    data: ws.data,
+    connected: ws.connected,
+    channelFault: ws.error ? { message: ws.error } : null,
+    errorCode: ws.errorCode,
+  }),
 }));
 
 type CodeMapProps = ComponentProps<typeof CodeMapComposition>;
