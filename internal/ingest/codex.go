@@ -183,6 +183,16 @@ func (a *CodexAdapter) enumerateCodexRollouts(ctx context.Context, root Resolved
 			return ctx.Err()
 		}
 		if err != nil {
+			if samePath(path, root) && errors.Is(err, fs.ErrNotExist) {
+				// A configured root that is not installed holds no rollout.
+				// Most users have one or two harnesses, not every one, so an
+				// absent tree is the normal case and not a short walk: there is
+				// nothing under it to enumerate and nothing there to miss. The
+				// root contributes no path, and a rollout recorded under it by
+				// an earlier run is pruned for the same reason maintenance
+				// prunes it — its file is gone.
+				return nil
+			}
 			// Keep walking, but name a directory permissions hid so the
 			// run does not just report fewer sessions.
 			a.noteUnreadable(path, err)
@@ -221,6 +231,13 @@ func (a *CodexAdapter) enumerateCodexRollouts(ctx context.Context, root Resolved
 		return nil, false, fmt.Errorf("CodexAdapter.Discover: walk %q: %w", root, walkErr)
 	}
 	return sources, complete, nil
+}
+
+// samePath reports whether two cleaned filesystem paths name the same location.
+// The walk names a root exactly as it was called, so this only guards against a
+// filesystem that reports the root in another spelling.
+func samePath(path string, root ResolvedPath) bool {
+	return filepath.Clean(path) == filepath.Clean(root.String())
 }
 
 // codexSessionBuild is one rollout file after the shared build.
@@ -705,8 +722,7 @@ func codexParentThreadID(data []byte) SessionID {
 	return id
 }
 
-// codexSessionIDFromFilename extracts the session id a rollout file name
-// carries: the trailing UUID of rollout-{ISO-timestamp}-{uuid}.jsonl. The ISO
+// codexSessionIDFromFilename extracts the session id a rollout file name// carries: the trailing UUID of rollout-{ISO-timestamp}-{uuid}.jsonl. The ISO
 // timestamp uses hyphens for time separators
 // (rollout-2026-05-29T21-14-24-{uuid}.jsonl), so the last five
 // hyphen-delimited segments are the UUID (8-4-4-4-12). It reports false for a
