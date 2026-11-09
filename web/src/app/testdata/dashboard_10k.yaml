@@ -1,0 +1,117 @@
+# A live-scale analytics summary at page 1 of 25. The dashboard renders from
+# `payload={{ analytics: summary }}`; every section in
+# PROJECT_OVERVIEW_SECTION_DEFS must draw from this one bundle, so the page
+# shows 10,000 sessions without any surface reading the full library. The
+# values are a presentation fixture, not a store export.
+page: 1
+perPage: 25
+total: 10000
+summary:
+  totalSessions: 10000
+  totalContributors: 1
+  totalProjects: 5
+  sessionsPerWeek:
+    - {week: "2026-01-05", count: 385}
+    - {week: "2026-01-12", count: 385}
+    - {week: "2026-01-19", count: 385}
+    - {week: "2026-01-26", count: 385}
+    - {week: "2026-02-02", count: 385}
+    - {week: "2026-02-09", count: 385}
+    - {week: "2026-02-16", count: 385}
+    - {week: "2026-02-23", count: 385}
+    - {week: "2026-03-02", count: 385}
+    - {week: "2026-03-09", count: 385}
+    - {week: "2026-03-16", count: 385}
+    - {week: "2026-03-23", count: 385}
+    - {week: "2026-03-30", count: 385}
+    - {week: "2026-04-06", count: 385}
+    - {week: "2026-04-13", count: 385}
+    - {week: "2026-04-20", count: 385}
+    - {week: "2026-04-27", count: 385}
+    - {week: "2026-05-04", count: 385}
+    - {week: "2026-05-11", count: 385}
+    - {week: "2026-05-18", count: 385}
+    - {week: "2026-05-25", count: 385}
+    - {week: "2026-06-01", count: 385}
+    - {week: "2026-06-08", count: 385}
+    - {week: "2026-06-15", count: 385}
+    - {week: "2026-06-22", count: 385}
+    - {week: "2026-06-29", count: 375}
+  weeklyActiveContributors:
+    - {week: "2026-01-05", contributors: 1}
+    - {week: "2026-01-12", contributors: 1}
+    - {week: "2026-01-19", contributors: 1}
+    - {week: "2026-01-26", contributors: 1}
+    - {week: "2026-02-02", contributors: 1}
+    - {week: "2026-02-09", contributors: 1}
+    - {week: "2026-02-16", contributors: 1}
+    - {week: "2026-02-23", contributors: 1}
+    - {week: "2026-03-02", contributors: 1}
+    - {week: "2026-03-09", contributors: 1}
+    - {week: "2026-03-16", contributors: 1}
+    - {week: "2026-03-23", contributors: 1}
+    - {week: "2026-03-30", contributors: 1}
+    - {week: "2026-04-06", contributors: 1}
+    - {week: "2026-04-13", contributors: 1}
+    - {week: "2026-04-20", contributors: 1}
+    - {week: "2026-04-27", contributors: 1}
+    - {week: "2026-05-04", contributors: 1}
+    - {week: "2026-05-11", contributors: 1}
+    - {week: "2026-05-18", contributors: 1}
+    - {week: "2026-05-25", contributors: 1}
+    - {week: "2026-06-01", contributors: 1}
+    - {week: "2026-06-08", contributors: 1}
+    - {week: "2026-06-15", contributors: 1}
+    - {week: "2026-06-22", contributors: 1}
+    - {week: "2026-06-29", contributors: 1}
+  returningContributorRate: {total: 1, returning: 1, rate: 1}
+  longestStreak: {weeks: 26, startWeek: "2026-01-05", endWeek: "2026-06-29"}
+  newContributorVelocity:
+    - {week: "2026-01-05", newContributors: 1}
+  sessionToCommitRate: {total: 10000, withCommit: 6400, rate: 0.64}
+  avgDurationPerActiveWeek:
+    - {week: "2026-01-05", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-01-12", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-01-19", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-01-26", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-02-02", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-02-09", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-02-16", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-02-23", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-03-02", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-03-09", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-03-16", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-03-23", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-03-30", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-04-06", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-04-13", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-04-20", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-04-27", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-05-04", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-05-11", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-05-18", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-05-25", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-06-01", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-06-08", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-06-15", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-06-22", avgDurationMins: 42.5, sessions: 385}
+    - {week: "2026-06-29", avgDurationMins: 42.5, sessions: 375}
+  outcomeDistribution: {resolved: 8000, partial: 1200, failed: 600, unknown: 200, total: 10000}
+  sessionStats:
+    durationMins: {count: 10000, median: 38, p90: 121}
+    totalTokens: {count: 10000, median: 91200, p90: 310400}
+    turnCount: {count: 10000, median: 22, p90: 71}
+    toolCallCount: {count: 10000, median: 35, p90: 120}
+  perContributorBreakdown:
+    - contributorId: "local user"
+      sessions: 10000
+      activeWeeks: 26
+      totalTokens: 912000000
+      totalDurationMins: 425000
+      totalTurns: 220000
+      totalToolCalls: 350000
+      sessionsWithCommit: 6400
+      totalCommits: 7200
+      outcomes: {resolved: 8000, partial: 1200, failed: 600, unknown: 200, total: 10000}
+      firstSeen: "2026-01-05"
+      lastSeen: "2026-06-29"
