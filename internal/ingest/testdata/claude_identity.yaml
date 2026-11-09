@@ -572,13 +572,14 @@ cases:
   - name: native subagent with unmarked request records
     capture_status: incomplete
     capture_failure: unknown_data_retained
-    artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+    artifact: -workspace/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_example/agent-abc123.jsonl
     parent: 11111111-1111-4111-8111-111111111111
     relationship: started_by
     target: 11111111-1111-4111-8111-111111111111
     files:
       - *source
-      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+      - *continuation
+      - path: -workspace/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_example/agent-abc123.jsonl
         lines:
           - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"uuid":"agent-task","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
           - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
