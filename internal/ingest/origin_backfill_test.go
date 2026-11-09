@@ -536,7 +536,7 @@ func TestResolveStoredOriginsWritesAVerdictIntoEveryRow(t *testing.T) {
 			ctx := context.Background()
 			world := newStoredBackfillWorld(t, tc)
 
-			report, err := world.resolver(t, nil).ResolveStoredOrigins(ctx, storedBackfillRuleVersion)
+			report, err := world.resolver(t, nil).ResolveStoredOrigins(ctx, storedBackfillRuleVersion, ingest.AllStoredSessions())
 			if err != nil {
 				t.Fatalf("first pass: %v", err)
 			}
@@ -548,7 +548,7 @@ func TestResolveStoredOriginsWritesAVerdictIntoEveryRow(t *testing.T) {
 			// Every arm is also an idempotence arm: a further pass over a store
 			// whose verdicts are already right must persist nothing, including
 			// for the rows it has to keep re-examining forever.
-			second, err := world.resolver(t, nil).ResolveStoredOrigins(ctx, storedBackfillRuleVersion)
+			second, err := world.resolver(t, nil).ResolveStoredOrigins(ctx, storedBackfillRuleVersion, ingest.AllStoredSessions())
 			if err != nil {
 				t.Fatalf("second pass: %v", err)
 			}
@@ -595,7 +595,7 @@ func TestResolveStoredOriginsLeavesEveryRowRetryableWhenNoTranscriptSurvives(t *
 			ctx := context.Background()
 			world := newStoredBackfillWorld(t, tc)
 
-			report, err := world.resolver(t, nil).ResolveStoredOrigins(ctx, storedBackfillRuleVersion)
+			report, err := world.resolver(t, nil).ResolveStoredOrigins(ctx, storedBackfillRuleVersion, ingest.AllStoredSessions())
 			if err != nil {
 				t.Fatalf("resolve with no readable transcript: %v", err)
 			}
@@ -665,7 +665,7 @@ func TestResolveStoredOriginsResumesAfterAnInterruptedPass(t *testing.T) {
 			world := newStoredBackfillWorld(t, tc)
 
 			interrupted := &interruptibleOriginStore{Store: world.database, failAfter: 1}
-			partial, err := world.resolver(t, interrupted).ResolveStoredOrigins(ctx, storedBackfillRuleVersion)
+			partial, err := world.resolver(t, interrupted).ResolveStoredOrigins(ctx, storedBackfillRuleVersion, ingest.AllStoredSessions())
 			if !errors.Is(err, errOriginWriteInterrupted) {
 				t.Fatalf("the interrupted pass returned %v, want the write failure", err)
 			}
@@ -694,7 +694,7 @@ func TestResolveStoredOriginsResumesAfterAnInterruptedPass(t *testing.T) {
 			}
 
 			// Resuming reaches exactly the state an uninterrupted pass reaches.
-			resumed, err := world.resolver(t, nil).ResolveStoredOrigins(ctx, storedBackfillRuleVersion)
+			resumed, err := world.resolver(t, nil).ResolveStoredOrigins(ctx, storedBackfillRuleVersion, ingest.AllStoredSessions())
 			if err != nil {
 				t.Fatalf("resumed pass: %v", err)
 			}
@@ -721,7 +721,7 @@ func TestResolveStoredOriginsRefusesAnUnusableRuleVersion(t *testing.T) {
 		t.Fatalf("load stored-origin backfill fixture: %v", err)
 	}
 	world := newStoredBackfillWorld(t, fixture.Cases[0])
-	if _, err := world.resolver(t, nil).ResolveStoredOrigins(context.Background(), 0); err == nil {
+	if _, err := world.resolver(t, nil).ResolveStoredOrigins(context.Background(), 0, ingest.AllStoredSessions()); err == nil {
 		t.Fatal("a pass at rule version zero was accepted; it can only ever report success over an unjudged store")
 	}
 }
