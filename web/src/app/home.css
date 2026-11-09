@@ -125,6 +125,47 @@
 /* the session table: a title, then the agent and its size */
 .home-list { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
 .home-table { margin-top: 0; }
+
+/* One project group header. It lives inside whichever column is first on the
+   row, so hiding the session column never hides the grouping. User content
+   (the project name) keeps its case. */
+.home-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink-2);
+}
+.home-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-transform: none;
+  cursor: pointer;
+}
+.home-group-toggle::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-top: 0.35em solid transparent;
+  border-bottom: 0.35em solid transparent;
+  border-left: 0.45em solid currentColor;
+  transform: rotate(90deg);
+}
+.home-group-toggle[aria-expanded='false']::before { transform: none; }
+.home-group-toggle:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 /* the page title names the table; its caption stays for screen readers */
 .home-table .tbl-caption {
   position: absolute;

@@ -121,7 +121,7 @@ describe('device view storage', () => {
   };
 
   it('reads the default when nothing is stored', () => {
-    expect(readHomeDeviceView(storage())).toEqual({ visibleColumns: null, open: [] });
+    expect(readHomeDeviceView(storage())).toEqual({ visibleColumns: null, open: null });
   });
 
   it('round-trips the columns and open groups', () => {
@@ -134,12 +134,12 @@ describe('device view storage', () => {
     const store = storage();
     writeHomeDeviceView({ visibleColumns: ['session'], open: ['project:alpha'] }, store);
     clearHomeOpenGroups(store);
-    expect(readHomeDeviceView(store)).toEqual({ visibleColumns: ['session'], open: [] });
+    expect(readHomeDeviceView(store)).toEqual({ visibleColumns: ['session'], open: null });
   });
 
   it('discards a value that is not the shape this app writes', () => {
     const store = storage();
     store.setItem('peasant.home', JSON.stringify({ visibleColumns: ['not-a-column'], open: 'nope' }));
-    expect(readHomeDeviceView(store)).toEqual({ visibleColumns: null, open: [] });
+    expect(readHomeDeviceView(store)).toEqual({ visibleColumns: null, open: null });
   });
 });

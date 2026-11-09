@@ -20,6 +20,8 @@ requiredNames:
   - claude-teammate-line
   - no-claude-teammate-line
   - refresh-restores-view-and-page
+  - interleaved-project-grouping
+  - hidden-session-column-grouping
 publish:
   request: { sessionIds: [root-0], redactionLevel: standard }
   response: { errors: 0, new: 1, updated: 0, skipped: 0, sessions: [{ sessionId: root-0, status: new }] }
@@ -123,3 +125,20 @@ cases:
       groupBy: none
     roots: 60
     children: 0
+  - name: interleaved-project-grouping
+    # The page order is A1, B1, A2. Stable partitioning must render header A,
+    # A1, A2, header B, B1 so A2 never reads under B.
+    search: 'groupBy=project'
+    rows:
+      - {id: a1, project: alpha}
+      - {id: b1, project: beta}
+      - {id: a2, project: alpha}
+  - name: hidden-session-column-grouping
+    # The URL carries the grouping and the device carries the columns. With the
+    # session column hidden, the project header still renders in the first
+    # remaining column.
+    search: 'groupBy=project'
+    visibleColumns: [project, state]
+    rows:
+      - {id: a1, project: alpha}
+      - {id: b1, project: beta}

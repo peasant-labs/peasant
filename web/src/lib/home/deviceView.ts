@@ -9,13 +9,17 @@ import { HOME_COLUMN_IDS, isHomeColumnId, type HomeColumnId } from '@/components
 export interface HomeDeviceView {
   /** The columns the reader can see, in table order. `null` means the default set. */
   readonly visibleColumns: readonly HomeColumnId[] | null;
-  /** The qualified group ids whose rows are open. */
-  readonly open: readonly string[];
+  /**
+   * The qualified group ids whose rows are open. `null` means no preference has
+   * been stored, so every group starts open. An empty array means the reader
+   * collapsed every group.
+   */
+  readonly open: readonly string[] | null;
 }
 
 export const HOME_DEVICE_KEY = 'peasant.home';
 
-const DEFAULT_DEVICE_VIEW: HomeDeviceView = Object.freeze({ visibleColumns: null, open: [] });
+const DEFAULT_DEVICE_VIEW: HomeDeviceView = Object.freeze({ visibleColumns: null, open: null });
 
 type ReadableStorage = Pick<Storage, 'getItem'>;
 type WritableStorage = Pick<Storage, 'getItem' | 'setItem'>;
@@ -42,8 +46,11 @@ export function readHomeDeviceView(storage: ReadableStorage | null = storageOrNu
     : null;
   const open = Array.isArray(record.open) && record.open.every((id) => typeof id === 'string')
     ? (record.open as string[])
-    : [];
-  return Object.freeze({ visibleColumns: columns === null ? null : Object.freeze(columns), open: Object.freeze(open) });
+    : null;
+  return Object.freeze({
+    visibleColumns: columns === null ? null : Object.freeze(columns),
+    open: open === null ? null : Object.freeze(open),
+  });
 }
 
 /** Write the device view. A storage failure is not fatal: the next read falls back to the default. */
@@ -63,7 +70,7 @@ export function writeHomeDeviceView(view: HomeDeviceView, storage: WritableStora
  */
 export function clearHomeOpenGroups(storage: WritableStorage | null = storageOrNull()): void {
   const view = readHomeDeviceView(storage);
-  writeHomeDeviceView({ visibleColumns: view.visibleColumns, open: [] }, storage);
+  writeHomeDeviceView({ visibleColumns: view.visibleColumns, open: null }, storage);
 }
 
 /** The column ids in their default order, for the first render before a reader hides one. */

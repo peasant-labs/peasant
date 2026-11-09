@@ -17,7 +17,7 @@ import type { LocalSyncProjectOption } from '@/lib/api/home';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { displayProject } from '@/lib/quality/utils';
 import { newProjectHash, type ProjectHash } from '@peasant-labs/schema';
-import { clearHomeOpenGroups, readHomeDeviceView } from '@/lib/home/deviceView';
+import { clearHomeOpenGroups, readHomeDeviceView, writeHomeDeviceView, type HomeDeviceView } from '@/lib/home/deviceView';
 import { HOME_COLUMN_IDS, type HomeSavedView } from '@/components/home/homeColumns';
 import {
   ALL_BROWSE_VIEWS,
@@ -97,6 +97,9 @@ export default function HomePage() {
 
 function HomeView() {
   const [view, setView] = useState<HomeViewState>(readInitialView);
+  // The device half is read once, outside the URL memo: a device change is not
+  // a URL change, and a static export must not hydrate a different value.
+  const [deviceView, setDeviceView] = useState<HomeDeviceView>(() => readHomeDeviceView());
   const viewRef = useRef(view);
   viewRef.current = view;
   const [queryInput, setQueryInput] = useState(view.query);
@@ -117,8 +120,10 @@ function HomeView() {
     if (sameView(next, current)) return;
     if (groupingChanged) {
       // The grouping is URL-owned; the open groups are device-owned. A new
-      // grouping names different groups, so its collapsed set starts empty.
+      // grouping names different groups, so its collapsed set returns to the
+      // default (all open).
       clearHomeOpenGroups();
+      setDeviceView(readHomeDeviceView());
     }
     viewRef.current = next;
     setView(next);
@@ -173,14 +178,15 @@ function HomeView() {
 
   // The table receives ONE saved view: the URL-owned grouping composed with
   // the device-owned columns and open groups.
-  const tableState = useMemo<HomeSavedView>(() => {
-    const device = readHomeDeviceView();
-    return {
-      groupBy: view.groupBy,
-      visibleColumns: device.visibleColumns ?? HOME_COLUMN_IDS,
-      open: device.open,
-    };
-  }, [view.groupBy]);
+  const tableState = useMemo<HomeSavedView>(() => ({
+    groupBy: view.groupBy,
+    visibleColumns: deviceView.visibleColumns ?? HOME_COLUMN_IDS,
+    open: deviceView.open,
+  }), [view.groupBy, deviceView]);
+  const onOpenChange = useCallback((open: readonly string[] | null) => {
+    writeHomeDeviceView({ visibleColumns: deviceView.visibleColumns, open });
+    setDeviceView(readHomeDeviceView());
+  }, [deviceView.visibleColumns]);
 
   const rows = useMemo(() => {
     const seen = new Set<string>();
@@ -303,6 +309,7 @@ function HomeView() {
             pageSize={view.pageSize}
             total={home.total}
             viewState={tableState}
+            onOpenChange={onOpenChange}
             onPageChange={next => commit({ page: next })}
             onPageSizeChange={size => commit({ pageSize: size, page: 1 })}
             loading={home.loading && home.rootPage === null}

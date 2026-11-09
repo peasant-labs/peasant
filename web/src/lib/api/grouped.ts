@@ -15,6 +15,7 @@
  */
 
 import {
+  PageSize,
   isSessionListItemKind,
   zLocalHelperMembersPayload,
   zLocalSessionListPayload,
@@ -276,7 +277,7 @@ export function groupedSearchMatches(payload: LocalSessionListPayload): SearchRe
  * possible; paging still follows the server-reported total, so a group larger
  * than one page is never truncated.
  */
-export const SEARCH_MEMBER_PER_PAGE = 25;
+export const SEARCH_MEMBER_PER_PAGE = PageSize.P25;
 
 /**
  * One navigable search hit's identity. A hit is unique per (session, entry), so

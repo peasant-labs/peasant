@@ -8,6 +8,7 @@ import (
 	"fmt"
 	regexp "github.com/wasilibs/go-re2"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -530,11 +531,13 @@ func readIndexSQL(t *testing.T, conn *sqlite.Conn, name string) string {
 	return sql
 }
 
-// TestParentStateProjectionMatchesParentRenderer pins the frozen migration text
-// to the current parent rule. A changed renderer fails here until a new
-// migration redefines the triggers; editing the shipped migration instead is
-// refused by the fresh-vs-migrated schema equality test.
-func TestParentStateProjectionMatchesParentRenderer(t *testing.T) {
+// TestParentStateTriggerTextMatchesGolden pins the exact trigger SQL to a
+// checked-in golden file. It is deliberately NOT a comparison against
+// LogicalParentSQL: that would compare the generator to itself and pass through
+// any rule change. The golden is the reviewed text; a rule change updates the
+// golden in the same diff and, once V70 has shipped, lands as a NEW migration.
+// Update it deliberately with UPDATE_PARENT_STATE_TRIGGER_GOLDEN=1.
+func TestParentStateTriggerTextMatchesGolden(t *testing.T) {
 	t.Parallel()
 	s, _ := openGenerationStore(t)
 	conn, err := s.pool.Take(context.Background())
@@ -542,8 +545,9 @@ func TestParentStateProjectionMatchesParentRenderer(t *testing.T) {
 		t.Fatalf("Pool.Take: %v", err)
 	}
 	defer s.pool.Put(conn)
+	var text strings.Builder
 	for _, name := range []string{
-		"sessions_parent_state_ai", "sessions_parent_state_au",
+		"sessions_parent_state_ai", "sessions_parent_state_au", "sessions_parent_state_ad",
 		"session_relationship_evidence_parent_state_ai",
 		"session_relationship_evidence_parent_state_au",
 		"session_relationship_evidence_parent_state_ad",
@@ -551,13 +555,23 @@ func TestParentStateProjectionMatchesParentRenderer(t *testing.T) {
 		"session_publication_metadata_parent_state_au",
 		"session_publication_metadata_parent_state_ad",
 	} {
-		trigger := readTriggerSQL(t, conn, name)
-		if !strings.Contains(trigger, ParentUnresolvedSQL("sessions")) {
-			t.Errorf("trigger %s no longer carries the current ParentUnresolvedSQL expression; the parent rule changed and the trigger needs a new migration", name)
+		text.WriteString("-- " + name + "\n")
+		text.WriteString(readTriggerSQL(t, conn, name))
+		text.WriteString("\n\n")
+	}
+	path := filepath.Join("testdata", "parent_state_triggers.golden.sql")
+	if os.Getenv("UPDATE_PARENT_STATE_TRIGGER_GOLDEN") == "1" {
+		if err := os.WriteFile(path, []byte(text.String()), 0o644); err != nil {
+			t.Fatalf("write the parent-state trigger golden: %v", err)
 		}
-		if !strings.Contains(trigger, LogicalParentSQL("sessions")) {
-			t.Errorf("trigger %s no longer carries the current LogicalParentSQL expression; the parent rule changed and the trigger needs a new migration", name)
-		}
+		return
+	}
+	golden, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the parent-state trigger golden: %v", err)
+	}
+	if string(golden) != text.String() {
+		t.Fatalf("the parent-state trigger text differs from testdata/parent_state_triggers.golden.sql; the parent rule or a trigger changed. Review the new text and update the golden deliberately with UPDATE_PARENT_STATE_TRIGGER_GOLDEN=1, then land a new migration if V70 has shipped")
 	}
 }
 

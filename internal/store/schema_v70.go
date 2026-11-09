@@ -29,12 +29,11 @@ package store
 // transcript read, and the caches compare it; it is the integer rendered as a
 // decimal string on the wire.
 //
-// The trigger bodies are FROZEN MIGRATION TEXT, not shared renderers: they
-// embed the LogicalParentSQL/ParentUnresolvedSQL expressions as they stood when
-// this migration shipped, and editing them rewrites an already-applied
-// migration. A change to the parent rule lands as a NEW migration that
-// redefines these triggers; TestParentStateProjectionMatchesParentRenderer and
-// the seeded drift test fail until it does.
+// The trigger bodies are generated migration text. testdata/parent_state_triggers.golden.sql
+// pins their exact SQL, and the seeded drift test proves the stored column
+// matches the rule. A parent-rule change updates the golden in the same reviewed
+// diff and, once V70 has shipped, lands as a NEW migration that redefines the
+// triggers rather than editing an applied one.
 //
 // Re-entry: SQLite does not fire a trigger recursively by default. The
 // migrations leave recursive_triggers off and must not enable it. The two
