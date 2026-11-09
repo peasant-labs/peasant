@@ -4,14 +4,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchHomeSessions, fetchHomeProjects, SYNC_HOME_PATH, type LocalSyncSessionPage, type SyncSessionsQuery, type LocalSyncProjectOption, type PageToken } from '@/lib/api/home';
 import { DiscoveryErrorCode, DiscoveryRequestError } from '@/lib/api/errors';
 import { fetchVillageAuth } from '@/lib/api/settings';
+import {
+  faultFromDiscoveryError,
+  FaultOperation,
+  HttpEvidence,
+  type WebFault,
+} from '@/lib/faults';
 
 export interface HomePages {
   pages: LocalSyncSessionPage[];
   loading: boolean;
   error: unknown;
+  /** The typed fault for this read, with its code kept on `HttpEvidence`. */
+  fault: WebFault | null;
   retryToken?: PageToken;
 }
-const empty = (): HomePages => ({ pages: [], loading: false, error: null });
+const empty = (): HomePages => ({ pages: [], loading: false, error: null, fault: null });
 const ROOT = '';
 
 function visibleExpanded(groups: ReadonlyMap<string, HomePages>, opened: ReadonlySet<string>) {
@@ -32,6 +40,7 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [projects, setProjects] = useState<LocalSyncProjectOption[] | null>(null);
   const [projectError, setProjectError] = useState<unknown>(null);
+  const [projectFault, setProjectFault] = useState<WebFault | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const scopeRestarted = useRef(false);
   const state = useRef(groups);
@@ -54,6 +63,7 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
     publishPending.current = false;
     setProjects(null);
     setProjectError(null);
+    setProjectFault(null);
     setProjectsLoading(false);
     opened.current = new Set();
     setExpanded(opened.current);
@@ -67,7 +77,13 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
   // is not a browsing boundary, and an error's code does not change that.
   const fail = useCallback((error: unknown, parent: string, retryToken?: PageToken) => {
     const next = new Map(state.current);
-    next.set(parent, { ...(next.get(parent) ?? empty()), loading: false, error, retryToken });
+    next.set(parent, {
+      ...(next.get(parent) ?? empty()),
+      loading: false,
+      error,
+      fault: faultFromDiscoveryError(FaultOperation.SessionsRead, error),
+      retryToken,
+    });
     update(next);
   }, [update]);
   const load = useCallback(async function loadPage(parent = ROOT, pageToken: PageToken = '') {
@@ -76,18 +92,19 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
     const controller = new AbortController();
     controllers.current.set(parent, controller);
     const next = new Map(state.current);
-    next.set(parent, { ...(next.get(parent) ?? empty()), loading: true, error: null });
+    next.set(parent, { ...(next.get(parent) ?? empty()), loading: true, error: null, fault: null });
     update(next);
     try {
       const page = await fetchHomeSessions(requestQuery(parent, pageToken), controller.signal);
       if (generation.current !== token || controller.signal.aborted) return;
       const result = new Map(state.current);
       const old = result.get(parent) ?? empty();
-      result.set(parent, { pages: [...old.pages, page], loading: false, error: null });
+      result.set(parent, { pages: [...old.pages, page], loading: false, error: null, fault: null });
       update(result);
     } catch (error) {
       if (generation.current === token && !controller.signal.aborted) {
-        if (error instanceof DiscoveryRequestError && error.status === 400 && error.code === DiscoveryErrorCode.SyncPageScopeChanged && !scopeRestarted.current) {
+        const fault = faultFromDiscoveryError(FaultOperation.SessionsRead, error);
+        if (fault?.evidence instanceof HttpEvidence && fault.evidence.status === 400 && fault.evidence.code === DiscoveryErrorCode.SyncPageScopeChanged && !scopeRestarted.current) {
           scopeRestarted.current = true;
           reset();
           await loadPage();
@@ -119,6 +136,7 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
     setProjects(null);
     setProjectsLoading(false);
     setProjectError(null);
+    setProjectFault(null);
     const token = ++generation.current;
     const controller = new AbortController();
     controllers.current.set('refresh', controller);
@@ -154,7 +172,7 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
             if (next === '') break;
           }
           if (target.signal.aborted) return null;
-          return [parent, { pages, loading: false, error: null }] as const;
+          return [parent, { pages, loading: false, error: null, fault: null }] as const;
         } catch (error) {
           if (parent && target.signal.aborted) return null;
           if (parent && error instanceof DiscoveryRequestError && error.path === SYNC_HOME_PATH
@@ -179,7 +197,8 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
       update(next);
     } catch (error) {
       if (token === generation.current && !controller.signal.aborted) {
-        if (error instanceof DiscoveryRequestError && error.status === 400 && error.code === DiscoveryErrorCode.SyncPageScopeChanged && !scopeRestarted.current) {
+        const fault = faultFromDiscoveryError(FaultOperation.SessionsRead, error);
+        if (fault?.evidence instanceof HttpEvidence && fault.evidence.status === 400 && fault.evidence.code === DiscoveryErrorCode.SyncPageScopeChanged && !scopeRestarted.current) {
           scopeRestarted.current = true;
           reset();
           await load();
@@ -254,11 +273,15 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
     controllers.current.set('project-options', controller);
     setProjectsLoading(true);
     setProjectError(null);
+    setProjectFault(null);
     try {
       const options = await fetchHomeProjects(controller.signal);
       if (!controller.signal.aborted && token === generation.current) setProjects(options);
     } catch (error) {
-      if (!controller.signal.aborted && token === generation.current) setProjectError(error);
+      if (!controller.signal.aborted && token === generation.current) {
+        setProjectError(error);
+        setProjectFault(faultFromDiscoveryError(FaultOperation.ProjectRead, error));
+      }
     } finally {
       if (controllers.current.get('project-options') === controller) {
         controllers.current.delete('project-options');
@@ -275,5 +298,5 @@ export function useHomeSessions(query: SyncSessionsQuery, publicationRevision: u
     if (group?.retryToken !== undefined) return load(parent, group.retryToken);
     return parent ? load(parent, group?.pages.at(-1)?.next ?? '') : refresh();
   };
-  return { groups: loadedQueryKey.current === queryKey ? groups : new Map<string, HomePages>([[ROOT, empty()]]), expanded, toggle, more, refresh, revision: generation.current, retry, projects: loadedQueryKey.current === queryKey ? projects : null, projectError, projectsLoading, loadProjects };
+  return { groups: loadedQueryKey.current === queryKey ? groups : new Map<string, HomePages>([[ROOT, empty()]]), expanded, toggle, more, refresh, revision: generation.current, retry, projects: loadedQueryKey.current === queryKey ? projects : null, projectError, projectFault, projectsLoading, loadProjects };
 }

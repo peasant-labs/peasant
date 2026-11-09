@@ -14,6 +14,20 @@ import {
 import type { ChannelName, ClientMessage, ServerMessage, SubscriptionMessage } from '@/types/messages';
 import { subscriptionKey, subscribe as mkSub, ChannelTopic } from '@/types/messages';
 import { parseServerMessageRaw } from '@peasant-labs/schema';
+import { DiscoveryErrorCode } from '@/lib/api/errors';
+import {
+  codeFromFault,
+  FaultCause,
+  FaultOperation,
+  FaultStore,
+  faultOperationForMessageType,
+  faultOperationForTopic,
+  frameByteLength,
+  MAX_FRAME_BYTES,
+  peekMessageType,
+  schemaPathDetail,
+  WebFault,
+} from '@/lib/faults';
 
 /** Derive WebSocket URL from the current page origin so any --port value works. */
 function defaultWsUrl(): string {
@@ -31,7 +45,6 @@ const BACKOFF_MULTIPLIER = 2;
 // ---------------------------------------------------------------------------
 
 type ChannelListener = () => void;
-type ChannelError = { message: string; code?: 'selection_visibility' };
 
 /**
  * ChannelStore holds per-channel data outside React state. Components
@@ -39,43 +52,50 @@ type ChannelError = { message: string; code?: 'selection_visibility' };
  * update does NOT re-render a component that only cares about `dashboard`.
  *
  * Keyed by subscriptionKey() strings (e.g. "dashboard", "session_detail:abc123").
+ * A retained fault is keyed by operation plus that same request key, so a
+ * success for one operation or one session never clears another.
  */
 class ChannelStore {
   private data = new Map<string, unknown>();
-  private errors = new Map<string, ChannelError>();
+  private readonly faults = new FaultStore();
   private listeners = new Map<string, Set<ChannelListener>>();
 
   get(key: string): unknown {
     return this.data.get(key);
   }
 
-  getError(key: string): ChannelError | null {
-    return this.errors.get(key) ?? null;
+  getFault(operation: FaultOperation, key: string): WebFault | null {
+    return this.faults.get(operation, key);
   }
 
-  set(key: string, value: unknown): void {
+  set(operation: FaultOperation, key: string, value: unknown): void {
     const prev = JSON.stringify(this.data.get(key));
     const next = JSON.stringify(value);
-    const hadError = this.errors.delete(key);
-    if (prev === next && !hadError) return; // no-op if unchanged
+    const hadFault = this.faults.clear(operation, key);
+    if (prev === next && !hadFault) return; // no-op if unchanged
     this.data.set(key, value);
     // Notify only listeners for this specific channel.
+    this.notify(key);
+  }
+
+  /** Clear one operation's fault and publish the change to that channel only. */
+  clearFault(operation: FaultOperation, key: string): void {
+    if (this.faults.clear(operation, key)) this.notify(key);
+  }
+
+  /** Clear stale data and publish one operation-scoped failure notification. */
+  fail(operation: FaultOperation, key: string, fault: WebFault): void {
+    const changedFault = this.faults.set(operation, key, fault);
+    const hadData = this.data.delete(key);
+    if (!changedFault && !hadData) return;
+    this.notify(key);
+  }
+
+  private notify(key: string): void {
     const subs = this.listeners.get(key);
     if (subs) {
       for (const fn of subs) fn();
     }
-  }
-
-  /** Clear stale data and publish one topic-scoped failure notification. */
-  fail(key: string, error: ChannelError): void {
-    const previous = this.errors.get(key);
-    const changed = this.data.delete(key)
-      || previous?.message !== error.message
-      || previous?.code !== error.code;
-    this.errors.set(key, error);
-    if (!changed) return;
-    const subs = this.listeners.get(key);
-    if (subs) for (const fn of subs) fn();
   }
 
   subscribe(key: string, listener: ChannelListener): () => void {
@@ -98,7 +118,10 @@ class ChannelStore {
 
 interface WebSocketContextValue {
   connected: boolean;
+  /** The connection fault's message, or null. */
   error: string | null;
+  /** The socket's fault: a frame failure, a socket error, or a non-topic refusal. */
+  connectionFault: WebFault | null;
   store: ChannelStore;
   /** Subscribe to WS channels on the server. */
   wsSubscribe: (channels: SubscriptionMessage[]) => void;
@@ -128,7 +151,7 @@ const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [connectionFault, setConnectionFault] = useState<WebFault | null>(null);
 
   // Stable refs — never trigger React re-renders.
   const storeRef = useRef(new ChannelStore());
@@ -172,7 +195,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     ws.onopen = () => {
       if (!mountedRef.current) return;
       setConnected(true);
-      setError(null);
+      // A reconnect is the connection fault's only healthy transition.
+      setConnectionFault(null);
       backoffRef.current = INITIAL_BACKOFF_MS;
 
       const activeSubs = Array.from(subsRef.current.values())
@@ -186,21 +210,46 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     ws.onmessage = (event: MessageEvent) => {
       if (!mountedRef.current) return;
 
-      let msg: ServerMessage;
-      try {
-        if (typeof event.data !== 'string') throw new TypeError('Expected a text WebSocket frame');
-        // Schema scans the original text before decoding can collapse duplicate
-        // keys, then validates detail data only for session_detail messages.
-        msg = parseServerMessageRaw(event.data);
-      } catch {
-        // Do not echo untrusted transcript bytes or schema exception values.
-        setError('A server message failed contract validation in WebSocketProvider while receiving an update and was not applied. Retry the connection; if this continues, update the Peasant app and reload this page.');
+      const raw: unknown = event.data;
+      if (typeof raw !== 'string') {
+        setConnectionFault(
+          WebFault.frameInvalid(FaultOperation.Socket, 'the socket delivered a non-text frame'),
+        );
         return;
       }
 
+      let msg: ServerMessage;
+      try {
+        // Schema scans the original text before decoding can collapse duplicate
+        // keys, then validates detail data only for session_detail messages.
+        msg = parseServerMessageRaw(raw);
+      } catch (error) {
+        // Classify without echoing untrusted transcript bytes or exception
+        // values: measure the frame, peek its operation, and carry a bounded
+        // schema path at most.
+        const operation = faultOperationForMessageType(peekMessageType(raw) ?? '');
+        const bytes = frameByteLength(raw);
+        setConnectionFault(
+          bytes > MAX_FRAME_BYTES
+            ? WebFault.payloadTooLarge(operation, bytes, MAX_FRAME_BYTES)
+            : WebFault.frameInvalid(operation, schemaPathDetail(error)),
+        );
+        return;
+      }
+
+      const acknowledge = (operation: FaultOperation, key: string) => {
+        // A success clears only its own operation's data fault, and clears the
+        // connection fault only when that fault named the same operation. An
+        // unrelated success never clears a retained failure.
+        storeRef.current.clearFault(operation, key);
+        setConnectionFault((current) => (current && current.operation === operation ? null : current));
+      };
+
       switch (msg.type) {
         case 'connected':
-          setError(null);
+          // The socket is alive, but a valid message is not a recovery signal
+          // for a retained data fault; only a reconnect clears a connection
+          // fault, and only the same operation's success clears a data fault.
           break;
 
         case 'error':
@@ -212,47 +261,67 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
                 : msg.topic === ChannelTopic.ProjectFamiliarity && msg.id
                   ? `${msg.topic}:${msg.id}`
                   : msg.topic;
-            storeRef.current.fail(key, {
-              message: msg.message ?? 'This data could not be loaded because the server returned an error without details. Retry, then inspect the Peasant server logs if the failure continues.',
-        code: (msg.data as { code?: string } | undefined)?.code === 'selection_visibility'
-        ? 'selection_visibility'
-        : undefined,
-            });
+            const operation = faultOperationForTopic(msg.topic);
+            const detail = typeof msg.message === 'string' && msg.message.trim().length > 0
+              ? msg.message
+              : 'the server returned no error detail';
+            const code = (msg.data as { code?: string } | undefined)?.code === DiscoveryErrorCode.SelectionVisibility
+              ? DiscoveryErrorCode.SelectionVisibility
+              : undefined;
+            storeRef.current.fail(operation, key, WebFault.topicError(operation, msg.topic, detail, code));
           } else {
-            setError(msg.message ?? 'Unknown server error');
+            // A refusal with no topic is not one channel's data failure.
+            const detail = typeof msg.message === 'string' && msg.message.trim().length > 0
+              ? msg.message
+              : 'the server returned no error detail';
+            setConnectionFault(WebFault.connection(FaultCause.TopicError, detail));
           }
           break;
 
         case 'dashboard':
         case 'sessions':
         case 'trends':
-        case 'quality':
+        case 'quality': {
           // Write to the ref-based store — only listeners for THIS channel
           // are notified. No React state change at the provider level.
-          setError(null);
-          storeRef.current.set(msg.type, msg.data);
+          const operation = faultOperationForMessageType(msg.type);
+          acknowledge(operation, msg.type);
+          storeRef.current.set(operation, msg.type, msg.data);
           break;
+        }
 
         case 'session_detail': {
           // Write to both bare key and ID-qualified key so both the
           // legacy ChannelName[] API and typed subscribe.sessionDetail(id) work.
-          setError(null);
-          storeRef.current.set(msg.type, msg.data);
+          acknowledge(FaultOperation.SessionDetailRead, msg.type);
+          storeRef.current.set(FaultOperation.SessionDetailRead, msg.type, msg.data);
           const payload = msg.data as { id?: string } | undefined;
           if (payload?.id) {
-            storeRef.current.set(`session_detail:${payload.id}`, msg.data);
+            const key = `session_detail:${payload.id}`;
+            acknowledge(FaultOperation.SessionDetailRead, key);
+            storeRef.current.set(FaultOperation.SessionDetailRead, key, msg.data);
           }
           break;
         }
 
         case 'annotations': {
           // Key must match subscriptionKey() format: "annotations:{axis}:{id}"
-          setError(null);
           const ann = msg.data as { axis?: string; id?: string } | undefined;
           const annKey = ann?.axis && ann?.id
             ? `${msg.type}:${ann.axis}:${ann.id}`
             : msg.type;
-          storeRef.current.set(annKey, msg.data);
+          acknowledge(FaultOperation.AnnotationsRead, annKey);
+          storeRef.current.set(FaultOperation.AnnotationsRead, annKey, msg.data);
+          break;
+        }
+
+        case 'project_familiarity': {
+          // Key must match subscriptionKey() format: "project_familiarity:{id}".
+          // The payload's project identity is `projectHash`, not an `id` member.
+          const payload = msg.data as { projectHash?: string } | undefined;
+          const key = payload?.projectHash ? `${msg.type}:${payload.projectHash}` : msg.type;
+          acknowledge(FaultOperation.ProjectFamiliarity, key);
+          storeRef.current.set(FaultOperation.ProjectFamiliarity, key, msg.data);
           break;
         }
 
@@ -264,12 +333,17 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     ws.onerror = () => {
       if (!mountedRef.current) return;
       // User-facing copy stays jargon-free; the connected flag drives the UI.
-      setError('Lost the connection to the Peasant app on this computer.');
+      setConnectionFault(
+        WebFault.connection(FaultCause.ConnectFailed, 'the socket reported an error'),
+      );
     };
 
     ws.onclose = () => {
       if (!mountedRef.current) return;
       setConnected(false);
+      setConnectionFault(
+        WebFault.connection(FaultCause.SocketClosed, 'the socket closed'),
+      );
       wsRef.current = null;
 
       const delay = backoffRef.current;
@@ -354,10 +428,15 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   // Context value changes ONLY when connected/error change (infrequent).
   // Channel data lives in the ChannelStore ref and is accessed via
   // useSyncExternalStore — it never triggers context re-renders.
+  // Context value changes ONLY when connected or the connection fault changes
+  // (infrequent). Channel data and channel faults live in the ChannelStore ref
+  // and are accessed via useSyncExternalStore — they never trigger context
+  // re-renders.
   const value: WebSocketContextValue = useMemo(
     () => ({
       connected,
-      error,
+      error: connectionFault?.message ?? null,
+      connectionFault,
       store: storeRef.current,
       wsSubscribe,
       wsUnsubscribe,
@@ -365,7 +444,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       sendMessage: sendRaw,
       reconnect,
     }),
-    [connected, error, wsSubscribe, wsUnsubscribe, wsRefresh, sendRaw, reconnect],
+    [connected, connectionFault, wsSubscribe, wsUnsubscribe, wsRefresh, sendRaw, reconnect],
   );
 
   return (
@@ -441,6 +520,7 @@ export function useChannel<T = unknown>(
   const subsArray = toSubsArray(subs, sessionId);
   const channelsKey = JSON.stringify(subsArray) + (sessionId ?? '');
   const primaryKey = subscriptionKey(subsArray[0]);
+  const primaryOperation = faultOperationForTopic(subsArray[0].topic);
 
   // Server-side subscribe/unsubscribe.
   useEffect(() => {
@@ -450,7 +530,7 @@ export function useChannel<T = unknown>(
   }, [channelsKey]);
 
   // Subscribe to the primary subscription's data via useSyncExternalStore.
-  // Only re-renders when THIS channel's data changes.
+  // Only re-renders when THIS channel's data or fault changes.
   const channelSubscribe = useCallback(
     (onStoreChange: () => void) => ctx.store.subscribe(primaryKey, onStoreChange),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -462,12 +542,12 @@ export function useChannel<T = unknown>(
     [primaryKey],
   );
   const data = useSyncExternalStore(channelSubscribe, getSnapshot, getSnapshot);
-  const getErrorSnapshot = useCallback(
-    () => ctx.store.getError(primaryKey),
+  const getFaultSnapshot = useCallback(
+    () => ctx.store.getFault(primaryOperation, primaryKey),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [primaryKey],
+    [primaryKey, primaryOperation],
   );
-  const channelError = useSyncExternalStore(channelSubscribe, getErrorSnapshot, getErrorSnapshot);
+  const fault = useSyncExternalStore(channelSubscribe, getFaultSnapshot, getFaultSnapshot);
   const refresh = useCallback(
     () => ctx.wsRefresh(subsArray),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -478,8 +558,13 @@ export function useChannel<T = unknown>(
     /** Latest data for the primary channel, or undefined if none received yet. */
     data,
     connected: ctx.connected,
-    error: channelError?.message ?? ctx.error,
-    errorCode: channelError?.code,
+    /** This channel's retained data fault, or null. */
+    fault,
+    /** The socket's fault, shared by every consumer. */
+    connectionFault: ctx.connectionFault,
+    /** Back-compat message: this channel's fault, then the connection fault. */
+    error: fault?.message ?? ctx.connectionFault?.message ?? null,
+    errorCode: codeFromFault(fault),
     /** Read this channel again from the server, keeping the current data until the new snapshot lands. */
     refresh,
   };
