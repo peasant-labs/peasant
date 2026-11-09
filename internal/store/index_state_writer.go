@@ -101,16 +101,19 @@ func updateIndexStateWithSessionEntriesHashOnConn(conn *sqlite.Conn, sessionID i
 // pure churn. A facet that moved (a newer pair, a producer or adapter target
 // bump) keeps the session selected, and the following run replaces the latest
 // attempt once.
-func (s *Store) ListStaleIndexSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
+// buildListStaleIndexSessionsQuery renders the stale-index work list for the
+// given targets and scope. Production and its query-plan guard call the same
+// builder, so the guarded statement is the statement production runs.
+func buildListStaleIndexSessionsQuery(targets map[ingest.Harness]ingest.HarvesterVersions, scope ingest.StoreScope) (string, []any, error) {
 	if len(targets) == 0 {
-		return nil, nil
+		return "", nil, nil
 	}
 	conditions := make([]string, 0, len(targets))
 	args := make([]any, 0, len(targets)*4)
 	for _, harness := range slices.Sorted(maps.Keys(targets)) {
 		version := targets[harness].IndexerVersion
 		if !harness.IsKnown() || version < 1 {
-			return nil, fmt.Errorf("store: select stale indexes: harness %q has invalid indexer target %d; supply registered positive harvester versions", harness, version)
+			return "", nil, fmt.Errorf("store: select stale indexes: harness %q has invalid indexer target %d; supply registered positive harvester versions", harness, version)
 		}
 		condition := "(s.model_harness = ? AND s.index_version < ?"
 		args = append(args, string(harness), version)
@@ -120,6 +123,25 @@ func (s *Store) ListStaleIndexSessions(ctx context.Context, targets map[ingest.H
 		}
 		conditions = append(conditions, condition+")")
 	}
+	predicate, narrowedArgs := narrowedSessionPredicate("s", scope)
+	args = append(args, narrowedArgs...)
+	return "SELECT s.session_id FROM sessions s WHERE " + strings.Join(conditions, " OR ") + predicate + " ORDER BY s.session_id", args, nil
+}
+
+func (s *Store) ListStaleIndexSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, scope ingest.StoreScope) ([]ingest.SessionID, error) {
+	if err := scope.Validate("ListStaleIndexSessions"); err != nil {
+		return nil, err
+	}
+	if narrowedSessionsEmpty(scope) {
+		return nil, nil
+	}
+	query, args, err := buildListStaleIndexSessionsQuery(targets, scope)
+	if err != nil {
+		return nil, err
+	}
+	if query == "" {
+		return nil, nil
+	}
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
@@ -127,7 +149,7 @@ func (s *Store) ListStaleIndexSessions(ctx context.Context, targets map[ingest.H
 	defer s.pool.Put(conn)
 
 	var sessions []ingest.SessionID
-	if err := sqlitex.ExecuteTransient(conn, "SELECT s.session_id FROM sessions s WHERE "+strings.Join(conditions, " OR ")+" ORDER BY s.session_id", &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			raw := stmt.ColumnText(0)

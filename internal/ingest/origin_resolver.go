@@ -82,7 +82,7 @@ type ResolveReport struct {
 type OriginResolverStore interface {
 	// ListStaleOriginSessions returns every session whose origin_version is
 	// below currentVersion.
-	ListStaleOriginSessions(ctx context.Context, currentVersion int) ([]StoredOriginRow, error)
+	ListStaleOriginSessions(ctx context.Context, currentVersion int, scope StoreScope) ([]StoredOriginRow, error)
 	// UpdateOriginState records a verdict and the version it was decided at, in
 	// one statement, so the two can never disagree.
 	UpdateOriginState(ctx context.Context, sessionID SessionID, origin string, version int) error
@@ -181,7 +181,7 @@ func (r *OriginResolver) ResolveStoredOrigins(ctx context.Context, ruleVersion i
 		)
 	}
 
-	rows, err := r.store.ListStaleOriginSessions(ctx, ruleVersion)
+	rows, err := r.store.ListStaleOriginSessions(ctx, ruleVersion, AllStoredSessions())
 	if err != nil {
 		return report, fmt.Errorf("ingest: list sessions below origin rule version %d: %w", ruleVersion, err)
 	}

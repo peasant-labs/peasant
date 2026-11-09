@@ -1347,7 +1347,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		// have captured.
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageContent, Done: len(backfilled), Total: len(backfilled) + remaining})
 		p.recordIndexProfileStage(StageContent, contentProfileStart, len(backfilled), len(backfilled)+remaining)
-		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
+		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets(), AllStoredSessions())
 		if staleErr != nil {
 			slog.Warn("pipeline: list stale index sessions",
 				"error", staleErr,
@@ -4581,7 +4581,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	// Best-effort: non-fatal; projects from deleted/pruned sessions are removed
 	// so that daily_summary_by_project and the session viewer remain consistent.
 	if p.store != nil {
-		if err := p.store.CleanupOrphanProjects(ctx); err != nil {
+		if err := p.store.CleanupOrphanProjects(ctx, AllProjects()); err != nil {
 			slog.Warn(logPrefix+": cleanup orphan projects",
 				"error", err,
 				"what", "failed to remove project rows with zero sessions",

@@ -27,9 +27,12 @@ var (
 // nativeRefreshVersions is the exact set of stored schema versions this build
 // re-extracts from native input, computed once in ingest so the two predicates
 // (this selection and metadataNeedsNativeRefresh) cannot drift.
-func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, nativeRefreshVersions []int) ([]ingest.SessionID, error) {
+// buildListStaleAdapterSessionsQuery renders the adapter-refresh work list for
+// the given targets and scope. Production and its query-plan guard call the
+// same builder.
+func buildListStaleAdapterSessionsQuery(targets map[ingest.Harness]ingest.HarvesterVersions, nativeRefreshVersions []int, scope ingest.StoreScope) (string, []any, error) {
 	if len(targets) == 0 {
-		return nil, nil
+		return "", nil, nil
 	}
 	refresh := make([]string, 0, len(nativeRefreshVersions))
 	refreshArgs := make([]any, 0, len(nativeRefreshVersions))
@@ -46,7 +49,7 @@ func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest
 	for _, harness := range slices.Sorted(maps.Keys(targets)) {
 		adapter := targets[harness].AdapterVersion
 		if !harness.IsKnown() || adapter < 1 {
-			return nil, fmt.Errorf("store: select stale adapters: harness %q has invalid adapter target %d; supply registered positive harvester versions", harness, adapter)
+			return "", nil, fmt.Errorf("store: select stale adapters: harness %q has invalid adapter target %d; supply registered positive harvester versions", harness, adapter)
 		}
 		condition := "(s.model_harness = ? AND s.schema_version <= ? AND (COALESCE(s.adapter_version, 1) < ? OR " + refreshClause + ")"
 		args = append(args, string(harness), int(ingest.CurrentSchemaVersion), adapter)
@@ -60,7 +63,26 @@ func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest
 		}
 		conditions = append(conditions, condition+")")
 	}
-	return s.selectSessionIDs(ctx, "SELECT s.session_id FROM sessions s WHERE "+strings.Join(conditions, " OR ")+" ORDER BY s.session_id", args)
+	predicate, narrowedArgs := narrowedSessionPredicate("s", scope)
+	args = append(args, narrowedArgs...)
+	return "SELECT s.session_id FROM sessions s WHERE " + strings.Join(conditions, " OR ") + predicate + " ORDER BY s.session_id", args, nil
+}
+
+func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, nativeRefreshVersions []int, scope ingest.StoreScope) ([]ingest.SessionID, error) {
+	if err := scope.Validate("ListStaleAdapterSessions"); err != nil {
+		return nil, err
+	}
+	if narrowedSessionsEmpty(scope) {
+		return nil, nil
+	}
+	query, args, err := buildListStaleAdapterSessionsQuery(targets, nativeRefreshVersions, scope)
+	if err != nil {
+		return nil, err
+	}
+	if query == "" {
+		return nil, nil
+	}
+	return s.selectSessionIDs(ctx, query, args)
 }
 
 // ListSessionsNeedingRepair selects the sessions a crash between the two write
@@ -76,9 +98,12 @@ func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest
 // provenance is not_recovered names no capture the index could bind to, so it
 // is never enumerated here; selecting it would read its pair on every harvest
 // for a repair the index write can never complete.
-func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
+// buildListSessionsNeedingRepairQuery renders the crash-repair work list for
+// the given targets and scope. Production and its query-plan guard call the
+// same builder.
+func buildListSessionsNeedingRepairQuery(targets map[ingest.Harness]ingest.HarvesterVersions, scope ingest.StoreScope) (string, []any, error) {
 	if len(targets) == 0 {
-		return nil, nil
+		return "", nil, nil
 	}
 	harnessPlaceholders := make([]string, 0, len(targets))
 	settleTerms := make([]string, 0, len(targets))
@@ -86,7 +111,7 @@ func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[inges
 	args := make([]any, 0, len(targets)+1)
 	for _, harness := range slices.Sorted(maps.Keys(targets)) {
 		if !harness.IsKnown() {
-			return nil, fmt.Errorf("store: select repair sessions: harness %q is not registered", harness)
+			return "", nil, fmt.Errorf("store: select repair sessions: harness %q is not registered", harness)
 		}
 		harnessPlaceholders = append(harnessPlaceholders, "?")
 		args = append(args, string(harness))
@@ -110,6 +135,8 @@ func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[inges
 		artifactSettle = " AND NOT (" + strings.Join(settleTerms, " OR ") + ")"
 		args = append(args, settleArgs...)
 	}
+	predicate, narrowedArgs := narrowedSessionPredicate("s", scope)
+	args = append(args, narrowedArgs...)
 	query := `SELECT s.session_id FROM sessions s
 WHERE s.model_harness IN (` + strings.Join(harnessPlaceholders, ",") + `)
  AND s.schema_version <= ?
@@ -121,8 +148,25 @@ WHERE s.model_harness IN (` + strings.Join(harnessPlaceholders, ",") + `)
        AND EXISTS (SELECT 1 FROM session_publication_metadata p
                    WHERE p.session_id = s.session_id
                      AND p.capture_revision = s.publication_capture_revision))
- )
+ )` + predicate + `
 ORDER BY s.session_id`
+	return query, args, nil
+}
+
+func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, scope ingest.StoreScope) ([]ingest.SessionID, error) {
+	if err := scope.Validate("ListSessionsNeedingRepair"); err != nil {
+		return nil, err
+	}
+	if narrowedSessionsEmpty(scope) {
+		return nil, nil
+	}
+	query, args, err := buildListSessionsNeedingRepairQuery(targets, scope)
+	if err != nil {
+		return nil, err
+	}
+	if query == "" {
+		return nil, nil
+	}
 	return s.selectSessionIDs(ctx, query, args)
 }
 

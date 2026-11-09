@@ -593,7 +593,7 @@ func (s *scopeRefusalStore) UpsertSessionCommits(context.Context, ingest.Session
 	return nil
 }
 
-func (s *scopeRefusalStore) CleanupOrphanProjects(context.Context) error {
+func (s *scopeRefusalStore) CleanupOrphanProjects(context.Context, ingest.ProjectScope) error {
 	s.calls = append(s.calls, "CleanupOrphanProjects")
 	return nil
 }

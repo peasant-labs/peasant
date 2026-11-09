@@ -294,7 +294,7 @@ type ContentBackfillTargetStore interface {
 	// resume a walk, so that is the only listing offered: an identifier-only
 	// variant returned a second shape for the same question and told a caller
 	// less than it needs.
-	ListContentCaptureIncompleteSessionsAfter(context.Context, SessionID, int) ([]ContentCaptureIncompleteSession, error)
+	ListContentCaptureIncompleteSessionsAfter(context.Context, SessionID, int, StoreScope) ([]ContentCaptureIncompleteSession, error)
 	LookupSessionLocation(context.Context, SessionID) (string, string, error)
 	LookupSourceInfo(context.Context, SessionID) (string, SourceFormat, string, error)
 	IndexSessionEntryBatch(context.Context, []SessionEntryWrite) []SessionEntryWriteResult

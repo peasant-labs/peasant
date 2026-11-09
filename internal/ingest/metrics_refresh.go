@@ -21,7 +21,7 @@ func (p *Pipeline) refreshStoredMetrics(ctx context.Context) (computed, checked,
 	engine := p.analyzer.(SessionMetricsEnsurer)
 	var after SessionID
 	for ctx.Err() == nil {
-		page, err := reader.ListMetricSessions(ctx, after, 256)
+		page, err := reader.ListMetricSessions(ctx, after, 256, AllStoredSessions())
 		if err != nil {
 			p.reportMetricFailure("stored session page", err)
 			break

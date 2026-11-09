@@ -20,13 +20,17 @@ import (
 // skipped pass at the pipeline's type assertion.
 var _ ingest.OriginResolverStore = (*Store)(nil)
 
-// sqlListStaleOriginSessions is the resolve pass's work list. Its parent column
+// listStaleOriginSessionsSQL is the resolve pass's work list. Its parent column
 // is the session-level logical-parent answer, not the raw availability cache: a
 // child whose generation carries started_by evidence must be judged parent-linked
 // even while its cache is NULL, or the pass would persist a root verdict that
-// every migrated reader contradicts.
-var sqlListStaleOriginSessions = `SELECT s.session_id, COALESCE(` + LogicalParentSQL("s") + `, ''), s.model_harness, s.source_path, s.session_origin, s.origin_version
-FROM sessions s WHERE s.origin_version < ?`
+// every migrated reader contradicts. A narrowed scope appends its id predicate
+// over the same statement production runs.
+func listStaleOriginSessionsSQL(scope ingest.StoreScope) string {
+	predicate, _ := narrowedSessionPredicate("s", scope)
+	return `SELECT s.session_id, COALESCE(` + LogicalParentSQL("s") + `, ''), s.model_harness, s.source_path, s.session_origin, s.origin_version
+FROM sessions s WHERE s.origin_version < ?` + predicate
+}
 
 // ListStaleOriginSessions returns every session whose origin_version is below
 // currentVersion, together with the facts the resolver judges it on. It is the
@@ -38,16 +42,24 @@ FROM sessions s WHERE s.origin_version < ?`
 // exactly where it found it. A row is
 // skipped only when its session_id is unreadable as an identifier, which no
 // row this store wrote can be.
-func (s *Store) ListStaleOriginSessions(ctx context.Context, currentVersion int) ([]ingest.StoredOriginRow, error) {
+func (s *Store) ListStaleOriginSessions(ctx context.Context, currentVersion int, scope ingest.StoreScope) ([]ingest.StoredOriginRow, error) {
+	if err := scope.Validate("ListStaleOriginSessions"); err != nil {
+		return nil, err
+	}
+	if narrowedSessionsEmpty(scope) {
+		return nil, nil
+	}
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
 
+	_, narrowedArgs := narrowedSessionPredicate("s", scope)
+	args := append([]any{currentVersion}, narrowedArgs...)
 	var rows []ingest.StoredOriginRow
-	if err := sqlitex.Execute(conn, sqlListStaleOriginSessions, &sqlitex.ExecOptions{
-		Args: []any{currentVersion},
+	if err := sqlitex.Execute(conn, listStaleOriginSessionsSQL(scope), &sqlitex.ExecOptions{
+		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			sid, err := ingest.NewSessionID(stmt.ColumnText(0))
 			if err != nil {
