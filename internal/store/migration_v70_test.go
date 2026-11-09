@@ -459,7 +459,7 @@ func TestMigrationV70DerivedLookups(t *testing.T) {
 			plantCorruptDerivedState(t, db, fixture)
 			beforeSpawns := readSpawnRows(t, db)
 			beforeCatalog := readCatalogRows(t, db)
-			rebuildErr := db.RebuildDerivedLookups(t.Context(), incomplete)
+			rebuildErr := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: incomplete})
 			if rebuildErr == nil {
 				t.Fatal("RebuildDerivedLookups accepted a walk entry with an empty session id")
 			}
@@ -470,7 +470,7 @@ func TestMigrationV70DerivedLookups(t *testing.T) {
 			requireCatalogRowsEqual(t, db, beforeCatalog)
 		case "rebuild-spawns":
 			plantCorruptDerivedState(t, db, fixture)
-			if err := db.RebuildDerivedLookups(t.Context(), rollouts); err != nil {
+			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: rollouts}); err != nil {
 				t.Fatalf("rebuild the derived lookups: %v", err)
 			}
 			requireSpawnRowsEqual(t, db, fixture.ExpectedSpawns)
