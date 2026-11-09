@@ -116,6 +116,16 @@ const codexAncestorProbeKind = ProbeCatalogWindow
 // branch, and cwd come from the rollout's first line (session_meta).
 func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	a.diagnostics = nil
+	if len(cfg.Paths) == 0 {
+		// An enabled source whose every configured root failed to resolve has
+		// nothing to walk, so it enumerated nothing. That is not an empty tree:
+		// a caller that replaced the catalog from this value would clear rows no
+		// walk re-derived, and the walk's own maintenance would keep them
+		// because it prunes only under the roots it was given. NotWalked states
+		// the fact the two writers agree on.
+		a.enumeration = RolloutEnumeration{Status: RolloutEnumerationNotWalked}
+		return nil, nil
+	}
 	a.enumeration = RolloutEnumeration{Status: RolloutEnumerationComplete}
 	var sessions []DiscoveredSession
 	var enumerated []RolloutFile
@@ -722,7 +732,8 @@ func codexParentThreadID(data []byte) SessionID {
 	return id
 }
 
-// codexSessionIDFromFilename extracts the session id a rollout file name// carries: the trailing UUID of rollout-{ISO-timestamp}-{uuid}.jsonl. The ISO
+// codexSessionIDFromFilename extracts the session id a rollout file name
+// carries: the trailing UUID of rollout-{ISO-timestamp}-{uuid}.jsonl. The ISO
 // timestamp uses hyphens for time separators
 // (rollout-2026-05-29T21-14-24-{uuid}.jsonl), so the last five
 // hyphen-delimited segments are the UUID (8-4-4-4-12). It reports false for a

@@ -5297,13 +5297,20 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Codex walk reports: a discovered session list is not that set, because a
 	// rollout that never became a session is still a catalog row, and a walk
 	// that could not read part of the tree reports fewer paths than exist. A
-	// run with no Codex source reports NotWalked, which leaves the catalog as
-	// it is; a partial walk is refused by the rebuild.
+	// run with no Codex source — or with one whose roots all failed to resolve —
+	// reports NotWalked, which leaves the catalog as it is; a partial walk is
+	// refused by the rebuild.
 	rolloutEnumeration := RolloutEnumeration{Status: RolloutEnumerationNotWalked}
 	for harness, config := range p.config.Sources {
+		if !config.Enabled {
+			// A source this run leaves out is not part of the walk: nothing was
+			// enumerated and nothing may be replaced. That is not a refusal, even
+			// when an adapter for it is registered.
+			continue
+		}
 		factory, ok := p.adapters[harness]
-		if !ok || !config.Enabled {
-			if harness == HarnessCodex && ok && p.config.RebuildAll {
+		if !ok {
+			if harness == HarnessCodex && p.config.RebuildAll {
 				// An enabled Codex source the run has no adapter for cannot be
 				// enumerated at all, so the catalog cannot be rebuilt from it.
 				rolloutEnumeration = RolloutEnumeration{Status: RolloutEnumerationPartial}
