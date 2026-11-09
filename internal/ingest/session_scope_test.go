@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -136,6 +137,18 @@ type scopeCase struct {
 	// selected session held before the mutation has no project row in either
 	// store, not merely that the two agree.
 	AssertOldProjectGone bool `yaml:"assertOldProjectGone"`
+
+	// AssertTeammateLinks names session→parent pairs that must be recorded in
+	// BOTH stores. The table diff proves the two runs agree; this proves the
+	// agreed answer is the link the case is about, so a case that silently
+	// forms no link in either store cannot pass.
+	AssertTeammateLinks []scopeAssertTeammateLink `yaml:"assertTeammateLinks"`
+}
+
+// scopeAssertTeammateLink is one recorded teammate parent the case requires.
+type scopeAssertTeammateLink struct {
+	Session string `yaml:"session"`
+	Parent  string `yaml:"parent"`
 }
 
 type scopeFile struct {
@@ -736,6 +749,51 @@ func runScopeParityCase(t *testing.T, fixture scopeFixture, manifest scopeManife
 	if testCase.AssertOldProjectGone {
 		assertOldProjectGone(t, ctx, worldA.raw, worldB.raw, bBefore, bAfter)
 	}
+	if len(testCase.AssertTeammateLinks) > 0 {
+		assertTeammateLinks(t, testCase, aAfter, bAfter)
+	}
+}
+
+// assertTeammateLinks proves each named session recorded the named parent in
+// both stores. The multiset comparison above cannot: two stores that both
+// failed to link would agree.
+//
+// ExportTableRows renders every cell as a storage-class-tagged canonical token
+// (text:"...", int:..., null), so the comparison is made on the same token the
+// table diff uses.
+func assertTeammateLinks(t *testing.T, testCase scopeCase, stores ...map[string]store.ExportedTable) {
+	t.Helper()
+	textToken := func(value string) string { return "text:" + strconv.Quote(value) }
+	for _, tables := range stores {
+		sessions, ok := tables["sessions"]
+		if !ok {
+			t.Fatalf("case %q: the export has no sessions table", testCase.Name)
+		}
+		sessionColumn := columnIndex(sessions.Columns, "session_id")
+		parentColumn := columnIndex(sessions.Columns, "parent_id")
+		if sessionColumn < 0 || parentColumn < 0 {
+			t.Fatalf("case %q: the sessions export lacks session_id or parent_id: %v", testCase.Name, sessions.Columns)
+		}
+		parents := make(map[string]string, len(sessions.Rows))
+		for _, row := range sessions.Rows {
+			parents[row[sessionColumn]] = row[parentColumn]
+		}
+		for _, link := range testCase.AssertTeammateLinks {
+			if got := parents[textToken(link.Session)]; got != textToken(link.Parent) {
+				t.Errorf("case %q: session %s parent = %q, want %q", testCase.Name, link.Session, got, textToken(link.Parent))
+			}
+		}
+	}
+}
+
+// columnIndex returns the position of name, or -1.
+func columnIndex(columns []string, name string) int {
+	for index, column := range columns {
+		if column == name {
+			return index
+		}
+	}
+	return -1
 }
 
 func scopeForCase(t *testing.T, testCase scopeCase) *ingest.SessionScope {

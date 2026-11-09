@@ -2738,6 +2738,15 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		if cache, ok := p.store.(ClaudeEvidenceCache); ok && !p.config.DryRun {
 			AttachClaudeEvidenceCache(adapter, cache)
 		}
+		// The full walk decides teammate links from the store's two indexed
+		// identity counts instead of an in-memory pass over the whole evidence
+		// table. It attaches only beside the evidence cache: a run that reads no
+		// cache (a dry run) mines its own view and links from that.
+		if _, caching := p.store.(ClaudeEvidenceCache); caching && !p.config.DryRun {
+			if derived, ok := p.store.(DerivedLookupReader); ok {
+				AttachClaudeDerivedLookup(adapter, derived)
+			}
+		}
 		// The full Codex walk keeps the derived rollout catalog current, so a
 		// later scoped run can answer the duplicate and parent questions
 		// without walking the sessions tree. A dry run writes nothing, and an

@@ -474,82 +474,197 @@ func (e claudeDeferredEvidence) Apply(ctx context.Context) error {
 	return nil
 }
 
-// linkClaudeTeammates links independently persisted Claude root transcripts.
-// A relationship is accepted only when both sides provide one unambiguous
-// complete identity, computed over every piece of root evidence this
-// discovery knows: the records this run mined, plus whatever survives in the
-// persisted evidence cache from an earlier run — so a child discovered in a
-// LATER run still finds a spawner an EARLIER run discovered, not only a
-// spawner in the same batch. Files that cannot be read or parsed simply
-// provide no evidence and do not make discovery fail.
+// linkClaudeTeammates links Claude root transcripts that declare a teammate
+// identity to the one root that spawned it. The ambiguity rule is the same for
+// a full walk and a located build: a link is created only when exactly one
+// root path declares the identity and exactly one spawner path records
+// spawning it, a child is never its own parent, and a pair that would close a
+// cycle is refused.
 //
-// A spawner found only in the persisted cache is pointed at ONLY when it is
-// already stored: a parent identifier must never point at a session that is
-// neither in this write batch nor already persisted, because the store's own
-// FK-orphan guard would otherwise silently drop the child at write time,
-// which is worse than leaving it parentless. The extension is one-directional
-// — a later child may find an earlier spawner, never the reverse — and never
-// creates a cycle: any assignment that would place a session among its own
-// ancestors is refused rather than guessed.
+// The counts come from the store's two indexed reads over the derived lookup
+// tables — the partial identity index and claude_teammate_spawns — not from an
+// in-memory pass over the whole evidence table. A build whose evidence view is
+// only its own records (a store-free run, a dry run) answers the same two
+// questions from that view through claudeEvidenceIdentityReader, so the rule
+// itself still lives here once.
+//
+// `current` is the evidence every path this build touched carries now.
+// `storedCounts` says whether the counts are the store's: the store describes
+// the rows the last discovery saved, so a re-mined row replaces its stored
+// contribution and a new row adds one, which claudeIdentityDeltas turns into
+// the per-identity adjustment. When the counts come from the build's own view,
+// that view already includes the adjustment and the delta is zero.
+//
+// A spawner found only in already-persisted evidence is pointed at ONLY when
+// its session is stored: a parent identifier must never point at a session
+// that is neither in this write batch nor already persisted, because the
+// store's own FK-orphan guard would otherwise silently drop the child at write
+// time, which is worse than leaving it parentless. The extension is
+// one-directional — a later child may find an earlier spawner, never the
+// reverse — and never creates a cycle: any assignment that would place a
+// session among its own ancestors is refused rather than guessed.
 func (a *ClaudeAdapter) linkClaudeTeammates(
 	ctx context.Context,
 	sessions []DiscoveredSession,
-	cached, mined map[ResolvedPath]ClaudeTranscriptEvidence,
-) {
-	rootByPath := make(map[ResolvedPath]int, len(sessions))
+	cached, current map[ResolvedPath]ClaudeTranscriptEvidence,
+	located *LocatedSource,
+	storedCounts bool,
+) error {
+	evidence := mergeClaudeEvidence(cached, current)
+
+	reader := DerivedLookupReader(newClaudeEvidenceIdentityReader(evidence))
+	delta := claudeIdentityCountDelta{}
+	if storedCounts {
+		if a.derivedLookup == nil {
+			return fmt.Errorf("ingest: the Claude build was asked to decide teammate links from the stored identity counts, but no indexed identity reader is attached; reading the whole evidence table instead is the pass this rewrite removes, and guessing would re-home a session under the wrong parent; where: ingest.ClaudeAdapter.linkClaudeTeammates in internal/ingest/claude.go; when: building discovered sessions; impact: no session was built and nothing was written; fix: attach the store's derived lookup reader to the adapter before the run (ingest.AttachClaudeDerivedLookup)")
+		}
+		reader = a.derivedLookup
+		delta = claudeIdentityDeltas(cached, current)
+	}
+
+	rootByID := make(map[SessionID]int, len(sessions))
+	spawnersInBatch := make(map[ClaudeTeammateIdentity][]SessionID)
 	for i := range sessions {
 		if sessions[i].ParentUUID == nil {
-			rootByPath[sessions[i].SourcePath] = i
+			rootByID[sessions[i].SessionID] = i
+		}
+		record := evidence[sessions[i].SourcePath]
+		if record.Scope != ClaudeEvidenceScopeRoot {
+			continue
+		}
+		// One transcript's repeated spawn of the same identity is still one
+		// spawner, exactly as the store's projection makes it.
+		seen := make(map[ClaudeTeammateIdentity]struct{}, len(record.Spawns))
+		for _, spawn := range record.Spawns {
+			if _, duplicate := seen[spawn]; duplicate {
+				continue
+			}
+			seen[spawn] = struct{}{}
+			// Two is enough for the caller's zero/one/many decision.
+			if len(spawnersInBatch[spawn]) < 2 {
+				spawnersInBatch[spawn] = append(spawnersInBatch[spawn], sessions[i].SessionID)
+			}
 		}
 	}
 
-	index := buildClaudeSpawnIndex(mergeClaudeEvidence(cached, mined))
-
-	candidates := make(map[SessionID]SessionID, len(index))
-	childIndexBySessionID := make(map[SessionID]int, len(index))
-	parentIndexBySessionID := make(map[SessionID]int, len(index))
-
-	for _, link := range index {
-		childIdx, inBatch := rootByPath[link.Child]
-		if !inBatch {
-			continue // nothing in this write batch to attach a parent to
+	candidates := make(map[SessionID]SessionID, len(sessions))
+	for i := range sessions {
+		session := sessions[i]
+		if session.ParentUUID != nil {
+			continue
 		}
-		childID := sessions[childIdx].SessionID
-
-		var parentID SessionID
-		parentIdx, parentInBatch := rootByPath[link.Parent]
-		if parentInBatch {
-			parentID = sessions[parentIdx].SessionID
-		} else {
-			id, ok := claudeSessionIDFromRootPath(link.Parent)
-			if !ok || !a.claudeSessionAlreadyStored(ctx, id) {
-				continue // unresolvable or unverified: leave the child parentless
-			}
-			parentID = id
+		record := evidence[session.SourcePath]
+		if record.Scope != ClaudeEvidenceScopeRoot || record.Identity == nil {
+			continue
 		}
-		if parentID == childID {
+		identity := *record.Identity
+
+		declarers, err := reader.CountClaudeIdentityDeclarers(ctx, identity)
+		if err != nil {
+			return fmt.Errorf("ingest: the Claude build could not count the root transcripts that declare teammate identity (%q, %q); without that count it cannot tell a unique identity from an ambiguous one, and guessing would re-home a session under the wrong parent; where: ingest.ClaudeAdapter.linkClaudeTeammates in internal/ingest/claude.go; when: deciding a teammate link for %q; impact: no session was built and nothing was written; fix: restore database access and retry: %w", identity.Team, identity.Name, session.SourcePath, err)
+		}
+		spawners, err := reader.CountClaudeIdentitySpawners(ctx, identity)
+		if err != nil {
+			return fmt.Errorf("ingest: the Claude build could not count the root transcripts that spawn teammate identity (%q, %q); without that count it cannot tell a unique spawner from an ambiguous one, and guessing would re-home a session under the wrong parent; where: ingest.ClaudeAdapter.linkClaudeTeammates in internal/ingest/claude.go; when: deciding a teammate link for %q; impact: no session was built and nothing was written; fix: restore database access and retry: %w", identity.Team, identity.Name, session.SourcePath, err)
+		}
+		declarers += delta.declarer(identity)
+		spawners += delta.spawner(identity)
+		if declarers != 1 || spawners != 1 {
 			continue
 		}
 
-		candidates[childID] = parentID
-		childIndexBySessionID[childID] = childIdx
-		if parentInBatch {
-			parentIndexBySessionID[childID] = parentIdx
+		parentID, haveParent, err := a.claudeTeammateParent(ctx, spawnersInBatch, evidence, reader, identity, session, located)
+		if err != nil {
+			return err
 		}
+		if !haveParent || parentID == session.SessionID {
+			continue
+		}
+		candidates[session.SessionID] = parentID
 	}
 
 	cyclic := a.claudeCyclicChildren(ctx, candidates)
-
 	for childID, parentID := range candidates {
 		if cyclic[childID] {
 			continue
 		}
-		childIdx := childIndexBySessionID[childID]
-		sessions[childIdx].ParentUUID = &parentID
-		if parentIdx, ok := parentIndexBySessionID[childID]; ok {
+		childIdx, ok := rootByID[childID]
+		if !ok {
+			continue
+		}
+		parent := parentID
+		sessions[childIdx].ParentUUID = &parent
+		if parentIdx, inBatch := rootByID[parentID]; inBatch {
 			sessions[parentIdx].SubagentPaths = append(sessions[parentIdx].SubagentPaths, sessions[childIdx].SourcePath)
 		}
 	}
+	return nil
+}
+
+// claudeTeammateParent names the one spawner of an identity whose uniqueness
+// the two counts already proved. The cheapest place that can name it wins: a
+// located session's stored logical parent, then a spawner inside this build's
+// own batch, then the single stored spawner path through the indexed read. A
+// read that returns more than one usable path is refused rather than resolved
+// to whichever path sorted first.
+func (a *ClaudeAdapter) claudeTeammateParent(
+	ctx context.Context,
+	spawnersInBatch map[ClaudeTeammateIdentity][]SessionID,
+	evidence map[ResolvedPath]ClaudeTranscriptEvidence,
+	reader DerivedLookupReader,
+	identity ClaudeTeammateIdentity,
+	child DiscoveredSession,
+	located *LocatedSource,
+) (SessionID, bool, error) {
+	if located != nil && child.SessionID == located.ID && located.Stored.Parent != nil {
+		return *located.Stored.Parent, true, nil
+	}
+
+	inBatch := spawnersInBatch[identity]
+	if len(inBatch) > 1 {
+		return "", false, nil // two spawners: the identity is ambiguous
+	}
+	if len(inBatch) == 1 {
+		return inBatch[0], true, nil
+	}
+
+	paths, err := reader.ClaudeIdentitySpawnerPaths(ctx, identity.Team, identity.Name)
+	if err != nil {
+		return "", false, fmt.Errorf("ingest: the Claude build could not read the stored spawner paths for teammate identity (%q, %q); without them it cannot name the spawner a full run would link to, and guessing would re-home %s under the wrong parent; where: ingest.ClaudeAdapter.claudeTeammateParent in internal/ingest/claude.go; when: deciding a teammate link for %q; impact: no session was built and nothing was written; fix: restore database access and retry: %w", identity.Team, identity.Name, child.SessionID, child.SourcePath, err)
+	}
+	// A stored path this build re-mined to no longer spawn is not a spawner any
+	// more, even though its old row is still in the store until this run's
+	// evidence write. The counts already exclude it, so the path list must too.
+	usable := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		path, pathErr := NewResolvedPath(raw)
+		if pathErr != nil {
+			return "", false, fmt.Errorf("ingest: the stored spawner path %q for teammate identity (%q, %q) is not a resolvable path; the link step cannot point %s at a source it cannot name; where: ingest.ClaudeAdapter.claudeTeammateParent in internal/ingest/claude.go; when: deciding a teammate link for %q; impact: no session was built and nothing was written; fix: repair the stored evidence path or re-run a full discovery: %w", raw, identity.Team, identity.Name, child.SessionID, child.SourcePath, pathErr)
+		}
+		if record, isCurrent := evidence[path]; isCurrent && !claudeSpawnsIdentity(record, identity) {
+			continue
+		}
+		usable = append(usable, raw)
+	}
+	if len(usable) != 1 {
+		return "", false, nil
+	}
+	spawnerPath, pathErr := NewResolvedPath(usable[0])
+	if pathErr != nil {
+		return "", false, fmt.Errorf("ingest: the stored spawner path %q for teammate identity (%q, %q) is not a resolvable path; the link step cannot point %s at a source it cannot name; where: ingest.ClaudeAdapter.claudeTeammateParent in internal/ingest/claude.go; when: deciding a teammate link for %q; impact: no session was built and nothing was written; fix: repair the stored evidence path or re-run a full discovery: %w", usable[0], identity.Team, identity.Name, child.SessionID, child.SourcePath, pathErr)
+	}
+	spawnID, ok := claudeSessionIDFromRootPath(spawnerPath)
+	if !ok || spawnID == child.SessionID {
+		return "", false, nil
+	}
+	// The evidence cache keeps a transcript for every mined root, so a spawner
+	// path can name a session that has no stored row: a session outside the
+	// run's filters, or one pruned while its file survived. A full run never
+	// points at such a parent, and a located build must make the same decision.
+	if !a.claudeSessionAlreadyStored(ctx, spawnID) {
+		return "", false, nil
+	}
+	return spawnID, true, nil
 }
 
 // mineClaudeRootTranscript reads one root transcript ONCE and derives every
@@ -1494,12 +1609,14 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 	}
 	sessions = linking
 
-	if mode == ClaudeBuildFullWalk {
-		a.linkClaudeTeammates(ctx, sessions, state.cached, state.mined)
-	} else {
-		if err := a.linkClaudeTeammatesScoped(ctx, sessions, state.cached, state.mined, located); err != nil {
-			return nil, nil, err
-		}
+	// The full walk uses the store's indexed identity counts whenever its
+	// evidence cache is attached: the whole-table load already happened for the
+	// cache itself, and the counts keep one rule for both build modes. A run
+	// with no cache (a logs-only harvest, a dry run) reads the counts from the
+	// evidence view it mined, so it links the same pairs without a store.
+	storedCounts := mode == ClaudeBuildScoped || a.derivedLookup != nil && a.evidence != nil
+	if err := a.linkClaudeTeammates(ctx, sessions, state.cached, state.mined, located, storedCounts); err != nil {
+		return nil, nil, err
 	}
 
 	a.reminedCount = len(state.remined)
@@ -1765,211 +1882,6 @@ func claudeWithoutContextSessions(sessions []DiscoveredSession, context map[Reso
 		kept = append(kept, session)
 	}
 	return kept
-}
-
-// linkClaudeTeammatesScoped links a built cohort member to the teammate that
-// spawned it, using the store's two indexed identity counts instead of the whole
-// evidence cache. The ambiguity rule is unchanged: a link is created only when
-// exactly one root path declares the identity and exactly one spawner path
-// records spawning it, a child is never its own parent, and a pair that would
-// close a cycle is refused. A link the store already records is kept; this step
-// never removes one.
-//
-// The parent comes from the cheapest place that can name it. A session's stored
-// logical parent or a spawner that is itself a cohort member is already known.
-// When neither is, the counts prove the identity unique and the spawner-path
-// read names the one spawner transcript, whose session must already be stored:
-// the derived table is evidence-derived, and evidence outlives a session row
-// that was filtered out or pruned. A read that returns more than one path is
-// refused rather than resolved to whichever path sorted first.
-func (a *ClaudeAdapter) linkClaudeTeammatesScoped(
-	ctx context.Context,
-	sessions []DiscoveredSession,
-	cached, mined map[ResolvedPath]ClaudeTranscriptEvidence,
-	located *LocatedSource,
-) error {
-	if a.derivedLookup == nil {
-		return fmt.Errorf("ingest: the located Claude build has no indexed identity reader, so it cannot decide a teammate link without reading the whole evidence table, which a scoped run must not do; where: ingest.ClaudeAdapter.linkClaudeTeammatesScoped in internal/ingest/claude.go; when: building a located Claude source; impact: no member was built and nothing was written; fix: attach the store's derived lookup reader to the adapter before the run (ingest.AttachClaudeDerivedLookup)")
-	}
-
-	evidence := mergeClaudeEvidence(cached, mined)
-	rootByID := make(map[SessionID]int, len(sessions))
-	rootByPath := make(map[ResolvedPath]int, len(sessions))
-	for i := range sessions {
-		if sessions[i].ParentUUID == nil {
-			rootByID[sessions[i].SessionID] = i
-			rootByPath[sessions[i].SourcePath] = i
-		}
-	}
-
-	candidates := make(map[SessionID]SessionID, len(sessions))
-	for i := range sessions {
-		session := sessions[i]
-		if session.ParentUUID != nil {
-			continue
-		}
-		record := evidence[session.SourcePath]
-		if record.Scope != ClaudeEvidenceScopeRoot || record.Identity == nil {
-			continue
-		}
-
-		var parentID SessionID
-		haveParent := false
-		if located != nil && session.SessionID == located.ID && located.Stored.Parent != nil {
-			parentID = *located.Stored.Parent
-			haveParent = true
-		} else {
-			for j := range sessions {
-				if sessions[j].SessionID == session.SessionID {
-					continue
-				}
-				spawner := evidence[sessions[j].SourcePath]
-				if spawner.Scope != ClaudeEvidenceScopeRoot || !claudeSpawnsIdentity(spawner, *record.Identity) {
-					continue
-				}
-				if haveParent {
-					haveParent = false // two spawners: the identity is ambiguous
-					break
-				}
-				parentID = sessions[j].SessionID
-				haveParent = true
-			}
-		}
-
-		declarers, spawners, err := a.claudeTeammateIdentityCounts(ctx, *record.Identity, session.SourcePath, cached, evidence)
-		if err != nil {
-			return err
-		}
-		if declarers != 1 || spawners != 1 {
-			continue
-		}
-		if !haveParent {
-			spawnerPath, ok, err := a.claudeTeammateSpawnerPath(ctx, *record.Identity, session)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
-			parentID, ok = claudeSessionIDFromRootPath(spawnerPath)
-			if !ok || parentID == session.SessionID {
-				continue
-			}
-			// The evidence cache keeps a transcript for every mined root, so a
-			// spawner path can name a session that has no stored row: a session
-			// outside the run's filters, or one pruned while its file survived.
-			// A full run never points at such a parent, and a scoped run must
-			// make the same decision.
-			if !a.claudeSessionAlreadyStored(ctx, parentID) {
-				continue
-			}
-			haveParent = true
-		}
-		if !haveParent || parentID == session.SessionID {
-			continue
-		}
-		candidates[session.SessionID] = parentID
-	}
-
-	cyclic := a.claudeCyclicChildren(ctx, candidates)
-	for childID, parentID := range candidates {
-		if cyclic[childID] {
-			continue
-		}
-		childIdx, ok := rootByID[childID]
-		if !ok {
-			continue
-		}
-		parent := parentID
-		sessions[childIdx].ParentUUID = &parent
-		if parentIdx, inBatch := rootByID[parentID]; inBatch {
-			sessions[parentIdx].SubagentPaths = append(sessions[parentIdx].SubagentPaths, sessions[childIdx].SourcePath)
-		}
-	}
-	return nil
-}
-
-// claudeTeammateIdentityCounts answers how many distinct root paths declare
-// identity and how many spawn it, once this build's current view replaces the
-// stored rows it re-read. The store counts are the rows the last discovery
-// wrote; a record this run re-mined replaces its stored row, so the adjustment
-// is what keeps the scoped answer equal to a full run's.
-func (a *ClaudeAdapter) claudeTeammateIdentityCounts(
-	ctx context.Context,
-	identity ClaudeTeammateIdentity,
-	childPath ResolvedPath,
-	cached, evidence map[ResolvedPath]ClaudeTranscriptEvidence,
-) (declarers, spawners int, err error) {
-	declarers, err = a.derivedLookup.CountClaudeIdentityDeclarers(ctx, identity)
-	if err != nil {
-		return 0, 0, fmt.Errorf("ingest: the located Claude build could not count the root transcripts that declare teammate identity (%q, %q); without that count it cannot tell a unique identity from an ambiguous one, and guessing would re-home a session under the wrong parent; where: ingest.ClaudeAdapter.linkClaudeTeammatesScoped in internal/ingest/claude.go; when: deciding a teammate link for %q; impact: the scoped run stops with no session written; fix: restore database access and retry: %w", identity.Team, identity.Name, childPath, err)
-	}
-	spawners, err = a.derivedLookup.CountClaudeIdentitySpawners(ctx, identity)
-	if err != nil {
-		return 0, 0, fmt.Errorf("ingest: the located Claude build could not count the root transcripts that spawn teammate identity (%q, %q); without that count it cannot tell a unique spawner from an ambiguous one, and guessing would re-home a session under the wrong parent; where: ingest.ClaudeAdapter.linkClaudeTeammatesScoped in internal/ingest/claude.go; when: deciding a teammate link for %q; impact: the scoped run stops with no session written; fix: restore database access and retry: %w", identity.Team, identity.Name, childPath, err)
-	}
-
-	declarers += claudeIdentityCountAdjustment(cached, evidence, func(record ClaudeTranscriptEvidence) bool {
-		return record.Scope == ClaudeEvidenceScopeRoot && record.Identity != nil && *record.Identity == identity
-	})
-	spawners += claudeIdentityCountAdjustment(cached, evidence, func(record ClaudeTranscriptEvidence) bool {
-		return record.Scope == ClaudeEvidenceScopeRoot && claudeSpawnsIdentity(record, identity)
-	})
-	return declarers, spawners, nil
-}
-
-// claudeTeammateSpawnerPath names the one spawner transcript of a unique
-// identity. The counts prove uniqueness; this read turns "one spawner exists"
-// into the path that holds it, so a declarer selected on its own can point at a
-// spawner outside its cohort. The path names a transcript, not necessarily a
-// stored session, so the caller still requires the session to be stored. A read
-// that returns any number of paths other than one is refused: two paths are two
-// claims, and the link step must not pick one.
-func (a *ClaudeAdapter) claudeTeammateSpawnerPath(
-	ctx context.Context,
-	identity ClaudeTeammateIdentity,
-	child DiscoveredSession,
-) (ResolvedPath, bool, error) {
-	paths, err := a.derivedLookup.ClaudeIdentitySpawnerPaths(ctx, identity.Team, identity.Name)
-	if err != nil {
-		return "", false, fmt.Errorf("ingest: the located Claude build could not read the stored spawner paths for teammate identity (%q, %q); without them it cannot name the spawner a full run would link to, and guessing would re-home %s under the wrong parent; where: ingest.ClaudeAdapter.linkClaudeTeammatesScoped in internal/ingest/claude.go; when: deciding a teammate link for %q; impact: the scoped run stops with no session written; fix: restore database access and retry: %w", identity.Team, identity.Name, child.SessionID, child.SourcePath, err)
-	}
-	if len(paths) != 1 {
-		return "", false, nil
-	}
-	spawner, err := NewResolvedPath(paths[0])
-	if err != nil {
-		return "", false, fmt.Errorf("ingest: the stored spawner path %q for teammate identity (%q, %q) is not a resolvable path; the scoped link step cannot point %s at a source it cannot name; where: ingest.ClaudeAdapter.linkClaudeTeammatesScoped in internal/ingest/claude.go; when: deciding a teammate link for %q; impact: the scoped run stops with no session written; fix: repair the stored evidence path or re-run a full discovery: %w", paths[0], identity.Team, identity.Name, child.SessionID, child.SourcePath, err)
-	}
-	return spawner, true, nil
-}
-
-// claudeIdentityCountAdjustment is the difference between the store's count and
-// the count after this build's re-mined rows replace the stored rows it read:
-// each stored row that matched loses one, and each current row that matches
-// gains one. A path present in both views cancels out.
-func claudeIdentityCountAdjustment(
-	cached, evidence map[ResolvedPath]ClaudeTranscriptEvidence,
-	matches func(ClaudeTranscriptEvidence) bool,
-) int {
-	adjustment := 0
-	for path, stored := range cached {
-		if matches(stored) {
-			adjustment--
-		}
-		if current, ok := evidence[path]; ok && matches(current) {
-			adjustment++
-		}
-	}
-	for path, current := range evidence {
-		if _, wasCached := cached[path]; wasCached {
-			continue
-		}
-		if matches(current) {
-			adjustment++
-		}
-	}
-	return adjustment
 }
 
 // claudeSpawnsIdentity reports whether one root transcript recorded spawning a

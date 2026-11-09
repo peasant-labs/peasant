@@ -8,70 +8,148 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
-// claudeSpawnLink names one candidate teammate relationship: the root that
-// declared the identity (the child) and the root that recorded spawning it
-// (the parent). It is only ever produced for an identity that is unambiguous
-// in both directions.
-type claudeSpawnLink struct {
-	Child  ResolvedPath
-	Parent ResolvedPath
+// claudeIdentityCountDelta is how far one build's current evidence view moves
+// each identity count away from the stored count. The store's counts describe
+// the rows the last discovery saved; a transcript this run re-mined replaces
+// its stored row, and a new transcript adds one, so the ambiguity decision has
+// to add the difference to the stored count.
+type claudeIdentityCountDelta struct {
+	declarers map[ClaudeTeammateIdentity]int
+	spawners  map[ClaudeTeammateIdentity]int
 }
 
-// buildClaudeSpawnIndex derives the identity-to-spawner pairing that is safe
-// to trust from every piece of root-transcript evidence the caller passes in.
-// A pairing is included only when exactly one root declares the identity and
-// exactly one (different) root recorded spawning it. An identity claimed by
-// more than one root, or spawned by more than one root, is OMITTED entirely:
-// a wrong parent would silently re-home a person's session under someone
-// else's, so ambiguity is worse than no link.
-//
-// The caller decides what "every piece of evidence" means. Passing the
-// current run's mined records alone reproduces same-batch linking; passing a
-// merge of the persisted evidence cache with this run's mined records (mined
-// values winning on overlap) extends linking so a child discovered in a
-// later run can still find a spawner an earlier run discovered.
-func buildClaudeSpawnIndex(evidence map[ResolvedPath]ClaudeTranscriptEvidence) map[ClaudeTeammateIdentity]claudeSpawnLink {
-	declarers := make(map[ClaudeTeammateIdentity]map[ResolvedPath]struct{})
-	spawners := make(map[ClaudeTeammateIdentity]map[ResolvedPath]struct{})
+// declarer returns the identity's declarer-count adjustment.
+func (d claudeIdentityCountDelta) declarer(id ClaudeTeammateIdentity) int { return d.declarers[id] }
 
-	for path, record := range evidence {
+// spawner returns the identity's spawner-count adjustment.
+func (d claudeIdentityCountDelta) spawner(id ClaudeTeammateIdentity) int { return d.spawners[id] }
+
+// claudeIdentityDeltas computes the per-identity difference between the stored
+// evidence rows and this build's current view.
+//
+// Only the paths this build holds current evidence for can differ from the
+// stored table. For each of them, the stored row loses its contribution (when
+// it matched) and the current row adds its own, so an unchanged row cancels
+// out and a changed row is replaced rather than counted twice. A stored row
+// this build did not touch — a transcript it did not walk, or one whose file
+// is gone — keeps its stored contribution, exactly as the full run's
+// whole-table view counted it before the prune.
+func claudeIdentityDeltas(cached, current map[ResolvedPath]ClaudeTranscriptEvidence) claudeIdentityCountDelta {
+	delta := claudeIdentityCountDelta{
+		declarers: make(map[ClaudeTeammateIdentity]int),
+		spawners:  make(map[ClaudeTeammateIdentity]int),
+	}
+	for path, record := range current {
+		if stored, ok := cached[path]; ok {
+			if stored.Scope == ClaudeEvidenceScopeRoot {
+				if stored.Identity != nil {
+					delta.declarers[*stored.Identity]--
+				}
+				// A repeated spawn in one transcript is one derived row.
+				seen := make(map[ClaudeTeammateIdentity]struct{}, len(stored.Spawns))
+				for _, spawn := range stored.Spawns {
+					if _, duplicate := seen[spawn]; duplicate {
+						continue
+					}
+					seen[spawn] = struct{}{}
+					delta.spawners[spawn]--
+				}
+			}
+		}
 		if record.Scope != ClaudeEvidenceScopeRoot {
-			continue // only a root transcript ever carries an identity or a spawn
+			continue
 		}
 		if record.Identity != nil {
-			identity := *record.Identity
-			if declarers[identity] == nil {
-				declarers[identity] = make(map[ResolvedPath]struct{})
-			}
-			declarers[identity][path] = struct{}{}
+			delta.declarers[*record.Identity]++
 		}
+		seen := make(map[ClaudeTeammateIdentity]struct{}, len(record.Spawns))
 		for _, spawn := range record.Spawns {
-			if spawners[spawn] == nil {
-				spawners[spawn] = make(map[ResolvedPath]struct{})
+			if _, duplicate := seen[spawn]; duplicate {
+				continue
 			}
-			spawners[spawn][path] = struct{}{}
+			seen[spawn] = struct{}{}
+			delta.spawners[spawn]++
 		}
 	}
+	return delta
+}
 
-	index := make(map[ClaudeTeammateIdentity]claudeSpawnLink)
-	for identity, children := range declarers {
-		parents := spawners[identity]
-		if len(children) != 1 || len(parents) != 1 {
-			continue // claimed or spawned more than once: stays absent
-		}
-		var child, parent ResolvedPath
-		for c := range children {
-			child = c
-		}
-		for p := range parents {
-			parent = p
-		}
-		if child == parent {
-			continue // a root cannot spawn itself
-		}
-		index[identity] = claudeSpawnLink{Child: child, Parent: parent}
+// claudeEvidenceIdentityReader is the DerivedLookupReader of a run that keeps
+// no store — a logs-only harvest, a dry run, or an adapter test. The derived
+// tables are a projection of the evidence table, so the evidence view this run
+// already holds IS that projection; reading it directly answers the same two
+// questions the store's indexes answer. The ambiguity rule itself lives in one
+// place (linkClaudeTeammates), so this is a data source, never a second rule.
+//
+// The counts and paths are computed once at construction, so the per-identity
+// questions are lookups: a build that asks about every declarer must not walk
+// the whole view once per identity.
+type claudeEvidenceIdentityReader struct {
+	declarers map[ClaudeTeammateIdentity]int
+	spawners  map[ClaudeTeammateIdentity]int
+	paths     map[ClaudeTeammateIdentity][]string
+}
+
+var _ DerivedLookupReader = claudeEvidenceIdentityReader{}
+
+// newClaudeEvidenceIdentityReader projects the evidence view once.
+func newClaudeEvidenceIdentityReader(evidence map[ResolvedPath]ClaudeTranscriptEvidence) claudeEvidenceIdentityReader {
+	reader := claudeEvidenceIdentityReader{
+		declarers: make(map[ClaudeTeammateIdentity]int),
+		spawners:  make(map[ClaudeTeammateIdentity]int),
+		paths:     make(map[ClaudeTeammateIdentity][]string),
 	}
-	return index
+	for path, record := range evidence {
+		if record.Scope != ClaudeEvidenceScopeRoot {
+			continue
+		}
+		if record.Identity != nil {
+			reader.declarers[*record.Identity]++
+		}
+		// One transcript's repeated spawn of the same identity is still one
+		// spawner path, exactly as the derived table's primary key makes it.
+		seen := make(map[ClaudeTeammateIdentity]struct{}, len(record.Spawns))
+		for _, spawn := range record.Spawns {
+			if _, duplicate := seen[spawn]; duplicate {
+				continue
+			}
+			seen[spawn] = struct{}{}
+			reader.spawners[spawn]++
+			if len(reader.paths[spawn]) < 2 {
+				reader.paths[spawn] = append(reader.paths[spawn], path.String())
+			}
+		}
+	}
+	return reader
+}
+
+// CountClaudeIdentityDeclarers counts the distinct root paths that declare id.
+func (r claudeEvidenceIdentityReader) CountClaudeIdentityDeclarers(_ context.Context, id ClaudeTeammateIdentity) (int, error) {
+	return r.declarers[id], nil
+}
+
+// CountClaudeIdentitySpawners counts the distinct root paths that record
+// spawning id.
+func (r claudeEvidenceIdentityReader) CountClaudeIdentitySpawners(_ context.Context, id ClaudeTeammateIdentity) (int, error) {
+	return r.spawners[id], nil
+}
+
+// ClaudeIdentitySpawnerPaths returns the root paths that record spawning
+// (team, name). It is bounded like the store's read: the caller only
+// distinguishes zero, one, and many.
+func (r claudeEvidenceIdentityReader) ClaudeIdentitySpawnerPaths(_ context.Context, team, name string) ([]string, error) {
+	return r.paths[ClaudeTeammateIdentity{Team: team, Name: name}], nil
+}
+
+// CountCodexRolloutsBySession is unused by the Claude link step. A store-free
+// run answers no Codex question through the evidence view.
+func (claudeEvidenceIdentityReader) CountCodexRolloutsBySession(context.Context, SessionID) (int, error) {
+	return 0, nil
+}
+
+// CodexRolloutPaths is unused by the Claude link step.
+func (claudeEvidenceIdentityReader) CodexRolloutPaths(context.Context, SessionID) ([]ResolvedPath, error) {
+	return nil, nil
 }
 
 // mergeClaudeEvidence returns the effective evidence view for one discovery:

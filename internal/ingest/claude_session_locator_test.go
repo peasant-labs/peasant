@@ -226,13 +226,17 @@ func runClaudeDiscoverAtParity(t *testing.T, rootText string, cfg ingest.SourceC
 	}
 	adapter := ingest.NewClaudeAdapter(counting, testutil.NoGitResolver(), salt.Salt{})
 	ingest.AttachClaudeEvidenceCache(adapter, cache)
-	ingest.AttachClaudeDerivedLookup(adapter, derived)
 	ingest.AttachSessionLocationLookup(adapter, location)
 
+	// The store's derived tables are empty before the first walk, so the full
+	// discovery links from the evidence it mines, exactly as a store-free run
+	// does. The derived reader below is the state the store holds AFTER this
+	// walk saves its evidence, which is what the located build reads.
 	full, err := adapter.Discover(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
+	ingest.AttachClaudeDerivedLookup(adapter, derived)
 	if locatedCase.StaleOwner {
 		path := claudeLocatorPath(t, rootText, locatedCase.ContextPaths[0])
 		stale := cache.evidence[ingest.ResolvedPath(path)]
