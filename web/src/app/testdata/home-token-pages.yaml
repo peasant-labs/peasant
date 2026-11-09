@@ -1,9 +1,7 @@
 requiredNames:
-  - short-and-empty-root-continuation
-  - empty-first-page-can-continue
-  - continuation-retries-same-token
-  - child-empty-continuation-retries
-  - finite-refresh-follows-fresh-root-and-child-tokens
+  - page-offset-and-next-items
+  - child-page-offset
+  - revision-change-clears-cache
   - scope-error-restarts-once
   - generic400-does-not-restart
   - project-options-do-not-block-rows
@@ -12,87 +10,97 @@ requiredNames:
   - account-reset-reloads-project-options
   - project-options-error-retains-rows-and-retries
   - project-options-selection-error-retains-rows-and-retries
+  - beyond-last-clamps-and-rewrites-url
+  - page-size-resets-to-one
+  - omitted-view-serves-home-page
+  - empty-store-page-one-total-zero
 projects:
   - { projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, projectName: alpha }
   - { projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, projectName: beta }
 cases:
-  - name: short-and-empty-root-continuation
+  - name: page-offset-and-next-items
     pages:
-      '': { ids: [root-one], next: sparse }
-      sparse: { ids: [], next: remaining }
-      remaining: { ids: [root-last], next: '' }
-    expectedTokens: ['', sparse, remaining]
-  - name: empty-first-page-can-continue
+      '1': { ids: [root-one], nextIds: [root-two], total: 26 }
+      '2': { ids: [root-two], nextIds: [], total: 26 }
+
+  - name: child-page-offset
     pages:
-      '': { ids: [], next: remaining }
-      remaining: { ids: [root-last], next: '' }
-    expectedTokens: ['', remaining]
-  - name: continuation-retries-same-token
-    pages:
-      '': { ids: [root-one], next: retry-this }
-      retry-this: { ids: [root-last], next: '', failOnce: 503 }
-    expectedTokens: ['', retry-this, retry-this]
-  - name: child-empty-continuation-retries
-    pages:
-      '': { ids: [root-one], next: '' }
+      '1': { ids: [root-one], nextIds: [], total: 1 }
     children:
-      '': { ids: [], next: child-more }
-      child-more: { ids: [child-one], next: '', failOnce: 503 }
-    expectedTokens: ['', child-more, child-more]
-  - name: finite-refresh-follows-fresh-root-and-child-tokens
+      root-one:
+        '1': { ids: [child-one], nextIds: [child-two], total: 2 }
+        '2': { ids: [child-two], nextIds: [], total: 2 }
+
+  - name: revision-change-clears-cache
     pages:
-      '': { ids: [root-one], next: old-root-a }
-      old-root-a: { ids: [], next: old-root-b }
-      old-root-b: { ids: [root-last], next: old-unvisited }
-    children:
-      '': { ids: [child-one], next: old-child-a }
-      old-child-a: { ids: [], next: old-child-unvisited }
+      '1': { ids: [root-one], nextIds: [], total: 26, revision: '1' }
+      '2': { ids: [root-two], nextIds: [], total: 26, revision: '1' }
     refreshed:
-      '': { ids: [root-one], next: fresh-root-a }
-      fresh-root-a: { ids: [], next: fresh-root-b }
-      fresh-root-b: { ids: [], next: fresh-unvisited }
-    refreshedChildren:
-      '': { ids: [child-one], next: fresh-child-a }
-      fresh-child-a: { ids: [], next: fresh-child-unvisited }
-    expectedTokens: ['', fresh-root-a, fresh-root-b]
-    expectedChildTokens: ['', fresh-child-a]
+      '1': { ids: [fresh-root-one], nextIds: [], total: 26, revision: '2' }
+      '2': { ids: [fresh-root-two], nextIds: [], total: 26, revision: '2' }
+
   - name: scope-error-restarts-once
     pages:
-      '': { ids: [root-one], next: wrong-scope }
-      wrong-scope: { ids: [], next: '', status: 400, code: sync_page_scope_changed }
+      '1': { ids: [root-one], nextIds: [], total: 26 }
+      '2': { ids: [root-two], nextIds: [], total: 26, failOnce: { status: 400, code: sync_page_scope_changed } }
     rejectRestart: true
-    expectedTokens: ['', wrong-scope, '']
+
   - name: generic400-does-not-restart
     pages:
-      '': { ids: [root-one], next: bad-query }
-      bad-query: { ids: [], next: '', status: 400, code: invalid_query }
-    expectedTokens: ['', bad-query]
+      '1': { ids: [root-one], nextIds: [], total: 26 }
+      '2': { ids: [], nextIds: [], total: 26, status: 400, code: invalid_query }
+
   - name: project-options-do-not-block-rows
     pages:
-      '': { ids: [root-one], next: '' }
+      '1': { ids: [root-one], nextIds: [], total: 1 }
     deferOptions: true
-    expectedTokens: ['']
+
   - name: project-filter-aborts-old-continuation
     pages:
-      '': { ids: [root-one], next: delayed-more }
-      delayed-more: { ids: [old-off-page], next: '', deferred: true }
-    expectedTokens: ['', delayed-more, '']
+      '1': { ids: [root-one], nextIds: [], total: 26 }
+      '2': { ids: [old-off-page], nextIds: [], total: 26, deferred: true }
+    refreshed:
+      '1': { ids: [fresh-root-one], nextIds: [], total: 1 }
+      '2': { ids: [], nextIds: [], total: 1 }
+
   - name: late-options-cannot-win-filter-reset
     pages:
-      '': { ids: [root-one], next: '' }
+      '1': { ids: [root-one], nextIds: [], total: 1 }
     deferOptions: true
-    expectedTokens: ['', '']
+
   - name: account-reset-reloads-project-options
     pages:
-      '': { ids: [root-one], next: '' }
-    expectedTokens: ['', '']
+      '1': { ids: [root-one], nextIds: [], total: 1 }
+    refreshed:
+      '1': { ids: [fresh-root-one], nextIds: [], total: 1 }
+
   - name: project-options-error-retains-rows-and-retries
     pages:
-      '': { ids: [root-one], next: '' }
+      '1': { ids: [root-one], nextIds: [], total: 1 }
     optionsError: { status: 503, code: sync_page_unavailable }
-    expectedTokens: ['']
+
   - name: project-options-selection-error-retains-rows-and-retries
     pages:
-      '': { ids: [root-one], next: '' }
+      '1': { ids: [root-one], nextIds: [], total: 1 }
     optionsError: { status: 500, code: selection_visibility }
-    expectedTokens: ['']
+
+  - name: beyond-last-clamps-and-rewrites-url
+    search: 'page=99&perPage=25'
+    pages:
+      '99': { ids: [root-last], nextIds: [], total: 30, servedPage: 2 }
+      '2': { ids: [root-last], nextIds: [], total: 30 }
+
+  - name: page-size-resets-to-one
+    pages:
+      '1': { ids: [root-one], nextIds: [], total: 26 }
+      '2': { ids: [root-two], nextIds: [], total: 26 }
+    resized:
+      '1': { ids: [root-one, root-two], nextIds: [], total: 51 }
+
+  - name: omitted-view-serves-home-page
+    pages:
+      '1': { ids: [root-one], nextIds: [], total: 1 }
+
+  - name: empty-store-page-one-total-zero
+    pages:
+      '1': { ids: [], nextIds: [], total: 0 }

@@ -381,6 +381,10 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  // The URL is Home's source of truth: each test starts at a clean root.
+  window.history.replaceState({}, '', '/');
+  window.sessionStorage.clear();
+  window.localStorage.clear();
 });
 
 describe('root page publish filters', () => {

@@ -8,15 +8,28 @@ import { PublishProvider, usePublishState } from '@/contexts/PublishContext';
 import { zSyncPushRequest, zSyncPushResponse } from '@peasant-labs/schema';
 import { ALPHA_HASH, makeSession } from '@/app/review/[[...segments]]/test-fixtures';
 import type { LocalSyncSessionRow } from '@/lib/api/home';
+import { decodeHomeViewState } from '@/lib/home/viewState';
 import { browseBy, browseTrigger, chooseStatus, choiceRows } from '@/test/homeMenus';
 
 const channels = vi.hoisted(() => vi.fn<(subscriptions: unknown) => { connected: boolean; data: unknown; error: null }>());
 vi.mock('@/contexts/WebSocketContext', () => ({ useChannel: channels }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-interface Fixture { name: string; roots: number; children: number; parentErrorCode?: string; cachedSessionId?: string; cachedProject?: string; accountAfterFailure?: string; teammate?: { team: string; name: string }; assertTeammateLine?: boolean }
-const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-pages.yaml'), 'utf8')) as { requiredNames: string[]; cases: Fixture[]; publish: { request: unknown; response: unknown; loadedTokens: { parent: string | null; token: string }[]; failedRefreshTokens: { parent: string | null; token: string }[] } };
-const required = ['first-page-and-next-page', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-error-keeps-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-error-retry-failure-keeps-loaded-content', 'selection-error-account-change-refreshes-loaded-content', 'claude-teammate-line', 'no-claude-teammate-line'];
+interface Fixture {
+  name: string;
+  roots: number;
+  children: number;
+  parentErrorCode?: string;
+  cachedSessionId?: string;
+  cachedProject?: string;
+  accountAfterFailure?: string;
+  teammate?: { team: string; name: string };
+  assertTeammateLine?: boolean;
+  search?: string;
+  expectView?: { browse: string; publication: string; project: string | null; perPage: number; page: number; groupBy: string };
+}
+const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-pages.yaml'), 'utf8')) as { requiredNames: string[]; cases: Fixture[]; publish: { request: unknown; response: unknown; loadedPages: { parent: string | null; page: number }[]; failedRefreshPages: { parent: string | null; page: number }[] } };
+const required = ['numbered-pages-from-the-url', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-error-keeps-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-error-retry-failure-keeps-loaded-content', 'selection-error-account-change-refreshes-loaded-content', 'claude-teammate-line', 'no-claude-teammate-line', 'refresh-restores-view-and-page'];
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
 expect(fixture.cases.map(row => row.name).sort()).toEqual([...required].sort());
 
@@ -59,8 +72,9 @@ let parentFailure: string | undefined;
 let pushReply: ReturnType<typeof deferred<Response>>;
 let holdPages: boolean;
 let releasePages: (() => void)[];
+let revision: string;
 const pageRequests = () => requests.filter(url => url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home');
-const tokens = (urls: URL[]) => urls.map(url => ({ parent: url.searchParams.get('parentSessionId'), token: url.searchParams.get('pageToken') }));
+const pagesOf = (urls: URL[]) => urls.map(url => ({ parent: url.searchParams.get('parentSessionId'), page: Number(url.searchParams.get('page') ?? '1') }));
 function PublishAction() {
   const { publish, settled } = usePublishState();
   return <><button onClick={() => { void publish('root-0', zSyncPushRequest.parse(fixture.publish.request), 0).catch(() => {}); }}>publish fixture session</button><output aria-label="publish completed">{settled.get('root-0') ?? 0}</output></>;
@@ -69,6 +83,7 @@ function mount() { return render(<PublishProvider><HomePage /><PublishAction /><
 
 beforeEach(() => {
   requests = []; signals = []; fail = false; selectionFailure = false; account = 'first'; delayed = undefined; delayFilter = ''; delayParent = '';
+  window.history.replaceState({}, '', '/'); window.sessionStorage.clear(); window.localStorage.clear(); revision = '0';
   channels.mockReset();
   channels.mockReturnValue({ connected: true, data: { sessions: [] }, error: null });
   childSources = new Map(); parentFailure = undefined; pushReply = deferred<Response>(); holdPages = false; releasePages = [];
@@ -84,36 +99,53 @@ beforeEach(() => {
     if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'project-options') return json({ projects: [{ projectHash: ALPHA_HASH, projectName: 'fixture-project' }] });
     if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home') {
       signals.push(init?.signal as AbortSignal);
-      if (delayFilter && url.searchParams.get('publication') === delayFilter && delayed) return delayed.promise;
+      if (delayFilter && (url.searchParams.get('publication') ?? 'all') === delayFilter && delayed) return delayed.promise;
       if (delayParent && url.searchParams.get('parentSessionId') === delayParent && delayed) return delayed.promise;
       if (selectionFailure) return json({ error: 'saved selection metadata could not be read', code: 'selection_visibility' }, 500);
       if (fail) return json({ error: 'temporary read failure; retry' }, 503);
       if (parentFailure && url.searchParams.has('parentSessionId')) return json({ error: 'parent read refused; choose a visible parent', code: parentFailure }, 404);
-      const start = url.searchParams.get('pageToken') === 'after-first' ? 25 : url.searchParams.get('pageToken') === 'after-second' ? 50 : 0;
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const size = Number(url.searchParams.get('maxItems') ?? '25');
+      const start = (page - 1) * size;
       const parent = url.searchParams.get('parentSessionId');
       const source = parent ? childSources.get(parent) ?? children : roots;
-      const body = { items: source.slice(start, start + 25), next: start + 25 < source.length ? start === 0 ? 'after-first' : 'after-second' : '' };
+      const body = {
+        items: source.slice(start, start + size),
+        nextItems: source.slice(start + size, start + 2 * size),
+        page,
+        perPage: size,
+        total: source.length,
+        revision,
+      };
       if (holdPages) return new Promise<Response>(done => { releasePages.push(() => done(json(body))); });
       return json(body);
     }
     throw new Error(`Unexpected eager request ${url.pathname}`);
   }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState({}, '', '/'); window.sessionStorage.clear(); window.localStorage.clear(); });
 
 describe('mounted bounded Home', () => {
   for (const testCase of fixture.cases) {
     it(testCase.name, async () => {
+      if (testCase.search) window.history.replaceState({}, '', `/?${testCase.search}`);
       roots = Array.from({ length: testCase.roots }, (_, index) => row(`root-${index}`, index === 0 ? testCase.children : 0));
       children = Array.from({ length: testCase.children }, (_, index) => row(`child-${index}`, index === 0 ? 1 : 0, index === 0 ? testCase.teammate : undefined));
       mount();
-      await screen.findByRole('link', { name: 'title root-0' });
+      const restoring = testCase.name === 'refresh-restores-view-and-page';
+      await screen.findByRole('link', { name: restoring ? 'title root-50' : 'title root-0' });
       expect(channels).not.toHaveBeenCalled();
       expect(pageRequests()).toHaveLength(1);
-      expect(pageRequests()[0].searchParams.get('maxItems')).toBe('25');
-      expect(screen.queryByRole('link', { name: 'title root-25' })).not.toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'title root-0' }).getAttribute('href')).toContain('root-0');
-      expect(choiceRows('status').find(row => row.getAttribute('aria-checked') === 'true')).toHaveTextContent('all');
+      if (restoring) {
+        expect(pageRequests()[0].searchParams.get('maxItems')).toBe('50');
+        expect(pageRequests()[0].searchParams.get('page')).toBe('2');
+      } else {
+        expect(pageRequests()[0].searchParams.get('maxItems')).toBe('25');
+        expect(pageRequests()[0].searchParams.get('page')).toBe('1');
+        expect(screen.queryByRole('link', { name: 'title root-25' })).not.toBeInTheDocument();
+        expect(screen.getByRole('link', { name: 'title root-0' }).getAttribute('href')).toContain('root-0');
+        expect(choiceRows('status').find(row => row.getAttribute('aria-checked') === 'true')).toHaveTextContent('all');
+      }
 
       if (testCase.assertTeammateLine) {
         fireEvent.click(screen.getByRole('button', { name: 'subagents 1' }));
@@ -137,18 +169,20 @@ describe('mounted bounded Home', () => {
         }
         expect(screen.getByRole('link', { name: 'title root-0' })).toBeInTheDocument();
       }
-      if (testCase.name === 'first-page-and-next-page') {
+      if (testCase.name === 'numbered-pages-from-the-url') {
         fireEvent.click(screen.getByRole('button', { name: 'next page' }));
         await screen.findByRole('link', { name: 'title root-25' });
         // One page at a time: the first page's rows leave the table.
         expect(screen.queryByRole('link', { name: 'title root-0' })).not.toBeInTheDocument();
-        expect(pageRequests().map(url => url.searchParams.get('pageToken'))).toEqual(['', 'after-first']);
-        // The server said more follow, so the pager offers the page after the ones read.
+        expect(pageRequests().map(url => url.searchParams.get('page'))).toEqual(['1', '2']);
+        expect(new URLSearchParams(window.location.search).get('page')).toBe('2');
+        // The server's total names the last page (60 roots at 25 per page).
         expect(screen.getByRole('button', { name: 'page 3' })).toBeInTheDocument();
         // A page already read opens without asking the server again.
         fireEvent.click(screen.getByRole('button', { name: 'page 1' }));
         await screen.findByRole('link', { name: 'title root-0' });
         expect(pageRequests()).toHaveLength(2);
+        expect(new URLSearchParams(window.location.search).get('page')).toBeNull();
       }
       if (testCase.name === 'loaded-refresh-keeps-content-on-failure') {
         fireEvent.click(screen.getByRole('button', { name: 'subagents 30' }));
@@ -159,13 +193,37 @@ describe('mounted bounded Home', () => {
         fail = true;
         fireEvent(window, new Event('focus'));
         await screen.findByRole('button', { name: 'retry the session list' });
+        // The failed refresh kept the visible page and its loaded family.
         expect(screen.getByRole('link', { name: 'title root-25' })).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'page 1' }));
-        expect(await screen.findByRole('link', { name: 'title child-0' })).toBeInTheDocument();
-        expect(tokens(pageRequests().slice(before))).toEqual(fixture.publish.failedRefreshTokens);
+        expect(pagesOf(pageRequests().slice(before))).toEqual(fixture.publish.failedRefreshPages);
         fail = false;
         fireEvent.click(screen.getByRole('button', { name: 'retry the session list' }));
         await waitFor(() => expect(screen.queryByRole('button', { name: 'retry the session list' })).not.toBeInTheDocument());
+        // Returning to a page read in this tab stays warm and keeps the family.
+        const afterRetry = pageRequests().length;
+        fireEvent.click(screen.getByRole('button', { name: 'page 1' }));
+        expect(await screen.findByRole('link', { name: 'title child-0' })).toBeInTheDocument();
+        expect(pageRequests()).toHaveLength(afterRetry);
+      }
+      if (testCase.name === 'refresh-restores-view-and-page') {
+        // The cold document load restores the view, page, size, and grouping
+        // from the URL; columns and open groups never travel in it.
+        const decoded = decodeHomeViewState(window.location.search);
+        expect({
+          browse: decoded.browse.wire,
+          publication: decoded.publication,
+          project: decoded.project,
+          perPage: decoded.pageSize,
+          page: decoded.page,
+          groupBy: decoded.groupBy.wire,
+        }).toEqual(testCase.expectView);
+        const first = pageRequests()[0];
+        expect(first.searchParams.get('page')).toBe('2');
+        expect(first.searchParams.get('maxItems')).toBe('50');
+        expect(first.searchParams.get('projectHash')).toBe(testCase.expectView?.project);
+        await screen.findByRole('link', { name: 'title root-50' });
+        await waitFor(() => expect(screen.getByRole('button', { name: 'page 2' })).toHaveAttribute('aria-current', 'page'));
+        expect(screen.queryByRole('link', { name: 'title root-0' })).not.toBeInTheDocument();
       }
       if (testCase.name === 'stale-filter-response') {
         delayed = deferred<Response>(); delayFilter = 'published';
@@ -175,7 +233,7 @@ describe('mounted bounded Home', () => {
         // Filter controls stay available during a first-page load.
         await chooseStatus('auto-publish on');
         await screen.findByRole('link', { name: 'title root-0' });
-        await act(async () => { delayed?.resolve(json({ items: [row('stale')], next: '' })); });
+        await act(async () => { delayed?.resolve(json({ items: [row('stale')], nextItems: [], page: 1, perPage: 25, total: 1, revision: '0' })); });
         expect(screen.queryByRole('link', { name: 'title stale' })).not.toBeInTheDocument();
         expect(signals.some(signal => signal.aborted)).toBe(true);
       }
@@ -207,7 +265,7 @@ describe('mounted bounded Home', () => {
         const childSignal = signals.at(-1)!;
         fireEvent.click(screen.getByRole('button', { name: 'subagents 30' }));
         expect(childSignal.aborted).toBe(true);
-        await act(async () => { delayed?.resolve(json({ items: children.slice(0,25), next: 'after-first' })); });
+        await act(async () => { delayed?.resolve(json({ items: children.slice(0,25), nextItems: children.slice(25,50), page: 1, perPage: 25, total: children.length, revision: '0' })); });
         expect(screen.queryByRole('link', { name: 'title child-0' })).not.toBeInTheDocument();
         delayParent = '';
         fireEvent.click(screen.getByRole('button', { name: 'subagents 30' }));
@@ -280,7 +338,7 @@ describe('mounted bounded Home', () => {
         fireEvent(window, new Event('focus'));
         expect(pageRequests()).toHaveLength(2);
         expect(screen.getByRole('link', { name: 'title root-0' })).toBeInTheDocument();
-        await act(async () => { delayed?.resolve(json({ items: roots.slice(0,25), next: 'after-first' })); });
+        await act(async () => { delayed?.resolve(json({ items: roots.slice(0,25), nextItems: roots.slice(25,50), page: 1, perPage: 25, total: roots.length, revision: '0' })); });
         expect(pageRequests()).toHaveLength(2);
       }
       if (testCase.name === 'collapse-cancels-expanded-refresh') {
@@ -292,7 +350,7 @@ describe('mounted bounded Home', () => {
         const childSignal = signals.at(-1)!;
         fireEvent.click(screen.getByRole('button', { name: 'subagents 30' }));
         expect(childSignal.aborted).toBe(true);
-        await act(async () => { delayed?.resolve(json({ items: children.slice(0,25), next: 'after-first' })); });
+        await act(async () => { delayed?.resolve(json({ items: children.slice(0,25), nextItems: children.slice(25,50), page: 1, perPage: 25, total: children.length, revision: '0' })); });
         expect(screen.queryByRole('link', { name: 'title child-0' })).not.toBeInTheDocument();
         const before = pageRequests().length;
         fireEvent(window, new Event('focus'));
@@ -336,7 +394,7 @@ describe('mounted bounded Home', () => {
         await screen.findByRole('link', { name: descendant ? 'title kept-grandchild' : 'title child-0' });
         expect(pageRequests()).toHaveLength(reopen + 1);
         expect(pageRequests().at(-1)?.searchParams.get('parentSessionId')).toBe(descendant ? 'child-0' : 'root-0');
-        expect(pageRequests().at(-1)?.searchParams.get('pageToken')).toBe('');
+        expect(pageRequests().at(-1)?.searchParams.get('page')).toBe('1');
         expect(pageRequests().at(-1)?.searchParams.get('maxItems')).toBe('25');
         expect(screen.queryByRole('link', { name: descendant ? 'title old-grandchild' : 'title child-1' })).not.toBeInTheDocument();
       }
@@ -379,18 +437,20 @@ describe('mounted bounded Home', () => {
         }
         fireEvent.click(screen.getByRole('button', { name: 'publish fixture session' }));
         roots[0] = { ...roots[0], publication: { ...roots[0].publication, state: 'published', transcriptId: '00000000-0000-4000-8000-000000000001', transcriptUrl: 'https://village.example/transcripts/fixture', publishedAt: '2026-06-01T10:00:00Z' } };
+        // A publish bumps the store revision, so the tab cache is stale.
+        revision = '1';
         await act(async () => { pushReply.resolve(json(zSyncPushResponse.parse(fixture.publish.response))); });
         await waitFor(() => expect(screen.getByLabelText('publish completed')).toHaveTextContent('1'));
         expect(screen.getByRole('link', { name: 'title root-25' })).toBeInTheDocument();
         if (overlap) {
-          expect(tokens(pageRequests().slice(before))).toEqual(fixture.publish.failedRefreshTokens);
+          expect(pagesOf(pageRequests().slice(before))).toEqual(fixture.publish.failedRefreshPages);
           holdPages = false;
           await act(async () => { releasePages.forEach(release => release()); });
         }
         await waitFor(() => expect(screen.getByRole('region', { name: 'sessions' })).not.toHaveAttribute('aria-busy'));
         fireEvent.click(screen.getByRole('button', { name: 'page 1' }));
         await waitFor(() => expect(screen.getByRole('link', { name: 'title root-0' }).closest('tr')).toHaveTextContent('published'));
-        expect(tokens(pageRequests().slice(before))).toEqual(overlap ? [...fixture.publish.loadedTokens, ...fixture.publish.loadedTokens] : fixture.publish.loadedTokens);
+        expect(pagesOf(pageRequests().slice(before))).toEqual(overlap ? [...fixture.publish.failedRefreshPages, ...fixture.publish.loadedPages] : fixture.publish.loadedPages);
         expect(screen.getByRole('link', { name: 'title child-0' })).toBeInTheDocument();
       }
     });

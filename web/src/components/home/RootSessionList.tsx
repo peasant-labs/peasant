@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { useHomeSessions } from '@/hooks/useHomeSessions';
 import { SkeletonList } from '@/lib/skeleton';
 import { IngestTeach } from '@/components/IngestTeach';
@@ -14,6 +14,7 @@ import {
   Pagination,
   type DataTableColumn,
 } from '@/lib/ft-ui';
+import type { PageSize } from '@peasant-labs/schema';
 import { usePublicationAudience } from '@/hooks/useRootSessions';
 import {
   rowPublishState,
@@ -74,8 +75,15 @@ export interface RootSessionListProps {
   home: ReturnType<typeof useHomeSessions>;
   /** The publish-state filter the page set; it picks the empty copy. */
   filter: PublishFilter;
-  /** What the list is scoped to (filter, project); a new scope starts on the first page. */
-  scope: string;
+  /** The one-based page the URL carries. */
+  page: number;
+  /** The page size the URL carries. */
+  pageSize: PageSize;
+  /** The server's total for the current scope. */
+  total: number;
+  /** The host owns the URL; the table reports the page it wants. */
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (size: PageSize) => void;
   loading?: boolean;
 }
 
@@ -112,57 +120,19 @@ function SessionChildrenGroup({ parentId, childIds, expanded, onToggle, indent =
 
 /**
  * The root page's session list: one row per session with its publish state,
- * paged. Each page of the table is one page the server sent: the server pages
- * by an opaque continuation and sends no total, so the pager numbers the pages
- * read so far, plus the next one while the server says more follow. Only a
- * press on the pager reads a page, and the table stays on the page it shows
- * until the next one has arrived. Page lengths never stand in for global
- * totals or the complete project catalog, so the footer counts the rows on
- * screen, not the library. A new scope (filter, project) starts on the first page.
+ * paged by the server's offset page. The URL carries the page; the server sends
+ * the total, so the pager numbers the whole scope instead of the pages read so
+ * far. A request past the last page comes back clamped, and the host rewrites
+ * the URL to the page the server served. Page lengths never stand in for global
+ * totals or the complete project catalog.
  */
-export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, scope, loading }: RootSessionListProps) {
+export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, page, pageSize, total, onPageChange, onPageSizeChange, loading }: RootSessionListProps) {
   const expandedGroups = home.expanded;
-  const root = home.groups.get('');
-  const serverPages = root?.pages;
-  // A page can come back short or empty and still have more after it, so the
-  // pager follows `next`, never a count.
-  const hasMore = (serverPages?.at(-1)?.nextItems.length ?? 0) > 0;
-  const reading = root?.loading ?? false;
-  // A session one page repeats from an earlier page stays on the earlier one.
-  const pageRows = useMemo(() => {
-    const seen = new Set<string>();
-    return (serverPages ?? []).map((served) => served.items.filter((row) => {
-      if (seen.has(row.sync.id)) return false;
-      seen.add(row.sync.id);
-      return true;
-    }));
-  }, [serverPages]);
-  const pageCount = Math.max(1, pageRows.length) + (hasMore && pageRows.length > 0 ? 1 : 0);
-  // `page` is the page shown; `wanted` is a page asked for while it is being
-  // read, shown once it arrives. A new scope starts over on the first page.
-  const [paging, setPaging] = useState<{ scope: string; page: number; wanted: number | null }>({ scope, page: 1, wanted: null });
-  if (paging.scope !== scope) setPaging({ scope, page: 1, wanted: null });
-  const { page, wanted } = paging;
-  // The asked-for page shows in the same render its rows arrive in.
-  const shown = wanted !== null && pageRows.length >= wanted ? wanted : page;
-  const current = Math.min(Math.max(1, shown), Math.max(1, pageRows.length));
-  const visible = pageRows[current - 1] ?? [];
-  const start = pageRows.slice(0, current - 1).reduce((sum, items) => sum + items.length, 0);
-  useEffect(() => {
-    if (wanted === null) return;
-    // Rows render before this effect settles the requested page. A newer click
-    // or scope change must win over that older request's completion.
-    if (pageRows.length >= wanted) setPaging((state) => state.scope === scope && state.wanted === wanted ? { ...state, page: wanted, wanted: null } : state);
-    else if (!reading && !hasMore) setPaging((state) => state.scope === scope && state.wanted === wanted ? { ...state, wanted: null } : state);
-  }, [scope, wanted, pageRows.length, reading, hasMore]);
-  const choose = (next: number) => {
-    if (next <= pageRows.length) {
-      setPaging((state) => ({ ...state, page: next, wanted: null }));
-    } else if (hasMore) {
-      setPaging((state) => ({ ...state, wanted: next }));
-      home.more();
-    }
-  };
+  const reading = home.loading;
+  const last = Math.max(1, Math.ceil(total / pageSize));
+  const current = Math.min(Math.max(1, page), last);
+  const visible = rows;
+  const start = (current - 1) * pageSize;
   // A new page starts at the table's top.
   const top = useRef<HTMLElement>(null);
   const turned = useRef(current);
@@ -194,7 +164,10 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
     [renderRows],
   );
   const audience = usePublicationAudience(publishedOnScreen, rows);
-  const childCounts = useMemo(() => new Map([...home.groups.values()].flatMap(group => group.pages.flatMap(page => page.items)).map(row => [row.sync.id, row.childCount])), [home.groups]);
+  const childCounts = useMemo(() => {
+    const all = [...(home.rootPage?.items ?? []), ...[...home.children.values()].flatMap(group => group.pages.flatMap(page => page.items))];
+    return new Map(all.map(row => [row.sync.id, row.childCount]));
+  }, [home.rootPage, home.children]);
 
   const whenOf = (row: ListRow) => {
     const started = Date.parse(row.sync.startTime);
@@ -224,9 +197,9 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
               <SessionChildrenGroup parentId={row.id} childIds={(children ?? []).map(child => child.sync.id)} count={childCount} pendingTarget expanded={expandedGroups.has(row.id)} onToggle={() => home.toggle(row.id)} indent />
               <div id={`home-children-${row.id}`} aria-owns={expandedGroups.has(row.id) ? (children ?? []).map(child => `session-group-rows:${child.sync.id}`).join(' ') || undefined : undefined}>
                 {expandedGroups.has(row.id) && <div className="flex items-center gap-2" role="status">
-                  {home.groups.get(row.id)?.loading && 'loading subagents…'}
-                  {home.groups.get(row.id)?.error != null && <Button variant="secondary" size="sm" onClick={() => home.retry(row.id)}>retry subagents</Button>}
-                  {(home.groups.get(row.id)?.pages.at(-1)?.nextItems.length ?? 0) > 0 && <Button variant="secondary" size="sm" disabled={home.groups.get(row.id)?.loading} onClick={() => home.more(row.id)}>load more subagents</Button>}
+                  {home.children.get(row.id)?.loading && 'loading subagents…'}
+                  {home.children.get(row.id)?.error != null && <Button variant="secondary" size="sm" onClick={() => home.retryChild(row.id)}>retry subagents</Button>}
+                  {(home.children.get(row.id)?.pages.at(-1)?.nextItems.length ?? 0) > 0 && <Button variant="secondary" size="sm" disabled={home.children.get(row.id)?.loading} onClick={() => home.more(row.id)}>load more subagents</Button>}
                 </div>}
               </div>
             </>
@@ -327,7 +300,7 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
   const end = start + visible.length;
   return (
     <section ref={top} aria-label="sessions" aria-busy={reading || undefined} className="home-list" data-root-session-list="true">
-      {loading ? <SkeletonList rows={6} label="Loading your sessions" /> : visible.length === 0 && filter === 'all' && !hasMore && rows.length === 0 ? (
+      {loading && visible.length === 0 ? <SkeletonList rows={6} label="Loading your sessions" /> : visible.length === 0 && filter === 'all' && total === 0 ? (
         // Nothing recorded at all: say so, and link to the docs that teach recording.
         <IngestTeach />
       ) : visible.length === 0 ? (
@@ -345,12 +318,24 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
         />
       )}
 
-      {!loading && (visible.length > 0 || pageCount > 1) && (
-        <div className="home-pager">
+      {(visible.length > 0 || last > 1) && (
+        <div className="home-pager" data-home-pager="true">
           <span className="home-pager-range tabular-nums" role="status">
-            {wanted !== null && reading ? `reading page ${wanted}…` : visible.length > 0 ? `showing ${(start + 1).toLocaleString('en-US')}–${end.toLocaleString('en-US')}` : ''}
+            {visible.length > 0 ? `showing ${(start + 1).toLocaleString('en-US')}–${end.toLocaleString('en-US')} of ${total.toLocaleString('en-US')}` : ''}
           </span>
-          {pageCount > 1 && <Pagination page={current} total={pageCount} onChange={choose} label="session pages" />}
+          {last > 1 && <Pagination page={current} total={last} onChange={onPageChange} label="session pages" />}
+          <label className="home-page-size">
+            <span>per page</span>
+            <select
+              aria-label="sessions per page"
+              value={pageSize}
+              onChange={(event) => onPageSizeChange(Number(event.target.value) as PageSize)}
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </label>
         </div>
       )}
     </section>

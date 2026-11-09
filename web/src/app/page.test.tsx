@@ -341,6 +341,10 @@ describe('HomePage — the changes-first picker', () => {
     channelError = null;
     channelErrorCode = undefined;
     vi.clearAllMocks();
+    // The URL is Home's source of truth: each test starts at a clean root.
+    window.history.replaceState({}, '', '/');
+    window.sessionStorage.clear();
+    window.localStorage.clear();
   });
 
   it('mounts the fixture-backed changes picker with review clarity and filtering', async () => {
