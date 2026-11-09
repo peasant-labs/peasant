@@ -27,9 +27,11 @@ import (
 var sessionScopeGoldenYAML []byte
 
 const (
-	scopeTestSessionID = "5a1f0c3e-7b2d-4e8a-9c61-0d4b3e2f1a70"
-	scopeTestChildID   = "agent-a1a1a1a1a1a1a1a1a"
-	scopeTestUnknownID = "11111111-2222-4333-8444-555566667777"
+	scopeTestSessionID  = "5a1f0c3e-7b2d-4e8a-9c61-0d4b3e2f1a70"
+	scopeTestChildID    = "agent-a1a1a1a1a1a1a1a1a"
+	scopeTestSession2ID = "7b2e1d8f-3c5e-4f9a-8b4d-6e8f2a3b4c5d"
+	scopeTestChild2ID   = "agent-b2b2b2b2b2b2b2b2b"
+	scopeTestUnknownID  = "11111111-2222-4333-8444-555566667777"
 )
 
 // scopeGoldenFixture is the command-level case table. Every golden is the exact
@@ -174,6 +176,12 @@ func (s *scopeSandbox) rootTranscript() string {
 func (s *scopeSandbox) childTranscript() string {
 	return filepath.Join(s.projectDir(), scopeTestSessionID, "subagents", scopeTestChildID+".jsonl")
 }
+func (s *scopeSandbox) secondRootTranscript() string {
+	return filepath.Join(s.projectDir(), scopeTestSession2ID+".jsonl")
+}
+func (s *scopeSandbox) secondChildTranscript() string {
+	return filepath.Join(s.projectDir(), scopeTestSession2ID, "subagents", scopeTestChild2ID+".jsonl")
+}
 
 func (s *scopeSandbox) writeConfig(claude, opencode bool, opencodeRoot string) {
 	s.t.Helper()
@@ -233,6 +241,29 @@ func (s *scopeSandbox) writeSession(withChild bool) {
 	child = strings.ReplaceAll(child, "AGENT_NAME", strings.TrimPrefix(scopeTestChildID, "agent-"))
 	child = strings.ReplaceAll(child, "AGENT_ID", scopeTestChildID)
 	if err := os.WriteFile(s.childTranscript(), []byte(child), 0o600); err != nil {
+		s.t.Fatal(err)
+	}
+}
+
+// writeSecondSession writes a second recorded root session, and optionally one
+// recorded subagent under it, so a warning about one session can be shown not
+// to count the other session's children.
+func (s *scopeSandbox) writeSecondSession(withChild bool) {
+	s.t.Helper()
+	root := strings.ReplaceAll(s.fixture.SessionRecord, "SESSION_ID", scopeTestSession2ID)
+	if err := os.WriteFile(s.secondRootTranscript(), []byte(root), 0o600); err != nil {
+		s.t.Fatal(err)
+	}
+	if !withChild {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(s.secondChildTranscript()), 0o700); err != nil {
+		s.t.Fatal(err)
+	}
+	child := strings.ReplaceAll(s.fixture.SubagentRecord, "SESSION_ID", scopeTestSession2ID)
+	child = strings.ReplaceAll(child, "AGENT_NAME", strings.TrimPrefix(scopeTestChild2ID, "agent-"))
+	child = strings.ReplaceAll(child, "AGENT_ID", scopeTestChild2ID)
+	if err := os.WriteFile(s.secondChildTranscript(), []byte(child), 0o600); err != nil {
 		s.t.Fatal(err)
 	}
 }
@@ -345,6 +376,17 @@ func (s *scopeSandbox) applySetup(tc scopeGoldenCase) {
 		s.writeSession(true)
 		s.harvest()
 		s.deleteSource(true)
+	case "stored_gone_two_roots":
+		s.writeConfig(true, false, "")
+		s.writeSession(true)
+		s.writeSecondSession(true)
+		s.harvest()
+		s.deleteSource(true)
+		for _, path := range []string{s.secondRootTranscript(), s.secondChildTranscript()} {
+			if err := os.Remove(path); err != nil {
+				s.t.Fatal(err)
+			}
+		}
 	case "stored_disabled":
 		s.writeConfig(true, false, "")
 		s.writeSession(false)
@@ -451,6 +493,8 @@ func (s *scopeSandbox) expandArgs(tc scopeGoldenCase) []string {
 	replacer := strings.NewReplacer(
 		"{session}", scopeTestSessionID,
 		"{child}", scopeTestChildID,
+		"{session2}", scopeTestSession2ID,
+		"{child2}", scopeTestChild2ID,
 		"{unknown}", scopeTestUnknownID,
 	)
 	args := make([]string, len(tc.Args))
