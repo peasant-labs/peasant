@@ -69,20 +69,6 @@ func (p *Pipeline) locateScopedRun(ctx context.Context) (*scopedLocate, error) {
 	return located, nil
 }
 
-// runStoreScope returns the store scope every narrowed pass reads. A full run
-// keeps the all-store value; a scoped run derives the scope from the same
-// allowlist the in-memory gate uses, so a pass and a row filter cannot disagree.
-func (p *Pipeline) runStoreScope() StoreScope {
-	if p.config.Scope == nil {
-		return AllStoredSessions()
-	}
-	ids := make([]SessionID, 0, len(p.config.AllowedSessionIDs))
-	for id := range p.config.AllowedSessionIDs {
-		ids = append(ids, id)
-	}
-	return StoredSessions(ids)
-}
-
 // scopeLocator is the state one LOCATE pass carries while it builds the cohort.
 type scopeLocator struct {
 	p     *Pipeline
