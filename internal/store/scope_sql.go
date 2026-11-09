@@ -23,8 +23,12 @@ func trimLeadingAnd(predicate string) string {
 
 // narrowedSessionPredicate renders " AND <alias>.session_id IN (?,...)" for a
 // narrowed scope and the ids to bind after the caller's own arguments. An
-// all-store scope renders nothing. A narrowed scope with no ids renders
-// " AND 0", which selects nothing: an empty selection must never widen.
+// all-store scope renders nothing.
+//
+// A narrowed scope with no ids renders " AND 0". Every pass already returns
+// before calling this for that case, so the branch is a fail-closed net rather
+// than a live path: a future pass that forgets the early return selects nothing
+// instead of producing an invalid empty IN list or, worse, widening.
 func narrowedSessionPredicate(alias string, scope ingest.StoreScope) (string, []any) {
 	ids, narrowed := scope.Narrowed()
 	if !narrowed {
@@ -42,7 +46,9 @@ func narrowedSessionPredicate(alias string, scope ingest.StoreScope) (string, []
 
 // narrowedProjectPredicate renders " AND <alias>.project_hash IN (?,...)" for
 // a narrowed project scope and the hashes to bind. An all-store scope renders
-// nothing; a narrowed scope with no hashes renders " AND 0".
+// nothing. A narrowed scope with no hashes keeps the same " AND 0" fail-closed
+// net as the session predicate, for the same reason: the live path returns
+// before this, and a pass that forgets must select nothing rather than widen.
 func narrowedProjectPredicate(alias string, scope ingest.ProjectScope) (string, []any) {
 	hashes, narrowed := scope.Narrowed()
 	if !narrowed {

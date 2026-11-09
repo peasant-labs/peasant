@@ -480,6 +480,9 @@ func (s *Store) SweepFlaggedSessions(ctx context.Context) (SweepFlaggedReport, e
 // sweepFlaggedSessions is the scoped form of SweepFlaggedSessions.
 func (s *Store) sweepFlaggedSessions(ctx context.Context, scope ingest.StoreScope) (SweepFlaggedReport, error) {
 	var report SweepFlaggedReport
+	if err := scope.Validate("SweepFlaggedSessions"); err != nil {
+		return report, err
+	}
 	if err := s.requireGenerationSupport(); err != nil {
 		return report, err
 	}
