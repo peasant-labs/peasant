@@ -16,9 +16,11 @@ peasant harvest logs [flags]
       --all                     Process ALL sessions (clears filters, implies --force)
       --dry-run                 Show what would be processed without writing
       --force                   Force re-process sessions that match current filters
+      --harness string          Alias for --source-harness
   -h, --help                    help for logs
       --include-active          Deprecated compatibility flag; active sessions are processed by default (default true)
       --json                    Output as JSON instead of human-readable
+      --no-related              Process only the named sessions. By default a session-scoped run also processes each named session's child sessions and its ancestors that are not recorded yet.
       --output string           Override output base path
       --session strings         Filter to specific session IDs (repeatable, comma-separated)
       --since string            Only sessions newer than this (positive Go duration (e.g. 30m, 1h30m), integer d, w, mo (months), y, YYYY-MM-DD (UTC), or RFC3339)

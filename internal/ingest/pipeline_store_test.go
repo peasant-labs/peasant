@@ -120,7 +120,7 @@ func (s *pipelineFixtureStore) SaveMetricsForInput(ctx context.Context, expected
 	return nil
 }
 
-func (s *pipelineFixtureStore) ListStaleIndexSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
+func (s *pipelineFixtureStore) ListStaleIndexSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, scope ingest.StoreScope) ([]ingest.SessionID, error) {
 	if s.metrics != nil {
 		s.mu.Lock()
 		s.metrics.ListStaleCalledWithTargets = maps.Clone(targets)
@@ -129,7 +129,7 @@ func (s *pipelineFixtureStore) ListStaleIndexSessions(ctx context.Context, targe
 			return nil, s.metrics.StaleIndexErr
 		}
 	}
-	return s.Store.ListStaleIndexSessions(ctx, targets)
+	return s.Store.ListStaleIndexSessions(ctx, targets, scope)
 }
 
 // durabilityStore wraps a real *store.Store opened at a persistent path so that

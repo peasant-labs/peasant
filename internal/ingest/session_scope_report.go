@@ -127,6 +127,16 @@ type LocatedMember struct {
 	Unreadable UnreadableReason
 	// Detail is set only with UnreadableSourceFailed: the first error line.
 	Detail string
+	// StoredPath is the source location the store recorded for an unreadable
+	// member, when the run knows it. The stored-but-unreadable warning prints
+	// it because it is the only part of the message the reader can act on.
+	StoredPath ResolvedPath
+	// Parent is the cohort member this member is a child of, when the run knows
+	// it: the root whose build produced a child, or a stored child's recorded
+	// parent. It is nil for a selected member and for an ancestor. The
+	// stored-but-unreadable warning counts only children whose Parent is the
+	// selected session it describes, never another session's children.
+	Parent *SessionID
 	// ParentProbe says where one unstored ancestor can be, computed from the
 	// child's own source. nil means this harness cannot derive where its
 	// parent is.
@@ -147,6 +157,11 @@ type ScopeReport struct {
 	// Members holds the selected members first, then children, ancestors, and
 	// context members.
 	Members []LocatedMember
+	// refusedUpkeep names recorded ids the duplicate refusal kept out of
+	// processing. They are not members and are never processed, but the store
+	// still holds their rows, so a scoped run's store-side passes reach them
+	// exactly as a full run's do.
+	refusedUpkeep []SessionID
 }
 
 // Processed returns the ids DIFF through INDEX may work on: the members
@@ -169,14 +184,16 @@ func (r ScopeReport) Processed() []SessionID {
 
 // Upkeep returns the ids the store-side passes may touch, and it is the run's
 // in-memory gate. It is Processed plus every LocateStoredUnreadable member
-// whose role is selected or child: a stored-but-unreadable selected session
-// still owes the upkeep a full run does for its row, and so do its unreadable
-// subagents. An ancestor is unstored by definition and cannot be unreadable, so
-// it never joins on that arm. Processed is always a subset. Context members are
-// in neither set.
+// whose role is selected or child, plus every recorded id whose duplicate was
+// refused: a stored-but-unreadable selected session still owes the upkeep a
+// full run does for its row, and so do its unreadable subagents; a refused
+// duplicate is never processed, but a full run would still pass its stored row
+// through the same store-side upkeep. An ancestor is unstored by definition and
+// cannot be unreadable, so it never joins on that arm. Processed is always a
+// subset. Context members are in neither set.
 func (r ScopeReport) Upkeep() []SessionID {
 	var ids []SessionID
-	seen := make(map[SessionID]struct{}, len(r.Members))
+	seen := make(map[SessionID]struct{}, len(r.Members)+len(r.refusedUpkeep))
 	for _, member := range r.Members {
 		var included bool
 		switch {
@@ -196,6 +213,13 @@ func (r ScopeReport) Upkeep() []SessionID {
 		}
 		seen[member.ID] = struct{}{}
 		ids = append(ids, member.ID)
+	}
+	for _, id := range r.refusedUpkeep {
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
 	}
 	return ids
 }

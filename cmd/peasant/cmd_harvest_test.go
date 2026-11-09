@@ -99,6 +99,7 @@ func TestHarvestCmd_Flags(t *testing.T) {
 
 	stringFlags := []flagCheck{
 		{"source-harness", ""},
+		{"harness", ""},
 		{"source-path", ""},
 		{"output", ""},
 		{"since", ""},
@@ -113,6 +114,7 @@ func TestHarvestCmd_Flags(t *testing.T) {
 		{defaults.JSONFlagName, "false"},
 		{"all", "false"},
 		{"detect-commits", "true"},
+		{"no-related", "false"},
 	}
 
 	sliceFlags := []flagCheck{

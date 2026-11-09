@@ -27,6 +27,9 @@ requiredResidual:
   - store-migration-v42
   - store-migration-v53
   - store-migration-v51
+  - store-stored-cached-children
+  - store-stored-relationship-children
+  - store-stored-publication-children
 requiredRouted:
   - store-all-sessions
   - store-session-detail-query

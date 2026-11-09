@@ -190,8 +190,10 @@ func (s *coverageFinalizeStore) BulkLookupSessionLocations(context.Context, []Se
 func (s *coverageFinalizeStore) UpsertSessionCommits(context.Context, SessionID, []CommitInfo) error {
 	return nil
 }
-func (s *coverageFinalizeStore) CleanupOrphanProjects(context.Context) error { return nil }
-func (s *coverageFinalizeStore) Close() error                                { return nil }
+func (s *coverageFinalizeStore) CleanupOrphanProjects(context.Context, ProjectScope) error {
+	return nil
+}
+func (s *coverageFinalizeStore) Close() error { return nil }
 func (s *coverageFinalizeStore) SessionsWithoutEntries(_ context.Context, ids []SessionID) (map[SessionID]bool, error) {
 	if s.err != nil {
 		if s.partial != nil {

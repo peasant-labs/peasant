@@ -142,7 +142,7 @@ func TestStore_HarvesterRepairInventories(t *testing.T) {
 
 			switch c.Selector {
 			case "stale_adapter":
-				ids, err := s.ListStaleAdapterSessions(ctx, adapterTargets(c, c.AdapterTarget), nil)
+				ids, err := s.ListStaleAdapterSessions(ctx, adapterTargets(c, c.AdapterTarget), nil, ingest.AllStoredSessions())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -150,7 +150,7 @@ func TestStore_HarvesterRepairInventories(t *testing.T) {
 					t.Fatalf("adapter target %d selected %v, want %v", c.AdapterTarget, got, expected)
 				}
 				if c.BaselineTargetSelectsNone {
-					baseline, err := s.ListStaleAdapterSessions(ctx, adapterTargets(c, 1), nil)
+					baseline, err := s.ListStaleAdapterSessions(ctx, adapterTargets(c, 1), nil, ingest.AllStoredSessions())
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -159,7 +159,7 @@ func TestStore_HarvesterRepairInventories(t *testing.T) {
 					}
 				}
 			case "repair":
-				ids, err := s.ListSessionsNeedingRepair(ctx, repairTargets(c.HarnessTargets))
+				ids, err := s.ListSessionsNeedingRepair(ctx, repairTargets(c.HarnessTargets), ingest.AllStoredSessions())
 				if err != nil {
 					t.Fatal(err)
 				}

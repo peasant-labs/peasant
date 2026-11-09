@@ -20,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/push"
@@ -1208,6 +1209,14 @@ func (h *syncHandler) handleSyncIngestSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err != nil {
+		// A scope miss already states why the id could not be used and the
+		// command that fixes it; the popup shows both instead of a quoted Go
+		// error.
+		var scopeErr *ingest.SessionScopeError
+		if errors.As(err, &scopeErr) {
+			writeAPIError(w, http.StatusUnprocessableEntity, fmt.Sprintf("re-indexing this session: %s; %s", scopeErr.Reason(), scopeErr.FixLine()), "session_ingest_refused")
+			return
+		}
 		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("re-indexing this session: %v; the previous index was kept", err), "session_ingest_failed")
 		return
 	}
@@ -1229,6 +1238,16 @@ func (h *syncHandler) handleSyncIngestSession(w http.ResponseWriter, r *http.Req
 			notes = append(notes, diagnostic.Message)
 			if line, ok := ingest.MalformedJSONLRecordLine(diagnostic.Message); ok {
 				unreadable = append(unreadable, sessionIngestUnreadable{Line: line, Reason: diagnostic.Message})
+			}
+		}
+	}
+	// A recording that is recorded but no longer readable keeps its stored copy.
+	// `open` says so on one stderr line; the popup shows the same line as a note,
+	// so the user knows why the copy it is about to publish did not change.
+	if result.ScopeReport != nil {
+		if member, ok := result.ScopeReport.SelectedMember(id); ok {
+			if line := member.UnreadableOpenLine(); line != "" {
+				notes = append(notes, line)
 			}
 		}
 	}
@@ -1294,6 +1313,13 @@ func storedEvidenceStillRefusedNote(evidenceErr error) string {
 }
 
 func sessionIngestFailure(result *ingest.PipelineResult, id ingest.SessionID) string {
+	// A recorded session whose source is gone is not a failure: the run kept the
+	// stored copy, and the response carries the same warning `open` prints.
+	if result.ScopeReport != nil {
+		if member, ok := result.ScopeReport.SelectedMember(id); ok && member.Outcome == ingest.LocateStoredUnreadable {
+			return ""
+		}
+	}
 	reached := false
 	for _, session := range result.Sessions {
 		if session.SessionID != id {
@@ -1394,8 +1420,18 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		Progress:           progState,
 	}
 	if scope != nil {
-		// The same scope as `peasant harvest --session <id> --force`.
-		pipelineCfg.AllowedSessionIDs = map[ingest.SessionID]bool{scope.id: true}
+		// The same scope as `peasant harvest --session <id> --force`: related
+		// sessions are included by default, the harness narrows the source, and
+		// the force re-reads a recording whose index looks current. The command
+		// prefix always carries this handler's data directory, so a message's
+		// suggested commands read the store this run wrote.
+		sessionScope, err := ingest.NewSessionScope([]ingest.SessionID{scope.id}, ingest.RelatedInclude)
+		if err != nil {
+			return nil, nil, fmt.Errorf("build the one-session scope for the web ingest: %w; nothing was changed", err)
+		}
+		pipelineCfg.Scope = &sessionScope
+		pipelineCfg.Command = "harvest"
+		pipelineCfg.CommandPrefix = githooks.CommandPrefix(githooks.Binding{DataDir: string(h.dataDir())})
 		pipelineCfg.Harness = &scope.harness
 		pipelineCfg.Force = true
 	}

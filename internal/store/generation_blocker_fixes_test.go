@@ -379,7 +379,7 @@ func TestGenerationCompletenessTransition(t *testing.T) {
 				}
 				stale, err := s.ListStaleIndexSessions(context.Background(), map[ingest.Harness]ingest.HarvesterVersions{
 					ingest.Harness("claude-code"): {IndexerVersion: 1},
-				})
+				}, ingest.AllStoredSessions())
 				if err != nil {
 					t.Fatalf("list stale: %v", err)
 				}

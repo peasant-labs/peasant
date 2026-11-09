@@ -2,10 +2,12 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -22,6 +24,7 @@ type PiAdapter struct {
 
 var _ SourceAdapter = (*PiAdapter)(nil)
 var _ DiscoveryDiagnosticReporter = (*PiAdapter)(nil)
+var _ SessionLocator = (*PiAdapter)(nil)
 
 func NewPiAdapter(fs FileSystem, git GitResolver, s salt.Salt) *PiAdapter {
 	return &PiAdapter{fs: fs, git: git, salt: s}
@@ -29,6 +32,17 @@ func NewPiAdapter(fs FileSystem, git GitResolver, s salt.Salt) *PiAdapter {
 func (a *PiAdapter) Harness() Harness { return HarnessPi }
 func (a *PiAdapter) DiscoveryDiagnostics() []DiscoveryDiagnostic {
 	return append([]DiscoveryDiagnostic(nil), a.diagnostics...)
+}
+
+// piSource is one candidate Pi recording. root is the configured source root it
+// was enumerated under, so a member carries the same OriginalRoot whichever
+// path found it. want is set only for a located source: it is the id the caller
+// asked for, and the build refuses a recording whose header names another
+// session instead of building a member for it.
+type piSource struct {
+	root ResolvedPath
+	path string
+	want SessionID
 }
 
 type piCandidate struct {
@@ -41,7 +55,7 @@ func (a *PiAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discovere
 	if !cfg.Enabled {
 		return nil, nil
 	}
-	winners := make(map[SessionID]piCandidate)
+	var sources []piSource
 	for _, root := range cfg.Paths {
 		paths, err := a.candidatePaths(root.String())
 		if err != nil {
@@ -51,57 +65,102 @@ func (a *PiAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discovere
 			continue
 		}
 		for _, path := range paths {
-			if resolver, ok := a.fs.(interface{ EvalSymlinks(string) (string, error) }); ok {
-				canonical, err := resolver.EvalSymlinks(path)
-				if err != nil {
-					a.diagnose(path, err)
-					continue
+			sources = append(sources, piSource{root: root, path: path})
+		}
+	}
+	return a.buildPiSessions(ctx, sources)
+}
+
+// buildPiSessions is the one construction path for Discover and
+// DiscoverSessionAt. It keeps the newest copy of one header identity, so the
+// full walk and a located source cannot describe a session two ways. A located
+// source (want set) returns the failure instead of skipping it, because the
+// core decides whether a stored session is unreadable and a selected one is a
+// miss.
+func (a *PiAdapter) buildPiSessions(ctx context.Context, sources []piSource) ([]DiscoveredSession, error) {
+	winners := make(map[SessionID]piCandidate)
+	for _, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		path := source.path
+		// fail reports one source that could not be built: a located source
+		// returns the error to the core, a walked candidate is a diagnostic and
+		// the walk continues.
+		fail := func(err error) error {
+			if source.want != "" {
+				return piLocatedSourceError(source, err)
+			}
+			a.diagnose(path, err)
+			return nil
+		}
+		if resolver, ok := a.fs.(interface{ EvalSymlinks(string) (string, error) }); ok {
+			canonical, err := resolver.EvalSymlinks(path)
+			if err != nil {
+				if failErr := fail(err); failErr != nil {
+					return nil, failErr
 				}
-				path = canonical
-			}
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			data, err := readPiSource(ctx, a.fs, path)
-			if err != nil {
-				a.diagnose(path, err)
 				continue
 			}
-			doc, err := parsePiDocument(ctx, data)
-			if err != nil {
-				a.diagnose(path, err)
-				continue
+			path = canonical
+		}
+		data, err := readPiSource(ctx, a.fs, path)
+		if err != nil {
+			if failErr := fail(err); failErr != nil {
+				return nil, failErr
 			}
-			sid, err := NewSessionID(doc.header.ID)
-			if err != nil {
-				a.diagnose(path, err)
-				continue
+			continue
+		}
+		doc, err := parsePiDocument(ctx, data)
+		if err != nil {
+			if failErr := fail(err); failErr != nil {
+				return nil, failErr
 			}
-			// Validate the candidate before ordering it: a newer corrupt transcript
-			// must never replace a valid older copy with the same header identity.
-			if _, _, err := NewPiIndexer(a.fs).project(doc, sid); err != nil {
-				a.diagnose(path, err)
-				continue
+			continue
+		}
+		sid, err := NewSessionID(doc.header.ID)
+		if err != nil {
+			if failErr := fail(err); failErr != nil {
+				return nil, failErr
 			}
-			info, err := a.fs.Stat(path)
-			if err != nil {
-				a.diagnose(path, err)
-				continue
+			continue
+		}
+		// A recording whose header names another session is not this session's
+		// source. A moved or replaced file is gone for this id, never a member
+		// carrying someone else's transcript.
+		if source.want != "" && sid != source.want {
+			return nil, piSourceGoneError(ResolvedPath(source.path), source.want, "the file header names another session")
+		}
+		// Validate the candidate before ordering it: a newer corrupt transcript
+		// must never replace a valid older copy with the same header identity.
+		if _, _, err := NewPiIndexer(a.fs).project(doc, sid); err != nil {
+			if failErr := fail(err); failErr != nil {
+				return nil, failErr
 			}
-			resolved, err := NewResolvedPath(filepath.Clean(path))
-			if err != nil {
-				a.diagnose(path, err)
-				continue
+			continue
+		}
+		info, err := a.fs.Stat(path)
+		if err != nil {
+			if failErr := fail(err); failErr != nil {
+				return nil, failErr
 			}
-			created := info.ModTime()
-			if timestamp := parseIndexTimestamp(doc.header.Timestamp); timestamp != nil {
-				created = time.UnixMilli(*timestamp)
+			continue
+		}
+		resolved, err := NewResolvedPath(filepath.Clean(path))
+		if err != nil {
+			if failErr := fail(err); failErr != nil {
+				return nil, failErr
 			}
-			candidate := piCandidate{size: info.Size(), session: DiscoveredSession{SessionID: sid, Harness: HarnessPi, SourcePath: resolved, OriginalRoot: root, SourceFormat: SourceFormatJSONL, TranscriptOrigin: TranscriptOriginFile, CWD: doc.header.CWD, ProjectName: filepath.Base(doc.header.CWD), Title: doc.title, CreatedAt: created, ModTime: info.ModTime(), DiscoveryWarnings: doc.warnings}}
-			previous, exists := winners[sid]
-			if !exists || candidate.session.ModTime.After(previous.session.ModTime) || candidate.session.ModTime.Equal(previous.session.ModTime) && (candidate.size > previous.size || candidate.size == previous.size && candidate.session.SourcePath.String() < previous.session.SourcePath.String()) {
-				winners[sid] = candidate
-			}
+			continue
+		}
+		created := info.ModTime()
+		if timestamp := parseIndexTimestamp(doc.header.Timestamp); timestamp != nil {
+			created = time.UnixMilli(*timestamp)
+		}
+		candidate := piCandidate{size: info.Size(), session: DiscoveredSession{SessionID: sid, Harness: HarnessPi, SourcePath: resolved, OriginalRoot: source.root, SourceFormat: SourceFormatJSONL, TranscriptOrigin: TranscriptOriginFile, CWD: doc.header.CWD, ProjectName: filepath.Base(doc.header.CWD), Title: doc.title, CreatedAt: created, ModTime: info.ModTime(), DiscoveryWarnings: doc.warnings}}
+		previous, exists := winners[sid]
+		if !exists || candidate.session.ModTime.After(previous.session.ModTime) || candidate.session.ModTime.Equal(previous.session.ModTime) && (candidate.size > previous.size || candidate.size == previous.size && candidate.session.SourcePath.String() < previous.session.SourcePath.String()) {
+			winners[sid] = candidate
 		}
 	}
 	result := make([]DiscoveredSession, 0, len(winners))
@@ -114,6 +173,106 @@ func (a *PiAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discovere
 
 func (a *PiAdapter) diagnose(path string, err error) {
 	a.diagnostics = append(a.diagnostics, DiscoveryDiagnostic{Provider: HarnessPi, Code: "pi_source_rejected", Location: path, Summary: "Pi source skipped during discovery", Detail: fmt.Sprintf("PiAdapter.Discover could not accept this source: %v; other sources continue and prior stored sessions remain; restore a readable v3 recording and retry harvest", err)})
+}
+
+// LookupSessionSources reports that Pi cannot be searched by session id at all.
+// A recording carries its id only in its first record's header, so no file name
+// holds it and no bounded name pattern can answer the question. The limitation
+// is a property of the format, not of a directory, so one entry states it and it
+// is reported whether or not a root exists today.
+//
+// It reads nothing: no file is stat'd, listed, opened, or read, and no header is
+// scanned. That is the point of the entry -- "no such session" and "this source
+// cannot be searched that way" are different answers, and a run must never
+// report the first after doing the second. The entry names no location because
+// it searched none.
+func (a *PiAdapter) LookupSessionSources(ctx context.Context, _ SourceConfig, id SessionID) (SourceLookup, error) {
+	if err := ctx.Err(); err != nil {
+		return SourceLookup{}, err
+	}
+	if _, err := NewSessionID(string(id)); err != nil {
+		return SourceLookup{}, fmt.Errorf("ingest: PiAdapter.LookupSessionSources was given %q, which is not a session id; no Pi source can be searched under a name no session can hold; where: ingest.PiAdapter.LookupSessionSources in internal/ingest/pi.go; when: locating a named session by name; impact: no Pi source is searched; fix: pass the session id the user named: %w", id, err)
+	}
+	return SourceLookup{Searched: []SearchedSource{{
+		Harness: HarnessPi,
+		Method:  SearchUnsupported,
+		Reason:  IDOnlyInFileHeader,
+	}}}, nil
+}
+
+// DiscoverSessionAt builds the member for one located Pi recording. It re-reads
+// the stored path and requires the header id to equal the requested id: a file
+// whose header names another session is not this session's source, so it is
+// gone for this id rather than a member carrying someone else's transcript.
+//
+// Pi records no parent and no children, so the located recording is the only
+// member, at.Stored describes a family the Pi source cannot re-read, and there
+// is no ancestor probe: the harness cannot derive where a parent is from a
+// recording, and the absent probe costs zero I/O. The role and the outcome of
+// the member are the core's, so this leaves both at zero.
+func (a *PiAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig, at LocatedSource) (LocatedBuild, error) {
+	if err := ctx.Err(); err != nil {
+		return LocatedBuild{}, err
+	}
+	if at.ID == "" {
+		return LocatedBuild{}, fmt.Errorf("ingest: PiAdapter.DiscoverSessionAt was given a located source with no session id at %q; a located source must name the session it holds so the member can be matched to its store row; where: ingest.PiAdapter.DiscoverSessionAt in internal/ingest/pi.go; when: building a located source; impact: nothing was read and no member was built; fix: pass the id the store or the lookup resolved", at.Path)
+	}
+	if _, err := NewSessionID(string(at.ID)); err != nil {
+		return LocatedBuild{}, fmt.Errorf("ingest: PiAdapter.DiscoverSessionAt was given %q, which is not a session id; no Pi recording can hold a name no session can have; where: ingest.PiAdapter.DiscoverSessionAt in internal/ingest/pi.go; when: building a located source; impact: nothing was read and no member was built; fix: pass the id the store or the lookup resolved: %w", at.ID, err)
+	}
+	root, ok := piEnumeratedRoot(cfg, at.Path)
+	if !ok {
+		return LocatedBuild{}, fmt.Errorf("ingest: the located Pi path %q lies outside every configured Pi source root; a located source must be attributed to the root the full walk would have found it under, or the member would carry a different OriginalRoot than discovery gives it; where: ingest.PiAdapter.DiscoverSessionAt in internal/ingest/pi.go; when: resolving the source root of the located path; impact: nothing was read and no member was built; fix: restore the recording under a configured Pi source path, or add the path's root to the configured source paths", at.Path)
+	}
+	sessions, err := a.buildPiSessions(ctx, []piSource{{root: root, path: at.Path.String(), want: at.ID}})
+	if err != nil {
+		return LocatedBuild{}, err
+	}
+	if len(sessions) != 1 || sessions[0].SessionID != at.ID {
+		return LocatedBuild{}, piSourceGoneError(at.Path, at.ID, "the recording did not build as this session")
+	}
+	member := LocatedMember{ID: at.ID, Harness: HarnessPi, Source: &sessions[0]}
+	return LocatedBuild{Members: []LocatedMember{member}, Deferred: NoDeferredWrites{}}, nil
+}
+
+// piEnumeratedRoot returns the configured source root a located path hangs
+// from, so a located member carries the same OriginalRoot a full walk gives it.
+// A configured root may name one recording rather than a directory, which is why
+// equality counts as well as containment.
+func piEnumeratedRoot(cfg SourceConfig, path ResolvedPath) (ResolvedPath, bool) {
+	for _, configured := range cfg.Paths {
+		if configured == path {
+			return configured, true
+		}
+		rel, err := filepath.Rel(string(configured), string(path))
+		if err != nil || filepath.IsAbs(rel) {
+			continue
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		return configured, true
+	}
+	return "", false
+}
+
+// piLocatedSourceError is the error a located build returns for a recording it
+// could not build. A path that does not exist is gone, because the store's
+// record no longer has a source; any other failure is returned as a read
+// failure, which the core records as an unreadable stored session rather than a
+// miss.
+func piLocatedSourceError(source piSource, cause error) error {
+	if errors.Is(cause, os.ErrNotExist) {
+		return piSourceGoneError(ResolvedPath(source.path), source.want, "the file no longer exists")
+	}
+	return fmt.Errorf("ingest: the located Pi recording %q for session %s could not be read; the path exists but cannot be built as this session's source, so the member cannot be built from it; where: ingest.PiAdapter.DiscoverSessionAt in internal/ingest/pi.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path, and the core records the read failure; fix: make the recording readable and retry: %w", source.path, source.want, cause)
+}
+
+// piSourceGoneError is the one statement of "this recorded path no longer holds
+// the session it was recorded for". It wraps ErrSourceGone, so the core treats
+// the stored session as unreadable rather than processing a foreign transcript.
+func piSourceGoneError(path ResolvedPath, id SessionID, because string) error {
+	return fmt.Errorf("ingest: the located Pi recording %q no longer holds session %s because %s; a Pi recording carries its session id only in its file header, so a path whose header names another session is not this session's source; where: ingest.PiAdapter.DiscoverSessionAt in internal/ingest/pi.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path; fix: restore the recording, or run harvest once without --session so a moved or replaced one is discovered again: %w", path, id, because, ErrSourceGone)
 }
 
 func (a *PiAdapter) candidatePaths(root string) ([]string, error) {

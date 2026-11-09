@@ -17,7 +17,9 @@ import (
 var _ ingest.ClaudeEvidenceCache = (*Store)(nil)
 
 const (
-	sqlSelectClaudeEvidence = `SELECT
+	// sqlSelectClaudeEvidenceColumns is the one column list both the whole-table
+	// read and the by-path read use, so the two shapes cannot drift.
+	sqlSelectClaudeEvidenceColumns = `SELECT
     source_path,
     scope,
     mod_time_unix_nano,
@@ -36,6 +38,13 @@ const (
     content_digest,
     identity_records_json
 FROM claude_transcript_evidence`
+
+	sqlSelectClaudeEvidence = sqlSelectClaudeEvidenceColumns
+
+	// sqlSelectClaudeEvidenceForTemplate is the by-path read over the source_path
+	// primary key. Production renders it through sqlSelectClaudeEvidenceFor, and
+	// its query-plan guard explains the same rendered statement.
+	sqlSelectClaudeEvidenceForTemplate = sqlSelectClaudeEvidenceColumns + ` WHERE source_path IN (%s)`
 
 	sqlUpsertClaudeEvidence = `INSERT OR REPLACE INTO claude_transcript_evidence (
     source_path, scope, mod_time_unix_nano, size_bytes, has_conversation,
@@ -146,6 +155,91 @@ func (s *Store) LoadClaudeEvidence(ctx context.Context) (map[ingest.ResolvedPath
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store.LoadClaudeEvidence: query: %w", err)
+	}
+	return records, nil
+}
+
+// sqlSelectClaudeEvidenceFor renders the by-path primary-key read for the given
+// path count. Production and its query-plan guard call it, so the guarded
+// statement is the statement production runs.
+func sqlSelectClaudeEvidenceFor(pathCount int) string {
+	return fmt.Sprintf(sqlSelectClaudeEvidenceForTemplate, sqlPlaceholders(pathCount))
+}
+
+// LoadClaudeEvidenceFor returns the cached records for the named source paths,
+// keyed by path. It is a primary-key read: a whole-table load on a scoped path
+// would read every cached transcript to answer a question about a few. A path
+// that is not cached is absent from the map. An empty input returns an empty
+// map without reading anything.
+//
+// The named paths are read in batches of indexFormatReadBatchSize, in the order
+// the caller supplied them, so one unbounded IN list can neither hit SQLite's
+// variable limit nor build a statement whose size grows with the stale-origin
+// population. Each batch is one round trip, the same batching the other bulk
+// readers use.
+func (s *Store) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, error) {
+	records := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence)
+	if len(paths) == 0 {
+		return records, nil
+	}
+	unique := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		value := path.String()
+		if value == "" {
+			continue
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	if len(unique) == 0 {
+		return records, nil
+	}
+
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"store.LoadClaudeEvidenceFor: take connection: %w; "+
+				"what: failed to obtain a database connection for the by-path evidence read; "+
+				"why: the pool is exhausted or the context was cancelled; "+
+				"where: store.LoadClaudeEvidenceFor in internal/store/claude_evidence.go; "+
+				"when: before the first by-path batch ran; "+
+				"impact: no cached transcript evidence was returned, so the caller cannot reuse the cache; "+
+				"fix: check the pool size and context deadline, then retry the scoped read", err)
+	}
+	defer s.pool.Put(conn)
+
+	for start := 0; start < len(unique); start += indexFormatReadBatchSize {
+		end := min(start+indexFormatReadBatchSize, len(unique))
+		batch := unique[start:end]
+		args := make([]any, len(batch))
+		for index, value := range batch {
+			args[index] = value
+		}
+		err = sqlitex.Execute(conn, sqlSelectClaudeEvidenceFor(len(batch)), &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				record, ok := scanClaudeEvidence(stmt)
+				if ok {
+					records[record.SourcePath] = record
+				}
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf(
+				"store.LoadClaudeEvidenceFor: query batch %d-%d of %d: %w; "+
+					"what: the by-path evidence query failed; "+
+					"why: the statement could not run against the evidence table (database access or a malformed statement); "+
+					"where: store.LoadClaudeEvidenceFor in internal/store/claude_evidence.go; "+
+					"when: reading cached evidence for paths %d-%d of %d; "+
+					"impact: the returned map is incomplete, so the caller must not treat it as the full cache; "+
+					"fix: restore database access and retry the scoped read",
+				start, end, len(unique), err, start, end, len(unique))
+		}
 	}
 	return records, nil
 }

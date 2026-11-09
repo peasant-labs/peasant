@@ -279,22 +279,27 @@ func (e *SessionScopeError) whyText(miss ScopeMiss) string {
 	}
 }
 
-// searchedLine is one rendered row of the searched block.
+// searchedLine is one rendered row of the searched block. joinable marks a row
+// that names one pattern of a by-name search, so several patterns from the same
+// harness render on one row.
 type searchedLine struct {
-	name string
-	text string
+	name     string
+	text     string
+	joinable bool
 }
 
 // searchedLines renders the searched block: the store row first, then every
 // harness search in the order it was recorded. The store row is synthesized
-// from Store, because no harness searched it.
+// from Store, because no harness searched it. A harness that searched several
+// patterns renders one row, joined with " and ", so one search reads as one
+// source with its pattern set rather than as several sources.
 func (e *SessionScopeError) searchedLines() []searchedLine {
 	lines := []searchedLine{{name: "store", text: e.storeLineText()}}
 	for _, searched := range e.uniqueSearched() {
 		name := string(searched.Harness)
 		switch {
 		case searched.Method.searchable():
-			lines = append(lines, searchedLine{name: name, text: searched.Location})
+			lines = append(lines, searchedLine{name: name, text: searched.Location, joinable: true})
 		case searched.Method == SearchUnsupported:
 			lines = append(lines, searchedLine{name: name, text: unsupportedSearchText(searched.Reason)})
 		case searched.Method == SearchHarnessDisabled:
@@ -308,7 +313,16 @@ func (e *SessionScopeError) searchedLines() []searchedLine {
 			lines = append(lines, searchedLine{name: name, text: "search state unstated (unknown method)"})
 		}
 	}
-	return lines
+	joined := make([]searchedLine, 0, len(lines))
+	for _, line := range lines {
+		last := len(joined) - 1
+		if line.joinable && last >= 0 && joined[last].joinable && joined[last].name == line.name {
+			joined[last].text += " and " + line.text
+			continue
+		}
+		joined = append(joined, line)
+	}
+	return joined
 }
 
 // searchedClause is the one-clause summary of the same values the searched
@@ -508,11 +522,25 @@ func appendUniqueString(values []string, value string) []string {
 	return append(values, value)
 }
 
-// firstLineOr returns the first line of detail, or fallback when it is empty.
-// A recorded error may be multi-line, and a message field stays on one line
-// without a trailing period, because Reason() must end without one.
+// firstLineOr returns one clause of detail, or fallback when it is empty. A
+// recorded error may be multi-line; the earlier lines are the clause. The
+// clause also stops before an actionable-error frame (`; where:`, `; when:`,
+// `; impact:`, `; fix:`) and before a following independent clause, and drops
+// the `ingest:` package prefix: a message that carries its own
+// what/why/where/when/impact/fix block must not be reprinted whole inside
+// another message that already prints one. The field stays on one line without
+// a trailing period, because Reason() must end without one.
 func firstLineOr(detail, fallback string) string {
 	line := strings.SplitN(strings.TrimSpace(detail), "\n", 2)[0]
+	for _, label := range []string{"; where:", "; when:", "; impact:", "; fix:", "; meaning:"} {
+		if index := strings.Index(line, label); index >= 0 {
+			line = line[:index]
+		}
+	}
+	if index := strings.Index(line, "; "); index >= 0 {
+		line = line[:index]
+	}
+	line = strings.TrimPrefix(line, "ingest: ")
 	line = strings.TrimRight(strings.TrimSpace(line), ".")
 	if line == "" {
 		return fallback

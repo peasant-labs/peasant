@@ -643,6 +643,83 @@ partition:
       byte-preservation assertions stay.
     cost: { wall_ms: 17440, cpu_ms: 34140 }
 
+  - package: internal/ingest
+    test: TestSessionScopeParity
+    class: single-threaded-bytes
+    evidence: '#TestSessionScopeParity'
+    justification: >-
+      Subject. A full harvest and a session-scoped harvest over the same sources
+      leave the same normalized multiset per non-exempt table; the scoped run
+      reads exactly the fixture's source paths, performs no walk, and never
+      calls the whole-table evidence loader. Concurrency actually exercised.
+      Every case runs real pipelines over golden-copy stores twice for the seed
+      and once for each fork, so the DIFF classifier pool, EXTRACT+WRITE
+      workers, the StagingBuffer, drainLoop and indexLoop overlap; Parallelism
+      is unbounded by the test, as in production. Why the detector is not this
+      test's oracle. Every assertion reads stored rows, exported tables, the
+      recorded operation sets and the scope report after a run returns; a race
+      would corrupt those products rather than produce its own assertion, and
+      the subtests are independent (each owns its stores, filesystem and
+      directory). Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed,
+      internal/store/generation_recovery_test.go#TestConcurrentReadAcrossActivation,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race reachable only under this fixture's two-run
+      interaction is not observed; the retained tests race the shared staging
+      and store primitives directly. Detector-independent guarantees kept. The
+      exact table multiset, operation set and evidence-read assertions stay.
+    cost: { wall_ms: 2122, cpu_ms: 4231 }
+
+  - package: internal/ingest
+    test: TestSessionScopeReadRecorder
+    class: single-threaded-bytes
+    evidence: '#TestSessionScopeReadRecorder'
+    justification: >-
+      Subject. The scoped run's evidence cache is read by path only: zero
+      whole-table loads and every requested path inside the cohort/context
+      union, with a planted stale origin that forces the by-path read.
+      Concurrency actually exercised. Each case seeds a store with two full
+      harvests and then runs one scoped harvest through the real pipeline, so
+      the DIFF pool, EXTRACT+WRITE workers, StagingBuffer, drainLoop and
+      indexLoop overlap. Why the detector is not this test's oracle. The
+      assertion is the recorder's post-run call set; a race would corrupt the
+      recorded paths or the store products, not produce a distinct detector
+      assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestSessionEntryQueue_MPMC_NoDataRace,
+      #TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      internal/ingest/pair_concurrency_test.go#TestConcurrentPairReadsFailClosed.
+      Residual risk. A race in the recorder's mutex-protected append is not
+      observed here; the recorder is exercised under the pipeline's lanes in
+      both passes. Detector-independent guarantees kept. The zero-load and
+      exact-path assertions stay.
+    cost: { wall_ms: 1804, cpu_ms: 2802 }
+
+  - package: internal/ingest
+    test: TestSessionScopeSizeIndependence
+    class: single-threaded-bytes
+    evidence: '#TestSessionScopeSizeIndependence'
+    justification: >-
+      Subject. The same scoped harvest against a 3-session and a 200-session
+      store yields the same source-root operation multiset, WAL commit-frame
+      count, evidence golden and scope report. Concurrency actually exercised.
+      Two independent stores are seeded with full harvests, then each gets one
+      real scoped pipeline run; the DIFF pool, EXTRACT+WRITE workers,
+      StagingBuffer, drainLoop and indexLoop overlap. Why the detector is not
+      this test's oracle. The assertions compare recorded counts and exported
+      rows across two runs; a race corrupts those products rather than
+      producing its own assertion. Retained race coverage.
+      internal/ingest/parallel_test.go#TestStagingBuffer_ArenaFull_ConcurrentDrain,
+      #TestStagingBuffer_ConcurrentAddDrain_AllEntriesDelivered,
+      internal/store/store_close_test.go#TestClose_ConcurrentReadersDoNotPanic.
+      Residual risk. A race specific to the 200-row seed insert is uncovered;
+      the insert is one batched production write, and the retained store tests
+      bound the writer. Detector-independent guarantees kept. The size-equality
+      assertions stay exact.
+    cost: { wall_ms: 2000, cpu_ms: 2969 }
+
 protected:
   - package: internal/ingest
     test: TestOpenCodeNativeCLI
