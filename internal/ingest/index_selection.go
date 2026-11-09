@@ -465,23 +465,32 @@ func (p *Pipeline) probeIndexPair(tree *indexPairTree, id SessionID) (*sessionMe
 // location the store holds. A pair the recorded location does not hold is
 // unreadable, not a miss: the stored transcript is kept and the run continues.
 func (p *Pipeline) locateStoredIndexPair(id SessionID, row StoredSessionSource, location SessionLocation, role CohortRole) (LocatedMember, *reindexTarget, *ScopeMiss) {
-	member := LocatedMember{ID: id, Harness: row.Harness, Role: role}
+	member := LocatedMember{ID: id, Harness: row.Harness, Role: role, StoredPath: row.Path}
 	if row.Harness == "" {
 		member.Outcome = LocateStoredUnreadable
 		member.Unreadable = UnreadableSourceFailed
 		member.Detail = "the store records no harness for this session, so its saved pair cannot be attributed to an adapter"
 		return member, nil, nil
 	}
-	if _, enabled := p.enabledSourceConfig(row.Harness); !enabled {
-		member.Outcome = LocateStoredUnreadable
-		member.Unreadable = UnreadableHarnessDisabled
-		return member, nil, nil
-	}
+	// A named --harness is the more specific answer: the user excluded this
+	// session on this run. The config's own disabled state answers only when no
+	// harness filter was given.
 	if !p.includesIndexHarness(row.Harness) {
 		if role == CohortSelected {
 			return member, nil, &ScopeMiss{ID: id, Reason: MissHarnessFiltered, StoredHarness: row.Harness}
 		}
-		return member, nil, nil // a related session the harness filter excludes is dropped
+		// A related saved pair the harness filter excludes is dropped, which is
+		// what a full `harvest index` with the same filter does: its scan never
+		// lists the pair. The source-locating path instead marks such a related
+		// member unreadable, because a full harvest's store-side upkeep still
+		// reaches its row. The two commands differ here on purpose; this run
+		// only maintains saved pairs, so an excluded pair is not its work.
+		return member, nil, nil
+	}
+	if _, enabled := p.enabledSourceConfig(row.Harness); !enabled {
+		member.Outcome = LocateStoredUnreadable
+		member.Unreadable = UnreadableHarnessDisabled
+		return member, nil, nil
 	}
 	if location.HostSlug == "" {
 		member.Outcome = LocateStoredUnreadable
@@ -490,6 +499,7 @@ func (p *Pipeline) locateStoredIndexPair(id SessionID, row StoredSessionSource, 
 		return member, nil, nil
 	}
 	metadataPath := SessionMetadataPath(string(p.config.OutputDir), location.HostSlug, string(id), location.ParentID)
+	member.StoredPath = ResolvedPath(metadataPath)
 	result, err := p.readSessionMetadata(filepath.Dir(filepath.Dir(metadataPath)), id, "index inventory")
 	if err != nil {
 		member.Outcome = LocateStoredUnreadable

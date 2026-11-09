@@ -5156,8 +5156,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// the tree scan: the metadata locator is what is gone. They are enumerated
 	// from the database and appended as native re-ingest targets, so
 	// `harvest index` repairs them instead of reporting a command to run. The
-	// enumeration reads P7/P8, which the scoped run has already narrowed to its
-	// upkeep set.
+	// enumeration reads the stale-index and repair predicates, which the scoped
+	// run has already narrowed to its upkeep set.
 	repairs := p.pairRepairTargets(ctx, scanned)
 	if scoped != nil {
 		// A stored session whose saved pair is gone is unreadable for this run:
@@ -5318,6 +5318,16 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			continue
 		}
 		adapter := factory(p.fs, p.git, p.salt)
+		// The full walk keeps the Codex rollout catalog current for every
+		// discovery it runs. A reindex scans the same sources for canonical
+		// facts, so it must attach the same writer: otherwise a database that
+		// is only ever maintained through `harvest index` never gains the
+		// catalog, and the stored-id duplicate lookup that reads it stays
+		// blind. A `--all` rebuild replaces the catalog from this walk's own
+		// enumeration below, so the walk does not write it first.
+		if catalog, ok := p.store.(CodexRolloutCatalogStore); ok && !p.config.DryRun && !p.config.RebuildAll {
+			AttachCodexRolloutCatalog(adapter, catalog)
+		}
 		sessions, err := adapter.Discover(ctx, config)
 		if err != nil {
 			slog.Warn("reindex: source discovery unavailable", "harness", harness, "error", err)

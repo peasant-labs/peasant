@@ -324,18 +324,23 @@ func (l *scopeLocator) locateSelected(ctx context.Context, id SessionID) error {
 			ID: id, Harness: row.Harness, Outcome: LocateStoredUnreadable, Role: CohortSelected,
 			Unreadable: UnreadableSourceFailed,
 			Detail:     "the store records no harness for this session, so its recorded source cannot be attributed to an adapter",
+			StoredPath: row.Path,
 		})
+		return nil
+	}
+	// A named --harness is the reason the session is out of scope, and it is the
+	// more specific answer: the user excluded it on this run. The config's own
+	// disabled state answers only when no harness filter was given.
+	if l.p.config.Harness != nil && *l.p.config.Harness != row.Harness {
+		l.misses = append(l.misses, ScopeMiss{ID: id, Reason: MissHarnessFiltered, StoredHarness: row.Harness})
 		return nil
 	}
 	if _, enabled := l.enabledConfig(row.Harness); !enabled {
 		l.addMember(LocatedMember{
 			ID: id, Harness: row.Harness, Outcome: LocateStoredUnreadable, Role: CohortSelected,
 			Unreadable: UnreadableHarnessDisabled,
+			StoredPath: row.Path,
 		})
-		return nil
-	}
-	if l.p.config.Harness != nil && *l.p.config.Harness != row.Harness {
-		l.misses = append(l.misses, ScopeMiss{ID: id, Reason: MissHarnessFiltered, StoredHarness: row.Harness})
 		return nil
 	}
 
@@ -346,6 +351,7 @@ func (l *scopeLocator) locateSelected(ctx context.Context, id SessionID) error {
 			ID: id, Harness: row.Harness, Outcome: LocateStoredUnreadable, Role: CohortSelected,
 			Unreadable: UnreadableSourceFailed,
 			Detail:     "the " + string(row.Harness) + " adapter cannot locate one session by name",
+			StoredPath: row.Path,
 		})
 		return nil
 	}
@@ -363,6 +369,7 @@ func (l *scopeLocator) locateSelected(ctx context.Context, id SessionID) error {
 		l.addMember(LocatedMember{
 			ID: id, Harness: row.Harness, Outcome: LocateStoredUnreadable, Role: CohortSelected,
 			Unreadable: UnreadableSourceGone,
+			StoredPath: row.Path,
 		})
 		return nil
 	}
@@ -388,6 +395,7 @@ func (l *scopeLocator) handleStoredBuildError(ctx context.Context, id SessionID,
 		ID: id, Harness: row.Harness, Outcome: LocateStoredUnreadable, Role: CohortSelected,
 		Unreadable: UnreadableSourceFailed,
 		Detail:     firstLineOr(err.Error(), "the recorded source could not be read"),
+		StoredPath: row.Path,
 	})
 	return nil
 }
@@ -487,6 +495,7 @@ func (l *scopeLocator) locateByName(ctx context.Context, id SessionID, storedRow
 			member := LocatedMember{
 				ID: id, Harness: storedRow.Harness, Outcome: LocateStoredUnreadable, Role: CohortSelected,
 				Unreadable: UnreadableSourceGone,
+				StoredPath: storedRow.Path,
 			}
 			if readFailure != nil {
 				// The id's source moved, and the source the lookup found could
@@ -713,19 +722,27 @@ func (l *scopeLocator) joinChildrenOf(ctx context.Context, parentID SessionID) e
 }
 
 // locateStoredChild re-reads one stored child of an unreadable parent.
+//
+// A child whose harness this run does not read stays in the cohort as an
+// unreadable child instead of being dropped. A full harvest does not discover it
+// either, but its store-side upkeep still reaches the row because a full run's
+// allowlist is nil; the child must join Upkeep() for the scoped run to match.
+// `harvest index --session` drops a related saved pair the harness filter
+// excludes, matching the full index scan, so the two commands state the
+// difference rather than sharing one predicate.
 func (l *scopeLocator) locateStoredChild(ctx context.Context, parentID SessionID, child StoredSessionSource) error {
 	role := CohortChild
 	if l.scope.Related() == RelatedExclude {
 		role = CohortContext
 	}
 	if _, enabled := l.enabledConfig(child.Harness); !enabled {
-		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableHarnessDisabled})
+		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableHarnessDisabled, StoredPath: child.Path})
 		return nil
 	}
 	cfg, _ := l.enabledConfig(child.Harness)
 	locator, ok := l.locatorFor(child.Harness)
 	if !ok {
-		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceFailed, Detail: "the " + string(child.Harness) + " adapter cannot locate one session by name"})
+		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceFailed, Detail: "the " + string(child.Harness) + " adapter cannot locate one session by name", StoredPath: child.Path})
 		return nil
 	}
 	parent := parentID
@@ -735,16 +752,16 @@ func (l *scopeLocator) locateStoredChild(ctx context.Context, parentID SessionID
 			return ctxErr
 		}
 		if errors.Is(err, ErrSourceGone) {
-			l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceGone})
+			l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceGone, StoredPath: child.Path})
 			return nil
 		}
-		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceFailed, Detail: firstLineOr(err.Error(), "the recorded source could not be read")})
+		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceFailed, Detail: firstLineOr(err.Error(), "the recorded source could not be read"), StoredPath: child.Path})
 		return nil
 	}
 	l.deferred = append(l.deferred, build.Deferred)
 	root, found := memberForID(build.Members, child.ID)
 	if !found || root.Source == nil {
-		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceGone})
+		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceGone, StoredPath: child.Path})
 		return nil
 	}
 	stored := StoredSessionSource{ID: child.ID, Harness: child.Harness, Parent: &parent}
