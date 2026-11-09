@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { FeedbackPanel } from '@/lib/ft-ui';
+import { FeedbackPanel, Pagination } from '@/lib/ft-ui';
 import { SkeletonList } from '@/lib/skeleton';
+import type { PageSize } from '@peasant-labs/schema';
 import {
   assertGroupedProjectScope,
   fetchGroupedLocalSearch,
@@ -59,6 +60,8 @@ export interface GroupedSessionsSectionProps {
  * helper-only or owner-excluded results. An expired member scope refreshes THIS
  * list, never a broader one.
  */
+const GROUPED_PAGE_SIZE: PageSize = 25;
+
 export function GroupedSessionsSection({
   variant,
   query,
@@ -76,8 +79,14 @@ export function GroupedSessionsSection({
   const [loading, setLoading] = useState(true);
   const [scopeUnavailable, setScopeUnavailable] = useState(false);
   const [reload, setReload] = useState(0);
+  const [page, setPage] = useState(1);
 
   const refresh = useCallback(() => setReload((value) => value + 1), []);
+
+  // A new route, query, project, or live set starts at page one.
+  useEffect(() => {
+    setPage(1);
+  }, [variant, query, projectHash, invalidationKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,8 +94,8 @@ export function GroupedSessionsSection({
     setError(null);
     const request =
       variant === 'search'
-        ? fetchGroupedLocalSearch(query ?? '', 20)
-        : fetchGroupedLocalSessions({ projectHash });
+        ? fetchGroupedLocalSearch(query ?? '', 20, { page, perPage: GROUPED_PAGE_SIZE })
+        : fetchGroupedLocalSessions({ projectHash }, { page, perPage: GROUPED_PAGE_SIZE });
     request
       .then((next) => {
         if (cancelled) return;
@@ -113,7 +122,7 @@ export function GroupedSessionsSection({
     return () => {
       cancelled = true;
     };
-  }, [variant, query, projectHash, invalidationKey, reload, onScopeUnavailable]);
+  }, [variant, query, projectHash, invalidationKey, reload, page, onScopeUnavailable]);
 
   if (scopeUnavailable) return null;
 
@@ -155,6 +164,20 @@ export function GroupedSessionsSection({
         emptyState={emptyState}
         rowDetail={rowDetail}
       />
+      {payload.total > payload.perPage && (
+        <div className="flex items-center justify-between gap-3 pt-1" data-grouped-pager="true">
+          <span className="font-mono text-xs text-ink-4 tabular-nums" role="status">
+            page {payload.page} of {Math.max(1, Math.ceil(payload.total / payload.perPage))}
+            {payload.nextItems.length > 0 ? ' · more follow' : ''}
+          </span>
+          <Pagination
+            page={payload.page}
+            total={Math.max(1, Math.ceil(payload.total / payload.perPage))}
+            onChange={setPage}
+            label="grouped pages"
+          />
+        </div>
+      )}
     </section>
   );
 }

@@ -155,7 +155,34 @@ async function fetchSessionSummaries(requestUrl: string, failure: string): Promi
 }
 
 async function fetchGroupedSyncSessions(): Promise<LocalSessionListPayload> {
-  const path = '/api/v1/sync/sessions?view=grouped';
+  // The grouped sync list is capped at one page. The chooser must offer every
+  // publishable session, so it follows the grouped pager to the last page and
+  // unions the pages rather than silently dropping units past 25.
+  const first = await fetchGroupedSyncPage(1);
+  const items = [...first.items];
+  const seenPages = new Set<number>([first.page]);
+  let page = first.page;
+  let next = first.nextItems;
+  while (next.length > 0) {
+    const requested = page + 1;
+    const following = await fetchGroupedSyncPage(requested);
+    if (following.items.length === 0) break;
+    if (seenPages.has(following.page)) {
+      throw new Error('Session discovery stopped while loading the Share chooser because the grouped sync pager repeated a page. No chooser was rendered, because a looping page cannot prove every publishable session was offered. Confirm the server pager and retry.');
+    }
+    items.push(...following.items);
+    seenPages.add(following.page);
+    page = following.page;
+    next = following.nextItems;
+    if (seenPages.size > 1000) {
+      throw new Error('Session discovery stopped while loading the Share chooser because the grouped sync pager did not converge after 1000 pages. No chooser was rendered, because a partial list would hide publishable sessions. Confirm the server pager and retry.');
+    }
+  }
+  return { ...first, items, nextItems: [], page: 1, perPage: first.perPage, total: first.total };
+}
+
+async function fetchGroupedSyncPage(page: number): Promise<LocalSessionListPayload> {
+  const path = `/api/v1/sync/sessions?view=grouped&page=${page}&perPage=25`;
   const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
     let detail = `the server returned HTTP ${response.status} without an actionable response body`;
@@ -187,8 +214,10 @@ async function fetchGroupedSyncSessions(): Promise<LocalSessionListPayload> {
  * build), so the link still resolves it explicitly.
  */
 async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDiscoveryResult<ShareHierarchySession>> {
-  const [grouped, linked, metadata] = await Promise.all([
-    fetchGroupedSyncSessions(),
+  // Read the grouped list first: its network fault must surface as the
+  // discovery error, not be masked by a dependent hierarchy read.
+  const grouped = await fetchGroupedSyncSessions();
+  const [linked, metadata] = await Promise.all([
     linkedIds.length > 0
       ? fetchSessionSummaries(
           `${getApiBaseUrl()}/api/v1/session-summaries?ids=${encodeURIComponent(linkedIds.join(','))}`,

@@ -116,9 +116,10 @@ type helperGroupListingNestedGroup struct {
 }
 
 type helperGroupListingTopLevelPage struct {
-	Page       int      `yaml:"page"`
-	PerPage    int      `yaml:"perPage"`
-	SessionIDs []string `yaml:"sessionIds"`
+	Page           int      `yaml:"page"`
+	PerPage        int      `yaml:"perPage"`
+	SessionIDs     []string `yaml:"sessionIds"`
+	NextSessionIDs []string `yaml:"nextSessionIds"`
 }
 
 type helperGroupListingMemberPages struct {
@@ -127,10 +128,11 @@ type helperGroupListingMemberPages struct {
 }
 
 type helperGroupListingMemberPage struct {
-	Page      int      `yaml:"page"`
-	PerPage   int      `yaml:"perPage"`
-	Total     int      `yaml:"total"`
-	MemberIDs []string `yaml:"memberIds"`
+	Page          int      `yaml:"page"`
+	PerPage       int      `yaml:"perPage"`
+	Total         int      `yaml:"total"`
+	MemberIDs     []string `yaml:"memberIds"`
+	NextMemberIDs []string `yaml:"nextMemberIds"`
 }
 
 type helperGroupListingAfterList struct {
@@ -356,6 +358,17 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 			if got := helperGroupMemberIDs(members); !reflect.DeepEqual(got, page.MemberIDs) {
 				t.Fatalf("member page (%d,%d) members = %v, want %v", page.Page, page.PerPage, got, page.MemberIDs)
 			}
+			if page.NextMemberIDs != nil {
+				next := make([]string, 0, len(members.NextItems))
+				for _, item := range members.NextItems {
+					if item.Transcript != nil {
+						next = append(next, item.Transcript.Session.ID)
+					}
+				}
+				if !reflect.DeepEqual(next, page.NextMemberIDs) {
+					t.Fatalf("member page (%d,%d) nextItems = %v, want %v", page.Page, page.PerPage, next, page.NextMemberIDs)
+				}
+			}
 		}
 	}
 
@@ -383,6 +396,17 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 			}
 			if !reflect.DeepEqual(got, page.SessionIDs) {
 				t.Fatalf("page (%d,%d) items = %v, want %v", page.Page, page.PerPage, got, page.SessionIDs)
+			}
+			if page.NextSessionIDs != nil {
+				next := make([]string, 0, len(paged.NextItems))
+				for _, item := range paged.NextItems {
+					if item.Transcript != nil {
+						next = append(next, item.Transcript.Session.ID)
+					}
+				}
+				if !reflect.DeepEqual(next, page.NextSessionIDs) {
+					t.Fatalf("page (%d,%d) nextItems = %v, want %v", page.Page, page.PerPage, next, page.NextSessionIDs)
+				}
 			}
 		}
 	}

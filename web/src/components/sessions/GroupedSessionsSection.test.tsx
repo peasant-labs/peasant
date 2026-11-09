@@ -70,6 +70,40 @@ describe('GroupedSessionsSection', () => {
     expect(listCalls).toHaveLength(1);
   });
 
+  it('pages the grouped list and renders the numbered pager from the server total', async () => {
+    const pageOne = {
+      ...listResponse(),
+      total: 60,
+      nextItems: [{ kind: 'transcript', transcript: { session: session('agent-next') } }],
+      items: [{ kind: 'transcript', transcript: { session: session('agent-a1') } }],
+    } as unknown as LocalSessionListPayload;
+    const pageTwo = {
+      ...listResponse(),
+      page: 2,
+      total: 60,
+      nextItems: [],
+      items: [{ kind: 'transcript', transcript: { session: session('page-two') } }],
+    } as unknown as LocalSessionListPayload;
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') {
+        return okResponse(url.searchParams.get('page') === '2' ? pageTwo : pageOne);
+      }
+      return Promise.resolve({ ok: false, status: 404, text: async () => 'not found' } as Response);
+    });
+    render(<GroupedSessionsSection variant="sessions" heading="all sessions" />);
+    expect(await screen.findByText('agent-a1')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('page 1 of 3');
+    await userEvent.click(screen.getByRole('button', { name: 'page 2' }));
+    expect(await screen.findByText('page-two')).toBeInTheDocument();
+    const pageCalls = fetchMock.mock.calls
+      .map((call) => new URL(String(call[0])))
+      .filter((url) => url.pathname === '/api/v1/sessions');
+    expect(pageCalls.at(-1)?.searchParams.get('page')).toBe('2');
+    expect(pageCalls.at(-1)?.searchParams.get('perPage')).toBe('25');
+    expect(screen.getByRole('status')).toHaveTextContent('page 2 of 3');
+  });
+
   it('refetches the grouped read when the live session channel invalidates it', async () => {
     const view = render(<GroupedSessionsSection variant="sessions" invalidationKey="a" />);
     await screen.findByText('agent-a1');

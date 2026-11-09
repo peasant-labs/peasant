@@ -126,12 +126,21 @@ export interface GroupedLocalSessionsScope {
   projectHash?: string;
 }
 
-/** GET /api/v1/sessions?view=grouped[&project=<projectHash>] */
+/** Paging for one grouped list or search read. The server defaults to page 1 and 25 rows. */
+export interface GroupedLocalPaging {
+  page?: number;
+  perPage?: number;
+}
+
+/** GET /api/v1/sessions?view=grouped[&project=<projectHash>][&page=&perPage=] */
 export async function fetchGroupedLocalSessions(
   scope: GroupedLocalSessionsScope = {},
+  paging: GroupedLocalPaging = {},
 ): Promise<LocalSessionListPayload> {
   const params = new URLSearchParams({ view: 'grouped' });
   if (scope.projectHash) params.set('project', scope.projectHash);
+  if (paging.page !== undefined) params.set('page', String(paging.page));
+  if (paging.perPage !== undefined) params.set('perPage', String(paging.perPage));
   const path = `/api/v1/sessions?${params.toString()}`;
   const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
@@ -193,13 +202,16 @@ export function assertGroupedProjectScope(
   }
 }
 
-/** GET /api/v1/search?q=...&view=grouped */
+/** GET /api/v1/search?q=...&view=grouped[&page=&perPage=] */
 export async function fetchGroupedLocalSearch(
   query: string,
   limit?: number,
+  paging: GroupedLocalPaging = {},
 ): Promise<LocalSessionListPayload> {
   const params = new URLSearchParams({ q: query, view: 'grouped' });
   if (limit) params.set('limit', String(limit));
+  if (paging.page !== undefined) params.set('page', String(paging.page));
+  if (paging.perPage !== undefined) params.set('perPage', String(paging.perPage));
   const path = `/api/v1/search?${params.toString()}`;
   const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
