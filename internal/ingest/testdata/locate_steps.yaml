@@ -21,6 +21,7 @@ requiredNames:
   - ancestor_catalog_hit
   - ancestor_row_probe
   - ancestor_path_chain_cycle
+  - ancestor_stored_parent
   - stored_lookup_read_failed
   - readable_parent_unreadable_child
   - related_exclude
@@ -677,6 +678,55 @@ cases:
       statExactly:
         /src/strike/66666666-6666-4666-8666-666666666666.jsonl: 1
         /src/strike/77777777-7777-4777-8777-777777777777.jsonl: 1
+
+  - name: ancestor_stored_parent
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    disabled:
+      - claude-code
+      - codex
+      - opencode
+      - cursor
+      - pi
+    files:
+      - path: /src/strike/11111111-1111-4111-8111-111111111111.jsonl
+      - path: /src/strike/66666666-6666-4666-8666-666666666666.jsonl
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: strike
+        path: /src/strike/11111111-1111-4111-8111-111111111111.jsonl
+      # Recorded but not in the cohort: the probe names it, the core must stop.
+      - id: 66666666-6666-4666-8666-666666666666
+        harness: strike
+        path: /src/strike/66666666-6666-4666-8666-666666666666.jsonl
+    build:
+      - harness: strike
+        path: /src/strike/11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+        probe:
+          kind: path
+          harness: strike
+          path: /src/strike/66666666-6666-4666-8666-666666666666.jsonl
+      # Only reachable if the core builds a recorded ancestor.
+      - harness: strike
+        path: /src/strike/66666666-6666-4666-8666-666666666666.jsonl
+        result: ok
+    want:
+      members:
+        - id: 11111111-1111-4111-8111-111111111111
+          role: selected
+          outcome: stored_path
+      processed:
+        - 11111111-1111-4111-8111-111111111111
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+      noLookup: true
+      noWalk: true
+      buildCount: 1
+      # The probe still costs its one stat; the ancestor is never built.
+      statExactly:
+        /src/strike/66666666-6666-4666-8666-666666666666.jsonl: 1
 
   - name: stored_lookup_read_failed
     selected:
