@@ -1,0 +1,365 @@
+# Parity between the full Claude discovery walk and the two paths a scoped run
+# uses: the by-name lookup and the located-source build. Each case writes its own
+# source tree, drives the production adapter over it, and asserts the exact set
+# of filesystem operations the step performs, so a lookup that reads a fourth
+# place, a build that walks the tree, or a probe that stats during construction
+# fails here.
+#
+# Every located case runs the full walk first, then the located build over the
+# same tree with the evidence the walk left behind, and compares the readable
+# members field for field. A case may name the fields it allows to differ, and
+# nothing else.
+requiredNames:
+  - root-hit
+  - miss
+  - subagent-located
+  - subagent-probe
+  - workflow-located
+  - duplicate-root
+  - two-hit
+  - stale-owner
+  - teammate-unique
+  - teammate-ambiguous
+  - stored-link-kept-gap
+  - stored-child-gone
+  - source-gone
+  - source-id-mismatch
+root: /claude
+cases:
+  - name: root-hit
+    files:
+      - path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+        body: |
+          {"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/work/project","message":{"role":"user","content":"hello"}}
+    lookup:
+      id: "11111111-1111-4111-8111-111111111111"
+      sources:
+        - project-a/11111111-1111-4111-8111-111111111111.jsonl
+      readdirs:
+        - "."
+        - project-a
+      stats:
+        - project-a/11111111-1111-4111-8111-111111111111.jsonl
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+      reads: []
+      stats:
+        - project-a/11111111-1111-4111-8111-111111111111.jsonl
+      readdirs:
+        - project-a/11111111-1111-4111-8111-111111111111/subagents
+      wantMembers:
+        - "11111111-1111-4111-8111-111111111111"
+
+  - name: miss
+    files: []
+    lookup:
+      id: "11111111-1111-4111-8111-111111111111"
+      sources: []
+      searched:
+        - harness: claude-code
+          method: name-pattern
+          location: /claude/*/11111111-1111-4111-8111-111111111111.jsonl
+        - harness: claude-code
+          method: name-pattern
+          location: /claude/*/*/subagents/11111111-1111-4111-8111-111111111111.jsonl
+        - harness: claude-code
+          method: name-pattern
+          location: /claude/*/*/subagents/workflows/wf_*/11111111-1111-4111-8111-111111111111.jsonl
+      readdirs:
+        - "."
+      stats: []
+
+  - name: subagent-located
+    files:
+      - path: project-a/22222222-2222-4222-8222-222222222222.jsonl
+        body: |
+          {"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/work/project","message":{"role":"user","content":"drive"}}
+      - path: project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+        body: |
+          {"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","isSidechain":true,"agentId":"abcdef01","cwd":"/work/project","message":{"role":"user","content":"work"}}
+    lookup:
+      id: agent-abcdef01
+      sources:
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+      readdirs:
+        - "."
+        - project-a
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/workflows
+      stats:
+        - project-a/agent-abcdef01.jsonl
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+    located:
+      id: agent-abcdef01
+      path: project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+      storedParent: "22222222-2222-4222-8222-222222222222"
+      contextPaths:
+        - project-a/22222222-2222-4222-8222-222222222222.jsonl
+      reads: []
+      stats:
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+        - project-a/22222222-2222-4222-8222-222222222222.jsonl
+      readdirs: []
+      wantMembers:
+        - agent-abcdef01
+
+  - name: subagent-probe
+    files:
+      - path: project-a/22222222-2222-4222-8222-222222222222.jsonl
+        body: |
+          {"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/work/project","message":{"role":"user","content":"drive"}}
+      - path: project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+        body: |
+          {"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","isSidechain":true,"agentId":"abcdef01","cwd":"/work/project","message":{"role":"user","content":"work"}}
+    located:
+      id: agent-abcdef01
+      path: project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+      contextPaths:
+        - project-a/22222222-2222-4222-8222-222222222222.jsonl
+      reads: []
+      stats:
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+        - project-a/22222222-2222-4222-8222-222222222222.jsonl
+      readdirs: []
+      wantMembers:
+        - agent-abcdef01
+      wantProbe:
+        kind: path
+        path: project-a/22222222-2222-4222-8222-222222222222.jsonl
+
+  - name: workflow-located
+    files:
+      - path: project-a/22222222-2222-4222-8222-222222222222.jsonl
+        body: |
+          {"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/work/project","message":{"role":"user","content":"drive"}}
+      - path: project-a/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_run/agent-abcdef02.jsonl
+        body: |
+          {"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","isSidechain":true,"agentId":"abcdef02","cwd":"/work/project","message":{"role":"user","content":"work"}}
+    lookup:
+      id: agent-abcdef02
+      sources:
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_run/agent-abcdef02.jsonl
+      readdirs:
+        - "."
+        - project-a
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/workflows
+      stats:
+        - project-a/agent-abcdef02.jsonl
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef02.jsonl
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_run/agent-abcdef02.jsonl
+    located:
+      id: agent-abcdef02
+      path: project-a/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_run/agent-abcdef02.jsonl
+      storedParent: "22222222-2222-4222-8222-222222222222"
+      contextPaths:
+        - project-a/22222222-2222-4222-8222-222222222222.jsonl
+      reads: []
+      stats:
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_run/agent-abcdef02.jsonl
+        - project-a/22222222-2222-4222-8222-222222222222.jsonl
+      readdirs: []
+      wantMembers:
+        - agent-abcdef02
+
+  - name: duplicate-root
+    files:
+      - path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+        body: |
+          {"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/work/project","message":{"role":"user","content":"first"}}
+      - path: project-b/11111111-1111-4111-8111-111111111111.jsonl
+        body: |
+          {"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/work/project","message":{"role":"user","content":"second"}}
+    lookup:
+      id: "11111111-1111-4111-8111-111111111111"
+      sources:
+        - project-a/11111111-1111-4111-8111-111111111111.jsonl
+        - project-b/11111111-1111-4111-8111-111111111111.jsonl
+      readdirs:
+        - "."
+        - project-a
+        - project-b
+      stats:
+        - project-a/11111111-1111-4111-8111-111111111111.jsonl
+        - project-b/11111111-1111-4111-8111-111111111111.jsonl
+
+  - name: two-hit
+    files:
+      - path: project-a/agent-abcdef03.jsonl
+        body: |
+          {"sessionId":"agent-abcdef03","type":"user","cwd":"/work/project","message":{"role":"user","content":"a root named like a subagent"}}
+      - path: project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef03.jsonl
+        body: |
+          {"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","isSidechain":true,"agentId":"abcdef03","cwd":"/work/project","message":{"role":"user","content":"work"}}
+    lookup:
+      id: agent-abcdef03
+      sources:
+        - project-a/agent-abcdef03.jsonl
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef03.jsonl
+      readdirs:
+        - "."
+        - project-a
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/workflows
+      stats:
+        - project-a/agent-abcdef03.jsonl
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef03.jsonl
+
+  - name: stale-owner
+    files:
+      - path: project-a/22222222-2222-4222-8222-222222222222.jsonl
+        body: |
+          {"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/work/project","message":{"role":"user","content":"drive"}}
+      - path: project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+        body: |
+          {"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","isSidechain":true,"agentId":"abcdef01","cwd":"/work/project","message":{"role":"user","content":"work"}}
+    located:
+      id: agent-abcdef01
+      path: project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+      storedParent: "22222222-2222-4222-8222-222222222222"
+      staleOwner: true
+      contextPaths:
+        - project-a/22222222-2222-4222-8222-222222222222.jsonl
+      reads:
+        - project-a/22222222-2222-4222-8222-222222222222.jsonl
+      stats:
+        - project-a/22222222-2222-4222-8222-222222222222/subagents/agent-abcdef01.jsonl
+        - project-a/22222222-2222-4222-8222-222222222222.jsonl
+      readdirs: []
+      wantMembers:
+        - agent-abcdef01
+
+  - name: teammate-unique
+    files:
+      - path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+        body: |
+          {"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/work/project","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn"}}
+      - path: project-a/33333333-3333-4333-8333-333333333333.jsonl
+        body: |
+          {"sessionId":"33333333-3333-4333-8333-333333333333","type":"user","cwd":"/work/project","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+      derived:
+        declarers: 1
+        spawners: 1
+      storedChildren:
+        - id: "33333333-3333-4333-8333-333333333333"
+          harness: claude-code
+          path: project-a/33333333-3333-4333-8333-333333333333.jsonl
+          parent: "11111111-1111-4111-8111-111111111111"
+      reads: []
+      stats:
+        - project-a/11111111-1111-4111-8111-111111111111.jsonl
+        - project-a/33333333-3333-4333-8333-333333333333.jsonl
+      readdirs:
+        - project-a/11111111-1111-4111-8111-111111111111/subagents
+      wantMembers:
+        - "11111111-1111-4111-8111-111111111111"
+        - "33333333-3333-4333-8333-333333333333"
+
+  - name: teammate-ambiguous
+    files:
+      - path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+        body: |
+          {"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/work/project","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn"}}
+      - path: project-a/33333333-3333-4333-8333-333333333333.jsonl
+        body: |
+          {"sessionId":"33333333-3333-4333-8333-333333333333","type":"user","cwd":"/work/project","teamName":"migration","agentName":"tests","message":{"role":"user","content":"first declarer"}}
+      - path: project-a/44444444-4444-4444-8444-444444444444.jsonl
+        body: |
+          {"sessionId":"44444444-4444-4444-8444-444444444444","type":"user","cwd":"/work/project","teamName":"migration","agentName":"tests","message":{"role":"user","content":"second declarer"}}
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+      derived:
+        declarers: 2
+        spawners: 1
+      storedChildren:
+        - id: "33333333-3333-4333-8333-333333333333"
+          harness: claude-code
+          path: project-a/33333333-3333-4333-8333-333333333333.jsonl
+          parent: "11111111-1111-4111-8111-111111111111"
+        - id: "44444444-4444-4444-8444-444444444444"
+          harness: claude-code
+          path: project-a/44444444-4444-4444-8444-444444444444.jsonl
+          parent: "11111111-1111-4111-8111-111111111111"
+      reads: []
+      stats:
+        - project-a/11111111-1111-4111-8111-111111111111.jsonl
+        - project-a/33333333-3333-4333-8333-333333333333.jsonl
+        - project-a/44444444-4444-4444-8444-444444444444.jsonl
+      readdirs:
+        - project-a/11111111-1111-4111-8111-111111111111/subagents
+      wantMembers:
+        - "11111111-1111-4111-8111-111111111111"
+        - "33333333-3333-4333-8333-333333333333"
+        - "44444444-4444-4444-8444-444444444444"
+
+  - name: stored-link-kept-gap
+    files:
+      - path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+        body: |
+          {"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/work/project","message":{"role":"user","content":"no teammate evidence"}}
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+      storedParent: "55555555-5555-4555-8555-555555555555"
+      allowedDiffs:
+        - parentUUID
+      reads: []
+      stats:
+        - project-a/11111111-1111-4111-8111-111111111111.jsonl
+      readdirs:
+        - project-a/11111111-1111-4111-8111-111111111111/subagents
+      wantMembers:
+        - "11111111-1111-4111-8111-111111111111"
+
+  - name: stored-child-gone
+    files:
+      - path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+        body: |
+          {"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/work/project","message":{"role":"user","content":"hello"}}
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+      storedChildren:
+        - id: "55555555-5555-4555-8555-555555555555"
+          harness: claude-code
+          path: project-a/55555555-5555-4555-8555-555555555555.jsonl
+          unreadable: SourceGone
+      reads: []
+      stats:
+        - project-a/11111111-1111-4111-8111-111111111111.jsonl
+        - project-a/55555555-5555-4555-8555-555555555555.jsonl
+      readdirs:
+        - project-a/11111111-1111-4111-8111-111111111111/subagents
+      wantMembers:
+        - "11111111-1111-4111-8111-111111111111"
+      wantUnreadable:
+        - id: "55555555-5555-4555-8555-555555555555"
+          reason: SourceGone
+
+  - name: source-gone
+    files: []
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+      sourceGone: true
+      wantError: no longer holds
+      reads: []
+      stats:
+        - project-a/11111111-1111-4111-8111-111111111111.jsonl
+      readdirs: []
+
+  - name: source-id-mismatch
+    files:
+      - path: project-a/33333333-3333-4333-8333-333333333333.jsonl
+        body: |
+          {"sessionId":"33333333-3333-4333-8333-333333333333","type":"user","cwd":"/work/project","message":{"role":"user","content":"another session"}}
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: project-a/33333333-3333-4333-8333-333333333333.jsonl
+      sourceGone: true
+      wantError: no longer holds
+      reads: []
+      stats: []
+      readdirs: []
