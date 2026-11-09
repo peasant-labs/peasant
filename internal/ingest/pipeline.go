@@ -2776,6 +2776,11 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		}
 		if err != nil {
 			providerErrors = append(providerErrors, fmt.Errorf("discover %s: %w", provider, err))
+			// A partial run must say which harness it could not read. The
+			// all-failed case returns the joined error below; a run with at least
+			// one healthy provider otherwise loses every session of this harness
+			// silently and exits 0.
+			p.discoveryDiagnostics = append(p.discoveryDiagnostics, failedProviderDiagnostic(provider, err))
 			continue
 		}
 		// Read the re-mine count immediately after the Discover it describes:
