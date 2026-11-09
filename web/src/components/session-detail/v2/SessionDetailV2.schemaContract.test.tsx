@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -12,7 +12,7 @@ import { SessionDetailV2 } from './SessionDetailV2';
 const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ProjectHash;
 const casesSource = readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/schema_contract.yaml'), 'utf8');
 const manifestSource = readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/schema_contract.manifest.yaml'), 'utf8');
-const caseFields = ['name', 'family', 'harness', 'turnsMode', 'depth', 'stopReason', 'toolOptionalNumbersMode', 'durationMs', 'exitCode', 'scorecardMode', 'workingDirectoryMode', 'workingDirectory', 'legacyWorkingDirectory', 'filePath', 'expectedTurnCount', 'expectedFileNode', 'expectedScorecardState'] as const;
+const caseFields = ['name', 'family', 'harness', 'turnsMode', 'depth', 'stopReason', 'toolOptionalNumbersMode', 'durationMs', 'exitCode', 'scorecardMode', 'workingDirectoryMode', 'workingDirectory', 'legacyWorkingDirectory', 'filePath', 'expectedTurnCount', 'expectedWorkingDirectory', 'expectedToolFilePath', 'expectedScorecardState'] as const;
 const mutationFields = ['name', 'find', 'replace', 'expectedTestFile', 'expectedFailedTestNames', 'expectedFailurePattern'] as const;
 const loaderMutationFields = ['name', 'target', 'find', 'replace', 'expectedError'] as const;
 
@@ -32,7 +32,8 @@ type ContractCase = {
   legacyWorkingDirectory: string;
   filePath: string;
   expectedTurnCount: number;
-  expectedFileNode: string;
+  expectedWorkingDirectory: string;
+  expectedToolFilePath: string;
   expectedScorecardState: 'absent' | 'nullable-member';
 };
 
@@ -50,6 +51,7 @@ const captures = vi.hoisted(() => ({
   annotated: [] as unknown[][],
   medians: [] as unknown[][],
   graphs: [] as Array<Record<string, unknown>>,
+  viewerProps: [] as Array<Record<string, unknown>>,
 }));
 
 let channelData: unknown;
@@ -118,24 +120,23 @@ vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => ({
     prefilterTurns: (turns: unknown[]) => turns,
     computeTasks: () => [],
     buildTaskWaterfall: () => [],
-    TranscriptViewer: (props: {
+    TranscriptViewer: (props: Record<string, unknown> & {
       viewModel: { turns: Array<Record<string, unknown>>; meta: { provider: string } };
       graphSlot?: () => ReactNode;
-      renderTurnPanel?: (turn: Record<string, unknown>) => ReactNode;
       streamPrelude?: ReactNode;
-    }) => (
-      <div
-        data-testid="contract-viewer"
-        data-provider={props.viewModel.meta.provider}
-        data-turn-count={props.viewModel.turns.length}
-      >
-        {props.streamPrelude}
-        {props.graphSlot?.()}
-        {props.viewModel.turns.map((turn) => (
-          <div key={String(turn.index)}>{props.renderTurnPanel?.(turn)}</div>
-        ))}
-      </div>
-    ),
+    }) => {
+      captures.viewerProps.push(props);
+      return (
+        <div
+          data-testid="contract-viewer"
+          data-provider={props.viewModel.meta.provider}
+          data-turn-count={props.viewModel.turns.length}
+        >
+          {props.streamPrelude}
+          {props.graphSlot?.()}
+        </div>
+      );
+    },
 }));
 
 function replaceExactlyOnce(source: string, find: string, replacement: string, label: string): string {
@@ -181,13 +182,14 @@ function loadFixtures(manifestText = manifestSource, contractText = casesSource)
   requireUniqueNames(rows, 'schema contract cases');
   rows.forEach((row, index) => {
     requireExactRequiredFields(row, caseFields, `schema contract cases[${index}]`);
-    for (const field of ['name', 'family', 'harness', 'turnsMode', 'stopReason', 'toolOptionalNumbersMode', 'scorecardMode', 'workingDirectoryMode', 'workingDirectory', 'legacyWorkingDirectory', 'filePath', 'expectedFileNode', 'expectedScorecardState']) {
+    for (const field of ['name', 'family', 'harness', 'turnsMode', 'stopReason', 'toolOptionalNumbersMode', 'scorecardMode', 'workingDirectoryMode', 'workingDirectory', 'legacyWorkingDirectory', 'filePath', 'expectedWorkingDirectory', 'expectedToolFilePath', 'expectedScorecardState']) {
       if (typeof row[field] !== 'string') throw new Error(`schema contract cases[${index}].${field} must be a string`);
     }
     if (!Object.values(Harness).includes(row.harness as ContractCase['harness']) || !Object.values(StopReason).includes(row.stopReason as ContractCase['stopReason'])) throw new Error(`schema contract cases[${index}] uses a noncanonical harness or stop reason`);
     if (!['null', 'populated'].includes(row.turnsMode as string) || !['absent', 'populated'].includes(row.toolOptionalNumbersMode as string) || !['absent', 'null', 'nullable-member'].includes(row.scorecardMode as string) || !['absent', 'populated'].includes(row.workingDirectoryMode as string) || !['absent', 'nullable-member'].includes(row.expectedScorecardState as string)) throw new Error(`schema contract cases[${index}] uses an invalid collection mode`);
     if (!Number.isSafeInteger(row.depth) || (row.depth as number) < 0 || !Number.isSafeInteger(row.durationMs) || !Number.isSafeInteger(row.exitCode) || !Number.isSafeInteger(row.expectedTurnCount) || (row.expectedTurnCount as number) < 0) throw new Error(`schema contract cases[${index}] requires safe integer numeric fields`);
     if ((row.turnsMode === 'null') !== (row.expectedTurnCount === 0) || (row.scorecardMode === 'nullable-member') !== (row.expectedScorecardState === 'nullable-member')) throw new Error(`schema contract cases[${index}] has inconsistent expectations`);
+    if ((row.workingDirectoryMode === 'populated' ? row.expectedWorkingDirectory !== row.workingDirectory : row.expectedWorkingDirectory !== '') || row.expectedToolFilePath !== row.filePath) throw new Error(`schema contract cases[${index}] has inconsistent adapter expectations`);
   });
   const names = rows.map((row) => row.name);
   const families = rows.map((row) => row.family);
@@ -259,6 +261,7 @@ beforeEach(() => {
   captures.annotated.length = 0;
   captures.medians.length = 0;
   captures.graphs.length = 0;
+  captures.viewerProps.length = 0;
   window.localStorage.clear();
 });
 
@@ -287,6 +290,9 @@ describe('mounted canonical schema contract', () => {
       expect(captures.medians.at(-1)).toEqual([]);
       expect(captures.annotated.at(-1)).toHaveLength(fixture.expectedTurnCount);
       expect(captures.graphs.at(-1)?.provider).toBe(fixture.harness);
+      // No per-turn files-read panel: the adapter passes no turn panel slot, so
+      // the tool rows and the viewer's Files tab are the only file surfaces.
+      expect(captures.viewerProps.at(-1)).not.toHaveProperty('renderTurnPanel');
 
       const adaptedPayload = captures.adapted.at(-1)?.payload as SessionDetailPayload;
       expect(adaptedPayload.turns).toHaveLength(fixture.expectedTurnCount);
@@ -307,14 +313,18 @@ describe('mounted canonical schema contract', () => {
       if (fixture.expectedScorecardState === 'nullable-member') expect(analyticsScorecard?.m2TokenOutcomeRatio).toBeNull();
       else expect(analyticsScorecard).toBeUndefined();
 
-      // Touched files are plain text relative to the payload's own working
-      // directory; the code map is route-only, so nothing links into it.
-      if (fixture.expectedFileNode) {
-        const files = screen.getByLabelText(/^Files touched in turn /);
-        expect(within(files).getByText(fixture.expectedFileNode).tagName).toBe('LI');
-        expect(screen.queryByText(fixture.legacyWorkingDirectory)).not.toBeInTheDocument();
+      // The flat working directory is the one the adapter receives; the legacy
+      // nested git context never stands in for it. Tool-call paths pass through
+      // untouched so the viewer's tool row and Files tab keep the real path.
+      if (fixture.expectedWorkingDirectory) {
+        expect(adaptedPayload.workingDirectory).toBe(fixture.expectedWorkingDirectory);
       } else {
-        expect(screen.queryByLabelText(/^Files touched in turn /)).not.toBeInTheDocument();
+        expect(adaptedPayload).not.toHaveProperty('workingDirectory');
+      }
+      if (fixture.expectedToolFilePath) {
+        expect(adaptedPayload.turns?.[0]?.toolCalls?.[0]?.filePath).toBe(fixture.expectedToolFilePath);
+      } else {
+        expect(adaptedPayload.turns?.[0]?.toolCalls ?? []).toHaveLength(0);
       }
       expect(document.querySelector('a[href^="/map"]')).toBeNull();
     });

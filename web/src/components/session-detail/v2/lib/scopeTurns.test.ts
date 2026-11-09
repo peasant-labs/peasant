@@ -7,14 +7,10 @@ import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniq
 import { TranscriptScope, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import {
   clearScopeQuery,
-  collectFileTouches,
   turnsToMarkdown,
-  isEditTouch,
-  isReadTouch,
   originCrumb,
   pathsMatch,
   prefilterTurns,
-  relativizePath,
   scopeChipLabel,
   scopeTurns,
 } from './scopeTurns';
@@ -43,9 +39,7 @@ type ScopeFixture = {
   taskScopes: Array<{ name: string; scopeVal: string; wantIndexes: number[] }>;
   fileScopes: Array<{ name: string; scopeVal: string; wantIndexes: number[] }>;
   changeScopes: Array<{ name: string; scopeVal: string; wantIndexes: number[] }>;
-  relativizePaths: Array<{ name: string; path: string; workingDirectory: string; want: string }>;
   pathMatches: Array<{ name: string; left: string; right: string; want: boolean }>;
-  touchKinds: Array<{ name: string; id: string; toolName: string; filePath: string; toolKind: ToolCallKind; wantEdit: boolean; wantRead: boolean }>;
   originCrumbs: Array<{ name: string; params: Parameters<typeof originCrumb>[0]; want: ReturnType<typeof originCrumb> }>;
   scopeChipLabels: Array<{ name: string; scope: TranscriptScope; value: string; want: string }>;
 };
@@ -55,9 +49,7 @@ const scopeFixtureFields: Record<ScopeFixtureFamily, readonly string[]> = {
   taskScopes: ['name', 'scopeVal', 'wantIndexes'],
   fileScopes: ['name', 'scopeVal', 'wantIndexes'],
   changeScopes: ['name', 'scopeVal', 'wantIndexes'],
-  relativizePaths: ['name', 'path', 'workingDirectory', 'want'],
   pathMatches: ['name', 'left', 'right', 'want'],
-  touchKinds: ['name', 'id', 'toolName', 'filePath', 'toolKind', 'wantEdit', 'wantRead'],
   originCrumbs: ['name', 'params', 'want'],
   scopeChipLabels: ['name', 'scope', 'value', 'want'],
 };
@@ -281,12 +273,6 @@ const absTurns: TurnDetail[] = [
   turn({ index: 1, role: 'assistant', toolCalls: [read('r1', `${ABS_WD}/${FILE_B}`)] }),
 ];
 
-describe('relativizePath', () => {
-  it.each(scopeFixture.relativizePaths)('$name', ({ path, workingDirectory, want }) => {
-    expect(relativizePath(path, workingDirectory || undefined)).toBe(want);
-  });
-});
-
 describe('pathsMatch', () => {
   it.each(scopeFixture.pathMatches)('$name', ({ left, right, want }) => {
     expect(pathsMatch(left, right)).toBe(want);
@@ -328,74 +314,6 @@ describe('prefilterTurns', () => {
       turn({ index: 2, role: 'user', content: 'next' }),
     ];
     expect(prefilterTurns(turns).map((t) => t.index)).toEqual([1, 2]);
-  });
-});
-
-// -- Touch classification ------------------------------------------------------------
-
-describe('isEditTouch / isReadTouch', () => {
-  it.each(scopeFixture.touchKinds)('$name', ({ id, toolName, filePath, toolKind, wantEdit, wantRead }) => {
-    const tc = tool({ id, name: toolName, filePath: filePath || undefined, toolKind });
-    expect(isEditTouch(tc)).toBe(wantEdit);
-    expect(isReadTouch(tc)).toBe(wantRead);
-  });
-});
-
-// -- collectFileTouches ------------------------------------------------------------
-
-describe('collectFileTouches', () => {
-  it('groups edits vs reads per turn, keyed by entry index', () => {
-    const got = collectFileTouches(fileTurns);
-    expect(got).toEqual([
-      { turnIndex: 1, edits: [FILE_A], reads: [] },
-      { turnIndex: 2, edits: [], reads: [FILE_A] },
-      { turnIndex: 3, edits: [FILE_B], reads: [] },
-    ]);
-  });
-
-  it('dedupes within a group and lists edited+read files under edits only', () => {
-    const turns = [
-      turn({
-        index: 7,
-        role: 'assistant',
-        toolCalls: [read('r1', FILE_A), edit('e1', FILE_A), edit('e2', FILE_A), read('r2', FILE_B)],
-      }),
-    ];
-    expect(collectFileTouches(turns)).toEqual([
-      { turnIndex: 7, edits: [FILE_A], reads: [FILE_B] },
-    ]);
-  });
-
-  it('omits turns with no file-bearing tool calls', () => {
-    const turns = [
-      turn({ index: 0, role: 'user' }),
-      turn({
-        index: 1,
-        role: 'assistant',
-        toolCalls: [tool({ id: 'x', name: 'Bash', toolKind: ToolCallKind.Execute })],
-      }),
-    ];
-    expect(collectFileTouches(turns)).toEqual([]);
-  });
-
-  it('relativizes absolute wire paths to Map node ids via the working directory', () => {
-    expect(collectFileTouches(absTurns, ABS_WD)).toEqual([
-      { turnIndex: 0, edits: [FILE_A], reads: [] },
-      { turnIndex: 1, edits: [], reads: [FILE_B] },
-    ]);
-  });
-
-  it('dedupes absolute and relative touches of the same file after relativization', () => {
-    const turns = [
-      turn({
-        index: 3,
-        role: 'assistant',
-        toolCalls: [edit('e1', `${ABS_WD}/${FILE_A}`), read('r1', FILE_A)],
-      }),
-    ];
-    expect(collectFileTouches(turns, ABS_WD)).toEqual([
-      { turnIndex: 3, edits: [FILE_A], reads: [] },
-    ]);
   });
 });
 

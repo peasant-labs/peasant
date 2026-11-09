@@ -2,9 +2,7 @@ expectedCounts:
   taskScopes: 5
   fileScopes: 4
   changeScopes: 5
-  relativizePaths: 5
   pathMatches: 6
-  touchKinds: 6
   originCrumbs: 6
   scopeChipLabels: 4
 taskScopes:
@@ -27,13 +25,6 @@ changeScopes:
   - {name: empty value uses whole session, scopeVal: "", wantIndexes: [0, 1, 2, 3, 4, 5]}
   - {name: stale branch value uses whole session, scopeVal: feat/x, wantIndexes: [0, 1, 2, 3, 4, 5]}
 
-relativizePaths:
-  - {name: working-directory prefix is stripped, path: /Users/dev/proj/web/src/lib/api.ts, workingDirectory: /Users/dev/proj, want: web/src/lib/api.ts}
-  - {name: trailing working-directory slash is tolerated, path: /Users/dev/proj/web/src/lib/api.ts, workingDirectory: /Users/dev/proj/, want: web/src/lib/api.ts}
-  - {name: outside path is unchanged, path: /elsewhere/web/src/lib/api.ts, workingDirectory: /Users/dev/proj, want: /elsewhere/web/src/lib/api.ts}
-  - {name: absent working directory leaves path unchanged, path: /Users/dev/proj/web/src/lib/api.ts, workingDirectory: "", want: /Users/dev/proj/web/src/lib/api.ts}
-  - {name: relative path is unchanged, path: web/src/lib/api.ts, workingDirectory: /Users/dev/proj, want: web/src/lib/api.ts}
-
 pathMatches:
   - {name: exact equality, left: web/src/lib/api.ts, right: web/src/lib/api.ts, want: true}
   - {name: absolute matches relative, left: /Users/dev/proj/web/src/lib/api.ts, right: web/src/lib/api.ts, want: true}
@@ -41,14 +32,6 @@ pathMatches:
   - {name: suffix requires segment boundary, left: sugar/api.ts, right: bar/api.ts, want: false}
   - {name: different files do not match, left: web/src/lib/api.ts, right: internal/ingest/pipeline.go, want: false}
   - {name: empty path does not match, left: "", right: web/src/lib/api.ts, want: false}
-
-touchKinds:
-  - {name: edit kind with path, id: e, toolName: Edit, filePath: web/src/lib/api.ts, toolKind: edit, wantEdit: true, wantRead: false}
-  - {name: delete kind with path, id: d, toolName: Bash, filePath: web/src/lib/api.ts, toolKind: delete, wantEdit: true, wantRead: false}
-  - {name: move kind with path, id: m, toolName: Bash, filePath: web/src/lib/api.ts, toolKind: move, wantEdit: true, wantRead: false}
-  - {name: read kind with path, id: r, toolName: Read, filePath: web/src/lib/api.ts, toolKind: read, wantEdit: false, wantRead: true}
-  - {name: search kind with path, id: s, toolName: Glob, filePath: web/src/lib/api.ts, toolKind: search, wantEdit: false, wantRead: true}
-  - {name: edit without path, id: e2, toolName: Edit, filePath: "", toolKind: edit, wantEdit: false, wantRead: false}
 
 originCrumbs:
   - name: Map node

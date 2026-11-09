@@ -1,4 +1,4 @@
-expectedFamilyCount: 8
+expectedFamilyCount: 6
 expectedMutationCount: 3
 mutations:
   - {name: second scope parser, find: "export function scopeTurns(", replace: "export function parseScopeParams() {}\nexport function scopeTurns(", expectedError: second scope parser}
@@ -25,13 +25,6 @@ families:
       - duplicate indexes deduplicate
       - empty value uses whole session
       - stale branch value uses whole session
-  - name: relativizePaths
-    requiredNames:
-      - working-directory prefix is stripped
-      - trailing working-directory slash is tolerated
-      - outside path is unchanged
-      - absent working directory leaves path unchanged
-      - relative path is unchanged
   - name: pathMatches
     requiredNames:
       - exact equality
@@ -40,14 +33,6 @@ families:
       - suffix requires segment boundary
       - different files do not match
       - empty path does not match
-  - name: touchKinds
-    requiredNames:
-      - edit kind with path
-      - delete kind with path
-      - move kind with path
-      - read kind with path
-      - search kind with path
-      - edit without path
   - name: originCrumbs
     requiredNames:
       - Map node
