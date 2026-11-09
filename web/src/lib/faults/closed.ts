@@ -42,6 +42,7 @@ export type FaultCause = (typeof FaultCause)[keyof typeof FaultCause];
 export const FaultRemedy = Object.freeze({
   Retry: closed('retry', 'try again'),
   LowerPageSize: closed('lower-page-size', 'lower the sessions per page'),
+  NarrowProject: closed('narrow-project', 'narrow the project scope'),
   StartApp: closed('start-app', 'start it with peasant web start, then try again'),
   UpdateApp: closed('update-app', 'update peasant, then try again'),
 } as const);
@@ -76,6 +77,7 @@ const _allFaultCauses: MissingFaultCause extends never ? true : never = true;
 export const ALL_FAULT_REMEDIES = Object.freeze([
   FaultRemedy.Retry,
   FaultRemedy.LowerPageSize,
+  FaultRemedy.NarrowProject,
   FaultRemedy.StartApp,
   FaultRemedy.UpdateApp,
 ] as const);

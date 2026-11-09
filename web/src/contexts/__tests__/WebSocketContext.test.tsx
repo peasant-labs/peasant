@@ -16,56 +16,8 @@ import { parseStrictYAML, requireExactFields, requireExactRequiredFields, requir
 import { WebSocketProvider, useChannel } from '@/contexts/WebSocketContext';
 import { ChannelTopic, AnnotationAxis, subscribe as mkSub } from '@/types/messages';
 import type { ChannelName, SubscriptionMessage } from '@/types/messages';
-import { faultOperationForMessageType, MAX_FRAME_BYTES } from '@/lib/faults';
-
-// ---------------------------------------------------------------------------
-// MockWebSocket — replaces globalThis.WebSocket in jsdom
-// ---------------------------------------------------------------------------
-
-class MockWebSocket {
-  static instances: MockWebSocket[] = [];
-
-  onopen: ((ev: Event) => void) | null = null;
-  onmessage: ((ev: MessageEvent) => void) | null = null;
-  onclose: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  readyState: number = WebSocket.CONNECTING;
-  sent: string[] = [];
-
-  constructor(_url: string) {
-    MockWebSocket.instances.push(this);
-  }
-
-  send(data: string): void {
-    this.sent.push(data);
-  }
-
-  close(): void {
-    this.readyState = WebSocket.CLOSED;
-  }
-
-  simulateClose(): void {
-    this.readyState = WebSocket.CLOSED;
-    this.onclose?.();
-  }
-
-  // Test helpers
-
-  simulateOpen(): void {
-    this.readyState = WebSocket.OPEN;
-    this.onopen?.(new Event('open'));
-  }
-
-  simulateMessage(data: unknown): void {
-    this.simulateRawMessage(JSON.stringify(data));
-  }
-
-  simulateRawMessage(data: string): void {
-    this.onmessage?.(
-      new MessageEvent('message', { data }),
-    );
-  }
-}
+import { formatByteSize, frameByteLength, MAX_EVIDENCE_DETAIL, MAX_FRAME_BYTES } from '@/lib/faults';
+import { MockWebSocket } from '@/test/mockWebSocket';
 
 // ---------------------------------------------------------------------------
 // Test consumer components
@@ -186,14 +138,20 @@ function loadRawMessageFixtures() {
     raw: string;
     accepted: boolean;
     faultOperation: string;
+    faultOperationLabel: string;
     faultCause: 'frame_invalid' | 'payload_too_large';
+    sentinel?: string;
   }>((row) => {
     const label = `raw messages.${row.name}`;
-    requireExactFields(row, ['name', 'topic', 'accepted', 'faultOperation', 'faultCause', 'axis', 'id', 'raw', 'repeat'], label);
+    requireExactFields(row, ['name', 'topic', 'accepted', 'faultOperation', 'faultOperationLabel', 'faultCause', 'axis', 'id', 'raw', 'repeat', 'sentinel'], label);
     if (typeof row.name !== 'string' || typeof row.raw !== 'string' || !row.raw || typeof row.accepted !== 'boolean') throw new Error(`${label} requires name, raw text and boolean accepted`);
     const topic = row.topic;
     if (typeof topic !== 'string' || !FIXTURE_TOPICS.includes(topic as FixtureTopic)) throw new Error(`${label} has unsupported topic`);
     if (typeof row.faultOperation !== 'string' || !FIXTURE_TOPICS.includes(row.faultOperation as FixtureTopic)) throw new Error(`${label} requires a faultOperation matching a provider topic`);
+    // The rendered operation label is a literal in the fixture, never derived
+    // from the mapper this suite exercises.
+    if (typeof row.faultOperationLabel !== 'string' || row.faultOperationLabel.length === 0) throw new Error(`${label} requires a literal faultOperationLabel`);
+    if (row.sentinel !== undefined && (typeof row.sentinel !== 'string' || row.sentinel.length === 0)) throw new Error(`${label}.sentinel must be a non-empty string`);
     if (row.accepted === false && row.faultCause !== undefined && row.faultCause !== 'frame_invalid' && row.faultCause !== 'payload_too_large') throw new Error(`${label} has an unsupported faultCause`);
     if (row.accepted === true && row.faultCause !== undefined) throw new Error(`${label} cannot name a fault cause for an accepted frame`);
     if (row.id !== undefined && typeof row.id !== 'string') throw new Error(`${label}.id must be a string`);
@@ -214,7 +172,9 @@ function loadRawMessageFixtures() {
       axis: row.axis as AnnotationAxis | undefined,
       accepted: row.accepted,
       faultOperation: row.faultOperation,
+      faultOperationLabel: row.faultOperationLabel,
       faultCause,
+      sentinel: row.sentinel as string | undefined,
       raw,
     };
   });
@@ -237,10 +197,6 @@ function TypedDetailConsumer() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function latestInstance(): MockWebSocket {
-  return MockWebSocket.instances[MockWebSocket.instances.length - 1];
-}
-
 // ---------------------------------------------------------------------------
 // Setup / teardown
 // ---------------------------------------------------------------------------
@@ -248,7 +204,7 @@ function latestInstance(): MockWebSocket {
 let originalWebSocket: typeof WebSocket;
 
 beforeEach(() => {
-  MockWebSocket.instances = [];
+  MockWebSocket.reset();
   originalWebSocket = globalThis.WebSocket;
   // Replace the global WebSocket with the mock.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -273,7 +229,7 @@ describe('WebSocketContext store keying', () => {
           <TypedDetailConsumer />
         </WebSocketProvider>,
       );
-      const ws = latestInstance();
+      const ws = MockWebSocket.latest();
       await act(async () => ws.simulateOpen());
       await act(async () => ws.simulateRawMessage(fixture.raw));
       const expected = fixture.accepted ? JSON.parse(fixture.raw).data : null;
@@ -284,18 +240,22 @@ describe('WebSocketContext store keying', () => {
         expect(screen.getByTestId('connection-fault')).toBeEmptyDOMElement();
         expect(screen.getByTestId('fault-operation')).toBeEmptyDOMElement();
       } else {
-        const operation = faultOperationForMessageType(fixture.faultOperation);
         const error = screen.getByTestId('connection-fault');
         // A refused or oversized frame is a provider-wide failure, never this
         // channel's data failure.
         expect(screen.getByTestId('channel-fault')).toBeEmptyDOMElement();
         expect(error).not.toBeEmptyDOMElement();
         expect(error).toHaveTextContent('the page kept its last data');
-        expect(error).toHaveTextContent(operation.label);
+        // The operation label is the fixture's literal, not the mapper's output.
+        expect(error).toHaveTextContent(fixture.faultOperationLabel);
         if (fixture.faultCause === 'payload_too_large') {
-          expect(error).toHaveTextContent(new RegExp(`${operation.label} update was \\d+(?:\\.\\d)? MiB; the app accepts up to 8 MiB`));
+          // The measured size is derived from the exact frame the fixture built.
+          const measured = formatByteSize(frameByteLength(fixture.raw));
           expect(error).toHaveTextContent(
-            fixture.faultOperation === 'sessions' || fixture.faultOperation === 'projects'
+            `${fixture.faultOperationLabel} update was ${measured}; the app accepts up to ${formatByteSize(MAX_FRAME_BYTES)}`,
+          );
+          expect(error).toHaveTextContent(
+            fixture.faultOperation === 'sessions'
               ? 'lower the sessions per page'
               : 'try again',
           );
@@ -303,6 +263,8 @@ describe('WebSocketContext store keying', () => {
           expect(error).toHaveTextContent('did not match this app');
           expect(error).toHaveTextContent('update peasant, then try again');
         }
+        // A rejected frame's payload is never echoed into its fault message.
+        if (fixture.sentinel) expect(error).not.toHaveTextContent(fixture.sentinel);
       }
       // A rejected frame must not poison the socket or either subscription API:
       // the same operation's next good message clears its fault, and no other
@@ -325,6 +287,69 @@ describe('WebSocketContext store keying', () => {
       expect(screen.getByTestId('fault-operation')).toBeEmptyDOMElement();
     });
   }
+
+  it('names the schema path of a real rejected frame', async () => {
+    const fixture = rawMessages.cases.find((row) => row.name === 'null tool namespace rejects before dispatch');
+    if (!fixture) throw new Error('raw message fixture is missing the null-namespace case');
+    render(
+      <WebSocketProvider>
+        <RecoveryConsumer sub={subscriptionFor('session_detail')} />
+      </WebSocketProvider>,
+    );
+    const ws = MockWebSocket.latest();
+    await act(async () => ws.simulateOpen());
+    await act(async () => ws.simulateRawMessage(fixture.raw));
+    expect(screen.getByTestId('connection-fault')).toHaveTextContent('/turns/0/toolCalls/0/namespace (invalid_type)');
+    expect(screen.getByTestId('channel-fault')).toBeEmptyDOMElement();
+  });
+
+  it('places a non-text frame in the connection fault', async () => {
+    render(
+      <WebSocketProvider>
+        <RecoveryConsumer sub={subscriptionFor('dashboard')} />
+      </WebSocketProvider>,
+    );
+    const ws = MockWebSocket.latest();
+    await act(async () => ws.simulateOpen());
+    await act(async () => ws.simulateNonTextFrame());
+    expect(screen.getByTestId('connection-fault')).toHaveTextContent('the socket delivered a non-text frame');
+    expect(screen.getByTestId('channel-fault')).toBeEmptyDOMElement();
+  });
+
+  it('places a topic-less refusal in the connection fault', async () => {
+    render(
+      <WebSocketProvider>
+        <RecoveryConsumer sub={subscriptionFor('dashboard')} />
+      </WebSocketProvider>,
+    );
+    const ws = MockWebSocket.latest();
+    await act(async () => ws.simulateOpen());
+    await act(async () => ws.simulateMessage({ type: 'error', message: 'the server is refusing reads' }));
+    expect(screen.getByTestId('connection-fault')).toHaveTextContent('the server refused the read: the server is refusing reads');
+    expect(screen.getByTestId('channel-fault')).toBeEmptyDOMElement();
+  });
+
+  it('derives the socket error cause from the socket state', async () => {
+    render(
+      <WebSocketProvider>
+        <RecoveryConsumer sub={subscriptionFor('dashboard')} />
+      </WebSocketProvider>,
+    );
+    const ws = MockWebSocket.latest();
+
+    // Still connecting: the start command is the remedy.
+    await act(async () => ws.simulateError());
+    expect(screen.getByTestId('connection-fault')).toHaveTextContent('peasant is not answering on this computer');
+    expect(screen.getByTestId('connection-fault')).not.toHaveTextContent('the connection to peasant closed');
+
+    // Open: an error is not a failed connect.
+    await act(async () => ws.simulateOpen());
+    expect(screen.getByTestId('connection-fault')).toBeEmptyDOMElement();
+    await act(async () => ws.simulateError());
+    expect(screen.getByTestId('connection-fault')).toHaveTextContent('the connection to peasant closed');
+    expect(screen.getByTestId('connection-fault')).not.toHaveTextContent('is not answering');
+  });
+
   for (const testCase of channelRecoveryFixture.cases) {
     it(testCase.name, async () => {
       const subscription = subscriptionFor(testCase.topic, testCase.id, testCase.axis);
@@ -333,7 +358,7 @@ describe('WebSocketContext store keying', () => {
           <RecoveryConsumer sub={subscription} />
         </WebSocketProvider>,
       );
-      const ws = latestInstance();
+      const ws = MockWebSocket.latest();
       await act(async () => ws.simulateOpen());
 
       await act(async () => {
@@ -350,13 +375,19 @@ describe('WebSocketContext store keying', () => {
       data: testCase.errorCode ? { code: testCase.errorCode } : undefined,
         });
       });
-      expect(JSON.parse(screen.getByTestId('data').textContent!)).toBeNull();
-      expect(screen.getByTestId('channel-fault')).toHaveTextContent(testCase.errorMessage);
+      // A topic error is a note above the snapshot this channel already holds,
+      // never a reason to blank it.
+      expect(JSON.parse(screen.getByTestId('data').textContent!)).toEqual(testCase.initialData);
+      expect(screen.getByTestId('channel-fault')).toHaveTextContent(testCase.errorMessage.slice(0, MAX_EVIDENCE_DETAIL));
       expect(screen.getByTestId('channel-fault')).toHaveTextContent('the server refused the');
       expect(screen.getByTestId('channel-fault')).toHaveTextContent('the page kept its last data');
       expect(screen.getByTestId('connection-fault')).toBeEmptyDOMElement();
     expect(screen.getByTestId('error-code')).toHaveTextContent(testCase.errorCode ?? '');
       expect(screen.getByTestId('fault-operation')).not.toBeEmptyDOMElement();
+      if (testCase.errorMessage.length > MAX_EVIDENCE_DETAIL) {
+        // The detail is capped at the boundary; the tail never reaches a surface.
+        expect(screen.getByTestId('channel-fault')).not.toHaveTextContent(testCase.errorMessage.slice(-20));
+      }
 
       await act(async () => {
         ws.simulateMessage({ type: testCase.topic, data: testCase.recoveryData });
@@ -374,7 +405,7 @@ describe('WebSocketContext store keying', () => {
       </WebSocketProvider>,
     );
 
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
 
     await act(async () => {
       ws.simulateOpen();
@@ -397,7 +428,7 @@ describe('WebSocketContext store keying', () => {
       </WebSocketProvider>,
     );
 
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
 
     await act(async () => {
       ws.simulateOpen();
@@ -425,7 +456,7 @@ describe('WebSocketContext store keying', () => {
         <RefreshingConsumer />
       </WebSocketProvider>,
     );
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
     await act(async () => {
       ws.simulateOpen();
     });
@@ -449,7 +480,7 @@ describe('WebSocketContext store keying', () => {
       </WebSocketProvider>,
     );
 
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
 
     await act(async () => {
       ws.simulateOpen();
@@ -491,7 +522,7 @@ describe('WebSocketContext store keying', () => {
       </WebSocketProvider>,
     );
 
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
 
     await act(async () => {
       ws.simulateOpen();
@@ -524,7 +555,7 @@ describe('WebSocketContext store keying', () => {
       </WebSocketProvider>,
     );
 
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
 
     await act(async () => {
       ws.simulateOpen();
@@ -554,7 +585,7 @@ describe('WebSocketContext store keying', () => {
       </WebSocketProvider>,
     );
 
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
 
     await act(async () => {
       ws.simulateOpen();
@@ -585,7 +616,7 @@ describe('WebSocketContext store keying', () => {
       </WebSocketProvider>,
     );
 
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
 
     await act(async () => {
       ws.simulateOpen();
@@ -621,7 +652,7 @@ describe('WebSocketContext store keying', () => {
         <QualityAndSessions />
       </WebSocketProvider>,
     );
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
     await act(async () => ws.simulateOpen());
 
     const oversized = JSON.stringify({ type: 'quality', data: 'x'.repeat(MAX_FRAME_BYTES) });
@@ -665,7 +696,7 @@ describe('WebSocketContext store keying', () => {
         <TwoSessions />
       </WebSocketProvider>,
     );
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
     await act(async () => ws.simulateOpen());
 
     await act(async () => {
@@ -705,7 +736,7 @@ describe('WebSocketContext store keying', () => {
         <RetryingConsumer />
       </WebSocketProvider>,
     );
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
     await act(async () => ws.simulateOpen());
 
     await act(async () => {
@@ -739,7 +770,7 @@ describe('WebSocketContext store keying', () => {
         <DashboardConsumer />
       </WebSocketProvider>,
     );
-    const ws = latestInstance();
+    const ws = MockWebSocket.latest();
     await act(async () => ws.simulateOpen());
 
     await act(async () => {

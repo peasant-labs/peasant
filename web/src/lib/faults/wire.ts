@@ -27,7 +27,9 @@ export function frameByteLength(text: string): number {
 export function peekMessageType(text: string): string | null {
   const head = MESSAGE_TYPE_PATTERN.exec(text.slice(0, TYPE_PEEK_CHARS));
   if (head) return head[1];
-  if (text.length > MAX_FRAME_BYTES) return null;
+  // The bound is bytes, not UTF-16 code units: a multi-byte frame can be over
+  // the limit while `text.length` is under it.
+  if (frameByteLength(text) > MAX_FRAME_BYTES) return null;
   return MESSAGE_TYPE_PATTERN.exec(text)?.[1] ?? null;
 }
 

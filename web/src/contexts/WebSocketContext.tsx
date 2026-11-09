@@ -83,11 +83,13 @@ class ChannelStore {
     if (this.faults.clear(operation, key)) this.notify(key);
   }
 
-  /** Clear stale data and publish one operation-scoped failure notification. */
+  /**
+   * Store one operation-scoped failure and publish it to that channel only. The
+   * channel's last snapshot is RETAINED: a failed refresh is a note above the
+   * rows the reader already has, not a reason to blank them.
+   */
   fail(operation: FaultOperation, key: string, fault: WebFault): void {
-    const changedFault = this.faults.set(operation, key, fault);
-    const hadData = this.data.delete(key);
-    if (!changedFault && !hadData) return;
+    if (!this.faults.set(operation, key, fault)) return;
     this.notify(key);
   }
 
@@ -330,9 +332,15 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
     ws.onerror = () => {
       if (!mountedRef.current) return;
-      // User-facing copy stays jargon-free; the connected flag drives the UI.
+      // An error on an OPEN socket is not a failed connect: the socket is up and
+      // the provider's reconnect loop does not apply. Derive the cause from the
+      // socket state so the banner copy stays accurate.
+      const connecting = ws.readyState === WebSocket.CONNECTING;
       setConnectionFault(
-        WebFault.connection(FaultCause.ConnectFailed, 'the socket reported an error'),
+        WebFault.connection(
+          connecting ? FaultCause.ConnectFailed : FaultCause.SocketClosed,
+          connecting ? 'the socket could not connect' : 'the socket reported an error',
+        ),
       );
     };
 

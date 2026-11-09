@@ -128,8 +128,10 @@ describe('transcript surface fault placement', () => {
     });
 
     expect(screen.queryByText('transcript unavailable')).not.toBeInTheDocument();
-    // The transcript stays on its skeleton.
+    // The transcript stays on its skeleton, and a frame failure on a live
+    // socket offers a retry of this channel.
     expect(screen.getByLabelText('Loading transcript')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'try again' })).toBeInTheDocument();
     // The one app-level banner states the provider failure, naming its
     // operation, cause, and remedy.
     const banner = screen.getByTestId('connection-fault-notice');
@@ -137,7 +139,7 @@ describe('transcript surface fault placement', () => {
     expect(banner).toHaveTextContent('the app accepts up to 8 MiB');
   });
 
-  it('session_detail channel fault shows transcript unavailable with its message', async () => {
+  it('session_detail channel fault shows transcript unavailable with its message and a retry', async () => {
     render(transcriptSurface());
 
     const ws = MockWebSocket.latest();
@@ -154,8 +156,33 @@ describe('transcript surface fault placement', () => {
 
     expect(screen.getByText('transcript unavailable')).toBeInTheDocument();
     expect(screen.getByText(/session detail is unavailable/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'try again' })).toBeInTheDocument();
     // A channel fault is local; the provider-wide banner stays silent.
     expect(screen.queryByTestId('connection-fault-notice')).not.toBeInTheDocument();
+  });
+
+  it('keeps the loaded transcript when its channel refuses a refresh, with the note above it', async () => {
+    render(transcriptSurface());
+
+    const ws = MockWebSocket.latest();
+    await act(async () => ws.simulateOpen());
+    await act(async () => ws.simulateMessage({ type: 'session_detail', data: DETAIL }));
+    expect(screen.getByTestId('package-session-detail')).toBeInTheDocument();
+
+    await act(async () => {
+      ws.simulateMessage({
+        type: 'error',
+        topic: 'session_detail',
+        id: SESSION_ID,
+        message: 'the re-index refused this read',
+      });
+    });
+
+    // The rows stay; the failure is a note beside them, not a fatal panel.
+    expect(screen.getByTestId('package-session-detail')).toBeInTheDocument();
+    expect(screen.queryByText('transcript unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText(/the re-index refused this read/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'try again' })).toBeInTheDocument();
   });
 
   it('a late detail replaces the skeleton with no residual fatal state', async () => {
@@ -174,7 +201,7 @@ describe('transcript surface fault placement', () => {
     expect(screen.queryByText('transcript unavailable')).not.toBeInTheDocument();
   });
 
-  it('a provider fault on another channel never renders as this transcript failure', async () => {
+  it('a channel fault on another channel never renders as this transcript failure', async () => {
     render(transcriptSurface());
 
     const ws = MockWebSocket.latest();

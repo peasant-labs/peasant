@@ -22,14 +22,23 @@ const webFaultBrand: unique symbol = Symbol('webFault');
 /** Byte titles are binary: the app's limit is 8 MiB exactly. */
 export function formatByteSize(bytes: number): string {
   const mib = bytes / (1024 * 1024);
-  if (mib >= 1) return `${round(mib)} MiB`;
+  if (mib >= 1) {
+    const whole = Math.floor(mib);
+    const remainder = bytes - whole * 1024 * 1024;
+    if (remainder === 0) return `${whole} MiB`;
+    const rounded = Math.round(mib * 10) / 10;
+    // A one-byte overflow rounds to the whole MiB, which would read as exactly
+    // the limit. Keep the remainder visible instead.
+    if (rounded > whole) return `${rounded.toFixed(1)} MiB`;
+    return `${whole} MiB + ${formatByteSize(remainder)}`;
+  }
   const kib = bytes / 1024;
-  if (kib >= 1) return `${Math.round(kib)} KB`;
-  return `${bytes} bytes`;
-}
-
-function round(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+  if (kib >= 1) {
+    const whole = Math.floor(kib);
+    const remainder = bytes - whole * 1024;
+    return remainder === 0 ? `${whole} KB` : `${Math.round(kib)} KB`;
+  }
+  return `${bytes} B`;
 }
 
 function subject(operation: FaultOperation): string {
@@ -105,9 +114,11 @@ export class WebFault {
 
   static payloadTooLarge(operation: FaultOperation, bytes: number, limit: number): WebFault {
     const remedy =
-      operation === FaultOperation.SessionsRead || operation === FaultOperation.ProjectRead
+      operation === FaultOperation.SessionsRead
         ? FaultRemedy.LowerPageSize
-        : FaultRemedy.Retry;
+        : operation === FaultOperation.ProjectRead
+          ? FaultRemedy.NarrowProject
+          : FaultRemedy.Retry;
     return new WebFault(operation, FaultCause.PayloadTooLarge, new PayloadEvidence(bytes, limit), remedy);
   }
 
@@ -154,4 +165,18 @@ export class WebFault {
     const remedy = cause === FaultCause.ConnectFailed ? FaultRemedy.StartApp : FaultRemedy.Retry;
     return new WebFault(FaultOperation.Socket, cause, new DetailEvidence(detail), remedy);
   }
+}
+
+/**
+ * A frame failure or a non-topic refusal on a live socket can be retried by
+ * re-reading the surface's channel. A failed or closed socket cannot: the
+ * provider reconnects it on its own, so a manual control would be a second
+ * retry loop.
+ */
+export function isRetryableConnectionFault(fault: WebFault | null): boolean {
+  return (
+    fault != null &&
+    fault.cause !== FaultCause.SocketClosed &&
+    fault.cause !== FaultCause.ConnectFailed
+  );
 }

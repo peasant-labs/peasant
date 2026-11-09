@@ -96,6 +96,7 @@ function HomeView() {
   }, [query]);
   const roots = home.groups.get('');
   const discoveryError = roots?.error;
+  const discoveryFault = roots?.fault ?? null;
   const rootPages = roots?.pages;
   const rows = useMemo(() => [...new Map((rootPages ?? []).flatMap(page => page.items).map(row => [row.sync.id, row])).values()], [rootPages]);
   const children = new Map([...home.groups].filter(([id]) => id !== '').map(([id, group]) => [id, [...new Map(group.pages.flatMap(page => page.items).map(row => [row.sync.id, row])).values()]]));
@@ -127,7 +128,7 @@ function HomeView() {
         ...projectOptions.map(option => projectChoice(option.projectHash, option.projectName)),
       ],
       onChoose: hash => setProject(hash === ALL_PROJECTS ? null : projectOptions.find(option => option.projectHash === hash) ?? null),
-      note: home.projectsLoading ? 'loading project choices…' : home.projectError != null ? discoveryErrorMessage(home.projectError) : undefined,
+      note: home.projectsLoading ? 'loading project choices…' : home.projectError != null ? (home.projectFault?.message ?? discoveryErrorMessage(home.projectError)) : undefined,
       retry: home.projectError != null ? { label: 'retry project choices', onSelect: () => { void home.loadProjects(); } } : undefined,
     },
   ];
@@ -152,7 +153,7 @@ function HomeView() {
     </header>
     <AutoPublishTip />
     {discoveryError != null && <div className="flex flex-col items-start gap-3">
-      <FeedbackPanel variant="error">{discoveryErrorMessage(discoveryError)}</FeedbackPanel>
+      <FeedbackPanel variant="error">{discoveryFault ? discoveryFault.message : discoveryErrorMessage(discoveryError)}</FeedbackPanel>
       <Button variant="secondary" size="sm" onClick={() => home.retry()}>retry the session list</Button>
     </div>}
     <div className="home-board">

@@ -25,8 +25,9 @@ import type { UnverifiedPullRequestSource } from '@peasant-labs/schema';
 import { useTheme } from '@/hooks/useTheme';
 import { useSessionExtras } from '@/hooks/useSessionExtras';
 import '@xyflow/react/dist/style.css';
-import { FeedbackPanel, Skeleton, type MenuItem } from '@/lib/ft-ui';
+import { Button, FeedbackPanel, Skeleton, type MenuItem } from '@/lib/ft-ui';
 import { useChannel } from '@/contexts/WebSocketContext';
+import { isRetryableConnectionFault } from '@/lib/faults';
 import { subscribe } from '@/types/messages';
 import type {
   SessionDetailPayload,
@@ -126,7 +127,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Host element for the mounted viewer; the per-session reading state replays
   // the inner scroller offset against it on the way back.
   const transcriptHostRef = useRef<HTMLDivElement | null>(null);
-  const { data: detail, channelFault: detailFault, refresh: refreshDetail } = useChannel<SessionDetailWire>(
+  const { data: detail, channelFault: detailFault, connectionFault, refresh: refreshDetail } = useChannel<SessionDetailWire>(
     subscribe.sessionDetail(sessionId),
   );
   // The canonical wire permits `null` for an empty turn collection. Normalize
@@ -459,10 +460,22 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           <FeedbackPanel variant="error" title="transcript unavailable">
             {detailFault.message}
           </FeedbackPanel>
+          <div className="mt-3">
+            <Button variant="secondary" size="sm" onClick={refreshDetail}>try again</Button>
+          </div>
         </div>
       );
     }
-    return <SessionDetailSkeleton />;
+    // A frame or non-topic refusal on a live socket is not a dead socket: the
+    // reader can ask this channel to read again while the banner explains the
+    // provider failure. A closed socket is left to the automatic reconnect.
+    return (
+      <SessionDetailSkeleton
+        footer={isRetryableConnectionFault(connectionFault)
+          ? <Button variant="secondary" size="sm" onClick={refreshDetail}>try again</Button>
+          : undefined}
+      />
+    );
   }
 
   // Recorded turns with nothing indexed: say so and offer the re-index,
@@ -529,9 +542,12 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
         </div>
       )}
       {detailFault != null && (
-        <p role="status" className="text-[12px] text-danger">
-          {detailFault.message}
-        </p>
+        <div className="flex flex-col items-start gap-2">
+          <p role="status" className="text-[12px] text-danger">
+            {detailFault.message}
+          </p>
+          <Button variant="secondary" size="sm" onClick={refreshDetail}>try again</Button>
+        </div>
       )}
     </div>
   );
@@ -735,13 +751,14 @@ function ScopeChipRow({ label, onClear }: { label: string; onClear: () => void }
   );
 }
 
-function SessionDetailSkeleton() {
+function SessionDetailSkeleton({ footer }: { footer?: React.ReactNode }) {
   return (
     <div className="asb-page">
       {/* Header block: breadcrumb + title + subtitle stand-ins. */}
       <Skeleton avatar={false} lines={3} label="Loading session header" />
       {/* Transcript body stand-in: an avatar row plus a run of content lines. */}
       <Skeleton lines={10} label="Loading transcript" />
+      {footer && <div className="mt-3">{footer}</div>}
     </div>
   );
 }

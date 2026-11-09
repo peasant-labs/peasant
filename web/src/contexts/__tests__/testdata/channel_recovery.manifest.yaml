@@ -1,3 +1,4 @@
 requiredNames:
   - dashboard failure clears only dashboard data and later recovers
   - session detail failure clears only the matching session and later recovers
+  - a long server detail is capped in the rendered fault

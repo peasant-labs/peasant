@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { ConnectionFaultNotice } from './ConnectionFaultNotice';
+import { PageNotices } from './PageNotices';
 import { MAX_FRAME_BYTES } from '@/lib/faults';
 import { MockWebSocket } from '@/test/mockWebSocket';
 
@@ -49,8 +50,9 @@ describe('ConnectionFaultNotice', () => {
     expect(banner).toHaveAttribute('data-connection-fault', 'payload-too-large');
     expect(banner).toHaveTextContent('the quality update was');
     expect(banner).toHaveTextContent('the page kept its last data');
-    // Automatic only: the banner never offers a retry control.
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    // Automatic only: the banner never offers a retry or any other control.
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
   });
 
   it('clears when the socket returns', async () => {
@@ -71,5 +73,25 @@ describe('ConnectionFaultNotice', () => {
     // The provider's automatic reconnect clears the fault on open.
     await act(async () => ws.simulateOpen());
     expect(screen.queryByTestId('connection-fault-notice')).not.toBeInTheDocument();
+  });
+});
+
+describe('PageNotices', () => {
+  it('mounts exactly one provider-fault notice above the page', async () => {
+    render(
+      <WebSocketProvider>
+        <PageNotices />
+      </WebSocketProvider>,
+    );
+    const ws = MockWebSocket.latest();
+    await act(async () => ws.simulateOpen());
+
+    await act(async () => {
+      ws.simulateRawMessage(JSON.stringify({ type: 'quality', data: 'x'.repeat(MAX_FRAME_BYTES) }));
+    });
+
+    expect(screen.getAllByTestId('connection-fault-notice')).toHaveLength(1);
+    // The message is stated once, not once per notice.
+    expect(document.body.textContent?.match(/the quality update was/g)).toHaveLength(1);
   });
 });

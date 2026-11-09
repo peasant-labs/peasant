@@ -56,6 +56,15 @@ export class MockWebSocket {
     this.onmessage?.(new MessageEvent('message', { data }));
   }
 
+  /** A binary frame: the provider refuses anything that is not text. */
+  simulateNonTextFrame(): void {
+    this.onmessage?.(new MessageEvent('message', { data: new ArrayBuffer(4) }));
+  }
+
+  simulateError(): void {
+    this.onerror?.(new Event('error'));
+  }
+
   simulateClose(): void {
     this.readyState = MockWebSocket.CLOSED;
     this.onclose?.(new Event('close'));

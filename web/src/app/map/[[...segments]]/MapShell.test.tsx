@@ -209,7 +209,7 @@ describe('MapShell — one map without lenses', () => {
   ws.errorCode = 'selection_visibility';
     render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} />);
     expect(await screen.findByTestId('map-canvas')).toBeInTheDocument();
-    expect(screen.getByText(/live updates stopped/)).toBeInTheDocument();
+    expect(screen.getByText(/live session updates failed/)).toBeInTheDocument();
   });
 
   it('shows the shimmer (never a blank screen) while the graph loads', async () => {

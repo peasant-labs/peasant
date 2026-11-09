@@ -16,11 +16,13 @@ import {
   faultOperationForTopic,
   faultFromDiscoveryError,
   formatByteSize,
+  frameByteLength,
   HttpEvidence,
   MAX_EVIDENCE_DETAIL,
   MAX_FRAME_BYTES,
   PayloadEvidence,
   peekMessageType,
+  schemaPathDetail,
   TopicEvidence,
   WebFault,
 } from '@/lib/faults';
@@ -95,6 +97,24 @@ describe('WebFault messages', () => {
     expect(fault.message).toContain('lower the sessions per page');
   });
 
+  it('narrows the project scope for a project read that was too large', () => {
+    const fault = WebFault.payloadTooLarge(FaultOperation.ProjectRead, 16 * 1024 * 1024, MAX_FRAME_BYTES);
+    expect(fault.remedy).toBe(FaultRemedy.NarrowProject);
+    expect(fault.message).toContain('narrow the project scope');
+    expect(fault.message).not.toContain('lower the sessions per page');
+  });
+
+  it('does not render a one-byte overflow as exactly the limit', () => {
+    expect(formatByteSize(MAX_FRAME_BYTES)).toBe('8 MiB');
+    expect(formatByteSize(MAX_FRAME_BYTES + 1)).toBe('8 MiB + 1 B');
+    expect(formatByteSize(MAX_FRAME_BYTES + 1)).not.toBe('8.0 MiB');
+    expect(formatByteSize(MAX_FRAME_BYTES * 2)).toBe('16 MiB');
+    expect(formatByteSize(MAX_FRAME_BYTES * 2 + 1)).toBe('16 MiB + 1 B');
+    expect(formatByteSize(MAX_FRAME_BYTES + 512 * 1024)).toBe('8.5 MiB');
+    expect(formatByteSize(512 * 1024)).toBe('512 KB');
+    expect(formatByteSize(1)).toBe('1 B');
+  });
+
   it('names the operation and a bounded schema path for a frame that did not match', () => {
     const fault = WebFault.frameInvalid(FaultOperation.SessionDetailRead, '/data/turns/0/toolCalls/0/namespace (invalid_type)');
     expect(fault.cause).toBe(FaultCause.FrameInvalid);
@@ -147,7 +167,10 @@ describe('WebFault messages', () => {
   it('builds the message once, when the fault is created', () => {
     const fault = WebFault.frameInvalid(FaultOperation.TrendsRead, '/data (invalid_type)');
     expect(Object.getOwnPropertyNames(fault)).toContain('message');
-    expect(fault.message).toBe(fault.message);
+    // The exact sentence is composed in the constructor, not by a surface.
+    expect(fault.message).toBe(
+      'the trends update did not match this app: /data (invalid_type). the page kept its last data. update peasant, then try again.',
+    );
   });
 
   it('never echoes payload bytes or transcript content', () => {
@@ -211,5 +234,36 @@ describe('wire peek', () => {
   it('does not scan an oversized frame past its head', () => {
     const oversized = `{"data":"${'x'.repeat(MAX_FRAME_BYTES)}","type":"quality"}`;
     expect(peekMessageType(oversized)).toBeNull();
+  });
+
+  it('bounds the whole-text scan by UTF-8 bytes, not code units', () => {
+    // Half as many `é` characters still encode to the full byte budget, so the
+    // character length alone would let the full scan run.
+    const text = `{"data":"${'é'.repeat(MAX_FRAME_BYTES / 2)}","type":"quality"}`;
+    expect(text.length).toBeLessThanOrEqual(MAX_FRAME_BYTES);
+    expect(frameByteLength(text)).toBeGreaterThan(MAX_FRAME_BYTES);
+    expect(peekMessageType(text)).toBeNull();
+  });
+});
+
+describe('schema path detail', () => {
+  it('names the first issue path and its code without the exception text', () => {
+    const error = {
+      issues: [{ code: 'invalid_type', path: ['turns', 0, 'toolCalls', 0, 'namespace'] }],
+    };
+    expect(schemaPathDetail(error)).toBe('/turns/0/toolCalls/0/namespace (invalid_type)');
+    expect(schemaPathDetail({ issues: [{ code: 'invalid_type', path: [] }] })).toBe('the root (invalid_type)');
+  });
+
+  it('keeps the short scanner reason and never echoes a value', () => {
+    const error = new TypeError(
+      'Schema could not scan this frame: raw JSON scanning near character 42: duplicate key "secret"; the payload is refused',
+    );
+    expect(schemaPathDetail(error)).toBe('duplicate key "secret"');
+  });
+
+  it('falls back to a bounded reason for anything else', () => {
+    expect(schemaPathDetail(new Error('Unexpected token } in JSON'))).toBe('the frame is not valid JSON');
+    expect(schemaPathDetail('not an error')).toBe('the frame is not valid JSON');
   });
 });

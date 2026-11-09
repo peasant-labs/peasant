@@ -22,3 +22,5 @@ requiredNames:
   - invalid usage domain rejects before dispatch
   - legacy harness cannot carry Pi metadata
   - payload too large names the measured bytes and the limit
+  - a rejected frame never echoes its payload
+  - payload at twice the limit reports its measured size

@@ -408,7 +408,7 @@ export function MapShell({
     >
 
       {/* One-line state notes keep stale or degraded data unambiguous. */}
-      {sessionsFault ? <StatusNote>live updates stopped. the map still works; reload the page to refresh the conversation list.</StatusNote> : null}
+      {sessionsFault ? <StatusNote>{sessionsFault.message}</StatusNote> : null}
       {!sessionsFault && !sessionsData ? <StatusNote>{connected ? 'waiting for live updates. the map is ready.' : CONNECTION.staleNote}</StatusNote> : null}
       {!sessionsFault && !connected && sessionsData && <StatusNote>{CONNECTION.staleNote}</StatusNote>}
       {graph && !graph.repoFound && (

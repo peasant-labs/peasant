@@ -19,5 +19,5 @@ export {
 } from './evidence';
 export { codeFromFault, faultFromDiscoveryError } from './discovery';
 export { FaultStore } from './faultStore';
-export { formatByteSize, WebFault } from './webFault';
+export { formatByteSize, isRetryableConnectionFault, WebFault } from './webFault';
 export { frameByteLength, MAX_FRAME_BYTES, peekMessageType, schemaPathDetail } from './wire';

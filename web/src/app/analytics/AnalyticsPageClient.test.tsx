@@ -25,6 +25,8 @@ vi.mock('@/contexts/WebSocketContext', () => ({
     data: channelData,
     connected: channelConnected,
     channelFault: channelError ? { message: channelError } : null,
+    connectionFault: null,
+    refresh: () => undefined,
   }),
 }));
 
@@ -106,14 +108,17 @@ describe('AnalyticsPageClient', () => {
     expect(overviewProps).not.toHaveBeenCalled();
   });
 
-  it('renders the disconnected state on a quality-channel error even while nominally connected', () => {
+  it('renders the channel fault with a retry while the socket is connected', () => {
     channelData = undefined;
     channelConnected = true;
     channelError = 'Lost the connection to the Peasant app on this computer.';
 
     render(<AnalyticsPageClient />);
 
-    expect(screen.getByText('waiting for the peasant app')).toBeInTheDocument();
+    // A channel topic error is local; it is not the offline state.
+    expect(screen.getByText('Lost the connection to the Peasant app on this computer.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'try again' })).toBeInTheDocument();
+    expect(screen.queryByText('waiting for the peasant app')).not.toBeInTheDocument();
     expect(overviewProps).not.toHaveBeenCalled();
   });
 

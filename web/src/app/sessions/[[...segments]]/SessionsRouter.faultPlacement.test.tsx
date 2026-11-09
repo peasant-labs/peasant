@@ -86,10 +86,11 @@ describe('project sessions surface fault placement', () => {
     expect(screen.queryByText(/Couldn’t load sessions/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Couldn't load sessions/)).not.toBeInTheDocument();
     expect(screen.getByLabelText('Loading sessions')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'try again' })).toBeInTheDocument();
     expect(screen.getByTestId('connection-fault-notice')).toHaveTextContent('the quality update was');
   });
 
-  it('a sessions channel fault owns the error paragraph', async () => {
+  it('a sessions channel fault with no data owns the error paragraph and offers a retry', async () => {
     renderSurface();
     const ws = MockWebSocket.latest();
     await act(async () => ws.simulateOpen());
@@ -104,7 +105,37 @@ describe('project sessions surface fault placement', () => {
 
     expect(await screen.findByText(/Couldn’t load sessions:/)).toBeInTheDocument();
     expect(screen.getByText(/the session store is locked/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'try again' })).toBeInTheDocument();
     expect(screen.queryByTestId('connection-fault-notice')).not.toBeInTheDocument();
+  });
+
+  it('keeps the loaded sessions and shows the note when its channel refuses a refresh', async () => {
+    renderSurface();
+    const ws = MockWebSocket.latest();
+    await act(async () => ws.simulateOpen());
+
+    await act(async () => {
+      ws.simulateMessage({
+        type: 'sessions',
+        data: { sessions: [makeSession({ id: 'agent-a1' })] },
+      });
+    });
+    expect(await screen.findByRole('heading', { name: 'alpha-project' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('agent-a1')).toBeInTheDocument());
+
+    await act(async () => {
+      ws.simulateMessage({
+        type: 'error',
+        topic: 'sessions',
+        message: 'the session store is locked',
+      });
+    });
+
+    // The rows stay; the refusal is a note above them.
+    expect(screen.getByRole('heading', { name: 'alpha-project' })).toBeInTheDocument();
+    expect(screen.getByText(/the session store is locked/)).toBeInTheDocument();
+    expect(screen.getByText('agent-a1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'try again' })).toBeInTheDocument();
   });
 
   it('keeps the loaded sessions when a provider fault arrives', async () => {

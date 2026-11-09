@@ -9,6 +9,7 @@ import { IngestTeach } from '@/components/IngestTeach';
 import { cachedProjectSummaries, fetchProjectSummaries, type DecodedProjectSummariesPayload } from '@/lib/api/map';
 import { formatRelative } from '@/app/review/[[...segments]]/format';
 import { Button, DataState, FeedbackPanel, StatGrid, type TileSpec } from '@/lib/ft-ui';
+import { isRetryableConnectionFault } from '@/lib/faults';
 import { FolderOpen, MessageSquare, Sparkles, GitBranch } from 'lucide-react';
 import { AllSessions } from '@/components/sessions/AllSessions';
 import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
@@ -25,7 +26,7 @@ const CHANNELS: ['sessions'] = ['sessions'];
  * only.
  */
 export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped' | 'flat' }) {
-  const { data, connected, channelFault } = useChannel<SessionsPayload>(CHANNELS);
+  const { data, connected, channelFault, connectionFault, refresh } = useChannel<SessionsPayload>(CHANNELS);
   const titles = useSessionTitles();
   const sessions = useMemo(() => data?.sessions ?? [], [data]);
   const [summaries, setSummaries] = useState<DecodedProjectSummariesPayload | null>(() => cachedProjectSummaries());
@@ -47,11 +48,10 @@ export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped
     }).finally(() => { if (active) setSettled(true); });
     return () => { active = false; };
   }, [view, revision, channelFault]);
-  // Only THIS channel's topic error blocks the browse. A provider-wide socket
-  // or frame failure is not this list's failure: the app-level banner carries
-  // it, and the project read continues from its own REST route.
-  const blocked = !!channelFault;
-  const rows = blocked ? [] : summaries?.projects.length ? rowsFromSummaries(summaries) : rowsFromSessions(sessions);
+  // A channel fault blanks the browse only when this channel has never
+  // delivered data. With rows already loaded it stays a note above them.
+  const fatal = !!channelFault && data === undefined;
+  const rows = summaries?.projects.length ? rowsFromSummaries(summaries) : rowsFromSessions(sessions);
   const totalSessions = sessions.length || rows.reduce((sum, row) => sum + row.sessions, 0);
   const recorded = rows.reduce((sum, row) => sum + (row.recordedFiles ?? 0), 0);
   const totalFiles = rows.reduce((sum, row) => sum + (row.totalFiles ?? 0), 0);
@@ -66,12 +66,20 @@ export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped
     { key: 'open', label: 'unmerged branches', value: hasOpen ? openChanges.toLocaleString() : '—', sub: times.length ? `last worked ${formatRelative(Math.max(...times))}` : undefined, icon: GitBranch },
   ];
   return <div className="flex flex-col gap-4" data-browse-view={view}>
-    {channelFault && <FeedbackPanel variant="error">{channelFault.message}</FeedbackPanel>}
+    {channelFault && <div className="flex flex-col items-start gap-3">
+      <FeedbackPanel variant="error">{channelFault.message}</FeedbackPanel>
+      <Button variant="secondary" size="sm" onClick={refresh}>try again</Button>
+    </div>}
     {failure != null && <div className="flex flex-col items-start gap-3">
       <FeedbackPanel variant="error">{discoveryErrorMessage(failure)}</FeedbackPanel>
       <Button variant="secondary" size="sm" onClick={() => setRevision(value => value + 1)}>retry project discovery</Button>
     </div>}
-    {!blocked && <DataState loading={view === 'projects' ? !settled && data === undefined : data === undefined} status={rows.length === 0 && !connected && summaries === null ? 'disconnected' : 'live'} empty={view === 'projects' && settled && failure === null && rows.length === 0} emptyState={<IngestTeach />} skeletonRows={4}>
+    {!fatal && data === undefined && isRetryableConnectionFault(connectionFault) && (
+      <div>
+        <Button variant="secondary" size="sm" onClick={refresh}>try again</Button>
+      </div>
+    )}
+    {!fatal && <DataState loading={view === 'projects' ? !settled && data === undefined : data === undefined} status={rows.length === 0 && !connected && summaries === null ? 'disconnected' : 'live'} empty={view === 'projects' && settled && failure === null && rows.length === 0} emptyState={<IngestTeach />} skeletonRows={4}>
       {view === 'projects' && <>
         <h3 className="font-[family-name:var(--font-display)] text-base font-semibold lowercase text-ink">projects</h3>
         {rows.length > 0 && <StatGrid tiles={tiles} />}

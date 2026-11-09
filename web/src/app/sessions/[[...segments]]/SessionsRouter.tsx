@@ -8,6 +8,8 @@ import { AllSessions } from '@/components/sessions/AllSessions';
 import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
 import { useSessionTitles } from '@/hooks/useSessionTitles';
 import { SkeletonList } from '@/lib/skeleton';
+import { Button } from '@/lib/ft-ui';
+import { isRetryableConnectionFault } from '@/lib/faults';
 import { IngestTeach } from '@/components/IngestTeach';
 import { displayProject } from '@/lib/quality/utils';
 import { parseProjectHash } from '@/lib/navigation/projectRoutes';
@@ -65,7 +67,7 @@ export function SessionsRouter() {
   // grouped list is the only body.
   const [groupedScopeUnavailable, setGroupedScopeUnavailable] = useState(false);
   const handleScopeUnavailable = useCallback(() => setGroupedScopeUnavailable(true), []);
-  const { data, channelFault } = useChannel<SessionsPayload>(CHANNELS);
+  const { data, channelFault, connectionFault, refresh } = useChannel<SessionsPayload>(CHANNELS);
   const sessionTitles = useSessionTitles();
 
   useEffect(() => {
@@ -123,9 +125,12 @@ export function SessionsRouter() {
       </h1>
 
       {channelFault && (
-        <p role="alert" className="text-base leading-relaxed text-danger">
-          Couldn&rsquo;t load sessions: {channelFault.message}
-        </p>
+        <div className="flex flex-col items-start gap-3">
+          <p role="alert" className="text-base leading-relaxed text-danger">
+            Couldn&rsquo;t load sessions: {channelFault.message}
+          </p>
+          <Button variant="secondary" size="sm" onClick={refresh}>try again</Button>
+        </div>
       )}
 
       {/* No payload yet — skeleton regardless of socket state. Gating this on
@@ -134,6 +139,11 @@ export function SessionsRouter() {
           A provider-wide connection fault does not render here: the app-level
           banner carries it, and this page keeps its skeleton. */}
       {!channelFault && data === undefined && <SkeletonList rows={5} label="Loading sessions" />}
+      {!channelFault && data === undefined && isRetryableConnectionFault(connectionFault) && (
+        <div className="mt-3">
+          <Button variant="secondary" size="sm" onClick={refresh}>try again</Button>
+        </div>
+      )}
 
       {/* The project-scoped grouped list. It renders exactly the server's items
           and counts for THIS project; when the project has no sessions the
@@ -141,7 +151,7 @@ export function SessionsRouter() {
           server did not apply is refused (see assertGroupedProjectScope) rather
           than showing another project's sessions, and this route then falls
           back to the flat project list below. */}
-      {!channelFault && data !== undefined && !groupedScopeUnavailable && (
+      {data !== undefined && !groupedScopeUnavailable && (
         <GroupedSessionsSection
           variant="sessions"
           projectHash={projectHash}
@@ -156,7 +166,7 @@ export function SessionsRouter() {
       {/* Fallback body for a server that cannot scope the grouped read. This is
           the project list this route served before the grouped mount: the same
           table Home uses, filtered to the project from the sessions channel. */}
-      {!channelFault && data !== undefined && groupedScopeUnavailable && (
+      {data !== undefined && groupedScopeUnavailable && (
         scoped.length > 0 ? (
           <AllSessions
             sessions={scoped}
