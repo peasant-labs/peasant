@@ -274,9 +274,6 @@ func (a *OpenCodeAdapter) enumerateOpenCodeLegacyJSONRoot(ctx context.Context, r
 
 	var candidates []openCodeSessionCandidate
 	for _, hashEntry := range hashEntries {
-		if ctx.Err() != nil {
-			return candidates
-		}
 		if !hashEntry.IsDir() {
 			continue
 		}
