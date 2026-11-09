@@ -7,11 +7,13 @@ retained_expectations:
   context_from: {target_state: target_known_retained, evidence: retained_last_good, anchor: {kind: general_source_session}}
   started_by: {target_state: target_known_retained, evidence: retained_last_good}
   conflicting_current_native_evidence: {target_state: conflicting_current_native_evidence, evidence: conflict}
-required_cache_upgrade_names: [legacy without structural proof, prior uncorrelated spawn proof, prior title that ignored isMeta]
+required_cache_upgrade_names: [legacy without structural proof, prior uncorrelated spawn proof, prior title that ignored isMeta, prior unmarked-request refusal proof]
 cache_upgrades:
   - {name: legacy without structural proof, proof_version: 0}
   - {name: prior uncorrelated spawn proof, proof_version: 1}
   - {name: prior title that ignored isMeta, proof_version: 2, stale_title: "harness-injected notice"}
+  - {name: prior unmarked-request refusal proof, proof_version: 3}
+required_unmarked_request_record_kinds: [api-request, api-request-blob, api-request-shape]
 required_retained_refusal_names:
   - changed multi-source bytes
   - absent multi-source digest with own-only replacement
@@ -60,6 +62,13 @@ required_case_names:
   - legacy nested agent that names its own session id is refused
   - uuid-less foreign record alone does not prove the fork
   - disconnected local-command divergence
+  - native subagent with unmarked request records
+  - request record with explicit sidechain false
+  - request record with foreign agent id
+  - request record with empty agent id
+  - other unmarked record kind
+  - request record with null sidechain
+  - request record with string sidechain
 cases:
   - name: matching root
     artifact: -workspace/22222222-2222-4222-8222-222222222222.jsonl
@@ -560,3 +569,80 @@ cases:
           - '{"sessionId":"11111111-1111-4111-8111-111111111111","parentUuid":"s1","type":"user","message":{"role":"user","content":"synthetic"}}'
           - '{"sessionId":"66666666-6666-4666-8666-666666666666","uuid":"own-root","type":"progress","message":{"role":"user","content":""}}'
           - '{"sessionId":"66666666-6666-4666-8666-666666666666","uuid":"own-1","parentUuid":"own-root","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+  - name: native subagent with unmarked request records
+    capture_status: incomplete
+    capture_failure: unknown_data_retained
+    artifact: -workspace/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_example/agent-abc123.jsonl
+    parent: 11111111-1111-4111-8111-111111111111
+    relationship: started_by
+    target: 11111111-1111-4111-8111-111111111111
+    files:
+      - *source
+      - *continuation
+      - path: -workspace/22222222-2222-4222-8222-222222222222/subagents/workflows/wf_example/agent-abc123.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"uuid":"agent-task","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","uuid":"request-1","type":"api-request"}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","uuid":"request-2","type":"api-request-blob"}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","uuid":"request-3","type":"api-request-shape"}'
+  - name: request record with explicit sidechain false
+    artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+    parent: 11111111-1111-4111-8111-111111111111
+    refuse: true
+    files:
+      - *source
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":false,"uuid":"request-1","type":"api-request"}'
+  - name: request record with foreign agent id
+    artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+    parent: 11111111-1111-4111-8111-111111111111
+    refuse: true
+    files:
+      - *source
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"deadbeefdeadbeef0","uuid":"request-1","type":"api-request"}'
+  - name: request record with empty agent id
+    artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+    parent: 11111111-1111-4111-8111-111111111111
+    refuse: true
+    files:
+      - *source
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","uuid":"request-1","type":"api-request"}'
+  - name: other unmarked record kind
+    artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+    parent: 11111111-1111-4111-8111-111111111111
+    refuse: true
+    files:
+      - *source
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","uuid":"request-1","type":"progress","message":{"role":"user","content":""}}'
+  - name: request record with null sidechain
+    artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+    parent: 11111111-1111-4111-8111-111111111111
+    refuse: true
+    files:
+      - *source
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":null,"uuid":"request-1","type":"api-request"}'
+  - name: request record with string sidechain
+    artifact: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+    parent: 11111111-1111-4111-8111-111111111111
+    refuse: true
+    files:
+      - *source
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-abc123.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"uuid":"agent-record","type":"assistant","message":{"role":"assistant","content":"synthetic"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":"true","uuid":"request-1","type":"api-request"}'

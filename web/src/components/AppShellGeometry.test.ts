@@ -69,7 +69,7 @@ describe('app shell geometry', () => {
   it('keeps <main> out of the tab order at rest, with no top padding to clear', () => {
     const shell = source(fixture.restingMain.path);
     expect(shell).toContain('mainAs="main"');
-    expect(shell).toContain('notice={<LocalOfflineNotice />}');
+    expect(shell).toContain('notice={<PageNotices />}');
     expect(shell).toContain('viewport={viewport}');
   });
 

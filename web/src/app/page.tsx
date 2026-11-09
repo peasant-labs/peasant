@@ -224,7 +224,7 @@ function HomeView() {
         ...projectChoices.map(option => projectChoice(option.projectHash, option.projectName)),
       ],
       onChoose: hash => commit({ project: hash === ALL_PROJECTS ? null : newProjectHash(hash) }),
-      note: home.projectsLoading ? 'loading project choices…' : home.projectError != null ? discoveryErrorMessage(home.projectError) : undefined,
+      note: home.projectsLoading ? 'loading project choices…' : home.projectError != null ? (home.projectFault?.message ?? discoveryErrorMessage(home.projectError)) : undefined,
       retry: home.projectError != null ? { label: 'retry project choices', onSelect: () => { void home.loadProjects(); } } : undefined,
     },
   ];
@@ -270,7 +270,7 @@ function HomeView() {
     </header>
     <AutoPublishTip />
     {home.error != null && <div className="flex flex-col items-start gap-3">
-      <FeedbackPanel variant="error">{discoveryErrorMessage(home.error)}</FeedbackPanel>
+      <FeedbackPanel variant="error">{home.fault ? home.fault.message : discoveryErrorMessage(home.error)}</FeedbackPanel>
       <Button variant="secondary" size="sm" onClick={() => home.retry()}>retry the session list</Button>
     </div>}
     <div className="home-board">
