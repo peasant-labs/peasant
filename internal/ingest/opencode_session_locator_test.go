@@ -119,6 +119,7 @@ type openCodeLocatorLocated struct {
 	WantError      string                      `yaml:"wantError"`
 	WantSourceGone bool                        `yaml:"wantSourceGone"`
 	WantUnreadable []openCodeLocatorUnreadable `yaml:"wantUnreadable"`
+	WantParents    []openCodeLocatorQueries    `yaml:"wantParents"`
 	WantReads      []string                    `yaml:"wantReads"`
 	WantStats      []string                    `yaml:"wantStats"`
 	WantReaddirs   []string                    `yaml:"wantReaddirs"`
@@ -281,7 +282,9 @@ func writeOpenCodeLocatorTree(t *testing.T, tree string, testCase openCodeLocato
 }
 
 // applyOpenCodeLocatorParentLinks sets the declared parent links on the real
-// session table, so discovery and the located build read the same row.
+// session row, so discovery and the located build read the same value. The row
+// may live in session_v2 (a migrated layout) or in session, so the table that
+// holds it is the one updated.
 func applyOpenCodeLocatorParentLinks(t *testing.T, path, declaredPath string, links []openCodeLocatorParent) {
 	t.Helper()
 	if len(links) == 0 {
@@ -296,21 +299,60 @@ func applyOpenCodeLocatorParentLinks(t *testing.T, path, declaredPath string, li
 			t.Fatalf("close fixture database %q: %v", declaredPath, closeErr)
 		}
 	}()
+	tables := openCodeLocatorSessionTables(t, conn, declaredPath)
 	for _, link := range links {
-		seen := 0
-		if err := sqlitex.Execute(conn, `SELECT id FROM session WHERE id = ?1;`, &sqlitex.ExecOptions{Args: []any{link.ID}, ResultFunc: func(*sqlite.Stmt) error {
-			seen++
-			return nil
-		}}); err != nil {
-			t.Fatalf("read fixture session %q in database %q: %v", link.ID, declaredPath, err)
+		updated := false
+		for _, table := range tables {
+			if !openCodeLocatorRowExists(t, conn, table, link.ID) {
+				continue
+			}
+			statement := `UPDATE ` + table + ` SET parent_id = ?1 WHERE id = ?2;`
+			if err := sqlitex.Execute(conn, statement, &sqlitex.ExecOptions{Args: []any{link.Parent, link.ID}}); err != nil {
+				t.Fatalf("set parent link on fixture database %q: %v", declaredPath, err)
+			}
+			updated = true
+			break
 		}
-		if seen != 1 {
-			t.Fatalf("fixture database %q holds %d session row(s) for %q, want one to arrange", declaredPath, seen, link.ID)
-		}
-		if err := sqlitex.Execute(conn, `UPDATE session SET parent_id = ?1 WHERE id = ?2;`, &sqlitex.ExecOptions{Args: []any{link.Parent, link.ID}}); err != nil {
-			t.Fatalf("set parent link on fixture database %q: %v", declaredPath, err)
+		if !updated {
+			t.Fatalf("fixture database %q holds no session row for %q to arrange", declaredPath, link.ID)
 		}
 	}
+}
+
+// openCodeLocatorSessionTables names the session tables a synthetic database
+// carries, preferred first.
+func openCodeLocatorSessionTables(t *testing.T, conn *sqlite.Conn, declaredPath string) []string {
+	t.Helper()
+	present := make(map[string]bool, 2)
+	if err := sqlitex.Execute(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('session_v2', 'session');`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		present[stmt.ColumnText(0)] = true
+		return nil
+	}}); err != nil {
+		t.Fatalf("read fixture database %q session tables: %v", declaredPath, err)
+	}
+	tables := make([]string, 0, 2)
+	for _, table := range []string{"session_v2", "session"} {
+		if present[table] {
+			tables = append(tables, table)
+		}
+	}
+	if len(tables) == 0 {
+		t.Fatalf("fixture database %q carries no session table to arrange", declaredPath)
+	}
+	return tables
+}
+
+func openCodeLocatorRowExists(t *testing.T, conn *sqlite.Conn, table, id string) bool {
+	t.Helper()
+	exists := false
+	statement := `SELECT id FROM ` + table + ` WHERE id = ?1;`
+	if err := sqlitex.Execute(conn, statement, &sqlitex.ExecOptions{Args: []any{id}, ResultFunc: func(*sqlite.Stmt) error {
+		exists = true
+		return nil
+	}}); err != nil {
+		t.Fatalf("read fixture session %q from %s: %v", id, table, err)
+	}
+	return exists
 }
 
 // openCodeLocatorSessionBody emits the legacy JSON document the adapter reads.
@@ -405,13 +447,14 @@ func (r *openCodeLocatorRecorder) Open(path string) (io.ReadCloser, error) {
 // openCodeLocatorOpens records every attempt to open a candidate database, by
 // path, and the session ids each opened database was asked about.
 type openCodeLocatorOpens struct {
-	mu     sync.Mutex
-	opened []string
-	ids    map[string][]string
+	mu      sync.Mutex
+	opened  []string
+	ids     map[string][]string
+	parents map[string][]string
 }
 
 func newOpenCodeLocatorOpens() *openCodeLocatorOpens {
-	return &openCodeLocatorOpens{ids: make(map[string][]string)}
+	return &openCodeLocatorOpens{ids: make(map[string][]string), parents: make(map[string][]string)}
 }
 
 func (o *openCodeLocatorOpens) opener() ingest.OpenCodeSQLiteSourceOpener {
@@ -431,6 +474,12 @@ func (o *openCodeLocatorOpens) recordQuery(path, id string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.ids[path] = append(o.ids[path], id)
+}
+
+func (o *openCodeLocatorOpens) recordParentPage(path, parent string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.parents[path] = append(o.parents[path], parent)
 }
 
 func (o *openCodeLocatorOpens) openedPaths() []string {
@@ -461,6 +510,16 @@ func (o *openCodeLocatorOpens) queried() map[string][]string {
 	return copied
 }
 
+func (o *openCodeLocatorOpens) parentPages() map[string][]string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	copied := make(map[string][]string, len(o.parents))
+	for path, parents := range o.parents {
+		copied[path] = append([]string(nil), parents...)
+	}
+	return copied
+}
+
 // openCodeLocatorQueryRecorder records the session ids one database was asked
 // about. A database that never opened has no entry, which is exactly how "a
 // failed open yields no id query" becomes assertable.
@@ -473,6 +532,9 @@ type openCodeLocatorQueryRecorder struct {
 func (r openCodeLocatorQueryRecorder) SessionRecords(ctx context.Context, request ingest.OpenCodeSessionRecordPageRequest) (ingest.OpenCodeSessionRecordPage, error) {
 	if request.SessionID != nil {
 		r.opens.recordQuery(r.path, request.SessionID.String())
+	}
+	if request.ParentID != nil {
+		r.opens.recordParentPage(r.path, request.ParentID.String())
 	}
 	return r.OpenCodeSQLiteSource.SessionRecords(ctx, request)
 }
@@ -640,6 +702,35 @@ func assertOpenCodeLocatorQueries(t *testing.T, tree string, opens *openCodeLoca
 	}
 }
 
+// assertOpenCodeLocatorParents asserts exactly which parent pages each database
+// was asked for. The located build must page the database that holds the
+// session, once per supported session table: one page when that table is the
+// legacy session table, and one page per table when the preferred table is
+// session_v2 and the legacy table is consulted too.
+func assertOpenCodeLocatorParents(t *testing.T, tree string, opens *openCodeLocatorOpens, want []openCodeLocatorQueries) {
+	t.Helper()
+	declared := make(map[string][]string, len(want))
+	for _, parents := range want {
+		path := openCodeLocatorPath(tree, parents.Path)
+		if _, duplicate := declared[path]; duplicate {
+			t.Fatalf("fixture declares parent pages for %q twice", parents.Path)
+		}
+		declared[path] = parents.IDs
+	}
+	paged := opens.parentPages()
+	for path, wanted := range declared {
+		if got := paged[path]; !reflect.DeepEqual(got, wanted) {
+			t.Errorf("database %q was paged for children of %v, want %v", path, got, wanted)
+		}
+	}
+	for path, parents := range paged {
+		if _, ok := declared[path]; ok {
+			continue
+		}
+		t.Errorf("database %q was paged for children of %v but the case declares no parent pages for it", path, parents)
+	}
+}
+
 func distinctStrings(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	unique := make([]string, 0, len(values))
@@ -780,6 +871,7 @@ func runOpenCodeLocatorLocated(t *testing.T, tree string, cfg ingest.SourceConfi
 
 	assertOpenCodeLocatorOpens(t, tree, opens, located.WantOpens)
 	assertOpenCodeLocatorQueries(t, tree, opens, located.WantQueries, false)
+	assertOpenCodeLocatorParents(t, tree, opens, located.WantParents)
 	assertOpenCodeLocatorFSOps(t, tree, fs, located.WantReads, located.WantStats, located.WantReaddirs)
 }
 

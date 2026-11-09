@@ -1952,7 +1952,7 @@ func (a *OpenCodeAdapter) discoverOpenCodeDatabaseMember(ctx context.Context, cf
 	default:
 		return LocatedBuild{}, openCodeUnsupportedSourceError(at.Path, at.ID, result)
 	}
-	session, found, err := a.openCodeDatabaseSession(ctx, result, at.ID)
+	build, err := a.openCodeDatabaseBuild(ctx, result, at.ID, true)
 	if err != nil {
 		// The database opened but the session could not be read from it. That is
 		// the same stored-but-unreadable outcome a corrupt file gives: the stored
@@ -1969,23 +1969,32 @@ func (a *OpenCodeAdapter) discoverOpenCodeDatabaseMember(ctx context.Context, cf
 			Deferred: NoDeferredWrites{},
 		}, nil
 	}
-	if !found {
+	if !build.Found {
 		return LocatedBuild{}, openCodeSourceGoneError(at.Path, at.ID, "the database holds no live row for this session")
 	}
-	located := LocatedMember{
-		ID:      at.ID,
-		Harness: HarnessOpenCode,
-		Source:  &session.session,
-	}
-	parent := session.session.ParentUUID
+	parent := build.Located.session.ParentUUID
 	if at.Stored.Parent != nil {
 		parent = nil
 	}
-	located.ParentProbe = openCodeAncestorProbe(at.ID, parent)
-
-	members := make([]LocatedMember, 0, 1+len(at.Stored.Children))
-	members = append(members, located)
-	members = append(members, a.openCodeStoredChildMembers(ctx, cfg, at, at.ID)...)
+	seen := make(map[SessionID]struct{}, 1+len(build.Children))
+	seen[at.ID] = struct{}{}
+	members := make([]LocatedMember, 0, 1+len(build.Children)+len(at.Stored.Children))
+	members = append(members, LocatedMember{
+		ID:          at.ID,
+		Harness:     HarnessOpenCode,
+		Source:      &build.Located.session,
+		ParentProbe: openCodeAncestorProbe(at.ID, parent),
+	})
+	for index := range build.Children {
+		child := &build.Children[index]
+		seen[child.identity.SessionID] = struct{}{}
+		members = append(members, LocatedMember{
+			ID:      child.identity.SessionID,
+			Harness: HarnessOpenCode,
+			Source:  &child.session,
+		})
+	}
+	members = append(members, a.openCodeStoredChildMembers(ctx, cfg, at, seen)...)
 	return LocatedBuild{Members: members, Deferred: NoDeferredWrites{}}, nil
 }
 
@@ -1994,12 +2003,13 @@ func (a *OpenCodeAdapter) discoverOpenCodeDatabaseMember(ctx context.Context, cf
 // or unreadable comes back as a member with no source and its reason, never
 // dropped: the stored transcript stays, and the store-side upkeep a full run
 // does for the row still runs.
-func (a *OpenCodeAdapter) openCodeStoredChildMembers(ctx context.Context, cfg SourceConfig, at LocatedSource, locatedID SessionID) []LocatedMember {
+func (a *OpenCodeAdapter) openCodeStoredChildMembers(ctx context.Context, cfg SourceConfig, at LocatedSource, built map[SessionID]struct{}) []LocatedMember {
 	members := make([]LocatedMember, 0, len(at.Stored.Children))
 	for _, child := range at.Stored.Children {
-		if child.ID == locatedID {
+		if _, duplicate := built[child.ID]; duplicate {
 			continue
 		}
+		built[child.ID] = struct{}{}
 		members = append(members, a.openCodeStoredChildMember(ctx, cfg, child))
 	}
 	return members
@@ -2029,17 +2039,17 @@ func (a *OpenCodeAdapter) openCodeStoredChildMember(ctx context.Context, cfg Sou
 			member.Detail = firstLine(openCodeProbeDetail(result))
 			return member
 		}
-		session, found, err := a.openCodeDatabaseSession(ctx, result, child.ID)
+		build, err := a.openCodeDatabaseBuild(ctx, result, child.ID, false)
 		if err != nil {
 			member.Unreadable = UnreadableSourceFailed
 			member.Detail = firstLine(err.Error())
 			return member
 		}
-		if !found {
+		if !build.Found {
 			member.Unreadable = UnreadableSourceGone
 			return member
 		}
-		member.Source = &session.session
+		member.Source = &build.Located.session
 		return member
 	}
 	root, ok := openCodeLegacyJSONRootFor(cfg, child.Path)
@@ -2131,29 +2141,135 @@ func (a *OpenCodeAdapter) discoverOpenCodeLegacyJSONMember(ctx context.Context, 
 
 	members := make([]LocatedMember, 0, 1+len(at.Stored.Children))
 	members = append(members, located)
-	members = append(members, a.openCodeStoredChildMembers(ctx, cfg, at, at.ID)...)
+	members = append(members, a.openCodeStoredChildMembers(ctx, cfg, at, map[SessionID]struct{}{at.ID: {}})...)
 	return LocatedBuild{Members: members, Deferred: NoDeferredWrites{}}, nil
 }
 
-// openCodeDatabaseSession builds the one session a database holds, with the
-// same steps the full walk runs for it: enumerate the representations that
-// carry the id, build through the shared build, apply the session row,
-// attribute the project, read the event sequence, select one canonical
-// representation, then hydrate freshness.
+// openCodeLocatedDatabaseBuild is one database's located build: the session the
+// caller asked for, whether the database still holds it, and every other session
+// the database records as its child.
+type openCodeLocatedDatabaseBuild struct {
+	Located  openCodeSessionCandidate
+	Found    bool
+	Children []openCodeSessionCandidate
+}
+
+// openCodeDatabaseBuild builds the located session and the new children one
+// database holds, from a single open source, with the same steps the full walk
+// runs for them: enumerate the representations that carry each id, build through
+// the shared build, apply the session row, attribute the project, read the event
+// sequence, select one canonical representation per session, then hydrate
+// freshness once for the whole set.
 //
-// found is false when the database no longer holds the session: no message row
-// in a supported projection, or a usable session table without a live row,
-// which is the one-id form of the deletion rule the full walk applies.
-func (a *OpenCodeAdapter) openCodeDatabaseSession(ctx context.Context, result OpenCodeProbeResult, id SessionID) (openCodeSessionCandidate, bool, error) {
+// A session the database no longer holds (no message row in a supported
+// projection, or a usable session table without a live row) reports Found false
+// with no error: that is the one-id form of the deletion rule the full walk
+// applies.
+//
+// withChildren asks for the session's own children. The caller that is already
+// merging stored children asks once for the located session; a stored child is
+// built without it, so one relation step never fans out into the next.
+func (a *OpenCodeAdapter) openCodeDatabaseBuild(ctx context.Context, result OpenCodeProbeResult, id SessionID, withChildren bool) (openCodeLocatedDatabaseBuild, error) {
 	source, err := a.openOpenCodeSQLiteSource(ctx, result.Candidate.Path)
 	if err != nil {
-		return openCodeSessionCandidate{}, false, err
+		return openCodeLocatedDatabaseBuild{}, err
 	}
 	defer a.closeScopedOpenCodeSource(ctx, source, result.Candidate.Path)
 
+	record, hasRecord, err := a.openCodeSessionRecordByID(ctx, source, id)
+	if err != nil {
+		return openCodeLocatedDatabaseBuild{}, err
+	}
+	candidates, err := a.openCodeDatabaseCandidatesForID(ctx, source, result, id, record, hasRecord)
+	if err != nil {
+		return openCodeLocatedDatabaseBuild{}, err
+	}
+	if len(candidates) == 0 {
+		return openCodeLocatedDatabaseBuild{}, nil
+	}
+
+	// The located session's children come from its own database. A child the
+	// parent page does not name is not a child this source can reveal, so a
+	// stored child the caller passed in is merged by the caller instead.
+	var children []OpenCodeSessionRecord
+	if withChildren {
+		children, err = a.openCodeChildRecords(ctx, source, result.Candidate.Path, id)
+		if err != nil {
+			return openCodeLocatedDatabaseBuild{}, err
+		}
+	}
+	seen := map[SessionID]struct{}{id: {}}
+	for _, child := range children {
+		childID, idErr := NewSessionID(child.SessionID.String())
+		if idErr != nil {
+			continue
+		}
+		if _, duplicate := seen[childID]; duplicate {
+			continue
+		}
+		seen[childID] = struct{}{}
+		built, err := a.openCodeDatabaseCandidatesForID(ctx, source, result, childID, openCodeSessionClockFromRecord(child), true)
+		if err != nil {
+			return openCodeLocatedDatabaseBuild{}, err
+		}
+		candidates = append(candidates, built...)
+	}
+
+	if attribution, attrErr := source.ProjectAttribution(ctx); attrErr != nil {
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "project attribution could not be read; the located sessions keep git-based project resolution", attrErr)
+	} else {
+		attributeOpenCodeProjects(candidates, attribution)
+	}
+	a.attributeOpenCodeEventSequences(ctx, source, result.Candidate, candidates)
+
+	selected, err := selectCanonicalOpenCodeCandidates(candidates)
+	if err != nil {
+		return openCodeLocatedDatabaseBuild{}, err
+	}
+	hydrated := a.hydrateCanonicalOpenCodeFreshness(ctx, selected, map[string]OpenCodeSQLiteSource{filepath.Clean(result.Candidate.Path): source})
+
+	kept := make(map[SessionID]struct{}, len(hydrated))
+	for _, session := range hydrated {
+		kept[session.SessionID] = struct{}{}
+	}
+	build := openCodeLocatedDatabaseBuild{Children: make([]openCodeSessionCandidate, 0, len(hydrated))}
+	for _, candidate := range selected {
+		if _, ok := kept[candidate.identity.SessionID]; !ok {
+			// Hydration dropped this candidate: its freshness was unreadable.
+			continue
+		}
+		if candidate.identity.SessionID == id {
+			build.Located = candidate
+			build.Found = true
+			continue
+		}
+		build.Children = append(build.Children, candidate)
+	}
+	if !build.Found {
+		// The session exists, but its changed time and the database mtime floor
+		// were both unreadable, so the full walk would skip it and record the
+		// reason. Reading the source failed; the path is not gone.
+		return openCodeLocatedDatabaseBuild{}, fmt.Errorf("read the freshness of session %s from %q: neither the session clock nor the database mtime floor could be read", id, result.Candidate.Path)
+	}
+	return build, nil
+}
+
+// openCodeDatabaseCandidatesForID builds every representation this database can
+// carry for one session id. The projection presence decides which
+// representations exist, and the shared build names each one.
+func (a *OpenCodeAdapter) openCodeDatabaseCandidatesForID(ctx context.Context, source OpenCodeSQLiteSource, result OpenCodeProbeResult, id SessionID, record openCodeSessionClock, hasRecord bool) ([]openCodeSessionCandidate, error) {
 	current, legacy, err := a.openCodeRepresentationPresence(ctx, source, result.Candidate.Path, result.Capability, id)
 	if err != nil {
-		return openCodeSessionCandidate{}, false, err
+		return nil, err
+	}
+	if !current && !legacy {
+		return nil, nil
+	}
+	if !hasRecord && !openCodeSessionTableAbsent(result) {
+		// The supported session table is usable and holds no live row for this
+		// id, so its remaining message rows are history, exactly as the full
+		// walk's deletion rule treats them.
+		return nil, nil
 	}
 	var candidates []openCodeSessionCandidate
 	if current {
@@ -2171,44 +2287,82 @@ func (a *OpenCodeAdapter) openCodeDatabaseSession(ctx context.Context, result Op
 		enumerated.Provenance = result.Candidate.Provenance
 		candidates = append(candidates, buildOpenCodeSession(enumerated))
 	}
-	if len(candidates) == 0 {
-		return openCodeSessionCandidate{}, false, nil
-	}
-
-	record, hasRecord, err := a.openCodeSessionRecordByID(ctx, source, id)
-	if err != nil {
-		return openCodeSessionCandidate{}, false, err
-	}
-	if !hasRecord && !openCodeSessionTableAbsent(result) {
-		// The supported session table is usable and holds no live row for this
-		// id, so its remaining message rows are history, exactly as the full
-		// walk's deletion rule treats them.
-		return openCodeSessionCandidate{}, false, nil
-	}
 	if hasRecord {
 		for index := range candidates {
 			applyOpenCodeSessionRecord(&candidates[index], record)
 		}
 	}
-	if attribution, attrErr := source.ProjectAttribution(ctx); attrErr != nil {
-		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "project attribution could not be read; the located session keeps git-based project resolution", attrErr)
-	} else {
-		attributeOpenCodeProjects(candidates, attribution)
-	}
-	a.attributeOpenCodeEventSequences(ctx, source, result.Candidate, candidates)
+	return candidates, nil
+}
 
-	selected, err := selectCanonicalOpenCodeCandidates(candidates)
+// openCodeChildRecords pages the located database for the rows whose parent link
+// names id. The preferred table is read first and, when it is session_v2, the
+// legacy session table is read too: a child created before OpenCode's migration
+// lives there, and an id present in both keeps its V2 record, exactly as the
+// full walk's record merge decides.
+//
+// The harness database is external and read-only. parent_id carries no index
+// upstream, so a page may be a scan of that database's session table. That is a
+// bounded read of the harness source, not a scan of the peasant store.
+func (a *OpenCodeAdapter) openCodeChildRecords(ctx context.Context, source OpenCodeSQLiteSource, database string, parent SessionID) ([]OpenCodeSessionRecord, error) {
+	preferred, table, err := a.openCodeChildRecordPages(ctx, source, database, parent, OpenCodeSessionRecordsPreferred)
 	if err != nil {
-		return openCodeSessionCandidate{}, false, err
+		return nil, err
 	}
-	hydrated := a.hydrateCanonicalOpenCodeFreshness(ctx, selected, map[string]OpenCodeSQLiteSource{filepath.Clean(result.Candidate.Path): source})
-	if len(hydrated) == 0 {
-		// The session exists, but its changed time and the database mtime floor
-		// were both unreadable, so the full walk would skip it and record the
-		// reason. Reading the source failed; the path is not gone.
-		return openCodeSessionCandidate{}, false, fmt.Errorf("read the freshness of session %s from %q: neither the session clock nor the database mtime floor could be read", id, result.Candidate.Path)
+	if table != OpenCodeSessionTableV2 {
+		return preferred, nil
 	}
-	return selected[0], true, nil
+	legacy, _, err := a.openCodeChildRecordPages(ctx, source, database, parent, OpenCodeSessionRecordsLegacy)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(preferred))
+	for _, record := range preferred {
+		seen[record.SessionID.String()] = struct{}{}
+	}
+	records := preferred
+	for _, record := range legacy {
+		if _, duplicate := seen[record.SessionID.String()]; duplicate {
+			continue
+		}
+		seen[record.SessionID.String()] = struct{}{}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+// openCodeChildRecordPages pages one table's children of parent to completion,
+// one bounded page at a time. The keyset cursor is the last observed session id,
+// so a page never re-reads a row and the read always advances.
+func (a *OpenCodeAdapter) openCodeChildRecordPages(ctx context.Context, source OpenCodeSQLiteSource, database string, parent SessionID, selection OpenCodeSessionRecordSelection) ([]OpenCodeSessionRecord, OpenCodeSessionTable, error) {
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return nil, "", err
+	}
+	linkID, err := NewOpenCodeSessionLinkID(string(parent))
+	if err != nil {
+		return nil, "", err
+	}
+	var records []OpenCodeSessionRecord
+	var table OpenCodeSessionTable
+	var cursor *OpenCodeSessionRecordCursor
+	for {
+		page, readErr := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{Selection: selection, PageSize: pageSize, ParentID: &linkID, After: cursor})
+		if readErr != nil {
+			return nil, "", fmt.Errorf("read the children of session %s from %q: %w", parent, database, readErr)
+		}
+		if page.Table != "" {
+			table = page.Table
+		}
+		records = append(records, page.Records...)
+		if page.Next == nil {
+			return records, table, nil
+		}
+		if cursor != nil && page.Next.sessionID == cursor.sessionID {
+			return nil, "", fmt.Errorf("read the children of session %s from %q: the page cursor did not advance past session %s, so a bounded read could repeat forever; no partial child list is eligible; inspect the source session table and retry", parent, database, cursor.sessionID.String())
+		}
+		cursor = page.Next
+	}
 }
 
 // openCodeRepresentationPresence reports which supported projection carries the

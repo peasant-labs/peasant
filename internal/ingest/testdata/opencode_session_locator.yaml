@@ -28,6 +28,12 @@
 # different. It also asserts the exact read, stat and listing sets and zero
 # walks; `wantOpens`/`wantQueries` are asserted as sets.
 #
+# A located database session also carries the children that database records for
+# it, so a child no harvest has stored is a member. `wantParents` names the
+# parent ids each database was paged for, as a set: the child page is one
+# bounded query per supported session table, and it runs only against the
+# database that holds the located session.
+#
 # `wantProbe` names the one ancestor probe kind; both formats declare ProbeRow,
 # and the probe itself performs no I/O.
 requiredNames:
@@ -39,6 +45,8 @@ requiredNames:
   - sqlite-located-session
   - sqlite-located-unstored-parent
   - sqlite-located-stored-child
+  - sqlite-located-unstored-child
+  - sqlite-located-v2-only-session
   - sqlite-located-source-read-failed
   - sqlite-located-not-a-candidate
   - legacy-json-lookup-unsupported
@@ -219,6 +227,10 @@ cases:
         - path: opencode.db
           ids:
             - ses_3cd91f52effeXd3QAJ54jOyzv5
+      wantParents:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv5
 
   - name: sqlite-located-unstored-parent
     # The session row names a parent no source in this tree holds. The full walk
@@ -249,6 +261,10 @@ cases:
       wantOpens:
         - opencode.db
       wantQueries:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv8
+      wantParents:
         - path: opencode.db
           ids:
             - ses_3cd91f52effeXd3QAJ54jOyzv8
@@ -284,7 +300,74 @@ cases:
         - path: opencode.db
           ids:
             - ses_3cd91f52effeXd3QAJ54jOyzv5
-            - ses_3cd91f52effeXd3QAJ54jOyzv6
+      wantParents:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv5
+
+  - name: sqlite-located-unstored-child
+    # A child row with the located session's id as its parent, which no harvest
+    # has stored: the located build must return it, and it must equal what a full
+    # discovery of the same tree produces for that id.
+    roots:
+      - .
+    databases:
+      - path: opencode.db
+        fixture: canonical-selection-mixed
+        parentLinks:
+          - id: ses_3cd91f52effeXd3QAJ54jOyzv6
+            parent: ses_3cd91f52effeXd3QAJ54jOyzv5
+    located:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv5
+      path: opencode.db
+      wantMembers:
+        - ses_3cd91f52effeXd3QAJ54jOyzv5
+        - ses_3cd91f52effeXd3QAJ54jOyzv6
+      wantStats:
+        - opencode.db
+        - opencode.db-wal
+      wantOpens:
+        - opencode.db
+      wantQueries:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv5
+      wantParents:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzv5
+
+  - name: sqlite-located-v2-only-session
+    # A migrated layout keeps its session rows in session_v2 only. The id read and
+    # the child page both come from session_v2, and the legacy page is issued
+    # against a database with no session table, which contributes no children
+    # rather than failing the read.
+    roots:
+      - .
+    databases:
+      - path: opencode.db
+        fixture: native-v2-only
+    located:
+      id: ses_3cd91f52effeXd3QAJ54jOyzn1
+      path: opencode.db
+      wantMembers:
+        - ses_3cd91f52effeXd3QAJ54jOyzn1
+      wantStats:
+        - opencode.db
+        - opencode.db-wal
+      wantOpens:
+        - opencode.db
+      wantQueries:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzn1
+      # Two pages: the preferred session_v2 table, then the legacy session table
+      # the migrated layout does not carry.
+      wantParents:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzn1
+            - ses_3cd91f52effeXd3QAJ54jOyzn1
 
   - name: sqlite-located-source-read-failed
     # A selected database that cannot be read yields a member with its reason and
