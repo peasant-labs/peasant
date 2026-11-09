@@ -28,6 +28,14 @@ import (
 // cycle, and every heal resets the child's origin watermark in the same
 // statement. A store without the reconciliation capability keeps the cache
 // unchanged.
+//
+// A scoped run narrows both halves. Its targets are the cohort's processed
+// independently admitted members, and the children it heals are the returned
+// ones in the run's upkeep set: a sibling outside the cohort, and a
+// --no-related child the build read only as context, stay out, because healing
+// them would write another session's row. An unreadable stored child is in the
+// upkeep set and is healed, exactly as a full run heals it. A full run keeps
+// the original rule and heals every returned child.
 func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, discovered, written []DiffEntry) {
 	if p.store == nil || p.config.DryRun {
 		return
@@ -41,7 +49,7 @@ func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, discovered, 
 	// either early return below, so a stuck row heals even on a harvest that
 	// names no target or finds no cache to heal. A failure is reported and the
 	// cache heal still runs; the next harvest retries the requeue.
-	if _, err := reconciler.InvalidateStaleParentOrigins(ctx, AllStoredSessions()); err != nil {
+	if _, err := reconciler.InvalidateStaleParentOrigins(ctx, p.runStoreScope()); err != nil {
 		p.warnParentOriginRequeue(storeLookupReasonCode(err))
 	}
 	targets := make([]SessionID, 0, len(discovered))
@@ -67,6 +75,17 @@ func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, discovered, 
 	for i := range written {
 		rewritten[written[i].Session.SessionID] = struct{}{}
 	}
+	// A scoped run heals only children it may touch. The upkeep set is the same
+	// one the SQL scope and the in-memory gate use, so a healed child is always
+	// a session this run was going to maintain anyway.
+	upkeep, scoped := p.runStoreScope().Narrowed()
+	var upkeepSet map[SessionID]struct{}
+	if scoped {
+		upkeepSet = make(map[SessionID]struct{}, len(upkeep))
+		for _, id := range upkeep {
+			upkeepSet[id] = struct{}{}
+		}
+	}
 
 	candidates, err := reconciler.ListUncachedChildrenOfParents(ctx, targets, []Harness{HarnessCodex, HarnessOpenCode})
 	if err != nil {
@@ -77,6 +96,11 @@ func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, discovered, 
 	for _, update := range candidates {
 		if _, justWritten := rewritten[update.Child]; justWritten {
 			continue
+		}
+		if scoped {
+			if _, inUpkeep := upkeepSet[update.Child]; !inUpkeep {
+				continue
+			}
 		}
 		updates = append(updates, update)
 	}

@@ -47,12 +47,16 @@ func (p *Pipeline) sweepCommittedSession(ctx context.Context, session SessionID,
 // warnings (those sessions keep their flag for the next pass); only a
 // listing failure aborts the harvest. The harvest command runs the
 // search-index health gate before this pass.
+//
+// The pass reads the run's store scope: a full run sweeps every flagged row,
+// and a scoped run sweeps only its cohort's, so a crash leftover outside the
+// cohort keeps its flag for the run that covers it.
 func (p *Pipeline) sweepFlaggedSessionsAtStart(ctx context.Context) error {
 	sweeper, ok := p.metricsStore.(ContentSweeper)
 	if !ok {
 		return nil
 	}
-	swept, warnings, err := sweeper.SweepFlaggedSessionsForHarvest(ctx, AllStoredSessions())
+	swept, warnings, err := sweeper.SweepFlaggedSessionsForHarvest(ctx, p.runStoreScope())
 	if err != nil {
 		return fmt.Errorf("pipeline harvest-start sweep: %w; no session was swept; fix database access and retry harvest", err)
 	}

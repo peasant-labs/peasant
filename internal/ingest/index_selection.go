@@ -34,7 +34,7 @@ func (p *Pipeline) repairSessions(ctx context.Context) []SessionID {
 	if !ok {
 		return nil
 	}
-	ids, err := lister.ListSessionsNeedingRepair(ctx, p.indexerTargets(), AllStoredSessions())
+	ids, err := lister.ListSessionsNeedingRepair(ctx, p.indexerTargets(), p.runStoreScope())
 	if err != nil {
 		p.reportMetadataRefusal("repair selection", err)
 		return nil

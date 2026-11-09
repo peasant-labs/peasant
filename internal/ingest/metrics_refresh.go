@@ -14,14 +14,15 @@ func (p *Pipeline) hasStoredMetricRefresh() bool {
 }
 
 // refreshStoredMetrics runs after the index writers have drained. Paging keeps
-// the cohort bounded; only explicit invocation filters scope stored maintenance.
+// the cohort bounded; the run's store scope bounds which sessions are read at
+// all, so a full run pages the whole store and a scoped run only its cohort's.
 func (p *Pipeline) refreshStoredMetrics(ctx context.Context) (computed, checked, annotated int, days map[string]bool) {
 	days = make(map[string]bool)
 	reader := p.metricsStore.(MetricSessionReader)
 	engine := p.analyzer.(SessionMetricsEnsurer)
 	var after SessionID
 	for ctx.Err() == nil {
-		page, err := reader.ListMetricSessions(ctx, after, 256, AllStoredSessions())
+		page, err := reader.ListMetricSessions(ctx, after, 256, p.runStoreScope())
 		if err != nil {
 			p.reportMetricFailure("stored session page", err)
 			break

@@ -1347,7 +1347,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		// have captured.
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageContent, Done: len(backfilled), Total: len(backfilled) + remaining})
 		p.recordIndexProfileStage(StageContent, contentProfileStart, len(backfilled), len(backfilled)+remaining)
-		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets(), AllStoredSessions())
+		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets(), p.runStoreScope())
 		if staleErr != nil {
 			slog.Warn("pipeline: list stale index sessions",
 				"error", staleErr,
@@ -1451,14 +1451,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				indexSessions = append(indexSessions, indexedMeta{session: *reconstructed, startMs: startMs, outputTranscriptPath: transcriptPath})
 			}
 		}
-		if selectionSkipped > 0 {
-			p.reportDiagnostic(DiagnosticEntry{
-				ErrorType:   "stale_index_outside_selection",
-				Location:    "stored index maintenance",
-				Message:     fmt.Sprintf("%d stored session(s) outside this run's session selection still need index maintenance (an older indexer revision or an unfinished repair) and were not processed by this run", selectionSkipped),
-				Remediation: "Run peasant harvest index to process every stored session that needs index maintenance, or include these sessions' projects in the kickstart selection and run again.",
-			})
-		}
+		// A scoped run's inventory is the cohort itself, so "outside this run's
+		// selection" describes nothing it could act on; the diagnostic is a
+		// full-run report and is not computed for a scoped run. The missing-input
+		// count below still names a cohort member whose own upkeep could not run.
+		p.reportStaleIndexOutsideSelection(selectionSkipped)
 		if missingInput > 0 {
 			p.reportDiagnostic(DiagnosticEntry{
 				ErrorType:   "stale_index_missing_input",
@@ -2761,7 +2758,7 @@ func (p *Pipeline) resolveStoredOrigins(ctx context.Context) (ResolveReport, err
 	if err != nil {
 		return ResolveReport{}, err
 	}
-	report, err := resolver.ResolveStoredOrigins(ctx, OriginRuleVersion)
+	report, err := resolver.ResolveStoredOrigins(ctx, OriginRuleVersion, p.runStoreScope())
 	if err != nil {
 		slog.Warn("ingest: resolve stored session origins",
 			"error", err,
@@ -4580,16 +4577,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	// Clean up orphan project rows (projects with no remaining sessions).
 	// Best-effort: non-fatal; projects from deleted/pruned sessions are removed
 	// so that daily_summary_by_project and the session viewer remain consistent.
-	if p.store != nil {
-		if err := p.store.CleanupOrphanProjects(ctx, AllProjects()); err != nil {
-			slog.Warn(logPrefix+": cleanup orphan projects",
-				"error", err,
-				"what", "failed to remove project rows with zero sessions",
-				"why", "DB error during DELETE from projects or daily_summary_by_project",
-				"user_impact", "stale project names may appear in the session viewer filter list",
-				"how_to_fix", "re-run peasant ingest; if persistent, delete the DB at ~/.local/share/peasant/peasant.db and re-ingest")
-		}
-	}
+	p.cleanupOrphanProjects(ctx, logPrefix)
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageCleanup})
 	p.recordIndexProfileStage(StageCleanup, cleanupProfileStart, 1, 1)
 
