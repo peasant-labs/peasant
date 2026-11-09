@@ -102,8 +102,10 @@ const (
 // before all of them and one constant covers the whole page sequence.
 //
 // The harness database is external and read-only, and parent_id carries no index
-// upstream, so this read may be a scan of that database's session table. That is
-// a bounded read of the harness source, never a scan of the peasant store.
+// upstream, so every page of this read scans that database's session table. The
+// caller pages to completion, so a parent with N children costs ceil(N/128)
+// scans of the harness table per supported table. That is a bounded read of the
+// harness source, never a scan of the peasant store.
 const (
 	openCodeSessionChildrenClockStatement         = "SELECT id, time_updated FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
 	openCodeSessionChildrenParentStatement        = "SELECT id, parent_id FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
