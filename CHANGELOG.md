@@ -62,7 +62,12 @@ Release, which holds the signed artifacts and checksums.
 - A named session that is recorded but can no longer be read keeps its stored
   transcript, receives the same store-side upkeep a full harvest gives it,
   exits 0, and prints one warning on stderr. `open` opens the stored copy and
-  says so on stderr. It used to be silent.
+  says so on stderr; `harvest index --session` names the saved pair it could
+  not read instead of a source. It used to be silent.
+- A plain `harvest index` now keeps the Codex rollout catalog current as it
+  walks the Codex source for canonical facts. It used to walk Codex and write
+  nothing, so a database maintained only through `harvest index` never gained
+  the catalog.
 
 ## [0.14.0] - 2026-11-04
 
