@@ -12,6 +12,7 @@ requiredNames:
   - new-direct-lookup
   - related-exclude
   - project-changed
+  - codex-stored-unchanged
   - stored-source-gone
   - stored-child-source-gone
   - derived-rebuild
@@ -38,7 +39,6 @@ notApplicable:
   - harnesses: [codex]
     kinds:
       - control
-      - stored_unchanged
       - stored_changed
       - new_direct_lookup
       - related_exclude
