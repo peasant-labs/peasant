@@ -1,0 +1,598 @@
+# LOCATE steps: one case per behavior the scoped path must preserve.
+#
+# Every case runs the real pipeline in dry-run mode with a real store and fake
+# adapters that record the production lookup/build calls. A build result is
+# "ok", "gone", "fail", or "noMember"; a lookup declares hits, a failure, or an
+# unsupported format.
+requiredNames:
+  - stored_path_first
+  - stored_path_gone_joins_children
+  - lookup_fanout
+  - lookup_failed
+  - lookup_unsupported
+  - unreadable_harness_disabled
+  - since_filtered
+  - several_misses
+  - duplicate_claude_root
+  - duplicate_codex_catalog
+  - ancestor_catalog_window
+  - ancestor_row_probe
+  - ancestor_path_chain_cycle
+  - readable_parent_unreadable_child
+  - related_exclude
+
+cases:
+  - name: stored_path_first
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        modTime: "2026-11-09T10:00:00Z"
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+    build:
+      - harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+        modTime: "2026-11-09T10:00:00Z"
+    want:
+      members:
+        - id: 11111111-1111-4111-8111-111111111111
+          role: selected
+          outcome: stored_path
+      processed:
+        - 11111111-1111-4111-8111-111111111111
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+      noLookup: true
+      noWalk: true
+      readDirs:
+        /src/codex/2026/11/09: 1
+        /src/codex/2026/11/08: 1
+
+  - name: stored_path_gone_joins_children
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-33333333-3333-4333-8333-333333333333.jsonl
+        modTime: "2026-11-09T11:00:00Z"
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+      - id: 33333333-3333-4333-8333-333333333333
+        harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-33333333-3333-4333-8333-333333333333.jsonl
+        parent: 11111111-1111-4111-8111-111111111111
+    build:
+      - harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        result: gone
+      - harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-33333333-3333-4333-8333-333333333333.jsonl
+        result: ok
+        modTime: "2026-11-09T11:00:00Z"
+    want:
+      members:
+        - id: 11111111-1111-4111-8111-111111111111
+          role: selected
+          outcome: stored_unreadable
+          unreadable: source gone
+        - id: 33333333-3333-4333-8333-333333333333
+          role: child
+          outcome: stored_path
+      processed:
+        - 33333333-3333-4333-8333-333333333333
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+        - 33333333-3333-4333-8333-333333333333
+      noWalk: true
+
+  - name: lookup_fanout
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    disabled:
+      - claude-code
+      - codex
+      - opencode
+      - pi
+    files:
+      - path: /src/cursor/ws/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+      - path: /src/strike/11111111-1111-4111-8111-111111111111.jsonl
+    lookup:
+      - harness: cursor
+        hits:
+          - /src/cursor/ws/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+      - harness: strike
+        hits:
+          - /src/strike/11111111-1111-4111-8111-111111111111.jsonl
+    build:
+      - harness: cursor
+        path: /src/cursor/ws/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+      - harness: strike
+        path: /src/strike/11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+    want:
+      members:
+        - id: 11111111-1111-4111-8111-111111111111
+          role: selected
+          outcome: direct_lookup
+      processed:
+        - 11111111-1111-4111-8111-111111111111
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+      lookupOrder:
+        - cursor
+        - strike
+      noWalk: true
+
+  - name: lookup_failed
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    disabled:
+      - claude-code
+      - codex
+      - cursor
+      - strike
+      - pi
+    lookup:
+      - harness: opencode
+        fail: the OpenCode database could not be opened
+        location: ~/.local/share/opencode/opencode.db
+    want:
+      misses:
+        - id: 11111111-1111-4111-8111-111111111111
+          reason: not_found
+      reasonContains:
+        - could not be looked up in all sources
+        - "lookup failed: opencode (the OpenCode database could not be opened)"
+        - "not enabled:"
+        - codex
+      lookupOrder:
+        - opencode
+      noWalk: true
+
+  - name: lookup_unsupported
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    disabled:
+      - claude-code
+      - codex
+      - cursor
+      - strike
+      - opencode
+    lookup:
+      - harness: pi
+        unsupported: file_header
+        location: ~/.pi/sessions/*.jsonl
+    want:
+      misses:
+        - id: 11111111-1111-4111-8111-111111111111
+          reason: not_found
+      reasonContains:
+        - "cannot search by id: pi"
+      lookupOrder:
+        - pi
+      noWalk: true
+
+  - name: unreadable_harness_disabled
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    disabled:
+      - claude-code
+    files:
+      - path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111.jsonl
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111.jsonl
+    want:
+      members:
+        - id: 11111111-1111-4111-8111-111111111111
+          role: selected
+          outcome: stored_unreadable
+          unreadable: harness disabled
+      processed: []
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+      noLookup: true
+      noWalk: true
+
+  - name: since_filtered
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    since: "2026-01-01T00:00:00Z"
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+    build:
+      - harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+        modTime: "2020-01-01T00:00:00Z"
+    want:
+      misses:
+        - id: 11111111-1111-4111-8111-111111111111
+          reason: since_filtered
+      reasonContains:
+        - was found but --since excludes it
+      noLookup: true
+      noWalk: true
+
+  - name: several_misses
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+      - 33333333-3333-4333-8333-333333333333
+    related: include
+    harness: codex
+    since: "2026-01-01T00:00:00Z"
+    disabled:
+      - claude-code
+      - opencode
+      - pi
+    files:
+      - path: /src/cursor/ws/agent-transcripts/22222222-2222-4222-8222-222222222222/22222222-2222-4222-8222-222222222222.jsonl
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-33333333-3333-4333-8333-333333333333.jsonl
+    stored:
+      - id: 22222222-2222-4222-8222-222222222222
+        harness: cursor
+        path: /src/cursor/ws/agent-transcripts/22222222-2222-4222-8222-222222222222/22222222-2222-4222-8222-222222222222.jsonl
+      - id: 33333333-3333-4333-8333-333333333333
+        harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-33333333-3333-4333-8333-333333333333.jsonl
+    build:
+      - harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-33333333-3333-4333-8333-333333333333.jsonl
+        result: ok
+        modTime: "2020-01-01T00:00:00Z"
+    want:
+      misses:
+        - id: 11111111-1111-4111-8111-111111111111
+          reason: not_found
+        - id: 22222222-2222-4222-8222-222222222222
+          reason: harness_filtered
+          harness: cursor
+        - id: 33333333-3333-4333-8333-333333333333
+          reason: since_filtered
+      reasonContains:
+        - 3 sessions could not be used
+        - was not found
+        - is recorded under cursor, which --harness excludes
+        - was found but --since excludes it
+      noWalk: true
+
+  - name: duplicate_claude_root
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    # The second root copy is older than --since. A cohort-filtering predicate
+    # would drop it before the refusal and process the id silently.
+    since: "2026-11-01T00:00:00Z"
+    disabled:
+      - codex
+      - opencode
+      - cursor
+      - strike
+      - pi
+    files:
+      - path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111.jsonl
+        modTime: "2026-11-09T10:00:00Z"
+      - path: /src/claude-code/proj-b/11111111-1111-4111-8111-111111111111.jsonl
+        modTime: "2020-01-01T00:00:00Z"
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111.jsonl
+    build:
+      - harness: claude-code
+        path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+        modTime: "2026-11-09T10:00:00Z"
+    want:
+      refused:
+        - 11111111-1111-4111-8111-111111111111
+      refusedContains:
+        - same session id in 2 source files
+        - "newer: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111.jsonl"
+      processed: []
+      upkeep: []
+      noLookup: true
+      noWalk: true
+
+  - name: duplicate_codex_catalog
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    disabled:
+      - claude-code
+      - opencode
+      - cursor
+      - strike
+      - pi
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        modTime: "2026-11-09T10:00:00Z"
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T12-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        modTime: "2026-11-09T12:00:00Z"
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+    build:
+      - harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+        modTime: "2026-11-09T10:00:00Z"
+    catalog:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T12-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        id: 11111111-1111-4111-8111-111111111111
+    want:
+      refused:
+        - 11111111-1111-4111-8111-111111111111
+      refusedContains:
+        - same session id in 2 source files
+        - "newer: /src/codex/2026/11/09/rollout-2026-11-09T12-00-00-11111111-1111-4111-8111-111111111111.jsonl"
+      processed: []
+      upkeep: []
+      noLookup: true
+      noWalk: true
+      statAtLeast:
+        /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl: 2
+        /src/codex/2026/11/09/rollout-2026-11-09T12-00-00-11111111-1111-4111-8111-111111111111.jsonl: 2
+
+  - name: ancestor_catalog_window
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    disabled:
+      - claude-code
+      - opencode
+      - cursor
+      - strike
+      - pi
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+      - path: /src/codex/2026/11/08/rollout-2026-11-08T09-00-00-66666666-6666-4666-8666-666666666666.jsonl
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+    build:
+      - harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+        probe:
+          kind: catalog_window
+          harness: codex
+          id: 66666666-6666-4666-8666-666666666666
+      - harness: codex
+        path: /src/codex/2026/11/08/rollout-2026-11-08T09-00-00-66666666-6666-4666-8666-666666666666.jsonl
+        result: ok
+    want:
+      members:
+        - id: 11111111-1111-4111-8111-111111111111
+          role: selected
+          outcome: stored_path
+        - id: 66666666-6666-4666-8666-666666666666
+          role: ancestor
+          outcome: direct_lookup
+      processed:
+        - 11111111-1111-4111-8111-111111111111
+        - 66666666-6666-4666-8666-666666666666
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+        - 66666666-6666-4666-8666-666666666666
+      noLookup: true
+      noWalk: true
+
+  - name: ancestor_row_probe
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    disabled:
+      - claude-code
+      - codex
+      - cursor
+      - strike
+      - pi
+    files:
+      - path: /src/opencode/11111111-1111-4111-8111-111111111111.json
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: opencode
+        path: /src/opencode/11111111-1111-4111-8111-111111111111.json
+    lookup:
+      - harness: opencode
+        hits:
+          - /src/opencode/66666666-6666-4666-8666-666666666666.json
+    build:
+      - harness: opencode
+        path: /src/opencode/11111111-1111-4111-8111-111111111111.json
+        result: ok
+        probe:
+          kind: row
+          harness: opencode
+          id: 66666666-6666-4666-8666-666666666666
+      - harness: opencode
+        path: /src/opencode/66666666-6666-4666-8666-666666666666.json
+        result: ok
+    want:
+      members:
+        - id: 11111111-1111-4111-8111-111111111111
+          role: selected
+          outcome: stored_path
+        - id: 66666666-6666-4666-8666-666666666666
+          role: ancestor
+          outcome: direct_lookup
+      processed:
+        - 11111111-1111-4111-8111-111111111111
+        - 66666666-6666-4666-8666-666666666666
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+        - 66666666-6666-4666-8666-666666666666
+      lookupOrder:
+        - opencode
+      noWalk: true
+
+  - name: ancestor_path_chain_cycle
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    disabled:
+      - claude-code
+      - codex
+      - opencode
+      - cursor
+      - pi
+    files:
+      - path: /src/strike/11111111-1111-4111-8111-111111111111.jsonl
+      - path: /src/strike/66666666-6666-4666-8666-666666666666.jsonl
+      - path: /src/strike/77777777-7777-4777-8777-777777777777.jsonl
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: strike
+        path: /src/strike/11111111-1111-4111-8111-111111111111.jsonl
+    build:
+      - harness: strike
+        path: /src/strike/11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+        probe:
+          kind: path
+          harness: strike
+          path: /src/strike/66666666-6666-4666-8666-666666666666.jsonl
+      - harness: strike
+        path: /src/strike/66666666-6666-4666-8666-666666666666.jsonl
+        result: ok
+        probe:
+          kind: path
+          harness: strike
+          path: /src/strike/77777777-7777-4777-8777-777777777777.jsonl
+      - harness: strike
+        path: /src/strike/77777777-7777-4777-8777-777777777777.jsonl
+        result: ok
+        probe:
+          kind: path
+          harness: strike
+          path: /src/strike/11111111-1111-4111-8111-111111111111.jsonl
+    want:
+      members:
+        - id: 11111111-1111-4111-8111-111111111111
+          role: selected
+          outcome: stored_path
+        - id: 66666666-6666-4666-8666-666666666666
+          role: ancestor
+          outcome: direct_lookup
+        - id: 77777777-7777-4777-8777-777777777777
+          role: ancestor
+          outcome: direct_lookup
+      processed:
+        - 11111111-1111-4111-8111-111111111111
+        - 66666666-6666-4666-8666-666666666666
+        - 77777777-7777-4777-8777-777777777777
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+        - 66666666-6666-4666-8666-666666666666
+        - 77777777-7777-4777-8777-777777777777
+      noLookup: true
+      noWalk: true
+      statAtLeast:
+        /src/strike/66666666-6666-4666-8666-666666666666.jsonl: 1
+        /src/strike/77777777-7777-4777-8777-777777777777.jsonl: 1
+
+  - name: readable_parent_unreadable_child
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    disabled:
+      - claude-code
+      - opencode
+      - cursor
+      - strike
+      - pi
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+    build:
+      - harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+        children:
+          - id: 33333333-3333-4333-8333-333333333333
+            harness: codex
+            path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-33333333-3333-4333-8333-333333333333.jsonl
+            unreadable: gone
+    want:
+      members:
+        - id: 11111111-1111-4111-8111-111111111111
+          role: selected
+          outcome: stored_path
+        - id: 33333333-3333-4333-8333-333333333333
+          role: child
+          outcome: stored_unreadable
+          unreadable: source gone
+      processed:
+        - 11111111-1111-4111-8111-111111111111
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+        - 33333333-3333-4333-8333-333333333333
+      noLookup: true
+      noWalk: true
+
+  - name: related_exclude
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: exclude
+    disabled:
+      - claude-code
+      - opencode
+      - cursor
+      - strike
+      - pi
+    files:
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+      - path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-33333333-3333-4333-8333-333333333333.jsonl
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+    build:
+      - harness: codex
+        path: /src/codex/2026/11/09/rollout-2026-11-09T10-00-00-11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+        children:
+          - id: 33333333-3333-4333-8333-333333333333
+            harness: codex
+            path: /src/codex/2026/11/09/rollout-2026-11-09T11-00-00-33333333-3333-4333-8333-333333333333.jsonl
+    want:
+      members:
+        - id: 11111111-1111-4111-8111-111111111111
+          role: selected
+          outcome: stored_path
+        - id: 33333333-3333-4333-8333-333333333333
+          role: context
+          outcome: stored_path
+      processed:
+        - 11111111-1111-4111-8111-111111111111
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+      noLookup: true
+      noWalk: true
