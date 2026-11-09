@@ -1,0 +1,138 @@
+# Adapter-level parity for Pi sessions: a located build must reproduce exactly
+# the session a full discovery records for the same file, field for field, and a
+# by-name lookup must answer honestly instead of reporting a miss.
+#
+# A Pi recording carries its session id only in its first record's header, so no
+# file name holds it and no bounded name pattern can answer "where is session X".
+# The lookup therefore performs NO I/O at all -- no stat, no directory listing,
+# no read, no header scan -- and reports SearchUnsupported with
+# IDOnlyInFileHeader for every id, stored or new. Reporting a plain miss would
+# claim the id does not exist, which is a different answer from "this source
+# cannot be searched that way".
+#
+# ancestorProbe: absent is the harness's one declared probe kind. Pi records no
+# parent it could derive a location for, so a located member carries no
+# ParentProbe and the build spends nothing deriving one.
+#
+# knownGaps states the one difference a located Pi run can still have, with the
+# exact DiscoveredSession fields it may change. A case that names the gap must
+# also prove the difference happens, so a case cannot quietly stop covering it.
+requiredNames:
+  - lookup-new-session
+  - lookup-known-recording
+  - located-stored-unchanged
+  - located-header-names-another-session
+  - located-source-gone
+  - located-path-outside-root
+  - latest-copy-wins
+ancestorProbe: absent
+miss:
+  line: "cannot be searched by id (the id is only in the file header)"
+  clause: "cannot search by id: pi"
+knownGaps:
+  - id: newest-copy-wins
+    description: a full discovery keeps the newest copy of one header id, while a located build re-reads only the path the store recorded
+    fields: [sourcePath, modTime]
+cases:
+  # The id is in no header on disk. The lookup still must not read the recording
+  # that exists, and its answer must be "cannot be searched", never "not found".
+  - name: lookup-new-session
+    roots: [sessions]
+    files:
+      - path: sessions/workspace/recording-a.jsonl
+        sessionId: "11111111-1111-4111-8111-111111111111"
+    lookup:
+      id: "33333333-3333-4333-8333-333333333333"
+
+  # The id IS the header of a recording on disk. The by-name lookup still finds
+  # nothing by name and still reports the limitation: finding it would require
+  # scanning every header, which is exactly what this must not do.
+  - name: lookup-known-recording
+    roots: [sessions]
+    files:
+      - path: sessions/workspace/recording-a.jsonl
+        sessionId: "11111111-1111-4111-8111-111111111111"
+    lookup:
+      id: "11111111-1111-4111-8111-111111111111"
+
+  # The stored path is re-read and its header id matches, so the located member
+  # is exactly the session a full walk builds from the same file.
+  - name: located-stored-unchanged
+    roots: [sessions]
+    files:
+      - path: sessions/workspace/recording-a.jsonl
+        sessionId: "11111111-1111-4111-8111-111111111111"
+        title: plan the day
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: sessions/workspace/recording-a.jsonl
+      wantMembers:
+        - "11111111-1111-4111-8111-111111111111"
+      ops:
+        - {op: Stat, path: sessions/workspace/recording-a.jsonl, count: 2}
+        - {op: ReadFile, path: sessions/workspace/recording-a.jsonl, count: 1}
+
+  # The recorded path now holds another session's recording. Its header names a
+  # different id, so this is not the requested session's source: gone, not a
+  # member carrying a foreign transcript.
+  - name: located-header-names-another-session
+    roots: [sessions]
+    files:
+      - path: sessions/workspace/recording-b.jsonl
+        sessionId: "22222222-2222-4222-8222-222222222222"
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: sessions/workspace/recording-b.jsonl
+      wantGone: true
+      wantError: "header names another session"
+      ops:
+        - {op: Stat, path: sessions/workspace/recording-b.jsonl, count: 1}
+        - {op: ReadFile, path: sessions/workspace/recording-b.jsonl, count: 1}
+
+  # The recorded file is gone. The store still holds the row, so this is a gone
+  # source, and the build reads no other file.
+  - name: located-source-gone
+    roots: [sessions]
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: sessions/workspace/missing.jsonl
+      wantGone: true
+      wantError: "no longer exists"
+      ops:
+        - {op: Stat, path: sessions/workspace/missing.jsonl, count: 1}
+
+  # A recorded path outside every configured root cannot be attributed to the
+  # root a full walk would give it. The build refuses before reading anything.
+  - name: located-path-outside-root
+    roots: [sessions]
+    files:
+      - path: elsewhere/recording-a.jsonl
+        sessionId: "11111111-1111-4111-8111-111111111111"
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: elsewhere/recording-a.jsonl
+      wantError: "outside every configured Pi source root"
+
+  # Two copies carry the same header id. A full walk keeps the newer/larger copy;
+  # a located build re-reads only the path the store recorded, which is the older
+  # one. That difference is declared, not hidden, and the fixture proves it.
+  - name: latest-copy-wins
+    roots: [sessions]
+    files:
+      - path: sessions/workspace/recording-old.jsonl
+        sessionId: "11111111-1111-4111-8111-111111111111"
+        title: plan the day
+      - path: sessions/workspace/recording-new.jsonl
+        sessionId: "11111111-1111-4111-8111-111111111111"
+        title: plan the day
+        extraTurn: true
+    located:
+      id: "11111111-1111-4111-8111-111111111111"
+      path: sessions/workspace/recording-old.jsonl
+      wantMembers:
+        - "11111111-1111-4111-8111-111111111111"
+      knownGap: newest-copy-wins
+      allowedDiffs: [sourcePath, modTime]
+      ops:
+        - {op: Stat, path: sessions/workspace/recording-old.jsonl, count: 2}
+        - {op: ReadFile, path: sessions/workspace/recording-old.jsonl, count: 1}
