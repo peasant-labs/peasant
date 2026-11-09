@@ -5292,41 +5292,42 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Reuse canonical discovery facts (notably Cursor workspace and SQLite
 	// source kind) instead of reconstructing them from a managed sidecar.
 	sourceSessions := make(map[SessionID]DiscoveredSession)
-	// A `harvest index --all` rebuild needs the complete enumerated rollout set,
-	// so this walk is also the catalog the derived lookup tables are rebuilt
-	// from. A failed Codex walk leaves that set incomplete: rebuilding from it
-	// would delete the rows for every path it did not enumerate, so the run
-	// refuses instead of clearing rows it cannot re-derive.
-	var rolloutCatalog []RolloutFile
-	catalogComplete := true
+	// A `harvest index --all` rebuild replaces the derived lookup tables, and
+	// the Codex rollout catalog can only be replaced from the enumeration the
+	// Codex walk reports: a discovered session list is not that set, because a
+	// rollout that never became a session is still a catalog row, and a walk
+	// that could not read part of the tree reports fewer paths than exist. A
+	// run with no Codex source reports NotWalked, which leaves the catalog as
+	// it is; a partial walk is refused by the rebuild.
+	rolloutEnumeration := RolloutEnumeration{Status: RolloutEnumerationNotWalked}
 	for harness, config := range p.config.Sources {
 		factory, ok := p.adapters[harness]
 		if !ok || !config.Enabled {
-			if harness == HarnessCodex && config.Enabled {
-				catalogComplete = false
+			if harness == HarnessCodex && ok && p.config.RebuildAll {
+				// An enabled Codex source the run has no adapter for cannot be
+				// enumerated at all, so the catalog cannot be rebuilt from it.
+				rolloutEnumeration = RolloutEnumeration{Status: RolloutEnumerationPartial}
 			}
 			continue
 		}
-		sessions, err := factory(p.fs, p.git, p.salt).Discover(ctx, config)
+		adapter := factory(p.fs, p.git, p.salt)
+		sessions, err := adapter.Discover(ctx, config)
 		if err != nil {
 			slog.Warn("reindex: source discovery unavailable", "harness", harness, "error", err)
-			if harness == HarnessCodex {
-				catalogComplete = false
+			if harness == HarnessCodex && p.config.RebuildAll {
+				rolloutEnumeration = RolloutEnumeration{Status: RolloutEnumerationPartial}
 			}
 			continue
 		}
 		for _, session := range sessions {
 			sourceSessions[session.SessionID] = session
-			if p.config.RebuildAll && session.Harness == HarnessCodex {
-				rolloutCatalog = append(rolloutCatalog, RolloutFile{Path: session.SourcePath, SessionID: session.SessionID})
-			}
+		}
+		if harness == HarnessCodex && p.config.RebuildAll {
+			rolloutEnumeration = rolloutEnumerationOf(adapter)
 		}
 	}
 	if p.config.RebuildAll {
-		if !catalogComplete {
-			return nil, fmt.Errorf("ingest: `harvest index --all` could not enumerate every Codex rollout, so the rollout catalog cannot be rebuilt; where: ingest.Pipeline.runReindex in internal/ingest/pipeline.go; when: walking the configured Codex sources before the derived lookup rebuild; impact: the derived lookup tables were left as they were and no saved pair was indexed; fix: restore the Codex source (check its configured path and read access), then rerun `harvest index --all`")
-		}
-		if err := p.rebuildIndexDerivedLookups(ctx, rolloutCatalog); err != nil {
+		if err := p.rebuildIndexDerivedLookups(ctx, rolloutEnumeration); err != nil {
 			return nil, err
 		}
 	}

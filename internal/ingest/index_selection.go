@@ -667,8 +667,8 @@ func (p *Pipeline) scopedIndexMissError(misses []ScopeMiss) error {
 // rebuildIndexDerivedLookups replaces the derived lookup tables from the walk
 // this run just enumerated. `harvest index --all` runs it: the teammate spawns
 // are re-derived from the stored transcript evidence, and the Codex rollout
-// catalog from the caller's complete enumeration.
-func (p *Pipeline) rebuildIndexDerivedLookups(ctx context.Context, catalog []RolloutFile) error {
+// catalog from the enumeration the Codex walk reported.
+func (p *Pipeline) rebuildIndexDerivedLookups(ctx context.Context, enumeration RolloutEnumeration) error {
 	var rebuilder DerivedLookupRebuilder
 	if candidate, ok := p.store.(DerivedLookupRebuilder); ok {
 		rebuilder = candidate
@@ -678,7 +678,10 @@ func (p *Pipeline) rebuildIndexDerivedLookups(ctx context.Context, catalog []Rol
 	if rebuilder == nil {
 		return fmt.Errorf("ingest: the attached store cannot rebuild the derived lookup tables, which `harvest index --all` is the entry point for; where: ingest.Pipeline.rebuildIndexDerivedLookups in internal/ingest/index_selection.go; when: rebuilding the derived lookups after the source walk; impact: the derived tables were left as they were and no saved pair was indexed; fix: run `harvest index --all` with its analytics database attached")
 	}
-	if err := rebuilder.RebuildDerivedLookups(ctx, catalog); err != nil {
+	if err := rebuilder.RebuildDerivedLookups(ctx, enumeration); err != nil {
+		if errors.Is(err, ErrIncompleteRolloutEnumeration) {
+			return fmt.Errorf("ingest: `harvest index --all` cannot rebuild the derived lookup tables because this run did not enumerate every Codex rollout completely; a walk that could not read part of the tree leaves the catalog short, and replacing the table with that set would delete the rows that answer the duplicate question for rollouts still on disk; where: ingest.Pipeline.rebuildIndexDerivedLookups in internal/ingest/index_selection.go; when: enumerating the Codex sources before the derived lookup rebuild; impact: the derived lookup tables were left as they were and no saved pair was indexed; fix: check every configured Codex source path and its read access (an unreadable directory is named in the run's discovery diagnostics), then rerun `harvest index --all`: %w", err)
+		}
 		return fmt.Errorf("pipeline reindex: rebuild the derived lookup tables: %w; no saved pair was indexed after the failure; repair the store and rerun `harvest index --all`", err)
 	}
 	return nil

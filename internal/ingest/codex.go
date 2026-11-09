@@ -39,10 +39,17 @@ type CodexAdapter struct {
 	// current. A nil value leaves the walk writing nothing, which is the
 	// store-free run's and every test's default.
 	rolloutCatalog CodexRolloutCatalogStore
+
+	// enumeration is what the most recent full walk enumerated, and whether it
+	// covered every configured root. The catalog maintenance and the
+	// `harvest index --all` rebuild both read it, so the two cannot disagree
+	// about which rollout paths this run saw.
+	enumeration RolloutEnumeration
 }
 
 var _ SourceAdapter = (*CodexAdapter)(nil)
 var _ SessionLocator = (*CodexAdapter)(nil)
+var _ RolloutEnumerator = (*CodexAdapter)(nil)
 
 // CodexAdapterOption injects one optional CodexAdapter dependency. Production
 // constructs the adapter without options; a test fixes what would otherwise
@@ -109,6 +116,7 @@ const codexAncestorProbeKind = ProbeCatalogWindow
 // branch, and cwd come from the rollout's first line (session_meta).
 func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	a.diagnostics = nil
+	a.enumeration = RolloutEnumeration{Status: RolloutEnumerationComplete}
 	var sessions []DiscoveredSession
 	var enumerated []RolloutFile
 
@@ -118,9 +126,16 @@ func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discov
 		titles := map[ResolvedPath]map[string]string{
 			basePath: a.loadCodexSessionTitles(string(basePath)),
 		}
-		sources, err := a.enumerateCodexRollouts(ctx, basePath)
+		sources, complete, err := a.enumerateCodexRollouts(ctx, basePath)
 		if err != nil {
 			return nil, err
+		}
+		if !complete {
+			// A directory or file the walk could not read may hold rollouts
+			// that are still on disk, so the enumerated set is short. The walk
+			// keeps the sessions it did read; a caller that would REPLACE the
+			// catalog must not treat this set as the whole tree.
+			a.enumeration.Status = RolloutEnumerationPartial
 		}
 		// Every enumerated path is catalogued, not only the ones that survive
 		// the build: the catalog answers the duplicate and parent questions,
@@ -129,9 +144,20 @@ func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discov
 		sessions = append(sessions, a.buildCodexSessions(sources, titles)...)
 	}
 
-	a.maintainCodexRolloutCatalog(ctx, cfg.Paths, enumerated)
+	a.enumeration.Files = dedupeRolloutFiles(enumerated)
+	a.maintainCodexRolloutCatalog(ctx, cfg.Paths)
 
 	return sessions, nil
+}
+
+// EnumeratedRollouts reports the rollout-file set the most recent Discover
+// enumerated, and whether that enumeration covered every configured root. It
+// returns a copy: the caller cannot edit the set the walk used.
+func (a *CodexAdapter) EnumeratedRollouts() RolloutEnumeration {
+	return RolloutEnumeration{
+		Status: a.enumeration.Status,
+		Files:  append([]RolloutFile(nil), a.enumeration.Files...),
+	}
 }
 
 // codexRolloutSource is one rollout file a source root holds, as enumeration
@@ -143,10 +169,14 @@ type codexRolloutSource struct {
 }
 
 // enumerateCodexRollouts lists the rollout files one configured root holds, in
-// walk order. It opens no file: every listed source is read once, by
-// buildCodexSession.
-func (a *CodexAdapter) enumerateCodexRollouts(ctx context.Context, root ResolvedPath) ([]codexRolloutSource, error) {
+// walk order, and reports whether the walk could read everything under it. A
+// directory or entry the filesystem could not read is reported and skipped so
+// the walk keeps going; that also makes the enumeration incomplete, because a
+// rollout inside it may still exist. It opens no file: every listed source is
+// read once, by buildCodexSession.
+func (a *CodexAdapter) enumerateCodexRollouts(ctx context.Context, root ResolvedPath) ([]codexRolloutSource, bool, error) {
 	var sources []codexRolloutSource
+	complete := true
 
 	walkErr := a.fs.WalkDir(string(root), func(path string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
@@ -156,6 +186,7 @@ func (a *CodexAdapter) enumerateCodexRollouts(ctx context.Context, root Resolved
 			// Keep walking, but name a directory permissions hid so the
 			// run does not just report fewer sessions.
 			a.noteUnreadable(path, err)
+			complete = false
 			return nil
 		}
 		if d.Type()&os.ModeSymlink != 0 {
@@ -187,9 +218,9 @@ func (a *CodexAdapter) enumerateCodexRollouts(ctx context.Context, root Resolved
 	})
 
 	if walkErr != nil {
-		return nil, fmt.Errorf("CodexAdapter.Discover: walk %q: %w", root, walkErr)
+		return nil, false, fmt.Errorf("CodexAdapter.Discover: walk %q: %w", root, walkErr)
 	}
-	return sources, nil
+	return sources, complete, nil
 }
 
 // codexSessionBuild is one rollout file after the shared build.

@@ -51,6 +51,17 @@ func AttachCodexRolloutCatalog(adapter SourceAdapter, catalog CodexRolloutCatalo
 // full walk whose rollout catalog could not be updated.
 const DiscoveryCodeCodexRolloutCatalogWrite = "codex_rollout_catalog_write"
 
+// rolloutEnumerationOf asks an adapter what its walk enumerated. An adapter that
+// cannot answer is reported as a partial enumeration: the walk happened, its
+// coverage is unknown, and a rebuild must not read that silence as a full tree.
+func rolloutEnumerationOf(adapter SourceAdapter) RolloutEnumeration {
+	enumerator, ok := adapter.(RolloutEnumerator)
+	if !ok {
+		return RolloutEnumeration{Status: RolloutEnumerationPartial}
+	}
+	return enumerator.EnumeratedRollouts()
+}
+
 // SetCodexRolloutCatalog makes the full walk keep the derived rollout catalog
 // current. A nil store leaves the walk writing nothing.
 func (a *CodexAdapter) SetCodexRolloutCatalog(catalog CodexRolloutCatalogStore) {
@@ -78,9 +89,29 @@ func codexRolloutFiles(sources []codexRolloutSource) []RolloutFile {
 	return files
 }
 
+// dedupeRolloutFiles keeps one entry per path, in walk order, so a root
+// configured twice cannot claim the same rollout path twice.
+func dedupeRolloutFiles(files []RolloutFile) []RolloutFile {
+	unique := make([]RolloutFile, 0, len(files))
+	seen := make(map[ResolvedPath]struct{}, len(files))
+	for _, file := range files {
+		if file.Path == "" || file.SessionID == "" {
+			continue
+		}
+		if _, duplicate := seen[file.Path]; duplicate {
+			continue
+		}
+		seen[file.Path] = struct{}{}
+		unique = append(unique, file)
+	}
+	return unique
+}
+
 // maintainCodexRolloutCatalog brings the catalog in line with the walk that
 // just finished: one row per enumerated path, and no row for a path the walk
-// re-walked and found gone.
+// re-walked and found gone. It reads the same enumeration the adapter reports
+// for the rebuild, so the two paths cannot disagree about which paths this run
+// saw.
 //
 // The walk never prunes a row whose file it did not look for. A row is removed
 // only when its path lies under a walked root, the walk did not enumerate it,
@@ -93,21 +124,14 @@ func codexRolloutFiles(sources []codexRolloutSource) []RolloutFile {
 // A failed catalog write is reported, never swallowed: the harvest still
 // completes, the next full walk re-derives the catalog, and a scoped run keeps
 // answering from whatever the last full walk left.
-func (a *CodexAdapter) maintainCodexRolloutCatalog(ctx context.Context, roots []ResolvedPath, enumerated []RolloutFile) {
+func (a *CodexAdapter) maintainCodexRolloutCatalog(ctx context.Context, roots []ResolvedPath) {
 	if a.rolloutCatalog == nil {
 		return
 	}
-	unique := make([]RolloutFile, 0, len(enumerated))
+	enumerated := a.enumeration.Files
 	seen := make(map[ResolvedPath]struct{}, len(enumerated))
 	for _, file := range enumerated {
-		if file.Path == "" || file.SessionID == "" {
-			continue
-		}
-		if _, duplicate := seen[file.Path]; duplicate {
-			continue
-		}
 		seen[file.Path] = struct{}{}
-		unique = append(unique, file)
 	}
 
 	existing, err := a.rolloutCatalog.LoadCodexRolloutCatalog(ctx)
@@ -130,10 +154,10 @@ func (a *CodexAdapter) maintainCodexRolloutCatalog(ctx context.Context, roots []
 		deletes = append(deletes, row.Path)
 	}
 
-	if len(unique) == 0 && len(deletes) == 0 {
+	if len(enumerated) == 0 && len(deletes) == 0 {
 		return
 	}
-	if err := a.rolloutCatalog.SaveCodexRolloutCatalog(ctx, unique, deletes); err != nil {
+	if err := a.rolloutCatalog.SaveCodexRolloutCatalog(ctx, enumerated, deletes); err != nil {
 		a.noteCodexRolloutCatalogFailure(err)
 	}
 }
