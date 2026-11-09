@@ -28,8 +28,10 @@ function group(groupId: string, helperThreadCount: number, memberScope: string) 
 function orderedPayload(): LocalSessionListPayload {
   return {
     page: 1,
-    limit: 20,
-    totalItems: 3,
+    perPage: 25,
+    total: 3,
+    nextItems: [],
+    revision: '0',
     ordinarySessionTotal: 3,
     helperThreadTotal: 3,
     items: [
@@ -44,8 +46,10 @@ function orderedPayload(): LocalSessionListPayload {
 function contextPayload(): LocalSessionListPayload {
   return {
     page: 1,
-    limit: 20,
-    totalItems: 1,
+    perPage: 25,
+    total: 1,
+    nextItems: [],
+    revision: '0',
     ordinarySessionTotal: 0,
     helperThreadTotal: 2,
     items: [
@@ -66,15 +70,17 @@ function errorResponse(status: number, body: unknown) {
   return Promise.resolve({ ok: false, status, text: async () => JSON.stringify(body) } as Response);
 }
 
-function membersResponse(ids: string[], page: number, total: number, limit = 20) {
+function membersResponse(ids: string[], page: number, total: number, perPage = 25) {
   return {
     members: ids.map((id) => ({
       kind: 'transcript',
       transcript: { session: session(id) },
     })),
+    nextItems: [],
     page,
-    limit,
+    perPage,
     total,
+    revision: '0',
   };
 }
 
@@ -121,8 +127,8 @@ describe('GroupedLocalSessions', () => {
     expect(call.pathname).toBe('/api/v1/session-groups/hg_p1/members');
     expect(call.searchParams.get('scope')).toBe('scope-p1');
     expect(call.searchParams.get('page')).toBe('1');
-    expect(call.searchParams.get('limit')).toBe('20');
-    expect([...call.searchParams.keys()].sort()).toEqual(['limit', 'page', 'scope']);
+    expect(call.searchParams.get('perPage')).toBe('25');
+    expect([...call.searchParams.keys()].sort()).toEqual(['page', 'perPage', 'scope']);
 
     const memberLink = screen.getByRole('link', { name: /agent-b1/ });
     expect(memberLink).toHaveAttribute('href', `/projects/${PROJECT_HASH}/agent-b1`);
@@ -131,9 +137,9 @@ describe('GroupedLocalSessions', () => {
 
   it('keeps one independent paging state per expanded group', async () => {
     fetchMock
-      .mockReturnValueOnce(okResponse(membersResponse(['agent-b1', 'agent-b2'], 1, 21)))
+      .mockReturnValueOnce(okResponse(membersResponse(['agent-b1', 'agent-b2'], 1, 26)))
       .mockReturnValueOnce(okResponse(membersResponse(['agent-c1'], 1, 1)))
-      .mockReturnValueOnce(okResponse(membersResponse(['agent-b3'], 2, 21)));
+      .mockReturnValueOnce(okResponse(membersResponse(['agent-b3'], 2, 26)));
     render(<GroupedLocalSessions payload={orderedPayload()} onRefreshList={() => {}} />);
 
     await userEvent.click(screen.getByText('2 helper threads'));

@@ -32,6 +32,7 @@ import { fetchMockSessions } from '@/lib/share/mock-data';
 import { useMockConfig } from '@/hooks/useMockConfig';
 import { getApiBaseUrl } from '@/lib/api/base';
 import { decodeGroupedSyncList, decodeHelperMembers } from '@/lib/api/grouped-sync';
+import { PageSize } from '@peasant-labs/schema';
 import { fetchDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
 import type { ShareFooterActions } from '@/components/share/footer-actions';
 
@@ -155,7 +156,34 @@ async function fetchSessionSummaries(requestUrl: string, failure: string): Promi
 }
 
 async function fetchGroupedSyncSessions(): Promise<LocalSessionListPayload> {
-  const path = '/api/v1/sync/sessions?view=grouped';
+  // The grouped sync list is capped at one page. The chooser must offer every
+  // publishable session, so it follows the grouped pager to the last page and
+  // unions the pages rather than silently dropping units past 25.
+  const first = await fetchGroupedSyncPage(1);
+  const items = [...first.items];
+  const seenPages = new Set<number>([first.page]);
+  let page = first.page;
+  let next = first.nextItems;
+  while (next.length > 0) {
+    const requested = page + 1;
+    const following = await fetchGroupedSyncPage(requested);
+    if (following.items.length === 0) break;
+    if (seenPages.has(following.page)) {
+      throw new Error('Session discovery stopped while loading the Share chooser because the grouped sync pager repeated a page. No chooser was rendered, because a looping page cannot prove every publishable session was offered. Confirm the server pager and retry.');
+    }
+    items.push(...following.items);
+    seenPages.add(following.page);
+    page = following.page;
+    next = following.nextItems;
+    if (seenPages.size > 1000) {
+      throw new Error('Session discovery stopped while loading the Share chooser because the grouped sync pager did not converge after 1000 pages. No chooser was rendered, because a partial list would hide publishable sessions. Confirm the server pager and retry.');
+    }
+  }
+  return { ...first, items, nextItems: [], page: 1, perPage: first.perPage, total: first.total };
+}
+
+async function fetchGroupedSyncPage(page: number): Promise<LocalSessionListPayload> {
+  const path = `/api/v1/sync/sessions?view=grouped&page=${page}&perPage=${PageSize.P25}`;
   const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
     let detail = `the server returned HTTP ${response.status} without an actionable response body`;
@@ -187,8 +215,10 @@ async function fetchGroupedSyncSessions(): Promise<LocalSessionListPayload> {
  * build), so the link still resolves it explicitly.
  */
 async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDiscoveryResult<ShareHierarchySession>> {
-  const [grouped, linked, metadata] = await Promise.all([
-    fetchGroupedSyncSessions(),
+  // Read the grouped list first: its network fault must surface as the
+  // discovery error, not be masked by a dependent hierarchy read.
+  const grouped = await fetchGroupedSyncSessions();
+  const [linked, metadata] = await Promise.all([
     linkedIds.length > 0
       ? fetchSessionSummaries(
           `${getApiBaseUrl()}/api/v1/session-summaries?ids=${encodeURIComponent(linkedIds.join(','))}`,
@@ -246,9 +276,9 @@ async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDis
  * scope. Paging and totals come from the decoded contract, never a fabricated
  * fallback.
  */
-async function loadHelperMembers(group: ShareHelperGroup, page: number, limit: number): Promise<HelperMembersPage> {
+async function loadHelperMembers(group: ShareHelperGroup, page: number, perPage: number): Promise<HelperMembersPage> {
   const path = `/api/v1/session-groups/${encodeURIComponent(group.groupId)}/members`;
-  const url = `${getApiBaseUrl()}${path}?scope=${encodeURIComponent(group.memberScope)}&page=${page}&limit=${limit}`;
+  const url = `${getApiBaseUrl()}${path}?scope=${encodeURIComponent(group.memberScope)}&page=${page}&perPage=${perPage}`;
   const response = await fetch(url);
   if (response.status === 409) {
     let code: string | undefined;
@@ -292,7 +322,7 @@ async function loadHelperMembers(group: ShareHelperGroup, page: number, limit: n
       helperGroups: mapHelperGroups(item.helperGroups),
     };
   });
-  return { members, total: payload.total, page: payload.page, limit: payload.limit };
+  return { members, total: payload.total, page: payload.page, perPage: payload.perPage };
 }
 
 
@@ -506,8 +536,8 @@ export function ShareWizardClient() {
 
   // Fetch one member page and remember the member sessions it returned, so the
   // downstream steps can resolve a selected member by its transcript id.
-  const loadMembersForWizard = useCallback(async (group: ShareHelperGroup, page: number, limit: number): Promise<HelperMembersPage> => {
-    const result = await loadHelperMembers(group, page, limit);
+  const loadMembersForWizard = useCallback(async (group: ShareHelperGroup, page: number, perPage: number): Promise<HelperMembersPage> => {
+    const result = await loadHelperMembers(group, page, perPage);
     setMemberSessions((previous) => {
       const next = new Map(previous);
       for (const member of result.members) next.set(member.id, member.session);

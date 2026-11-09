@@ -25,12 +25,25 @@ sessions:
   - {id: sess_cycle2, state: target_known, target: sess_cycle1}
 cases:
   - name: roots
+    # The canonical rule: explicit-none and context-from evidence are roots (a
+    # snapshot or cache cannot override authority), the snapshot decides when
+    # there is no evidence, and an inactive generation is out of scope.
     ids: [sess_a, sess_b, sess_context, sess_none]
     children: [4, 1, 0, 0]
+    parentMarkers:
+      sess_a: {parentSessionId: null, parentUnresolved: null}
+      sess_b: {parentSessionId: null, parentUnresolved: null}
+      sess_context: {parentSessionId: null, parentUnresolved: null}
+      sess_none: {parentSessionId: null, parentUnresolved: null}
   - name: general-children
     query: parentSessionId=sess_a
     ids: [sess_cache, sess_generation, sess_old, sess_snapshot]
     children: [0, 1, 0, 0]
+    parentMarkers:
+      sess_cache: {parentSessionId: sess_a, parentUnresolved: null}
+      sess_generation: {parentSessionId: sess_a, parentUnresolved: null}
+      sess_old: {parentSessionId: sess_a, parentUnresolved: null}
+      sess_snapshot: {parentSessionId: sess_a, parentUnresolved: null}
   - name: recursive-immediate-only
     query: parentSessionId=sess_generation
     ids: [sess_grandchild]
@@ -39,6 +52,8 @@ cases:
     query: parentSessionId=sess_b
     ids: [sess_latest]
     children: [0]
+    parentMarkers:
+      sess_latest: {parentSessionId: sess_b, parentUnresolved: null}
   # The first two cases retain their required-name families and their saved
   # selector inputs. Selection is ingest-only, so an ingested parent and its
   # children stay reachable. The invalid-selection case is a genuine metadata
@@ -50,11 +65,21 @@ cases:
     query: parentSessionId=sess_a
     ids: [sess_cache, sess_generation, sess_old, sess_snapshot]
     children: [0, 1, 0, 0]
+    parentMarkers:
+      sess_cache: {parentSessionId: sess_a, parentUnresolved: null}
+      sess_generation: {parentSessionId: sess_a, parentUnresolved: null}
+      sess_old: {parentSessionId: sess_a, parentUnresolved: null}
+      sess_snapshot: {parentSessionId: sess_a, parentUnresolved: null}
   - name: hidden-parent
     selected: [sess_b]
     query: parentSessionId=sess_a
     ids: [sess_cache, sess_generation, sess_old, sess_snapshot]
     children: [0, 1, 0, 0]
+    parentMarkers:
+      sess_cache: {parentSessionId: sess_a, parentUnresolved: null}
+      sess_generation: {parentSessionId: sess_a, parentUnresolved: null}
+      sess_old: {parentSessionId: sess_a, parentUnresolved: null}
+      sess_snapshot: {parentSessionId: sess_a, parentUnresolved: null}
   - name: invalid-selection
     invalidSelection: true
     status: 500

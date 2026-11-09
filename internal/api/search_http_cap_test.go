@@ -80,7 +80,12 @@ func TestGroupedSearchServesAtMostTheDocumentedCap(t *testing.T) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("decode grouped search payload: %v", err)
 	}
-	if len(payload.Items) != codemap.SearchMaxLimit {
-		t.Fatalf("grouped items = %d, want exactly %d (the documented cap)", len(payload.Items), codemap.SearchMaxLimit)
+	// The ranked reader keeps exactly the documented cap; the grouped payload
+	// then pages that bounded set into perPage rows plus nextItems.
+	if payload.Total != codemap.SearchMaxLimit {
+		t.Fatalf("grouped total = %d, want exactly %d (the documented cap)", payload.Total, codemap.SearchMaxLimit)
+	}
+	if len(payload.Items) != int(payload.PerPage) || len(payload.NextItems) != int(payload.PerPage) {
+		t.Fatalf("grouped page = items %d nextItems %d, want %d and %d", len(payload.Items), len(payload.NextItems), payload.PerPage, payload.PerPage)
 	}
 }

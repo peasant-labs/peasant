@@ -7,18 +7,18 @@ requiredNames:
   - clamped-past-last-page
   - empty-scope-window
   - single-short-page
-  - page-size-one
-  - first-page-default-limit
-  - first-page-custom-limit
+  - page-size-25
+  - first-page-default-perPage
+  - first-page-custom-perPage
   - goto-next-page
-  - goto-page-preserves-limit-and-total
+  - goto-page-preserves-perPage-and-total
   - with-total-records-served-page
   - with-total-follows-server-lower-page
   - window-rejects-zero-page
-  - window-rejects-zero-limit
+  - window-rejects-zero-perPage
   - window-rejects-fractional-page
   - goto-page-rejects-nonexistent-page
-  - first-page-rejects-zero-limit
+  - first-page-rejects-zero-perPage
 requiredOperations:
   - window
   - firstPage

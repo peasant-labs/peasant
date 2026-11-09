@@ -82,8 +82,8 @@ type helperGroupListingExpected struct {
 	ReListIdentical      bool                             `yaml:"reListIdentical"`
 	DistinctGroupIDs     bool                             `yaml:"distinctGroupIDs"`
 	Page                 int                              `yaml:"page"`
-	Limit                int                              `yaml:"limit"`
-	TotalItems           int                              `yaml:"totalItems"`
+	PerPage              int                              `yaml:"perPage"`
+	Total                int                              `yaml:"total"`
 	OrdinarySessionTotal int                              `yaml:"ordinarySessionTotal"`
 	HelperThreadTotal    int                              `yaml:"helperThreadTotal"`
 	Items                []helperGroupListingItem         `yaml:"items"`
@@ -116,9 +116,10 @@ type helperGroupListingNestedGroup struct {
 }
 
 type helperGroupListingTopLevelPage struct {
-	Page       int      `yaml:"page"`
-	Limit      int      `yaml:"limit"`
-	SessionIDs []string `yaml:"sessionIds"`
+	Page           int      `yaml:"page"`
+	PerPage        int      `yaml:"perPage"`
+	SessionIDs     []string `yaml:"sessionIds"`
+	NextSessionIDs []string `yaml:"nextSessionIds"`
 }
 
 type helperGroupListingMemberPages struct {
@@ -127,14 +128,18 @@ type helperGroupListingMemberPages struct {
 }
 
 type helperGroupListingMemberPage struct {
-	Page      int      `yaml:"page"`
-	Limit     int      `yaml:"limit"`
-	Total     int      `yaml:"total"`
-	MemberIDs []string `yaml:"memberIds"`
+	Page          int      `yaml:"page"`
+	PerPage       int      `yaml:"perPage"`
+	Total         int      `yaml:"total"`
+	MemberIDs     []string `yaml:"memberIds"`
+	NextMemberIDs []string `yaml:"nextMemberIds"`
 }
 
 type helperGroupListingAfterList struct {
 	Purposes map[string]string `yaml:"purposes"`
+	// Page2 asks the same route for the second grouped page, so the HTTP route
+	// (not only the payload builder) proves page > 1 is served.
+	Page2 bool `yaml:"page2"`
 }
 
 // groupedScopeIssuerFunc adapts a function to the grouping issuer seam so a
@@ -242,14 +247,14 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 		t.Fatalf("decode grouped list: %v (body %s)", err, firstBody)
 	}
 	if tc.Expected.Page > 0 {
-		if payload.Page != tc.Expected.Page || payload.Limit != tc.Expected.Limit {
-			t.Fatalf("list page/limit = (%d,%d), want (%d,%d)", payload.Page, payload.Limit, tc.Expected.Page, tc.Expected.Limit)
+		if payload.Page != tc.Expected.Page || int(payload.PerPage) != tc.Expected.PerPage {
+			t.Fatalf("list page/perPage = (%d,%d), want (%d,%d)", payload.Page, payload.PerPage, tc.Expected.Page, tc.Expected.PerPage)
 		}
 	}
-	if payload.TotalItems != tc.Expected.TotalItems || payload.OrdinarySessionTotal != tc.Expected.OrdinarySessionTotal || payload.HelperThreadTotal != tc.Expected.HelperThreadTotal {
+	if payload.Total != tc.Expected.Total || payload.OrdinarySessionTotal != tc.Expected.OrdinarySessionTotal || payload.HelperThreadTotal != tc.Expected.HelperThreadTotal {
 		t.Fatalf("list totals = (total %d, ordinary %d, helper %d), want (%d,%d,%d)",
-			payload.TotalItems, payload.OrdinarySessionTotal, payload.HelperThreadTotal,
-			tc.Expected.TotalItems, tc.Expected.OrdinarySessionTotal, tc.Expected.HelperThreadTotal)
+			payload.Total, payload.OrdinarySessionTotal, payload.HelperThreadTotal,
+			tc.Expected.Total, tc.Expected.OrdinarySessionTotal, tc.Expected.HelperThreadTotal)
 	}
 	if len(payload.Items) != len(tc.Expected.Items) {
 		t.Fatalf("list items = %d, want %d (%+v)", len(payload.Items), len(tc.Expected.Items), payload.Items)
@@ -296,7 +301,7 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 			if group.HelperThreadCount != expected.HelperThreadCount {
 				t.Fatalf("item[%d] group count = %d, want %d", i, group.HelperThreadCount, expected.HelperThreadCount)
 			}
-			members := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 50)
+			members := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 25)
 			if members.Total != expected.HelperThreadCount {
 				t.Fatalf("item[%d] member total = %d, want %d", i, members.Total, expected.HelperThreadCount)
 			}
@@ -337,6 +342,25 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 	}
 
 	if tc.Expected.AfterList != nil {
+		if tc.Expected.AfterList.Page2 {
+			pageTwoBody, pageTwoStatus := helperGroupGET(t, listURL+"&page=2&perPage=25")
+			if pageTwoStatus != http.StatusOK {
+				t.Fatalf("page 2 status = %d, want 200 (body %s)", pageTwoStatus, pageTwoBody)
+			}
+			var pageTwo schema.LocalSessionListPayload
+			if err := json.Unmarshal(pageTwoBody, &pageTwo); err != nil {
+				t.Fatalf("decode grouped page 2: %v", err)
+			}
+			if pageTwo.Page != 2 || int(pageTwo.PerPage) != 25 || pageTwo.Total != tc.Expected.Total {
+				t.Fatalf("page 2 page/perPage/total = (%d,%d,%d), want (2,25,%d)", pageTwo.Page, pageTwo.PerPage, pageTwo.Total, tc.Expected.Total)
+			}
+			if len(pageTwo.Items) != 1 || pageTwo.Items[0].Transcript == nil || pageTwo.Items[0].Transcript.Session.ID != "agent-o26" {
+				t.Fatalf("page 2 items = %+v, want agent-o26", pageTwo.Items)
+			}
+			if len(pageTwo.NextItems) != 0 {
+				t.Fatalf("page 2 nextItems = %d, want 0", len(pageTwo.NextItems))
+			}
+		}
 		for id, purpose := range tc.Expected.AfterList.Purposes {
 			helperGroupSetPurpose(t, db, id, purpose)
 		}
@@ -349,12 +373,23 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 		}
 		group := item.HelperGroups[0]
 		for _, page := range memberPages.Pages {
-			members := helperGroupMembers(t, base, group.GroupID, group.MemberScope, page.Page, page.Limit)
+			members := helperGroupMembers(t, base, group.GroupID, group.MemberScope, page.Page, page.PerPage)
 			if members.Total != page.Total {
-				t.Fatalf("member page (%d,%d) total = %d, want %d", page.Page, page.Limit, members.Total, page.Total)
+				t.Fatalf("member page (%d,%d) total = %d, want %d", page.Page, page.PerPage, members.Total, page.Total)
 			}
 			if got := helperGroupMemberIDs(members); !reflect.DeepEqual(got, page.MemberIDs) {
-				t.Fatalf("member page (%d,%d) members = %v, want %v", page.Page, page.Limit, got, page.MemberIDs)
+				t.Fatalf("member page (%d,%d) members = %v, want %v", page.Page, page.PerPage, got, page.MemberIDs)
+			}
+			if page.NextMemberIDs != nil {
+				next := make([]string, 0, len(members.NextItems))
+				for _, item := range members.NextItems {
+					if item.Transcript != nil {
+						next = append(next, item.Transcript.Session.ID)
+					}
+				}
+				if !reflect.DeepEqual(next, page.NextMemberIDs) {
+					t.Fatalf("member page (%d,%d) nextItems = %v, want %v", page.Page, page.PerPage, next, page.NextMemberIDs)
+				}
 			}
 		}
 	}
@@ -367,9 +402,13 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 		}
 		issuer := groupedScopeIssuerFunc(func(string, GroupedRouteVariant, GroupedFilters) (string, error) { return "scope-stub", nil })
 		for _, page := range tc.Expected.TopLevelPages {
-			paged, err := buildGroupedListPayload(filters, candidates, page.Page, page.Limit, issuer)
+			perPage, sizeErr := schema.NewPageSize(page.PerPage)
+			if sizeErr != nil {
+				t.Fatalf("fixture perPage %d is outside the closed set: %v", page.PerPage, sizeErr)
+			}
+			paged, err := buildGroupedListPayload(filters, candidates, page.Page, perPage, "4213", issuer)
 			if err != nil {
-				t.Fatalf("build page (%d,%d): %v", page.Page, page.Limit, err)
+				t.Fatalf("build page (%d,%d): %v", page.Page, page.PerPage, err)
 			}
 			got := make([]string, 0, len(paged.Items))
 			for _, item := range paged.Items {
@@ -378,7 +417,18 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 				}
 			}
 			if !reflect.DeepEqual(got, page.SessionIDs) {
-				t.Fatalf("page (%d,%d) items = %v, want %v", page.Page, page.Limit, got, page.SessionIDs)
+				t.Fatalf("page (%d,%d) items = %v, want %v", page.Page, page.PerPage, got, page.SessionIDs)
+			}
+			if page.NextSessionIDs != nil {
+				next := make([]string, 0, len(paged.NextItems))
+				for _, item := range paged.NextItems {
+					if item.Transcript != nil {
+						next = append(next, item.Transcript.Session.ID)
+					}
+				}
+				if !reflect.DeepEqual(next, page.NextSessionIDs) {
+					t.Fatalf("page (%d,%d) nextItems = %v, want %v", page.Page, page.PerPage, next, page.NextSessionIDs)
+				}
 			}
 		}
 	}
@@ -479,9 +529,9 @@ func helperGroupErrorCode(body []byte) string {
 	return envelope.Code
 }
 
-func helperGroupMembers(t *testing.T, base, groupID, scope string, page, limit int) schema.LocalHelperMembersPayload {
+func helperGroupMembers(t *testing.T, base, groupID, scope string, page, perPage int) schema.LocalHelperMembersPayload {
 	t.Helper()
-	values := url.Values{"scope": {scope}, "page": {fmt.Sprintf("%d", page)}, "limit": {fmt.Sprintf("%d", limit)}}
+	values := url.Values{"scope": {scope}, "page": {fmt.Sprintf("%d", page)}, "perPage": {fmt.Sprintf("%d", perPage)}}
 	rawURL := base + "/api/v1/session-groups/" + groupID + "/members?" + values.Encode()
 	body, status := helperGroupGET(t, rawURL)
 	if status != http.StatusOK {
@@ -533,7 +583,7 @@ func assertNestedMemberGroups(t *testing.T, base string, itemIndex int, members 
 		if group.HelperThreadCount != nested.HelperThreadCount {
 			t.Fatalf("item[%d] member %q group count = %d, want %d", itemIndex, nested.SessionID, group.HelperThreadCount, nested.HelperThreadCount)
 		}
-		child := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 50)
+		child := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 25)
 		if got := helperGroupMemberIDs(child); !reflect.DeepEqual(got, nested.MemberIDs) {
 			t.Fatalf("item[%d] member %q nested members = %v, want %v", itemIndex, nested.SessionID, got, nested.MemberIDs)
 		}

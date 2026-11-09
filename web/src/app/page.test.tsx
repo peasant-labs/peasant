@@ -107,8 +107,10 @@ const GROUPED_HOME_PAYLOAD = {
     },
   ],
   page: 1,
-  limit: 20,
-  totalItems: 2,
+  perPage: 25,
+  total: 2,
+  nextItems: [],
+  revision: '0',
   ordinarySessionTotal: 2,
   helperThreadTotal: 2,
 };
@@ -339,6 +341,10 @@ describe('HomePage — the changes-first picker', () => {
     channelError = null;
     channelErrorCode = undefined;
     vi.clearAllMocks();
+    // The URL is Home's source of truth: each test starts at a clean root.
+    window.history.replaceState({}, '', '/');
+    window.sessionStorage.clear();
+    window.localStorage.clear();
   });
 
   it('mounts the fixture-backed changes picker with review clarity and filtering', async () => {

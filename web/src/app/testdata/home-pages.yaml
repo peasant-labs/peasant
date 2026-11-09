@@ -1,5 +1,5 @@
 requiredNames:
-  - first-page-and-next-page
+  - numbered-pages-from-the-url
   - loaded-refresh-keeps-content-on-failure
   - stale-filter-response
   - lazy-children-and-child-more
@@ -19,16 +19,20 @@ requiredNames:
   - selection-error-account-change-refreshes-loaded-content
   - claude-teammate-line
   - no-claude-teammate-line
+  - refresh-restores-view-and-page
+  - interleaved-project-grouping
+  - hidden-session-column-grouping
+  - collapsed-group-does-not-hide-page-two
 publish:
   request: { sessionIds: [root-0], redactionLevel: standard }
   response: { errors: 0, new: 1, updated: 0, skipped: 0, sessions: [{ sessionId: root-0, status: new }] }
-  loadedTokens:
-    - { parent: null, token: '' }
-    - { parent: root-0, token: '' }
-    - { parent: null, token: after-first }
-  failedRefreshTokens:
-    - { parent: null, token: '' }
-    - { parent: root-0, token: '' }
+  loadedPages:
+    - { parent: null, page: 2 }
+    - { parent: root-0, page: 1 }
+    - { parent: null, page: 1 }
+  failedRefreshPages:
+    - { parent: null, page: 2 }
+    - { parent: root-0, page: 1 }
 visual:
   themes: [dark, light]
   viewports:
@@ -43,7 +47,7 @@ visual:
     - { projectHash: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90, projectName: fixture-project }
     - { projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, projectName: unseen-project }
 cases:
-  - name: first-page-and-next-page
+  - name: numbered-pages-from-the-url
     roots: 60
     children: 0
   - name: loaded-refresh-keeps-content-on-failure
@@ -109,3 +113,65 @@ cases:
     roots: 1
     children: 1
     assertTeammateLine: true
+  - name: refresh-restores-view-and-page
+    # A cold reload: the URL carries the view, the page, the size, and the
+    # grouping. Columns and open groups are device state and never travel here.
+    search: 'browse=sessions&publication=all&project=a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90&perPage=50&page=2&groupBy=none'
+    expectView:
+      browse: sessions
+      publication: all
+      project: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90
+      perPage: 50
+      page: 2
+      groupBy: none
+    roots: 60
+    children: 0
+  - name: interleaved-project-grouping
+    # The page order is A1, B1, A2. Stable partitioning must render header A,
+    # A1, A2, header B, B1 so A2 never reads under B.
+    search: 'groupBy=project'
+    rows:
+      - {id: a1, project: alpha}
+      - {id: b1, project: beta}
+      - {id: a2, project: alpha}
+  - name: hidden-session-column-grouping
+    # The URL carries the grouping and the device carries the columns. With the
+    # session column hidden, the project header still renders in the first
+    # remaining column.
+    search: 'groupBy=project'
+    visibleColumns: [project, state]
+    rows:
+      - {id: a1, project: alpha}
+      - {id: b1, project: beta}
+  - name: collapsed-group-does-not-hide-page-two
+    # A collapsed project is a global device set, not a page-local allow-list:
+    # page 2's gamma/delta projects were never collapsed and render open.
+    search: 'groupBy=project'
+    rows:
+      - {id: a01, project: alpha}
+      - {id: a02, project: alpha}
+      - {id: a03, project: alpha}
+      - {id: a04, project: alpha}
+      - {id: a05, project: alpha}
+      - {id: a06, project: alpha}
+      - {id: a07, project: alpha}
+      - {id: a08, project: alpha}
+      - {id: a09, project: alpha}
+      - {id: a10, project: alpha}
+      - {id: a11, project: alpha}
+      - {id: a12, project: alpha}
+      - {id: a13, project: alpha}
+      - {id: b01, project: beta}
+      - {id: b02, project: beta}
+      - {id: b03, project: beta}
+      - {id: b04, project: beta}
+      - {id: b05, project: beta}
+      - {id: b06, project: beta}
+      - {id: b07, project: beta}
+      - {id: b08, project: beta}
+      - {id: b09, project: beta}
+      - {id: b10, project: beta}
+      - {id: b11, project: beta}
+      - {id: b12, project: beta}
+      - {id: c01, project: gamma}
+      - {id: d01, project: delta}

@@ -44,26 +44,49 @@ func parentGenerationScopeSQL(alias string) string {
 	return "COALESCE(" + alias + ".active_generation_id, " + alias + ".latest_attempt_generation_id)"
 }
 
+// parentEvidenceExistsSQL renders whether the session's generation scope has
+// any started_by or context_from evidence. When it does, the evidence lane is
+// authoritative and the snapshot/cache fallback is closed: a session whose
+// evidence explicitly names no parent is a root, not a stale-cache child.
+func parentEvidenceExistsSQL(alias string) string {
+	return `EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = ` + alias + `.session_id
+     AND e.generation_id = ` + parentGenerationScopeSQL(alias) + `
+     AND e.kind IN ('started_by','context_from')
+)`
+}
+
 // LogicalParentSQL renders the one parent-answer rule as a scalar expression
-// that correlates on alias: the started_by evidence target of the session's
-// active generation (or its latest attempt when no active generation exists)
-// when that target state is known or retained and the target is non-empty,
-// otherwise the availability cache.
+// that correlates on alias. The rule has two tiers:
 //
-// A NULL answer never proves a root: an evidenced session whose target is
-// unavailable still answers its evidence target, and only a session with no
-// evidence at all falls back to the cache. Generation scoping is exact: an
-// active generation is consulted on its own, and the latest attempt is
-// consulted only when no active generation exists.
+//   - when the session's generation scope carries any started_by or
+//     context_from evidence, the answer is that evidence alone: the started_by
+//     target when its state is known or retained and the target is non-empty,
+//     otherwise NULL (explicit none, an unnamed target, or context_from only);
+//   - when it carries no evidence at all, the answer is the managed metadata
+//     ParentUUID snapshot, then the sessions.parent_id availability cache.
+//
+// A NULL answer never proves a root while evidence exists, and the snapshot and
+// cache can never override authority evidence. Generation scoping is exact: an
+// active generation is consulted on its own, and the latest attempt is consulted
+// only when no active generation exists.
 func LogicalParentSQL(alias string) string {
-	return `COALESCE((
-  SELECT r.target_local_id FROM session_relationship_evidence r
-   WHERE r.session_id = ` + alias + `.session_id
-     AND r.generation_id = ` + parentGenerationScopeSQL(alias) + `
-     AND r.kind = 'started_by'
-     AND r.target_state IN ('target_known','target_known_retained')
-     AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
-), ` + alias + `.parent_id)`
+	return `CASE
+  WHEN ` + parentEvidenceExistsSQL(alias) + ` THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = ` + alias + `.session_id
+       AND r.generation_id = ` + parentGenerationScopeSQL(alias) + `
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = ` + alias + `.session_id), ''),
+    ` + alias + `.parent_id)
+END`
 }
 
 // ParentUnresolvedSQL renders whether a session is a known spawned child whose
@@ -140,6 +163,32 @@ FROM sessions s WHERE s.session_id IN (?` + strings.Repeat(",?", len(batch)-1) +
 		}
 	}
 	return lineages, nil
+}
+
+// ParentCacheForSession reads the raw availability cache for one session. It
+// answers which cached row can join, never who the logical parent is: a nil
+// value never proves rootness. The orphan reconciliation's own assertions read
+// the cache it wrote here, without conflating it with LogicalParentSQL.
+func (s *Store) ParentCacheForSession(ctx context.Context, sessionID string) (*string, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: take connection to read the parent cache of session %s: %w; the cache value was not read; restore database access and retry", sessionID, err)
+	}
+	defer s.pool.Put(conn)
+	var cache *string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{sessionID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				value := stmt.ColumnText(0)
+				cache = &value
+			}
+			return nil
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("store: read the parent cache of session %s: %w; the cache value was not read; inspect the store and retry", sessionID, err)
+	}
+	return cache, nil
 }
 
 // LogicalParentForSession returns the durable logical parent for one session:

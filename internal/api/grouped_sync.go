@@ -217,6 +217,14 @@ func syncParentMarkers(identity store.ParentIdentityRow) (*string, *bool) {
 	return nil, nil
 }
 
+// pageRevision reads the one store revision a grouped sync payload carries.
+func (h *syncHandler) pageRevision(ctx context.Context) (string, error) {
+	if h.store == nil {
+		return "0", nil
+	}
+	return h.store.Revision(ctx)
+}
+
 // serveGroupedSyncSessions answers GET /api/v1/sync/sessions?view=grouped. It
 // assembles the same opt-in grouped payload the sessions route serves, over the
 // exact sync predicate, and attaches each rendered group's opaque member scope
@@ -236,7 +244,26 @@ func (h *syncHandler) serveGroupedSyncSessions(w http.ResponseWriter, r *http.Re
 		writeDiscoveryError(w, "failed to fetch grouped sync sessions", err)
 		return
 	}
-	payload, err := buildGroupedListPayload(filters, candidates, 1, 0, h.scopeIssuer)
+	page, pageOK := parseGroupedPageValue(r.URL.Query(), "page", 1)
+	if !pageOK {
+		writeAPIError(w, http.StatusBadRequest,
+			"Grouped sync sessions could not be listed because query field \"page\" is not a positive integer in internal/api.serveGroupedSyncSessions. No provider call was made and no rows were returned. Provide one page number of at least 1, or remove the field, then retry.",
+			"grouped_page_invalid")
+		return
+	}
+	perPage, sizeOK := parseGroupedPageSize(r.URL.Query(), "perPage", groupedMembersDefaultPageSize)
+	if !sizeOK {
+		writeAPIError(w, http.StatusBadRequest,
+			"Grouped sync sessions could not be listed because query field \"perPage\" is outside the closed 25/50/100 page sizes in internal/api.serveGroupedSyncSessions. No provider call was made and no rows were returned. Provide 25, 50, or 100, or remove the field for the default of 25, then retry.",
+			"grouped_per_page_invalid")
+		return
+	}
+	revision, err := h.pageRevision(r.Context())
+	if err != nil {
+		writeDiscoveryError(w, "failed to read the grouped sync page revision", err)
+		return
+	}
+	payload, err := buildGroupedListPayload(filters, candidates, page, perPage, revision, h.scopeIssuer)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError,
 			"Grouped sync sessions could not be assembled because the grouped projection failed in internal/api.serveGroupedSyncSessions after the sync rows were read. No grouped response was returned, because a partial list would misstate the counts. Refresh the share chooser; if the failure repeats, inspect the Peasant server logs.",

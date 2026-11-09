@@ -153,6 +153,60 @@ describe('ShareWizardClient', () => {
     expect(fetchMockSessionsSpy).not.toHaveBeenCalled();
   });
 
+  it('drains every grouped sync page so later sessions are publishable', async () => {
+    mockConfigSpy.mockReturnValue({ config: { enabled: false, web: [], tui: [] }, loading: false, error: null, refetch: vi.fn() });
+    const pageOne = {
+      id: 'page-one', harness: 'claude-code', startTime: '2026-02-24T09:00:00Z', durationMins: 30,
+      totalTokens: 1000, turnCount: 2, toolCallCount: 0, project: 'alpha', projectHash: 'alpha', preview: 'first page',
+    };
+    const pageTwo = {
+      id: 'page-two', harness: 'claude-code', startTime: '2026-02-23T09:00:00Z', durationMins: 30,
+      totalTokens: 1000, turnCount: 2, toolCallCount: 0, project: 'beta', projectHash: 'beta', preview: 'second page',
+    };
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/sync/sessions')) {
+        const page = Number(new URL(url, 'http://mounted.test').searchParams.get('page') ?? '1');
+        return { ok: true, json: async () => page === 2
+          ? buildGroupedSyncResponse([pageTwo], [], { page: 2, total: 2 })
+          : buildGroupedSyncResponse([pageOne], [], { total: 2, nextSessions: [pageTwo] }) };
+      }
+      if (url.includes('/api/v1/web/discovery')) {
+        return { ok: true, json: async () => ({ items: [
+          { sessionId: 'page-one', locationLabel: 'workspace', repositoryLocationId: 'rl_one', branch: 'main', selectionStatus: 'selected' },
+          { sessionId: 'page-two', locationLabel: 'workspace', repositoryLocationId: 'rl_two', branch: 'main', selectionStatus: 'selected' },
+        ] }) };
+      }
+      throw new Error(`unexpected paged fetch: ${url}`);
+    });
+    fetchMockSessionsSpy.mockReturnValue({ sessions: [], counts: { new: 0, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 } });
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
+    expect(await screen.findByRole('checkbox', { name: 'select session page-two' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(call => String(call[0]).includes('page=2'))).toBe(true);
+  });
+
+  it('aborts the chooser when the grouped pager repeats a page', async () => {
+    mockConfigSpy.mockReturnValue({ config: { enabled: false, web: [], tui: [] }, loading: false, error: null, refetch: vi.fn() });
+    const pageOne = {
+      id: 'page-one', harness: 'claude-code', startTime: '2026-02-24T09:00:00Z', durationMins: 30,
+      totalTokens: 1000, turnCount: 2, toolCallCount: 0, project: 'alpha', projectHash: 'alpha', preview: 'first page',
+    };
+    const pageTwo = {
+      id: 'page-two', harness: 'claude-code', startTime: '2026-02-23T09:00:00Z', durationMins: 30,
+      totalTokens: 1000, turnCount: 2, toolCallCount: 0, project: 'beta', projectHash: 'beta', preview: 'second page',
+    };
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/sync/sessions')) {
+        return { ok: true, json: async () => buildGroupedSyncResponse([pageOne], [], { total: 2, nextSessions: [pageTwo] }) };
+      }
+      throw new Error(`unexpected repeated-page fetch: ${url}`);
+    });
+    fetchMockSessionsSpy.mockReturnValue({ sessions: [], counts: { new: 0, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 } });
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
+    expect(await screen.findByText(/repeated a page/i)).toBeInTheDocument();
+  });
+
   it('shows error UI when real fetch fails (no mock fallback)', async () => {
     const mockConfig = { enabled: false, web: [], tui: [] };
     mockConfigSpy.mockReturnValue({

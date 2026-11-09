@@ -12,7 +12,7 @@ cases:
   - name: list-missing-total
     base: list
     drop:
-      - totalItems
+      - total
   - name: list-unknown-arm
     base: list
     set:

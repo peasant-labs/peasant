@@ -15,6 +15,7 @@
  */
 
 import {
+  PageSize,
   isSessionListItemKind,
   zLocalHelperMembersPayload,
   zLocalSessionListPayload,
@@ -126,12 +127,21 @@ export interface GroupedLocalSessionsScope {
   projectHash?: string;
 }
 
-/** GET /api/v1/sessions?view=grouped[&project=<projectHash>] */
+/** Paging for one grouped list or search read. The server defaults to page 1 and 25 rows. */
+export interface GroupedLocalPaging {
+  page?: number;
+  perPage?: number;
+}
+
+/** GET /api/v1/sessions?view=grouped[&project=<projectHash>][&page=&perPage=] */
 export async function fetchGroupedLocalSessions(
   scope: GroupedLocalSessionsScope = {},
+  paging: GroupedLocalPaging = {},
 ): Promise<LocalSessionListPayload> {
   const params = new URLSearchParams({ view: 'grouped' });
   if (scope.projectHash) params.set('project', scope.projectHash);
+  if (paging.page !== undefined) params.set('page', String(paging.page));
+  if (paging.perPage !== undefined) params.set('perPage', String(paging.perPage));
   const path = `/api/v1/sessions?${params.toString()}`;
   const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
@@ -193,13 +203,16 @@ export function assertGroupedProjectScope(
   }
 }
 
-/** GET /api/v1/search?q=...&view=grouped */
+/** GET /api/v1/search?q=...&view=grouped[&page=&perPage=] */
 export async function fetchGroupedLocalSearch(
   query: string,
   limit?: number,
+  paging: GroupedLocalPaging = {},
 ): Promise<LocalSessionListPayload> {
   const params = new URLSearchParams({ q: query, view: 'grouped' });
   if (limit) params.set('limit', String(limit));
+  if (paging.page !== undefined) params.set('page', String(paging.page));
+  if (paging.perPage !== undefined) params.set('perPage', String(paging.perPage));
   const path = `/api/v1/search?${params.toString()}`;
   const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
@@ -210,7 +223,7 @@ export async function fetchGroupedLocalSearch(
 }
 
 /**
- * GET /api/v1/session-groups/{groupId}/members?scope=...&page=...&limit=...
+ * GET /api/v1/session-groups/{groupId}/members?scope=...&page=...&perPage=...
  *
  * Only the opaque scope and paging are sent: the prefix route already fixed
  * every search and project filter, so an extra narrowing or widening filter
@@ -220,11 +233,11 @@ export async function fetchHelperGroupMembers(args: {
   groupId: string;
   scope: string;
   page?: number;
-  limit?: number;
+  perPage?: number;
 }): Promise<LocalHelperMembersPayload> {
   const params = new URLSearchParams({ scope: args.scope });
   if (args.page !== undefined) params.set('page', String(args.page));
-  if (args.limit !== undefined) params.set('limit', String(args.limit));
+  if (args.perPage !== undefined) params.set('perPage', String(args.perPage));
   const path = `/api/v1/session-groups/${encodeURIComponent(args.groupId)}/members?${params.toString()}`;
   const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
@@ -264,7 +277,7 @@ export function groupedSearchMatches(payload: LocalSessionListPayload): SearchRe
  * possible; paging still follows the server-reported total, so a group larger
  * than one page is never truncated.
  */
-export const SEARCH_MEMBER_PAGE_LIMIT = 50;
+export const SEARCH_MEMBER_PER_PAGE = PageSize.P25;
 
 /**
  * One navigable search hit's identity. A hit is unique per (session, entry), so
@@ -320,7 +333,7 @@ export async function fetchGroupedSearchMatches(
           groupId: group.groupId,
           scope: group.memberScope,
           page: requestedPage,
-          limit: SEARCH_MEMBER_PAGE_LIMIT,
+          perPage: SEARCH_MEMBER_PER_PAGE,
         });
         for (const member of members.members) {
           for (const match of member.transcript?.matches ?? []) {
@@ -335,11 +348,11 @@ export async function fetchGroupedSearchMatches(
         // Stop on an empty page, a non-positive served limit, or a server page
         // that did not advance (a shrunk set can return a lower page than
         // requested), so a malformed or stale page cannot loop the traversal.
-        if (members.members.length === 0 || members.limit < 1 || members.page <= highestServedPage) {
+        if (members.members.length === 0 || members.perPage < 1 || members.page <= highestServedPage) {
           break;
         }
         highestServedPage = members.page;
-        if (members.page * members.limit >= members.total) break;
+        if (members.page * members.perPage >= members.total) break;
         requestedPage = members.page + 1;
       }
     } catch (cause) {

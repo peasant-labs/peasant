@@ -266,7 +266,7 @@ func assertLibraryGroupedSessions(t *testing.T, base string) {
 			ordinary = append(ordinary, string(item.Transcript.Session.ID))
 		}
 		for _, group := range item.HelperGroups {
-			members := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 50)
+			members := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 25)
 			memberIDs = append(memberIDs, helperGroupMemberIDs(members)...)
 		}
 	}
@@ -294,7 +294,7 @@ func assertLibraryGroupedSearch(t *testing.T, base string) {
 			got = append(got, string(item.Transcript.Session.ID))
 		}
 		for _, group := range item.HelperGroups {
-			members := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 50)
+			members := helperGroupMembers(t, base, group.GroupID, group.MemberScope, 1, 25)
 			got = append(got, helperGroupMemberIDs(members)...)
 		}
 	}
@@ -394,7 +394,7 @@ func assertLibraryHomeAndParent(t *testing.T, fixture libraryPolicyFixture, fixt
 		t.Fatalf("Home project options = %v, want project-name then hash order %v", optionHashes, fixture.HomeProjectHashes)
 	}
 
-	firstBody, firstStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&maxItems=1")
+	firstBody, firstStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&maxItems=25")
 	if firstStatus != http.StatusOK {
 		t.Fatalf("Home first page status = %d (body %s)", firstStatus, firstBody)
 	}
@@ -405,14 +405,33 @@ func assertLibraryHomeAndParent(t *testing.T, fixture libraryPolicyFixture, fixt
 	if err := first.Validate(); err != nil {
 		t.Fatalf("Home first page breaks the canonical wire contract: %v", err)
 	}
-	if first.Next == "" {
-		t.Fatal("Home first page has no continuation token")
+	if first.Page != 1 || first.PerPage != schema.PageSize25 || first.Total != len(fixture.HomeRootIDs) {
+		t.Fatalf("Home first page = page %d perPage %d total %d, want page 1 perPage 25 total %d", first.Page, first.PerPage, first.Total, len(fixture.HomeRootIDs))
 	}
-	if _, replayStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&maxItems=1&pageToken="+string(first.Next)); replayStatus != http.StatusOK {
-		t.Fatalf("Home continuation replay status = %d, want 200", replayStatus)
+	if len(first.NextItems) != 0 {
+		t.Fatalf("Home first page carries next items %+v on a root set smaller than one page", first.NextItems)
 	}
-	if _, filteredStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&maxItems=1&pageToken="+string(first.Next)+"&projectHash="+libraryAlphaHash.String()); filteredStatus != http.StatusBadRequest {
-		t.Fatalf("Home continuation under a changed project filter status = %d, want 400", filteredStatus)
+	if first.Totals == nil || first.Totals.Sessions == 0 {
+		t.Fatal("Home first page carries no totals.sessions")
+	}
+	if first.Revision == "" {
+		t.Fatal("Home first page carries no revision")
+	}
+	// A request past the last page shows the last page, and the client rewrites
+	// the URL from the echoed page.
+	pastBody, pastStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&maxItems=25&page=9")
+	if pastStatus != http.StatusOK {
+		t.Fatalf("Home past-last page status = %d (body %s)", pastStatus, pastBody)
+	}
+	var past schema.LocalSyncSessionPage
+	if err := json.Unmarshal(pastBody, &past); err != nil {
+		t.Fatalf("decode Home past-last page: %v (body %s)", err, pastBody)
+	}
+	if past.Page != 1 {
+		t.Fatalf("Home past-last page echoes page %d, want the last page 1", past.Page)
+	}
+	if _, retiredStatus := helperGroupGET(t, base+"/api/v1/sync/sessions?view=home&maxItems=25&page=2&pageToken=old"); retiredStatus != http.StatusBadRequest {
+		t.Fatalf("Home retired token with a page status = %d, want 400", retiredStatus)
 	}
 }
 

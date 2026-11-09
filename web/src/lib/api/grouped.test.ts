@@ -38,7 +38,6 @@ type GroupedCase = {
     groupIds?: string[];
     memberIds?: string[];
     total?: number;
-    totalItems?: number;
     ordinarySessionTotal?: number;
     helperThreadTotal?: number;
   };
@@ -119,7 +118,7 @@ function projectList(payload: ReturnType<typeof decodeGroupedLocalList>) {
   return {
     itemKinds: payload.items.map((item) => item.kind),
     groupIds: payload.items.flatMap((item) => (item.helperGroups ?? []).map((group) => group.groupId)),
-    totalItems: payload.totalItems,
+    total: payload.total,
     ordinarySessionTotal: payload.ordinarySessionTotal,
     helperThreadTotal: payload.helperThreadTotal,
   };
@@ -182,9 +181,11 @@ function errorResponse(status: number, body: unknown) {
 
 const listPayload = {
   items: [],
+  nextItems: [],
   page: 1,
-  limit: 20,
-  totalItems: 0,
+  perPage: 25,
+  total: 0,
+  revision: '0',
   ordinarySessionTotal: 0,
   helperThreadTotal: 0,
 };
@@ -221,14 +222,14 @@ describe('grouped local REST client', () => {
   });
 
   it('fetchHelperGroupMembers sends only the opaque scope and paging', async () => {
-    fetchMock.mockReturnValueOnce(okResponse({ members: [], page: 2, limit: 1, total: 4 }));
-    const payload = await fetchHelperGroupMembers({ groupId: 'hg_p1', scope: 'scope-p1', page: 2, limit: 1 });
+    fetchMock.mockReturnValueOnce(okResponse({ members: [], nextItems: [], page: 2, perPage: 25, total: 4, revision: '0' }));
+    const payload = await fetchHelperGroupMembers({ groupId: 'hg_p1', scope: 'scope-p1', page: 2, perPage: 25 });
     const url = new URL(String(fetchMock.mock.calls[0][0]));
     expect(url.pathname).toBe('/api/v1/session-groups/hg_p1/members');
     expect(url.searchParams.get('scope')).toBe('scope-p1');
     expect(url.searchParams.get('page')).toBe('2');
-    expect(url.searchParams.get('limit')).toBe('1');
-    expect([...url.searchParams.keys()].sort()).toEqual(['limit', 'page', 'scope']);
+    expect(url.searchParams.get('perPage')).toBe('25');
+    expect([...url.searchParams.keys()].sort()).toEqual(['page', 'perPage', 'scope']);
     expect(payload.total).toBe(4);
   });
 
@@ -446,7 +447,7 @@ describe('grouped search navigation', () => {
           const request = memberRequestFromUrl(String(call[0]));
           if (!request) continue;
           const keys = [...new URL(String(call[0])).searchParams.keys()].sort();
-          expect(keys).toEqual(['limit', 'page', 'scope']);
+          expect(keys).toEqual(['page', 'perPage', 'scope']);
         }
       } finally {
         vi.unstubAllGlobals();
@@ -481,7 +482,7 @@ describe('grouped project scope', () => {
   it('accepts a response whose transcript rows all belong to the requested project', () => {
     const payload = decodeGroupedLocalList({
       ...listPayload,
-      totalItems: 1,
+      total: 1,
       ordinarySessionTotal: 1,
       items: [
         {
@@ -498,7 +499,7 @@ describe('grouped project scope', () => {
   it('refuses a response that carries another project under a project-scoped request', () => {
     const payload = decodeGroupedLocalList({
       ...listPayload,
-      totalItems: 1,
+      total: 1,
       ordinarySessionTotal: 1,
       items: [
         {
