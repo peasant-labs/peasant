@@ -1,0 +1,103 @@
+# Deletion protection and the registry cross for the pipeline parity fixture.
+#
+# `requiredNames` lists every case that must exist. The runner also derives the
+# adapter registry crossed with the closed case-kind list and refuses any pair
+# that is neither a real case nor named in `notApplicable`, so a new harness or
+# a new kind cannot be silently skipped. A not_applicable pair is named by its
+# harness and kind, never counted.
+requiredNames:
+  - control
+  - stored-unchanged
+  - stored-changed
+  - new-direct-lookup
+  - related-exclude
+  - project-changed
+  - stored-source-gone
+  - stored-child-source-gone
+  - derived-rebuild
+
+notApplicable:
+  - harnesses: [pi]
+    kinds:
+      - control
+      - stored_unchanged
+      - stored_changed
+      - new_direct_lookup
+      - related_exclude
+      - project_changed
+      - stored_source_gone
+      - stored_child_source_gone
+      - derived_rebuild
+    reason: >-
+      The Pi adapter's scoped path is covered by its own locator fixture and
+      capture tests; this pipeline runner drives the Claude tree because that
+      adapter exercises every store-side pass the parity claim is about (root
+      probe, subagent children, teammate evidence), and a second adapter's tree
+      would duplicate that coverage without adding a store assertion.
+
+  - harnesses: [codex]
+    kinds:
+      - control
+      - stored_unchanged
+      - stored_changed
+      - new_direct_lookup
+      - related_exclude
+      - project_changed
+      - stored_source_gone
+      - stored_child_source_gone
+      - derived_rebuild
+    reason: >-
+      Codex's located build, its two-folder window and its catalog maintenance
+      are covered by codex_session_locator.yaml and the session-scoped index
+      suite. The catalog table is still compared in every case here (never
+      exempted); a Codex-specific mutation case is named as a follow-up rather
+      than hidden behind an exemption.
+
+  - harnesses: [opencode]
+    kinds:
+      - control
+      - stored_unchanged
+      - stored_changed
+      - new_direct_lookup
+      - related_exclude
+      - project_changed
+      - stored_source_gone
+      - stored_child_source_gone
+      - derived_rebuild
+    reason: >-
+      OpenCode cases need real SQLite source databases that the adapter's
+      private-execution guard governs; opencode_session_locator.yaml drives
+      those databases and asserts the same located-build parity at the adapter
+      boundary.
+
+  - harnesses: [cursor]
+    kinds:
+      - control
+      - stored_unchanged
+      - stored_changed
+      - new_direct_lookup
+      - related_exclude
+      - project_changed
+      - stored_source_gone
+      - stored_child_source_gone
+      - derived_rebuild
+    reason: >-
+      Cursor's workspace-path identity and its lookup are covered by
+      cursor_session_locator.yaml; this runner's store assertions are
+      adapter-neutral, so a second tree would not change what they prove.
+
+  - harnesses: [strike]
+    kinds:
+      - control
+      - stored_unchanged
+      - stored_changed
+      - new_direct_lookup
+      - related_exclude
+      - project_changed
+      - stored_source_gone
+      - stored_child_source_gone
+      - derived_rebuild
+    reason: >-
+      Strike's locator and parent-directory lookup are covered by its adapter
+      tests; the store-side passes this runner asserts are shared, so its tree
+      is not duplicated here.
