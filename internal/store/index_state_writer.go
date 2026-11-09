@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -116,7 +115,11 @@ func buildListStaleIndexSessionsQuery(targets map[ingest.Harness]ingest.Harveste
 	}
 	predicate, narrowedArgs := narrowedSessionPredicate("s", scope)
 	args = append(args, narrowedArgs...)
-	return "SELECT s.session_id FROM sessions s WHERE (" + strings.Join(conditions, " OR ") + ")" + predicate + " ORDER BY s.session_id", args, nil
+	where, err := scopedWhere(conditions, predicate)
+	if err != nil {
+		return "", nil, err
+	}
+	return "SELECT s.session_id FROM sessions s WHERE " + where + " ORDER BY s.session_id", args, nil
 }
 
 // ListStaleIndexSessions selects only registered harness targets. The legacy SQL

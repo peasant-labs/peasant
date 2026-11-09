@@ -55,7 +55,11 @@ func buildListStaleAdapterSessionsQuery(targets map[ingest.Harness]ingest.Harves
 	}
 	predicate, narrowedArgs := narrowedSessionPredicate("s", scope)
 	args = append(args, narrowedArgs...)
-	return "SELECT s.session_id FROM sessions s WHERE (" + strings.Join(conditions, " OR ") + ")" + predicate + " ORDER BY s.session_id", args, nil
+	where, err := scopedWhere(conditions, predicate)
+	if err != nil {
+		return "", nil, err
+	}
+	return "SELECT s.session_id FROM sessions s WHERE " + where + " ORDER BY s.session_id", args, nil
 }
 
 // ListStaleAdapterSessions selects the sessions whose stored adapter revision
