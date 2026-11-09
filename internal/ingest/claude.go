@@ -2064,11 +2064,26 @@ func claudeSourceGoneError(path ResolvedPath, id SessionID, because string) erro
 	return fmt.Errorf("ingest: the located Claude path %q no longer holds session %s because %s; a Claude transcript is named by the file it lives in and the id its content records, so this path is not that session's source; where: ingest.ClaudeAdapter.DiscoverSessionAt in internal/ingest/claude.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path; fix: let the by-name lookup find the source the session is in now: %w", path, id, because, ErrSourceGone)
 }
 
+// claudeGoneSourceBuild is the build a gone located path returns alongside
+// ErrSourceGone. The path holds no transcript any more, so the evidence record
+// mined from it is stale; the returned build carries its prune as a deferred
+// write, which the core applies only after every selected id is located, so a
+// refused run still writes nothing. The stored session row is untouched: the
+// core records the stored-but-unreadable outcome.
+func (a *ClaudeAdapter) claudeGoneSourceBuild(path ResolvedPath) LocatedBuild {
+	return LocatedBuild{Deferred: claudeDeferredEvidence{cache: a.evidence, deletes: []ResolvedPath{path}}}
+}
+
 // DiscoverSessionAt builds the members one located Claude source carries: the
 // source itself, the subagents its layout names, the stored children the core
 // passed in, and the evidence of the native-agent owner and layout parent its
 // own transcript proves. It reads only what it builds and writes nothing: its
 // evidence records are returned as deferred writes.
+//
+// A path that no longer holds its transcript returns ErrSourceGone together
+// with a build whose only deferred write is that path's evidence prune, so the
+// scoped run leaves the same evidence table a full walk does: the row for a
+// transcript that no longer exists goes, while the stored session stays.
 //
 // The role and the outcome of every member are the core's: only the core knows
 // whether a member was requested, related-only, or an ancestor, so the adapter
@@ -2082,7 +2097,7 @@ func (a *ClaudeAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig,
 	}
 	parsed, ok := parseClaudeTranscriptPath(at.Path)
 	if !ok || parsed.id != at.ID {
-		return LocatedBuild{}, claudeSourceGoneError(at.Path, at.ID, "the path is not a root or subagent Claude transcript that holds this session id")
+		return a.claudeGoneSourceBuild(at.Path), claudeSourceGoneError(at.Path, at.ID, "the path is not a root or subagent Claude transcript that holds this session id")
 	}
 	root, ok := claudeEnumeratedRootFor(cfg, parsed.root)
 	if !ok {
@@ -2093,12 +2108,12 @@ func (a *ClaudeAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig,
 	info, err := a.fs.Stat(at.Path.String())
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return LocatedBuild{}, claudeSourceGoneError(at.Path, at.ID, "the file no longer exists")
+			return a.claudeGoneSourceBuild(at.Path), claudeSourceGoneError(at.Path, at.ID, "the file no longer exists")
 		}
 		return LocatedBuild{}, fmt.Errorf("ingest: the located Claude transcript %q for session %s could not be observed; the path exists but its state cannot be read, so the member cannot be built from it; where: ingest.ClaudeAdapter.DiscoverSessionAt in internal/ingest/claude.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path, and the core records the read failure; fix: make the file readable and retry: %w", at.Path, at.ID, err)
 	}
 	if info.IsDir() {
-		return LocatedBuild{}, claudeSourceGoneError(at.Path, at.ID, "the path is a directory, not a transcript file")
+		return a.claudeGoneSourceBuild(at.Path), claudeSourceGoneError(at.Path, at.ID, "the path is a directory, not a transcript file")
 	}
 
 	enumerated, unreadable, missing, err := a.enumerateClaudeLocatedSource(ctx, cfg, parsed, at, info)
