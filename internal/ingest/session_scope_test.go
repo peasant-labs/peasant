@@ -15,6 +15,7 @@ import (
 	_ "embed"
 	"fmt"
 	"maps"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
@@ -101,19 +103,17 @@ type scopeCase struct {
 	Related  string   `yaml:"related"`
 	SinceMs  int64    `yaml:"sinceMs"`
 
-	// Expected source-root operations, relative to Root, as exact sets.
-	ExpectedReads    []string `yaml:"expectedReads"`
-	ExpectedStats    []string `yaml:"expectedStats"`
-	ExpectedReaddirs []string `yaml:"expectedReaddirs"`
-	ContextPaths     []string `yaml:"contextPaths"`
+	// ExpectedOps is the exact source-root operation set per configured
+	// harness, keyed by harness name. Every configured root must have an entry
+	// on a scoped case: the assertion derives the root list from the same
+	// declaration the pipeline uses, so a new source with no entry fails
+	// instead of passing silently. A full_both case runs no scoped discovery
+	// and does not assert source ops.
+	ExpectedOps  map[string]scopeRootOps `yaml:"expectedOps"`
+	ContextPaths []string                `yaml:"contextPaths"`
 	// EvidencePaths is the exact union the evidence recorder may request. When
 	// empty it defaults to the read set plus context paths.
 	EvidencePaths []string `yaml:"evidencePaths"`
-
-	// ExpectedCodexOps is the exact source-root operation set for the Codex
-	// root. It is required (not defaulted) so adding a configured source
-	// cannot silently escape the op assertion.
-	ExpectedCodexOps *scopeRootOps `yaml:"expectedCodexOps"`
 
 	WantProcessed []string `yaml:"wantProcessed"`
 	WantUpkeep    []string `yaml:"wantUpkeep"`
@@ -123,7 +123,7 @@ type scopeCase struct {
 
 	// ExpectParentTargets, when non-empty, is the exact parent list the run's
 	// uncached-child heal must receive: the processed members of the
-	// independent-admission harnesses. It is the P5 witness.
+	// independent-admission harnesses. It is the uncached-child-heal witness.
 	ExpectParentTargets   []string `yaml:"expectParentTargets"`
 	ExpectParentHarnesses []string `yaml:"expectParentHarnesses"`
 
@@ -131,11 +131,6 @@ type scopeCase struct {
 	// a cohort id, so the cohort-filtered delta compares real work rather than
 	// two empty sets.
 	WantIndexLogDelta bool `yaml:"wantIndexLogDelta"`
-
-	// ExpectedScopedCalls names the scope-bearing store calls the scoped run
-	// must make exactly once, each carrying the run's upkeep set. An empty list
-	// means no call is asserted for this case.
-	ExpectedScopedCalls []string `yaml:"expectedScopedCalls"`
 
 	// AssertOldProjectGone asks the runner to prove the project identity the
 	// selected session held before the mutation has no project row in either
@@ -153,11 +148,9 @@ type scopeFile struct {
 	Lines []string `yaml:"lines"`
 }
 
-// scopeRootOps is one configured source root's exact operation sets, relative
-// to that root.
-// scopeExpectedDerived is the exact derived state a full_both case must
-// produce. Paths are relative to the fixture root (spawns) or the Codex root
-// (catalogue entries).
+// scopeExpectedDerived is the exact derived state a derived case must produce.
+// Paths are relative to the Claude root (spawns) or the Codex root (catalogue
+// entries).
 type scopeExpectedDerived struct {
 	Spawns  []scopeExpectedSpawn   `yaml:"spawns"`
 	Catalog []scopeExpectedRollout `yaml:"catalog"`
@@ -174,6 +167,8 @@ type scopeExpectedRollout struct {
 	SessionID string `yaml:"session"` // "session" avoids the YAML "id" ambiguity
 }
 
+// scopeRootOps is one configured source root's exact operation sets, relative
+// to that root.
 type scopeRootOps struct {
 	Reads    []string `yaml:"reads"`
 	Stats    []string `yaml:"stats"`
@@ -195,7 +190,22 @@ type scopeManifest struct {
 	// to the full cross product, so a pair is covered by name, never by a
 	// count.
 	NotApplicable []scopeNotApplicable `yaml:"notApplicable"`
+	// Passes is the closed pass inventory: every scope-bearing store call the
+	// scoped pipeline makes must be named here, and every store_scope pass must
+	// record a call on every scoped run.
+	Passes []scopePass `yaml:"passes"`
 }
+
+// scopePass is one pass of the closed pass inventory. Guard selects how the
+// pass is witnessed: a store-scope call, the parent-target list, or a by-path
+// evidence read.
+type scopePass struct {
+	ID        string `yaml:"id"`
+	Operation string `yaml:"operation"`
+	Guard     string `yaml:"guard"`
+}
+
+var scopePassGuards = []string{"store_scope", "parent_targets", "by_path_read"}
 
 type scopeNotApplicable struct {
 	Harnesses []string `yaml:"harnesses"`
@@ -257,6 +267,9 @@ func TestSessionScopeManifestCoversTheRegistryCross(t *testing.T) {
 	if err := testutil.RequireFixtureNames("session-scope manifest", "case", manifest.RequiredNames, caseNameSet(fixture.Cases)); err != nil {
 		t.Fatal(err)
 	}
+	if err := validateScopePassInventory(manifest); err != nil {
+		t.Fatal(err)
+	}
 
 	have := make(map[string]bool, len(fixture.Cases))
 	for _, testCase := range fixture.Cases {
@@ -307,11 +320,12 @@ func TestSessionScopeManifestCoversTheRegistryCross(t *testing.T) {
 func TestSessionScopeParity(t *testing.T) {
 	t.Parallel()
 	fixture := loadScopeFixture(t)
+	manifest := loadScopeManifest(t)
 	for _, testCase := range fixture.Cases {
 		testCase := testCase
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
-			runScopeParityCase(t, fixture, testCase)
+			runScopeParityCase(t, fixture, manifest, testCase)
 		})
 	}
 }
@@ -622,6 +636,7 @@ func runScopePhase(t *testing.T, ctx context.Context, world *scopeWorld, scope *
 		ingest.WithStore(storeArg),
 		ingest.WithMetricsStore(metricsArg),
 		ingest.WithIndexLogger(indexLogArg),
+		ingest.WithAnalyzer(metrics.NewEngine(world.raw)),
 		ingest.WithLogger(logArg),
 		ingest.WithHarvesterVersions(maps.Clone(ingest.HarvesterVersionRegistry)),
 	)
@@ -635,7 +650,7 @@ func runScopePhase(t *testing.T, ctx context.Context, world *scopeWorld, scope *
 	return result
 }
 
-func runScopeParityCase(t *testing.T, fixture scopeFixture, testCase scopeCase) {
+func runScopeParityCase(t *testing.T, fixture scopeFixture, manifest scopeManifest, testCase scopeCase) {
 	t.Helper()
 	ctx := context.Background()
 	root := fixture.Root
@@ -714,8 +729,10 @@ func runScopeParityCase(t *testing.T, fixture scopeFixture, testCase scopeCase) 
 	assertScopeOps(t, fixture, testCase, worldB)
 	assertScopeEvidence(t, testCase, worldB.pipe)
 	assertScopeReport(t, testCase, result)
-	assertScopeCalls(t, testCase, worldB.pipe)
-	assertScopeParentTargets(t, testCase, worldB.pipe)
+	assertScopeCalls(t, testCase, manifest, worldB.pipe)
+	if testCase.ExpectedDerived != nil {
+		assertDerivedRebuild(t, ctx, testCase, worldA.raw, worldB.raw)
+	}
 	if testCase.AssertOldProjectGone {
 		assertOldProjectGone(t, ctx, worldA.raw, worldB.raw, bBefore, bAfter)
 	}
@@ -843,10 +860,10 @@ func firstScopeRows(rows []string, limit int) []string {
 func assertScopeLogs(t *testing.T, fixture scopeFixture, aBefore, aAfter, bBefore, bAfter map[string]store.ExportedTable, bIngestBefore int, testCase scopeCase) {
 	t.Helper()
 	if got := tableRowCount(bAfter, "ingest_log") - bIngestBefore; got != 1 {
-		t.Fatalf("case %q: scoped run added %d ingest_log rows, want exactly 1", testCase.Name, got)
+		t.Fatalf("case %q: the run on B added %d ingest_log rows, want exactly 1", testCase.Name, got)
 	}
 	if got := tableRowCount(aAfter, "ingest_log") - tableRowCount(aBefore, "ingest_log"); got != 1 {
-		t.Fatalf("case %q: full run added %d ingest_log rows, want exactly 1", testCase.Name, got)
+		t.Fatalf("case %q: the run on A added %d ingest_log rows, want exactly 1", testCase.Name, got)
 	}
 	cohort := make(map[string]bool)
 	for _, id := range testCase.WantUpkeep {
@@ -880,34 +897,28 @@ func assertScopeLogs(t *testing.T, fixture scopeFixture, aBefore, aAfter, bBefor
 
 // assertScopeOps asserts the exact source-root operation sets for EVERY
 // configured harness root, the fixture's context_paths in the Claude read and
-// stat sets, and zero WalkDir anywhere under a configured root. A new source
-// without expectations fails the case, so an extra operation on a root the case
-// does not use cannot hide behind the root it does use.
+// stat sets, and the absence of a directory read or walk on any ancestor of a
+// configured root. The root list is derived from the same declaration the
+// pipeline uses, and a configured harness with no fixture entry fails, so a new
+// source cannot escape the assertion.
 func assertScopeOps(t *testing.T, fixture scopeFixture, testCase scopeCase, world *scopeWorld) {
 	t.Helper()
-	if testCase.ExpectedCodexOps == nil {
-		t.Fatalf("case %q declares no expectedCodexOps; every configured harness root must state its exact operation set", testCase.Name)
-	}
-	type rootCase struct {
-		harness string
-		root    string
-		want    scopeRootOps
-	}
-	roots := []rootCase{
-		{harness: string(ingest.HarnessClaudeCode), root: fixture.Root, want: scopeRootOps{Reads: testCase.ExpectedReads, Stats: testCase.ExpectedStats, Readdirs: testCase.ExpectedReaddirs}},
-		{harness: string(ingest.HarnessCodex), root: scopeSourceRoots()[ingest.HarnessCodex], want: *testCase.ExpectedCodexOps},
-	}
+	roots := scopeSourceRoots()
 	readSets := make(map[string]map[string]bool, len(roots))
 	statSets := make(map[string]map[string]bool, len(roots))
-	for _, entry := range roots {
-		if entry.root == "" {
-			t.Fatalf("case %q: harness %s has no configured source root", testCase.Name, entry.harness)
+	for harness, root := range roots {
+		if root == "" {
+			t.Fatalf("case %q: configured harness %s has no source root", testCase.Name, harness)
+		}
+		want, declared := testCase.ExpectedOps[string(harness)]
+		if !declared {
+			t.Fatalf("case %q: configured harness %s has no expectedOps entry; every configured root must state its exact operation set", testCase.Name, harness)
 		}
 		relPaths := func(paths []string) []string {
 			out := make([]string, 0, len(paths))
-			for _, path := range paths {
-				if path == entry.root || strings.HasPrefix(path, entry.root+"/") {
-					rel := strings.TrimPrefix(strings.TrimPrefix(path, entry.root), "/")
+			for _, sourcePath := range paths {
+				if sourcePath == root || strings.HasPrefix(sourcePath, root+"/") {
+					rel := strings.TrimPrefix(strings.TrimPrefix(sourcePath, root), "/")
 					if rel == "" {
 						rel = "."
 					}
@@ -917,38 +928,61 @@ func assertScopeOps(t *testing.T, fixture scopeFixture, testCase scopeCase, worl
 			sort.Strings(out)
 			return out
 		}
-		assertSet := func(operation testutil.FSOp, want []string) {
+		assertSet := func(operation testutil.FSOp, expected []string) {
 			got := relPaths(world.fs.Paths(operation))
-			sortedWant := append([]string(nil), want...)
+			sortedWant := append([]string(nil), expected...)
 			sort.Strings(sortedWant)
 			if strings.Join(got, "\x00") != strings.Join(sortedWant, "\x00") {
-				t.Fatalf("case %q: %s set on the %s root %s = %v, want exactly %v", testCase.Name, operation, entry.harness, entry.root, got, sortedWant)
+				t.Fatalf("case %q: %s set on the %s root %s = %v, want exactly %v", testCase.Name, operation, harness, root, got, sortedWant)
 			}
 		}
-		assertSet(testutil.FSOpReadFile, entry.want.Reads)
-		assertSet(testutil.FSOpStat, entry.want.Stats)
-		assertSet(testutil.FSOpReadDir, entry.want.Readdirs)
+		assertSet(testutil.FSOpReadFile, want.Reads)
+		assertSet(testutil.FSOpStat, want.Stats)
+		assertSet(testutil.FSOpReadDir, want.Readdirs)
 		if walks := relPaths(world.fs.Paths(testutil.FSOpWalkDir)); len(walks) != 0 {
-			t.Fatalf("case %q: a scoped run walked the %s source root %s: %v", testCase.Name, entry.harness, entry.root, walks)
+			t.Fatalf("case %q: a scoped run walked the %s source root %s: %v", testCase.Name, harness, root, walks)
 		}
-		readSets[entry.harness] = make(map[string]bool)
-		for _, path := range relPaths(world.fs.Paths(testutil.FSOpReadFile)) {
-			readSets[entry.harness][path] = true
+		for _, ancestor := range scopeSourceAncestors(root) {
+			for _, operation := range []testutil.FSOp{testutil.FSOpReadDir, testutil.FSOpWalkDir} {
+				for _, touched := range world.fs.Paths(operation) {
+					if touched == ancestor {
+						t.Fatalf("case %q: %s on %s, an ancestor of the %s source root %s; an ancestor read or walk can descend into a root the scoped run must not enumerate", testCase.Name, operation, ancestor, harness, root)
+					}
+				}
+			}
 		}
-		statSets[entry.harness] = make(map[string]bool)
-		for _, path := range relPaths(world.fs.Paths(testutil.FSOpStat)) {
-			statSets[entry.harness][path] = true
+		readSets[string(harness)] = make(map[string]bool)
+		for _, sourcePath := range relPaths(world.fs.Paths(testutil.FSOpReadFile)) {
+			readSets[string(harness)][sourcePath] = true
+		}
+		statSets[string(harness)] = make(map[string]bool)
+		for _, sourcePath := range relPaths(world.fs.Paths(testutil.FSOpStat)) {
+			statSets[string(harness)][sourcePath] = true
 		}
 	}
 	claude := string(ingest.HarnessClaudeCode)
-	for _, path := range testCase.ContextPaths {
-		if !readSets[claude][path] {
-			t.Fatalf("case %q: context path %q is absent from the Claude read set %v", testCase.Name, path, scopeKeysOf(readSets[claude]))
+	for _, sourcePath := range testCase.ContextPaths {
+		if !readSets[claude][sourcePath] {
+			t.Fatalf("case %q: context path %q is absent from the Claude read set %v", testCase.Name, sourcePath, scopeKeysOf(readSets[claude]))
 		}
-		if !statSets[claude][path] {
-			t.Fatalf("case %q: context path %q is absent from the Claude stat set %v", testCase.Name, path, scopeKeysOf(statSets[claude]))
+		if !statSets[claude][sourcePath] {
+			t.Fatalf("case %q: context path %q is absent from the Claude stat set %v", testCase.Name, sourcePath, scopeKeysOf(statSets[claude]))
 		}
 	}
+}
+
+// scopeSourceAncestors returns every ancestor directory of root, nearest first,
+// ending at the filesystem root. They are the directories a walk or listing
+// could use to reach a configured source without naming it.
+func scopeSourceAncestors(root string) []string {
+	var ancestors []string
+	for dir := path.Dir(root); dir != "." && dir != root; dir = path.Dir(dir) {
+		ancestors = append(ancestors, dir)
+		if dir == "/" {
+			break
+		}
+	}
+	return ancestors
 }
 
 func scopeKeysOf(set map[string]bool) []string {
@@ -975,11 +1009,11 @@ func assertScopeEvidence(t *testing.T, testCase scopeCase, recorder *scopeStore)
 		t.Fatalf("case %q: the scoped run called the whole-table LoadClaudeEvidence %d times, want 0", testCase.Name, wholeLoad)
 	}
 	allowed := make(map[string]bool)
-	for _, path := range testCase.ExpectedReads {
-		allowed[path] = true
+	for _, sourcePath := range testCase.ExpectedOps[string(ingest.HarnessClaudeCode)].Reads {
+		allowed[sourcePath] = true
 	}
-	for _, path := range testCase.ContextPaths {
-		allowed[path] = true
+	for _, sourcePath := range testCase.ContextPaths {
+		allowed[sourcePath] = true
 	}
 	for _, path := range testCase.EvidencePaths {
 		allowed[path] = true
@@ -1041,39 +1075,104 @@ func scopeAssertIDSet(t *testing.T, label string, got, want []string) {
 	}
 }
 
-// assertScopeCalls pins the per-pass call set the fixture names, each exactly
-// once and each carrying the run's upkeep set.
-func assertScopeCalls(t *testing.T, testCase scopeCase, recorder *scopeStore) {
+// assertScopeCalls enforces the pass inventory: every store_scope pass named
+// in the manifest must record at least one narrowed call carrying the run's
+// upkeep set, every recorded scope-bearing call must be named in the manifest,
+// and the parent-target pass must record exactly when its target set is
+// non-empty.
+func assertScopeCalls(t *testing.T, testCase scopeCase, manifest scopeManifest, recorder *scopeStore) {
 	t.Helper()
-	if len(testCase.ExpectedScopedCalls) == 0 {
-		return
+	if len(manifest.Passes) == 0 {
+		t.Fatal("the manifest names no passes; the pass inventory must be explicit")
 	}
-	calls := recorder.calls.Calls()
-	byOperation := make(map[string][]scoperecorder.Call, len(calls))
-	for _, call := range calls {
+	byOperation := make(map[string][]scoperecorder.Call)
+	for _, call := range recorder.calls.Calls() {
 		byOperation[call.Operation] = append(byOperation[call.Operation], call)
 	}
-	// A pass may run more than once in a harvest (the paged listings page, and
-	// two maintenance sites share one method), so the assertion is the exact
-	// operation set with every call narrowed: a call that widens is the defect,
-	// not a repeat.
-	for _, operation := range testCase.ExpectedScopedCalls {
-		recorded := byOperation[operation]
-		if len(recorded) == 0 {
-			t.Fatalf("case %q: %s recorded no call, want at least one", testCase.Name, operation)
+	named := make(map[string]bool, len(manifest.Passes))
+	storeScopePasses := 0
+	for _, pass := range manifest.Passes {
+		if pass.ID == "" || pass.Operation == "" {
+			t.Fatalf("the manifest pass %v names no id or operation", pass)
 		}
-		for _, call := range recorded {
-			if call.All {
-				t.Fatalf("case %q: %s carried the all-store scope on a scoped run", testCase.Name, operation)
+		if !containsString(scopePassGuards, pass.Guard) {
+			t.Fatalf("pass %q names unknown guard %q; the closed set is %v", pass.ID, pass.Guard, scopePassGuards)
+		}
+		if named[pass.Operation] && pass.Guard == "store_scope" {
+			t.Fatalf("the manifest names the store-scope operation %q twice", pass.Operation)
+		}
+		named[pass.Operation] = true
+		switch pass.Guard {
+		case "store_scope":
+			storeScopePasses++
+			recorded := byOperation[pass.Operation]
+			if len(recorded) == 0 {
+				t.Fatalf("case %q: pass %q (%s) recorded no call; the manifest inventory is the fail-on-unrecorded rule", testCase.Name, pass.ID, pass.Operation)
 			}
-			if call.Kind == scoperecorder.KindProjects {
-				if len(call.ProjectHashes) == 0 {
-					t.Fatalf("case %q: %s carried a narrowed project scope with no hashes", testCase.Name, operation)
+			for _, call := range recorded {
+				if call.All {
+					t.Fatalf("case %q: pass %q (%s) carried the all-store scope on a scoped run", testCase.Name, pass.ID, pass.Operation)
 				}
-				continue
+				if call.Kind == scoperecorder.KindProjects {
+					if len(call.ProjectHashes) == 0 {
+						t.Fatalf("case %q: pass %q (%s) carried a narrowed project scope with no hashes", testCase.Name, pass.ID, pass.Operation)
+					}
+					continue
+				}
+				scopeAssertIDSet(t, testCase.Name+" "+pass.ID+" ids", call.IDs, testCase.WantUpkeep)
 			}
-			scopeAssertIDSet(t, testCase.Name+" "+operation+" ids", call.IDs, testCase.WantUpkeep)
+		case "parent_targets":
+			assertScopeParentTargets(t, testCase, pass, recorder)
+		case "by_path_read":
+			// The by-path evidence read is witnessed per case kind: for a
+			// Claude cohort this run built, at least one path must be asked for.
+			// The dedicated read-recorder cases pin the exact set.
+			if testCase.Harness == string(ingest.HarnessClaudeCode) && len(testCase.ExpectedOps[string(ingest.HarnessClaudeCode)].Reads) > 0 {
+				_, requested := recorder.evidenceSnapshot()
+				if len(requested) == 0 {
+					t.Fatalf("case %q: pass %q recorded no by-path evidence read, want at least one", testCase.Name, pass.ID)
+				}
+			}
 		}
+	}
+	if storeScopePasses == 0 {
+		t.Fatal("the manifest names no store-scope pass; the inventory would assert nothing")
+	}
+	for operation := range byOperation {
+		if !named[operation] {
+			t.Fatalf("case %q: scope-bearing operation %q recorded a call but is not named in the pass inventory; add it to the manifest so a new pass cannot go unwitnessed", testCase.Name, operation)
+		}
+	}
+}
+
+// assertScopeParentTargets pins the argument of the uncached-child heal: its
+// targets are the processed members of the independent-admission harnesses,
+// never the whole store and never the whole upkeep set. An empty target set
+// records no call, which is the one documented exception to the unrecorded
+// rule.
+func assertScopeParentTargets(t *testing.T, testCase scopeCase, pass scopePass, recorder *scopeStore) {
+	t.Helper()
+	parents, harnesses := recorder.parentSnapshot()
+	if len(testCase.ExpectParentTargets) == 0 {
+		if len(parents) != 0 || len(harnesses) != 0 {
+			t.Fatalf("case %q: pass %q recorded a target list %v/%v although the processed intersection is empty", testCase.Name, pass.ID, parents, harnesses)
+		}
+		return
+	}
+	gotIDs := make([]string, 0, len(parents))
+	for _, parent := range parents {
+		gotIDs = append(gotIDs, string(parent))
+	}
+	scopeAssertIDSet(t, testCase.Name+" "+pass.ID+" targets", gotIDs, testCase.ExpectParentTargets)
+	gotHarnesses := make([]string, 0, len(harnesses))
+	for _, harness := range harnesses {
+		gotHarnesses = append(gotHarnesses, string(harness))
+	}
+	sort.Strings(gotHarnesses)
+	wantHarnesses := append([]string(nil), testCase.ExpectParentHarnesses...)
+	sort.Strings(wantHarnesses)
+	if strings.Join(gotHarnesses, ",") != strings.Join(wantHarnesses, ",") {
+		t.Fatalf("case %q: pass %q harnesses = %v, want %v", testCase.Name, pass.ID, gotHarnesses, wantHarnesses)
 	}
 }
 
@@ -1210,7 +1309,7 @@ func assertDerivedRebuild(t *testing.T, ctx context.Context, testCase scopeCase,
 	enumeration := ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete}
 	for _, row := range testCase.ExpectedDerived.Catalog {
 		enumeration.Files = append(enumeration.Files, ingest.RolloutFile{
-			Path:      ingest.ResolvedPath(filepath.Join("/codex/sessions", row.Path)),
+			Path:      ingest.ResolvedPath(filepath.Join(scopeSourceRoots()[ingest.HarnessCodex], row.Path)),
 			SessionID: ingest.SessionID(row.SessionID),
 		})
 	}
@@ -1258,7 +1357,7 @@ func normalizedDerivedSpawns(rows []scopeExpectedSpawn) []string {
 	out := make([]string, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, derivedRowToken(
-			filepath.Join("/claude", row.Spawner),
+			filepath.Join(scopeSourceRoots()[ingest.HarnessClaudeCode], row.Spawner),
 			row.Team,
 			row.Name,
 		))
@@ -1271,7 +1370,7 @@ func normalizedDerivedCatalog(rows []scopeExpectedRollout) []string {
 	out := make([]string, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, derivedRowToken(
-			filepath.Join("/codex/sessions", row.Path),
+			filepath.Join(scopeSourceRoots()[ingest.HarnessCodex], row.Path),
 			row.SessionID,
 		))
 	}
@@ -1340,25 +1439,42 @@ func cohortRowNamesCohort(row string, cohort map[string]bool) bool {
 // assertScopeParentTargets pins the argument of the uncached-child heal: its
 // targets are the processed members of the independent-admission harnesses,
 // never the whole store and never the whole upkeep set.
-func assertScopeParentTargets(t *testing.T, testCase scopeCase, recorder *scopeStore) {
-	t.Helper()
-	if len(testCase.ExpectParentTargets) == 0 {
-		return
+
+// validateScopePassInventory makes the manifest's pass inventory explicit and
+// complete: every entry states its id, operation and guard; the store-scope
+// operations are unique; and the inventory contains at least one pass of each
+// guard kind, so dropping a guard class cannot leave the expected pass
+// assertion silently smaller.
+func validateScopePassInventory(manifest scopeManifest) error {
+	if len(manifest.Passes) == 0 {
+		return fmt.Errorf("the session-scope manifest names no passes; list every scope-bearing pass with its id, operation and guard")
 	}
-	parents, harnesses := recorder.parentSnapshot()
-	gotIDs := make([]string, 0, len(parents))
-	for _, parent := range parents {
-		gotIDs = append(gotIDs, string(parent))
+	seenID := make(map[string]bool, len(manifest.Passes))
+	seenStoreOp := make(map[string]bool, len(manifest.Passes))
+	guards := make(map[string]int, len(scopePassGuards))
+	for _, pass := range manifest.Passes {
+		if pass.ID == "" || pass.Operation == "" {
+			return fmt.Errorf("manifest pass %v names no id or operation; every pass must be explicit", pass)
+		}
+		if !containsString(scopePassGuards, pass.Guard) {
+			return fmt.Errorf("manifest pass %q names unknown guard %q; the closed set is %v", pass.ID, pass.Guard, scopePassGuards)
+		}
+		if seenID[pass.ID] {
+			return fmt.Errorf("manifest pass id %q appears twice", pass.ID)
+		}
+		seenID[pass.ID] = true
+		if pass.Guard == "store_scope" {
+			if seenStoreOp[pass.Operation] {
+				return fmt.Errorf("manifest names the store-scope operation %q twice", pass.Operation)
+			}
+			seenStoreOp[pass.Operation] = true
+		}
+		guards[pass.Guard]++
 	}
-	scopeAssertIDSet(t, testCase.Name+" parent-heal targets", gotIDs, testCase.ExpectParentTargets)
-	gotHarnesses := make([]string, 0, len(harnesses))
-	for _, harness := range harnesses {
-		gotHarnesses = append(gotHarnesses, string(harness))
+	for _, guard := range scopePassGuards {
+		if guards[guard] == 0 {
+			return fmt.Errorf("manifest has no %q pass; the inventory must cover every guard kind", guard)
+		}
 	}
-	sort.Strings(gotHarnesses)
-	wantHarnesses := append([]string(nil), testCase.ExpectParentHarnesses...)
-	sort.Strings(wantHarnesses)
-	if strings.Join(gotHarnesses, ",") != strings.Join(wantHarnesses, ",") {
-		t.Fatalf("case %q: parent-heal harnesses = %v, want %v", testCase.Name, gotHarnesses, wantHarnesses)
-	}
+	return nil
 }
