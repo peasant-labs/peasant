@@ -76,20 +76,20 @@ type strikeLocatorLookup struct {
 }
 
 type strikeLocatorLocated struct {
-	ID                    string                    `yaml:"id"`
-	Path                  string                    `yaml:"path"`
-	StoredParent          string                    `yaml:"storedParent"`
-	StoredChildren        []strikeLocatorChild      `yaml:"storedChildren"`
-	WantMembers           []string                  `yaml:"wantMembers"`
-	WantUnreadable        []strikeLocatorUnreadable `yaml:"wantUnreadable"`
-	WantProbe             *strikeLocatorProbe       `yaml:"wantProbe"`
-	Stats                 []string                  `yaml:"stats"`
-	Reads                 []string                  `yaml:"reads"`
-	WantGone              bool                      `yaml:"wantGone"`
-	WantError             string                    `yaml:"wantError"`
-	KnownGap      string   `yaml:"knownGap"`
-	AllowedDiffs  []string `yaml:"allowedDiffs"`
-	AbsentMembers []string `yaml:"absentMembers"`
+	ID             string                    `yaml:"id"`
+	Path           string                    `yaml:"path"`
+	StoredParent   string                    `yaml:"storedParent"`
+	StoredChildren []strikeLocatorChild      `yaml:"storedChildren"`
+	WantMembers    []string                  `yaml:"wantMembers"`
+	WantUnreadable []strikeLocatorUnreadable `yaml:"wantUnreadable"`
+	WantProbe      *strikeLocatorProbe       `yaml:"wantProbe"`
+	Stats          []string                  `yaml:"stats"`
+	Reads          []string                  `yaml:"reads"`
+	WantGone       bool                      `yaml:"wantGone"`
+	WantError      string                    `yaml:"wantError"`
+	KnownGap       string                    `yaml:"knownGap"`
+	AllowedDiffs   []string                  `yaml:"allowedDiffs"`
+	AbsentMembers  []string                  `yaml:"absentMembers"`
 }
 
 type strikeLocatorChild struct {
