@@ -598,12 +598,17 @@ func (l *scopeLocator) adopt(rootID SessionID, stored StoredSessionSource, membe
 		switch {
 		case member.ID == rootID:
 			member.Role = rootRole
+			if rootRole == CohortChild && stored.Parent != nil {
+				member.Parent = stored.Parent
+			}
 		case stored.Parent != nil && member.ID == *stored.Parent:
 			member.Role = CohortContext
 		case l.scope.Related() == RelatedExclude:
 			member.Role = CohortContext
 		default:
 			member.Role = CohortChild
+			parent := rootID
+			member.Parent = &parent
 		}
 
 		if member.Source == nil {
@@ -740,17 +745,17 @@ func (l *scopeLocator) locateStoredChild(ctx context.Context, parentID SessionID
 	if l.scope.Related() == RelatedExclude {
 		role = CohortContext
 	}
+	parent := parentID
 	if _, enabled := l.enabledConfig(child.Harness); !enabled {
-		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableHarnessDisabled, StoredPath: child.Path})
+		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableHarnessDisabled, StoredPath: child.Path, Parent: &parent})
 		return nil
 	}
 	cfg, _ := l.enabledConfig(child.Harness)
 	locator, ok := l.locatorFor(child.Harness)
 	if !ok {
-		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceFailed, Detail: "the " + string(child.Harness) + " adapter cannot locate one session by name", StoredPath: child.Path})
+		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceFailed, Detail: "the " + string(child.Harness) + " adapter cannot locate one session by name", StoredPath: child.Path, Parent: &parent})
 		return nil
 	}
-	parent := parentID
 	build, err := locator.DiscoverSessionAt(ctx, cfg, LocatedSource{ID: child.ID, Path: child.Path, Stored: StoredRelatives{Parent: &parent, Children: l.children[child.ID]}})
 	if err != nil {
 		l.deferred = append(l.deferred, build.Deferred)
@@ -758,16 +763,16 @@ func (l *scopeLocator) locateStoredChild(ctx context.Context, parentID SessionID
 			return ctxErr
 		}
 		if errors.Is(err, ErrSourceGone) {
-			l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceGone, StoredPath: child.Path})
+			l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceGone, StoredPath: child.Path, Parent: &parent})
 			return nil
 		}
-		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceFailed, Detail: firstLineOr(err.Error(), "the recorded source could not be read"), StoredPath: child.Path})
+		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceFailed, Detail: firstLineOr(err.Error(), "the recorded source could not be read"), StoredPath: child.Path, Parent: &parent})
 		return nil
 	}
 	l.deferred = append(l.deferred, build.Deferred)
 	root, found := memberForID(build.Members, child.ID)
 	if !found || root.Source == nil {
-		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceGone, StoredPath: child.Path})
+		l.addMember(LocatedMember{ID: child.ID, Harness: child.Harness, Outcome: LocateStoredUnreadable, Role: role, Unreadable: UnreadableSourceGone, StoredPath: child.Path, Parent: &parent})
 		return nil
 	}
 	stored := StoredSessionSource{ID: child.ID, Harness: child.Harness, Parent: &parent}
