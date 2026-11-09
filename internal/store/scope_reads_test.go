@@ -41,11 +41,14 @@ type storeScopeContractFixture struct {
 }
 
 type scopedPassCase struct {
-	Name             string   `yaml:"name"`
-	Narrowed         []string `yaml:"narrowed"`
-	All              []string `yaml:"all"`
-	NarrowedProjects []string `yaml:"narrowedProjects"`
-	AllProjects      []string `yaml:"allProjects"`
+	Name              string   `yaml:"name"`
+	HarnessTargets    []string `yaml:"harnessTargets"`
+	ExtraDecoy        string   `yaml:"extraDecoy"`
+	ExtraDecoyHarness string   `yaml:"extraDecoyHarness"`
+	Narrowed          []string `yaml:"narrowed"`
+	All               []string `yaml:"all"`
+	NarrowedProjects  []string `yaml:"narrowedProjects"`
+	AllProjects       []string `yaml:"allProjects"`
 }
 
 type scopedPassFixture struct {
@@ -276,8 +279,8 @@ func TestStoreScopeNarrowsEveryPass(t *testing.T) {
 	for _, testCase := range fixture.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
-			narrowed := runScopedPass(t, fixture, testCase.Name, false)
-			wide := runScopedPass(t, fixture, testCase.Name, true)
+			narrowed := runScopedPass(t, fixture, testCase, false)
+			wide := runScopedPass(t, fixture, testCase, true)
 			if testCase.Name == "orphan_projects" {
 				assertIDsEqual(t, testCase.Name+" narrowed", narrowed, testCase.NarrowedProjects)
 				assertIDsEqual(t, testCase.Name+" all", wide, testCase.AllProjects)
@@ -289,12 +292,36 @@ func TestStoreScopeNarrowsEveryPass(t *testing.T) {
 	}
 }
 
+// scopePassTargets turns the fixture's harness target names into the target map
+// the selection reads. An empty list keeps the historical single-harness case;
+// a two-harness list reproduces the production shape where an appended
+// predicate that escapes an OR chain lets the first sorted arm through.
+func scopePassTargets(t *testing.T, testCase scopedPassCase) map[ingest.Harness]ingest.HarvesterVersions {
+	t.Helper()
+	names := testCase.HarnessTargets
+	if len(names) == 0 {
+		names = []string{string(ingest.HarnessCodex)}
+	}
+	targets := make(map[ingest.Harness]ingest.HarvesterVersions, len(names))
+	for _, name := range names {
+		harness := ingest.Harness(name)
+		if !harness.IsKnown() {
+			t.Fatalf("fixture case %q names unknown harness target %q", testCase.Name, name)
+		}
+		targets[harness] = ingest.HarvesterVersions{IndexerVersion: 1, AdapterVersion: 2}
+	}
+	return targets
+}
+
 // runScopedPass seeds a fresh store and runs one named pass either narrowed to
 // the cohort or at the full-store value. It returns the ids the pass acted on
-// (selected, or mutated for a write pass).
-func runScopedPass(t *testing.T, fixture scopedPassFixture, name string, full bool) []string {
+// (selected, or mutated for a write pass). The fixture's harnessTargets is the
+// real production shape: more than one harness target, so an appended predicate
+// that escapes an OR chain is visible.
+func runScopedPass(t *testing.T, fixture scopedPassFixture, testCase scopedPassCase, full bool) []string {
 	t.Helper()
 	ctx := context.Background()
+	name := strings.TrimSuffix(testCase.Name, "_two_harness")
 	if name == "flagged_sweep" {
 		return runFlaggedSweepPass(t, fixture, full)
 	}
@@ -302,14 +329,24 @@ func runScopedPass(t *testing.T, fixture scopedPassFixture, name string, full bo
 	cohort := ingest.SessionID(fixture.Cohort)
 	decoy := ingest.SessionID(fixture.Decoy)
 	seedPassSessions(t, db, fixture.Cohort, fixture.Decoy, fixture.CohortProject, fixture.DecoyProject, ingest.HarnessCodex)
+	if testCase.ExtraDecoy != "" {
+		// A decoy in the last-sorted arm: the fix must apply the narrowed
+		// predicate to every arm, not only the arm an unparenthesised AND
+		// happens to bind to.
+		harness := ingest.Harness(testCase.ExtraDecoyHarness)
+		if !harness.IsKnown() {
+			t.Fatalf("fixture case %q names unknown extra decoy harness %q", testCase.Name, testCase.ExtraDecoyHarness)
+		}
+		if err := db.InsertSessions(ctx, []ingest.StoreEntry{scopeSessionEntry(t, testCase.ExtraDecoy, fixture.DecoyProject, harness)}); err != nil {
+			t.Fatalf("seed extra decoy %s: %v", testCase.ExtraDecoy, err)
+		}
+	}
 
 	scope := ingest.StoredSessions([]ingest.SessionID{cohort})
 	if full {
 		scope = ingest.AllStoredSessions()
 	}
-	targets := map[ingest.Harness]ingest.HarvesterVersions{
-		ingest.HarnessCodex: {IndexerVersion: 1, AdapterVersion: 2},
-	}
+	targets := scopePassTargets(t, testCase)
 
 	switch name {
 	case "stale_origin":

@@ -171,6 +171,12 @@ func sqlSelectClaudeEvidenceFor(pathCount int) string {
 // would read every cached transcript to answer a question about a few. A path
 // that is not cached is absent from the map. An empty input returns an empty
 // map without reading anything.
+//
+// The named paths are read in batches of indexFormatReadBatchSize, in the order
+// the caller supplied them, so one unbounded IN list can neither hit SQLite's
+// variable limit nor build a statement whose size grows with the stale-origin
+// population. Each batch is one round trip, the same batching the other bulk
+// readers use.
 func (s *Store) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, error) {
 	records := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence)
 	if len(paths) == 0 {
@@ -199,22 +205,26 @@ func (s *Store) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 	}
 	defer s.pool.Put(conn)
 
-	args := make([]any, len(unique))
-	for index, value := range unique {
-		args[index] = value
-	}
-	err = sqlitex.Execute(conn, sqlSelectClaudeEvidenceFor(len(unique)), &sqlitex.ExecOptions{
-		Args: args,
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			record, ok := scanClaudeEvidence(stmt)
-			if ok {
-				records[record.SourcePath] = record
-			}
-			return nil
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store.LoadClaudeEvidenceFor: query: %w", err)
+	for start := 0; start < len(unique); start += indexFormatReadBatchSize {
+		end := min(start+indexFormatReadBatchSize, len(unique))
+		batch := unique[start:end]
+		args := make([]any, len(batch))
+		for index, value := range batch {
+			args[index] = value
+		}
+		err = sqlitex.Execute(conn, sqlSelectClaudeEvidenceFor(len(batch)), &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				record, ok := scanClaudeEvidence(stmt)
+				if ok {
+					records[record.SourcePath] = record
+				}
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("store.LoadClaudeEvidenceFor: query batch %d-%d of %d: %w", start, end, len(unique), err)
+		}
 	}
 	return records, nil
 }

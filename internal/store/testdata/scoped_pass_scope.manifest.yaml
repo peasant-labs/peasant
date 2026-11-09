@@ -3,7 +3,9 @@ requiredNames:
   - stale_origin
   - invalidate_stale_parent_origins
   - stale_adapter
+  - stale_adapter_two_harness
   - stale_index
+  - stale_index_two_harness
   - repair
   - content_incomplete
   - metric_sessions

@@ -631,31 +631,31 @@ func (s *Store) UpdateDailySummary(ctx context.Context, days []string) (err erro
 }
 
 // buildDeleteOrphanDailySummaryByProjectSQL renders the daily_summary_by_project
-// orphan delete for the given scope. The all-store form keeps the historical
-// NOT IN predicate unchanged. The narrowed form restricts the target rows and
-// asks about their survivors through the sessions project index, so it never
-// scans the session population.
-func buildDeleteOrphanDailySummaryByProjectSQL(scope ingest.ProjectScope) string {
-	predicate, _ := narrowedProjectPredicate("daily_summary_by_project", scope)
+// orphan delete for the given scope and the hashes to bind. The all-store form
+// keeps the historical NOT IN predicate unchanged. The narrowed form restricts
+// the target rows and asks about their survivors through the sessions project
+// index, so it never scans the session population.
+func buildDeleteOrphanDailySummaryByProjectSQL(scope ingest.ProjectScope) (string, []any) {
+	predicate, args := narrowedProjectPredicate("daily_summary_by_project", scope)
 	if scope.IsAll() {
 		return `DELETE FROM daily_summary_by_project
-WHERE project_hash NOT IN (SELECT DISTINCT project_hash FROM sessions)`
+WHERE project_hash NOT IN (SELECT DISTINCT project_hash FROM sessions)`, nil
 	}
 	return `DELETE FROM daily_summary_by_project WHERE ` + trimLeadingAnd(predicate) + `
-  AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.project_hash = daily_summary_by_project.project_hash)`
+  AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.project_hash = daily_summary_by_project.project_hash)`, args
 }
 
 // buildDeleteOrphanProjectsSQL renders the projects orphan delete for the given
-// scope. The narrowed form is driven by the named hashes and asks about their
-// survivors per row through idx_sessions_project.
-func buildDeleteOrphanProjectsSQL(scope ingest.ProjectScope) string {
-	predicate, _ := narrowedProjectPredicate("projects", scope)
+// scope and the hashes to bind. The narrowed form is driven by the named hashes
+// and asks about their survivors per row through idx_sessions_project.
+func buildDeleteOrphanProjectsSQL(scope ingest.ProjectScope) (string, []any) {
+	predicate, args := narrowedProjectPredicate("projects", scope)
 	if scope.IsAll() {
 		return `DELETE FROM projects
-WHERE project_hash NOT IN (SELECT DISTINCT project_hash FROM sessions)`
+WHERE project_hash NOT IN (SELECT DISTINCT project_hash FROM sessions)`, nil
 	}
 	return `DELETE FROM projects WHERE ` + trimLeadingAnd(predicate) + `
-  AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.project_hash = projects.project_hash)`
+  AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.project_hash = projects.project_hash)`, args
 }
 
 // CleanupOrphanProjects deletes projects and related daily_summary_by_project
@@ -682,9 +682,9 @@ func (s *Store) CleanupOrphanProjects(ctx context.Context, scope ingest.ProjectS
 	}
 	defer s.pool.Put(conn)
 
-	_, hashes := narrowedProjectPredicate("", scope)
+	dailySQL, dailyArgs := buildDeleteOrphanDailySummaryByProjectSQL(scope)
 	// Delete child rows first (daily_summary_by_project → projects).
-	if err := sqlitex.ExecuteTransient(conn, buildDeleteOrphanDailySummaryByProjectSQL(scope), &sqlitex.ExecOptions{Args: hashes}); err != nil {
+	if err := sqlitex.ExecuteTransient(conn, dailySQL, &sqlitex.ExecOptions{Args: dailyArgs}); err != nil {
 		return fmt.Errorf(
 			"store.CleanupOrphanProjects: delete orphan daily_summary_by_project: %w — "+
 				"what: DELETE failed on daily_summary_by_project; "+
@@ -694,7 +694,8 @@ func (s *Store) CleanupOrphanProjects(ctx context.Context, scope ingest.ProjectS
 		)
 	}
 
-	if err := sqlitex.ExecuteTransient(conn, buildDeleteOrphanProjectsSQL(scope), &sqlitex.ExecOptions{Args: hashes}); err != nil {
+	projectsSQL, projectsArgs := buildDeleteOrphanProjectsSQL(scope)
+	if err := sqlitex.ExecuteTransient(conn, projectsSQL, &sqlitex.ExecOptions{Args: projectsArgs}); err != nil {
 		return fmt.Errorf(
 			"store.CleanupOrphanProjects: delete orphan projects: %w — "+
 				"what: DELETE failed on projects; "+

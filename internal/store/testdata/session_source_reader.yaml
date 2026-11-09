@@ -44,6 +44,24 @@ sessions:
     cacheParent: false
     relationshipEvidence: false
     publicationParent: ""
+  - name: unstoredParent
+    id: "66666666-6666-4666-8666-666666666666"
+    harness: codex
+    project: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sourcePath: /synthetic/sessions/unstored-parent.jsonl
+    parent: ""
+    cacheParent: false
+    relationshipEvidence: false
+    publicationParent: ""
+  - name: orphanChild
+    id: "77777777-7777-4777-8777-777777777777"
+    harness: codex
+    project: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sourcePath: /synthetic/sessions/orphan-child.jsonl
+    parent: unstoredParent
+    cacheParent: false
+    relationshipEvidence: true
+    publicationParent: ""
 
 cases:
   - name: sources_primary_key_batch
@@ -117,3 +135,15 @@ cases:
       - parent
     wantChildren:
       parent: []
+
+  - name: children_uncached_missing_parent_row
+    kind: children
+    seed:
+      - orphanChild
+    parents:
+      - unstoredParent
+    wantChildren:
+      unstoredParent:
+        - orphanChild
+    wantChildCacheEmpty:
+      - orphanChild

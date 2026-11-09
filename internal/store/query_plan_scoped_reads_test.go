@@ -59,15 +59,12 @@ func TestScopedStatementsQueryPlans(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	contentArgs := []any{string("")}
-	for _, harness := range ingest.AllHarnesses {
-		contentArgs = append(contentArgs, string(harness))
-	}
-	contentArgs = append(contentArgs, string(idA), string(idB), 25)
-	contentSQL, _ := buildListContentCaptureIncompleteSessionsQuery("", 25, narrow)
+	contentSQL, contentArgs := buildListContentCaptureIncompleteSessionsQuery("", 25, narrow)
 
 	projects := ingest.Projects([]ingest.ProjectHash{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
-	projectArgs := []any{string("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")}
+	orphanDailySQL, orphanDailyArgs := buildDeleteOrphanDailySummaryByProjectSQL(projects)
+	orphanProjectsSQL, orphanProjectsArgs := buildDeleteOrphanProjectsSQL(projects)
+	metricSQL, metricArgs := buildListMetricSessionsQuery("", 25, narrow)
 
 	targetsJSON := `["11111111-1111-4111-8111-111111111111","22222222-2222-4222-8222-222222222222"]`
 	durableArgs := append([]any{targetsJSON}, harnessArgs...)
@@ -101,20 +98,20 @@ func TestScopedStatementsQueryPlans(t *testing.T) {
 		{name: "content_incomplete", sql: contentSQL, args: contentArgs},
 		{
 			name:      "metric_sessions",
-			sql:       func() string { sql, _ := buildListMetricSessionsQuery("", 25, narrow); return sql }(),
-			args:      []any{string(""), string(idA), string(idB), 25},
+			sql:       metricSQL,
+			args:      metricArgs,
 			wantIndex: "sqlite_autoindex_sessions_1",
 		},
 		{
 			name:      "orphan_daily_summary",
-			sql:       buildDeleteOrphanDailySummaryByProjectSQL(projects),
-			args:      projectArgs,
+			sql:       orphanDailySQL,
+			args:      orphanDailyArgs,
 			wantIndex: "idx_sessions_project",
 		},
 		{
 			name:      "orphan_projects",
-			sql:       buildDeleteOrphanProjectsSQL(projects),
-			args:      projectArgs,
+			sql:       orphanProjectsSQL,
+			args:      orphanProjectsArgs,
 			wantIndex: "idx_sessions_project",
 		},
 		{

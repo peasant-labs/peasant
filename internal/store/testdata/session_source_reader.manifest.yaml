@@ -5,3 +5,4 @@ requiredNames:
   - children_uncached_relationship_evidence
   - children_uncached_publication_metadata
   - children_absent_parent
+  - children_uncached_missing_parent_row
