@@ -16,9 +16,10 @@ import (
 // The three shared decorators conform to the frozen contract and to the
 // production filesystem interface.
 var (
-	_ fsdecorator.FileSystem = (*testutil.CountingFS)(nil)
-	_ fsdecorator.GatedFS    = (*testutil.GatedFS)(nil)
-	_ fsdecorator.BoundedFS  = (*testutil.BoundedFS)(nil)
+	_ fsdecorator.FileSystem  = (*testutil.CountingFS)(nil)
+	_ fsdecorator.GatedFS     = (*testutil.GatedFS)(nil)
+	_ fsdecorator.BoundedFS   = (*testutil.BoundedFS)(nil)
+	_ fsdecorator.RecordingFS = (*testutil.OpRecorderFS)(nil)
 )
 
 // TestOpVocabularyMatchesTestutil pins the canonical operation set to the one
