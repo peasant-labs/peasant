@@ -5071,6 +5071,33 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 //  4. Write index_log entries, populate PipelineResult.IndexLog
 func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineResult, error) {
 	prog := p.config.Progress
+
+	// `--all` clears the session filters: it rebuilds every saved pair and is
+	// the rebuild entry point, so it is never scoped. A scope that reaches this
+	// path is refused rather than silently dropped, so a run that named
+	// sessions is never answered with a full rebuild.
+	if p.config.RebuildAll {
+		if p.config.Scope != nil {
+			return nil, fmt.Errorf("ingest: `harvest index --all` rebuilds every saved pair and cannot be combined with a session scope; where: ingest.Pipeline.runReindex in internal/ingest/pipeline.go; when: starting a rebuild that also named sessions; impact: no saved pair was read and no store row was written; fix: drop --all to process the named sessions, or drop --session to rebuild every saved pair")
+		}
+		p.config.AllowedSessionIDs = nil
+		p.config.Since = nil
+	}
+
+	// A session-scoped index run resolves its cohort before any stage, so the
+	// content pass and every store-wide pass below see the same upkeep set and a
+	// selection no saved pair can serve is refused with nothing recorded.
+	var scoped *scopedIndexScan
+	if p.config.Scope != nil {
+		found, err := p.scanScopedManagedSessions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		scoped = found
+		p.scopeReport = &found.report
+		p.applyScopeReport(found.report)
+	}
+
 	// harvest index runs the content pass to the end with no budget.
 	contentProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageContent})
@@ -5088,7 +5115,14 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
 	// Content recovery repairs the stored capture only. Every scanned target,
 	// recovered or not, still receives the adapter/indexer evaluation below.
-	scanned := p.scanPeasantSyncSessions(ctx)
+	// A session-scoped run already resolved its pairs from the recorded
+	// locations; the whole-tree reader never runs for it.
+	var scanned []reindexTarget
+	if scoped != nil {
+		scanned = scoped.targets
+	} else {
+		scanned = p.scanPeasantSyncSessions(ctx)
+	}
 	if err := ctx.Err(); err != nil {
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
 		return nil, fmt.Errorf("pipeline reindex discovery: %w", err)
@@ -5114,8 +5148,24 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Stored sessions whose saved pair is missing or damaged cannot be found by
 	// the tree scan: the metadata locator is what is gone. They are enumerated
 	// from the database and appended as native re-ingest targets, so
-	// `harvest index` repairs them instead of reporting a command to run.
-	scanned = append(scanned, p.pairRepairTargets(ctx, scanned)...)
+	// `harvest index` repairs them instead of reporting a command to run. The
+	// enumeration reads P7/P8, which the scoped run has already narrowed to its
+	// upkeep set.
+	repairs := p.pairRepairTargets(ctx, scanned)
+	if scoped != nil {
+		// A stored session whose saved pair is gone is unreadable for this run:
+		// its transcript is kept and its store-side upkeep runs, but the pair is
+		// not rebuilt from native input.
+		kept := repairs[:0]
+		for _, target := range repairs {
+			if scoped.unreadable[target.session.SessionID] {
+				continue
+			}
+			kept = append(kept, target)
+		}
+		repairs = kept
+	}
+	scanned = append(scanned, repairs...)
 	prepareProfileStart := time.Now()
 	p.recordIndexProfileStage(StagePrepare, prepareProfileStart, len(scanned), len(scanned))
 
@@ -5199,8 +5249,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 
 	if p.config.DryRun {
 		result := &PipelineResult{
-			Duration: time.Since(start),
-			Summary:  PipelineSummary{HarvesterVersions: maps.Clone(p.versionTargets()), MetadataVersion: int(CurrentSchemaVersion)},
+			Duration:    time.Since(start),
+			Summary:     PipelineSummary{HarvesterVersions: maps.Clone(p.versionTargets()), MetadataVersion: int(CurrentSchemaVersion)},
+			ScopeReport: p.scopeReport,
 		}
 		for _, t := range targeted {
 			result.Sessions = append(result.Sessions, SessionResult{
@@ -5234,18 +5285,42 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Reuse canonical discovery facts (notably Cursor workspace and SQLite
 	// source kind) instead of reconstructing them from a managed sidecar.
 	sourceSessions := make(map[SessionID]DiscoveredSession)
+	// A `harvest index --all` rebuild needs the complete enumerated rollout set,
+	// so this walk is also the catalog the derived lookup tables are rebuilt
+	// from. A failed Codex walk leaves that set incomplete: rebuilding from it
+	// would delete the rows for every path it did not enumerate, so the run
+	// refuses instead of clearing rows it cannot re-derive.
+	var rolloutCatalog []RolloutFile
+	catalogComplete := true
 	for harness, config := range p.config.Sources {
 		factory, ok := p.adapters[harness]
 		if !ok || !config.Enabled {
+			if harness == HarnessCodex && config.Enabled {
+				catalogComplete = false
+			}
 			continue
 		}
 		sessions, err := factory(p.fs, p.git, p.salt).Discover(ctx, config)
 		if err != nil {
 			slog.Warn("reindex: source discovery unavailable", "harness", harness, "error", err)
+			if harness == HarnessCodex {
+				catalogComplete = false
+			}
 			continue
 		}
 		for _, session := range sessions {
 			sourceSessions[session.SessionID] = session
+			if p.config.RebuildAll && session.Harness == HarnessCodex {
+				rolloutCatalog = append(rolloutCatalog, RolloutFile{Path: session.SourcePath, SessionID: session.SessionID})
+			}
+		}
+	}
+	if p.config.RebuildAll {
+		if !catalogComplete {
+			return nil, fmt.Errorf("ingest: `harvest index --all` could not enumerate every Codex rollout, so the rollout catalog cannot be rebuilt; where: ingest.Pipeline.runReindex in internal/ingest/pipeline.go; when: walking the configured Codex sources before the derived lookup rebuild; impact: the derived lookup tables were left as they were and no saved pair was indexed; fix: restore the Codex source (check its configured path and read access), then rerun `harvest index --all`")
+		}
+		if err := p.rebuildIndexDerivedLookups(ctx, rolloutCatalog); err != nil {
+			return nil, err
 		}
 	}
 
