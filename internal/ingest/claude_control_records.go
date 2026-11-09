@@ -71,6 +71,21 @@ var claudeOwnerRotationRecordTypes = map[string]bool{
 	"file-history-snapshot": true,
 }
 
+// claudeUnmarkedRequestRecordTypes is the admission-proof set of
+// request-accounting record kinds Claude Code writes into subagent transcripts
+// carrying sessionId and agentId but no isSidechain scope marker. This is an
+// admission-proof set, not a parser vocabulary change: the kinds still resolve
+// to opaque retained evidence. An admitted session is therefore a partial
+// capture whose retained evidence requires retained_unknown_v1 to transfer. An
+// absent marker on these kinds does not break native subagent proof; an
+// explicit false still contradicts it, and the agentId must still agree with
+// every other record.
+var claudeUnmarkedRequestRecordTypes = map[string]bool{
+	"api-request":       true,
+	"api-request-blob":  true,
+	"api-request-shape": true,
+}
+
 // isClaudeOwnerRotationRecord reports whether a record kind is one this build
 // reads as owner-rotation evidence rather than conversation content.
 func isClaudeOwnerRotationRecord(recordType string) bool {
