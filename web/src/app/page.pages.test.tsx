@@ -183,6 +183,11 @@ describe('mounted bounded Home', () => {
         await screen.findByRole('link', { name: 'title root-0' });
         expect(pageRequests()).toHaveLength(2);
         expect(new URLSearchParams(window.location.search).get('page')).toBeNull();
+        // A direct jump to a numbered page reads just that page.
+        fireEvent.click(screen.getByRole('button', { name: 'page 3' }));
+        await screen.findByRole('link', { name: 'title root-50' });
+        expect(pageRequests().map(url => url.searchParams.get('page'))).toEqual(['1', '2', '3']);
+        expect(new URLSearchParams(window.location.search).get('page')).toBe('3');
       }
       if (testCase.name === 'loaded-refresh-keeps-content-on-failure') {
         fireEvent.click(screen.getByRole('button', { name: 'subagents 30' }));

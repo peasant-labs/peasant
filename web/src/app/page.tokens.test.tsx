@@ -405,3 +405,47 @@ describe('tab cache', () => {
     expect(reads).toHaveLength(1);
   });
 });
+
+describe('history', () => {
+  it('back and forward restore the prior view and page from the URL with no request', async () => {
+    const reads: URL[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(input, 'http://localhost');
+      if (url.pathname === '/api/v1/sync/auth') return json({ authenticated: true, username: 'first-account', villageUrl: 'https://village.example' });
+      if (url.searchParams.get('view') === 'project-options') return json({ projects: [fixture.projects[0]] });
+      reads.push(url);
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const size = Number(url.searchParams.get('maxItems') ?? '25');
+      const row = (id: string) => ({
+        sync: {
+          id, harness: 'claude-code', projectName: 'alpha', projectHash: fixture.projects[0].projectHash, hostSlug: 'fixture-host',
+          startTime: '2026-06-01T10:00:00Z', durationMs: 60000, totalTokens: 10, turnCount: 2, model: 'fixture', syncStatus: 'new', previouslyPushed: false,
+        },
+        publication: { sessionId: id, state: 'unpublished', autoPublish: false, outsideSelection: false },
+        title: id, preview: '', childCount: 0,
+      });
+      return json({
+        items: Array.from({ length: size }, (_, index) => row(`root-${(page - 1) * size + index}`)),
+        nextItems: [], page, perPage: size, total: 60, revision: '0',
+      });
+    }));
+    render(<PublishProvider><HomePage /></PublishProvider>);
+    await screen.findByRole('link', { name: 'root-0' });
+    fireEvent.click(screen.getByRole('button', { name: 'next page' }));
+    await screen.findByRole('link', { name: 'root-25' });
+    expect(reads).toHaveLength(2);
+
+    // Back: the prior URL names page one, and the tab already holds it.
+    window.history.replaceState({}, '', '/');
+    fireEvent(window, new PopStateEvent('popstate'));
+    await screen.findByRole('link', { name: 'root-0' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'page 1' })).toHaveAttribute('aria-current', 'page'));
+
+    // Forward: the next URL names page two, also already in this tab.
+    window.history.replaceState({}, '', '/?page=2');
+    fireEvent(window, new PopStateEvent('popstate'));
+    await screen.findByRole('link', { name: 'root-25' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'page 2' })).toHaveAttribute('aria-current', 'page'));
+    expect(reads).toHaveLength(2);
+  });
+});
