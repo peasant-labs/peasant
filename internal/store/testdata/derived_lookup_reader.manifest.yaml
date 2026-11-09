@@ -1,5 +1,8 @@
 requiredNames:
   - identity_declarer_count
   - identity_spawner_count
+  - identity_spawner_paths_many
+  - identity_spawner_paths_one
+  - identity_spawner_paths_none
   - codex_rollout_duplicate_count
   - codex_rollout_paths

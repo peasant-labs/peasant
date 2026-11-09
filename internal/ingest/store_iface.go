@@ -180,6 +180,15 @@ type DerivedLookupReader interface {
 	// CountClaudeIdentitySpawners counts the distinct spawner transcripts that
 	// name id, through the (team, name) spawns index.
 	CountClaudeIdentitySpawners(ctx context.Context, id ClaudeTeammateIdentity) (int, error)
+	// ClaudeIdentitySpawnerPaths returns the stored spawner transcript paths
+	// that name (team, name), read through the (team, name) spawns index.
+	//
+	// The read is bounded: at most two paths are returned, which is enough for
+	// the caller's zero/one/many decision. Every path the bound reads comes
+	// back, in path order, so a caller that sees more than one can refuse the
+	// ambiguous identity instead of silently taking the first. An identity no
+	// stored transcript spawns returns an empty slice.
+	ClaudeIdentitySpawnerPaths(ctx context.Context, team, name string) ([]string, error)
 	// CountCodexRolloutsBySession counts the catalogued rollout paths that carry
 	// id. Two paths mean the id is a duplicate and the run must refuse it.
 	CountCodexRolloutsBySession(ctx context.Context, id SessionID) (int, error)

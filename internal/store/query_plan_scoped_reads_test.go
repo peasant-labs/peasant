@@ -136,6 +136,12 @@ func TestScopedStatementsQueryPlans(t *testing.T) {
 			wantIndex: "idx_claude_teammate_spawns_identity",
 		},
 		{
+			name:      "claude_identity_spawner_paths",
+			sql:       sqlClaudeIdentitySpawnerPaths,
+			args:      []any{"team", "name"},
+			wantIndex: "idx_claude_teammate_spawns_identity",
+		},
+		{
 			name:      "codex_rollout_count",
 			sql:       sqlCountCodexRolloutsBySession,
 			args:      []any{string(idA)},

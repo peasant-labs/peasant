@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -28,6 +29,15 @@ WHERE scope = 'root' AND identity_team = ? AND identity_name = ?`
 	// already makes one spawner path one row per pair.
 	sqlCountClaudeIdentitySpawners = `SELECT COUNT(DISTINCT spawner_path) FROM claude_teammate_spawns
 WHERE team = ? AND name = ?`
+
+	// sqlClaudeIdentitySpawnerPaths returns the spawner transcript paths that
+	// name an identity, through the (team, name) spawns index. The bound is the
+	// caller's whole decision: one path names the spawner, two already mean
+	// "more than one", and the rows that are read are all returned. There is no
+	// ORDER BY because at most two rows are read; the caller receives them in
+	// path order after a bounded in-memory sort.
+	sqlClaudeIdentitySpawnerPaths = `SELECT spawner_path FROM claude_teammate_spawns
+WHERE team = ? AND name = ? LIMIT 2`
 
 	// sqlCountCodexRolloutsBySession counts the catalogued rollout paths that
 	// carry one id. The session_id index is deliberately non-unique: a count of
@@ -80,6 +90,51 @@ func (s *Store) CountClaudeIdentitySpawners(ctx context.Context, id ingest.Claud
 		return 0, fmt.Errorf("store: count Claude identity spawners for (%q, %q): %w; the ambiguity answer is unavailable; restore database access and retry the link step", id.Team, id.Name, err)
 	}
 	return count, nil
+}
+
+// ClaudeIdentitySpawnerPaths returns the stored spawner transcript paths that
+// name (team, name), in path order.
+//
+// The read is bounded at two rows: one path names the spawner, and two already
+// prove the identity ambiguous. Every read row is returned rather than only the
+// first, so the caller refuses an ambiguous identity instead of silently
+// linking through whichever path sorted first. An identity no stored transcript
+// spawns returns an empty slice.
+func (s *Store) ClaudeIdentitySpawnerPaths(ctx context.Context, team, name string) ([]string, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"store: take connection to read Claude identity spawner paths for (%q, %q): %w; "+
+				"what: failed to obtain a database connection for the spawner-path read; "+
+				"why: the pool is exhausted or the context was cancelled; "+
+				"where: store.ClaudeIdentitySpawnerPaths in internal/store/derived_lookup_reader.go; "+
+				"when: before the (team, name) lookup ran; "+
+				"impact: the spawner identity is unavailable, so the scoped link step cannot name an out-of-cohort spawner; "+
+				"fix: check the pool size and context deadline, then retry the scoped link step",
+			team, name, err)
+	}
+	defer s.pool.Put(conn)
+
+	var paths []string
+	if err := sqlitex.ExecuteTransient(conn, sqlClaudeIdentitySpawnerPaths, &sqlitex.ExecOptions{
+		Args: []any{team, name},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			paths = append(paths, stmt.ColumnText(0))
+			return nil
+		},
+	}); err != nil {
+		return nil, fmt.Errorf(
+			"store: read Claude identity spawner paths for (%q, %q): %w; "+
+				"what: the spawner-path query failed; "+
+				"why: the statement could not run against the spawns projection (database access or a malformed statement); "+
+				"where: store.ClaudeIdentitySpawnerPaths in internal/store/derived_lookup_reader.go; "+
+				"when: reading the stored spawner paths for the identity; "+
+				"impact: the spawner identity is unavailable, so the scoped link step cannot name an out-of-cohort spawner; "+
+				"fix: restore database access and retry the scoped link step",
+			team, name, err)
+	}
+	sort.Strings(paths)
+	return paths, nil
 }
 
 // CountCodexRolloutsBySession counts the catalogued rollout paths that carry
