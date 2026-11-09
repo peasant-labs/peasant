@@ -20,6 +20,7 @@ requiredNames:
   - project-changed
   - codex-stored-unchanged
   - scoped-derived-write
+  - claude-teammate-link
   - stored-source-gone
   - stored-child-source-gone
   - derived-rebuild
@@ -419,6 +420,52 @@ cases:
     wantUpkeep:
       - "11111111-1111-4111-8111-111111111111"
     wantOutcome: direct-lookup
+
+  - name: claude-teammate-link
+    harness: claude-code
+    kind: stored_changed
+    wantIndexLogDelta: true
+    files:
+      # The spawner is seeded alone: its spawns row is what the seeded store
+      # holds. The child starts with no identity, so no link exists after the
+      # seed; the mutation adds the declaration and both runs must form the
+      # same link from the stored spawns row.
+      - path: project-a/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/work/project","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn"}}'
+      - path: project-b/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/work/project","message":{"role":"user","content":"coordinate work"}}'
+    mutation:
+      action: append
+      path: project-b/22222222-2222-4222-8222-222222222222.jsonl
+      lines:
+        - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/work/project","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    selected:
+      - "22222222-2222-4222-8222-222222222222"
+    expectedOps:
+      claude-code:
+        reads:
+          - project-b/22222222-2222-4222-8222-222222222222.jsonl
+        stats:
+          - project-a/22222222-2222-4222-8222-222222222222.jsonl
+          - project-b/11111111-1111-4111-8111-111111111111.jsonl
+          - project-b/22222222-2222-4222-8222-222222222222.jsonl
+        readdirs:
+          - "."
+          - project-b/22222222-2222-4222-8222-222222222222/subagents
+      codex:
+        reads: []
+        stats: []
+        readdirs: []
+    wantProcessed:
+      - "22222222-2222-4222-8222-222222222222"
+    wantUpkeep:
+      - "22222222-2222-4222-8222-222222222222"
+    wantOutcome: stored-path
+    assertTeammateLinks:
+      - session: "22222222-2222-4222-8222-222222222222"
+        parent: "11111111-1111-4111-8111-111111111111"
 
   - name: codex-stored-unchanged
     harness: codex
