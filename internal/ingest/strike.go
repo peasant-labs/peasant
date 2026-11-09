@@ -29,6 +29,11 @@ type StrikeAdapter struct {
 var _ SourceAdapter = (*StrikeAdapter)(nil)
 var _ SessionLocator = (*StrikeAdapter)(nil)
 
+// strikeAncestorProbeKind is this adapter's one declared ancestor-probe kind:
+// one stat of the parent's exact file beside the child, derived from the child's
+// own sidecar and path, and never a directory read.
+const strikeAncestorProbeKind = ProbePath
+
 // NewStrikeAdapter creates a StrikeAdapter with injected filesystem, git, and salt dependencies.
 func NewStrikeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *StrikeAdapter {
 	return &StrikeAdapter{fs: fs, git: git, salt: s}
@@ -1007,7 +1012,7 @@ func strikeAncestorProbe(located strikeSource) *AncestorProbe {
 	if err != nil {
 		return nil
 	}
-	return &AncestorProbe{Kind: ProbePath, Harness: HarnessStrike, Path: path}
+	return &AncestorProbe{Kind: strikeAncestorProbeKind, Harness: HarnessStrike, Path: path}
 }
 
 // strikeSourceGoneError is the one statement of "this recorded path no longer

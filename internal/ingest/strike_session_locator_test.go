@@ -87,9 +87,9 @@ type strikeLocatorLocated struct {
 	Reads                 []string                  `yaml:"reads"`
 	WantGone              bool                      `yaml:"wantGone"`
 	WantError             string                    `yaml:"wantError"`
-	KnownGap              string                    `yaml:"knownGap"`
-	AllowedDifferences    []strikeLocatorDifference `yaml:"allowedDifferences"`
-	AllowedMissingMembers []string                  `yaml:"allowedMissingMembers"`
+	KnownGap      string   `yaml:"knownGap"`
+	AllowedDiffs  []string `yaml:"allowedDiffs"`
+	AbsentMembers []string `yaml:"absentMembers"`
 }
 
 type strikeLocatorChild struct {
@@ -110,11 +110,6 @@ type strikeLocatorUnreadable struct {
 type strikeLocatorProbe struct {
 	Path string `yaml:"path"`
 	Miss bool   `yaml:"miss"`
-}
-
-type strikeLocatorDifference struct {
-	Member string   `yaml:"member"`
-	Fields []string `yaml:"fields"`
 }
 
 var strikeLocatorHarnesses = map[string]ingest.Harness{
@@ -185,7 +180,7 @@ func loadStrikeLocatorFixture(t *testing.T) strikeLocatorFixture {
 		}
 		located := testCase.Located
 		if located.KnownGap == "" {
-			if len(located.AllowedDifferences) > 0 || len(located.AllowedMissingMembers) > 0 {
+			if len(located.AllowedDiffs) > 0 || len(located.AbsentMembers) > 0 {
 				t.Fatalf("case %q declares an allowance but no known gap; a scoped difference needs a declared gap", testCase.Name)
 			}
 			continue
@@ -195,17 +190,12 @@ func loadStrikeLocatorFixture(t *testing.T) strikeLocatorFixture {
 			t.Fatalf("case %q names undeclared known gap %q", testCase.Name, located.KnownGap)
 		}
 		exercised[located.KnownGap] = true
-		for _, difference := range located.AllowedDifferences {
-			if _, err := ingest.NewSessionID(difference.Member); err != nil {
-				t.Fatalf("case %q allows fields to differ for %q: %v", testCase.Name, difference.Member, err)
-			}
-			for _, field := range difference.Fields {
-				if !slices.Contains(gap.Fields, field) {
-					t.Fatalf("case %q allows field %q, which known gap %q does not declare", testCase.Name, field, gap.ID)
-				}
+		for _, field := range located.AllowedDiffs {
+			if !slices.Contains(gap.Fields, field) {
+				t.Fatalf("case %q allows field %q, which known gap %q does not declare", testCase.Name, field, gap.ID)
 			}
 		}
-		for _, id := range located.AllowedMissingMembers {
+		for _, id := range located.AbsentMembers {
 			if _, err := ingest.NewSessionID(id); err != nil {
 				t.Fatalf("case %q allows missing member %q: %v", testCase.Name, id, err)
 			}
@@ -531,9 +521,8 @@ func assertStrikeLocatedBuild(t *testing.T, mfs *testutil.MemFS, tree string, cf
 			t.Errorf("member %s has no source, but a full discovery finds it", wantID)
 			continue
 		}
-		allowed := strikeLocatorAllowedFields(located, member.ID)
-		got := strikeLocatorSessionExcluding(*member.Source, allowed)
-		expected := strikeLocatorSessionExcluding(want, allowed)
+		got := strikeLocatorSessionExcluding(*member.Source, located.AllowedDiffs)
+		expected := strikeLocatorSessionExcluding(want, located.AllowedDiffs)
 		if !reflect.DeepEqual(got, expected) {
 			t.Errorf("member %s differs from a full discovery beyond the declared gap:\n got: %#v\nwant: %#v", wantID, got, expected)
 		}
@@ -636,24 +625,22 @@ func assertStrikeKnownGapExercised(t *testing.T, located *strikeLocatorLocated, 
 		return
 	}
 	differs := false
-	for _, difference := range located.AllowedDifferences {
-		member, present := members[ingest.SessionID(difference.Member)]
-		if !present || member.Source == nil {
-			t.Errorf("known gap %s allows fields to differ for %s, but the located build returned no source for it", located.KnownGap, difference.Member)
-			continue
-		}
-		want, discovered := full[ingest.SessionID(difference.Member)]
-		if !discovered {
-			t.Errorf("known gap %s allows fields to differ for %s, but a full discovery does not find it", located.KnownGap, difference.Member)
-			continue
-		}
-		for _, field := range difference.Fields {
+	for _, field := range located.AllowedDiffs {
+		for id, member := range members {
+			if member.Source == nil {
+				continue
+			}
+			want, discovered := full[id]
+			if !discovered {
+				t.Errorf("known gap %s allows field %q to differ for %s, but a full discovery does not find it", located.KnownGap, field, id)
+				continue
+			}
 			if !reflect.DeepEqual(strikeLocatorFieldValue(*member.Source, field), strikeLocatorFieldValue(want, field)) {
 				differs = true
 			}
 		}
 	}
-	for _, id := range located.AllowedMissingMembers {
+	for _, id := range located.AbsentMembers {
 		if _, present := members[ingest.SessionID(id)]; present {
 			t.Errorf("known gap %s says %s cannot be reached, but the located build returned it", located.KnownGap, id)
 		}
@@ -661,18 +648,9 @@ func assertStrikeKnownGapExercised(t *testing.T, located *strikeLocatorLocated, 
 			t.Errorf("known gap %s allows %s to be missing, but a full discovery does not find it either; the case proves nothing", located.KnownGap, id)
 		}
 	}
-	if len(located.AllowedDifferences) > 0 && !differs {
+	if len(located.AllowedDiffs) > 0 && !differs {
 		t.Errorf("known gap %s is declared but no allowed field differs; the case no longer exercises it", located.KnownGap)
 	}
-}
-
-func strikeLocatorAllowedFields(located *strikeLocatorLocated, id ingest.SessionID) []string {
-	for _, difference := range located.AllowedDifferences {
-		if difference.Member == string(id) {
-			return difference.Fields
-		}
-	}
-	return nil
 }
 
 func strikeLocatorSessionExcluding(session ingest.DiscoveredSession, fields []string) ingest.DiscoveredSession {

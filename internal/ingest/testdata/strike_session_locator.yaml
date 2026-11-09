@@ -16,11 +16,11 @@
 #
 # knownGaps states the three differences a scoped Strike run can still have,
 # each with the exact DiscoveredSession fields it may change. A case names the
-# gap it exercises and the runner refuses any allowance the gap does not
+# gap it exercises and the runner refuses an allowance the gap does not
 # declare; it also asserts the declared difference actually happens, so a case
 # cannot quietly stop covering its gap. The related member a gap leaves out is
-# named under allowedMissingMembers. A case with no knownGap may declare no
-# allowance at all.
+# named under absentMembers. A case with no knownGap may declare no allowance
+# at all.
 #
 # wantProbe names the one ancestor probe a child case must carry, and miss marks
 # a probe that must not resolve. ProbePath costs one stat of the parent path,
@@ -55,14 +55,14 @@ requiredNames:
 # Known differences a located build can still have from a full walk, each
 # declared with the exact DiscoveredSession fields it may change.
 knownGaps:
-  - id: R5
-    description: a parent named only by another session's stream
+  - id: parent-known-only-from-another-stream
+    description: the parent is named only by the parent's own stream, so a run of the child cannot see it
     fields: [parentUUID]
-  - id: G8
-    description: a child named only by its own sidecar
+  - id: child-known-only-from-its-own-sidecar
+    description: the child is named only by its own sidecar, so the parent's source cannot reveal it
     fields: [subagentPaths, modTime]
-  - id: G15
-    description: a parent in another directory is not located
+  - id: parent-outside-the-childs-directory
+    description: the parent's file is in another directory, so the derived path probe misses
     fields: []
 
 cases:
@@ -400,8 +400,8 @@ cases:
         - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
         - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
 
-  # R5, accepted: the parent is named only by the parent's own stream, so
-  # a run of the child alone cannot see it and the child stays a root.
+  # The parent is named only by the parent's own stream, so a run of the child
+  # alone cannot see it and the child stays a root.
   - name: parent-named-only-by-another-stream
     files:
       - path: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
@@ -421,11 +421,10 @@ cases:
       path: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
       wantMembers:
         - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
-      knownGap: R5
-      allowedDifferences:
-        - member: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
-          fields: [parentUUID]
-      allowedMissingMembers:
+      knownGap: parent-known-only-from-another-stream
+      allowedDiffs:
+        - parentUUID
+      absentMembers:
         - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
       stats:
         - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
@@ -434,9 +433,9 @@ cases:
         - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
         - 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.meta.json
 
-  # G8: the child is named only by its own sidecar, so the parent's own
-  # source cannot reveal it; the parent keeps the child path list and the
-  # propagated mod time a full walk records.
+  # The child is named only by its own sidecar, so the parent's own source
+  # cannot reveal it; a full walk keeps the child path list and the propagated
+  # mod time it records.
   - name: child-named-only-by-its-sidecar
     files:
       - path: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
@@ -455,11 +454,11 @@ cases:
       path: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
       wantMembers:
         - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
-      knownGap: G8
-      allowedDifferences:
-        - member: 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
-          fields: [subagentPaths, modTime]
-      allowedMissingMembers:
+      knownGap: child-known-only-from-its-own-sidecar
+      allowedDiffs:
+        - subagentPaths
+        - modTime
+      absentMembers:
         - 20260728T130000.000000001Z-BBBBBBBBBBBBBBBBBBBBBBBBBB
       stats:
         - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
@@ -468,9 +467,9 @@ cases:
         - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
         - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.meta.json
 
-  # G15: the child's sidecar names its parent, but the parent's file is in
-  # another directory, so the derived path probe misses and no ancestor is
-  # located. The child's own link still equals the full walk's.
+  # The child's sidecar names its parent, but the parent's file is in another
+  # directory, so the derived path probe misses and no ancestor is located. The
+  # child's own link still equals the full walk's.
   - name: parent-in-another-directory
     roots:
       - a
@@ -495,8 +494,8 @@ cases:
       wantProbe:
         path: a/20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP.jsonl
         miss: true
-      knownGap: G15
-      allowedMissingMembers:
+      knownGap: parent-outside-the-childs-directory
+      absentMembers:
         - 20260728T110000.000000000Z-PPPPPPPPPPPPPPPPPPPPPPPPPP
       stats:
         - a/20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.jsonl
