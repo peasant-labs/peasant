@@ -571,6 +571,12 @@ func (d *claudeLocatorDerivedLookup) CountClaudeIdentitySpawners(context.Context
 	return d.spawners, nil
 }
 
+// ClaudeIdentitySpawnerPaths answers the spawner-path read with no path: no
+// case in this file declares a stored spawner outside the cohort.
+func (d *claudeLocatorDerivedLookup) ClaudeIdentitySpawnerPaths(context.Context, string, string) ([]string, error) {
+	return nil, nil
+}
+
 func (d *claudeLocatorDerivedLookup) CountCodexRolloutsBySession(context.Context, ingest.SessionID) (int, error) {
 	return 0, nil
 }

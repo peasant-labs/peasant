@@ -13,7 +13,7 @@ import (
 var upkeepScopeFixtureData []byte
 
 type upkeepScopeFixture struct {
-	Required []string `yaml:"required_names"`
+	Required []string `yaml:"requiredNames"`
 	Cases    []struct {
 		Name       string   `yaml:"name"`
 		Operations []string `yaml:"operations"`
