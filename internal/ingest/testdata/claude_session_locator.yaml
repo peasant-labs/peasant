@@ -21,6 +21,7 @@ requiredNames:
   - teammate-unique
   - teammate-ambiguous
   - teammate-spawner-outside-cohort
+  - teammate-spawner-unstored
   - teammate-spawner-paths-ambiguous
   - stored-link-kept-gap
   - stored-child-gone
@@ -314,6 +315,34 @@ cases:
           - project-a/22222222-2222-4222-8222-222222222222.jsonl
       storedSessions:
         - "22222222-2222-4222-8222-222222222222"
+      reads: []
+      stats:
+        - project-a/33333333-3333-4333-8333-333333333333.jsonl
+      readdirs:
+        - project-a/33333333-3333-4333-8333-333333333333/subagents
+      wantMembers:
+        - "33333333-3333-4333-8333-333333333333"
+      wantProbe:
+        kind: path
+        path: project-a/22222222-2222-4222-8222-222222222222.jsonl
+
+  - name: teammate-spawner-unstored
+    files:
+      - path: project-a/22222222-2222-4222-8222-222222222222.jsonl
+        body: |
+          {"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/work/project","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn"}}
+      - path: project-a/33333333-3333-4333-8333-333333333333.jsonl
+        body: |
+          {"sessionId":"33333333-3333-4333-8333-333333333333","type":"user","cwd":"/work/project","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}
+    located:
+      id: "33333333-3333-4333-8333-333333333333"
+      path: project-a/33333333-3333-4333-8333-333333333333.jsonl
+      derived:
+        declarers: 1
+        spawners: 1
+        spawnerPaths:
+          - project-a/22222222-2222-4222-8222-222222222222.jsonl
+      wantNoParent: true
       reads: []
       stats:
         - project-a/33333333-3333-4333-8333-333333333333.jsonl

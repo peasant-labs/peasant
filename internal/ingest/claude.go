@@ -1775,12 +1775,13 @@ func claudeWithoutContextSessions(sessions []DiscoveredSession, context map[Reso
 // close a cycle is refused. A link the store already records is kept; this step
 // never removes one.
 //
-// The parent comes from the cheapest place that can name it. A stored logical
-// parent or a spawner that is itself a cohort member is already known. When
-// neither is, the counts prove the identity unique and the spawner-path read
-// names the one stored spawner, so a declarer selected on its own still gets the
-// link a full run records. A read that returns more than one path is refused
-// rather than resolved to whichever path sorted first.
+// The parent comes from the cheapest place that can name it. A session's stored
+// logical parent or a spawner that is itself a cohort member is already known.
+// When neither is, the counts prove the identity unique and the spawner-path
+// read names the one spawner transcript, whose session must already be stored:
+// the derived table is evidence-derived, and evidence outlives a session row
+// that was filtered out or pruned. A read that returns more than one path is
+// refused rather than resolved to whichever path sorted first.
 func (a *ClaudeAdapter) linkClaudeTeammatesScoped(
 	ctx context.Context,
 	sessions []DiscoveredSession,
@@ -1854,6 +1855,14 @@ func (a *ClaudeAdapter) linkClaudeTeammatesScoped(
 			if !ok || parentID == session.SessionID {
 				continue
 			}
+			// The evidence cache keeps a transcript for every mined root, so a
+			// spawner path can name a session that has no stored row: a session
+			// outside the run's filters, or one pruned while its file survived.
+			// A full run never points at such a parent, and a scoped run must
+			// make the same decision.
+			if !a.claudeSessionAlreadyStored(ctx, parentID) {
+				continue
+			}
 			haveParent = true
 		}
 		if !haveParent || parentID == session.SessionID {
@@ -1909,19 +1918,18 @@ func (a *ClaudeAdapter) claudeTeammateIdentityCounts(
 	return declarers, spawners, nil
 }
 
-// claudeTeammateSpawnerPath names the one stored spawner of a unique identity.
-// The counts prove uniqueness; this read turns "one spawner exists" into the
-// path that holds it, so a declarer selected on its own can point at a spawner
-// outside its cohort. A read that returns any number of paths other than one is
-// refused: two paths are two claims, and the link step must not pick one.
+// claudeTeammateSpawnerPath names the one spawner transcript of a unique
+// identity. The counts prove uniqueness; this read turns "one spawner exists"
+// into the path that holds it, so a declarer selected on its own can point at a
+// spawner outside its cohort. The path names a transcript, not necessarily a
+// stored session, so the caller still requires the session to be stored. A read
+// that returns any number of paths other than one is refused: two paths are two
+// claims, and the link step must not pick one.
 func (a *ClaudeAdapter) claudeTeammateSpawnerPath(
 	ctx context.Context,
 	identity ClaudeTeammateIdentity,
 	child DiscoveredSession,
 ) (ResolvedPath, bool, error) {
-	if a.derivedLookup == nil {
-		return "", false, nil // the caller already refused a build with no reader
-	}
 	paths, err := a.derivedLookup.ClaudeIdentitySpawnerPaths(ctx, identity.Team, identity.Name)
 	if err != nil {
 		return "", false, fmt.Errorf("ingest: the located Claude build could not read the stored spawner paths for teammate identity (%q, %q); without them it cannot name the spawner a full run would link to, and guessing would re-home %s under the wrong parent; where: ingest.ClaudeAdapter.linkClaudeTeammatesScoped in internal/ingest/claude.go; when: deciding a teammate link for %q; impact: the scoped run stops with no session written; fix: restore database access and retry: %w", identity.Team, identity.Name, child.SessionID, child.SourcePath, err)
@@ -2107,7 +2115,7 @@ func (a *ClaudeAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig,
 		members = append(members, LocatedMember{ID: sessions[i].SessionID, Harness: HarnessClaudeCode, Source: &sessions[i]})
 	}
 	members = append(members, unreadable...)
-	a.claudeSetLocatedLinkAndProbe(ctx, members, at)
+	claudeSetLocatedLinkAndProbe(members, at)
 	return LocatedBuild{Members: members, Deferred: deferred}, nil
 }
 
@@ -2312,11 +2320,11 @@ func (a *ClaudeAdapter) claudeStoredChild(cfg SourceConfig, child StoredSessionS
 }
 
 // claudeSetLocatedLinkAndProbe gives the located member the one thing the core
-// cannot derive: the probe for an unstored ancestor, or the parent the store
-// already records. It writes no link away. The probe is a pure value derived
-// from the child's own path; the only read is the store's own "is this parent
-// already recorded" question, so a stored ancestor is never probed.
-func (a *ClaudeAdapter) claudeSetLocatedLinkAndProbe(ctx context.Context, members []LocatedMember, at LocatedSource) {
+// cannot derive: the probe for a parent that is not the store's logical parent,
+// or the parent the store already records. It writes no link away and reads no
+// store: the probe is a pure value derived from the child's own path, and the
+// core stops the ancestor walk at a stored parent on its own.
+func claudeSetLocatedLinkAndProbe(members []LocatedMember, at LocatedSource) {
 	for i := range members {
 		if members[i].ID != at.ID || members[i].Source == nil {
 			continue
@@ -2331,9 +2339,6 @@ func (a *ClaudeAdapter) claudeSetLocatedLinkAndProbe(ctx context.Context, member
 		}
 		if source.ParentUUID == nil || *source.ParentUUID == at.ID {
 			return
-		}
-		if a.claudeSessionAlreadyStored(ctx, *source.ParentUUID) {
-			return // a stored ancestor needs no probe
 		}
 		members[i].ParentProbe = &AncestorProbe{
 			Kind:    claudeAncestorProbeKind,
