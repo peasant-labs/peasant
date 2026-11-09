@@ -639,12 +639,14 @@ func (a *locateFakeAdapter) DiscoverSessionAt(_ context.Context, _ ingest.Source
 			})
 			continue
 		}
+		parent := at.ID
 		childSource := ingest.DiscoveredSession{
 			SessionID:    ingest.SessionID(child.ID),
 			Harness:      ingest.Harness(child.Harness),
 			SourcePath:   ingest.ResolvedPath(child.Path),
 			SourceFormat: ingest.SourceFormatJSONL,
 			ModTime:      child.modTime,
+			ParentUUID:   &parent,
 		}
 		members = append(members, ingest.LocatedMember{
 			ID:      ingest.SessionID(child.ID),
@@ -869,6 +871,74 @@ func TestLocateRefusesStoreWithoutDerivedLookup(t *testing.T) {
 		t.Fatalf("LOCATE accepted a store without DerivedLookupReader and skipped the duplicate check")
 	}
 	for _, substring := range []string{"CountCodexRolloutsBySession", "DerivedLookupReader", "fix:"} {
+		if !strings.Contains(runErr.Error(), substring) {
+			t.Errorf("refusal = %q, missing %q", runErr, substring)
+		}
+	}
+}
+
+// TestLocateRefusesStoreWithoutDerivedLookupForClaudeCohort pins the other half
+// of the derived-read requirement: a Claude build links teammates from the
+// indexed identity reads, so a store that cannot answer them would turn every
+// located Claude session into an unreadable member and the run would exit 0
+// having processed nothing.
+func TestLocateRefusesStoreWithoutDerivedLookupForClaudeCohort(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	const path = "/src/claude-code/proj-a/11111111-1111-4111-8111-111111111111.jsonl"
+	ctx := context.Background()
+
+	mfs := testutil.NewMemFS()
+	if err := mfs.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	dbPath := storetest.CopyGoldenDB(t)
+	db, err := store.Open(dbPath, store.WithSkipMigrations())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	seedLocateStored(t, db, []locateStoredCase{{ID: id, Harness: string(ingest.HarnessClaudeCode), Path: path}})
+
+	behavior := &locateFakeBehavior{
+		builds: map[string]locateBuildCase{
+			locateBuildKey(ingest.HarnessClaudeCode, path): {Harness: string(ingest.HarnessClaudeCode), Path: path, Result: "ok"},
+		},
+		lookups: map[ingest.Harness]locateLookupCase{},
+	}
+	adapters := make(map[ingest.Harness]ingest.AdapterFactory, len(ingest.DefaultAdapterRegistry))
+	for harness := range ingest.DefaultAdapterRegistry {
+		bound := harness
+		adapters[harness] = func(_ ingest.FileSystem, _ ingest.GitResolver, _ salt.Salt) ingest.SourceAdapter {
+			return &locateFakeAdapter{harness: bound, behavior: behavior}
+		}
+	}
+	sources := make(map[ingest.Harness]ingest.SourceConfig, len(ingest.DefaultAdapterRegistry))
+	for harness := range ingest.DefaultAdapterRegistry {
+		sources[harness] = ingest.SourceConfig{
+			Paths:   []ingest.ResolvedPath{ingest.ResolvedPath(filepath.Join("/src", string(harness)))},
+			Enabled: harness == ingest.HarnessClaudeCode,
+		}
+	}
+	scope, err := ingest.NewSessionScope([]ingest.SessionID{id}, ingest.RelatedInclude)
+	if err != nil {
+		t.Fatalf("build scope: %v", err)
+	}
+	pipeline, err := ingest.NewPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(), adapters, ingest.PipelineConfig{
+		Sources:     sources,
+		OutputDir:   ingest.ResolvedPath("/out"),
+		Scope:       &scope,
+		Command:     "harvest",
+		DryRun:      true,
+		Parallelism: 1,
+	}, ingest.WithStore(storeWithoutDerivedLookup{SessionStore: db}))
+	if err != nil {
+		t.Fatalf("build pipeline: %v", err)
+	}
+	result, runErr := pipeline.Run(ctx)
+	if runErr == nil {
+		t.Fatalf("LOCATE degraded a Claude cohort to an unreadable member instead of refusing (report: %+v)", result.ScopeReport)
+	}
+	for _, substring := range []string{"indexed Claude identity reads", "DerivedLookupReader", "fix:"} {
 		if !strings.Contains(runErr.Error(), substring) {
 			t.Errorf("refusal = %q, missing %q", runErr, substring)
 		}

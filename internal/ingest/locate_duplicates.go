@@ -44,7 +44,8 @@ func (l *scopeLocator) refuseDuplicates(ctx context.Context) error {
 // source was a refused claim, and a subagent the refusal left out with its
 // parent. A dropped id whose row the store still records joins refusedUpkeep:
 // the run must not process it, but the store-side passes a full run performs for
-// that row must still see it.
+// that row must still see it. The recorded set is both halves the store
+// answered: the selected ids' rows and their stored children.
 func (l *scopeLocator) removeRefused(kept []DiscoveredSession, refused []SessionResult) {
 	keptPaths := make(map[ResolvedPath]struct{}, len(kept))
 	for _, session := range kept {
@@ -53,6 +54,15 @@ func (l *scopeLocator) removeRefused(kept []DiscoveredSession, refused []Session
 	refusedIDs := make(map[SessionID]struct{}, len(refused))
 	for _, result := range refused {
 		refusedIDs[result.SessionID] = struct{}{}
+	}
+	recorded := make(map[SessionID]struct{}, len(l.stored))
+	for id := range l.stored {
+		recorded[id] = struct{}{}
+	}
+	for _, rows := range l.children {
+		for _, row := range rows {
+			recorded[row.ID] = struct{}{}
+		}
 	}
 	for id, member := range l.members {
 		drop := false
@@ -67,7 +77,7 @@ func (l *scopeLocator) removeRefused(kept []DiscoveredSession, refused []Session
 			continue
 		}
 		delete(l.members, id)
-		if _, recorded := l.stored[id]; recorded {
+		if _, stored := recorded[id]; stored {
 			l.refusedUpkeep = append(l.refusedUpkeep, id)
 		}
 	}

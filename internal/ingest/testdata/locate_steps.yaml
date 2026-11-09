@@ -16,6 +16,7 @@ requiredNames:
   - several_misses
   - duplicate_claude_root
   - duplicate_codex_catalog
+  - duplicate_claude_root_with_child
   - ancestor_catalog_window
   - ancestor_catalog_hit
   - ancestor_row_probe
@@ -359,6 +360,57 @@ cases:
       processed: []
       upkeep:
         - 11111111-1111-4111-8111-111111111111
+      noLookup: true
+      noWalk: true
+      buildCount: 1
+
+  - name: duplicate_claude_root_with_child
+    selected:
+      - 11111111-1111-4111-8111-111111111111
+    related: include
+    # The refused root's stored child must keep its store-side upkeep even
+    # though the run processes neither the parent nor the child.
+    since: "2026-11-01T00:00:00Z"
+    disabled:
+      - codex
+      - opencode
+      - cursor
+      - strike
+      - pi
+    files:
+      - path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111.jsonl
+        modTime: "2026-11-09T10:00:00Z"
+      - path: /src/claude-code/proj-b/11111111-1111-4111-8111-111111111111.jsonl
+        modTime: "2020-01-01T00:00:00Z"
+      - path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111/subagents/33333333-3333-4333-8333-333333333333.jsonl
+        modTime: "2026-11-09T11:00:00Z"
+    stored:
+      - id: 11111111-1111-4111-8111-111111111111
+        harness: claude-code
+        path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111.jsonl
+      - id: 33333333-3333-4333-8333-333333333333
+        harness: claude-code
+        path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111/subagents/33333333-3333-4333-8333-333333333333.jsonl
+        parent: 11111111-1111-4111-8111-111111111111
+    build:
+      - harness: claude-code
+        path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111.jsonl
+        result: ok
+        modTime: "2026-11-09T10:00:00Z"
+        children:
+          - id: 33333333-3333-4333-8333-333333333333
+            harness: claude-code
+            path: /src/claude-code/proj-a/11111111-1111-4111-8111-111111111111/subagents/33333333-3333-4333-8333-333333333333.jsonl
+            modTime: "2026-11-09T11:00:00Z"
+    want:
+      refused:
+        - 11111111-1111-4111-8111-111111111111
+      refusedContains:
+        - same session id in 2 source files
+      processed: []
+      upkeep:
+        - 11111111-1111-4111-8111-111111111111
+        - 33333333-3333-4333-8333-333333333333
       noLookup: true
       noWalk: true
       buildCount: 1
