@@ -17,16 +17,6 @@ var (
 	_ ingest.RepairSessionLister       = (*Store)(nil)
 )
 
-// ListStaleAdapterSessions selects the sessions whose stored adapter revision
-// is behind this build's target for their harness, or whose stored schema is
-// one this build re-extracts from native input. It is the database-driven
-// replacement for the stored-tree walk that used to find adapter-refresh
-// work: it reads no file, and a NULL adapter_version counts as revision 1, so
-// at target 1 no legacy row is selected and nothing is re-extracted every run.
-//
-// nativeRefreshVersions is the exact set of stored schema versions this build
-// re-extracts from native input, computed once in ingest so the two predicates
-// (this selection and metadataNeedsNativeRefresh) cannot drift.
 // buildListStaleAdapterSessionsQuery renders the adapter-refresh work list for
 // the given targets and scope. Production and its query-plan guard call the
 // same builder.
@@ -68,6 +58,16 @@ func buildListStaleAdapterSessionsQuery(targets map[ingest.Harness]ingest.Harves
 	return "SELECT s.session_id FROM sessions s WHERE " + strings.Join(conditions, " OR ") + predicate + " ORDER BY s.session_id", args, nil
 }
 
+// ListStaleAdapterSessions selects the sessions whose stored adapter revision
+// is behind this build's target for their harness, or whose stored schema is
+// one this build re-extracts from native input. It is the database-driven
+// replacement for the stored-tree walk that used to find adapter-refresh
+// work: it reads no file, and a NULL adapter_version counts as revision 1, so
+// at target 1 no legacy row is selected and nothing is re-extracted every run.
+//
+// nativeRefreshVersions is the exact set of stored schema versions this build
+// re-extracts from native input, computed once in ingest so the two predicates
+// (this selection and metadataNeedsNativeRefresh) cannot drift.
 func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, nativeRefreshVersions []int, scope ingest.StoreScope) ([]ingest.SessionID, error) {
 	if err := scope.Validate("ListStaleAdapterSessions"); err != nil {
 		return nil, err
@@ -85,12 +85,6 @@ func (s *Store) ListStaleAdapterSessions(ctx context.Context, targets map[ingest
 	return s.selectSessionIDs(ctx, query, args)
 }
 
-// ListSessionsNeedingRepair selects the sessions a crash between the two write
-// commits can leave: a row whose pair hash is recorded but whose index input
-// proof was cleared, and a row whose current publication capture the index is
-// not yet bound to. Both settle in one ordinary harvest, so the next unchanged
-// harvest selects nothing. It is harness-scoped and reads no file.
-//
 // The publication half is deliberately the exact complement of the binding
 // predicate: it needs a capture at the row's current revision (the metadata row
 // EXISTS), a recovered provenance kind (the same guard publicationBindingSQL
@@ -153,6 +147,11 @@ ORDER BY s.session_id`
 	return query, args, nil
 }
 
+// ListSessionsNeedingRepair selects the sessions a crash between the two write
+// commits can leave: a row whose pair hash is recorded but whose index input
+// proof was cleared, and a row whose current publication capture the index is
+// not yet bound to. Both settle in one ordinary harvest, so the next unchanged
+// harvest selects nothing. It is harness-scoped and reads no file.
 func (s *Store) ListSessionsNeedingRepair(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, scope ingest.StoreScope) ([]ingest.SessionID, error) {
 	if err := scope.Validate("ListSessionsNeedingRepair"); err != nil {
 		return nil, err

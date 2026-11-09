@@ -92,15 +92,6 @@ func updateIndexStateWithSessionEntriesHashOnConn(conn *sqlite.Conn, sessionID i
 	return nil
 }
 
-// ListStaleIndexSessions selects only registered harness targets. The legacy SQL
-// index_version column records the actual indexer revision, not an index format.
-//
-// A session whose latest attempt has fully settled against the
-// harness's producer and adapter targets is excluded: its attempt is known to
-// consume the current pair under the current build, so re-parsing it would be
-// pure churn. A facet that moved (a newer pair, a producer or adapter target
-// bump) keeps the session selected, and the following run replaces the latest
-// attempt once.
 // buildListStaleIndexSessionsQuery renders the stale-index work list for the
 // given targets and scope. Production and its query-plan guard call the same
 // builder, so the guarded statement is the statement production runs.
@@ -128,6 +119,15 @@ func buildListStaleIndexSessionsQuery(targets map[ingest.Harness]ingest.Harveste
 	return "SELECT s.session_id FROM sessions s WHERE " + strings.Join(conditions, " OR ") + predicate + " ORDER BY s.session_id", args, nil
 }
 
+// ListStaleIndexSessions selects only registered harness targets. The legacy SQL
+// index_version column records the actual indexer revision, not an index format.
+//
+// A session whose latest attempt has fully settled against the
+// harness's producer and adapter targets is excluded: its attempt is known to
+// consume the current pair under the current build, so re-parsing it would be
+// pure churn. A facet that moved (a newer pair, a producer or adapter target
+// bump) keeps the session selected, and the following run replaces the latest
+// attempt once.
 func (s *Store) ListStaleIndexSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, scope ingest.StoreScope) ([]ingest.SessionID, error) {
 	if err := scope.Validate("ListStaleIndexSessions"); err != nil {
 		return nil, err
