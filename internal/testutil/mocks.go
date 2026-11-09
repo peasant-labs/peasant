@@ -20,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testkit/scoperecorder"
 	"github.com/peasant-labs/schema"
 )
 
@@ -614,53 +615,27 @@ func (s *StubGitResolver) WalkUpRemoteURL(_ context.Context, _ string) (string, 
 
 // --- Scope-bearing call recorder ---
 
-// ScopeCall is one scope-bearing store call a test double observed.
-//
-// The recorder is deliberately generic: a call is appended with the operation
-// name its implementation passes, so adding a new scope-bearing store read
-// never requires editing a per-method field list here. Exactly one of Store and
-// Projects is set, matching the scope kind the operation took.
-type ScopeCall struct {
-	Operation string
-	Store     *ingest.StoreScope
-	Projects  *ingest.ProjectScope
+// recordStoreScope records one call that took a StoreScope in the neutral shape
+// the stdlib-only recorder package understands. Keeping the conversion here is
+// what lets the recorder live in a leaf package: package ingest cannot import
+// testutil, but it can import the leaf.
+func recordStoreScope(recorder *scoperecorder.Recorder, operation string, scope ingest.StoreScope) {
+	ids, _ := scope.Narrowed()
+	narrowed := make([]string, 0, len(ids))
+	for _, id := range ids {
+		narrowed = append(narrowed, string(id))
+	}
+	recorder.RecordStore(operation, narrowed, scope.IsAll())
 }
 
-// ScopeCallRecorder records the scope every scope-bearing store call received.
-// Its zero value is ready to use and safe for concurrent calls.
-type ScopeCallRecorder struct {
-	mu    sync.Mutex
-	calls []ScopeCall
-}
-
-// RecordStore records one call that took a StoreScope.
-func (r *ScopeCallRecorder) RecordStore(operation string, scope ingest.StoreScope) {
-	copied := scope
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.calls = append(r.calls, ScopeCall{Operation: operation, Store: &copied})
-}
-
-// RecordProjects records one call that took a ProjectScope.
-func (r *ScopeCallRecorder) RecordProjects(operation string, scope ingest.ProjectScope) {
-	copied := scope
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.calls = append(r.calls, ScopeCall{Operation: operation, Projects: &copied})
-}
-
-// Calls returns a copy of the recorded calls, in call order.
-func (r *ScopeCallRecorder) Calls() []ScopeCall {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]ScopeCall(nil), r.calls...)
-}
-
-// Reset drops every recorded call.
-func (r *ScopeCallRecorder) Reset() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.calls = nil
+// recordProjectScope records one call that took a ProjectScope.
+func recordProjectScope(recorder *scoperecorder.Recorder, operation string, scope ingest.ProjectScope) {
+	hashes, _ := scope.Narrowed()
+	narrowed := make([]string, 0, len(hashes))
+	for _, hash := range hashes {
+		narrowed = append(narrowed, string(hash))
+	}
+	recorder.RecordProjects(operation, narrowed, scope.IsAll())
 }
 
 // --- StubSessionStore ---
@@ -688,7 +663,7 @@ type StubSessionStore struct {
 	// observing side effects at DB INSERT time (e.g., asserting file not yet written).
 	OnInsert func(entries []ingest.StoreEntry)
 	// ScopeCalls records every scope-bearing call this double receives.
-	ScopeCalls ScopeCallRecorder
+	ScopeCalls scoperecorder.Recorder
 }
 
 var _ ingest.SessionStore = (*StubSessionStore)(nil)
@@ -755,7 +730,7 @@ func (s *StubSessionStore) UpsertSessionCommits(_ context.Context, sessionID ing
 // CleanupOrphanProjectsCalled records whether CleanupOrphanProjects was called.
 // Embed in StubSessionStore fields for test assertions.
 func (s *StubSessionStore) CleanupOrphanProjects(_ context.Context, scope ingest.ProjectScope) error {
-	s.ScopeCalls.RecordProjects("CleanupOrphanProjects", scope)
+	recordProjectScope(&s.ScopeCalls, "CleanupOrphanProjects", scope)
 	s.CleanupOrphanProjectsCalled = true
 	return s.CleanupOrphanProjectsErr
 }
@@ -802,7 +777,7 @@ type StubMetricsStore struct {
 	TitleProjectPath          string
 	TitleContextErr           error
 	// ScopeCalls records every scope-bearing call this double receives.
-	ScopeCalls ScopeCallRecorder
+	ScopeCalls scoperecorder.Recorder
 }
 
 var _ ingest.MetricsStore = (*StubMetricsStore)(nil)
@@ -930,7 +905,7 @@ func (s *StubMetricsStore) UpdateIndexState(_ context.Context, sessionID ingest.
 }
 
 func (s *StubMetricsStore) ListStaleIndexSessions(_ context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, scope ingest.StoreScope) ([]ingest.SessionID, error) {
-	s.ScopeCalls.RecordStore("ListStaleIndexSessions", scope)
+	recordStoreScope(&s.ScopeCalls, "ListStaleIndexSessions", scope)
 	s.ListStaleCalledWithTargets = maps.Clone(targets)
 	if s.StaleIndexErr != nil {
 		return nil, s.StaleIndexErr
