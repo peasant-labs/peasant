@@ -45,6 +45,13 @@ type indexScopedCase struct {
 	// SeedCatalog is the catalog the store already holds before the run, as
 	// path/id pairs; it is written through the complete-enumeration rebuild.
 	SeedCatalog []indexCodexSource `yaml:"seedCatalog"`
+	// CodexDisabled registers a Codex adapter but leaves its source disabled,
+	// which a `--all` run must treat as out of scope rather than as a source it
+	// failed to walk.
+	CodexDisabled bool `yaml:"codexDisabled"`
+	// CodexWithoutAdapter enables the source without registering an adapter for
+	// it, which a `--all` run cannot enumerate and must refuse.
+	CodexWithoutAdapter bool `yaml:"codexWithoutAdapter"`
 	// WantRunErrorContains is the refusal a case expects; it replaces the
 	// post-run assertions.
 	WantRunErrorContains string `yaml:"wantRunErrorContains"`
@@ -319,6 +326,19 @@ func runIndexScopedCase(t *testing.T, testCase indexScopedCase) {
 			cfg.Sources[ingest.HarnessCodex] = ingest.SourceConfig{
 				Paths:   []ingest.ResolvedPath{ingest.ResolvedPath("/codex")},
 				Enabled: true,
+			}
+			adapters[ingest.HarnessCodex] = makeIndexScopedCodexAdapter(codexSessions, codexEnumeration)
+		}
+		if testCase.CodexWithoutAdapter {
+			cfg.Sources[ingest.HarnessCodex] = ingest.SourceConfig{
+				Paths:   []ingest.ResolvedPath{ingest.ResolvedPath("/codex")},
+				Enabled: true,
+			}
+		}
+		if testCase.CodexDisabled {
+			cfg.Sources[ingest.HarnessCodex] = ingest.SourceConfig{
+				Paths:   []ingest.ResolvedPath{ingest.ResolvedPath("/codex")},
+				Enabled: false,
 			}
 			adapters[ingest.HarnessCodex] = makeIndexScopedCodexAdapter(codexSessions, codexEnumeration)
 		}

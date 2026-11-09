@@ -341,12 +341,82 @@ func TestPipelineDiscoveryAttachesTheCodexRolloutCatalog(t *testing.T) {
 	}
 }
 
+// TestPipelineRebuildKeepsTheCatalogWhenNoCodexRootResolved pins the config case
+// where every configured Codex root fails to resolve: the source stays enabled
+// with an empty path list, so the adapter walks nothing. `harvest index --all`
+// must leave the catalog exactly as it was; an empty COMPLETE enumeration would
+// clear rows no walk looked for, which is what the maintenance pass on the same
+// config does not do.
+func TestPipelineRebuildKeepsTheCatalogWhenNoCodexRootResolved(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	output := filepath.Join(root, "managed")
+	if err := os.MkdirAll(output, 0o755); err != nil {
+		t.Fatalf("create the output root: %v", err)
+	}
+
+	db := storetest.Open(t)
+	seeded := []ingest.RolloutFile{{
+		Path:      ingest.ResolvedPath("/broken/2026/11/09/rollout-2026-11-09T10-00-00-88888888-8888-4888-8888-888888888888.jsonl"),
+		SessionID: ingest.SessionID("88888888-8888-4888-8888-888888888888"),
+	}}
+	if err := db.RebuildDerivedLookups(ctx, ingest.RolloutEnumeration{
+		Status: ingest.RolloutEnumerationComplete,
+		Files:  seeded,
+	}); err != nil {
+		t.Fatalf("seed the rollout catalog: %v", err)
+	}
+
+	fs := &ingest.OSFileSystem{}
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessCodex: func(filesystem ingest.FileSystem, git ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
+			return ingest.NewCodexAdapter(filesystem, git, s)
+		},
+	}
+	cfg := makePipelineConfig(output, func(c *ingest.PipelineConfig) {
+		c.Reindex = true
+		c.RebuildAll = true
+		c.Command = "harvest index"
+		c.Sources = map[ingest.Harness]ingest.SourceConfig{
+			// An enabled source whose configured path failed to resolve: the
+			// command still adds it, with no root left to walk.
+			ingest.HarnessCodex: {Enabled: true},
+		}
+	})
+	pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), adapters, cfg,
+		ingest.WithStore(db),
+		ingest.WithMetricsStore(db),
+		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		ingest.WithHarvesterVersions(maps.Clone(ingest.HarvesterVersionRegistry)),
+	)
+	if err != nil {
+		t.Fatalf("build the pipeline: %v", err)
+	}
+	if _, err := pipeline.Run(ctx); err != nil {
+		t.Fatalf("`harvest index --all` refused an enabled Codex source whose roots did not resolve: %v", err)
+	}
+
+	rows, err := db.LoadCodexRolloutCatalog(ctx)
+	if err != nil {
+		t.Fatalf("load the rollout catalog: %v", err)
+	}
+	if len(rows) != len(seeded) {
+		t.Fatalf("catalog holds %d rows after the rebuild, want the %d seeded; a walk that read no root may not replace the table", len(rows), len(seeded))
+	}
+	if rows[0] != seeded[0] {
+		t.Fatalf("catalog row = %+v, want %+v", rows[0], seeded[0])
+	}
+}
+
 func assertCodexRolloutEnumeration(t *testing.T, adapter *ingest.CodexAdapter, testCase codexCatalogCase) {
 	t.Helper()
 	enumeration := adapter.EnumeratedRollouts()
 	wantStatus := ingest.RolloutEnumerationComplete
-	if testCase.WantEnumeration == "partial" {
+	switch testCase.WantEnumeration {
+	case "partial":
 		wantStatus = ingest.RolloutEnumerationPartial
+	case "not-walked":
+		wantStatus = ingest.RolloutEnumerationNotWalked
 	}
 	if enumeration.Status != wantStatus {
 		t.Fatalf("enumerated rollout status = %v, want %v; a partial walk must say so, because the rebuild refuses on it", enumeration.Status, wantStatus)

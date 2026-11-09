@@ -10,6 +10,7 @@ requiredNames:
   - partial_walk_keeps_a_path_whose_stat_is_denied
   - absent_root_is_complete_and_leaves_other_roots_alone
   - root_read_failure_is_partial
+  - enabled_source_with_no_resolved_root_is_not_walked
 
 cases:
   # A walked tree is catalogued path by path, not session by session: a second
@@ -242,3 +243,20 @@ cases:
         id: 11111111-1111-4111-8111-111111111111
     wantSessionCounts:
       11111111-1111-4111-8111-111111111111: 1
+
+  # Every configured root failed to resolve, so the source is still enabled with
+  # an empty path list and the walk read nothing. That is not an empty tree: the
+  # catalog must be left exactly as it was, which is also what the maintenance
+  # pass does, because it prunes only under roots it was given.
+  - name: enabled_source_with_no_resolved_root_is_not_walked
+    roots: []
+    seedCatalog:
+      - path: /broken/2026/11/09/rollout-2026-11-09T10-00-00-88888888-8888-4888-8888-888888888888.jsonl
+        id: 88888888-8888-4888-8888-888888888888
+    wantEnumeration: not-walked
+    wantSessions: 0
+    wantCatalog:
+      - path: /broken/2026/11/09/rollout-2026-11-09T10-00-00-88888888-8888-4888-8888-888888888888.jsonl
+        id: 88888888-8888-4888-8888-888888888888
+    wantSessionCounts:
+      88888888-8888-4888-8888-888888888888: 1

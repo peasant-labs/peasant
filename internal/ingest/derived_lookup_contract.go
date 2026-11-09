@@ -25,9 +25,13 @@ type RolloutEnumerationStatus uint8
 
 const (
 	rolloutEnumerationUnset RolloutEnumerationStatus = iota
-	// RolloutEnumerationNotWalked says this run configured no Codex source, so
-	// nothing was enumerated. A rebuild has nothing to derive the catalog from
-	// and leaves it exactly as it is.
+	// RolloutEnumerationNotWalked says a Codex source was configured but no root
+	// was walked: either the run configures no Codex source at all, or every
+	// path it names failed to resolve, so no tree was read. Nothing was
+	// enumerated, so nothing may be replaced: a rebuild has nothing to derive
+	// the catalog from and leaves it exactly as it is. This is deliberately not
+	// an empty COMPLETE enumeration, which would clear rows the walk never
+	// looked for.
 	RolloutEnumerationNotWalked
 	// RolloutEnumerationPartial says a Codex walk ran and swallowed at least
 	// one directory-read or file-stat FAILURE that could hide rollouts, so a
