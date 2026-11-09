@@ -1,0 +1,200 @@
+[
+  {
+    "theme": "dark",
+    "route": "/?groupBy=project",
+    "shell": "/home/minttea/dev/peasant-labs/peasant/peasant-855--fix-home-view--url-and-cache/review-capture/slice10/home-shell-dark.png",
+    "groupedBody": "/home/minttea/dev/peasant-labs/peasant/peasant-855--fix-home-view--url-and-cache/review-capture/slice10/home-grouped-dark.png",
+    "pageTwoBody": "/home/minttea/dev/peasant-labs/peasant/peasant-855--fix-home-view--url-and-cache/review-capture/slice10/home-page-two-dark.png",
+    "pageOneHeaders": [
+      {
+        "id": "project:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "label": "alpha-project",
+        "expanded": "true"
+      },
+      {
+        "id": "project:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "label": "beta-project",
+        "expanded": "true"
+      }
+    ],
+    "pageOneOrder": [
+      "a01",
+      "a02",
+      "a03",
+      "a04",
+      "a05",
+      "a06",
+      "a07",
+      "a08",
+      "a09",
+      "a10",
+      "a11",
+      "a12",
+      "a13",
+      "b01",
+      "b02",
+      "b03",
+      "b04",
+      "b05",
+      "b06",
+      "b07",
+      "b08",
+      "b09",
+      "b10",
+      "b11",
+      "b12"
+    ],
+    "collapsed": "project:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "pageTwoHeaders": [
+      {
+        "label": "gamma-project",
+        "expanded": "true"
+      },
+      {
+        "label": "delta-project",
+        "expanded": "true"
+      }
+    ],
+    "reads": [
+      {
+        "view": "home",
+        "maxItems": "25",
+        "page": "1"
+      },
+      {
+        "view": "home",
+        "maxItems": "25",
+        "page": "2"
+      }
+    ],
+    "provenance": {
+      "chunks": [
+        "/_next/static/chunks/1581e093-df44a9a2e7ddb4bb.js",
+        "/_next/static/chunks/2595-d6d68c9716f152cb.js",
+        "/_next/static/chunks/358f1977-e55233683659bef3.js",
+        "/_next/static/chunks/37961976-a8858a3c4999a4d8.js",
+        "/_next/static/chunks/4922-173a6edd940b955f.js",
+        "/_next/static/chunks/4a79b2bc-20e85bf2bfd4ed4a.js",
+        "/_next/static/chunks/5788-dc186d06797a3962.js",
+        "/_next/static/chunks/5941-1bc5866d13b535b5.js",
+        "/_next/static/chunks/6480-3878f7d2ef4b2746.js",
+        "/_next/static/chunks/665-aa2874aed942d7dc.js",
+        "/_next/static/chunks/7105-2cab7efe595bc4c1.js",
+        "/_next/static/chunks/8191-82380d04e5cd2fae.js",
+        "/_next/static/chunks/917-a4da0bd1fc2cebfc.js",
+        "/_next/static/chunks/9291-b89cc9b78685eec0.js",
+        "/_next/static/chunks/app/layout-a7112935c2457689.js",
+        "/_next/static/chunks/app/not-found-137f5389d8ceb86e.js",
+        "/_next/static/chunks/app/page-a81ca3f8a7cfcc30.js",
+        "/_next/static/chunks/main-app-7ef3c9d70167d23f.js",
+        "/_next/static/chunks/polyfills-42372ed130431b0a.js",
+        "/_next/static/chunks/webpack-781cdd342ff5c95a.js"
+      ],
+      "markerChunks": {
+        "home-group-head": [
+          "/_next/static/chunks/app/page-a81ca3f8a7cfcc30.js"
+        ]
+      },
+      "binChecked": true
+    }
+  },
+  {
+    "theme": "light",
+    "route": "/?groupBy=project",
+    "shell": "/home/minttea/dev/peasant-labs/peasant/peasant-855--fix-home-view--url-and-cache/review-capture/slice10/home-shell-light.png",
+    "groupedBody": "/home/minttea/dev/peasant-labs/peasant/peasant-855--fix-home-view--url-and-cache/review-capture/slice10/home-grouped-light.png",
+    "pageTwoBody": "/home/minttea/dev/peasant-labs/peasant/peasant-855--fix-home-view--url-and-cache/review-capture/slice10/home-page-two-light.png",
+    "pageOneHeaders": [
+      {
+        "id": "project:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "label": "alpha-project",
+        "expanded": "true"
+      },
+      {
+        "id": "project:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "label": "beta-project",
+        "expanded": "true"
+      }
+    ],
+    "pageOneOrder": [
+      "a01",
+      "a02",
+      "a03",
+      "a04",
+      "a05",
+      "a06",
+      "a07",
+      "a08",
+      "a09",
+      "a10",
+      "a11",
+      "a12",
+      "a13",
+      "b01",
+      "b02",
+      "b03",
+      "b04",
+      "b05",
+      "b06",
+      "b07",
+      "b08",
+      "b09",
+      "b10",
+      "b11",
+      "b12"
+    ],
+    "collapsed": "project:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "pageTwoHeaders": [
+      {
+        "label": "gamma-project",
+        "expanded": "true"
+      },
+      {
+        "label": "delta-project",
+        "expanded": "true"
+      }
+    ],
+    "reads": [
+      {
+        "view": "home",
+        "maxItems": "25",
+        "page": "1"
+      },
+      {
+        "view": "home",
+        "maxItems": "25",
+        "page": "2"
+      }
+    ],
+    "provenance": {
+      "chunks": [
+        "/_next/static/chunks/1581e093-df44a9a2e7ddb4bb.js",
+        "/_next/static/chunks/2595-d6d68c9716f152cb.js",
+        "/_next/static/chunks/358f1977-e55233683659bef3.js",
+        "/_next/static/chunks/37961976-a8858a3c4999a4d8.js",
+        "/_next/static/chunks/4922-173a6edd940b955f.js",
+        "/_next/static/chunks/4a79b2bc-20e85bf2bfd4ed4a.js",
+        "/_next/static/chunks/5788-dc186d06797a3962.js",
+        "/_next/static/chunks/5941-1bc5866d13b535b5.js",
+        "/_next/static/chunks/6480-3878f7d2ef4b2746.js",
+        "/_next/static/chunks/665-aa2874aed942d7dc.js",
+        "/_next/static/chunks/7105-2cab7efe595bc4c1.js",
+        "/_next/static/chunks/8191-82380d04e5cd2fae.js",
+        "/_next/static/chunks/917-a4da0bd1fc2cebfc.js",
+        "/_next/static/chunks/9291-b89cc9b78685eec0.js",
+        "/_next/static/chunks/app/layout-a7112935c2457689.js",
+        "/_next/static/chunks/app/not-found-137f5389d8ceb86e.js",
+        "/_next/static/chunks/app/page-a81ca3f8a7cfcc30.js",
+        "/_next/static/chunks/main-app-7ef3c9d70167d23f.js",
+        "/_next/static/chunks/polyfills-42372ed130431b0a.js",
+        "/_next/static/chunks/webpack-781cdd342ff5c95a.js"
+      ],
+      "markerChunks": {
+        "home-group-head": [
+          "/_next/static/chunks/app/page-a81ca3f8a7cfcc30.js"
+        ]
+      },
+      "binChecked": true
+    }
+  }
+]
