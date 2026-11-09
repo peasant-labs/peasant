@@ -43,7 +43,6 @@ import { useTranscriptReadingState } from './lib/useTranscriptReadingState';
 import { toTranscriptGitContext } from './lib/transcriptGit';
 import {
   clearScopeQuery,
-  collectFileTouches,
   originCrumb,
   prefilterTurns,
   scopeChipLabel,
@@ -53,7 +52,6 @@ import {
   type CrumbItem,
 } from './lib/scopeTurns';
 import { TurnLabelPopover } from './canvas/TurnLabelPopover';
-import { TurnTouchedFiles } from './panels/TurnTouchedFiles';
 import { DetectedPullRequests } from './panels/DetectedPullRequests';
 import { adaptQualitySessions } from '@/lib/quality/types';
 import { useTranscriptPublish } from './publish/useTranscriptPublish';
@@ -94,12 +92,12 @@ type EarlierHistoryOpen = Record<string, boolean>;
  *
  * Peasant additionally owns the scoping layer: the viewer is the
  * destination of every "why" click from Map/Review, so it can open aimed —
- * `?scope=task|file|change&scopeVal=…` filters the turn list client-side,
- * `?origin=Map|Review` prepends an origin breadcrumb, and every turn that
- * touched files carries a touched-files panel (mounted through the package's
- * `renderTurnPanel` slot) linking its file touches back to the Map.
+ * `?scope=task|file|change&scopeVal=…` filters the turn list client-side and
+ * `?origin=Map|Review` prepends an origin breadcrumb.
  * Scoping POLICY lives in this adapter; the rendering seams (`turns`,
- * `renderTurnPanel`, harness-derived provider) are package contract.
+ * harness-derived provider) are package contract. A turn's file paths stay in
+ * its tool-call rows, and the viewer's Files tab lists every touched file, so
+ * the adapter adds no per-turn file surface.
  */
 export function SessionDetailV2(props: SessionDetailV2Props) {
   const [mounted, setMounted] = useState(false);
@@ -480,9 +478,6 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     onNavigateRelationship: navigateToRelationship,
   };
 
-  // Relativizes touched-file paths to repo-relative Map node ids.
-  const workingDirectory = detail.workingDirectory;
-
   // Host-owned status context contains state the reader needs: the active-scope
   // chip plus stale-link and connection-error status. View controls remain in
   // the shared composite, while copy-as-markdown is a header action below.
@@ -641,20 +636,6 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
                 provider={detail.harness}
               />
             )}
-            // Each turn carries its touched files under the card. The
-            // panel reads WIRE turns (tool-call paths), so look the turn back up.
-            renderTurnPanel={(turn) => {
-              const wire = (displayTurns ?? turns).find((w) => w.index === turn.index);
-              if (!wire) return null;
-              const touches = collectFileTouches([wire], workingDirectory)[0];
-              if (!touches) return null;
-              return (
-                <TurnTouchedFiles
-                  touches={touches}
-                  activeFile={scope.scope === TranscriptScope.File ? scope.scopeVal : undefined}
-                />
-              );
-            }}
             // Peasant's TYPED label model (annotation-type registry): the
             // restored outcome+flag modal is backed by the real
             // quality.turn_outcome/quality.turn_flag types, plus a

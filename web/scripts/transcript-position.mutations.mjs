@@ -8,6 +8,7 @@ const manifestPaths = [
   resolve('src/components/session-detail/v2/testdata/transcript_target_recovery.manifest.yaml'),
   resolve('src/components/session-detail/v2/testdata/transcript_mounted_position.manifest.yaml'),
   resolve('src/components/session-detail/v2/testdata/schema_contract.manifest.yaml'),
+  resolve('src/components/session-detail/v2/testdata/turn_files_panel.manifest.yaml'),
   resolve('src/components/session-detail/v2/testdata/context_navigation.manifest.yaml'),
 ];
 const production = readFileSync(productionPath, 'utf8');

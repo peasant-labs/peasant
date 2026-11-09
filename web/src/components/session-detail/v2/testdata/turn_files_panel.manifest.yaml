@@ -1,0 +1,14 @@
+expectedCaseCount: 2
+requiredNames:
+  - consecutive wordless turns render no files-read panel
+  - a file-scoped link still filters wordless turns without a panel
+expectedMutationCount: 1
+mutations:
+  - name: a re-added per-turn files panel is caught
+    find: "            renderTurnActions={(turn) => ("
+    replace: "            renderTurnPanel={() => <div>files read</div>}\n            renderTurnActions={(turn) => ("
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.filesReadPanel.test.tsx
+    expectedFailedTestNames:
+      - consecutive wordless turns render no files-read panel
+      - a file-scoped link still filters wordless turns without a panel
+    expectedFailurePattern: 'to deeply equal \[\]'
