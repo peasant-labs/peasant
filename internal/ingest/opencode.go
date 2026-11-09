@@ -2203,7 +2203,10 @@ func (a *OpenCodeAdapter) openCodeDatabaseSession(ctx context.Context, result Op
 	}
 	hydrated := a.hydrateCanonicalOpenCodeFreshness(ctx, selected, map[string]OpenCodeSQLiteSource{filepath.Clean(result.Candidate.Path): source})
 	if len(hydrated) == 0 {
-		return openCodeSessionCandidate{}, false, nil
+		// The session exists, but its changed time and the database mtime floor
+		// were both unreadable, so the full walk would skip it and record the
+		// reason. Reading the source failed; the path is not gone.
+		return openCodeSessionCandidate{}, false, fmt.Errorf("read the freshness of session %s from %q: neither the session clock nor the database mtime floor could be read", id, result.Candidate.Path)
 	}
 	return selected[0], true, nil
 }
