@@ -113,6 +113,10 @@ type openCodeLocatorLookup struct {
 	WantStats     []string                  `yaml:"wantStats"`
 	WantError     string                    `yaml:"wantError"`
 	RendersAsMiss bool                      `yaml:"rendersAsMiss"`
+	// WantMiss is the exact one-line reason a `rendersAsMiss` case renders. The
+	// `{database}` placeholder stands for the absolute path of the single
+	// database the case opens, so the sentence is pinned against a real path.
+	WantMiss string `yaml:"wantMiss"`
 }
 
 type openCodeLocatorSearched struct {
@@ -192,6 +196,14 @@ func loadOpenCodeSessionLocatorFixture(t *testing.T) openCodeLocatorFixture {
 		}
 		if testCase.Lookup == nil && testCase.Located == nil {
 			t.Fatalf("case %q asserts nothing", testCase.Name)
+		}
+		if testCase.Lookup != nil && testCase.Lookup.RendersAsMiss {
+			if testCase.Lookup.WantMiss == "" {
+				t.Fatalf("case %q renders the miss as a sentence but declares no wantMiss", testCase.Name)
+			}
+			if len(testCase.Lookup.WantOpens) != 1 {
+				t.Fatalf("case %q declares %d opened database(s); a rendered miss names the one that failed", testCase.Name, len(testCase.Lookup.WantOpens))
+			}
 		}
 		for _, file := range testCase.Files {
 			switch file.Kind {
@@ -1077,18 +1089,24 @@ func openCodeProbeKind(t *testing.T, name string) ingest.ProbeKind {
 }
 
 // assertOpenCodeLookupRendersAsMiss feeds the adapter's failure into the scope
-// error the way the core does — one SearchFailed entry built from the returned
-// error's first line — and asserts the rendered miss. A database that did not
-// open must read as "could not be looked up in all sources" and name both the
-// database and its first error line, never as a plain "was not found".
+// error the way the core does — one SearchFailed entry carrying the returned
+// error — and asserts the exact sentence the renderer produces. A database that
+// did not open must read as "could not be looked up in all sources" and name
+// both the database and the session in one clause, never as a plain "was not
+// found" and never by repeating the actionable paragraph the block prints.
 func assertOpenCodeLookupRendersAsMiss(t *testing.T, tree string, id ingest.SessionID, lookup *openCodeLocatorLookup, sources ingest.SourceLookup, lookupErr error) {
 	t.Helper()
-	detail := strings.SplitN(strings.TrimSpace(lookupErr.Error()), "\n", 2)[0]
+	// The miss block already prints the what/why/where/when/impact/fix paragraph,
+	// so the recorded detail is cut to ONE clause: the first line of the
+	// underlying error, stopping before its actionable frame and before a
+	// following independent clause, with the package prefix dropped. The core
+	// does that cutting, so the test feeds the adapter's error in unmodified and
+	// pins the sentence the renderer produces.
 	miss := ingest.ScopeMiss{ID: id, Reason: ingest.MissNotFound, Searched: sources.Searched}
 	miss.Searched = append(miss.Searched, ingest.SearchedSource{
 		Harness: ingest.HarnessOpenCode,
 		Method:  ingest.SearchFailed,
-		Detail:  detail,
+		Detail:  lookupErr.Error(),
 	})
 	scopeErr := &ingest.SessionScopeError{
 		Misses:  []ingest.ScopeMiss{miss},
@@ -1096,25 +1114,23 @@ func assertOpenCodeLookupRendersAsMiss(t *testing.T, tree string, id ingest.Sess
 		Store:   ingest.StoreAttached,
 	}
 	reason := scopeErr.Reason()
-	want := []string{"could not be looked up in all sources", detail}
-	// Every searched entry the case declares must reach the rendered sentence,
-	// so the block and the sentence never drift apart.
-	for _, searched := range lookup.WantSearched {
-		switch searched.Method {
-		case "sqlite-row":
-			want = append(want, "searched opencode (SQLite)")
-		case "unsupported":
-			want = append(want, "cannot search by id: opencode (legacy JSON)")
+
+	database := openCodeLocatorPath(tree, lookup.WantOpens[0])
+	wanted := strings.ReplaceAll(lookup.WantMiss, "{database}", database)
+	if reason != wanted {
+		t.Fatalf("rendered miss = %q, want exactly %q", reason, wanted)
+	}
+	// The clause must still say which database could not be read and for which
+	// session: those are the two facts a person needs to act on the failure.
+	for _, required := range []string{database, string(id)} {
+		if !strings.Contains(reason, required) {
+			t.Errorf("rendered miss %q does not name %q", reason, required)
 		}
 	}
-	for _, substring := range want {
-		if !strings.Contains(reason, substring) {
-			t.Errorf("rendered miss %q does not name %q", reason, substring)
-		}
-	}
-	for _, opened := range lookup.WantOpens {
-		if location := openCodeLocatorPath(tree, opened); !strings.Contains(reason, location) && !strings.Contains(detail, location) {
-			t.Errorf("rendered miss %q names no database path", reason)
+	// And it must not reprint the paragraph the block already prints.
+	for _, forbidden := range []string{"; where:", "; when:", "; impact:", "; fix:", "; meaning:", "ingest:"} {
+		if strings.Contains(reason, forbidden) {
+			t.Errorf("rendered miss %q repeats the actionable frame %q", reason, forbidden)
 		}
 	}
 }

@@ -1957,7 +1957,7 @@ func (a *OpenCodeAdapter) discoverOpenCodeDatabaseMember(ctx context.Context, cf
 				ID:         at.ID,
 				Harness:    HarnessOpenCode,
 				Unreadable: UnreadableSourceFailed,
-				Detail:     firstLine(openCodeProbeDetail(result)),
+				Detail:     firstLineOr(openCodeProbeDetail(result), "the located source could not be read"),
 			}},
 			Deferred: NoDeferredWrites{},
 		}, nil
@@ -1976,7 +1976,7 @@ func (a *OpenCodeAdapter) discoverOpenCodeDatabaseMember(ctx context.Context, cf
 				ID:         at.ID,
 				Harness:    HarnessOpenCode,
 				Unreadable: UnreadableSourceFailed,
-				Detail:     firstLine(err.Error()),
+				Detail:     firstLineOr(err.Error(), "the located source could not be read"),
 			}},
 			Deferred: NoDeferredWrites{},
 		}, nil
@@ -2048,13 +2048,13 @@ func (a *OpenCodeAdapter) openCodeStoredChildMember(ctx context.Context, cfg Sou
 		result := a.probeOpenCodeCandidate(ctx, candidate)
 		if result.Support != OpenCodeSupportSupported {
 			member.Unreadable = UnreadableSourceFailed
-			member.Detail = firstLine(openCodeProbeDetail(result))
+			member.Detail = firstLineOr(openCodeProbeDetail(result), "the recorded source could not be read")
 			return member
 		}
 		build, err := a.openCodeDatabaseBuild(ctx, result, child.ID, false)
 		if err != nil {
 			member.Unreadable = UnreadableSourceFailed
-			member.Detail = firstLine(err.Error())
+			member.Detail = firstLineOr(err.Error(), "the recorded source could not be read")
 			return member
 		}
 		if !build.Found {

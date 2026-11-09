@@ -202,6 +202,10 @@ cases:
       id: ses_3cd91f52effeXd3QAJ54jOyzv5
       wantError: could not read database
       rendersAsMiss: true
+      # The exact sentence the miss renders. The block already prints the
+      # what/why/where/when/impact/fix paragraph, so the recorded detail is one
+      # clause: which database could not be read, and for which session.
+      wantMiss: 'session ses_... could not be looked up in all sources, so nothing was recorded; searched store; lookup failed: opencode (the OpenCode lookup for session ses_3cd91f52effeXd3QAJ54jOyzv5 could not read database "{database}")'
       wantSources: []
       # The failing database is the first candidate, so the lookup stops before
       # the legacy-JSON entry; the miss names the failure instead.
