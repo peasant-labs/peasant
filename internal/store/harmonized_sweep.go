@@ -459,12 +459,13 @@ func (s *Store) clearSweepFlag(ctx context.Context, sessionID schema.SessionID) 
 	return nil
 }
 
-// flaggedSessionsSweepSQL is the harvest-start sweep's work list. The partial
-// index makes the flagged population the driving set; a narrowed scope appends
-// its id predicate over the same statement production runs.
-func flaggedSessionsSweepSQL(scope ingest.StoreScope) string {
-	predicate, _ := narrowedSessionPredicate("s", scope)
-	return `SELECT s.session_id FROM sessions s WHERE s.content_sweep_pending = 1` + predicate + ` ORDER BY s.session_id`
+// flaggedSessionsSweepSQL is the harvest-start sweep's work list, with the
+// arguments it binds. The partial index makes the flagged population the
+// driving set; a narrowed scope appends its id predicate over the same
+// statement production runs.
+func flaggedSessionsSweepSQL(scope ingest.StoreScope) (string, []any) {
+	predicate, args := narrowedSessionPredicate("s", scope)
+	return `SELECT s.session_id FROM sessions s WHERE s.content_sweep_pending = 1` + predicate + ` ORDER BY s.session_id`, args
 }
 
 // SweepFlaggedSessions sweeps every session the crash marker flags: the
@@ -491,9 +492,9 @@ func (s *Store) sweepFlaggedSessions(ctx context.Context, scope ingest.StoreScop
 		return report, fmt.Errorf("store: take connection to list flagged sessions for the harvest-start sweep: %w; no session was swept", err)
 	}
 	var flagged []schema.SessionID
-	_, narrowedArgs := narrowedSessionPredicate("s", scope)
-	listErr := sqlitex.Execute(conn, flaggedSessionsSweepSQL(scope), &sqlitex.ExecOptions{
-		Args: narrowedArgs,
+	sweepSQL, sweepArgs := flaggedSessionsSweepSQL(scope)
+	listErr := sqlitex.Execute(conn, sweepSQL, &sqlitex.ExecOptions{
+		Args: sweepArgs,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			flagged = append(flagged, schema.SessionID(stmt.ColumnText(0)))
 			return nil

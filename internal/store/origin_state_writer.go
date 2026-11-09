@@ -20,16 +20,18 @@ import (
 // skipped pass at the pipeline's type assertion.
 var _ ingest.OriginResolverStore = (*Store)(nil)
 
-// listStaleOriginSessionsSQL is the resolve pass's work list. Its parent column
-// is the session-level logical-parent answer, not the raw availability cache: a
-// child whose generation carries started_by evidence must be judged parent-linked
-// even while its cache is NULL, or the pass would persist a root verdict that
-// every migrated reader contradicts. A narrowed scope appends its id predicate
-// over the same statement production runs.
-func listStaleOriginSessionsSQL(scope ingest.StoreScope) string {
-	predicate, _ := narrowedSessionPredicate("s", scope)
+// listStaleOriginSessionsSQL is the resolve pass's work list, with the
+// arguments it binds. Its parent column is the session-level logical-parent
+// answer, not the raw availability cache: a child whose generation carries
+// started_by evidence must be judged parent-linked even while its cache is
+// NULL, or the pass would persist a root verdict that every migrated reader
+// contradicts. A narrowed scope appends its id predicate over the same
+// statement production runs.
+func listStaleOriginSessionsSQL(currentVersion int, scope ingest.StoreScope) (string, []any) {
+	predicate, narrowedArgs := narrowedSessionPredicate("s", scope)
+	args := append([]any{currentVersion}, narrowedArgs...)
 	return `SELECT s.session_id, COALESCE(` + LogicalParentSQL("s") + `, ''), s.model_harness, s.source_path, s.session_origin, s.origin_version
-FROM sessions s WHERE s.origin_version < ?` + predicate
+FROM sessions s WHERE s.origin_version < ?` + predicate, args
 }
 
 // ListStaleOriginSessions returns every session whose origin_version is below
@@ -55,10 +57,9 @@ func (s *Store) ListStaleOriginSessions(ctx context.Context, currentVersion int,
 	}
 	defer s.pool.Put(conn)
 
-	_, narrowedArgs := narrowedSessionPredicate("s", scope)
-	args := append([]any{currentVersion}, narrowedArgs...)
+	query, args := listStaleOriginSessionsSQL(currentVersion, scope)
 	var rows []ingest.StoredOriginRow
-	if err := sqlitex.Execute(conn, listStaleOriginSessionsSQL(scope), &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{
 		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			sid, err := ingest.NewSessionID(stmt.ColumnText(0))
