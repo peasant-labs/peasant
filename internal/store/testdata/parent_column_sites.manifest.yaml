@@ -4,6 +4,7 @@
 # manifest is a deletion, and the guard refuses it.
 requiredResidual:
   - store-home-identity-parent-cache
+  - store-parent-cache-reader
   - store-logical-parent-renderer
   - store-push-sessions-parent
   - store-lookup-session-location

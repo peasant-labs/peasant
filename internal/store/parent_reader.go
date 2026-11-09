@@ -165,6 +165,32 @@ FROM sessions s WHERE s.session_id IN (?` + strings.Repeat(",?", len(batch)-1) +
 	return lineages, nil
 }
 
+// ParentCacheForSession reads the raw availability cache for one session. It
+// answers which cached row can join, never who the logical parent is: a nil
+// value never proves rootness. The orphan reconciliation's own assertions read
+// the cache it wrote here, without conflating it with LogicalParentSQL.
+func (s *Store) ParentCacheForSession(ctx context.Context, sessionID string) (*string, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: take connection to read the parent cache of session %s: %w; the cache value was not read; restore database access and retry", sessionID, err)
+	}
+	defer s.pool.Put(conn)
+	var cache *string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{sessionID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				value := stmt.ColumnText(0)
+				cache = &value
+			}
+			return nil
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("store: read the parent cache of session %s: %w; the cache value was not read; inspect the store and retry", sessionID, err)
+	}
+	return cache, nil
+}
+
 // LogicalParentForSession returns the durable logical parent for one session:
 // the evidence target of the session's generation when one answers, otherwise
 // the availability cache. A nil return means no known logical parent; it never

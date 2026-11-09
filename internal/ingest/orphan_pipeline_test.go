@@ -832,16 +832,25 @@ func assertOrphanExpectations(
 func assertOrphanParentCache(t *testing.T, ctx context.Context, db *store.Store, label string, want map[string]*string) {
 	t.Helper()
 	for id, wantCache := range want {
-		row, err := db.SessionByID(ctx, id)
+		// Read the raw availability cache, not the logical parent answer:
+		// SessionByID renders LogicalParentSQL, which is a different question
+		// and may name an evidence or snapshot parent while the cache is NULL.
+		rawCache, err := db.ParentCacheForSession(ctx, id)
 		if err != nil {
-			t.Fatalf("case %q: SessionByID(%q): %v", label, id, err)
+			t.Fatalf("case %q: ParentCacheForSession(%q): %v", label, id, err)
 		}
-		if row == nil {
-			t.Fatalf("case %q: cannot check parent cache of missing session %q", label, id)
+		if rawCache == nil {
+			row, err := db.SessionByID(ctx, id)
+			if err != nil {
+				t.Fatalf("case %q: SessionByID(%q): %v", label, id, err)
+			}
+			if row == nil {
+				t.Fatalf("case %q: cannot check parent cache of missing session %q", label, id)
+			}
 		}
 		var gotCache *string
-		if row.ParentID != nil && *row.ParentID != "" {
-			gotCache = row.ParentID
+		if rawCache != nil && *rawCache != "" {
+			gotCache = rawCache
 		}
 		if !orphanOptionalEqual(gotCache, wantCache) {
 			t.Fatalf("case %q: parent cache of %q = %v, want %v", label, id, orphanDisplay(gotCache), orphanDisplay(wantCache))

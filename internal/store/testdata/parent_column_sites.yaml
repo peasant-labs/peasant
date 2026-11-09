@@ -55,6 +55,15 @@ residual:
       SyncParentIdentities. The shared identity reader applies generation and
       snapshot authority before this last fallback; candidate root/child
       membership and child counts never use the cache directly.
+  - name: store-parent-cache-reader
+    file: internal/store/parent_reader.go
+    declaration: Store.ParentCacheForSession
+    literals: 1
+    class: availability
+    reason: >-
+      Reads the raw availability cache for the orphan reconciliation's own
+      assertions and for any caller that asks which cached row can join. It
+      never answers who the logical parent is.
   - name: store-logical-parent-renderer
     file: internal/store/parent_reader.go
     declaration: LogicalParentSQL
