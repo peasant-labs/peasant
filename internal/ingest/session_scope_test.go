@@ -85,6 +85,18 @@ type scopeCase struct {
 	// source tree.
 	NonCohortSessions int `yaml:"nonCohortSessions"`
 
+	// Execution is "scoped" (A full, B scoped; the default) or "full_both"
+	// (both stores run a full harvest). The derived tables need full_both: the
+	// scoped path deliberately does not walk Codex, so a scoped store cannot
+	// derive the catalogue and the two stores would differ for a reason that is
+	// not a defect.
+	Execution string `yaml:"execution"`
+	// ExpectedDerived is what the derived tables must hold after a full_both
+	// run. It is computed from the fixture sources and asserted per store, so a
+	// no-op catalog writer or a broken spawns projection leaves them empty and
+	// fails.
+	ExpectedDerived *scopeExpectedDerived `yaml:"expectedDerived"`
+
 	Selected []string `yaml:"selected"`
 	Related  string   `yaml:"related"`
 	SinceMs  int64    `yaml:"sinceMs"`
@@ -98,22 +110,32 @@ type scopeCase struct {
 	// empty it defaults to the read set plus context paths.
 	EvidencePaths []string `yaml:"evidencePaths"`
 
+	// ExpectedCodexOps is the exact source-root operation set for the Codex
+	// root. It is required (not defaulted) so adding a configured source
+	// cannot silently escape the op assertion.
+	ExpectedCodexOps *scopeRootOps `yaml:"expectedCodexOps"`
+
 	WantProcessed []string `yaml:"wantProcessed"`
 	WantUpkeep    []string `yaml:"wantUpkeep"`
 	WantOutcome   string   `yaml:"wantOutcome"`
 	WantReason    string   `yaml:"wantReason"`
 	WantRunError  string   `yaml:"wantRunError"`
 
+	// ExpectParentTargets, when non-empty, is the exact parent list the run's
+	// uncached-child heal must receive: the processed members of the
+	// independent-admission harnesses. It is the P5 witness.
+	ExpectParentTargets   []string `yaml:"expectParentTargets"`
+	ExpectParentHarnesses []string `yaml:"expectParentHarnesses"`
+
+	// WantIndexLogDelta requires the run to add at least one index_log entry for
+	// a cohort id, so the cohort-filtered delta compares real work rather than
+	// two empty sets.
+	WantIndexLogDelta bool `yaml:"wantIndexLogDelta"`
+
 	// ExpectedScopedCalls names the scope-bearing store calls the scoped run
 	// must make exactly once, each carrying the run's upkeep set. An empty list
 	// means no call is asserted for this case.
 	ExpectedScopedCalls []string `yaml:"expectedScopedCalls"`
-
-	// DivergentTables names a table whose scoped result is known to differ from
-	// the full run's, with the reason. A declared divergence is logged and the
-	// case is skipped, never silently exempted: the table stays compared and a
-	// new difference fails.
-	DivergentTables map[string]string `yaml:"divergentTables"`
 
 	// AssertOldProjectGone asks the runner to prove the project identity the
 	// selected session held before the mutation has no project row in either
@@ -129,6 +151,33 @@ type scopeFile struct {
 	Body string `yaml:"body"`
 	// Lines is an alternative body spelling for JSONL fixtures.
 	Lines []string `yaml:"lines"`
+}
+
+// scopeRootOps is one configured source root's exact operation sets, relative
+// to that root.
+// scopeExpectedDerived is the exact derived state a full_both case must
+// produce. Paths are relative to the fixture root (spawns) or the Codex root
+// (catalogue entries).
+type scopeExpectedDerived struct {
+	Spawns  []scopeExpectedSpawn   `yaml:"spawns"`
+	Catalog []scopeExpectedRollout `yaml:"catalog"`
+}
+
+type scopeExpectedSpawn struct {
+	Spawner string `yaml:"spawner"`
+	Team    string `yaml:"team"`
+	Name    string `yaml:"name"`
+}
+
+type scopeExpectedRollout struct {
+	Path      string `yaml:"path"`
+	SessionID string `yaml:"session"` // "session" avoids the YAML "id" ambiguity
+}
+
+type scopeRootOps struct {
+	Reads    []string `yaml:"reads"`
+	Stats    []string `yaml:"stats"`
+	Readdirs []string `yaml:"readdirs"`
 }
 
 type scopeMutation struct {
@@ -172,8 +221,14 @@ func loadScopeFixture(t *testing.T) scopeFixture {
 		if testCase.Harness == "" || testCase.Kind == "" {
 			t.Fatalf("case %q names no harness or kind", testCase.Name)
 		}
-		if len(testCase.Selected) == 0 && testCase.Kind != "control" {
+		if len(testCase.Selected) == 0 && testCase.Kind != "control" && testCase.Execution != "full_both" {
 			t.Fatalf("case %q selects no session", testCase.Name)
+		}
+		if testCase.Execution != "" && testCase.Execution != "scoped" && testCase.Execution != "full_both" {
+			t.Fatalf("case %q names unknown execution %q", testCase.Name, testCase.Execution)
+		}
+		if testCase.Execution == "full_both" && testCase.ExpectedDerived == nil {
+			t.Fatalf("case %q runs full_both but names no expectedDerived rows", testCase.Name)
 		}
 	}
 	if err := testutil.RequireFixtureNames("session-scope parity fixture", "case", fixture.RequiredNames, names); err != nil {
@@ -532,13 +587,23 @@ func applyScopeMutation(t *testing.T, mfs *testutil.MemFS, root string, mutation
 }
 
 // runScopePhase runs one harvest against a world. scope == nil is the full run.
+// scopeSourceRoots is the one declaration of every configured source root,
+// used by the runner and by the op assertion so they cannot drift.
+func scopeSourceRoots() map[ingest.Harness]string {
+	return map[ingest.Harness]string{
+		ingest.HarnessClaudeCode: "/claude",
+		ingest.HarnessCodex:      "/codex/sessions",
+	}
+}
+
 func runScopePhase(t *testing.T, ctx context.Context, world *scopeWorld, scope *ingest.SessionScope) *ingest.PipelineResult {
 	t.Helper()
 	cfg := makePipelineConfig(testOutputDir, func(cfg *ingest.PipelineConfig) {
-		cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
-			ingest.HarnessClaudeCode: {Paths: []ingest.ResolvedPath{"/claude"}, Enabled: true},
-			ingest.HarnessCodex:      {Paths: []ingest.ResolvedPath{"/codex/sessions"}, Enabled: true},
+		sources := make(map[ingest.Harness]ingest.SourceConfig, len(scopeSourceRoots()))
+		for harness, root := range scopeSourceRoots() {
+			sources[harness] = ingest.SourceConfig{Paths: []ingest.ResolvedPath{ingest.ResolvedPath(root)}, Enabled: true}
 		}
+		cfg.Sources = sources
 		cfg.Command = "harvest"
 		cfg.Scope = scope
 	})
@@ -553,6 +618,7 @@ func runScopePhase(t *testing.T, ctx context.Context, world *scopeWorld, scope *
 		indexLogArg = world.pipe
 	}
 	p, err := newTestPipeline(world.fs, testutil.NoGitResolver(), scopeAdapters(), cfg,
+		ingest.WithIndexers(ingest.NewIndexerRegistry(world.fs, ingest.IndexerRegistryOptions{})),
 		ingest.WithStore(storeArg),
 		ingest.WithMetricsStore(metricsArg),
 		ingest.WithIndexLogger(indexLogArg),
@@ -613,8 +679,23 @@ func runScopeParityCase(t *testing.T, fixture scopeFixture, testCase scopeCase) 
 
 	aBefore := exportScopeTables(t, ctx, worldA.raw)
 	bBefore := exportScopeTables(t, ctx, worldB.raw)
-	bIngestBefore := tableRowCount(aBefore, "ingest_log")
-	bIndexBefore := aBefore["index_log"].Rows
+	bIngestBefore := tableRowCount(bBefore, "ingest_log")
+
+	if testCase.Execution == "full_both" {
+		// The derived tables are the subject: both stores run the same full
+		// harvest from a seed that has no derived rows, so a no-op catalog
+		// writer or a broken spawns projection leaves both empty.
+		runScopePhase(t, ctx, worldA, nil)
+		runScopePhase(t, ctx, worldB, nil)
+		aAfter := exportScopeTables(t, ctx, worldA.raw)
+		bAfter := exportScopeTables(t, ctx, worldB.raw)
+		if differing := compareScopeTables(t, fixture, aAfter, bAfter); len(differing) != 0 {
+			t.Fatalf("full-both stores differ: %v", differing)
+		}
+		assertScopeLogs(t, fixture, aBefore, aAfter, bBefore, bAfter, bIngestBefore, testCase)
+		assertDerivedRebuild(t, ctx, testCase, worldA.raw, worldB.raw)
+		return
+	}
 
 	scope := scopeForCase(t, testCase)
 	runScopePhase(t, ctx, worldA, nil)
@@ -626,29 +707,17 @@ func runScopeParityCase(t *testing.T, fixture scopeFixture, testCase scopeCase) 
 	// The parity claim: the full run on A and the scoped run on B leave the
 	// same normalized multiset per non-exempt table. The logs are asserted
 	// directly below, not waved through.
-	differing := compareScopeTables(t, fixture, aAfter, bAfter)
-	var skipped []string
-	for _, name := range differing {
-		reason, declared := testCase.DivergentTables[name]
-		if !declared {
-			t.Fatalf("scoped run B vs full run A: table %q differs by multiset and the case declares no divergence", name)
-		}
-		t.Logf("declared divergence on table %q: %s", name, reason)
-		skipped = append(skipped, name)
+	if differing := compareScopeTables(t, fixture, aAfter, bAfter); len(differing) != 0 {
+		t.Fatalf("scoped run B vs full run A: tables %v differ by multiset", differing)
 	}
-	assertScopeLogs(t, fixture, aBefore, aAfter, bBefore, bAfter, bIngestBefore, bIndexBefore, testCase)
+	assertScopeLogs(t, fixture, aBefore, aAfter, bBefore, bAfter, bIngestBefore, testCase)
 	assertScopeOps(t, fixture, testCase, worldB)
 	assertScopeEvidence(t, testCase, worldB.pipe)
 	assertScopeReport(t, testCase, result)
 	assertScopeCalls(t, testCase, worldB.pipe)
-	if testCase.Kind == "derived_rebuild" {
-		assertDerivedRebuild(t, ctx, fixture, testCase, worldA.raw, worldB.raw)
-	}
+	assertScopeParentTargets(t, testCase, worldB.pipe)
 	if testCase.AssertOldProjectGone {
 		assertOldProjectGone(t, ctx, worldA.raw, worldB.raw, bBefore, bAfter)
-	}
-	if len(skipped) != 0 {
-		t.Skipf("known divergence: %v differ between the full and scoped runs; see the fixture reason", skipped)
 	}
 }
 
@@ -771,7 +840,7 @@ func firstScopeRows(rows []string, limit int) []string {
 // ingest_log row, and index_log entries naming the cohort are equal. The tables
 // are exempt from the multiset diff only because their ids and timestamps are a
 // property of the run.
-func assertScopeLogs(t *testing.T, fixture scopeFixture, aBefore, aAfter, bBefore, bAfter map[string]store.ExportedTable, bIngestBefore int, bIndexBefore [][]string, testCase scopeCase) {
+func assertScopeLogs(t *testing.T, fixture scopeFixture, aBefore, aAfter, bBefore, bAfter map[string]store.ExportedTable, bIngestBefore int, testCase scopeCase) {
 	t.Helper()
 	if got := tableRowCount(bAfter, "ingest_log") - bIngestBefore; got != 1 {
 		t.Fatalf("case %q: scoped run added %d ingest_log rows, want exactly 1", testCase.Name, got)
@@ -793,83 +862,91 @@ func assertScopeLogs(t *testing.T, fixture scopeFixture, aBefore, aAfter, bBefor
 		}
 		return rows
 	}
-	_ = bIndexBefore
 	if len(cohort) == 0 {
 		return
 	}
 	// index_log is exempt from the whole-table diff; this is the index-side
-	// guard: entries naming this run's cohort ids must agree.
-	aCohort := filterCohortRows(indexRows(aAfter), cohort)
-	bCohort := filterCohortRows(indexRows(bAfter), cohort)
-	if strings.Join(aCohort, "\x1e") != strings.Join(bCohort, "\x1e") {
-		t.Fatalf("case %q: index_log cohort entries differ: full=%v scoped=%v", testCase.Name, aCohort, bCohort)
+	// guard: the entries this run added for its cohort ids must agree. Delta
+	// from before the run, so a seed row is not counted as this run's work.
+	aAdded := cohortLogDelta(indexRows(aBefore), indexRows(aAfter), cohort)
+	bAdded := cohortLogDelta(indexRows(bBefore), indexRows(bAfter), cohort)
+	if testCase.WantIndexLogDelta && (len(aAdded) == 0 || len(bAdded) == 0) {
+		t.Fatalf("case %q: index_log cohort delta is empty (full=%d scoped=%d); the index-side guard would compare nothing", testCase.Name, len(aAdded), len(bAdded))
+	}
+	if strings.Join(aAdded, "\x1e") != strings.Join(bAdded, "\x1e") {
+		t.Fatalf("case %q: index_log entries added for the cohort differ: full=%v scoped=%v", testCase.Name, aAdded, bAdded)
 	}
 }
 
-// index_log's session_id is the second column.
-func filterCohortRows(rows []string, cohort map[string]bool) []string {
-	out := make([]string, 0, len(rows))
-	for _, row := range rows {
-		cells := strings.Split(row, "\x1f")
-		if len(cells) < 2 {
-			continue
-		}
-		id := strings.TrimSuffix(strings.TrimPrefix(cells[1], "text:"), "\"")
-		id = strings.Trim(id, "\"")
-		if cohort[id] {
-			out = append(out, row)
-		}
-	}
-	return out
-}
-
-// assertScopeOps asserts the source-root read/stat/readdir sets exactly, the
-// fixture's context_paths in the read and stat sets, and zero WalkDir.
+// assertScopeOps asserts the exact source-root operation sets for EVERY
+// configured harness root, the fixture's context_paths in the Claude read and
+// stat sets, and zero WalkDir anywhere under a configured root. A new source
+// without expectations fails the case, so an extra operation on a root the case
+// does not use cannot hide behind the root it does use.
 func assertScopeOps(t *testing.T, fixture scopeFixture, testCase scopeCase, world *scopeWorld) {
 	t.Helper()
-	root := fixture.Root
-	inRoot := func(paths []string) []string {
-		out := make([]string, 0, len(paths))
-		for _, path := range paths {
-			if path == root || strings.HasPrefix(path, root+"/") {
-				rel := strings.TrimPrefix(strings.TrimPrefix(path, root), "/")
-				if rel == "" {
-					rel = "."
+	if testCase.ExpectedCodexOps == nil {
+		t.Fatalf("case %q declares no expectedCodexOps; every configured harness root must state its exact operation set", testCase.Name)
+	}
+	type rootCase struct {
+		harness string
+		root    string
+		want    scopeRootOps
+	}
+	roots := []rootCase{
+		{harness: string(ingest.HarnessClaudeCode), root: fixture.Root, want: scopeRootOps{Reads: testCase.ExpectedReads, Stats: testCase.ExpectedStats, Readdirs: testCase.ExpectedReaddirs}},
+		{harness: string(ingest.HarnessCodex), root: scopeSourceRoots()[ingest.HarnessCodex], want: *testCase.ExpectedCodexOps},
+	}
+	readSets := make(map[string]map[string]bool, len(roots))
+	statSets := make(map[string]map[string]bool, len(roots))
+	for _, entry := range roots {
+		if entry.root == "" {
+			t.Fatalf("case %q: harness %s has no configured source root", testCase.Name, entry.harness)
+		}
+		relPaths := func(paths []string) []string {
+			out := make([]string, 0, len(paths))
+			for _, path := range paths {
+				if path == entry.root || strings.HasPrefix(path, entry.root+"/") {
+					rel := strings.TrimPrefix(strings.TrimPrefix(path, entry.root), "/")
+					if rel == "" {
+						rel = "."
+					}
+					out = append(out, rel)
 				}
-				out = append(out, rel)
+			}
+			sort.Strings(out)
+			return out
+		}
+		assertSet := func(operation testutil.FSOp, want []string) {
+			got := relPaths(world.fs.Paths(operation))
+			sortedWant := append([]string(nil), want...)
+			sort.Strings(sortedWant)
+			if strings.Join(got, "\x00") != strings.Join(sortedWant, "\x00") {
+				t.Fatalf("case %q: %s set on the %s root %s = %v, want exactly %v", testCase.Name, operation, entry.harness, entry.root, got, sortedWant)
 			}
 		}
-		sort.Strings(out)
-		return out
-	}
-	assertSet := func(operation testutil.FSOp, want []string) {
-		got := inRoot(world.fs.Paths(operation))
-		sortedWant := append([]string(nil), want...)
-		sort.Strings(sortedWant)
-		if strings.Join(got, "\x00") != strings.Join(sortedWant, "\x00") {
-			t.Fatalf("case %q: %s set on the source root = %v, want exactly %v", testCase.Name, operation, got, sortedWant)
+		assertSet(testutil.FSOpReadFile, entry.want.Reads)
+		assertSet(testutil.FSOpStat, entry.want.Stats)
+		assertSet(testutil.FSOpReadDir, entry.want.Readdirs)
+		if walks := relPaths(world.fs.Paths(testutil.FSOpWalkDir)); len(walks) != 0 {
+			t.Fatalf("case %q: a scoped run walked the %s source root %s: %v", testCase.Name, entry.harness, entry.root, walks)
+		}
+		readSets[entry.harness] = make(map[string]bool)
+		for _, path := range relPaths(world.fs.Paths(testutil.FSOpReadFile)) {
+			readSets[entry.harness][path] = true
+		}
+		statSets[entry.harness] = make(map[string]bool)
+		for _, path := range relPaths(world.fs.Paths(testutil.FSOpStat)) {
+			statSets[entry.harness][path] = true
 		}
 	}
-	assertSet(testutil.FSOpReadFile, testCase.ExpectedReads)
-	assertSet(testutil.FSOpStat, testCase.ExpectedStats)
-	assertSet(testutil.FSOpReadDir, testCase.ExpectedReaddirs)
-	if walks := inRoot(world.fs.Paths(testutil.FSOpWalkDir)); len(walks) != 0 {
-		t.Fatalf("case %q: a scoped run walked the source root: %v", testCase.Name, walks)
-	}
-	readSet := make(map[string]bool)
-	for _, path := range inRoot(world.fs.Paths(testutil.FSOpReadFile)) {
-		readSet[path] = true
-	}
-	statSet := make(map[string]bool)
-	for _, path := range inRoot(world.fs.Paths(testutil.FSOpStat)) {
-		statSet[path] = true
-	}
+	claude := string(ingest.HarnessClaudeCode)
 	for _, path := range testCase.ContextPaths {
-		if !readSet[path] {
-			t.Fatalf("case %q: context path %q is absent from the read set %v", testCase.Name, path, scopeKeysOf(readSet))
+		if !readSets[claude][path] {
+			t.Fatalf("case %q: context path %q is absent from the Claude read set %v", testCase.Name, path, scopeKeysOf(readSets[claude]))
 		}
-		if !statSet[path] {
-			t.Fatalf("case %q: context path %q is absent from the stat set %v", testCase.Name, path, scopeKeysOf(statSet))
+		if !statSets[claude][path] {
+			t.Fatalf("case %q: context path %q is absent from the Claude stat set %v", testCase.Name, path, scopeKeysOf(statSets[claude]))
 		}
 	}
 }
@@ -1123,39 +1200,29 @@ func scopeUnreadableReasonName(reason ingest.UnreadableReason) string {
 // rebuild from the same enumeration must change neither store. It runs per
 // store, so a drift the two runs share is caught even though the table
 // comparison cannot see it.
-func assertDerivedRebuild(t *testing.T, ctx context.Context, fixture scopeFixture, testCase scopeCase, a, b *store.Store) {
+func assertDerivedRebuild(t *testing.T, ctx context.Context, testCase scopeCase, a, b *store.Store) {
 	t.Helper()
-	expectedCatalog := expectedCatalogRows(testCase)
+	if testCase.ExpectedDerived == nil {
+		t.Fatalf("case %q runs full_both with no expectedDerived rows", testCase.Name)
+	}
+	wantSpawns := normalizedDerivedSpawns(testCase.ExpectedDerived.Spawns)
+	wantCatalog := normalizedDerivedCatalog(testCase.ExpectedDerived.Catalog)
+	enumeration := ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete}
+	for _, row := range testCase.ExpectedDerived.Catalog {
+		enumeration.Files = append(enumeration.Files, ingest.RolloutFile{
+			Path:      ingest.ResolvedPath(filepath.Join("/codex/sessions", row.Path)),
+			SessionID: ingest.SessionID(row.SessionID),
+		})
+	}
 	for name, db := range map[string]*store.Store{"A": a, "B": b} {
-		tables := exportScopeTables(t, ctx, db)
-		catalog := tables["codex_rollout_catalog"]
-		if got := len(catalog.Rows); got != len(expectedCatalog) {
-			t.Fatalf("derived-rebuild store %s: codex_rollout_catalog has %d rows, want the %d the fixture's rollouts imply", name, got, len(expectedCatalog))
-		}
-		for _, want := range expectedCatalog {
-			found := false
-			for _, row := range catalog.Rows {
-				if len(row) >= 2 && row[0] == "text:"+quoteScopeToken(want.Path) && row[1] == "text:"+quoteScopeToken(want.SessionID) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Fatalf("derived-rebuild store %s: codex_rollout_catalog is missing %s/%s: %v", name, want.Path, want.SessionID, catalog.Rows)
-			}
-		}
-		if got := len(tables["claude_teammate_spawns"].Rows); got != 0 {
-			t.Fatalf("derived-rebuild store %s: claude_teammate_spawns has %d rows, want none for a tree with no teammate identity declarations", name, got)
-		}
-		before := tables
-		if err := db.RebuildDerivedLookups(ctx, ingest.RolloutEnumeration{
-			Status: ingest.RolloutEnumerationComplete,
-			Files:  expectedRolloutFiles(expectedCatalog),
-		}); err != nil {
+		before := exportScopeTables(t, ctx, db)
+		assertDerivedRows(t, name, before, "claude_teammate_spawns", wantSpawns)
+		assertDerivedRows(t, name, before, "codex_rollout_catalog", wantCatalog)
+		if err := db.RebuildDerivedLookups(ctx, enumeration); err != nil {
 			t.Fatalf("derived-rebuild store %s: RebuildDerivedLookups: %v", name, err)
 		}
 		after := exportScopeTables(t, ctx, db)
-		for _, table := range []string{"codex_rollout_catalog", "claude_teammate_spawns"} {
+		for _, table := range []string{"claude_teammate_spawns", "codex_rollout_catalog"} {
 			wantRows, err := before[table].NormalizedRows(nil)
 			if err != nil {
 				t.Fatalf("derived-rebuild store %s: normalize %s before rebuild: %v", name, table, err)
@@ -1171,57 +1238,56 @@ func assertDerivedRebuild(t *testing.T, ctx context.Context, fixture scopeFixtur
 	}
 }
 
-type scopeCatalogRow struct {
-	Path      string
-	SessionID string
+// assertDerivedRows compares a derived table against the exact rows the fixture
+// implies. An empty expected set is a real assertion: a no-op writer leaves the
+// table empty and a row that should exist is reported missing.
+func assertDerivedRows(t *testing.T, storeName string, tables map[string]store.ExportedTable, table string, want []string) {
+	t.Helper()
+	got, err := tables[table].NormalizedRows(nil)
+	if err != nil {
+		t.Fatalf("derived-rebuild store %s: normalize %s: %v", storeName, table, err)
+	}
+	sortedWant := append([]string(nil), want...)
+	sort.Strings(sortedWant)
+	if strings.Join(got, "\x1e") != strings.Join(sortedWant, "\x1e") {
+		t.Fatalf("derived-rebuild store %s: %s = %v, want exactly %v", storeName, table, got, sortedWant)
+	}
 }
 
-// expectedCatalogRows derives the catalog a fixture implies from the Codex
-// rollout the case writes under /codex. It is computed from the fixture, not
-// from a run: a run that never wrote the row would fail the comparison.
-func expectedCatalogRows(testCase scopeCase) []scopeCatalogRow {
-	var rows []scopeCatalogRow
-	for _, file := range testCase.Files {
-		if !strings.HasPrefix(file.Root, "/codex") || !strings.Contains(file.Path, "rollout-") {
-			continue
-		}
-		body := file.Body
-		if len(file.Lines) > 0 {
-			body = strings.Join(file.Lines, "\n")
-		}
-		id := codexRolloutSessionID(body)
-		if id == "" {
-			continue
-		}
-		rows = append(rows, scopeCatalogRow{Path: filepath.Join(file.Root, file.Path), SessionID: id})
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Path < rows[j].Path })
-	return rows
-}
-
-// codexRolloutSessionID reads the id from a session_meta envelope without
-// reimplementing the Codex parser: the fixture body names it in the one field
-// the catalog keys on.
-func codexRolloutSessionID(body string) string {
-	const marker = `"id":"`
-	index := strings.Index(body, marker)
-	if index < 0 {
-		return ""
-	}
-	rest := body[index+len(marker):]
-	end := strings.IndexByte(rest, '"')
-	if end < 0 {
-		return ""
-	}
-	return rest[:end]
-}
-
-func expectedRolloutFiles(rows []scopeCatalogRow) []ingest.RolloutFile {
-	files := make([]ingest.RolloutFile, 0, len(rows))
+func normalizedDerivedSpawns(rows []scopeExpectedSpawn) []string {
+	out := make([]string, 0, len(rows))
 	for _, row := range rows {
-		files = append(files, ingest.RolloutFile{Path: ingest.ResolvedPath(row.Path), SessionID: ingest.SessionID(row.SessionID)})
+		out = append(out, derivedRowToken(
+			filepath.Join("/claude", row.Spawner),
+			row.Team,
+			row.Name,
+		))
 	}
-	return files
+	sort.Strings(out)
+	return out
+}
+
+func normalizedDerivedCatalog(rows []scopeExpectedRollout) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, derivedRowToken(
+			filepath.Join("/codex/sessions", row.Path),
+			row.SessionID,
+		))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// derivedRowToken renders one expected row the same way NormalizedRows renders
+// a stored row: storage-class-tagged, quoted text cells joined by the normalizer
+// separator.
+func derivedRowToken(cells ...string) string {
+	parts := make([]string, len(cells))
+	for i, cell := range cells {
+		parts[i] = "text:" + quoteScopeToken(cell)
+	}
+	return strings.Join(parts, "\x1f")
 }
 
 // scopeSplitColumn splits an exempt-column key at its last dot, so a table name
@@ -1232,4 +1298,67 @@ func scopeSplitColumn(qualified string) (table, column string, ok bool) {
 		return "", "", false
 	}
 	return qualified[:index], qualified[index+1:], true
+}
+
+// cohortLogDelta returns the rows present after a run but not before it, for
+// entries naming a cohort id. It is a multiset difference, so a repeated
+// identical entry keeps its multiplicity.
+func cohortLogDelta(before, after []string, cohort map[string]bool) []string {
+	remaining := make(map[string]int, len(before))
+	for _, row := range before {
+		if cohortRowNamesCohort(row, cohort) {
+			remaining[row]++
+		}
+	}
+	var added []string
+	for _, row := range after {
+		if !cohortRowNamesCohort(row, cohort) {
+			continue
+		}
+		if remaining[row] > 0 {
+			remaining[row]--
+			continue
+		}
+		added = append(added, row)
+	}
+	sort.Strings(added)
+	return added
+}
+
+func cohortRowNamesCohort(row string, cohort map[string]bool) bool {
+	// The row is normalized already, so column positions have shifted; the
+	// session id is whichever text cell names a cohort id.
+	for _, cell := range strings.Split(row, "\x1f") {
+		id := strings.Trim(strings.TrimPrefix(cell, "text:"), "\"")
+		if cohort[id] {
+			return true
+		}
+	}
+	return false
+}
+
+// assertScopeParentTargets pins the argument of the uncached-child heal: its
+// targets are the processed members of the independent-admission harnesses,
+// never the whole store and never the whole upkeep set.
+func assertScopeParentTargets(t *testing.T, testCase scopeCase, recorder *scopeStore) {
+	t.Helper()
+	if len(testCase.ExpectParentTargets) == 0 {
+		return
+	}
+	parents, harnesses := recorder.parentSnapshot()
+	gotIDs := make([]string, 0, len(parents))
+	for _, parent := range parents {
+		gotIDs = append(gotIDs, string(parent))
+	}
+	scopeAssertIDSet(t, testCase.Name+" parent-heal targets", gotIDs, testCase.ExpectParentTargets)
+	gotHarnesses := make([]string, 0, len(harnesses))
+	for _, harness := range harnesses {
+		gotHarnesses = append(gotHarnesses, string(harness))
+	}
+	sort.Strings(gotHarnesses)
+	wantHarnesses := append([]string(nil), testCase.ExpectParentHarnesses...)
+	sort.Strings(wantHarnesses)
+	if strings.Join(gotHarnesses, ",") != strings.Join(wantHarnesses, ",") {
+		t.Fatalf("case %q: parent-heal harnesses = %v, want %v", testCase.Name, gotHarnesses, wantHarnesses)
+	}
 }

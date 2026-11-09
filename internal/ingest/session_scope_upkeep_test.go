@@ -31,19 +31,23 @@ type scopeUpkeepRefusal struct {
 	Expected         []string `yaml:"expected"`
 	StalePaths       []string `yaml:"stalePaths"`
 	ContextPaths     []string `yaml:"contextPaths"`
-	ReadableOwner    string   `yaml:"readableOwner"`
 	WantErrorContain string   `yaml:"wantErrorContain"`
 }
 
 type scopeUpkeepCase struct {
 	Name string `yaml:"name"`
-	// Guard is read_recorder or decoy.
+	// Guard is read_recorder. A decoy guard is refused by the loader; the
+	// decoy rows are not implemented in this fixture.
 	Guard string `yaml:"guard"`
 	// StaleOrigin plants an origin version the resolver judges stale on the
 	// selected stored-but-unreadable root.
 	StaleOrigin bool `yaml:"staleOrigin"`
 	// DeleteSource removes the selected transcript before the scoped run.
 	DeleteSource bool `yaml:"deleteSource"`
+	// StalePaths is the path set the planted stale origin names; it must not
+	// overlap ContextPaths, or the P3 assertion could pass for the wrong reason.
+	StalePaths   []string `yaml:"stalePaths"`
+	ContextPaths []string `yaml:"contextPaths"`
 	// WantRequested is the exact sorted union the evidence recorder must see.
 	WantRequested []string `yaml:"wantRequested"`
 	// WantWholeLoads is the number of whole-table LoadClaudeEvidence calls the
@@ -60,6 +64,12 @@ func loadScopeUpkeepFixture(t *testing.T) scopeUpkeepFixture {
 	present := make(map[string]bool)
 	for _, testCase := range fixture.Cases {
 		present[testCase.Name] = true
+		if testCase.Guard != "read_recorder" {
+			t.Fatalf("upkeep case %q names guard %q; only read_recorder cases exist here, so an unimplemented decoy guard is refused rather than silently ignored", testCase.Name, testCase.Guard)
+		}
+		if err := validateReadRecorderCase(testCase.Name, testCase.WantRequested, testCase.StalePaths, testCase.ContextPaths); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, refusal := range fixture.Refusals {
 		present[refusal.Name] = true
