@@ -15,7 +15,7 @@ import {
   type DataTableColumn,
 } from '@/lib/ft-ui';
 import { isPageSize, type PageSize } from '@peasant-labs/schema';
-import { HomeGroupBy, type HomeSavedView } from './homeColumns';
+import { HomeGroupBy, type HomeColumnId, type HomeSavedView } from './homeColumns';
 import { usePublicationAudience } from '@/hooks/useRootSessions';
 import {
   rowPublishState,
@@ -63,8 +63,43 @@ const EMPTY_FILTER_COPY: Readonly<Record<PublishFilter, string>> = {
 };
 
 type SessionListRow = RootSessionRow & { id: string; kind: 'session' | 'child'; depth: number };
-type GroupListRow = { id: string; kind: 'group'; groupLabel: string; groupKey: string; depth: 0 };
+type GroupListRow = { id: string; kind: 'group'; groupLabel: string; groupKey: string; open: boolean; depth: 0 };
 type ListRow = SessionListRow | GroupListRow;
+
+interface ProjectRowGroup {
+  key: string;
+  qualified: string;
+  label: string;
+  rows: RootSessionRow[];
+}
+
+/**
+ * Group the visible root rows by project in first-appearance order. The key,
+ * the qualified id, and the label are derived here ONCE so the row renderer and
+ * the collapse set cannot drift on a fallback or prefix.
+ */
+function groupProjectRows(rows: readonly RootSessionRow[]): ProjectRowGroup[] {
+  const order: string[] = [];
+  const buckets = new Map<string, RootSessionRow[]>();
+  for (const row of rows) {
+    const key = row.sync.projectHash || row.sync.projectName;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(row);
+    else {
+      buckets.set(key, [row]);
+      order.push(key);
+    }
+  }
+  return order.map((key) => {
+    const grouped = buckets.get(key)!;
+    return {
+      key,
+      qualified: `${HomeGroupBy.Project.wire}:${key}`,
+      label: displayProject(grouped[0].sync.projectName),
+      rows: grouped,
+    };
+  });
+}
 
 const NO_CHILDREN: ReadonlyMap<string, readonly RootSessionRow[]> = new Map();
 
@@ -89,6 +124,8 @@ export interface RootSessionListProps {
   /** The host owns the URL; the table reports the page it wants. */
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: PageSize) => void;
+  /** The host owns the device storage; the table reports the collapsed group set. */
+  onCollapsedChange?: (collapsed: readonly string[] | null) => void;
   loading?: boolean;
 }
 
@@ -131,7 +168,7 @@ function SessionChildrenGroup({ parentId, childIds, expanded, onToggle, indent =
  * the URL to the page the server served. Page lengths never stand in for global
  * totals or the complete project catalog.
  */
-export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, page, pageSize, total, viewState, onPageChange, onPageSizeChange, loading }: RootSessionListProps) {
+export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previews, home, filter, page, pageSize, total, viewState, onPageChange, onPageSizeChange, onCollapsedChange, loading }: RootSessionListProps) {
   const expandedGroups = home.expanded;
   const reading = home.loading;
   const last = Math.max(1, Math.ceil(total / pageSize));
@@ -148,13 +185,16 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
     if (box && box.top < 0) top.current?.scrollIntoView({ block: 'start' });
   }, [current]);
 
-  // Depth-first: each expanded child becomes its own row immediately after its
-  // parent. Folded groups materialize nothing, so a deep chain stays bounded.
+  const projectGroups = useMemo(() => groupProjectRows(visible), [visible]);
+  const collapsedGroups = useMemo(() => new Set(viewState.collapsed ?? []), [viewState.collapsed]);
+
+  // Depth-first within one project: every child follows its parent, and the
+  // rows are STABLE-PARTITIONED by project before the headers are emitted, so a
+  // page ordered A1, B1, A2 renders header A / A1 / A2 / header B / B1 and
+  // every header is followed by its own rows.
   const renderRows = useMemo(() => {
     const out: ListRow[] = [];
     const visited = new Set<string>();
-    const seenGroups = new Set<string>();
-    const grouped = viewState.groupBy === HomeGroupBy.Project;
     const walk = (row: RootSessionRow, kind: 'session' | 'child', depth: number) => {
       if (visited.has(row.sync.id)) return;
       visited.add(row.sync.id);
@@ -162,18 +202,25 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
       if (!expandedGroups.has(row.sync.id)) return;
       for (const child of childGroups.get(row.sync.id) ?? []) walk(child, 'child', depth + 1);
     };
-    for (const row of visible) {
-      if (grouped) {
-        const key = row.sync.projectHash || row.sync.projectName;
-        if (!seenGroups.has(key)) {
-          seenGroups.add(key);
-          out.push({ id: `group:${key}`, kind: 'group', groupLabel: displayProject(row.sync.projectName), groupKey: key, depth: 0 });
-        }
-      }
-      walk(row, 'session', 0);
+    if (viewState.groupBy !== HomeGroupBy.Project) {
+      for (const row of visible) walk(row, 'session', 0);
+      return out;
+    }
+    for (const group of projectGroups) {
+      const open = !collapsedGroups.has(group.qualified);
+      out.push({
+        id: group.qualified,
+        kind: 'group',
+        groupLabel: group.label,
+        groupKey: group.qualified,
+        open,
+        depth: 0,
+      });
+      if (!open) continue;
+      for (const row of group.rows) walk(row, 'session', 0);
     }
     return out;
-  }, [visible, childGroups, expandedGroups, viewState.groupBy]);
+  }, [visible, projectGroups, collapsedGroups, childGroups, expandedGroups, viewState.groupBy]);
 
   const publishedOnScreen = useMemo(
     () => renderRows.filter((row) => row.kind !== 'group' && row.publication.state === 'published').map((row) => row.id),
@@ -198,13 +245,43 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
     return <PublishStateLabel state={state} collectives={published ? (audience.get(row.id) || undefined) : undefined} className="whitespace-nowrap" />;
   };
 
-  const columns = useMemo<DataTableColumn<ListRow>[]>(
-    () => [
+  const columnOrder: readonly HomeColumnId[] = ['session', 'project', 'turns', 'duration', 'when', 'state'];
+  const shownKeys = viewState.visibleColumns.length === 0
+    ? columnOrder
+    : columnOrder.filter(key => viewState.visibleColumns.includes(key));
+  const firstShownKey: string = shownKeys[0] ?? 'session';
+
+  const columns = useMemo<DataTableColumn<ListRow>[]>(() => {
+    // The header must survive hiding the session column, so it is emitted by
+    // whichever column is first on the row, not by the session projection.
+    const groupHeader = (columnKey: string, row: GroupListRow) => {
+      if (columnKey !== firstShownKey) return null;
+      return (
+        <div className="home-group-head" data-home-group={row.groupKey}>
+          {onCollapsedChange ? (
+            <button
+              type="button"
+              className="home-group-toggle"
+              aria-expanded={row.open}
+              onClick={() => {
+                const current = new Set(viewState.collapsed ?? []);
+                if (current.has(row.groupKey)) current.delete(row.groupKey);
+                else current.add(row.groupKey);
+                onCollapsedChange([...current]);
+              }}
+            >
+              {row.groupLabel}
+            </button>
+          ) : row.groupLabel}
+        </div>
+      );
+    };
+    return [
       {
         key: 'session',
         label: 'session',
         render: (_, row) => {
-          if (row.kind === 'group') return <div className="home-group-head" data-home-group={row.groupKey}>{row.groupLabel}</div>;
+          if (row.kind === 'group') return groupHeader('session', row);
           const children = childGroups.get(row.id);
           const hash = parseProjectHash(row.sync.projectHash);
           const title = rowTitle(row.id, titles, previews);
@@ -286,23 +363,23 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
         key: 'project',
         label: 'project',
         render: (_, row) => {
-          if (row.kind === 'group') return null;
+          if (row.kind === 'group') return groupHeader('project', row);
           const name = displayProject(row.sync.projectName);
           return <span className="home-project">{name}</span>;
         },
       },
-      { key: 'turns', label: 'turns', align: 'right', render: (_, row) => row.kind === 'group' ? null : row.sync.turnCount.toLocaleString('en-US') },
+      { key: 'turns', label: 'turns', align: 'right', render: (_, row) => row.kind === 'group' ? groupHeader('turns', row) : row.sync.turnCount.toLocaleString('en-US') },
       {
         key: 'duration',
         label: 'duration',
         align: 'right',
-        render: (_, row) => row.kind === 'group' ? null : formatMinutes(Number(row.sync.durationMs) / 60_000),
+        render: (_, row) => row.kind === 'group' ? groupHeader('duration', row) : formatMinutes(Number(row.sync.durationMs) / 60_000),
       },
       {
         key: 'when',
         label: 'when',
         render: (_, row) => {
-          if (row.kind === 'group') return null;
+          if (row.kind === 'group') return groupHeader('when', row);
           const when = whenOf(row);
           return when === null ? '—' : <span className="whitespace-nowrap">{when}</span>;
         },
@@ -310,11 +387,10 @@ export function RootSessionList({ rows, childGroups = NO_CHILDREN, titles, previ
       {
         key: 'state',
         label: 'status',
-        render: (_, row) => row.kind === 'group' ? null : stateOf(row),
+        render: (_, row) => row.kind === 'group' ? groupHeader('state', row) : stateOf(row),
       },
-    ],
-    [titles, previews, audience, childGroups, expandedGroups, home, childCounts, viewState.visibleColumns],
-  );
+    ];
+  }, [titles, previews, audience, childGroups, expandedGroups, home, childCounts, viewState.visibleColumns, viewState.collapsed, firstShownKey, onCollapsedChange]);
   const shownColumns = useMemo(() => {
     if (viewState.visibleColumns.length === 0) return columns;
     const wanted = new Set<string>(viewState.visibleColumns);

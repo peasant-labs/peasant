@@ -672,4 +672,5 @@ cases:
           pages:
             - {page: 1, perPage: 25, total: 26, memberIds: [agent-h26, agent-h25, agent-h24, agent-h23, agent-h22, agent-h21, agent-h20, agent-h19, agent-h18, agent-h17, agent-h16, agent-h15, agent-h14, agent-h13, agent-h12, agent-h11, agent-h10, agent-h09, agent-h08, agent-h07, agent-h06, agent-h05, agent-h04, agent-h03, agent-h02], nextMemberIds: [agent-h01]}
             - {page: 2, perPage: 25, total: 26, memberIds: [agent-h01], nextMemberIds: []}
+      afterList: {page2: true}
       reListIdentical: true

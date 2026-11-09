@@ -67,6 +67,7 @@ traversals:
     next: [true, false]
   - name: immediate-children-only
     total: 60
+    sessions: 61
     roots: 60
     parent: sess_parent
     pages: [1, 2, 3]

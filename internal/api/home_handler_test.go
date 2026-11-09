@@ -213,6 +213,7 @@ type syncTraversalCase struct {
 	Counts, First  []int
 	Next           []bool
 	Total          int
+	Sessions       int
 	DeleteBoundary bool `yaml:"deleteBoundary"`
 }
 type syncPagesFixture struct {
@@ -344,6 +345,41 @@ func TestSyncHomeEmptyStoreReturnsPageOne(t *testing.T) {
 	}
 }
 
+// TestSyncHomeChildTotalsUseTheRequestFilter holds the child branch's
+// totals.sessions to the request filter. The HTTP validator refuses root
+// filters on a child request, so this drives the reader directly: a published
+// filter with no receipts counts zero while the child page still has rows. A
+// revert to CountPushableSessions(All) reports the whole 61-session store.
+func TestSyncHomeChildTotalsUseTheRequestFilter(t *testing.T) {
+	db := storetest.Open(t)
+	ids := rootIDs(60)
+	seedHomeSessions(t, db, ids)
+	seedHomeSessions(t, db, []string{"sess_parent"})
+	homeExec(t, db, `UPDATE sessions SET parent_id=? WHERE session_id<>?`, "sess_parent", "sess_parent")
+
+	sh := &syncHandler{config: newLiveConfig(config.BaseConfig())}
+	h := &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: fixtureRepositoryResolver{}}
+	parent := "sess_parent"
+	publication := schema.LocalSyncPublicationPublished
+	page, err := h.newReader(schema.LocalSyncSessionsQuery{
+		View:            "home",
+		ParentSessionID: &parent,
+		Publication:     &publication,
+	}).ReadPage(context.Background())
+	if err != nil {
+		t.Fatalf("read the filtered child page: %v", err)
+	}
+	if page.Total != 60 {
+		t.Fatalf("child total = %d, want 60", page.Total)
+	}
+	if len(page.Items) == 0 {
+		t.Fatal("the filtered child page returned no rows; the totals assertion needs a visible child page")
+	}
+	if page.Totals == nil || page.Totals.Sessions != 0 {
+		t.Fatalf("totals.sessions = %+v, want 0 for publication=published with no receipts; the store total is 61", page.Totals)
+	}
+}
+
 func TestSyncHomeKeysetTraversal(t *testing.T) {
 	for _, tc := range loadSyncPages(t).Traversals {
 		t.Run(tc.Name, func(t *testing.T) {
@@ -391,6 +427,9 @@ func TestSyncHomeKeysetTraversal(t *testing.T) {
 				}
 				if tc.Total != 0 && p.Total != tc.Total {
 					t.Fatalf("page%d total = %d, want %d", i, p.Total, tc.Total)
+				}
+				if tc.Sessions != 0 && (p.Totals == nil || p.Totals.Sessions != tc.Sessions) {
+					t.Fatalf("page%d totals.sessions = %+v, want %d (the same request filter as the root branch)", i, p.Totals, tc.Sessions)
 				}
 				// nextItems is the FOLLOWING rows, not a repeat of the page.
 				nextWant := []string{}
@@ -442,6 +481,10 @@ type homeAncestryCase struct {
 	Selected         []string
 	Status           int
 	InvalidSelection bool `yaml:"invalidSelection"`
+	ParentMarkers    map[string]struct {
+		ParentSessionID  *string `yaml:"parentSessionId"`
+		ParentUnresolved *bool   `yaml:"parentUnresolved"`
+	} `yaml:"parentMarkers"`
 }
 
 type homeAncestryDocument struct {
@@ -517,6 +560,25 @@ func TestSyncHomeAncestryIgnoresSavedSelection(t *testing.T) {
 			}
 			if !reflect.DeepEqual(ids, tc.IDs) || !reflect.DeepEqual(counts, tc.Children) {
 				t.Fatalf("ids=%v children=%v; want %v/%v", ids, counts, tc.IDs, tc.Children)
+			}
+			// The page membership and the row's own parent markers are the same
+			// answer: a root must not name a parent, and a resolved child must
+			// name the parent that put it on the child page.
+			byID := make(map[string]schema.LocalSyncSessionRow, len(p.Items))
+			for _, row := range p.Items {
+				byID[row.Sync.ID] = row
+			}
+			for id, want := range tc.ParentMarkers {
+				row, ok := byID[id]
+				if !ok {
+					t.Fatalf("parent marker %q names a row that is not on the page %v", id, ids)
+				}
+				if !reflect.DeepEqual(row.Sync.ParentSessionID, want.ParentSessionID) {
+					t.Fatalf("%s parentSessionId = %v, want %v", id, row.Sync.ParentSessionID, want.ParentSessionID)
+				}
+				if !reflect.DeepEqual(row.Sync.ParentUnresolved, want.ParentUnresolved) {
+					t.Fatalf("%s parentUnresolved = %v, want %v", id, row.Sync.ParentUnresolved, want.ParentUnresolved)
+				}
 			}
 		})
 	}

@@ -104,6 +104,32 @@ describe('GroupedSessionsSection', () => {
     expect(screen.getByRole('status')).toHaveTextContent('page 2 of 3');
   });
 
+  it('pages grouped search results through the same numbered pager', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/search') {
+        const page = Number(url.searchParams.get('page') ?? '1');
+        return okResponse({
+          ...listResponse(),
+          page,
+          total: 60,
+          nextItems: [],
+          items: [{ kind: 'transcript', transcript: { session: session(page === 2 ? 'search-2' : 'search-1') } }],
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404, text: async () => 'not found' } as Response);
+    });
+    render(<GroupedSessionsSection variant="search" query="needle" heading="search results" />);
+    expect(await screen.findByText('search-1')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'page 2' }));
+    expect(await screen.findByText('search-2')).toBeInTheDocument();
+    const searches = fetchMock.mock.calls
+      .map((call) => new URL(String(call[0])))
+      .filter((url) => url.pathname === '/api/v1/search');
+    expect(searches.at(-1)?.searchParams.get('page')).toBe('2');
+    expect(searches.at(-1)?.searchParams.get('perPage')).toBe('25');
+  });
+
   it('refetches the grouped read when the live session channel invalidates it', async () => {
     const view = render(<GroupedSessionsSection variant="sessions" invalidationKey="a" />);
     await screen.findByText('agent-a1');

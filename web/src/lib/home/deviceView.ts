@@ -9,13 +9,17 @@ import { HOME_COLUMN_IDS, isHomeColumnId, type HomeColumnId } from '@/components
 export interface HomeDeviceView {
   /** The columns the reader can see, in table order. `null` means the default set. */
   readonly visibleColumns: readonly HomeColumnId[] | null;
-  /** The qualified group ids whose rows are open. */
-  readonly open: readonly string[];
+  /**
+   * The qualified group ids whose rows are collapsed. `null` or an empty array
+   * means nothing is collapsed; a group renders open unless its qualified id is
+   * listed. It is a global set, not a page-local allow-list.
+   */
+  readonly collapsed: readonly string[] | null;
 }
 
 export const HOME_DEVICE_KEY = 'peasant.home';
 
-const DEFAULT_DEVICE_VIEW: HomeDeviceView = Object.freeze({ visibleColumns: null, open: [] });
+const DEFAULT_DEVICE_VIEW: HomeDeviceView = Object.freeze({ visibleColumns: null, collapsed: null });
 
 type ReadableStorage = Pick<Storage, 'getItem'>;
 type WritableStorage = Pick<Storage, 'getItem' | 'setItem'>;
@@ -36,21 +40,24 @@ export function readHomeDeviceView(storage: ReadableStorage | null = storageOrNu
     return DEFAULT_DEVICE_VIEW;
   }
   if (typeof parsed !== 'object' || parsed === null) return DEFAULT_DEVICE_VIEW;
-  const record = parsed as { visibleColumns?: unknown; open?: unknown };
+  const record = parsed as { visibleColumns?: unknown; collapsed?: unknown };
   const columns = Array.isArray(record.visibleColumns) && record.visibleColumns.every(isHomeColumnId)
     ? (record.visibleColumns as HomeColumnId[])
     : null;
-  const open = Array.isArray(record.open) && record.open.every((id) => typeof id === 'string')
-    ? (record.open as string[])
-    : [];
-  return Object.freeze({ visibleColumns: columns === null ? null : Object.freeze(columns), open: Object.freeze(open) });
+  const collapsed = Array.isArray(record.collapsed) && record.collapsed.every((id) => typeof id === 'string')
+    ? (record.collapsed as string[])
+    : null;
+  return Object.freeze({
+    visibleColumns: columns === null ? null : Object.freeze(columns),
+    collapsed: collapsed === null ? null : Object.freeze(collapsed),
+  });
 }
 
 /** Write the device view. A storage failure is not fatal: the next read falls back to the default. */
 export function writeHomeDeviceView(view: HomeDeviceView, storage: WritableStorage | null = storageOrNull()): void {
   if (storage === null) return;
   try {
-    storage.setItem(HOME_DEVICE_KEY, JSON.stringify({ visibleColumns: view.visibleColumns, open: view.open }));
+    storage.setItem(HOME_DEVICE_KEY, JSON.stringify({ visibleColumns: view.visibleColumns, collapsed: view.collapsed }));
   } catch {
     // Quota or private-mode failure: the view is a convenience, not a requirement.
   }
@@ -61,9 +68,9 @@ export function writeHomeDeviceView(view: HomeDeviceView, storage: WritableStora
  * one grouping do not name groups under another. The URL owns the grouping; the
  * device keeps the open set, so this clears only the device half.
  */
-export function clearHomeOpenGroups(storage: WritableStorage | null = storageOrNull()): void {
+export function clearHomeCollapsedGroups(storage: WritableStorage | null = storageOrNull()): void {
   const view = readHomeDeviceView(storage);
-  writeHomeDeviceView({ visibleColumns: view.visibleColumns, open: [] }, storage);
+  writeHomeDeviceView({ visibleColumns: view.visibleColumns, collapsed: [] }, storage);
 }
 
 /** The column ids in their default order, for the first render before a reader hides one. */

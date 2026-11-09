@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -199,6 +200,71 @@ func parentStateForSession(t *testing.T, db *Store, sessionID string) (string, *
 	}
 	defer db.pool.Put(conn)
 	return readParentState(t, conn, sessionID)
+}
+
+// TestParentCacheForSessionReadsOnlyTheRawColumn proves the availability reader
+// never substitutes the logical parent answer: a snapshot-only session reads a
+// NULL cache while LogicalParentSQL names the snapshot.
+func TestParentCacheForSessionReadsOnlyTheRawColumn(t *testing.T) {
+	t.Parallel()
+	db, _ := openGenerationStore(t)
+	ctx := context.Background()
+	target, err := schema.NewSessionID("1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	insertParentStateSession(t, db, target, nil)
+	cached, err := schema.NewSessionID("2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logical := ingest.SessionID(target)
+	insertParentStateSession(t, db, cached, &logical)
+	cache, err := db.ParentCacheForSession(ctx, string(cached))
+	if err != nil {
+		t.Fatalf("read the cache: %v", err)
+	}
+	if cache == nil || *cache != string(target) {
+		t.Fatalf("cache of a stored child = %v, want %q", cache, target)
+	}
+	snapshotOnly, err := schema.NewSessionID("3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unstoredParent := ingest.SessionID("4d4d4d4d-4d4d-4d4d-8d4d-4d4d4d4d4d4d")
+	insertParentStateSession(t, db, snapshotOnly, &unstoredParent)
+	cache, err = db.ParentCacheForSession(ctx, string(snapshotOnly))
+	if err != nil {
+		t.Fatalf("read the snapshot-only cache: %v", err)
+	}
+	if cache != nil {
+		t.Fatalf("cache of a snapshot-only child = %q, want NULL; the reader must not answer the logical parent", *cache)
+	}
+}
+
+// TestParentStateRevisionCeilingFailsClosed proves the bump refuses to freeze
+// every cache at the integer ceiling instead of silently leaving the revision
+// stuck.
+func TestParentStateRevisionCeilingFailsClosed(t *testing.T) {
+	t.Parallel()
+	db, _ := openGenerationStore(t)
+	sid := "5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e"
+	seedGenerationSession(t, db, sid)
+	conn, err := db.pool.Take(context.Background())
+	if err != nil {
+		t.Fatalf("Pool.Take: %v", err)
+	}
+	defer db.pool.Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE store_state SET revision = 9223372036854775807 WHERE id = 1`, &sqlitex.ExecOptions{}); err != nil {
+		t.Fatalf("set the revision ceiling: %v", err)
+	}
+	err = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET tags = 'ceiling' WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{sid}})
+	if err == nil {
+		t.Fatal("a page-relevant write at the revision ceiling succeeded; the store must fail closed")
+	}
+	if !strings.Contains(err.Error(), "integer ceiling") {
+		t.Fatalf("the ceiling write failed for an unrelated reason: %v", err)
+	}
 }
 
 // TestParentStateTriggersBumpRevisionOncePerWrite proves the trigger contract

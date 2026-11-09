@@ -316,7 +316,7 @@ describe('mounted Home offset pages', () => {
 });
 
 describe('grouping changes', () => {
-  it('a group change resets to page one and clears the open groups but keeps the columns', async () => {
+  it('a group change resets to page one and clears the collapsed groups but keeps the columns', async () => {
     const homeReads: URL[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string) => {
       const url = new URL(input, 'http://localhost');
@@ -338,7 +338,7 @@ describe('grouping changes', () => {
         nextItems: [], page, perPage: size, total: 60, revision: '0',
       });
     }));
-    window.localStorage.setItem('peasant.home', JSON.stringify({ visibleColumns: ['session', 'state'], open: ['project:alpha'] }));
+    window.localStorage.setItem('peasant.home', JSON.stringify({ visibleColumns: ['session', 'state'], collapsed: [`project:${fixture.projects[1].projectHash}`] }));
     render(<PublishProvider><HomePage /></PublishProvider>);
     await screen.findByRole('link', { name: 'root-0' });
     fireEvent.click(screen.getByRole('button', { name: 'next page' }));
@@ -354,7 +354,7 @@ describe('grouping changes', () => {
     // The open groups are device state and the new grouping names different
     // groups, so the open set clears; the columns stay.
     const stored = JSON.parse(window.localStorage.getItem('peasant.home') ?? '{}');
-    expect(stored.open).toEqual([]);
+    expect(stored.collapsed).toEqual([]);
     expect(stored.visibleColumns).toEqual(['session', 'state']);
     expect(homeReads.map(url => url.searchParams.get('page'))).toEqual(['1', '2']);
   });

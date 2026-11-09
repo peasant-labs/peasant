@@ -137,6 +137,9 @@ type helperGroupListingMemberPage struct {
 
 type helperGroupListingAfterList struct {
 	Purposes map[string]string `yaml:"purposes"`
+	// Page2 asks the same route for the second grouped page, so the HTTP route
+	// (not only the payload builder) proves page > 1 is served.
+	Page2 bool `yaml:"page2"`
 }
 
 // groupedScopeIssuerFunc adapts a function to the grouping issuer seam so a
@@ -339,6 +342,25 @@ func runHelperGroupListingCase(t *testing.T, tc testcase.Case[helperGroupListing
 	}
 
 	if tc.Expected.AfterList != nil {
+		if tc.Expected.AfterList.Page2 {
+			pageTwoBody, pageTwoStatus := helperGroupGET(t, listURL+"&page=2&perPage=25")
+			if pageTwoStatus != http.StatusOK {
+				t.Fatalf("page 2 status = %d, want 200 (body %s)", pageTwoStatus, pageTwoBody)
+			}
+			var pageTwo schema.LocalSessionListPayload
+			if err := json.Unmarshal(pageTwoBody, &pageTwo); err != nil {
+				t.Fatalf("decode grouped page 2: %v", err)
+			}
+			if pageTwo.Page != 2 || int(pageTwo.PerPage) != 25 || pageTwo.Total != tc.Expected.Total {
+				t.Fatalf("page 2 page/perPage/total = (%d,%d,%d), want (2,25,%d)", pageTwo.Page, pageTwo.PerPage, pageTwo.Total, tc.Expected.Total)
+			}
+			if len(pageTwo.Items) != 1 || pageTwo.Items[0].Transcript == nil || pageTwo.Items[0].Transcript.Session.ID != "agent-o26" {
+				t.Fatalf("page 2 items = %+v, want agent-o26", pageTwo.Items)
+			}
+			if len(pageTwo.NextItems) != 0 {
+				t.Fatalf("page 2 nextItems = %d, want 0", len(pageTwo.NextItems))
+			}
+		}
 		for id, purpose := range tc.Expected.AfterList.Purposes {
 			helperGroupSetPurpose(t, db, id, purpose)
 		}

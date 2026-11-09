@@ -32,6 +32,7 @@ import { fetchMockSessions } from '@/lib/share/mock-data';
 import { useMockConfig } from '@/hooks/useMockConfig';
 import { getApiBaseUrl } from '@/lib/api/base';
 import { decodeGroupedSyncList, decodeHelperMembers } from '@/lib/api/grouped-sync';
+import { PageSize } from '@peasant-labs/schema';
 import { fetchDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
 import type { ShareFooterActions } from '@/components/share/footer-actions';
 
@@ -182,7 +183,7 @@ async function fetchGroupedSyncSessions(): Promise<LocalSessionListPayload> {
 }
 
 async function fetchGroupedSyncPage(page: number): Promise<LocalSessionListPayload> {
-  const path = `/api/v1/sync/sessions?view=grouped&page=${page}&perPage=25`;
+  const path = `/api/v1/sync/sessions?view=grouped&page=${page}&perPage=${PageSize.P25}`;
   const response = await fetch(`${getApiBaseUrl()}${path}`);
   if (!response.ok) {
     let detail = `the server returned HTTP ${response.status} without an actionable response body`;

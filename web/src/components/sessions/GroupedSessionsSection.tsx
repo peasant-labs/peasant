@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { FeedbackPanel, Pagination } from '@/lib/ft-ui';
 import { SkeletonList } from '@/lib/skeleton';
-import type { PageSize } from '@peasant-labs/schema';
+import { PageSize } from '@peasant-labs/schema';
 import {
   assertGroupedProjectScope,
   fetchGroupedLocalSearch,
@@ -60,7 +60,7 @@ export interface GroupedSessionsSectionProps {
  * helper-only or owner-excluded results. An expired member scope refreshes THIS
  * list, never a broader one.
  */
-const GROUPED_PAGE_SIZE: PageSize = 25;
+const GROUPED_PAGE_SIZE = PageSize.P25;
 
 export function GroupedSessionsSection({
   variant,
