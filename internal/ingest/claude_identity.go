@@ -65,10 +65,10 @@ func addClaudeIdentityRecord(value map[string]any, evidence *ClaudeTranscriptEvi
 	evidence.Records = append(evidence.Records, record)
 	agent, _ := value["agentId"].(string)
 	sidechain, _ := value["isSidechain"].(bool)
-	if record.Sidechain == nil && claudeUnscopedRequestRecordTypes[record.Type] {
-		sidechain = true
-	}
-	if agent == "" || !sidechain {
+	// record.Sidechain stays the recorded coordinate (nil when absent); the
+	// effective marker below is the only thing the native-proof decision reads.
+	scopeProvesAgent := sidechain || (record.Sidechain == nil && claudeUnmarkedRequestRecordTypes[record.Type])
+	if agent == "" || !scopeProvesAgent {
 		evidence.NativeAgentValid = false
 	}
 	if evidence.NativeAgentID == "" {
