@@ -345,9 +345,10 @@ type OpenCodeSessionRecordPageRequest struct {
 	SessionID *OpenCodeSessionLinkID // Optional exact lookup for captured materialization.
 	// ParentID pages the rows whose parent_id names this session. The harness
 	// database is external and read-only, and parent_id carries no index
-	// upstream, so this read may be a scan of that database's session table. It
-	// is a bounded page against the harness source, never a scan of the peasant
-	// store.
+	// upstream, so each page scans that database's session table: a parent with
+	// N children costs ceil(N/128) scans per supported session table, and the
+	// caller pages to completion. That is a bounded read of the harness source,
+	// never a scan of the peasant store.
 	ParentID *OpenCodeSessionLinkID
 }
 

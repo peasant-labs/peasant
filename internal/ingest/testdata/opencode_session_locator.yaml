@@ -7,12 +7,18 @@
 # reads a real database file in the case's own temporary directory, never an
 # in-memory filesystem. `parentLinks` sets one session row's parent on that same
 # real file, because a row's parent link is what discovery and the located build
-# both read. `directories` creates a directory where a database would be, which
-# is one way an existing path cannot be opened as a database.
+# both read. `sessions` writes whole session rows into that real file — with a
+# current message row, so the full walk discovers them — which is how a mixed
+# session_v2/session layout with children is expressed. `directories` creates a
+# directory where a database would be, which is one way an existing path cannot
+# be opened as a database.
 #
 # A lookup asserts, exactly:
 #   - `wantSources`, the paths it resolved;
-#   - `wantSearched`, the ordered searched block, one entry per source format;
+#   - `wantSearched`, the ordered searched block: it follows the same candidate
+#     order Discover considers (override database, channel database, legacy JSON
+#     root), one entry per source, and a candidate database that does not exist
+#     still contributes its entry because it is a place the id was looked for;
 #   - `wantOpens`, the set of database paths it opened;
 #   - `wantQueries`, the session ids each database was asked for, with
 #     multiplicity: one row read per candidate database, and none at all for a
@@ -29,10 +35,12 @@
 # walks; `wantOpens`/`wantQueries` are asserted as sets.
 #
 # A located database session also carries the children that database records for
-# it, so a child no harvest has stored is a member. `wantParents` names the
-# parent ids each database was paged for, as a set: the child page is one
-# bounded query per supported session table, and it runs only against the
-# database that holds the located session.
+# it, so a child no harvest has stored is a member. `wantParents` is asserted
+# WITH MULTIPLICITY, so the page count is part of the case: one page per
+# supported session table, and a repeated id means a second page was read. It
+# runs only against the database that holds the located session. `wantTitles`
+# pins one member's title, which is how a preference between two records of the
+# same session is asserted directly.
 #
 # `wantProbe` names the one ancestor probe kind; both formats declare ProbeRow,
 # and the probe itself performs no I/O.
@@ -42,16 +50,19 @@ requiredNames:
   - sqlite-lookup-miss
   - sqlite-lookup-candidate-order
   - sqlite-lookup-failed-open
+  - sqlite-lookup-absent-database
   - sqlite-located-session
   - sqlite-located-unstored-parent
   - sqlite-located-stored-child
   - sqlite-located-unstored-child
   - sqlite-located-v2-only-session
+  - sqlite-located-both-layout-children
   - sqlite-located-source-read-failed
   - sqlite-located-not-a-candidate
   - legacy-json-lookup-unsupported
   - legacy-json-located-session
   - legacy-json-located-unstored-parent
+  - legacy-json-located-unreadable
   - legacy-json-located-source-gone
 cases:
   - name: sqlite-lookup-current-row
@@ -66,12 +77,12 @@ cases:
         - opencode.db
       wantSearched:
         - harness: opencode
+          method: sqlite-row
+          location: opencode.db
+        - harness: opencode
           method: unsupported
           reason: IDOnlyInFileBody
           location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv5.json
-        - harness: opencode
-          method: sqlite-row
-          location: opencode.db
       wantStats:
         - opencode.db
       wantOpens:
@@ -93,12 +104,12 @@ cases:
         - opencode.db
       wantSearched:
         - harness: opencode
+          method: sqlite-row
+          location: opencode.db
+        - harness: opencode
           method: unsupported
           reason: IDOnlyInFileBody
           location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv8.json
-        - harness: opencode
-          method: sqlite-row
-          location: opencode.db
       wantStats:
         - opencode.db
       wantOpens:
@@ -121,12 +132,12 @@ cases:
       wantSources: []
       wantSearched:
         - harness: opencode
+          method: sqlite-row
+          location: opencode.db
+        - harness: opencode
           method: unsupported
           reason: IDOnlyInFileBody
           location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv0.json
-        - harness: opencode
-          method: sqlite-row
-          location: opencode.db
       wantStats:
         - opencode.db
       wantOpens:
@@ -156,15 +167,15 @@ cases:
         - opencode.db
       wantSearched:
         - harness: opencode
-          method: unsupported
-          reason: IDOnlyInFileBody
-          location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv5.json
-        - harness: opencode
           method: sqlite-row
           location: other.db
         - harness: opencode
           method: sqlite-row
           location: opencode.db
+        - harness: opencode
+          method: unsupported
+          reason: IDOnlyInFileBody
+          location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv5.json
       wantStats:
         - other.db
         - opencode.db
@@ -192,15 +203,37 @@ cases:
       wantError: could not read database
       rendersAsMiss: true
       wantSources: []
+      # The failing database is the first candidate, so the lookup stops before
+      # the legacy-JSON entry; the miss names the failure instead.
+      wantSearched: []
+      wantStats:
+        - opencode.db
+      wantOpens:
+        - opencode.db
+      wantQueries: []
+
+  - name: sqlite-lookup-absent-database
+    # No database and no session file: the channel database is a candidate that
+    # does not exist. It is never opened and never asked for an id, and it still
+    # contributes its searched entry, so the miss names the place the id was
+    # looked for, exactly as a configured legacy-JSON root does.
+    roots:
+      - .
+    files: []
+    lookup:
+      id: ses_3cd91f52effeXd3QAJ54jOyzv5
+      wantSources: []
       wantSearched:
+        - harness: opencode
+          method: sqlite-row
+          location: opencode.db
         - harness: opencode
           method: unsupported
           reason: IDOnlyInFileBody
           location: storage/session/*/ses_3cd91f52effeXd3QAJ54jOyzv5.json
       wantStats:
         - opencode.db
-      wantOpens:
-        - opencode.db
+      wantOpens: []
       wantQueries: []
 
   - name: sqlite-located-session
@@ -369,6 +402,63 @@ cases:
             - ses_3cd91f52effeXd3QAJ54jOyzn1
             - ses_3cd91f52effeXd3QAJ54jOyzn1
 
+  - name: sqlite-located-both-layout-children
+    # A migrated database keeps its session rows in session_v2 and can still hold
+    # a child row only in the legacy session table. Both halves of the merge are
+    # load-bearing: the preferred page finds the dual-table child, the legacy
+    # page finds the legacy-only one, and the dual-table child keeps its V2
+    # record. The two parent pages are the exact page count for this layout.
+    roots:
+      - .
+    databases:
+      - path: opencode.db
+        fixture: native-v2-preferred
+        sessions:
+          - id: ses_3cd91f52effeXd3QAJ54jOyzn2
+            parent: ses_3cd91f52effeXd3QAJ54jOyzn1
+            inV2: true
+            inLegacy: true
+            currentText: synthetic dual-table child turn
+            v2Title: dual child v2 title
+            legacyTitle: dual child legacy title
+            directory: /work/dual
+            createdMS: 3000
+            updatedMS: 4000
+          - id: ses_3cd91f52effeXd3QAJ54jOyzn3
+            parent: ses_3cd91f52effeXd3QAJ54jOyzn1
+            inLegacy: true
+            currentText: synthetic legacy-only child turn
+            legacyTitle: legacy-only child title
+            directory: /work/legacy-child
+            createdMS: 5000
+            updatedMS: 6000
+    located:
+      id: ses_3cd91f52effeXd3QAJ54jOyzn1
+      path: opencode.db
+      wantMembers:
+        - ses_3cd91f52effeXd3QAJ54jOyzn1
+        - ses_3cd91f52effeXd3QAJ54jOyzn2
+        - ses_3cd91f52effeXd3QAJ54jOyzn3
+      wantTitles:
+        - id: ses_3cd91f52effeXd3QAJ54jOyzn2
+          title: dual child v2 title
+        - id: ses_3cd91f52effeXd3QAJ54jOyzn3
+          title: legacy-only child title
+      wantStats:
+        - opencode.db
+        - opencode.db-wal
+      wantOpens:
+        - opencode.db
+      wantQueries:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzn1
+      wantParents:
+        - path: opencode.db
+          ids:
+            - ses_3cd91f52effeXd3QAJ54jOyzn1
+            - ses_3cd91f52effeXd3QAJ54jOyzn1
+
   - name: sqlite-located-source-read-failed
     # A selected database that cannot be read yields a member with its reason and
     # the first error line, not a refused run: a stored session keeps its
@@ -424,6 +514,9 @@ cases:
       id: ses_legacyJSON0000000000000000
       wantSources: []
       wantSearched:
+        - harness: opencode
+          method: sqlite-row
+          location: opencode.db
         - harness: opencode
           method: unsupported
           reason: IDOnlyInFileBody
@@ -488,6 +581,32 @@ cases:
       wantOpens: []
       wantQueries: []
 
+  - name: legacy-json-located-unreadable
+    # The file is there but does not decode as a session: a read failure, the same
+    # outcome an OpenCode database that does not open gives, never "source gone".
+    roots:
+      - .
+    files:
+      - path: storage/session/hash-a/ses_legacyUndecodable0000000000.json
+        kind: stray
+        body: |
+          this file is not a session document
+    located:
+      id: ses_legacyUndecodable0000000000
+      path: storage/session/hash-a/ses_legacyUndecodable0000000000.json
+      wantMembers:
+        - ses_legacyUndecodable0000000000
+      wantUnreadable:
+        - id: ses_legacyUndecodable0000000000
+          reason: SourceFailed
+          detailContains: does not decode
+      wantReads:
+        - storage/session/hash-a/ses_legacyUndecodable0000000000.json
+      wantStats:
+        - storage/session/hash-a/ses_legacyUndecodable0000000000.json
+      wantOpens: []
+      wantQueries: []
+
   - name: legacy-json-located-source-gone
     roots:
       - .
@@ -496,8 +615,6 @@ cases:
       id: ses_legacyGone0000000000000000
       path: storage/session/hash-a/ses_legacyGone0000000000000000.json
       wantSourceGone: true
-      wantReads:
-        - storage/session/hash-a/ses_legacyGone0000000000000000.json
       wantStats:
         - storage/session/hash-a/ses_legacyGone0000000000000000.json
       wantOpens: []

@@ -13,6 +13,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -74,9 +75,28 @@ type openCodeLocatorFile struct {
 // declares. Parent links live on the session row, so the case sets them with
 // one UPDATE on the same real file production reads.
 type openCodeLocatorDatabase struct {
-	Path        string                  `yaml:"path"`
-	Fixture     string                  `yaml:"fixture"`
-	ParentLinks []openCodeLocatorParent `yaml:"parentLinks"`
+	Path        string                      `yaml:"path"`
+	Fixture     string                      `yaml:"fixture"`
+	ParentLinks []openCodeLocatorParent     `yaml:"parentLinks"`
+	Sessions    []openCodeLocatorSessionRow `yaml:"sessions"`
+}
+
+// openCodeLocatorSessionRow is one session row the case writes into a real
+// database after materializing it. The synthetic corpus has no mixed-layout
+// store with children, so the rows that make one are arranged here: inV2 and
+// inLegacy choose which session tables carry the row, and currentText adds the
+// one session_message row that makes the full walk discover the session.
+type openCodeLocatorSessionRow struct {
+	ID          string `yaml:"id"`
+	Parent      string `yaml:"parent"`
+	InV2        bool   `yaml:"inV2"`
+	InLegacy    bool   `yaml:"inLegacy"`
+	CurrentText string `yaml:"currentText"`
+	V2Title     string `yaml:"v2Title"`
+	LegacyTitle string `yaml:"legacyTitle"`
+	Directory   string `yaml:"directory"`
+	CreatedMS   int64  `yaml:"createdMS"`
+	UpdatedMS   int64  `yaml:"updatedMS"`
 }
 
 type openCodeLocatorParent struct {
@@ -120,11 +140,20 @@ type openCodeLocatorLocated struct {
 	WantSourceGone bool                        `yaml:"wantSourceGone"`
 	WantUnreadable []openCodeLocatorUnreadable `yaml:"wantUnreadable"`
 	WantParents    []openCodeLocatorQueries    `yaml:"wantParents"`
+	WantTitles     []openCodeLocatorTitle      `yaml:"wantTitles"`
 	WantReads      []string                    `yaml:"wantReads"`
 	WantStats      []string                    `yaml:"wantStats"`
 	WantReaddirs   []string                    `yaml:"wantReaddirs"`
 	WantOpens      []string                    `yaml:"wantOpens"`
 	WantQueries    []openCodeLocatorQueries    `yaml:"wantQueries"`
+}
+
+// openCodeLocatorTitle pins one member's title, so a preference between two
+// records of the same session is asserted directly instead of only through the
+// full-walk comparison.
+type openCodeLocatorTitle struct {
+	ID    string `yaml:"id"`
+	Title string `yaml:"title"`
 }
 
 type openCodeLocatorChild struct {
@@ -184,6 +213,17 @@ func loadOpenCodeSessionLocatorFixture(t *testing.T) openCodeLocatorFixture {
 			for _, link := range database.ParentLinks {
 				if link.ID == "" || link.Parent == "" {
 					t.Fatalf("case %q database %q declares an incomplete parent link", testCase.Name, database.Path)
+				}
+			}
+			for _, row := range database.Sessions {
+				if _, err := ingest.NewSessionID(row.ID); err != nil {
+					t.Fatalf("case %q database %q arranged session %q: %v", testCase.Name, database.Path, row.ID, err)
+				}
+				if !row.InV2 && !row.InLegacy {
+					t.Fatalf("case %q arranged session %q names no session table to write", testCase.Name, row.ID)
+				}
+				if row.CurrentText == "" {
+					t.Fatalf("case %q arranged session %q has no current message row, so no full walk would discover it", testCase.Name, row.ID)
 				}
 			}
 		}
@@ -278,6 +318,7 @@ func writeOpenCodeLocatorTree(t *testing.T, tree string, testCase openCodeLocato
 			t.Fatalf("write fixture database %q: %v", database.Path, err)
 		}
 		applyOpenCodeLocatorParentLinks(t, path, database.Path, database.ParentLinks)
+		applyOpenCodeLocatorSessionRows(t, path, database.Path, database.Sessions)
 	}
 }
 
@@ -934,6 +975,18 @@ func assertOpenCodeLocatedMembers(t *testing.T, cfg ingest.SourceConfig, testCas
 		assertOpenCodeMemberMatchesDiscovery(t, member, walked, located.AllowedDiffs)
 	}
 
+	for _, expected := range located.WantTitles {
+		got := ""
+		for _, member := range build.Members {
+			if string(member.ID) == expected.ID && member.Source != nil {
+				got = member.Source.Title
+			}
+		}
+		if got != expected.Title {
+			t.Errorf("member %q title = %q, want %q", expected.ID, got, expected.Title)
+		}
+	}
+
 	locatedMember := build.Members[0]
 	switch located.WantProbe {
 	case "":
@@ -1043,9 +1096,20 @@ func assertOpenCodeLookupRendersAsMiss(t *testing.T, tree string, id ingest.Sess
 		Store:   ingest.StoreAttached,
 	}
 	reason := scopeErr.Reason()
-	for _, want := range []string{"could not be looked up in all sources", "cannot search by id: opencode (legacy JSON)", detail} {
-		if !strings.Contains(reason, want) {
-			t.Errorf("rendered miss %q does not name %q", reason, want)
+	want := []string{"could not be looked up in all sources", detail}
+	// Every searched entry the case declares must reach the rendered sentence,
+	// so the block and the sentence never drift apart.
+	for _, searched := range lookup.WantSearched {
+		switch searched.Method {
+		case "sqlite-row":
+			want = append(want, "searched opencode (SQLite)")
+		case "unsupported":
+			want = append(want, "cannot search by id: opencode (legacy JSON)")
+		}
+	}
+	for _, substring := range want {
+		if !strings.Contains(reason, substring) {
+			t.Errorf("rendered miss %q does not name %q", reason, substring)
 		}
 	}
 	for _, opened := range lookup.WantOpens {
@@ -1053,4 +1117,58 @@ func assertOpenCodeLookupRendersAsMiss(t *testing.T, tree string, id ingest.Sess
 			t.Errorf("rendered miss %q names no database path", reason)
 		}
 	}
+}
+
+// applyOpenCodeLocatorSessionRows writes the declared session rows into the real
+// database, so a mixed session_v2/session layout with children exists on disk
+// exactly as the case describes it.
+func applyOpenCodeLocatorSessionRows(t *testing.T, path, declaredPath string, rows []openCodeLocatorSessionRow) {
+	t.Helper()
+	if len(rows) == 0 {
+		return
+	}
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatalf("open fixture database %q: %v", declaredPath, err)
+	}
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			t.Fatalf("close fixture database %q: %v", declaredPath, closeErr)
+		}
+	}()
+	for index, row := range rows {
+		// The full walk discovers a session from its message rows, so every
+		// arranged session carries one.
+		payload, err := json.Marshal(map[string]any{
+			"text": row.CurrentText,
+			"time": map[string]any{"created": row.CreatedMS},
+		})
+		if err != nil {
+			t.Fatalf("encode arranged session %q message: %v", row.ID, err)
+		}
+		if err := sqlitex.Execute(conn, `INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES (?1, ?2, 'user', ?3, ?4, ?5, 0);`, &sqlitex.ExecOptions{Args: []any{fmt.Sprintf("msg_arranged_%d", index), row.ID, row.CreatedMS, row.UpdatedMS, string(payload)}}); err != nil {
+			t.Fatalf("write arranged session %q message row: %v", row.ID, err)
+		}
+		insert := func(table, title string) {
+			statement := `INSERT INTO ` + table + ` (id, parent_id, time_created, time_updated, directory, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6);`
+			if err := sqlitex.Execute(conn, statement, &sqlitex.ExecOptions{Args: []any{row.ID, nullableLocatorText(row.Parent), row.CreatedMS, row.UpdatedMS, nullableLocatorText(row.Directory), nullableLocatorText(title)}}); err != nil {
+				t.Fatalf("write arranged session %q into %s: %v", row.ID, table, err)
+			}
+		}
+		if row.InV2 {
+			insert("session_v2", row.V2Title)
+		}
+		if row.InLegacy {
+			insert("session", row.LegacyTitle)
+		}
+	}
+}
+
+// nullableLocatorText keeps an unset arranged value a SQL NULL rather than an
+// empty string, so the row reads back the way an absent value does upstream.
+func nullableLocatorText(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }

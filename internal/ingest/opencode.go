@@ -1730,6 +1730,11 @@ func deriveStorageRoot(sesFilePath string) string {
 //     be searched by id. That is reported as unsupported for every configured
 //     root instead of being passed over in silence.
 //
+// The searched block follows that same candidate order, one entry per source: for
+// each configured root, the override database, the channel database, then the
+// legacy root. A candidate database that does not exist still contributes its
+// entry — it is a place the id was looked for — and is never opened.
+//
 // It reads no transcript and lists no directory. A failed lookup is recorded
 // ONCE, by the core: on a returned error the core appends the SearchFailed
 // entry and carries the miss, so this method never appends one itself. It
@@ -1753,55 +1758,62 @@ func (a *OpenCodeAdapter) LookupSessionSources(ctx context.Context, cfg SourceCo
 
 	candidates := a.resolveOpenCodeCandidateSources(cfg.Paths)
 	var lookup SourceLookup
-	// The legacy-JSON entry is a pure value and costs no I/O, so it is recorded
-	// first: a database failure below must not hide the fact that this format
-	// cannot be searched by id at all.
+	// The searched block follows the same candidate order Discover considers, so
+	// the miss reads in the order the sources are actually visited: for each
+	// configured root, the environment override database, the channel database,
+	// then the legacy JSON root.
 	for _, candidate := range candidates {
-		if candidate.Kind != OpenCodeSourceLegacyJSON {
-			continue
-		}
-		lookup.Searched = append(lookup.Searched, SearchedSource{
-			Harness:  HarnessOpenCode,
-			Method:   SearchUnsupported,
-			Location: openCodeLegacyJSONSearchPattern(ResolvedPath(candidate.Path), id),
-			Reason:   IDOnlyInFileBody,
-		})
-	}
-
-	for _, candidate := range candidates {
-		if candidate.Kind != OpenCodeSourceSQLite {
-			continue
-		}
 		if err := ctx.Err(); err != nil {
 			return lookup, err
 		}
-		location := openCodeDisplayPath(candidate.Path)
-		// A candidate database that does not exist holds no rows. It is not a
-		// failure and not a searched source: there is nothing there to search.
-		if _, statErr := a.fs.Stat(candidate.Path); statErr != nil {
-			if errors.Is(statErr, fs.ErrNotExist) {
-				continue
+		switch candidate.Kind {
+		case OpenCodeSourceLegacyJSON:
+			// The id appears only in the file body, so this format cannot be
+			// searched by id. The limitation belongs to the format, not to the
+			// directory, so the entry is recorded whether or not the root exists
+			// today.
+			lookup.Searched = append(lookup.Searched, SearchedSource{
+				Harness:  HarnessOpenCode,
+				Method:   SearchUnsupported,
+				Location: openCodeLegacyJSONSearchPattern(ResolvedPath(candidate.Path), id),
+				Reason:   IDOnlyInFileBody,
+			})
+		case OpenCodeSourceSQLite:
+			location := openCodeDisplayPath(candidate.Path)
+			// A candidate database that does not exist holds no rows. It is a
+			// place the id was looked for, so the miss names it, and it is never
+			// opened.
+			if _, statErr := a.fs.Stat(candidate.Path); statErr != nil {
+				if errors.Is(statErr, fs.ErrNotExist) {
+					lookup.Searched = append(lookup.Searched, SearchedSource{
+						Harness:  HarnessOpenCode,
+						Method:   SearchSQLiteRow,
+						Location: location,
+					})
+					continue
+				}
+				return lookup, openCodeLookupFailure(id, location, statErr)
 			}
-			return lookup, openCodeLookupFailure(id, location, statErr)
-		}
-		source, err := a.openOpenCodeSQLiteSource(ctx, candidate.Path)
-		if err != nil {
-			// No row is read from a database that did not open: the opener takes
-			// a path, and the database was never in a state to answer for an id.
-			return lookup, openCodeLookupFailure(id, location, err)
-		}
-		present, queryErr := a.openCodeSessionRowPresent(ctx, source, id)
-		a.closeScopedOpenCodeSource(ctx, source, candidate.Path)
-		if queryErr != nil {
-			return lookup, openCodeLookupFailure(id, location, queryErr)
-		}
-		lookup.Searched = append(lookup.Searched, SearchedSource{
-			Harness:  HarnessOpenCode,
-			Method:   SearchSQLiteRow,
-			Location: location,
-		})
-		if present {
-			lookup.Sources = append(lookup.Sources, ResolvedPath(candidate.Path))
+			source, err := a.openOpenCodeSQLiteSource(ctx, candidate.Path)
+			if err != nil {
+				// No row is read from a database that did not open: the opener
+				// takes a path, and the database was never in a state to answer
+				// for an id.
+				return lookup, openCodeLookupFailure(id, location, err)
+			}
+			present, queryErr := a.openCodeSessionRowPresent(ctx, source, id)
+			a.closeScopedOpenCodeSource(ctx, source, candidate.Path)
+			if queryErr != nil {
+				return lookup, openCodeLookupFailure(id, location, queryErr)
+			}
+			lookup.Searched = append(lookup.Searched, SearchedSource{
+				Harness:  HarnessOpenCode,
+				Method:   SearchSQLiteRow,
+				Location: location,
+			})
+			if present {
+				lookup.Sources = append(lookup.Sources, ResolvedPath(candidate.Path))
+			}
 		}
 	}
 	return lookup, nil
@@ -2112,16 +2124,33 @@ func (a *OpenCodeAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfi
 }
 
 // discoverOpenCodeLegacyJSONMember builds the members one located legacy-JSON
-// session file carries: the session itself and every stored child. A file that
-// no longer decodes as the session it was recorded for is ErrSourceGone, so the
-// core takes the by-name lookup path for the id.
+// session file carries: the session itself and every stored child. A missing
+// file, or one that names another session id, is ErrSourceGone, so the core
+// takes the by-name lookup path for the id. A file that is there but does not
+// decode is a read failure with the same outcome a database that does not open
+// gives: a member with no source and UnreadableSourceFailed.
 func (a *OpenCodeAdapter) discoverOpenCodeLegacyJSONMember(ctx context.Context, cfg SourceConfig, root ResolvedPath, at LocatedSource) (LocatedBuild, error) {
+	// A path that is not there no longer holds the session. A path that is there
+	// but cannot be read or decoded is a read failure, the same outcome a
+	// database that does not open gives: the stored transcript stays and the
+	// run continues.
+	if _, err := a.fs.Stat(string(at.Path)); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return LocatedBuild{}, openCodeSourceGoneError(at.Path, at.ID, "the file is gone")
+		}
+		return LocatedBuild{}, fmt.Errorf("ingest: the located OpenCode session file %q exists but its state cannot be observed, so the member cannot be built from it; where: ingest.OpenCodeAdapter.DiscoverSessionAt in internal/ingest/opencode.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path, and the core records the read failure; fix: make the file readable and retry: %w", at.Path, err)
+	}
 	source, ok := a.readOpenCodeLegacyJSONSource(string(at.Path), root)
 	if !ok {
-		if _, err := a.fs.Stat(string(at.Path)); err != nil {
-			return LocatedBuild{}, openCodeSourceGoneError(at.Path, at.ID, "the file is gone or unreadable")
-		}
-		return LocatedBuild{}, openCodeSourceGoneError(at.Path, at.ID, "the file no longer decodes as a session")
+		return LocatedBuild{
+			Members: []LocatedMember{{
+				ID:         at.ID,
+				Harness:    HarnessOpenCode,
+				Unreadable: UnreadableSourceFailed,
+				Detail:     "the recorded OpenCode session file does not decode as a session",
+			}},
+			Deferred: NoDeferredWrites{},
+		}, nil
 	}
 	if source.ID != at.ID {
 		return LocatedBuild{}, openCodeSourceGoneError(at.Path, at.ID, "the file names another session id")
@@ -2301,9 +2330,14 @@ func (a *OpenCodeAdapter) openCodeDatabaseCandidatesForID(ctx context.Context, s
 // lives there, and an id present in both keeps its V2 record, exactly as the
 // full walk's record merge decides.
 //
-// The harness database is external and read-only. parent_id carries no index
-// upstream, so a page may be a scan of that database's session table. That is a
-// bounded read of the harness source, not a scan of the peasant store.
+// Cost: the harness database is external and read-only and parent_id carries no
+// index upstream, so this is not a cheap read. A parent with N children costs
+// ceil(N/128) scans of that database's session table per supported session
+// table (two for a mixed layout), plus one bounded presence read per child for
+// each projection the schema declares and one substantive-row probe per current
+// child. What bounds it: the 128-row page size, the keyset cursor that makes the
+// loop terminate, and the fact that only the located database is read. None of
+// it scans the peasant store.
 func (a *OpenCodeAdapter) openCodeChildRecords(ctx context.Context, source OpenCodeSQLiteSource, database string, parent SessionID) ([]OpenCodeSessionRecord, error) {
 	preferred, table, err := a.openCodeChildRecordPages(ctx, source, database, parent, OpenCodeSessionRecordsPreferred)
 	if err != nil {
@@ -2332,8 +2366,11 @@ func (a *OpenCodeAdapter) openCodeChildRecords(ctx context.Context, source OpenC
 }
 
 // openCodeChildRecordPages pages one table's children of parent to completion,
-// one bounded page at a time. The keyset cursor is the last observed session id,
-// so a page never re-reads a row and the read always advances.
+// one bounded page at a time. Each page is bounded by the page size; the keyset
+// cursor is the last observed session id, so a page never re-reads a row and the
+// read always advances. The page count is the child count divided by the page
+// size, and each page may scan the harness session table because parent_id is
+// unindexed upstream.
 func (a *OpenCodeAdapter) openCodeChildRecordPages(ctx context.Context, source OpenCodeSQLiteSource, database string, parent SessionID, selection OpenCodeSessionRecordSelection) ([]OpenCodeSessionRecord, OpenCodeSessionTable, error) {
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
