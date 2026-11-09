@@ -38,14 +38,16 @@ type derivedRolloutSpec struct {
 }
 
 type derivedReaderCase struct {
-	Name             string   `yaml:"name"`
-	Team             string   `yaml:"team"`
-	IdentityName     string   `yaml:"identityName"`
-	Session          string   `yaml:"session"`
-	WantDeclarers    int      `yaml:"wantDeclarers"`
-	WantSpawners     int      `yaml:"wantSpawners"`
-	WantRolloutCount int      `yaml:"wantRolloutCount"`
-	WantRolloutPaths []string `yaml:"wantRolloutPaths"`
+	Name              string   `yaml:"name"`
+	Team              string   `yaml:"team"`
+	IdentityName      string   `yaml:"identityName"`
+	Session           string   `yaml:"session"`
+	WantDeclarers     int      `yaml:"wantDeclarers"`
+	WantSpawners      int      `yaml:"wantSpawners"`
+	CheckSpawnerPaths bool     `yaml:"checkSpawnerPaths"`
+	WantSpawnerPaths  []string `yaml:"wantSpawnerPaths"`
+	WantRolloutCount  int      `yaml:"wantRolloutCount"`
+	WantRolloutPaths  []string `yaml:"wantRolloutPaths"`
 }
 
 type derivedReaderFixture struct {
@@ -104,6 +106,22 @@ func TestDerivedLookupReaderIndexedAnswers(t *testing.T) {
 				}
 				if spawners != testCase.WantSpawners {
 					t.Fatalf("CountClaudeIdentitySpawners(%v) = %d, want %d", identity, spawners, testCase.WantSpawners)
+				}
+			}
+			if testCase.CheckSpawnerPaths {
+				paths, err := db.ClaudeIdentitySpawnerPaths(ctx, testCase.Team, testCase.IdentityName)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := append([]string(nil), testCase.WantSpawnerPaths...)
+				sort.Strings(want)
+				if len(paths) != len(want) {
+					t.Fatalf("ClaudeIdentitySpawnerPaths(%q, %q) = %v, want %v", testCase.Team, testCase.IdentityName, paths, want)
+				}
+				for index := range want {
+					if paths[index] != want[index] {
+						t.Fatalf("ClaudeIdentitySpawnerPaths(%q, %q) = %v, want %v", testCase.Team, testCase.IdentityName, paths, want)
+					}
 				}
 			}
 			if testCase.Session != "" {

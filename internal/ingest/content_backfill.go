@@ -128,7 +128,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 		if err := ctx.Err(); err != nil {
 			return recovered, stoppedOnBudget, remaining, err
 		}
-		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, contentBackfillPageSize, AllStoredSessions())
+		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, contentBackfillPageSize, p.runStoreScope())
 		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 			return recovered, stoppedOnBudget, remaining, cancelErr
 		}
@@ -281,7 +281,7 @@ func (p *Pipeline) countIncompleteContentWork(ctx context.Context, store Content
 		if err := ctx.Err(); err != nil {
 			return count, err
 		}
-		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, contentBackfillPageSize, AllStoredSessions())
+		targets, err := store.ListContentCaptureIncompleteSessionsAfter(ctx, after, contentBackfillPageSize, p.runStoreScope())
 		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
 			return count, cancelErr
 		}
