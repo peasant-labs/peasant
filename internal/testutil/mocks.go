@@ -612,6 +612,57 @@ func (s *StubGitResolver) WalkUpRemoteURL(_ context.Context, _ string) (string, 
 	return s.WalkUpRemoteResult[0], s.WalkUpRemoteResult[1], nil
 }
 
+// --- Scope-bearing call recorder ---
+
+// ScopeCall is one scope-bearing store call a test double observed.
+//
+// The recorder is deliberately generic: a call is appended with the operation
+// name its implementation passes, so adding a new scope-bearing store read
+// never requires editing a per-method field list here. Exactly one of Store and
+// Projects is set, matching the scope kind the operation took.
+type ScopeCall struct {
+	Operation string
+	Store     *ingest.StoreScope
+	Projects  *ingest.ProjectScope
+}
+
+// ScopeCallRecorder records the scope every scope-bearing store call received.
+// Its zero value is ready to use and safe for concurrent calls.
+type ScopeCallRecorder struct {
+	mu    sync.Mutex
+	calls []ScopeCall
+}
+
+// RecordStore records one call that took a StoreScope.
+func (r *ScopeCallRecorder) RecordStore(operation string, scope ingest.StoreScope) {
+	copied := scope
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, ScopeCall{Operation: operation, Store: &copied})
+}
+
+// RecordProjects records one call that took a ProjectScope.
+func (r *ScopeCallRecorder) RecordProjects(operation string, scope ingest.ProjectScope) {
+	copied := scope
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, ScopeCall{Operation: operation, Projects: &copied})
+}
+
+// Calls returns a copy of the recorded calls, in call order.
+func (r *ScopeCallRecorder) Calls() []ScopeCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]ScopeCall(nil), r.calls...)
+}
+
+// Reset drops every recorded call.
+func (r *ScopeCallRecorder) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = nil
+}
+
 // --- StubSessionStore ---
 
 // StubSessionStore is a test double for ingest.SessionStore.
@@ -636,6 +687,8 @@ type StubSessionStore struct {
 	// OnInsert is called by InsertSessions before recording the entries. Useful for
 	// observing side effects at DB INSERT time (e.g., asserting file not yet written).
 	OnInsert func(entries []ingest.StoreEntry)
+	// ScopeCalls records every scope-bearing call this double receives.
+	ScopeCalls ScopeCallRecorder
 }
 
 var _ ingest.SessionStore = (*StubSessionStore)(nil)
@@ -701,7 +754,8 @@ func (s *StubSessionStore) UpsertSessionCommits(_ context.Context, sessionID ing
 
 // CleanupOrphanProjectsCalled records whether CleanupOrphanProjects was called.
 // Embed in StubSessionStore fields for test assertions.
-func (s *StubSessionStore) CleanupOrphanProjects(_ context.Context) error {
+func (s *StubSessionStore) CleanupOrphanProjects(_ context.Context, scope ingest.ProjectScope) error {
+	s.ScopeCalls.RecordProjects("CleanupOrphanProjects", scope)
 	s.CleanupOrphanProjectsCalled = true
 	return s.CleanupOrphanProjectsErr
 }
@@ -747,6 +801,8 @@ type StubMetricsStore struct {
 	TitleHarness              schema.Harness
 	TitleProjectPath          string
 	TitleContextErr           error
+	// ScopeCalls records every scope-bearing call this double receives.
+	ScopeCalls ScopeCallRecorder
 }
 
 var _ ingest.MetricsStore = (*StubMetricsStore)(nil)
@@ -873,7 +929,8 @@ func (s *StubMetricsStore) UpdateIndexState(_ context.Context, sessionID ingest.
 	return nil
 }
 
-func (s *StubMetricsStore) ListStaleIndexSessions(_ context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
+func (s *StubMetricsStore) ListStaleIndexSessions(_ context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, scope ingest.StoreScope) ([]ingest.SessionID, error) {
+	s.ScopeCalls.RecordStore("ListStaleIndexSessions", scope)
 	s.ListStaleCalledWithTargets = maps.Clone(targets)
 	if s.StaleIndexErr != nil {
 		return nil, s.StaleIndexErr

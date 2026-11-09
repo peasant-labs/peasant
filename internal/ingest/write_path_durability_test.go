@@ -233,7 +233,7 @@ func runCrashMirrorEntries(t *testing.T, variant string) {
 	if state.IndexedInputHash != nil {
 		t.Fatalf("the entries never committed, so the indexed-input hash must be null; got %q", *state.IndexedInputHash)
 	}
-	needing, err := crashed.ListSessionsNeedingRepair(ctx, ingest.HarvesterVersionRegistry)
+	needing, err := crashed.ListSessionsNeedingRepair(ctx, ingest.HarvesterVersionRegistry, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("list repair sessions: %v", err)
 	}
@@ -257,7 +257,7 @@ func runCrashMirrorEntries(t *testing.T, variant string) {
 		t.Fatalf("the restart must set the indexed-input hash; got %+v, %v", healed, err)
 	}
 	// Run 3: the steady state. The repair predicate selects nothing.
-	settled, err := restarted.ListSessionsNeedingRepair(ctx, ingest.HarvesterVersionRegistry)
+	settled, err := restarted.ListSessionsNeedingRepair(ctx, ingest.HarvesterVersionRegistry, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("list repair sessions after heal: %v", err)
 	}
@@ -318,7 +318,7 @@ func runCrashMirrorEntriesOpenCodeLegacy(t *testing.T) {
 	if state.IndexedInputHash != nil {
 		t.Fatalf("the entries never committed, so the indexed-input hash must be null; got %q", *state.IndexedInputHash)
 	}
-	needing, err := crashed.ListSessionsNeedingRepair(ctx, ingest.HarvesterVersionRegistry)
+	needing, err := crashed.ListSessionsNeedingRepair(ctx, ingest.HarvesterVersionRegistry, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("list repair sessions: %v", err)
 	}

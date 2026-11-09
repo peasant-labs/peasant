@@ -207,7 +207,7 @@ func (s *Store) ListUncachedChildrenOfParents(ctx context.Context, parents []ing
 	return updates, nil
 }
 
-// sqlInvalidateStaleParentOrigins re-queues every settled, parent-linked,
+// invalidateStaleParentOriginsSQL re-queues every settled, parent-linked,
 // independently admitted row whose verdict is still unknown at the current
 // origin rule version. Its parent test is the session-level logical-parent
 // answer, rendered through LogicalParentSQL, not the raw availability cache: a
@@ -216,12 +216,16 @@ func (s *Store) ListUncachedChildrenOfParents(ctx context.Context, parents []ing
 // pass's own work list (sqlListStaleOriginSessions) treats as parent-linked.
 // The predicate is whole-population and idempotent: once a row is reset to
 // version 0 it no longer matches, and the resolve pass moves it back to the
-// rule version with its parent-link verdict.
-var sqlInvalidateStaleParentOrigins = `UPDATE sessions SET origin_version = 0
+// rule version with its parent-link verdict. A narrowed scope appends its id
+// predicate over the same statement production runs.
+func invalidateStaleParentOriginsSQL(scope ingest.StoreScope) string {
+	predicate, _ := narrowedSessionPredicate("sessions", scope)
+	return `UPDATE sessions SET origin_version = 0
 WHERE session_origin = 'unknown'
   AND COALESCE(` + LogicalParentSQL("sessions") + `, '') <> ''
   AND origin_version = ?
-  AND model_harness IN (?, ?)`
+  AND model_harness IN (?, ?)` + predicate
+}
 
 // InvalidateStaleParentOrigins re-queues the stored codex and opencode rows that
 // carry a parent link but kept an unknown origin verdict at the current rule
@@ -229,14 +233,22 @@ WHERE session_origin = 'unknown'
 // only origin_version, never the verdict, the link, or any other column, and
 // returns the number of rows re-queued; a second application returns zero.
 // Claude Code rows and parentless roots are never touched.
-func (s *Store) InvalidateStaleParentOrigins(ctx context.Context) (int64, error) {
+func (s *Store) InvalidateStaleParentOrigins(ctx context.Context, scope ingest.StoreScope) (int64, error) {
+	if err := scope.Validate("InvalidateStaleParentOrigins"); err != nil {
+		return 0, err
+	}
+	if narrowedSessionsEmpty(scope) {
+		return 0, nil
+	}
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("store: take connection to re-queue stale parent-linked origin verdicts: %w; no origin verdict was re-queued; restore database access and rerun harvest", err)
 	}
 	defer s.pool.Put(conn)
-	if err := sqlitex.ExecuteTransient(conn, sqlInvalidateStaleParentOrigins, &sqlitex.ExecOptions{
-		Args: []any{ingest.OriginRuleVersion, ingest.HarnessCodex.String(), ingest.HarnessOpenCode.String()},
+	_, narrowedArgs := narrowedSessionPredicate("sessions", scope)
+	args := append([]any{ingest.OriginRuleVersion, ingest.HarnessCodex.String(), ingest.HarnessOpenCode.String()}, narrowedArgs...)
+	if err := sqlitex.ExecuteTransient(conn, invalidateStaleParentOriginsSQL(scope), &sqlitex.ExecOptions{
+		Args: args,
 	}); err != nil {
 		return 0, fmt.Errorf("store: re-queue stale parent-linked origin verdicts at rule version %d: %w; no origin verdict was re-queued; restore database access and rerun harvest", ingest.OriginRuleVersion, err)
 	}

@@ -41,7 +41,7 @@ func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, discovered, 
 	// either early return below, so a stuck row heals even on a harvest that
 	// names no target or finds no cache to heal. A failure is reported and the
 	// cache heal still runs; the next harvest retries the requeue.
-	if _, err := reconciler.InvalidateStaleParentOrigins(ctx); err != nil {
+	if _, err := reconciler.InvalidateStaleParentOrigins(ctx, AllStoredSessions()); err != nil {
 		p.warnParentOriginRequeue(storeLookupReasonCode(err))
 	}
 	targets := make([]SessionID, 0, len(discovered))

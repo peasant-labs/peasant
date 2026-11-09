@@ -133,6 +133,11 @@ type ClaudeEvidenceCache interface {
 	// SaveClaudeEvidence writes the records mined during one discovery and
 	// deletes the records whose transcripts are gone.
 	SaveClaudeEvidence(ctx context.Context, upserts []ClaudeTranscriptEvidence, deletes []ResolvedPath) error
+	// LoadClaudeEvidenceFor is a primary-key read of the named paths. A path
+	// that is not cached is absent from the map. It carries the same
+	// best-effort contract as LoadClaudeEvidence: a cache that fails makes
+	// discovery do the full work, which is always correct.
+	LoadClaudeEvidenceFor(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath]ClaudeTranscriptEvidence, error)
 }
 
 // ClaudeEvidenceCaching is implemented by an adapter that can reuse mined

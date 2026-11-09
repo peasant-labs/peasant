@@ -171,7 +171,7 @@ func TestContentCrashSeams(t *testing.T) {
 				t.Fatalf("after recovery visible = %q, want the different recovery candidate", got)
 			}
 			assertHarmonizedContent(t, s, sid, "gen_crash_g2b", recovered, recoveredBlobs)
-			if _, warnings, err := s.SweepFlaggedSessionsForHarvest(context.Background()); err != nil || len(warnings) != 0 {
+			if _, warnings, err := s.SweepFlaggedSessionsForHarvest(context.Background(), ingest.AllStoredSessions()); err != nil || len(warnings) != 0 {
 				t.Fatalf("recover flagged sweep: %v", err)
 			}
 			if readSweepFlag(t, s, sid) {
@@ -250,7 +250,7 @@ func runCrashMidActivationBatch(t *testing.T, fixtures contentCrashSeamFixtures,
 			t.Fatal(err)
 		}
 	}
-	if _, warnings, err := s.SweepFlaggedSessionsForHarvest(ctx); err != nil || len(warnings) != 0 {
+	if _, warnings, err := s.SweepFlaggedSessionsForHarvest(ctx, ingest.AllStoredSessions()); err != nil || len(warnings) != 0 {
 		t.Fatalf("crashed batch recovery: %v %v", err, warnings)
 	}
 	for _, sid := range sessions {

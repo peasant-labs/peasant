@@ -223,6 +223,33 @@ residual:
     literals: 1
     class: ddl
     reason: Immutable historical trigger text.
+  - name: store-stored-cached-children
+    file: internal/store/session_source_reader.go
+    declaration: storedCachedChildrenSQL
+    literals: 3
+    class: availability
+    reason: >-
+      The cached half of the stored-children read: the raw column is the cache
+      key the partial parent index seeks, and the parent ANSWER beside it is
+      still rendered through LogicalParentSQL. A raw value here decides which
+      cached row to join, never who the parent is.
+  - name: store-stored-relationship-children
+    file: internal/store/session_source_reader.go
+    declaration: storedRelationshipChildrenSQL
+    literals: 1
+    class: availability
+    reason: >-
+      The durable half returns only children the cache does not name, which is
+      the availability question this read exists to answer; the target it
+      groups by is the durable evidence, not the cache.
+  - name: store-stored-publication-children
+    file: internal/store/session_source_reader.go
+    declaration: storedPublicationChildrenSQL
+    literals: 1
+    class: availability
+    reason: >-
+      The legacy durable half of the same read: it selects only children whose
+      cache is empty, so a populated cache is never reported twice.
 
 routed:
   - name: store-all-sessions
@@ -264,12 +291,12 @@ routed:
     reason: Recovered document parent answer, rendered.
   - name: store-list-stale-origin-sessions
     file: internal/store/origin_state_writer.go
-    declaration: sqlListStaleOriginSessions
+    declaration: listStaleOriginSessionsSQL
     class: routed
     reason: Stored-origin verdict input, rendered.
   - name: store-invalidate-stale-parent-origins
     file: internal/store/parent_reconcile.go
-    declaration: sqlInvalidateStaleParentOrigins
+    declaration: invalidateStaleParentOriginsSQL
     class: routed
     reason: >-
       The re-queue set is the resolver's own parent test, rendered: a raw-cache

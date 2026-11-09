@@ -195,16 +195,10 @@ func (s *Store) GetSessionContentCapture(ctx context.Context, id ingest.SessionI
 	return readCapture(conn, id)
 }
 
-// After is an exclusive keyset cursor. Failed targets cannot starve later ones.
-func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, after ingest.SessionID, limit int) ([]ingest.ContentCaptureIncompleteSession, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	conn, err := s.pool.Take(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer s.pool.Put(conn)
+// buildListContentCaptureIncompleteSessionsQuery renders one content-recovery
+// page for the given cursor, limit and scope. Production and its query-plan
+// guard call the same builder.
+func buildListContentCaptureIncompleteSessionsQuery(after ingest.SessionID, limit int, scope ingest.StoreScope) (string, []any) {
 	// Ineligible rows are excluded by the QUERY, not after it: a row this build
 	// cannot harness-parse must not consume a LIMIT slot, or a page made only of
 	// such rows would come back empty and read as the end of the table, ending
@@ -216,9 +210,31 @@ func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, a
 		placeholders = append(placeholders, "?")
 		args = append(args, string(known))
 	}
+	predicate, narrowedArgs := narrowedSessionPredicate("s", scope)
+	args = append(args, narrowedArgs...)
 	args = append(args, limit)
+	return `SELECT s.session_id,s.model_harness,s.start_ms FROM sessions s LEFT JOIN session_content_captures c ON c.session_id=s.session_id WHERE s.session_id>? AND s.model_harness IN (` + strings.Join(placeholders, ",") + `)` + predicate + ` AND (c.status IS NULL OR c.status!='complete') ORDER BY s.session_id LIMIT ?`, args
+}
+
+// After is an exclusive keyset cursor. Failed targets cannot starve later ones.
+func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, after ingest.SessionID, limit int, scope ingest.StoreScope) ([]ingest.ContentCaptureIncompleteSession, error) {
+	if err := scope.Validate("ListContentCaptureIncompleteSessionsAfter"); err != nil {
+		return nil, err
+	}
+	if narrowedSessionsEmpty(scope) {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer s.pool.Put(conn)
+	query, args := buildListContentCaptureIncompleteSessionsQuery(after, limit, scope)
 	var targets []ingest.ContentCaptureIncompleteSession
-	err = sqlitex.ExecuteTransient(conn, `SELECT s.session_id,s.model_harness,s.start_ms FROM sessions s LEFT JOIN session_content_captures c ON c.session_id=s.session_id WHERE s.session_id>? AND s.model_harness IN (`+strings.Join(placeholders, ",")+`) AND (c.status IS NULL OR c.status!='complete') ORDER BY s.session_id LIMIT ?`, &sqlitex.ExecOptions{Args: args, ResultFunc: func(st *sqlite.Stmt) error {
+	err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args, ResultFunc: func(st *sqlite.Stmt) error {
 		id, e := ingest.NewSessionID(st.ColumnText(0))
 		if e != nil {
 			return e

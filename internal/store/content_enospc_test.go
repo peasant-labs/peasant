@@ -106,7 +106,7 @@ func TestContentHarvestENOSPC(t *testing.T) {
 				restore()
 				restore = nil
 			}
-			if _, warnings, err := s.SweepFlaggedSessionsForHarvest(context.Background()); err != nil || len(warnings) != 0 {
+			if _, warnings, err := s.SweepFlaggedSessionsForHarvest(context.Background(), ingest.AllStoredSessions()); err != nil || len(warnings) != 0 {
 				t.Fatalf("next harvest orphan recovery: %v %v", err, warnings)
 			}
 			if orphanContentCount(t, s, sid) != 0 || readSweepFlag(t, s, sid) {

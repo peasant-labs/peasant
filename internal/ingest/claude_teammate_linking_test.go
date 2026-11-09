@@ -202,6 +202,16 @@ func (f *fakeClaudeLinkingEvidenceCache) LoadClaudeEvidence(context.Context) (ma
 	return out, nil
 }
 
+func (f *fakeClaudeLinkingEvidenceCache) LoadClaudeEvidenceFor(_ context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, error) {
+	out := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, len(paths))
+	for _, path := range paths {
+		if record, ok := f.evidence[path]; ok {
+			out[path] = record
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeClaudeLinkingEvidenceCache) SaveClaudeEvidence(_ context.Context, upserts []ingest.ClaudeTranscriptEvidence, deletes []ingest.ResolvedPath) error {
 	for _, record := range upserts {
 		f.evidence[record.SourcePath] = record

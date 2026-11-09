@@ -386,7 +386,7 @@ func (w storedBackfillWorld) resolver(t *testing.T, backing ingest.OriginResolve
 // rows are included too.
 func (w storedBackfillWorld) storedOrigins(t *testing.T) map[string]ingest.StoredOriginRow {
 	t.Helper()
-	rows, err := w.database.ListStaleOriginSessions(context.Background(), storedBackfillRuleVersion+1)
+	rows, err := w.database.ListStaleOriginSessions(context.Background(), storedBackfillRuleVersion+1, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("read back the stored origins: %v", err)
 	}

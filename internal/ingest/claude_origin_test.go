@@ -227,6 +227,16 @@ func (c *fakeClaudeEvidenceCache) LoadClaudeEvidence(context.Context) (map[inges
 	return loaded, nil
 }
 
+func (c *fakeClaudeEvidenceCache) LoadClaudeEvidenceFor(_ context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, error) {
+	loaded := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, len(paths))
+	for _, path := range paths {
+		if record, ok := c.records[path]; ok {
+			loaded[path] = record
+		}
+	}
+	return loaded, nil
+}
+
 func (c *fakeClaudeEvidenceCache) SaveClaudeEvidence(_ context.Context, upserts []ingest.ClaudeTranscriptEvidence, deletes []ingest.ResolvedPath) error {
 	for _, record := range upserts {
 		c.records[record.SourcePath] = record

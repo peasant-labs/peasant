@@ -86,7 +86,7 @@ func TestPipeline_FillsInStoredOriginsAndReportsTheReMine(t *testing.T) {
 			"store it has nothing to judge", first.Summary.OriginResolve.Examined)
 	}
 
-	stale, err := database.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion)
+	stale, err := database.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("list rows below the version line after run 1: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestPipeline_FillsInStoredOriginsAndReportsTheReMine(t *testing.T) {
 			"every row resolved from full evidence", second.Summary.OriginResolve.Degraded)
 	}
 
-	remaining, err := database.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion)
+	remaining, err := database.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("list rows below the version line after run 2: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestPipeline_FillsInStoredOriginsAndReportsTheReMine(t *testing.T) {
 
 	// The verdicts themselves, so a pass that finalised everything at the wrong
 	// value would not pass on the watermark alone.
-	judged, err := database.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion+1)
+	judged, err := database.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion+1, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("read back the judged rows: %v", err)
 	}
