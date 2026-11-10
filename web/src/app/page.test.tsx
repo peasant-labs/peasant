@@ -524,7 +524,7 @@ describe('HomePage — the changes-first picker', () => {
   });
 
   for (const testCase of flatSessionFixture) {
-    it(`retains the cross-project filter and top-level pager: ${testCase.name}`, async () => {
+    it(`retains the cross-project filter as a complete list: ${testCase.name}`, async () => {
       const sessions = Array.from({ length: testCase.sessionCount }, (_, index) =>
         makeSession({
           id: `sess-${String(index).padStart(4, '0')}`,

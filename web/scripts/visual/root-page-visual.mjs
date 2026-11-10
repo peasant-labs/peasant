@@ -692,8 +692,8 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
       href: node.querySelector('a')?.getAttribute('href'),
       title: node.querySelector('a')?.textContent?.trim(),
       fontSize: getComputedStyle(node.querySelector('a')).fontSize,
-      // The state has its own column; only the phone summary repeats it in the title cell.
-      publishChrome: [...node.querySelectorAll('.pub-state')].some((state) => !state.closest('.home-session-phone')),
+      // The state has its own column; the title cell carries no state.
+      publishChrome: node.querySelector('.pub-state') !== null,
     }))
     const childSync = answers.sync.find((row) => row.id === CONTEXT.childSessionId)
     if (familyProbe.topLevel || familyProbe.publishChrome || !familyProbe.title || familyProbe.fontSize !== '16px'
