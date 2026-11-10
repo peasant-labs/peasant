@@ -217,9 +217,10 @@ jobs:
       RACE: '0'
       TMPDIR: /tmp
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
-    # 30 minutes = the measured amd64 pool gate plus headroom. The suite exceeds
-    # 20 minutes when internal/ingest is disk-bound (#941), and the old cap
-    # killed the gate before its non-blocking budget report could run. This
+    # 30 minutes = the measured ~9m30s amd64 pool gate plus headroom for the
+    # internal/ingest regression (#941). The suite exceeds 20 minutes when
+    # internal/ingest is disk-bound, and the old cap killed the gate before its
+    # non-blocking budget report could run. This
     # remains a wedging cap, not the budget check: the committed budget fixture
     # reports a slow suite and the gate stays green, and the 5-minute aggregate
     # is assessed on this job's wall (it is the critical path; the other pool
