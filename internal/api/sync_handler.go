@@ -40,6 +40,7 @@ type syncHandler struct {
 	// resolves config, data, and state paths under. Empty keeps the process
 	// environment as the default, so only tests inject explicit roots and the
 	// CLI keeps its environment-derived defaults. Mirrors ServerConfig.
+	configPath string
 	configHome string
 	dataHome   string
 	stateHome  string
@@ -1351,7 +1352,7 @@ type ingestSessionScope struct {
 
 // selectionConfigPath is the configuration file a withheld-conflict notice names.
 func (h *syncHandler) selectionConfigPath() string {
-	return defaults.ResolveConfigFilePathWith(h.configHome).String()
+	return h.configPath
 }
 
 // newIngestPipeline builds the ingest pipeline the web routes run, and the

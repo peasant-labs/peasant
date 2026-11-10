@@ -2,11 +2,9 @@ package selectionfilter
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 
 	"github.com/peasant-labs/peasant/internal/config"
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 )
 
@@ -20,7 +18,8 @@ type preparedSelection struct {
 // Filter applies a saved selection to one discovered cohort. Prepare must see
 // the complete cohort before Match or Excludes. A session outside that cohort
 // fails closed: Match refuses it, and Excludes reports it as denied so a child
-// cannot inherit a selected parent's result.
+// cannot inherit a selected parent's result. Filter and its recorder must be
+// used serially by one goroutine; they are not safe for concurrent use.
 type Filter struct {
 	matcher               ingest.SelectionMatcher
 	autoIngestNewBranches bool
@@ -71,6 +70,9 @@ func (f *Filter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSessio
 	if f == nil {
 		return nil
 	}
+	f.prepared = nil
+	f.recordedConflicts = nil
+	f.recorder.reset()
 	type gitContext struct{ remote, branch string }
 	resolvedGit := make(map[string]gitContext)
 	inputs := make([]CandidateInput, len(sessions))
@@ -117,12 +119,16 @@ func (f *Filter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSessio
 	f.prepared = make(map[ingest.SessionID]preparedSelection, len(candidates))
 	f.recordedConflicts = make(map[ingest.SessionID]bool)
 	f.recorder.reset()
-	for index, candidate := range candidates {
+	sessionsByID := make(map[ingest.SessionID]ingest.DiscoveredSession, len(sessions))
+	for _, session := range sessions {
+		sessionsByID[session.SessionID] = session
+	}
+	for _, candidate := range candidates {
 		f.prepared[candidate.SessionID] = preparedSelection{
 			candidate: candidate,
 			decision:  f.matcher.MatchDiscoveryCandidateDecision(candidate, f.autoIngestNewBranches),
 			excluded:  f.matcher.ExcludesCandidate(candidate),
-			session:   sessions[index],
+			session:   sessionsByID[candidate.SessionID],
 		}
 	}
 	return nil
@@ -169,9 +175,9 @@ func discoveredSessionProjectPath(session ingest.DiscoveredSession) string {
 	if filepath.IsAbs(session.CWD) {
 		return filepath.Clean(session.CWD)
 	}
-	if session.Harness == defaults.HarnessClaudeCode {
+	if session.Harness == ingest.HarnessClaudeCode {
 		slug := filepath.Base(filepath.Dir(string(session.SourcePath)))
-		if decoded := decodeClaudeSlugToPath(slug); decoded != "" {
+		if decoded := ingest.DecodeClaudeSlugOnDisk(slug); decoded != "" {
 			return decoded
 		}
 	}
@@ -187,13 +193,4 @@ func discoveredSessionGitDirectory(session ingest.DiscoveredSession, projectPath
 		dir = filepath.Dir(string(session.SourcePath))
 	}
 	return dir
-}
-
-// decodeClaudeSlugToPath decodes a Claude project slug to the real filesystem
-// path, using the same directory check the harvest command uses.
-func decodeClaudeSlugToPath(encoded string) string {
-	return ingest.DecodeClaudeSlug(encoded, func(path string) bool {
-		info, err := os.Stat(path)
-		return err == nil && info.IsDir()
-	})
 }

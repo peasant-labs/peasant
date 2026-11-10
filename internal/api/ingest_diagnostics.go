@@ -16,7 +16,7 @@ func appendSelectionConflictDiagnostics(result *ingest.PipelineResult, recorder 
 		return
 	}
 	for _, line := range recorder.Diagnostics(configPath) {
-		slog.Warn(line)
+		slog.Warn("selection conflict withheld session", "diagnostic", line)
 		if result == nil {
 			continue
 		}

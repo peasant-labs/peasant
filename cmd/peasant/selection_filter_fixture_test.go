@@ -658,7 +658,7 @@ func TestHarvestCmd_ReportsWithheldSelectionConflict(t *testing.T) {
 func initConflictedSourceRepo(t *testing.T, fixture mountedConflictFixture) string {
 	t.Helper()
 	sourceDir := t.TempDir()
-	if decoded := decodeClaudeSlugToPath(fixture.ClaudeSlug); decoded != "" {
+	if decoded := ingest.DecodeClaudeSlugOnDisk(fixture.ClaudeSlug); decoded != "" {
 		t.Fatalf("fixture claude_slug %q decodes to an existing directory %q; pick a slug that cannot resolve", fixture.ClaudeSlug, decoded)
 	}
 	for _, args := range [][]string{

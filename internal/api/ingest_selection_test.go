@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
@@ -152,10 +151,11 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	cfg := webIngestConfig(t, source, output, item, exclusionPath, conflictRemote)
 	hs := newTestXDGHomes(t)
 	handler := hs.handler(nil, cfg)
+	handler.configPath = filepath.Join(root, "custom-config", "settings.yaml")
 	result := runWebIngest(t, handler, item.ThroughRoute)
 	assertIngestMembership(t, result, item.ExpectImported, item.ExpectExcluded)
 	if item.ExpectDiagnostic {
-		configPath := defaults.ResolveConfigFilePathWith(hs.Config).String()
+		configPath := handler.configPath
 		found := false
 		for _, diagnostic := range result.Diagnostics {
 			if diagnostic.ErrorType == "selection_withheld_conflict" &&

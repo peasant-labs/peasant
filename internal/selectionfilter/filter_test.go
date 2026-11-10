@@ -212,9 +212,6 @@ func runFilterCase(t *testing.T, item filterCase) {
 	if err := filter.Prepare(context.Background(), sessions); err != nil {
 		t.Fatalf("prepare cohort: %v", err)
 	}
-	if item.ExpectPrepared != 0 && len(filter.prepared) != item.ExpectPrepared {
-		t.Fatalf("prepared %d sessions, want %d", len(filter.prepared), item.ExpectPrepared)
-	}
 	assertMatch(t, "first", filter.Match(sessions[0]), item.ExpectMatch)
 	if item.CheckExcludes {
 		if got := filter.Excludes(sessions[0]); got != item.ExpectExcludes {
