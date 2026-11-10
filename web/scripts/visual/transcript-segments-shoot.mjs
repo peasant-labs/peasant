@@ -122,19 +122,32 @@ try {
       }
       const viewer = await page.$('.txn-app')
       if (!viewer) throw fail(`capturing ${theme}`, 'the transcript viewer did not mount')
-      const edge = async (name, top) => {
-        await page.evaluate((scrollTop) => {
-          const stream = document.querySelector('.txn-stream')
-          if (!stream) return
-          stream.scrollTop = scrollTop === 'end' ? stream.scrollHeight : 0
-        }, top)
+      const edge = async (name) => {
+        const selector = `[data-segment-boundary="${name}"]`
+        await page.$eval(selector, (boundary) => boundary.scrollIntoView({ block: 'center', inline: 'nearest' }))
         await pause(200)
+        const visible = await page.$eval(selector, (boundary) => {
+          const rect = boundary.getBoundingClientRect()
+          const label = boundary.querySelector('.txn-segboundary-caption')
+          const caption = label?.textContent ?? ''
+          const button = boundary.querySelector('button')
+          const unobscured = (element) => {
+            if (!element) return false
+            const box = element.getBoundingClientRect()
+            const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+            return !!hit && (element === hit || element.contains(hit))
+          }
+          return rect.top >= 0 && rect.bottom <= innerHeight && rect.width > 0 && rect.height > 0
+            && /turn/.test(caption) && /segments?/.test(caption) && /(?:bytes|KiB|MiB|GiB)/.test(caption)
+            && unobscured(label) && unobscured(button)
+        })
+        if (!visible) throw fail(`capturing ${theme} ${name}`, 'the boundary, caption, extent, or load control is not visible')
         const path = resolve(OUT, `transcript-segments-${theme}-${name}.png`)
         await viewer.screenshot({ path })
         return path
       }
-      const older = await edge('older', 'start')
-      const newer = await edge('newer', 'end')
+      const older = await edge('older')
+      const newer = await edge('newer')
       const path = resolve(OUT, `transcript-segments-${theme}.png`)
       await run('magick', [older, newer, '-append', path])
       const boundaries = await page.$$eval('[data-segment-boundary]', (nodes) => nodes.map((node) => node.getAttribute('data-segment-boundary')))

@@ -108,13 +108,15 @@ func main() {
 	// a segment read is allowed to return. The bulk lives in the turn text, so
 	// the cut still crosses the segment budget and the read can reproduce it.
 	entries := make([]schema.SessionEntry, 0, 80)
-	page := strings.Repeat("synthetic page text ", 20_000)
+	// Spaces retain their wire size but collapse in normal HTML whitespace, so
+	// the seed does not exceed the browser's maximum scrollable paint height.
+	page := strings.Repeat(" ", 400_000)
 	for turn := 0; turn < 80; turn++ {
 		role := schema.RoleUser
 		content := fmt.Sprintf("synthetic user turn %d. the reader can page from here.", turn)
 		if turn%2 == 1 {
 			role = schema.RoleAssistant
-			content = fmt.Sprintf("synthetic assistant turn %d. %s", turn, page)
+			content = fmt.Sprintf("synthetic assistant turn %d.%s end of turn.", turn, page)
 		}
 		timestamp := start + int64(turn)*1000
 		entries = append(entries, schema.SessionEntry{

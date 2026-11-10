@@ -87,8 +87,10 @@ export interface TranscriptPublishOptions {
   title: string;
   /** Every turn the page received. Counted only when the directory is fully loaded. */
   turns: readonly { timestamp: string }[];
-  /** The store revision. The redaction scan is versioned with this, not the loaded turn count. */
+  /** Store revision, when provided. Otherwise the per-session turn count versions the scan. */
   revision: string;
+  /** The detail's recorded count, never the number of turns loaded on this page. */
+  turnCount?: number;
   /** How much of the directory this page holds. A short read cannot claim there are no new turns. */
   coverage: { loadedSegments: number; totalSegments: number };
   /** Whether the page has the session's detail yet; nothing is scanned before it. */
@@ -120,7 +122,7 @@ export interface TranscriptPublish {
  */
 export function useTranscriptPublish(options: TranscriptPublishOptions): TranscriptPublish {
   const router = useRouter();
-  const { sessionId, title, turns, revision, coverage, loaded, moreItems, openOnArrival, onArrivalHandled, onReindexed } = options;
+  const { sessionId, title, turns, revision, turnCount, coverage, loaded, moreItems, openOnArrival, onArrivalHandled, onReindexed } = options;
   const { redactionCache, updateRedactionCache, publishing, settled, publish } = usePublishState();
 
   // ── the publication state ────────────────────────────────────────────────
@@ -358,12 +360,13 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
 
   // ── what leaves the machine: the cached local scan ───────────────────────
   // The scan starts when the popup opens and the session's detail is here,
-  // whatever the sign-in: it runs on this computer. Its version is the store
-  // revision, so a later segment cannot leave an older preview looking current.
+  // whatever the sign-in: it runs on this computer. Its version uses the store
+  // revision or the recorded turn count, never the currently loaded turns.
   // A failure stays until an explicit re-scan.
+  const version = scanVersion(revision, turnCount);
   const scanTargets = useMemo<RedactionScanTarget[]>(
-    () => (open && loaded && revision ? [{ id: sessionId, version: scanVersion(revision) }] : []),
-    [loaded, open, revision, sessionId],
+    () => (open && loaded && version !== null ? [{ id: sessionId, version }] : []),
+    [loaded, open, version, sessionId],
   );
   const scan = useRedactionPipeline(scanTargets, DEFAULT_REDACTION_LEVEL, false, redactionCache, updateRedactionCache);
   const scanResult = scan.sessionRedactions.get(sessionId);
@@ -457,7 +460,9 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   // and its audience must be known before anything is offered: a popup that
   // guessed them would publish as a first publish, or update a list it cannot
   // show.
-  const blocked: Blocked | null = automaticFailure !== null
+  const blocked: Blocked | null = loaded && version === null
+    ? { stoppedAt: 'checking this session: its revision and turn count are missing; refresh the session or re-index it before publishing' }
+    : automaticFailure !== null
     ? automaticFailure
     : signInFailure != null
     ? {

@@ -16,6 +16,9 @@ type ConsentCase = {
   expectVersion?: string;
   expectPreviousVersion?: string;
   forbid?: string;
+  expectedReason?: string;
+  expectedNewTurns?: number;
+  expectedSummary?: string;
   sessionId?: string;
   level?: 'standard';
   expectedRequest?: unknown;
@@ -47,10 +50,13 @@ describe('segment publish consent', () => {
         turns: entry.turns ?? [],
         publishedAt: entry.publishedAt,
       });
-      expect(comparison.comparable).toBe(false);
-      if (comparison.comparable) return;
-      expect(comparison.reason).not.toContain(entry.forbid);
-      expect(changesSummary(0)).toContain(entry.forbid);
+      if (entry.expectedReason) {
+        expect(comparison).toEqual({ comparable: false, reason: entry.expectedReason });
+        expect(changesSummary(0)).toBe('no new turns since you published');
+      } else {
+        expect(comparison).toEqual({ comparable: true, newTurns: entry.expectedNewTurns });
+        if (comparison.comparable) expect(changesSummary(comparison.newTurns)).toBe(entry.expectedSummary);
+      }
       return;
     }
     expect(pushRequest(entry.sessionId ?? '', entry.level ?? 'standard', { add: [], remove: [] }, { listed: [], readers: [] })).toEqual(entry.expectedRequest);

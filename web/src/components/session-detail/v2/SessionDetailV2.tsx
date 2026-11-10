@@ -376,6 +376,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     title: sessionTitle ?? UNTITLED_SESSION_TITLE,
     turns: transcriptTurns,
     revision: detail?.revision ?? '',
+    turnCount: detail?.turnCount,
     coverage: publishCoverage,
     loaded: detail != null,
     moreItems,

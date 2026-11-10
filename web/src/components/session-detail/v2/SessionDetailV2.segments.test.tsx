@@ -38,6 +38,7 @@ type SegmentCase = {
 };
 
 const reads: string[] = [];
+const scanRequests = vi.hoisted(() => vi.fn());
 let revision = '7';
 let servePreBoundInline = false;
 let failNextDirectory = false;
@@ -47,6 +48,13 @@ vi.mock('@/lib/share/publishing', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/share/publishing')>()),
   ...(await import('@/test/fixtures/publishingIdle')).PUBLISHING_IDLE,
 }));
+vi.mock('@/lib/share/redactionScan', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/share/redactionScan')>();
+  return { ...actual, useRedactionPipeline: (...args: Parameters<typeof actual.useRedactionPipeline>) => {
+    scanRequests(args[0]);
+    return actual.useRedactionPipeline(...args);
+  } };
+});
 vi.mock('next/navigation', () => ({
   useSearchParams: () => currentSearch,
   usePathname: () => `/projects/${PROJECT_HASH}/${SESSION_ID}`,
@@ -199,6 +207,7 @@ function detail(plan: SegmentCase) {
 function TestDetail({ turn }: { turn: number | null }) {
   const params = new URLSearchParams();
   if (turn != null) params.set('turn', String(turn));
+  if (activeCase?.name === 'revision-refetch-segment-zero') params.set('publish', 'open');
   currentSearch = params;
   const routeQuery = parseTranscriptRouteQuery(params);
   if (!routeQuery) throw new Error('route query must be valid');
@@ -249,6 +258,7 @@ describe('SessionDetailV2 segmented transcript', () => {
     reads.length = 0;
     failNextDirectory = false;
     activeCase = null;
+    scanRequests.mockClear();
   });
 
   it('covers the required-name inventory exactly', () => {
@@ -269,6 +279,9 @@ describe('SessionDetailV2 segmented transcript', () => {
         return;
       }
       await waitFor(() => expect(view.container.querySelector('[data-segment-mode="true"]')).not.toBeNull());
+      if (plan.name === 'revision-refetch-segment-zero') {
+        await waitFor(() => expect(scanRequests).toHaveBeenCalledWith([{ id: SESSION_ID, version: `revision:${plan.revision}` }]));
+      }
       for (const action of plan.actions) {
         if (action === 'click-newer' || action === 'click-older') {
           const side = action === 'click-newer' ? 'newer' : 'older';
@@ -290,6 +303,9 @@ describe('SessionDetailV2 segmented transcript', () => {
           revision = plan.nextRevision ?? revision;
           channelData = detail(plan);
           view.rerender(<TestDetail turn={plan.turn} />);
+          if (plan.name === 'revision-refetch-segment-zero') {
+            await waitFor(() => expect(scanRequests).toHaveBeenCalledWith([{ id: SESSION_ID, version: `revision:${plan.nextRevision}` }]));
+          }
         }
       }
       if (plan.expectError) {

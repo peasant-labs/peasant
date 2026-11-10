@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseSessionDetailPayloadValue, type SessionDetailPayload } from '@peasant-labs/schema';
+import { parseSessionDetailPayloadValue, type SessionDetailPayload, type SessionDetailReadPayload } from '@peasant-labs/schema';
 import { ProjectsRouter } from '@/app/projects/[[...segments]]/ProjectsRouter';
 import { PublishProvider } from '@/contexts/PublishContext';
 import { type ProjectHash } from '@/lib/navigation/projectRoutes';
@@ -91,7 +91,8 @@ const QUALITY_SESSION = {
 };
 
 /** Twelve turns, one a minute: the publication fixture places publishedAt among them. */
-const detail: SessionDetailPayload = (() => {
+type SessionDetailWire = SessionDetailPayload & Pick<SessionDetailReadPayload, 'title' | 'medians' | 'revision'>;
+const detail: SessionDetailWire = (() => {
   const durable: SessionDetailPayload = {
     id: SESSION_ID,
     harness: 'claude-code',
@@ -114,10 +115,10 @@ const detail: SessionDetailPayload = (() => {
     })),
   };
   parseSessionDetailPayloadValue(durable);
-  return durable;
+  return { ...durable, title: TITLE, revision: '7' };
 })();
 
-let sessionDetail: SessionDetailPayload | undefined = detail;
+let sessionDetail: SessionDetailWire | undefined = detail;
 
 type World = ReturnType<typeof createPublishWorld>;
 

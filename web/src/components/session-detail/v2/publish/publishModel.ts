@@ -47,8 +47,13 @@ export interface PickerSuggestion {
  * number of turns this page has loaded: a later segment can grow without
  * changing segment 0's length.
  */
-export function scanVersion(revision: string): string {
-  return revision;
+export function scanVersion(revision: string, turnCount?: number): string | null {
+  // Store-wide revisions invalidate every session's scan after any ingest.
+  // The fallback is per-session but cannot detect edits that keep its count.
+  // Prefixes prevent a revision and a count from sharing a cache entry.
+  if (revision.trim()) return `revision:${revision}`;
+  if (Number.isSafeInteger(turnCount) && turnCount != null && turnCount >= 0) return `turn-count:${turnCount}`;
+  return null;
 }
 
 export type TurnComparison =
