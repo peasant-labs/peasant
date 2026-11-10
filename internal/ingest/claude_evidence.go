@@ -154,6 +154,10 @@ type ClaudeEvidenceCompleteness interface {
 	// whether the load returned every stored row. A false second result still
 	// returns the readable rows, so a caller can fall back to its own view.
 	LoadClaudeEvidenceCompletely(ctx context.Context) (map[ResolvedPath]ClaudeTranscriptEvidence, bool, error)
+	// LoadClaudeEvidenceForCompletely is the same for a named path set. A path
+	// with no stored row is absent and does not make the read incomplete; a
+	// stored row this build cannot parse does.
+	LoadClaudeEvidenceForCompletely(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath]ClaudeTranscriptEvidence, bool, error)
 }
 
 // ClaudeEvidenceCaching is implemented by an adapter that can reuse mined

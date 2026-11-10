@@ -270,7 +270,11 @@ func (l *scopeLocator) adapterFor(harness Harness) (SourceAdapter, bool) {
 		return nil, false
 	}
 	adapter := factory(l.p.fs, l.p.git, l.p.salt)
-	if cache, ok := l.p.store.(ClaudeEvidenceCache); ok && !l.p.config.DryRun {
+	// A scoped build reads the evidence cache even under --dry-run: the stored
+	// rows are what make the identity-count delta exact, and a dry run never
+	// applies the deferred write. The store a dry run opens is read-only, so
+	// the cache is a read side only.
+	if cache, ok := l.p.store.(ClaudeEvidenceCache); ok {
 		AttachClaudeEvidenceCache(adapter, cache)
 	}
 	if l.derived != nil {

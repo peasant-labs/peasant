@@ -194,15 +194,36 @@ func sqlSelectClaudeEvidenceFor(pathCount int) string {
 // that is not cached is absent from the map. An empty input returns an empty
 // map without reading anything.
 //
+// A row whose identity-record list cannot be parsed is still returned with its
+// readable scope, identity and spawn fields, and with a proof version that
+// forces discovery to mine it again. The by-path read does that so a malformed
+// record list cannot hide a row's identity contribution from the count delta;
+// its Records field is nil and no caller may treat it as fresh.
+//
 // The named paths are read in batches of indexFormatReadBatchSize, in the order
 // the caller supplied them, so one unbounded IN list can neither hit SQLite's
 // variable limit nor build a statement whose size grows with the stale-origin
 // population. Each batch is one round trip, the same batching the other bulk
 // readers use.
 func (s *Store) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, error) {
+	records, _, err := s.loadClaudeEvidenceFor(ctx, paths)
+	return records, err
+}
+
+// LoadClaudeEvidenceForCompletely is LoadClaudeEvidenceFor plus whether every
+// requested stored row was readable. A row the by-path scan cannot parse is
+// skipped, so the returned map can be a strict subset of the rows that exist
+// for the requested paths; a caller that counts identities from the store must
+// not add its own records for the skipped paths again.
+func (s *Store) LoadClaudeEvidenceForCompletely(ctx context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, bool, error) {
+	return s.loadClaudeEvidenceFor(ctx, paths)
+}
+
+// loadClaudeEvidenceFor is the one batched by-path scan both readers use.
+func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, bool, error) {
 	records := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence)
 	if len(paths) == 0 {
-		return records, nil
+		return records, true, nil
 	}
 	unique := make([]string, 0, len(paths))
 	seen := make(map[string]struct{}, len(paths))
@@ -218,12 +239,12 @@ func (s *Store) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 		unique = append(unique, value)
 	}
 	if len(unique) == 0 {
-		return records, nil
+		return records, true, nil
 	}
 
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf(
+		return nil, false, fmt.Errorf(
 			"store.LoadClaudeEvidenceFor: take connection: %w; "+
 				"what: failed to obtain a database connection for the by-path evidence read; "+
 				"why: the pool is exhausted or the context was cancelled; "+
@@ -234,6 +255,7 @@ func (s *Store) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 	}
 	defer s.pool.Put(conn)
 
+	skipped := 0
 	for start := 0; start < len(unique); start += indexFormatReadBatchSize {
 		end := min(start+indexFormatReadBatchSize, len(unique))
 		batch := unique[start:end]
@@ -244,15 +266,17 @@ func (s *Store) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 		err = sqlitex.Execute(conn, sqlSelectClaudeEvidenceFor(len(batch)), &sqlitex.ExecOptions{
 			Args: args,
 			ResultFunc: func(stmt *sqlite.Stmt) error {
-				record, ok := scanClaudeEvidence(stmt)
-				if ok {
-					records[record.SourcePath] = record
+				record, ok := scanClaudeEvidenceWithRecords(stmt, true)
+				if !ok {
+					skipped++
+					return nil
 				}
+				records[record.SourcePath] = record
 				return nil
 			},
 		})
 		if err != nil {
-			return nil, fmt.Errorf(
+			return nil, false, fmt.Errorf(
 				"store.LoadClaudeEvidenceFor: query batch %d-%d of %d: %w; "+
 					"what: the by-path evidence query failed; "+
 					"why: the statement could not run against the evidence table (database access or a malformed statement); "+
@@ -263,12 +287,22 @@ func (s *Store) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 				start, end, len(unique), err, start, end, len(unique))
 		}
 	}
-	return records, nil
+	return records, skipped == 0, nil
 }
 
 // scanClaudeEvidence reads one row. It reports false for a row whose scope this
 // build does not know or whose spawn or identity record list does not parse.
 func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, bool) {
+	return scanClaudeEvidenceWithRecords(stmt, false)
+}
+
+// scanClaudeEvidenceWithRecords reads one row. With tolerateUnreadableRecords,
+// a row whose identity-record list cannot be parsed is still returned with the
+// fields the identity-count decision reads (scope, identity, spawns) and a
+// proof version that forces discovery to re-mine it. The by-path read uses that
+// so a single malformed record list cannot hide the row's identity from the
+// count delta; the struct's Records stay nil and no reader trusts it as fresh.
+func scanClaudeEvidenceWithRecords(stmt *sqlite.Stmt, tolerateUnreadableRecords bool) (ingest.ClaudeTranscriptEvidence, bool) {
 	scope := ingest.ClaudeEvidenceScope(stmt.ColumnText(1))
 	if !scope.IsValid() {
 		return ingest.ClaudeTranscriptEvidence{}, false
@@ -278,18 +312,32 @@ func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, boo
 		return ingest.ClaudeTranscriptEvidence{}, false
 	}
 	var identityRows []*claudeIdentityRecordRow
+	recordsUnreadable := false
 	if err := json.Unmarshal([]byte(stmt.ColumnText(16)), &identityRows); err != nil || identityRows == nil {
-		return ingest.ClaudeTranscriptEvidence{}, false
+		if !tolerateUnreadableRecords {
+			return ingest.ClaudeTranscriptEvidence{}, false
+		}
+		recordsUnreadable = true
 	}
-	for _, row := range identityRows {
-		if row == nil {
-			return ingest.ClaudeTranscriptEvidence{}, false
+	if !recordsUnreadable {
+		for _, row := range identityRows {
+			if row == nil {
+				if !tolerateUnreadableRecords {
+					return ingest.ClaudeTranscriptEvidence{}, false
+				}
+				recordsUnreadable = true
+				break
+			}
+			id, err := ingest.NewSessionID(row.SessionID)
+			if err != nil {
+				if !tolerateUnreadableRecords {
+					return ingest.ClaudeTranscriptEvidence{}, false
+				}
+				recordsUnreadable = true
+				break
+			}
+			row.SessionID = id.String()
 		}
-		id, err := ingest.NewSessionID(row.SessionID)
-		if err != nil {
-			return ingest.ClaudeTranscriptEvidence{}, false
-		}
-		row.SessionID = id.String()
 	}
 	// Column 11 (origin) is read as raw text and assigned directly, never
 	// through sessionorigin.Parse or Origin.Validate. The empty string is a
@@ -321,6 +369,12 @@ func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, boo
 	}
 	for _, row := range spawnRows {
 		record.Spawns = append(record.Spawns, ingest.ClaudeTeammateIdentity{Team: row.Team, Name: row.Name})
+	}
+	if recordsUnreadable {
+		// A proof version no Fresh check accepts forces discovery to mine this
+		// transcript again before any reader trusts its records.
+		record.ProofVersion = 0
+		return record, true
 	}
 	for _, row := range identityRows {
 		record.Records = append(record.Records, ingest.ClaudeIdentityRecord{

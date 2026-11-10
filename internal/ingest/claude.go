@@ -1587,11 +1587,12 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 	if mode == ClaudeBuildFullWalk {
 		state.cached, cacheComplete = a.loadCachedEvidence(ctx)
 	} else {
-		cached, err := a.loadEvidenceByPath(ctx, memberPaths)
+		cached, complete, err := a.loadEvidenceByPath(ctx, memberPaths)
 		if err != nil {
 			return nil, nil, err
 		}
 		state.cached = cached
+		cacheComplete = complete
 		for _, path := range locatedMissing {
 			state.missing[path] = struct{}{}
 		}
@@ -1606,11 +1607,12 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 	var contextSessions []DiscoveredSession
 	contextPaths := make(map[ResolvedPath]struct{})
 	if mode == ClaudeBuildScoped && located != nil {
-		loaded, err := a.loadClaudeLocatedContext(ctx, located, &state, contextPaths)
+		loaded, complete, err := a.loadClaudeLocatedContext(ctx, located, &state, contextPaths)
 		if err != nil {
 			return nil, nil, err
 		}
 		contextSessions = loaded
+		cacheComplete = cacheComplete && complete
 	}
 
 	linking := sessions
@@ -1625,17 +1627,16 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 	}
 	sessions = linking
 
-	// The full walk uses the store's indexed identity counts only when its
-	// whole-table evidence load returned every stored row. A load that skipped a
-	// row (an unreadable record, or a failed load) is a strict subset of the
-	// store, so adding this run's records to the store count would double-book
-	// the paths the subset covers and drop a link the evidence view forms. In
-	// that case the build decides from the evidence view, exactly as it did
-	// before the indexed rewrite. A scoped build reads its named paths and
-	// always uses the stored counts; a store-free or dry run has no store to
-	// count from and uses its own view.
-	storedCounts := mode == ClaudeBuildScoped ||
-		(a.derivedLookup != nil && a.evidence != nil && cacheComplete)
+	// Both build modes take the store's indexed identity counts only when their
+	// evidence load returned every stored row it covered. A load that skipped a
+	// row (an unreadable record, a failed load, or no cache at all) is a strict
+	// subset of the store, so adding this run's records to the store count would
+	// double-book the paths the subset covers and drop a link the evidence view
+	// forms. In that case the build decides from the evidence view, exactly as
+	// it did before the indexed rewrite. A scoped run gets a read side from the
+	// store even under --dry-run (the deferred write is what a dry run skips),
+	// so its delta is exact rather than reconstructed from an empty cache.
+	storedCounts := a.derivedLookup != nil && cacheComplete
 	if err := a.linkClaudeTeammates(ctx, sessions, state.cached, state.mined, located, storedCounts); err != nil {
 		return nil, nil, err
 	}
@@ -1792,18 +1793,32 @@ func (a *ClaudeAdapter) buildClaudeRootEntries(root claudeEnumeratedRoot, mode C
 	return sessions
 }
 
-// loadEvidenceByPath reads the cached evidence for exactly the named paths. A
-// scoped build never reads the whole table: the paths it names are its members
-// and the context sources it reads for them.
-func (a *ClaudeAdapter) loadEvidenceByPath(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath]ClaudeTranscriptEvidence, error) {
-	if a.evidence == nil || len(paths) == 0 {
-		return nil, nil
+// loadEvidenceByPath reads the cached evidence for exactly the named paths and
+// reports whether every requested stored row was readable. A scoped build never
+// reads the whole table: the paths it names are its members and the context
+// sources it reads for them. An incomplete read must not be combined with the
+// store's identity counts, because a skipped row is still counted there.
+func (a *ClaudeAdapter) loadEvidenceByPath(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath]ClaudeTranscriptEvidence, bool, error) {
+	if a.evidence == nil {
+		return nil, false, nil
+	}
+	if len(paths) == 0 {
+		return nil, true, nil
+	}
+	if completeness, ok := a.evidence.(ClaudeEvidenceCompleteness); ok {
+		records, complete, err := completeness.LoadClaudeEvidenceForCompletely(ctx, paths)
+		if err != nil {
+			return nil, false, fmt.Errorf("ingest: the Claude build could not read the cached evidence for the %d path(s) it names; a link decided without that evidence would disagree with a full discovery; where: ingest.ClaudeAdapter.loadEvidenceByPath in internal/ingest/claude.go; when: reading the evidence cache by path; impact: no member was built and nothing was written; fix: restore the evidence cache and retry: %w", len(paths), err)
+		}
+		return records, complete, nil
 	}
 	records, err := a.evidence.LoadClaudeEvidenceFor(ctx, paths)
 	if err != nil {
-		return nil, fmt.Errorf("ingest: the located Claude build could not read the cached evidence for the %d path(s) it names; a link decided without that evidence would disagree with a full discovery; where: ingest.ClaudeAdapter.loadEvidenceByPath in internal/ingest/claude.go; when: reading the evidence cache by path; impact: no member was built and nothing was written; fix: restore the evidence cache and retry: %w", len(paths), err)
+		return nil, false, fmt.Errorf("ingest: the Claude build could not read the cached evidence for the %d path(s) it names; a link decided without that evidence would disagree with a full discovery; where: ingest.ClaudeAdapter.loadEvidenceByPath in internal/ingest/claude.go; when: reading the evidence cache by path; impact: no member was built and nothing was written; fix: restore the evidence cache and retry: %w", len(paths), err)
 	}
-	return records, nil
+	// A cache without the capability returns every record it holds for the
+	// named paths, which is the complete view by construction.
+	return records, true, nil
 }
 
 // loadClaudeLocatedContext reads the evidence of the located subagent's
@@ -1816,14 +1831,14 @@ func (a *ClaudeAdapter) loadClaudeLocatedContext(
 	located *LocatedSource,
 	state *claudeBuildEvidence,
 	contextPaths map[ResolvedPath]struct{},
-) ([]DiscoveredSession, error) {
+) ([]DiscoveredSession, bool, error) {
 	layout, hasLayout := claudeLayoutParent(located.Path)
 	if !hasLayout {
-		return nil, nil // a root transcript names no owner and lays no parent out beside itself
+		return nil, true, nil // a root transcript names no owner and lays no parent out beside itself
 	}
 	evidence, ok := state.mined[located.Path]
 	if !ok {
-		return nil, nil
+		return nil, true, nil
 	}
 
 	paths := make([]ResolvedPath, 0, 2)
@@ -1835,9 +1850,9 @@ func (a *ClaudeAdapter) loadClaudeLocatedContext(
 		paths = append(paths, layoutPath)
 	}
 
-	loaded, err := a.loadEvidenceByPath(ctx, paths)
+	loaded, complete, err := a.loadEvidenceByPath(ctx, paths)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var sessions []DiscoveredSession
 	for _, path := range paths {
@@ -1867,7 +1882,7 @@ func (a *ClaudeAdapter) loadClaudeLocatedContext(
 		}
 		sessions = append(sessions, claudeContextSession(id, path, record, info))
 	}
-	return sessions, nil
+	return sessions, complete, nil
 }
 
 // claudeContextSession is the in-memory session a context source contributes to

@@ -25,11 +25,11 @@ func (failingDiscoveryAdapter) ExtractMetadata(context.Context, ingest.Discovere
 	return nil, errors.New("unused: discovery failed before extraction")
 }
 
-// TestPipelineSurfacesPartialProviderDiscoveryFailure proves a run with one
+// TestPipelineProviderDiscoveryFailureIsSurfaced proves a run with one
 // healthy harness and one failed harness reports the failure on its result.
 // Without the diagnostic the run loses every session of the failed harness and
 // still exits 0.
-func TestPipelineSurfacesPartialProviderDiscoveryFailure(t *testing.T) {
+func TestPipelineProviderDiscoveryFailureIsSurfaced(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	transcript := `{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","message":{"role":"user","content":"hello"}}` + "\n"
 	if err := mfs.WriteFile("/claude/-workspace/11111111-1111-4111-8111-111111111111.jsonl", []byte(transcript), 0o644); err != nil {
@@ -66,6 +66,9 @@ func TestPipelineSurfacesPartialProviderDiscoveryFailure(t *testing.T) {
 		t.Fatalf("a run with one healthy harness failed: %v", err)
 	}
 
+	// The failed harness is reported AND the healthy harness's work survives: a
+	// diagnostic that came with an empty run would not be a partial run.
+	found := false
 	for _, diagnostic := range result.DiscoveryDiagnostics {
 		if diagnostic.Code != ingest.DiscoveryCodeHarnessFailed || diagnostic.Provider != ingest.HarnessCodex {
 			continue
@@ -76,7 +79,16 @@ func TestPipelineSurfacesPartialProviderDiscoveryFailure(t *testing.T) {
 		if !strings.Contains(diagnostic.Detail, "synthetic codex discovery failure") {
 			t.Errorf("the partial-failure diagnostic does not name the cause: %q", diagnostic.Detail)
 		}
-		return
+		found = true
 	}
-	t.Fatalf("the run lost the Codex harness with no diagnostic: %+v", result.DiscoveryDiagnostics)
+	if !found {
+		t.Fatalf("the run lost the Codex harness with no diagnostic: %+v", result.DiscoveryDiagnostics)
+	}
+	const healthySessionID = "11111111-1111-4111-8111-111111111111"
+	for _, session := range result.Sessions {
+		if session.SessionID.String() == healthySessionID && session.Harness == ingest.HarnessClaudeCode {
+			return
+		}
+	}
+	t.Fatalf("the healthy Claude session %s was lost from the partial run: %+v", healthySessionID, result.Sessions)
 }
