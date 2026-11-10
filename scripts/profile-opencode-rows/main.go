@@ -82,11 +82,48 @@ func run(corpus, phase string, repetitions int) error {
 	out := report{Phase: phase, CorpusDigest: fmt.Sprintf("%x", sha256.Sum256(raw)), Cases: len(inputs), Repetitions: repetitions}
 	var before, after runtime.MemStats
 	var start time.Time
-	var last ingest.OpenCodeProvenanceMessage
 	if phase == "timing" {
 		runtime.ReadMemStats(&before)
 		start = time.Now()
 	}
+	counts, err := countRows(inputs, repetitions, phase == "parity")
+	if err != nil {
+		return err
+	}
+	out.Success, out.Ignored, out.Refused, out.Rows = counts.Success, counts.Ignored, counts.Refused, counts.Rows
+	if phase == "timing" {
+		elapsed := time.Since(start)
+		runtime.ReadMemStats(&after)
+		if out.Refused == 0 {
+			out.DecodeSeconds = elapsed.Seconds()
+			out.AllocatedBytes = after.TotalAlloc - before.TotalAlloc
+			out.Allocations = after.Mallocs - before.Mallocs
+		}
+	}
+	if json.NewEncoder(os.Stdout).Encode(out) != nil {
+		return errors.New("report write failed; choose a writable scratch output destination")
+	}
+	if phase == "timing" && out.Refused != 0 {
+		return errors.New("timing invalid: row refusals occurred; filter using parity case ordinals, recheck output parity, then rerun timing")
+	}
+	return nil
+}
+
+// rowCounts is the classification of one corpus pass: how many rows produced a
+// message, were interpreted as entryless, or were refused, plus the parity rows.
+type rowCounts struct {
+	Success int
+	Ignored int
+	Refused int
+	Rows    []caseResult
+}
+
+// countRows walks the corpus and classifies every decode result. It is separate
+// from the timing bracket and the report writer so the ignored/refused split can
+// be tested without a file or a process.
+func countRows(inputs []input, repetitions int, parity bool) (rowCounts, error) {
+	var out rowCounts
+	var last ingest.OpenCodeProvenanceMessage
 	for range repetitions {
 		for i, in := range inputs {
 			message, settled, decodeErr := ingest.DecodeOpenCodeProvenanceRow(in.Row, in.Scope)
@@ -101,33 +138,18 @@ func run(corpus, phase string, repetitions int) error {
 			default:
 				out.Refused++
 			}
-			if phase == "parity" {
+			if parity {
 				// Maps encode deterministically; raw payload bytes, settled state,
 				// interpretation, and partial returned messages on refusal all
 				// participate.
 				h := sha256.New()
 				if json.NewEncoder(h).Encode(decoded{Message: message, Settled: settled, Ignored: ignored, Refused: refused}) != nil {
-					return fmt.Errorf("case %d: output encoding failed; inspect the decoder return types", i)
+					return rowCounts{}, fmt.Errorf("case %d: output encoding failed; inspect the decoder return types", i)
 				}
 				out.Rows = append(out.Rows, caseResult{Case: i, Digest: fmt.Sprintf("%x", h.Sum(nil)), Ignored: ignored, Refused: refused})
 			}
 		}
 	}
-	if phase == "timing" {
-		elapsed := time.Since(start)
-		runtime.ReadMemStats(&after)
-		if out.Refused == 0 {
-			out.DecodeSeconds = elapsed.Seconds()
-			out.AllocatedBytes = after.TotalAlloc - before.TotalAlloc
-			out.Allocations = after.Mallocs - before.Mallocs
-		}
-	}
 	runtime.KeepAlive(last)
-	if json.NewEncoder(os.Stdout).Encode(out) != nil {
-		return errors.New("report write failed; choose a writable scratch output destination")
-	}
-	if phase == "timing" && out.Refused != 0 {
-		return errors.New("timing invalid: row refusals occurred; filter using parity case ordinals, recheck output parity, then rerun timing")
-	}
-	return nil
+	return out, nil
 }
