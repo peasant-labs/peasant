@@ -446,6 +446,11 @@ func TestLatestAttemptSettleGatesSelection(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	sid := schema.SessionID("88889999-0000-4111-8222-333344445555")
 	seedLatestAttemptCoexistence(t, s, sid)
+	// A row retained by the previously shipped build: the stamp was not
+	// advanced, so the adapter arm matches and only the settle clause can
+	// hide it. Without this the settled legs pass from the adapter
+	// comparison alone.
+	execGenerationSQL(t, s, `UPDATE sessions SET adapter_version = 1 WHERE session_id = '`+string(sid)+`';`)
 	ctx := context.Background()
 	settled := map[ingest.Harness]ingest.HarvesterVersions{
 		ingest.Harness("claude-code"): {IndexerVersion: 18, AdapterVersion: 2},
@@ -502,10 +507,8 @@ func TestLatestAttemptSettleGatesSelection(t *testing.T) {
 		ingest.Harness("claude-code"): {IndexerVersion: 18, AdapterVersion: 0},
 	}
 	// A zero producer target cannot express a settle decision, so the clause is
-	// omitted. Put the row behind the attempt's revision first: otherwise the
-	// ordinary adapter arm would list it even if the omitted fragment were
-	// wrongly bound, and this guard would pass without protecting anything.
-	execGenerationSQL(t, s, `UPDATE sessions SET adapter_version = 1 WHERE session_id = '`+string(sid)+`';`)
+	// omitted. The row is behind the attempt's revision, so only the adapter
+	// arm can list it; a wrongly bound fragment would hide it.
 	zeroIndexer := map[ingest.Harness]ingest.HarvesterVersions{
 		ingest.Harness("claude-code"): {IndexerVersion: 0, AdapterVersion: 2},
 	}
