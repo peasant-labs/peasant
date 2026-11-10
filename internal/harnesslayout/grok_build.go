@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/peasant-labs/schema"
 	"io/fs"
 	"net/url"
 	"path"
@@ -132,6 +133,7 @@ var _ Probe = grokBuildProbe{}
 func init() {
 	Register(Layout{
 		Tool:        ToolGrokBuild,
+		Harness:     schema.HarnessGrokBuild,
 		DisplayName: "Grok Build",
 		Sessions:    "One directory per session under sessions/<URL-encoded cwd>/<session id>/, holding summary.json, updates.jsonl, and chat_history.jsonl.",
 		Roots: []Root{
