@@ -33,6 +33,14 @@ cases:
     advertised: true
     managed: true
     earlier: true
+  - name: managed_earlier_image_source_strips_local_fields_keeps_number
+    payload: '{"type":"future","n":9007199254740993,"mediaType":"image/png","ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source":{"type":"base64","media_type":"image/png","data":"IMAGEBYTES"}}'
+    expected: '{"n":9007199254740993,"source":{"type":"base64"},"type":"future"}'
+    advertised: true
+    managed: true
+    earlier: true
+    imageStrip: true
+    numberText: "9007199254740993"
   - name: full_record_between_known_records
     payload: '{"type":"future","number":9007199254740993}'
     expected: '{"type":"future","number":9007199254740993}'

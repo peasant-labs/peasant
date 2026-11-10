@@ -248,12 +248,20 @@ func TestRetainedUnknownPublication(t *testing.T) {
 				t.Fatalf("payload changed or escaped secret leaked: %q", uploaded)
 			}
 			if c.ImageStrip {
-				if c.NumberText == "" || !strings.Contains(uploaded, c.NumberText) {
-					t.Fatalf("uploaded retained payload %q lost the exact number %q", uploaded, c.NumberText)
+				if len(envelope.SessionDetail.RetainedUnknown) != wantRecords {
+					t.Fatalf("uploaded retained records = %d, want %d", len(envelope.SessionDetail.RetainedUnknown), wantRecords)
 				}
-				for _, token := range []string{`"data"`, `"ref"`, `"mediaType"`, `"media_type"`, "IMAGEBYTES"} {
-					if strings.Contains(uploaded, token) {
-						t.Fatalf("uploaded retained payload still carries %s: %s", token, uploaded)
+				for i, record := range envelope.SessionDetail.RetainedUnknown {
+					if record.Payload != expected {
+						t.Fatalf("uploaded retained[%d] = %q, want the stripped document %q", i, record.Payload, expected)
+					}
+					if c.NumberText == "" || !strings.Contains(record.Payload, c.NumberText) {
+						t.Fatalf("uploaded retained[%d] %q lost the exact number %q", i, record.Payload, c.NumberText)
+					}
+					for _, token := range []string{`"data"`, `"ref"`, `"mediaType"`, `"media_type"`, "IMAGEBYTES"} {
+						if strings.Contains(record.Payload, token) {
+							t.Fatalf("uploaded retained[%d] still carries %s: %s", i, token, record.Payload)
+						}
 					}
 				}
 			}
