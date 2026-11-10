@@ -8,11 +8,12 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// TestCapturedSourceSettlesOnlyWhenTheAdapterStampIsCurrent pins the rule that
-// a byte-identical capture still republishes while the stored artifact was
-// produced by an older adapter revision, and is left alone once the stamp
-// matches. Without it an adapter bump wakes every session on every harvest,
-// re-opens the native source, and never advances the stamp.
+// TestCapturedSourceSettlesOnlyWhenTheAdapterStampIsCurrent pins the captured
+// classifier, not a harvest: identical bytes classify as updated while the
+// stored adapter revision is behind this build's target, and unchanged once it
+// matches. That status is what decides whether the worker reaches the write
+// that stamps the revision; this test does not open a source or read a stamp
+// back, and the maintenance write path already asserts the stamp itself.
 func TestCapturedSourceSettlesOnlyWhenTheAdapterStampIsCurrent(t *testing.T) {
 	sessionID, err := NewSessionID("ses_3cd91f52effeXd3QAJ54jStmp")
 	if err != nil {
