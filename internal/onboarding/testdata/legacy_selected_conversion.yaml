@@ -1,4 +1,15 @@
-expectedCaseCount: 9
+expectedCaseCount: 10
+requiredNames:
+  - overlap-unions-stored-clones-and-preserves-exclusions
+  - unrestricted-rule-dominates-and-groups-stored-clones
+  - non-git-same-name-clones-remain-separate
+  - disjoint-rules-retain-stored-clone-with-union
+  - remote-precedence-and-asymmetric-missing-remote-fallback
+  - exact-cohort-splits-residual-and-preserves-outside-shape
+  - unresolved-rows-add-only-canonical-yes-after-exclusions
+  - failed-worktree-does-not-use-canonical-fallback
+  - exact-selected-input-is-field-equivalent-without-resolution
+  - rerun-over-converted-file-is-a-copy
 expectedCaseNames:
   - overlap-unions-stored-clones-and-preserves-exclusions
   - unrestricted-rule-dominates-and-groups-stored-clones
@@ -9,6 +20,7 @@ expectedCaseNames:
   - unresolved-rows-add-only-canonical-yes-after-exclusions
   - failed-worktree-does-not-use-canonical-fallback
   - exact-selected-input-is-field-equivalent-without-resolution
+  - rerun-over-converted-file-is-a-copy
 cases:
   - name: overlap-unions-stored-clones-and-preserves-exclusions
     expectedStoredCount: 3
@@ -300,3 +312,27 @@ cases:
             branches:
               - {clonePath: /fixtures/exact, branches: [private]}
             sessions: []
+
+  - name: rerun-over-converted-file-is-a-copy
+    expectedStoredCount: 0
+    expectedResolverCallCount: 0
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/copied.git"
+              clonePaths: [/fixtures/copied]
+              branches: [main]
+    stored: []
+    expectedResolverCalls: []
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/copied.git"
+              clonePaths: [/fixtures/copied]
+              branches: [main]

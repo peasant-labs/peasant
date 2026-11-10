@@ -719,8 +719,7 @@ func TestSanitizePlaceholderSelectionFixture(t *testing.T) {
 	document := loadTouchedSelectionDocument(t)
 	for _, testCase := range document.SanitizeCases {
 		t.Run(testCase.Name, func(t *testing.T) {
-			projects := availableProjectsFromForest(touchedDerivationRoots(t, testCase.Forest))
-			got, changed := sanitizePlaceholderSelection(testCase.Saved, projects)
+			got, changed := sanitizePlaceholderSelection(touchedDerivationRoots(t, testCase.Forest), testCase.Saved)
 			if changed != testCase.ExpectChanged {
 				t.Fatalf("sanitize changed=%v, want %v\n got: %#v", changed, testCase.ExpectChanged, got)
 			}

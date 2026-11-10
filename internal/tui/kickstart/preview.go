@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -79,27 +80,17 @@ type EmptySessionPreview struct {
 type EmptySessionBodyFunc func(sessionID string) (preview EmptySessionPreview, imported bool, err error)
 
 // ListingPreviewKind identifies the non-session row a scanner preview describes.
-type ListingPreviewKind uint8
+type ListingPreviewKind = discovery.PreviewKind
 
 const (
-	ListingPreviewUnknown ListingPreviewKind = iota
-	ListingPreviewProject
-	ListingPreviewBranch
+	ListingPreviewUnknown = discovery.PreviewUnknown
+	ListingPreviewProject = discovery.PreviewProject
+	ListingPreviewBranch  = discovery.PreviewBranch
 )
 
 // ListingPreviewContext is the resolved repository metadata shown for a project
 // or branch row. It is built from the same forest the selection tree renders.
-type ListingPreviewContext struct {
-	Kind           ListingPreviewKind
-	Project        string
-	Harnesses      []string
-	Remotes        []string
-	GitDirectories []string
-	ClonePaths     []string
-	Branches       []string
-	Branch         string
-	SessionCount   int
-}
+type ListingPreviewContext = discovery.PreviewContext
 
 // ListingPreviewContextSource reads project and branch metadata by tree row ID.
 // ScannerTreeSource implements it from the latest successfully loaded forest.
@@ -588,6 +579,13 @@ func (i sessionItem) FilterValue() string { return i.label }
 // ID implements kit.IdentifiedItem, the identity PreviewSplit requests previews
 // by.
 func (i sessionItem) ID() string { return i.id }
+
+func sessionLabel(sess ftue.SessionListing) string {
+	if sess.Title != "" {
+		return sess.Title
+	}
+	return sess.SessionID
+}
 
 var _ kit.IdentifiedItem = sessionItem{}
 

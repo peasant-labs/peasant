@@ -1,0 +1,49 @@
+# Answer order is declaration order. Later answers win. One path has one writer.
+requiredNames:
+  - selection-mode-all-sets-auto-ingest-true
+  - auto-ingest-answer-after-selection-wins
+  - keep-local-clears-auto-publish-intent
+  - auto-publish-on-sets-share-later
+  - duplicate-yaml-path-refused-by-build-model
+  - id-answer-uses-selection-model
+cases:
+  - name: selection-mode-all-sets-auto-ingest-true
+    startMode: selected
+    startAutoIngest: false
+    answers:
+      - key: transcripts
+        selection:
+          mode: all
+    wantMode: all
+    wantAutoIngest: true
+  - name: auto-ingest-answer-after-selection-wins
+    startMode: selected
+    startAutoIngest: true
+    answers:
+      - key: transcripts
+        selection:
+          mode: all
+      - key: auto-ingest-new-branches
+        bool: false
+    wantMode: all
+    wantAutoIngest: false
+  - name: keep-local-clears-auto-publish-intent
+    startShare: share-later
+    startAutoPublish: true
+    answers:
+      - key: publication-preference
+        token: ""
+    wantShare: ""
+    wantAutoPublish: false
+  - name: auto-publish-on-sets-share-later
+    startShare: ""
+    startAutoPublish: false
+    answers:
+      - key: publish-automatically
+        token: "true"
+    wantShare: share-later
+    wantAutoPublish: true
+  - name: duplicate-yaml-path-refused-by-build-model
+    duplicatePath: true
+  - name: id-answer-uses-selection-model
+    idAnswer: true

@@ -8,15 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
-	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
@@ -378,6 +377,8 @@ func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *disco
 // discovered set. The relation resolves a parent row's child count, which the
 // roots-only listing cannot answer on its own. It never widens the listing, so
 // no subagent session becomes selectable or ingestable through it.
+var _ discovery.ScanProgress = (*discoverySpinner)(nil)
+
 func ftueDiscoverWith(
 	ctx context.Context,
 	cfg *config.Config,
@@ -387,134 +388,7 @@ func ftueDiscoverWith(
 	evidence ingest.ClaudeEvidenceCache,
 	spinner *discoverySpinner,
 ) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
-	inventory := ftue.ProviderInventory{}
-	var sessions []ftue.SessionListing
-	subagents := kickstart.SubagentRelation{}
-
-	staleness := configStaleness(cfg)
-
-	for provider, factory := range ingest.DefaultAdapterRegistry {
-		src, _, ok := resolveConfiguredSource(cfg, provider)
-		if !ok {
-			continue
-		}
-		discovery := ftue.ProviderDiscovery{Enabled: src.Enabled}
-		inventory[provider] = discovery
-		if len(src.Paths) == 0 {
-			discovery.State = ftue.DiscoveryUnavailable
-			discovery.Detail = "no transcript paths are configured"
-			inventory[provider] = discovery
-			continue
-		}
-		// Kickstart inventories available data before the user chooses providers.
-		// The saved selection still controls which providers ingestion enables.
-		src.Enabled = true
-		spinner.SetPhase(fmt.Sprintf("Discovering %s sessions...", schema.HarnessDisplayName(provider)))
-		adapter := factory(fs, git, salt.Salt{})
-		ingest.AttachClaudeEvidenceCache(adapter, evidence)
-		discovered, err := adapter.Discover(ctx, src)
-		if err != nil {
-			discovery.State = ftue.DiscoveryFailed
-			discovery.Detail = err.Error()
-			inventory[provider] = discovery
-			continue
-		}
-		// Build parent → child session ID map from ALL discovered sessions.
-		childMap := buildChildMap(discovered)
-		// Record the relation for EVERY discovered session, including the
-		// children the listing below drops. A present key is the proof that
-		// discovery surfaced that session, which is what keeps a child count
-		// from being invented out of a bare identifier.
-		for _, d := range discovered {
-			subagents[string(d.SessionID)] = childMap[string(d.SessionID)]
-		}
-
-		roots := filterRootSessions(discovered)
-		rootCount := len(roots)
-		spinner.SetPhase(fmt.Sprintf("Resolving %s project info...", schema.HarnessDisplayName(provider)))
-		spinner.SetProgress(0, rootCount)
-		for idx, d := range roots {
-			spinner.SetProgress(idx+1, rootCount)
-			date := d.ModTime
-			if !d.CreatedAt.IsZero() {
-				date = d.CreatedAt
-			}
-			projectName := d.ProjectName
-			title := d.Title
-			branchName := d.Branch // prefer per-session branch from session data
-			workingDir := d.CWD
-			var gitRemote string
-			// claudeProjectDir is the decoded project directory for a Claude
-			// session, kept so the git resolution below can read its remote.
-			claudeProjectDir := ""
-
-			// Claude-specific: decode project slug to filesystem path for project name.
-			if provider == defaults.HarnessClaudeCode {
-				slug := filepath.Base(filepath.Dir(string(d.SourcePath)))
-				if decoded := ingest.DecodeClaudeSlugOnDisk(slug); decoded != "" {
-					claudeProjectDir = decoded
-					if projectName == "" {
-						projectName = shortenPath(decoded)
-					}
-				}
-				if projectName == "" {
-					projectName = claudeSlugToProjectName(slug)
-				}
-			}
-
-			if record, ok := known.reusable(d, staleness); ok {
-				// The store already resolved this session and its source has not
-				// moved since, so reuse what it recorded rather than paying for
-				// git again. Values discovery itself carries still win: they come
-				// from the source file, which is never staler than the record.
-				gitRemote = record.GitRemote
-				if branchName == "" {
-					branchName = record.Branch
-				}
-				if title == "" {
-					title = record.Title
-				}
-				if workingDir == "" {
-					workingDir = record.workingDirectory()
-				}
-			} else {
-				gitRemote, branchName = resolveSessionGit(ctx, git, d, claudeProjectDir, branchName)
-			}
-
-			sessions = append(sessions, ftue.SessionListing{
-				Harness:     provider.String(),
-				ProjectName: projectName,
-				GitRemote:   gitRemote,
-				Branch:      branchName,
-				Title:       title,
-				Agent:       d.Agent,
-				Date:        date,
-				SessionID:   string(d.SessionID),
-				SubagentIDs: childMap[string(d.SessionID)],
-				WorkingDir:  workingDir,
-				Origin:      resolveListingOrigin(d.Origin),
-				// The transcript location travels with the listing so the
-				// selection step can preview a session before any import. The
-				// file stays where the harness wrote it.
-				Source: kickstart.ListingSource(d),
-			})
-		}
-		discovery.SessionCount = rootCount
-		// A provider can enumerate some sources and skip others without failing.
-		// Name the skipped databases so a short session count is explained rather
-		// than silent.
-		if reporter, ok := adapter.(ingest.DiscoveryDiagnosticReporter); ok {
-			if diagnostics := reporter.DiscoveryDiagnostics(); len(diagnostics) > 0 {
-				skipped := make([]string, 0, len(diagnostics))
-				for _, diagnostic := range diagnostics {
-					skipped = append(skipped, fmt.Sprintf("%s (%s)", diagnostic.Location, diagnostic.Summary))
-				}
-				discovery.Detail = fmt.Sprintf("%d source(s) could not be fully read: %s", len(diagnostics), strings.Join(skipped, "; "))
-			}
-		}
-		inventory[provider] = discovery
-	}
-	return inventory, sessions, subagents
+	return discovery.Scan(ctx, cfg, fs, git, knownLookup{index: known}, evidence, spinner)
 }
 
 // resolveSessionGit walks git for one discovered session's remote and branch.
@@ -528,45 +402,7 @@ func resolveSessionGit(
 	claudeProjectDir string,
 	branchName string,
 ) (string, string) {
-	var gitRemote string
-
-	// Claude records the project directory in its path, which is the most
-	// precise place to ask.
-	if claudeProjectDir != "" {
-		if remote, err := git.RemoteURL(ctx, claudeProjectDir); err == nil && remote != "" {
-			gitRemote = remote
-		}
-	}
-
-	// For all providers: if we still need git remote, try to resolve
-	// from the session's CWD or project directory.
-	if gitRemote == "" {
-		// Try the session's working directory first (most accurate).
-		if d.CWD != "" {
-			if remote, err := git.RemoteURL(ctx, d.CWD); err == nil && remote != "" {
-				gitRemote = remote
-			}
-		}
-		// Fall back to OriginalRoot or source file directory.
-		if gitRemote == "" && d.ProjectName != "" {
-			dir := string(d.OriginalRoot)
-			if dir == "" {
-				dir = filepath.Dir(string(d.SourcePath))
-			}
-			if remote, err := git.RemoteURL(ctx, dir); err == nil && remote != "" {
-				gitRemote = remote
-			}
-		}
-	}
-
-	// If we still don't have a branch, try resolving from CWD.
-	// This is a last resort — prefers session-recorded branch above.
-	if branchName == "" && d.CWD != "" {
-		if branch, err := git.Branch(ctx, d.CWD); err == nil && branch != "" {
-			branchName = branch
-		}
-	}
-	return gitRemote, branchName
+	return discovery.ResolveSessionGit(ctx, git, d, claudeProjectDir, branchName)
 }
 
 // resolveListingOrigin turns discovery's typed origin evidence into the menu
@@ -580,15 +416,7 @@ func resolveSessionGit(
 // kickstart is best-effort discovery, so it fails safe to Unknown (never
 // crashes the picker) rather than propagate a corrupt value.
 func resolveListingOrigin(discovered sessionorigin.Origin) sessionorigin.Origin {
-	token := discovered.String()
-	if token == "" {
-		token = sessionorigin.Unknown.String()
-	}
-	resolved, err := sessionorigin.Parse(token)
-	if err != nil {
-		return sessionorigin.Unknown
-	}
-	return resolved
+	return discovery.ResolveListingOrigin(discovered)
 }
 
 // filterRootSessions returns only root sessions (no subagents). This is what
@@ -597,46 +425,25 @@ func resolveListingOrigin(discovered sessionorigin.Origin) sessionorigin.Origin 
 // over the whole discovered set travels separately, so a listed parent can still
 // report how many subagent sessions were found beneath it.
 func filterRootSessions(discovered []ingest.DiscoveredSession) []ingest.DiscoveredSession {
-	var roots []ingest.DiscoveredSession
-	for _, d := range discovered {
-		if d.ParentUUID == nil {
-			roots = append(roots, d)
-		}
-	}
-	return roots
+	return discovery.FilterRootSessions(discovered)
+}
+
+// decodeClaudeSlugToPath decodes a Claude project slug to the real filesystem path.
+// Delegates to ingest.DecodeClaudeSlug with an os.Stat-based directory checker.
+func decodeClaudeSlugToPath(encoded string) string {
+	return discovery.DecodeClaudeSlugToPath(encoded)
 }
 
 // shortenPath replaces the home directory prefix with "~" for display.
 func shortenPath(path string) string {
-	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home) {
-		return "~" + path[len(home):]
-	}
-	return path
+	return discovery.ShortenPath(path)
 }
 
 // claudeSlugToProjectName converts a Claude project slug (e.g. "-Users-alice-GitHub-my-repo")
 // to a human-readable name (e.g. "my-repo"). It mirrors the logic in the village's
 // extractProjectDisplayName for the dash-delimited slug case.
 func claudeSlugToProjectName(slug string) string {
-	if slug == "" {
-		return ""
-	}
-	knownDirs := []string{"github", "documents", "projects", "repos", "src", "code", "dev", "home"}
-	stripped := strings.TrimPrefix(slug, "-")
-	segments := strings.Split(stripped, "-")
-	lastKnownIdx := -1
-	for i, seg := range segments {
-		for _, known := range knownDirs {
-			if strings.EqualFold(seg, known) {
-				lastKnownIdx = i
-				break
-			}
-		}
-	}
-	if lastKnownIdx >= 0 && lastKnownIdx < len(segments)-1 {
-		return strings.Join(segments[lastKnownIdx+1:], "-")
-	}
-	return slug
+	return discovery.ClaudeSlugToProjectName(slug)
 }
 
 // progressAdapter wraps ingest.ProgressState to satisfy ftue.ProgressSnapshot.
@@ -872,32 +679,11 @@ func aggregateProviderCounts(sessions []ingest.SessionResult) []ftue.ProviderIng
 // expanding each parent session to include its subagent child session IDs.
 // Returns nil when no sessions are selected (nil means "allow all" in the pipeline).
 func expandAllowedSessionIDs(selected []ftue.SessionListing) map[ingest.SessionID]bool {
-	if len(selected) == 0 {
-		return nil
-	}
-	allowed := make(map[ingest.SessionID]bool, len(selected))
-	for _, s := range selected {
-		if sid, err := ingest.NewSessionID(s.SessionID); err == nil {
-			allowed[sid] = true
-		}
-		for _, childID := range s.SubagentIDs {
-			if sid, err := ingest.NewSessionID(childID); err == nil {
-				allowed[sid] = true
-			}
-		}
-	}
-	return allowed
+	return discovery.ExpandAllowedSessionIDs(selected)
 }
 
 // buildChildMap builds a mapping from parent session ID to child session IDs
 // from the full (unfiltered) discovery results.
 func buildChildMap(discovered []ingest.DiscoveredSession) map[string][]string {
-	childMap := make(map[string][]string)
-	for _, d := range discovered {
-		if d.ParentUUID != nil {
-			parentID := string(*d.ParentUUID)
-			childMap[parentID] = append(childMap[parentID], string(d.SessionID))
-		}
-	}
-	return childMap
+	return discovery.BuildChildMap(discovered)
 }

@@ -1,0 +1,42 @@
+# Strict Claude settings reads and atomic writes. requiredNames is the
+# deletion-protection manifest. A case that is removed goes red by name.
+requiredNames:
+  - preserves-unrelated-keys
+  - writes-cleanup-period-days
+  - refuses-malformed-file-with-actionable-error
+  - missing-file-reads-absent
+  - atomic-replace-leaves-destination-unchanged-on-failure
+cases:
+  - name: preserves-unrelated-keys
+    before: |
+      {
+        "cleanupPeriodDays": 30,
+        "theme": "dark",
+        "nested": {"keep": true}
+      }
+    days: 45
+    wantDays: 45
+    wantKeys: [cleanupPeriodDays, theme, nested]
+  - name: writes-cleanup-period-days
+    before: |
+      {
+        "theme": "dark"
+      }
+    days: 14
+    wantDays: 14
+    wantKeys: [cleanupPeriodDays, theme]
+  - name: refuses-malformed-file-with-actionable-error
+    before: "{not json"
+    days: 14
+    wantError: ["not valid JSON", "no settings were changed", "repair settings.json"]
+  - name: missing-file-reads-absent
+    missing: true
+  - name: atomic-replace-leaves-destination-unchanged-on-failure
+    before: |
+      {
+        "cleanupPeriodDays": 30,
+        "theme": "dark"
+      }
+    days: 14
+    blockReplace: true
+    wantError: ["destination was not changed"]

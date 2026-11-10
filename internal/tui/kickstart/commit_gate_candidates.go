@@ -63,7 +63,7 @@ func projectCandidatesFromPreparedListings(prepared []PreparedSessionListing) []
 	projects := make(map[string]*commitGateProjectCohort)
 	projectOrder := make([]string, 0)
 	for _, row := range prepared {
-		if !row.ProjectIdentity.available() || !repositoryIdentityAvailable(row.RepositoryIdentity) || row.Listing.SessionID == "" {
+		if !row.ProjectIdentity.Available() || !repositoryIdentityAvailable(row.RepositoryIdentity) || row.Listing.SessionID == "" {
 			continue
 		}
 		if _, err := ingest.NewSessionID(row.Listing.SessionID); err != nil {

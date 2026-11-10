@@ -4,18 +4,15 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
 // ConsentSummary is the guided presentation's final explanation of the values
-// about to be saved and the effects that confirming will run. Its lines are
-// display-only; the Registry remains the sole owner of field behavior and the
-// Flow remains the sole commit boundary.
-type ConsentSummary struct {
-	Values  []string
-	Effects []string
-}
+// about to be saved and the effects that confirming will run. The lines are
+// produced by the shared onboarding model; this name is that type.
+type ConsentSummary = onboarding.ConsentSummary
 
 // VisibleConsentField identifies one field that remains visible after the
 // Registry's canonical hidden-edit convergence. Values are copied into the

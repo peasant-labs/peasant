@@ -3,7 +3,6 @@ package kickstart_test
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,13 +30,15 @@ type listingsDoc struct {
 	Listings             []ftue.SessionListing `yaml:"listings"`
 }
 
-//go:embed testdata/listings.yaml
-var listingsData []byte
+func listingsData(t *testing.T) []byte {
+	t.Helper()
+	return readMovedDiscoveryFixture(t, "listings.yaml")
+}
 
 func loadListings(t *testing.T) listingsDoc {
 	t.Helper()
 	var doc listingsDoc
-	if err := decodeStrictFixture(listingsData, &doc); err != nil {
+	if err := decodeStrictFixture(listingsData(t), &doc); err != nil {
 		t.Fatalf("decode listings fixture: %v", err)
 	}
 	if doc.ExpectedListingCount != len(doc.Listings) || len(doc.Listings) == 0 {
@@ -48,8 +49,9 @@ func loadListings(t *testing.T) listingsDoc {
 
 func TestListingsFixtureRejectsUnknownCloneIdentityKey(t *testing.T) {
 	t.Parallel()
-	malformed := bytes.Replace(listingsData, []byte("workingDir:"), []byte("workingDirectoryTypo:"), 1)
-	if bytes.Equal(malformed, listingsData) {
+	raw := listingsData(t)
+	malformed := bytes.Replace(raw, []byte("workingDir:"), []byte("workingDirectoryTypo:"), 1)
+	if bytes.Equal(malformed, raw) {
 		t.Fatal("listings fixture has no workingDir key to mutate")
 	}
 	var document listingsDoc

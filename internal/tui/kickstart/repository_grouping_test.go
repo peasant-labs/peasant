@@ -2,7 +2,6 @@ package kickstart_test
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,8 +23,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed testdata/repository_grouping.yaml
-var repositoryGroupingData []byte
+func repositoryGroupingData(t *testing.T) []byte {
+	t.Helper()
+	return readMovedDiscoveryFixture(t, "repository_grouping.yaml")
+}
 
 type repositoryGroupingAction string
 
@@ -95,7 +96,7 @@ type repositoryFacetExpectation struct {
 func loadRepositoryGroupingDocument(t *testing.T) repositoryGroupingDocument {
 	t.Helper()
 	var document repositoryGroupingDocument
-	if err := decodeStrictFixture(repositoryGroupingData, &document); err != nil {
+	if err := decodeStrictFixture(repositoryGroupingData(t), &document); err != nil {
 		t.Fatalf("decode repository grouping fixture: %v", err)
 	}
 	if document.ExpectedCaseCount != len(document.Cases) || document.ExpectedCaseCount != len(document.ExpectedNames) || len(document.Cases) == 0 {

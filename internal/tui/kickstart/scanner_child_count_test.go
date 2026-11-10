@@ -2,7 +2,6 @@ package kickstart_test
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"testing"
 
@@ -12,8 +11,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 )
 
-//go:embed testdata/child_counts.yaml
-var childCountData []byte
+func childCountData(t *testing.T) []byte {
+	t.Helper()
+	return readMovedDiscoveryFixture(t, "child_counts.yaml")
+}
 
 // childCountRow is one expected session row of the folded branch: its id, the
 // child-session count its Meta must carry ("" for none), and whether the row is
@@ -55,7 +56,7 @@ type childCountDocument struct {
 func loadChildCounts(t *testing.T) childCountDocument {
 	t.Helper()
 	var doc childCountDocument
-	if err := testutil.DecodeFixtureYAML(childCountData, &doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(childCountData(t), &doc); err != nil {
 		t.Fatalf("decode testdata/child_counts.yaml: %v", err)
 	}
 	present := make(map[string]bool, len(doc.Cases))

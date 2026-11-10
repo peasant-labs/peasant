@@ -2,8 +2,8 @@ package kickstart_test
 
 import (
 	"bytes"
-	_ "embed"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -16,10 +16,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
 
-//go:embed testdata/legacy_selected_conversion.yaml
-var legacySelectedConversionData []byte
+const legacySelectedConversionFixturePath = "../../onboarding/testdata/legacy_selected_conversion.yaml"
 
 type legacySelectedConversionDocument struct {
+	RequiredNames     []string                       `yaml:"requiredNames"`
 	ExpectedCaseCount int                            `yaml:"expectedCaseCount"`
 	ExpectedCaseNames []string                       `yaml:"expectedCaseNames"`
 	Cases             []legacySelectedConversionCase `yaml:"cases"`
@@ -38,8 +38,12 @@ type legacySelectedConversionCase struct {
 
 func loadLegacySelectedConversionDocument(t *testing.T) legacySelectedConversionDocument {
 	t.Helper()
+	data, err := os.ReadFile(legacySelectedConversionFixturePath)
+	if err != nil {
+		t.Fatalf("read legacy selected conversion fixture %s: %v", legacySelectedConversionFixturePath, err)
+	}
 	var document legacySelectedConversionDocument
-	if err := decodeStrictFixture(legacySelectedConversionData, &document); err != nil {
+	if err := decodeStrictFixture(data, &document); err != nil {
 		t.Fatalf("decode legacy selected conversion fixture: %v", err)
 	}
 	if document.ExpectedCaseCount != len(document.Cases) || document.ExpectedCaseCount == 0 {
@@ -50,6 +54,7 @@ func loadLegacySelectedConversionDocument(t *testing.T) legacySelectedConversion
 	}
 
 	seen := make(map[string]struct{}, len(document.Cases))
+	present := make(map[string]bool, len(document.Cases))
 	actualNames := make([]string, 0, len(document.Cases))
 	for _, testCase := range document.Cases {
 		testutil.RequireFixtureFields(t, "legacy selected conversion", testCase.Name, []testutil.FixtureField{
@@ -61,6 +66,7 @@ func loadLegacySelectedConversionDocument(t *testing.T) legacySelectedConversion
 			t.Fatalf("legacy selected conversion fixture repeats case name %q", testCase.Name)
 		}
 		seen[testCase.Name] = struct{}{}
+		present[testCase.Name] = true
 		actualNames = append(actualNames, testCase.Name)
 		if *testCase.ExpectedStoredCount != len(testCase.Stored) {
 			t.Fatalf("case %q expectedStoredCount=%d but %d rows are present", testCase.Name, *testCase.ExpectedStoredCount, len(testCase.Stored))
@@ -81,6 +87,9 @@ func loadLegacySelectedConversionDocument(t *testing.T) legacySelectedConversion
 	}
 	if !reflect.DeepEqual(actualNames, document.ExpectedCaseNames) {
 		t.Fatalf("legacy selected conversion names = %v, want exact manifest %v", actualNames, document.ExpectedCaseNames)
+	}
+	if err := testutil.RequireFixtureNames(legacySelectedConversionFixturePath, "case", document.RequiredNames, present); err != nil {
+		t.Fatalf("legacy selected conversion fixture: %v", err)
 	}
 	return document
 }
@@ -113,7 +122,7 @@ func TestConvertLegacySelected_StoredCloneCorpus(t *testing.T) {
 			for index, row := range testCase.Stored {
 				stored[index] = row.productionRow()
 			}
-			storedBefore := append([]store.IngestedSessionRow(nil), stored...)
+			storedBefore := append(make([]store.IngestedSessionRow, 0, len(stored)), stored...)
 			currentBefore := cloneSelectedFixtureSelection(testCase.Current)
 			failures := make(map[string]struct{}, len(testCase.ResolverFailures))
 			for _, raw := range testCase.ResolverFailures {
@@ -211,8 +220,12 @@ func TestConvertLegacySelected_ExactCopyDoesNotAliasInput(t *testing.T) {
 
 func TestLegacySelectedConversionFixtureRejectsUnknownExclusionKey(t *testing.T) {
 	t.Parallel()
-	malformed := bytes.Replace(legacySelectedConversionData, []byte("exclusions:"), []byte("exclusionsTypo:"), 1)
-	if bytes.Equal(malformed, legacySelectedConversionData) {
+	data, err := os.ReadFile(legacySelectedConversionFixturePath)
+	if err != nil {
+		t.Fatalf("read legacy selected conversion fixture: %v", err)
+	}
+	malformed := bytes.Replace(data, []byte("exclusions:"), []byte("exclusionsTypo:"), 1)
+	if bytes.Equal(malformed, data) {
 		t.Fatal("legacy selected conversion fixture has no exclusions key to mutate")
 	}
 	var document legacySelectedConversionDocument
