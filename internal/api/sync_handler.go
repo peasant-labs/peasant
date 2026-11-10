@@ -1448,7 +1448,7 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		// suggested commands read the store this run wrote.
 		sessionScope, err := ingest.NewSessionScope([]ingest.SessionID{scope.id}, ingest.RelatedInclude)
 		if err != nil {
-			return nil, nil, fmt.Errorf("build the one-session scope for the web ingest: %w; nothing was changed", err)
+			return nil, nil, nil, fmt.Errorf("build the one-session scope for the web ingest: %w; nothing was changed", err)
 		}
 		pipelineCfg.Scope = &sessionScope
 		pipelineCfg.Command = "harvest"
