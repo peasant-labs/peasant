@@ -1,0 +1,22 @@
+# Image bytes must not survive into a publication request. Each case runs the
+# real Claude Code capture path, then the real metadata request builder, and
+# asserts that neither the stored Extra nor the assembled request carries the
+# base64 source data. The media type and decoded byte size remain.
+cases:
+  - name: image-source-data-absent-from-publication
+    source: '{"type":"attachment","attachment":{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},"uuid":"at-image"}'
+    want_extra_members:
+      attachment: '{"type":"image","source":{"type":"base64","media_type":"image/png","byteSize":8}}'
+    want_absent: "iVBORw0KGgo="
+  - name: image-source-data-oversized-absent-from-publication
+    source: '{"type":"attachment","attachment":{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"IMAGE_BYTES"}},"uuid":"at-image-big"}'
+    image_data_bytes: 400000
+    want_extra_members:
+      attachment: '{"type":"image","source":{"type":"base64","media_type":"image/jpeg","byteSize":300000}}'
+    want_absent: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  - name: flat-image-source-data-absent-from-publication
+    source: '{"type":"attachment","attachmentType":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="},"uuid":"at-flat-image"}'
+    want_extra_members:
+      attachmentType: image
+      source: '{"type":"base64","media_type":"image/png","byteSize":8}'
+    want_absent: "iVBORw0KGgo="

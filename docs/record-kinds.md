@@ -16,9 +16,9 @@ remain errors, not successful unknown-kind captures.
 - **Namespace** separates discriminator domains. Equal record and block names
   are not the same key. **Match** is literal unless explicitly marked prefix.
 - **Status** is the closed set below, listed with what this build declares.
-  **represented** (interpreted entries or owning-entry state) — 277 rows;
+  **represented** (interpreted entries or owning-entry state) — 279 rows;
   **tracked-only** (stored non-conversation evidence outside interpreted
-  transcript entries) — 7 rows; **ignored-control** (no row; the capture
+  transcript entries) — 5 rows; **ignored-control** (no row; the capture
   accounts for the kind and can still certify complete) — 82 rows;
   **retained-unknown** (complete redacted evidence without interpretation) — 0
   rows, declared by no kind in this build, and the unseen-valid-kind fallback of
@@ -57,11 +57,11 @@ integration suites. Publication requires validated retained evidence, partial
 signaling and the receiver's preservation capability; failed or oversized
 transfer must not silently discard evidence. Schema release/tag precedes pins.
 
-## claude-code (adapter 4, indexer 22)
+## claude-code (adapter 4, indexer 23)
 
 Baseline index format: 1.
 
-Managed generation: adapter 4, indexer 23, index format 2.
+Managed generation: adapter 4, indexer 24, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -83,7 +83,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | record | `agent-name` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | retained-format-1 | record | `ai-title` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | retained-format-1 | record | `atis-latch` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
-| retained-format-1 | record | `attachment` | literal | tracked-only | no | bounded control extra |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| retained-format-1 | record | `attachment` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | retained-format-1 | record | `bridge-session` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | retained-format-1 | record | `started` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | retained-format-1 | record | `cost-state` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
@@ -120,7 +120,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | record | `agent-name` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | native-generation | record | `ai-title` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | native-generation | record | `atis-latch` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
-| native-generation | record | `attachment` | literal | tracked-only | no | bounded control extra |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
+| native-generation | record | `attachment` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | native-generation | record | `bridge-session` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | native-generation | record | `started` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | native-generation | record | `cost-state` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |

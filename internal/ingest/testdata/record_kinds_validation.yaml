@@ -21,7 +21,7 @@ required_names:
   - native reasoning mirror is ignored
   - status mutation fails production witness
   - preview mutation fails production witness
-  - tracked control production witness
+  - represented attachment control production witness
   - represented control production witness
   - arbitrary unseen record retains
   - arbitrary unseen block retains
@@ -43,16 +43,16 @@ cases:
   - {name: ignored without reason rejected, operation: yaml, find: 'reason: Entryless control; unexpected conversation content remains a validation error.', replace: 'reason: ""', error: requires a reason}
   - {name: missing supported harness rejected, operation: yaml, find: '  pi:', replace: '  gemini-cli:', error: 'has no section'}
   - {name: unsupported adapter rejected, operation: yaml, find: 'harnesses:', replace: "harnesses:\n  gemini-cli: {}", error: no supported adapter}
-  - {name: wrong baseline revision rejected, operation: yaml, find: 'indexer_version: 22', replace: 'indexer_version: 999', error: baseline versions differ}
+  - {name: wrong baseline revision rejected, operation: yaml, find: 'indexer_version: 23', replace: 'indexer_version: 999', error: baseline versions differ}
   - {name: wrong native revision rejected, operation: yaml, find: 'native_versions: {adapter_version: 3, indexer_version: 21', replace: 'native_versions: {adapter_version: 3, indexer_version: 999', error: managed-generation versions differ}
   - {name: native reasoning namespace stays separate from media, operation: lookup, harness: codex, context: native-generation, namespace: reasoning_content, kind: input_image, status: retained-unknown, preview: no}
   - {name: native token count is ignored metadata, operation: native-event-behavior, kind: token_count}
   - {name: native user mirror is ignored, operation: native-event-behavior, kind: user_message}
   - {name: native agent mirror is ignored, operation: native-event-behavior, kind: agent_message}
   - {name: native reasoning mirror is ignored, operation: native-event-behavior, kind: agent_reasoning}
-  - {name: status mutation fails production witness, operation: mutate-status, harness: claude-code, context: retained-format-1, namespace: record, kind: attachment, status: represented, error: control behavior differs}
+  - {name: status mutation fails production witness, operation: mutate-status, harness: claude-code, context: retained-format-1, namespace: record, kind: attachment, status: tracked-only, error: control behavior differs}
   - {name: preview mutation fails production witness, operation: mutate-preview, harness: claude-code, context: retained-format-1, namespace: record, kind: mode, preview: no, error: control behavior differs}
-  - {name: tracked control production witness, operation: behavior, harness: claude-code, context: retained-format-1, namespace: record, kind: attachment}
+  - {name: represented attachment control production witness, operation: behavior, harness: claude-code, context: retained-format-1, namespace: record, kind: attachment}
   - {name: represented control production witness, operation: behavior, harness: claude-code, context: retained-format-1, namespace: system_subtype, kind: compact_boundary}
   - {name: arbitrary unseen record retains, operation: lookup, harness: pi, context: retained-format-1, namespace: entry, kind: novel_unlisted_kind, status: retained-unknown, preview: no}
   - {name: arbitrary unseen block retains, operation: lookup, harness: pi, context: retained-format-1, namespace: content_block, kind: novel_unlisted_kind, status: retained-unknown, preview: no}

@@ -29,6 +29,11 @@ import (
 //go:embed testdata/content_capture.yaml
 var contentCaptureFixtures []byte
 
+// controlOversizedFixtureText exceeds the 256 KiB Claude control-payload cap so
+// an oversized case proves the identity fallback rather than retaining the
+// whole payload.
+var controlOversizedFixtureText = strings.Repeat("x", 300*1024)
+
 type captureFixtureAdapter struct {
 	ingest.SourceAdapter
 	fs ingest.FileSystem
@@ -536,7 +541,7 @@ func TestControlRecordEntryShape(t *testing.T) {
 			fs := testutil.NewMemFS()
 			text := "shape fixture"
 			if fixture.Oversized {
-				text = strings.Repeat("x", 9000)
+				text = controlOversizedFixtureText
 			}
 			session, data := captureFixtureSource(t, fixture, fs, text)
 			idx, ok := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})[fixture.Harness].(ingest.AuthoritativeTranscriptIndexer)
@@ -598,7 +603,7 @@ func TestControlRecordTolerantPreviewBound(t *testing.T) {
 			fs := testutil.NewMemFS()
 			text := "shape fixture"
 			if fixture.Oversized {
-				text = strings.Repeat("x", 9000)
+				text = controlOversizedFixtureText
 			}
 			session, data := captureFixtureSource(t, fixture, fs, text)
 			idx, ok := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})[fixture.Harness].(ingest.TranscriptIndexer)
