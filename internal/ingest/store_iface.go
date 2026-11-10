@@ -210,11 +210,14 @@ type CurrentCommitAssociation struct {
 // before the DIFF stage so classifySession can use DB state without reading metadata.json.
 type SessionLocation struct {
 	// Readiness is a bulk repair hint, not a substitute for the bundle read.
-	ProjectHash             schema.ProjectHash
-	OpaqueHostID            string
-	GitRemote               *string
-	PublicationReadiness    PublicationReadiness
-	CaptureRevision         int64
+	ProjectHash          schema.ProjectHash
+	OpaqueHostID         string
+	GitRemote            *string
+	PublicationReadiness PublicationReadiness
+	CaptureRevision      int64
+	// AdapterVersion is sessions.adapter_version: the newest adapter revision
+	// this row's stored work has been parsed at. A retained latest attempt
+	// advances it without replacing the active generation.
 	AdapterVersion          *int
 	HostSlug                string
 	ParentID                string // empty string if the session has no parent
@@ -235,21 +238,6 @@ type SessionLocation struct {
 	// the write recorded no proof, so nothing anchors the stored result to the
 	// bytes it claims to describe.
 	IndexedInputHash *string
-}
-
-// adapterStampBehind reports whether the stored artifact was produced by an
-// adapter revision older than this build's target for the harness. A missing
-// stamp is not behind: it is an unknown producer, and the ordinary clock and
-// schema rules decide whether to re-read it.
-func (l SessionLocation) adapterStampBehind(harness Harness, targets map[Harness]HarvesterVersions) bool {
-	if l.AdapterVersion == nil {
-		return false
-	}
-	target, ok := targets[harness]
-	if !ok {
-		return false
-	}
-	return *l.AdapterVersion < target.AdapterVersion
 }
 
 // MetricSeedStore reads stored adapter statistics independently of computed

@@ -3086,9 +3086,16 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// and only a published capture advances the stamp. Without this a
 			// session whose bytes happen to project identically is selected on
 			// every harvest, opened every time, and never settles.
+			//
+			// The harness-wide target applies even to a legacy OpenCode origin
+			// that keeps the baseline target for indexing: ListStaleAdapterSessions
+			// selects by harness, so a narrower classifier rule would leave those
+			// rows selected forever instead of republishing them once. This is
+			// deliberately not sessionVersionTarget, which narrows only the index
+			// lane.
 			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || metadataNeedsNativeRefresh(loc.SchemaVersion) ||
 				(loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled) ||
-				loc.adapterStampBehind(session.Harness, p.versionTargets()) {
+				adapterRevisionBehind(loc.AdapterVersion, p.versionTargets()[session.Harness]) {
 				status = DiffUpdated
 			}
 		}
@@ -3215,7 +3222,14 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		transcriptPath := filepath.Join(filepath.Dir(metaPath), fmt.Sprintf("%s--transcript.%s", session.SessionID, session.SourceFormat))
 		transcript, transcriptErr := p.fs.ReadFile(transcriptPath)
 		matchingEvidence := readErr == nil && transcriptErr == nil && bytes.Equal(evidence, want)
-		matchingCapture := matchingEvidence && existing.SchemaVersion >= CurrentSchemaVersion && existing.ContentHash == schema.ComputeTranscriptHash(transcript)
+		// The stored producer revision is part of the evidence: an artifact
+		// written by an older parser keeps its old projection and failure text
+		// even when the source bytes and marker still match. A file-only
+		// harvest has no store row to carry that rule, so it is applied here.
+		matchingCapture := matchingEvidence &&
+			!adapterRevisionBehind(existing.AdapterVersion, p.versionTargets()[session.Harness]) &&
+			existing.SchemaVersion >= CurrentSchemaVersion &&
+			existing.ContentHash == schema.ComputeTranscriptHash(transcript)
 		if matchingCapture {
 			return DiffUnchanged, nil
 		}

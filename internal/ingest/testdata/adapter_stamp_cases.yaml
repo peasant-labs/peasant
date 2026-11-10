@@ -1,0 +1,22 @@
+# The captured-source classifier asks one question: is the stored artifact's
+# adapter revision older than this build's target? A generation-capable store
+# resolves the managed-generation overlay; a store-free or format-1 store
+# resolves the baseline registry. The same cases must hold for both.
+requiredNames:
+  - behind-target-republishes
+  - omitted-stamp-republishes
+  - current-target-settles
+targetSets:
+  - name: managed-generation
+    generationOverlay: true
+  - name: baseline-registry
+    generationOverlay: false
+cases:
+  - name: behind-target-republishes
+    storedRevisionOffset: -1
+    want: updated
+  - name: omitted-stamp-republishes
+    want: updated
+  - name: current-target-settles
+    storedRevisionOffset: 0
+    want: unchanged
