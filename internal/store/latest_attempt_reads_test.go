@@ -501,11 +501,13 @@ func TestLatestAttemptSettleGatesSelection(t *testing.T) {
 	zeroAdapter := map[ingest.Harness]ingest.HarvesterVersions{
 		ingest.Harness("claude-code"): {IndexerVersion: 18, AdapterVersion: 0},
 	}
-	// The adapter arm must still match the row: retention advances the session
-	// stamp to the attempt's revision, so a target at that same revision is
-	// current regardless of a settle clause.
+	// A zero producer target cannot express a settle decision, so the clause is
+	// omitted. Put the row behind the attempt's revision first: otherwise the
+	// ordinary adapter arm would list it even if the omitted fragment were
+	// wrongly bound, and this guard would pass without protecting anything.
+	execGenerationSQL(t, s, `UPDATE sessions SET adapter_version = 1 WHERE session_id = '`+string(sid)+`';`)
 	zeroIndexer := map[ingest.Harness]ingest.HarvesterVersions{
-		ingest.Harness("claude-code"): {IndexerVersion: 0, AdapterVersion: 3},
+		ingest.Harness("claude-code"): {IndexerVersion: 0, AdapterVersion: 2},
 	}
 	ids, err = s.ListStaleIndexSessions(ctx, zeroAdapter, ingest.AllStoredSessions())
 	if err != nil {
