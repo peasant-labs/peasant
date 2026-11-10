@@ -54,6 +54,17 @@ declared) or deprecated (`gemini-cli`, no adapter planned). Those are not one
 status. Being known makes a value a legal wire value and lets the CLI refuse it
 by name; it does not make it harvestable, and it stores nothing.
 
+`peasant layout` is not ingestion. It records roots, shape, and metadata only —
+never transcript text — and it writes no session, no database row, and no wire
+value. A layout tool is its own harness value only when no existing harness
+ingests that product; otherwise it is another store of a product that already
+has one (see [`harness-layouts/README.md`](harness-layouts/README.md)). Inside a
+harness Peasant does ingest, a record its adapter cannot interpret is retained
+as unknown evidence and marks that session partial (`diagnostics.partial`);
+layout capture does not do that work for anyone. Observing a layout does not
+promote a tool: promotion is a bestiary declaration, then a schema declaration
+and tag, then an adapter, fixtures, and a version.
+
 
 ## Models & providers
 
