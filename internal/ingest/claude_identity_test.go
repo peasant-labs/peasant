@@ -29,6 +29,7 @@ type claudeIdentityFixtures struct {
 	RetainedExpectations         map[string]claudeRetainedExpectation `yaml:"retained_expectations"`
 	RequiredCacheUpgradeNames    []string                             `yaml:"required_cache_upgrade_names"`
 	CacheUpgrades                []claudeCacheUpgrade                 `yaml:"cache_upgrades"`
+	RequiredUnmarkedRequestKinds []string                             `yaml:"required_unmarked_request_record_kinds"`
 	RequiredCaseNames            []string                             `yaml:"required_case_names"`
 	RequiredRetainedRefusalNames []string                             `yaml:"required_retained_refusal_names"`
 	Cases                        []claudeIdentityCase                 `yaml:"cases"`
@@ -366,11 +367,54 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 					if err := database.SaveClaudeEvidence(ctx, []ingest.ClaudeTranscriptEvidence{record}, nil); err != nil {
 						t.Fatal(err)
 					}
-					if _, err := adapter.Discover(ctx, cfg); err != nil {
+					remined, err := adapter.Discover(ctx, cfg)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if adapter.ReminedCount() != 1 {
 						t.Fatalf("prior proof re-mines = %d", adapter.ReminedCount())
+					}
+					// An older build's cached row is re-mined into the corrected
+					// admission: the rediscovered artifact must carry the proved
+					// parent and extract the recorded relationship.
+					if !fixture.Refuse {
+						var upgraded *ingest.DiscoveredSession
+						for i := range remined {
+							if remined[i].SessionID == artifact.SessionID {
+								upgraded = &remined[i]
+								break
+							}
+						}
+						if upgraded == nil {
+							t.Fatal("re-mined artifact not rediscovered")
+						}
+						parent := ""
+						if upgraded.ParentUUID != nil {
+							parent = upgraded.ParentUUID.String()
+						}
+						if parent != fixture.Parent {
+							t.Fatalf("re-mined parent = %q, want %q", parent, fixture.Parent)
+						}
+						upgradedMetadata, err := adapter.ExtractMetadata(ctx, *upgraded)
+						if err != nil {
+							t.Fatalf("re-mined extraction: %v", err)
+						}
+						if fixture.Relationship != "" {
+							if len(upgradedMetadata.Relationships) != 1 {
+								t.Fatalf("re-mined relationships = %+v", upgradedMetadata.Relationships)
+							}
+							relation := upgradedMetadata.Relationships[0]
+							target := ""
+							if relation.TargetLocalID != nil {
+								target = relation.TargetLocalID.String()
+							}
+							if string(relation.Kind) != fixture.Relationship || target != fixture.Target {
+								t.Fatalf("re-mined provenance = %+v", relation)
+							}
+							if fixture.Relationship == "started_by" && relation.Evidence != schema.EvidenceNativeTyped {
+								t.Fatalf("re-mined evidence = %q, want native_typed", relation.Evidence)
+							}
+						}
 					}
 					updated, err := database.LoadClaudeEvidence(ctx)
 					if err != nil {

@@ -11,6 +11,7 @@ import {
 } from '@/lib/api/home';
 import { DiscoveryErrorCode, DiscoveryRequestError } from '@/lib/api/errors';
 import { fetchVillageAuth } from '@/lib/api/settings';
+import { faultFromDiscoveryError, FaultOperation, HttpEvidence, type WebFault } from '@/lib/faults';
 import type { ProjectHash, PageSize as PageSizeValue } from '@peasant-labs/schema';
 import { createHomePageCache, type HomePageCache } from '@/lib/home/pageCache';
 import {
@@ -25,10 +26,12 @@ export interface HomePages {
   pages: LocalSyncSessionPage[];
   loading: boolean;
   error: unknown;
+  /** The typed fault for this read, with its code kept on `HttpEvidence`. */
+  fault: WebFault | null;
   retryPage?: number;
 }
 
-const empty = (): HomePages => ({ pages: [], loading: false, error: null });
+const empty = (): HomePages => ({ pages: [], loading: false, error: null, fault: null });
 const ROOT = '';
 
 export interface HomeSessionsOptions {
@@ -70,10 +73,12 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [fault, setFault] = useState<WebFault | null>(null);
   const [retryPage, setRetryPage] = useState<number | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [projects, setProjects] = useState<LocalSyncProjectOption[] | null>(null);
   const [projectError, setProjectError] = useState<unknown>(null);
+  const [projectFault, setProjectFault] = useState<WebFault | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(false);
 
   const optionsRef = useRef(options);
@@ -159,7 +164,8 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
     return true;
   }, []);
 
-  const settleRevision = useCallback((served: LocalSyncSessionPage) => {    // The cached value carries the revision. A new revision means every cached
+  const settleRevision = useCallback((served: LocalSyncSessionPage) => {
+    // The cached value carries the revision. A new revision means every cached
     // page may be stale, so clear the tab cache and the in-tab pages before
     // writing the fresh page.
     if (revisionRef.current !== null && revisionRef.current !== served.revision) {
@@ -186,6 +192,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
       setLoading(true);
     }
     setError(null);
+    setFault(null);
     setRetryPage(undefined);
     try {
       const served = await fetchHomeSessions(requestQuery(ROOT, page, optionsRef.current.pageSize), controller.signal);
@@ -196,11 +203,13 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
       setRootPage(served);
       setLoading(false);
       setError(null);
+      setFault(null);
       setRetryPage(undefined);
       if (served.page !== page) onServedRef.current?.(served.page);
     } catch (cause) {
       if (token !== rootToken.current || controller.signal.aborted) return;
-      if (cause instanceof DiscoveryRequestError && cause.status === 400 && cause.code === DiscoveryErrorCode.SyncPageScopeChanged && !scopeRestarted.current) {
+      const failure = faultFromDiscoveryError(FaultOperation.SessionsRead, cause);
+      if (failure?.evidence instanceof HttpEvidence && failure.evidence.status === 400 && failure.evidence.code === DiscoveryErrorCode.SyncPageScopeChanged && !scopeRestarted.current) {
         scopeRestarted.current = true;
         cache.current.clear();
         memory.current.clear();
@@ -210,6 +219,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
       // A failed read keeps the loaded page on screen and reports the failure.
       setLoading(false);
       setError(cause);
+      setFault(failure);
       setRetryPage(page);
     } finally {
       if (rootController.current === controller) rootController.current = null;
@@ -241,10 +251,12 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
       resetChildren();
       setRootPage(null);
       setError(null);
+      setFault(null);
       setRetryPage(undefined);
       setLoading(true);
       setProjects(null);
       setProjectError(null);
+      setProjectFault(null);
       setProjectsLoading(false);
     }
     const run = async () => {
@@ -276,6 +288,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
         setRootPage(cached);
         setLoading(false);
         setError(null);
+        setFault(null);
         setRetryPage(undefined);
         return;
       }
@@ -291,7 +304,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
     const controller = new AbortController();
     childControllers.current.set(parent, controller);
     const result = new Map(childrenRef.current);
-    result.set(parent, { ...(result.get(parent) ?? empty()), loading: true, error: null });
+    result.set(parent, { ...(result.get(parent) ?? empty()), loading: true, error: null, fault: null });
     childrenRef.current = result;
     setChildren(result);
     try {
@@ -300,13 +313,13 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
       rememberParents(parent, served);
       const next = new Map(childrenRef.current);
       const old = next.get(parent) ?? empty();
-      next.set(parent, { pages: [...old.pages, served], loading: false, error: null });
+      next.set(parent, { pages: [...old.pages, served], loading: false, error: null, fault: null });
       childrenRef.current = next;
       setChildren(next);
     } catch (cause) {
       if (!controller.signal.aborted) {
         const next = new Map(childrenRef.current);
-        next.set(parent, { ...(next.get(parent) ?? empty()), loading: false, error: cause, retryPage: page });
+        next.set(parent, { ...(next.get(parent) ?? empty()), loading: false, error: cause, fault: faultFromDiscoveryError(FaultOperation.SessionsRead, cause), retryPage: page });
         childrenRef.current = next;
         setChildren(next);
       }
@@ -390,8 +403,11 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
         resetChildren();
         setProjects(null);
         setProjectError(null);
+        setProjectFault(null);
         setProjectsLoading(false);
         setRootPage(null);
+        setError(null);
+        setFault(null);
         await loadRoot(page, { quiet: false, cached: null });
         return;
       }
@@ -433,6 +449,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
       setRootPage(rootServed);
       setLoading(false);
       setError(null);
+      setFault(null);
       setRetryPage(undefined);
       if (rootServed.page !== page) onServedRef.current?.(rootServed.page);
       const next = new Map(childrenRef.current);
@@ -443,7 +460,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
         }
       }
       for (const result of childResults) {
-        if ('parent' in result) next.set(result.parent, { pages: result.pages, loading: false, error: null });
+        if ('parent' in result) next.set(result.parent, { pages: result.pages, loading: false, error: null, fault: null });
       }
       // A refresh proves which families are still open; a collapsed family
       // keeps no stale pages, so reopening it reads fresh.
@@ -455,9 +472,18 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
       setExpanded(new Set(opened.current));
     } catch (cause) {
       if (controller.signal.aborted) return;
+      const failure = faultFromDiscoveryError(FaultOperation.SessionsRead, cause);
+      if (failure?.evidence instanceof HttpEvidence && failure.evidence.status === 400 && failure.evidence.code === DiscoveryErrorCode.SyncPageScopeChanged && !scopeRestarted.current) {
+        scopeRestarted.current = true;
+        cache.current.clear();
+        memory.current.clear();
+        await loadRoot(page, { quiet: false, cached: null });
+        return;
+      }
       // A failed refresh keeps the loaded window on screen and reports the
       // failure where the reader can retry it.
       setError(cause);
+      setFault(failure);
       setRetryPage(page);
     } finally {
       if (rootController.current === controller) rootController.current = null;
@@ -492,11 +518,18 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
     childControllers.current.set('project-options', controller);
     setProjectsLoading(true);
     setProjectError(null);
+    setProjectFault(null);
     try {
       const optionsLoaded = await fetchHomeProjects(controller.signal);
-      if (!controller.signal.aborted) setProjects(optionsLoaded);
+      if (!controller.signal.aborted) {
+        setProjects(optionsLoaded);
+        setProjectFault(null);
+      }
     } catch (cause) {
-      if (!controller.signal.aborted) setProjectError(cause);
+      if (!controller.signal.aborted) {
+        setProjectError(cause);
+        setProjectFault(faultFromDiscoveryError(FaultOperation.ProjectRead, cause));
+      }
     } finally {
       if (childControllers.current.get('project-options') === controller) {
         childControllers.current.delete('project-options');
@@ -517,6 +550,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
     loading,
     refreshing,
     error,
+    fault,
     retry,
     children,
     expanded,
@@ -526,6 +560,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
     refresh,
     projects,
     projectError,
+    projectFault,
     projectsLoading,
     loadProjects,
   };

@@ -360,8 +360,10 @@ expensive) — the `sessions` WS channel keeps providing ambient liveness."
 plain `Map` behind `useSyncExternalStore`, keyed per subscription, so a write to
 one channel notifies only that channel's listeners — a `sessions` update does not
 re-render a `dashboard`-only component (`WebSocketContext.tsx:34`–`73`,
-`:362`–`:398`). The context value itself changes only on connect/error
-(infrequent). This is a deliberate render-isolation decision.
+`:362`–`:398`). The context value itself changes only on connect or the
+connection fault (infrequent); a channel's own topic error is retained in the
+channel store beside that channel's data, so a failed refresh is a note above
+the rows, not a blank. This is a deliberate render-isolation decision.
 
 **Where mutation wiring lives.** Writes are *not* centralized. Each write lives
 next to the surface that triggers it:
