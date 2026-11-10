@@ -431,8 +431,8 @@ transcript.
    `--force`. An unchanged named session refreshes only its commit rows.
    Measured 2026-11-09 on the large sandbox at `/tmp/opencode/slice17-timing/large`,
    session `9aec3ccd-622c-46ee-b346-92d6e20fd2a5`, port 8799, five runs after
-   one warmup, binary built from this change: median 789.5 ms, max 856.2 ms
-   (725.8, 779.0, 789.5, 807.6, 856.2). Every timed run exited 0 and opened
+   one warmup, binary built at `a7f4955a`: median 827.8 ms, max 861.1 ms
+   (762.1, 780.0, 827.8, 831.3, 861.1). Every timed run exited 0 and opened
    the session. The 7,210 ms median in the issue is the before number.
 2. **The unchanged scoped harvest sits at about 0.68 s on this host**, and the
    settled `--dry-run` is 51 ms, so the source read plus the evidence/audit
