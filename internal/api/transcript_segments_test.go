@@ -1302,8 +1302,15 @@ func TestSessionDetailFrameSurvivesInvalidHeader(t *testing.T) {
 	if message.Type != MsgSessionDetail {
 		t.Fatalf("message type = %q, want %q", message.Type, MsgSessionDetail)
 	}
-	if message.Data != read {
-		t.Fatal("the durable read was not served after a header fault")
+	served, ok := message.Data.(*schema.SessionDetailReadPayload)
+	if !ok || served == read {
+		t.Fatal("the frame must be a copy of the read, so emptying turns cannot mutate the durable payload")
+	}
+	if len(served.Turns) != 0 {
+		t.Fatalf("frame turns = %d, want none; turn content is served by the segment read", len(served.Turns))
+	}
+	if len(read.EarlierHistory[0].Turns) != 1 {
+		t.Fatal("the durable read lost its earlier-history turn")
 	}
 }
 

@@ -80,6 +80,38 @@ func seedStoreTranscript(t *testing.T, sstore *store.Store, sessionID string, tu
 	}
 }
 
+func servedSegmentZero(t *testing.T, db *store.Store, sessionID string) schema.TranscriptSegment {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := api.NewServer(api.ServerConfig{Port: 0, Store: db})
+	if err := srv.Listen(ctx); err != nil {
+		cancel()
+		t.Fatalf("Listen: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil && err != context.Canceled {
+			t.Errorf("segment server shutdown: %v", err)
+		}
+	})
+	response, err := http.Get("http://" + srv.Addr().String() + "/api/v1/sessions/" + sessionID + "/transcript/segments/0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("segment 0 status = %d, body %s", response.StatusCode, body)
+	}
+	var segment schema.TranscriptSegment
+	if err := json.Unmarshal(body, &segment); err != nil {
+		t.Fatalf("decode segment 0: %v", err)
+	}
+	return segment
+}
+
 func TestTranscriptDirectoryByteLengthMatchesServedSegment(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)

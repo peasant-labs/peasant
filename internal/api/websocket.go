@@ -246,17 +246,34 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	slog.Info("ws: client disconnected", "remote", r.RemoteAddr)
 }
 
-// sessionDetailFrame builds the durable session_detail frame and checks the
-// metadata-only header projection beside it. A header fault is logged, never
-// returned: the current viewer still reads the durable turns until the released
-// viewer consumes segments, so a projection defect must not suppress the frame.
+// sessionDetailFrame serves the session_detail frame without turn content.
+// The released viewer reads the directory and segments, so this frame keeps
+// the session metadata, title, medians, revision, and navigation, and sends
+// turns as an empty list. The durable read is not mutated: push and export
+// still carry the transcript. Earlier-history turns stay on that durable read
+// and are omitted here, because a metadata frame cannot vouch for content it
+// does not carry.
 func sessionDetailFrame(sub ChannelSubscription, detail *schema.SessionDetailReadPayload) ServerMessage {
+	if detail == nil {
+		return ServerMessage{Type: MsgSessionDetail}
+	}
 	if header := SessionDetailHeaderPayloadFromRead(detail); header != nil {
 		if err := header.Validate(); err != nil {
-			slog.Error("session detail header projection is invalid; serving the durable frame", "session_id", sub.ID, "err", err)
+			slog.Error("session detail header projection is invalid; serving metadata with empty turns", "session_id", sub.ID, "err", err)
 		}
 	}
-	return ServerMessage{Type: MsgSessionDetail, Data: detail}
+	served := *detail
+	served.Turns = []schema.TurnDetail{}
+	if len(detail.EarlierHistory) > 0 {
+		sections := make([]schema.EarlierHistorySection, len(detail.EarlierHistory))
+		for i, section := range detail.EarlierHistory {
+			section.Turns = []schema.TurnDetail{}
+			section.NativeMetadata = nil
+			sections[i] = section
+		}
+		served.EarlierHistory = sections
+	}
+	return ServerMessage{Type: MsgSessionDetail, Data: &served}
 }
 
 // sendSnapshots pushes current data for each subscription.
