@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"runtime"
@@ -55,13 +56,13 @@ func main() {
 	phase := flag.String("phase", "parity", "parity or timing (separate invocations)")
 	repetitions := flag.Int("repetitions", 1, "positive timing repetition count; parity requires 1")
 	flag.Parse()
-	if err := run(*corpus, *phase, *repetitions); err != nil {
+	if err := run(*corpus, *phase, *repetitions, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(corpus, phase string, repetitions int) error {
+func run(corpus, phase string, repetitions int, writer io.Writer) error {
 	if phase != "parity" && phase != "timing" {
 		return errors.New("use -phase=parity or -phase=timing")
 	}
@@ -100,7 +101,7 @@ func run(corpus, phase string, repetitions int) error {
 			out.Allocations = after.Mallocs - before.Mallocs
 		}
 	}
-	if json.NewEncoder(os.Stdout).Encode(out) != nil {
+	if json.NewEncoder(writer).Encode(out) != nil {
 		return errors.New("report write failed; choose a writable scratch output destination")
 	}
 	if phase == "timing" && out.Refused != 0 {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -91,23 +92,11 @@ func runCorpus(t *testing.T, inputs []input, phase string) (report, error) {
 	if err := os.WriteFile(corpus, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	old := os.Stdout
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = writer
-	runErr := run(corpus, phase, 1)
-	os.Stdout = old
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	var out report
-	if err := json.NewDecoder(reader).Decode(&out); err != nil {
+	var out bytes.Buffer
+	runErr := run(corpus, phase, 1, &out)
+	var report report
+	if err := json.NewDecoder(&out).Decode(&report); err != nil {
 		t.Fatalf("decode profiler report: %v", err)
 	}
-	if err := reader.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return out, runErr
+	return report, runErr
 }
