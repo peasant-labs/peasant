@@ -29,7 +29,11 @@ A capture reads the local session store read-only and prints a JSON report of
 the structure of each artifact: field paths, JSON types, and record-kind
 counts. It never prints transcript text. By default it also removes paths,
 session identifiers, titles, and timestamps, so the report can be attached to
-a public issue.`,
+a public issue.
+
+The report records roots, shape, and metadata only. It does not store a session,
+and it does not make the tool a harness: a tool's harness identity is declared in
+bestiary and the schema, not observed here.`,
 	}
 
 	listCmd := &cobra.Command{

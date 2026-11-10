@@ -13,6 +13,7 @@ import (
 	"testing/fstest"
 
 	"github.com/peasant-labs/peasant/internal/harnesslayout"
+	"github.com/peasant-labs/schema"
 )
 
 const reportSecret = "do-not-publish-this-sentence"
@@ -99,7 +100,8 @@ func failedReport(t *testing.T) harnesslayout.Report {
 	dir := t.TempDir()
 	open := func(string) harnesslayout.Source { return harnesslayout.Source{FS: os.DirFS(dir)} }
 	layout := harnesslayout.Layout{
-		Tool: "fixture-tool",
+		Harness: schema.HarnessOpenCode,
+		Tool:    "fixture-tool",
 		Probe: scriptedProbe{
 			discoverErr: fmt.Errorf("read secret-discovery-path: %w", fs.ErrPermission),
 		},
@@ -109,8 +111,9 @@ func failedReport(t *testing.T) harnesslayout.Report {
 		t.Fatal(err)
 	}
 	capturing := harnesslayout.Layout{
-		Tool:  "fixture-tool",
-		Probe: scriptedProbe{sessions: []string{"sess"}, fail: map[string]bool{"sess": true}},
+		Harness: schema.HarnessOpenCode,
+		Tool:    "fixture-tool",
+		Probe:   scriptedProbe{sessions: []string{"sess"}, fail: map[string]bool{"sess": true}},
 	}
 	captured, err := harnesslayout.Run(context.Background(), capturing, []string{"/secret/root"}, open, 0)
 	if err != nil {

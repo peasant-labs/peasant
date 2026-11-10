@@ -7,9 +7,11 @@
 // transcript text, so a shape-only report is safe to attach to a public issue
 // when a maintainer builds the full ingest adapter.
 //
-// The package is deliberately independent of internal/ingest. A tool listed
-// here is not a schema.Harness: promoting it to an ingested harness follows the
-// bestiary and schema contract ceremony described in docs/bestiary.md.
+// A layout tool is its own harness value only when no existing harness ingests
+// that product. It is not a harness value when it is another store of a product
+// that already has one. A layout tool is not necessarily a harness. Promotion
+// requires a bestiary declaration, then a schema declaration and tag, then an
+// adapter, fixtures, and a version.
 package harnesslayout
 
 import (
@@ -77,7 +79,11 @@ type Artifact struct {
 
 // Layout is the declared storage layout of one tool.
 type Layout struct {
-	Tool        Tool
+	Tool Tool
+	// Harness is the schema harness a session from this tool belongs to. A tool
+	// that is its own product has its own known value; another store of a known
+	// product names that product.
+	Harness     schema.Harness
 	DisplayName string
 	// Sessions states what one session is on disk, in one sentence.
 	Sessions  string
@@ -222,6 +228,16 @@ func (l Layout) validate() error {
 		return fmt.Errorf("harnesslayout: %s: no sources", l.Tool)
 	case l.Probe == nil:
 		return fmt.Errorf("harnesslayout: %s: no probe", l.Tool)
+	}
+	knownHarness := false
+	for _, h := range schema.Harnesses() {
+		if l.Harness == h {
+			knownHarness = true
+			break
+		}
+	}
+	if !knownHarness {
+		return fmt.Errorf("harnesslayout: tool %q has invalid harness %q; set Harness to a known value from schema.Harnesses()", l.Tool, l.Harness)
 	}
 	for _, artifact := range l.Artifacts {
 		if _, err := fs.Glob(emptyFS{}, artifact.Pattern); err != nil {

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/harnesslayout"
+	"github.com/peasant-labs/schema"
 )
 
 const (
@@ -60,6 +61,7 @@ func (layoutFailProbe) Capture(context.Context, harnesslayout.Source, harnesslay
 
 func init() {
 	harnesslayout.Register(harnesslayout.Layout{
+		Harness:     schema.HarnessOpenCode,
 		Tool:        layoutTestTool,
 		DisplayName: "Layout Test Tool",
 		Sessions:    "One JSONL file per session.",
@@ -69,6 +71,7 @@ func init() {
 		Probe:       layoutTestProbe{},
 	})
 	harnesslayout.Register(harnesslayout.Layout{
+		Harness:     schema.HarnessOpenCode,
 		Tool:        layoutFailTool,
 		DisplayName: "Layout Fail Tool",
 		Sessions:    "One JSONL file per session.",

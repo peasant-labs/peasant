@@ -1,15 +1,25 @@
 # Harness layouts
 
-Peasant ingests only the harnesses in `schema.AllHarnesses`. For other coding tools,
+Peasant ingests the harnesses it registers an adapter for; `peasant harvest --help` prints that set.
+For other coding tools,
 `internal/harnesslayout` records where the tool keeps its session metadata and transcripts,
 and a probe captures the structure of those files from a real machine. A captured layout is
 the evidence a maintainer needs to write a full ingest adapter. It is not ingestion: nothing
 here writes to the Peasant database, the managed transcript store, or any wire format.
 
-A tool with a layout is not a `schema.Harness`. Promoting one to an ingested harness follows
+A layout tool is its own harness value only when no existing harness ingests that product;
+`cursor-cli` and `cursor-ide-state` capture other stores of `cursor` and are not harness values
+themselves. The rule and its cases are in
+[`../bestiary.md`](../bestiary.md#known-harnesses-declared-support-and-this-build).
+
+Promoting one to an ingested harness follows
 the bestiary and schema contract procedure in [`../bestiary.md`](../bestiary.md) and
 [`../contract/versioning-procedure.md`](../contract/versioning-procedure.md), and the local
 harness migration that the store needs for a wider harness set.
+
+This command records roots, shape, and metadata only, never transcript text, and it writes no
+session. Inside a harness Peasant already ingests, a record the adapter cannot interpret is
+retained as unknown and marks that session partial. A layout capture does not do that work.
 
 ## Capturing a layout
 

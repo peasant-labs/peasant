@@ -3,7 +3,9 @@ package harnesslayout_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/fs"
+	"os"
 	"path"
 	"slices"
 	"strconv"
@@ -13,6 +15,8 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/harnesslayout"
+	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 )
 
 const exampleTool harnesslayout.Tool = "example-tool"
@@ -71,6 +75,7 @@ func (exampleProbe) Capture(_ context.Context, src harnesslayout.Source, ref har
 }
 
 var exampleLayout = harnesslayout.Layout{
+	Harness:     schema.HarnessOpenCode,
 	Tool:        exampleTool,
 	DisplayName: "Example Tool",
 	Sessions:    "One JSONL file per session.",
@@ -108,6 +113,46 @@ func TestRegisterRejectsDuplicateAndIncompleteLayouts(t *testing.T) {
 	badGlob.Tool = "bad-glob-tool"
 	badGlob.Artifacts = []harnesslayout.Artifact{{Name: "x", Pattern: "[", Format: harnesslayout.FormatJSON, Role: harnesslayout.RoleIndex}}
 	assertPanics(t, "bad glob", func() { harnesslayout.Register(badGlob) })
+}
+
+func TestRegisterRejectsInvalidHarness(t *testing.T) {
+	data, err := os.ReadFile("testdata/harness_validation.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name    string `yaml:"name"`
+			Harness string `yaml:"harness"`
+		} `yaml:"cases"`
+	}
+	if err := testutil.DecodeNamedFixtureYAML(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(schema.Harnesses(), schema.Harness(exampleTool)) {
+		t.Fatal("synthetic tool is a harness value")
+	}
+	for _, tc := range fixture.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			layout := exampleLayout
+			layout.Tool = "invalid-harness-tool"
+			layout.Harness = schema.Harness(tc.Harness)
+			defer func() {
+				p := recover()
+				if p == nil {
+					t.Fatal("Register accepted invalid harness")
+				}
+				message := fmt.Sprint(p)
+				for _, want := range []string{string(layout.Tool), fmt.Sprintf("%q", tc.Harness), "schema.Harnesses()"} {
+					if !strings.Contains(message, want) {
+						t.Errorf("panic %q lacks %q", message, want)
+					}
+				}
+			}()
+			harnesslayout.Register(layout)
+		})
+	}
 }
 
 func TestEnvResolveFiltersRootsByOperatingSystem(t *testing.T) {

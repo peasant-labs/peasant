@@ -14,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/harnesslayout"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 )
 
 type shapeField struct {
@@ -210,7 +211,7 @@ func runScriptedCase(t *testing.T, tc runCase) {
 	if tc.DiscoverError != "" {
 		probe.discoverErr = discoveryError(tc.DiscoverError)
 	}
-	layout := harnesslayout.Layout{Tool: "scripted", Probe: probe}
+	layout := harnesslayout.Layout{Tool: "scripted", Harness: schema.HarnessOpenCode, Probe: probe}
 	ctx := context.Background()
 	if tc.Cancel {
 		var cancel context.CancelFunc
