@@ -26,6 +26,7 @@ func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 		Scenarios []struct {
 			Name string `yaml:"name"`
 		} `yaml:"scenarios"`
+		RequiredObjects []string `yaml:"requiredObjects"`
 	}
 	var m struct {
 		RequiredNames []string `yaml:"requiredNames"`
@@ -83,6 +84,11 @@ func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 	}
 	objectsSQL := `SELECT name,sql FROM sqlite_master WHERE (name IN ('sessions','daily_summary_harness') OR (tbl_name='sessions' AND type IN ('index','trigger') AND sql IS NOT NULL) OR (type='trigger' AND name LIKE '%parent_state%')) ORDER BY name`
 	before := query(objectsSQL)
+	for _, name := range f.RequiredObjects {
+		if _, ok := before[name]; !ok {
+			t.Fatalf("missing predecessor schema object %q", name)
+		}
+	}
 	stateSQL := `SELECT 'revision',CAST(revision AS TEXT) FROM store_state UNION ALL SELECT session_id,coalesce(parent_id,'') || ':' || parent_state || ':' || coalesce(resolved_parent_id,'') || ':' || model_harness FROM sessions UNION ALL SELECT 'summary',model_harness || ':' || session_count FROM daily_summary_harness`
 	state := query(stateSQL)
 	if err = sqlitemigration.Migrate(context.Background(), c, dbSchema); err != nil {
