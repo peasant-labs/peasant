@@ -1,0 +1,52 @@
+# The surfaces this change rewrites read their display metadata from the
+# bounded read or the local session read payload. The full quality topic has no
+# consumer here: the transcript no longer derives medians or titles from it, and
+# the project sessions, Home browse, grouped, and flat views render stored row
+# titles. The retired title hook has no consumer either: it and the local
+# grouped row list are deleted.
+requiredNames:
+  - the transcript reads its metadata from the read payload
+  - the project sessions page renders stored row titles
+  - the home browse flows render stored row titles
+  - the grouped table renders stored row titles
+  - the flat session list renders stored row titles
+cases:
+  - name: the transcript reads its metadata from the read payload
+    path: src/components/session-detail/v2/SessionDetailV2.tsx
+    forbidden:
+      - subscribe.quality
+      - QualityPayload
+      - computePersonalMedians
+      - adaptQualitySessions
+  - name: the project sessions page renders stored row titles
+    path: src/app/sessions/[[...segments]]/SessionsRouter.tsx
+    forbidden:
+      - useSessionTitles
+      - subscribe.quality
+  - name: the home browse flows render stored row titles
+    path: src/components/home/LegacyHomeBrowse.tsx
+    forbidden:
+      - useSessionTitles
+      - subscribe.quality
+      - QualityPayload
+  - name: the grouped table renders stored row titles
+    path: src/components/sessions/GroupedSessionsSection.tsx
+    forbidden:
+      - useSessionTitles
+      - subscribe.quality
+      - QualityPayload
+  - name: the flat session list renders stored row titles
+    path: src/components/sessions/AllSessions.tsx
+    forbidden:
+      - useSessionTitles
+      - subscribe.quality
+      - QualityPayload
+deletedPaths:
+  - src/hooks/useSessionTitles.ts
+  - src/components/sessions/GroupedLocalSessions.tsx
+mutations:
+  - name: restoring the full quality subscription fails the guard
+    path: src/components/session-detail/v2/SessionDetailV2.tsx
+    find: '  const readSessionAgain = useCallback(() => {'
+    replace: '  const { data: _quality } = useChannel(subscribe.quality());\n  const readSessionAgain = useCallback(() => {'
+    expectedError: subscribe.quality

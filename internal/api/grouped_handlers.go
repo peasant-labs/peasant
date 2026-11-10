@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,7 +92,26 @@ func (s *Server) serveGroupedSessions(w http.ResponseWriter, r *http.Request) {
 		writeDiscoveryError(w, "failed to fetch grouped sessions", err)
 		return
 	}
-	payload, err := buildGroupedListPayload(filters, candidates, 1, 0, s)
+	page, pageOK := parseGroupedPageValue(r.URL.Query(), "page", 1)
+	if !pageOK {
+		writeAPIError(w, http.StatusBadRequest,
+			"Grouped sessions could not be listed because query field \"page\" is not a positive integer in internal/api.serveGroupedSessions. No provider call was made and no rows were returned. Provide one page number of at least 1, or remove the field, then retry.",
+			"grouped_page_invalid")
+		return
+	}
+	perPage, sizeOK := parseGroupedPageSize(r.URL.Query(), "perPage", groupedMembersDefaultPageSize)
+	if !sizeOK {
+		writeAPIError(w, http.StatusBadRequest,
+			"Grouped sessions could not be listed because query field \"perPage\" is outside the closed 25/50/100 page sizes in internal/api.serveGroupedSessions. No provider call was made and no rows were returned. Provide 25, 50, or 100, or remove the field for the default of 25, then retry.",
+			"grouped_per_page_invalid")
+		return
+	}
+	revision, err := s.groupedPageRevision(r.Context())
+	if err != nil {
+		writeDiscoveryError(w, "failed to read the grouped page revision", err)
+		return
+	}
+	payload, err := buildGroupedListPayload(filters, candidates, page, perPage, revision, s)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError,
 			"Grouped sessions could not be assembled because the grouped projection failed in internal/api.serveGroupedSessions after the session rows were read. No grouped response was returned, because a partial list would misstate the counts. Retry the grouped list; if the failure repeats, inspect the Peasant server logs.",
@@ -117,7 +137,26 @@ func (s *Server) serveGroupedSearch(w http.ResponseWriter, r *http.Request, quer
 		writeDiscoveryError(w, "failed to fetch grouped search results", err)
 		return
 	}
-	payload, err := buildGroupedListPayload(filters, candidates, 1, 0, s)
+	page, pageOK := parseGroupedPageValue(r.URL.Query(), "page", 1)
+	if !pageOK {
+		writeAPIError(w, http.StatusBadRequest,
+			"Grouped search results could not be listed because query field \"page\" is not a positive integer in internal/api.serveGroupedSearch. No provider call was made and no rows were returned. Provide one page number of at least 1, or remove the field, then retry.",
+			"grouped_page_invalid")
+		return
+	}
+	perPage, sizeOK := parseGroupedPageSize(r.URL.Query(), "perPage", groupedMembersDefaultPageSize)
+	if !sizeOK {
+		writeAPIError(w, http.StatusBadRequest,
+			"Grouped search results could not be listed because query field \"perPage\" is outside the closed 25/50/100 page sizes in internal/api.serveGroupedSearch. No provider call was made and no rows were returned. Provide 25, 50, or 100, or remove the field for the default of 25, then retry.",
+			"grouped_per_page_invalid")
+		return
+	}
+	revision, err := s.groupedPageRevision(r.Context())
+	if err != nil {
+		writeDiscoveryError(w, "failed to read the grouped page revision", err)
+		return
+	}
+	payload, err := buildGroupedListPayload(filters, candidates, page, perPage, revision, s)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError,
 			"Grouped search results could not be assembled because the grouped projection failed in internal/api.serveGroupedSearch after the matching sessions were read. No grouped response was returned, because a partial list would misstate the counts. Retry the search; if the failure repeats, inspect the Peasant server logs.",
@@ -136,7 +175,7 @@ func (s *Server) handleHelperGroupMembers(w http.ResponseWriter, r *http.Request
 	request, ok := s.exactRequestGuard(w, r, exactRequestSpec{
 		operation: "helper group member",
 		provider:  true,
-		query:     map[string]bool{"scope": true, "page": false, "limit": false},
+		query:     map[string]bool{"scope": true, "page": false, "perPage": false},
 	})
 	if !ok {
 		return
@@ -170,11 +209,11 @@ func (s *Server) handleHelperGroupMembers(w http.ResponseWriter, r *http.Request
 			"grouped_page_invalid")
 		return
 	}
-	limit, limitOK := parseGroupedPageValue(request.query, "limit", groupedMembersDefaultLimit)
-	if !limitOK {
+	perPage, perPageOK := parseGroupedPageSize(request.query, "perPage", groupedMembersDefaultPageSize)
+	if !perPageOK {
 		writeAPIError(w, http.StatusBadRequest,
-			"Helper group members could not be listed because query field \"limit\" is not a positive integer in internal/api.handleHelperGroupMembers. No provider call was made and no members were returned. Provide one page size of at least 1, or remove the field, then retry.",
-			"grouped_limit_invalid")
+			"Helper group members could not be listed because query field \"perPage\" is outside the closed 25/50/100 page sizes in internal/api.handleHelperGroupMembers. No provider call was made and no members were returned. Provide 25, 50, or 100, or remove the field for the default of 25, then retry.",
+			"grouped_per_page_invalid")
 		return
 	}
 
@@ -188,7 +227,12 @@ func (s *Server) handleHelperGroupMembers(w http.ResponseWriter, r *http.Request
 		writeDiscoveryError(w, "failed to replay grouped member scope", err)
 		return
 	}
-	payload, err := buildGroupedMembersPayload(groupID, entry.Filters, candidates, page, limit, s)
+	revision, err := s.groupedPageRevision(r.Context())
+	if err != nil {
+		writeDiscoveryError(w, "failed to read the member page revision", err)
+		return
+	}
+	payload, err := buildGroupedMembersPayload(groupID, entry.Filters, candidates, page, perPage, revision, s)
 	switch {
 	case errors.Is(err, errGroupedGroupUnknown):
 		s.writeGroupedScopeExpired(w, groupID)
@@ -225,4 +269,32 @@ func parseGroupedPageValue(values url.Values, name string, defaultValue int) (in
 		return 0, false
 	}
 	return parsed, true
+}
+
+// parseGroupedPageSize reads one optional page size and validates it through the
+// schema-owned closed set. A missing value is the 25-row default; a malformed or
+// non-member value is refused rather than cast.
+func parseGroupedPageSize(values url.Values, name string, defaultValue schema.PageSize) (schema.PageSize, bool) {
+	raw, present := values[name]
+	if !present || raw[0] == "" {
+		return defaultValue, true
+	}
+	parsed, err := strconv.Atoi(raw[0])
+	if err != nil {
+		return 0, false
+	}
+	size, err := schema.NewPageSize(parsed)
+	if err != nil {
+		return 0, false
+	}
+	return size, true
+}
+
+// groupedPageRevision reads the one store revision a grouped payload carries.
+// A server without a store has no revision to compare, so it reports zero.
+func (s *Server) groupedPageRevision(ctx context.Context) (string, error) {
+	if s.cfg.Store == nil {
+		return "0", nil
+	}
+	return s.cfg.Store.Revision(ctx)
 }

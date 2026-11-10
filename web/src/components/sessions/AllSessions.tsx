@@ -1,9 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { SearchIcon } from 'lucide-react';
 import { Input, ProviderName } from '@/lib/ft-ui';
+import { closed } from '@peasant-labs/fairtrade/closed-value';
+import {
+  ColumnAlign,
+  TranscriptLibraryTable,
+  type TranscriptLibraryColumn,
+} from '@peasant-labs/fairtrade/ui';
 import { formatTokens } from '@/lib/sessions/columns';
 import { displayProject } from '@/lib/quality/utils';
 import { parseProjectHash, transcriptHref } from '@/lib/navigation/projectRoutes';
@@ -14,7 +20,12 @@ import type { SessionSummary } from '@/types/messages';
  * on `/`, restoring the pre-release archive's Projects page shape (a projects
  * list, then every ingested session beneath it).
  *
- * Columns are project · session · harness · turns · tokens.
+ * The list is a thin host adapter over the shared table: it renders a complete
+ * list with `page={null}` (the table hides its pager and draws every row), so a
+ * caller that holds no server total never invents one.
+ *
+ * Columns are session · project · harness · turns · tokens. The session column
+ * is the row identity, so the shared table always shows it.
  *
  * Two columns the archive showed are deliberately ABSENT:
  *   - "Source" / "Status". Those were never real data — the archive's own
@@ -31,21 +42,20 @@ import type { SessionSummary } from '@/types/messages';
  *     halving. The honest header is the total.
  */
 
-/** Rows per page. The full payload can run to thousands of sessions. */
-const PAGE_SIZE = 25;
+const AllSessionColumn = Object.freeze({
+  Session: closed('session', 'session'),
+  Project: closed('project', 'project'),
+  Harness: closed('harness', 'harness'),
+  Turns: closed('turns', 'turns'),
+  Tokens: closed('tokens', 'tokens'),
+} as const);
+type AllSessionColumn = (typeof AllSessionColumn)[keyof typeof AllSessionColumn];
 
-/**
- * Column track sizing, in the reading order project · session · harness · turns
- * · tokens — project leads because it is how you orient in a cross-project list.
- *
- * The text columns take FRACTIONAL widths so the slack spreads across all of
- * them rather than pooling in one, and `session` takes the largest share since
- * it carries the generated title, which is the longest content in the row. The
- * two numeric columns stay fixed: their content has a bounded width, and holding
- * them steady keeps the tabular figures aligned down the page.
- */
-const GRID =
-  'grid min-w-[48rem] grid-cols-[minmax(0,2fr)_minmax(0,4fr)_minmax(0,1.5fr)_88px_112px] items-center gap-5 px-5';
+/** One grouping member: a complete list renders as one ungrouped body. */
+const AllSessionGroupBy = Object.freeze({
+  None: closed('none', 'none'),
+} as const);
+type AllSessionGroupBy = (typeof AllSessionGroupBy)[keyof typeof AllSessionGroupBy];
 
 function sessionDate(iso: string): string {
   const ms = Date.parse(iso);
@@ -65,36 +75,27 @@ function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
 }
 
-function SessionRow({ session, title }: { session: SessionSummary; title?: string }) {
+function rowTitle(session: SessionSummary): string {
+  const preview = session.preview?.trim();
+  return preview || shortId(session.id);
+}
+
+function SessionCell({ session }: { session: SessionSummary }) {
   const projectHash = parseProjectHash(session.projectHash);
   const project = session.project ? displayProject(session.project) : '—';
-  // The generated title is the row's identity when there is one; the short id is
-  // the fallback, since the server only stores a title for some sessions.
-  const primary = title ?? shortId(session.id);
+  const primary = rowTitle(session);
   const label = `${primary}, ${session.harness}, ${session.turnCount} turns, ${session.totalTokens.toLocaleString()} tokens${session.project ? `, ${project}` : ''}`;
 
-  const cells = (
+  const body = (
     <>
-      <span className="min-w-0 text-xs text-ink-3 truncate" title={session.project ?? undefined}>
-        {project}
-      </span>
       <span className="min-w-0">
         <span
-          className={`block text-[13px] text-ink truncate ${title ? '' : 'font-mono'}`}
-          title={title ?? session.id}
+          className={`block text-[13px] text-ink truncate ${session.preview?.trim() ? '' : 'font-mono'}`}
+          title={session.preview?.trim() || session.id}
         >
           {primary}
         </span>
         <span className="block text-[11px] text-ink-4 truncate">{sessionDate(session.startTime)}</span>
-      </span>
-      <span className="min-w-0 text-[13px] text-ink-2">
-        <ProviderName harness={session.harness} />
-      </span>
-      <span className="font-mono text-xs text-ink-3 tabular-nums text-right">
-        {session.turnCount.toLocaleString()}
-      </span>
-      <span className="font-mono text-xs text-ink-3 tabular-nums text-right">
-        {formatTokens(session.totalTokens)}
       </span>
     </>
   );
@@ -106,12 +107,8 @@ function SessionRow({ session, title }: { session: SessionSummary; title?: strin
       // role="group" so the aria-label is actually exposed: a label on a bare
       // <div> with no role is dropped by assistive tech, which would have made
       // the "not openable" explanation silent.
-      <div
-        role="group"
-        className={`${GRID} py-3`}
-        aria-label={`${label} (no project recorded, not openable)`}
-      >
-        {cells}
+      <div role="group" className="py-1" aria-label={`${label} (no project recorded, not openable)`}>
+        {body}
       </div>
     );
   }
@@ -120,28 +117,21 @@ function SessionRow({ session, title }: { session: SessionSummary; title?: strin
     <Link
       href={transcriptHref(projectHash, session.id)}
       aria-label={`Open session ${label}`}
-      className={`${GRID} py-3 hover:bg-surface-hover transition-colors focus-mono cursor-pointer`}
+      className="block py-1 hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
     >
-      {cells}
+      {body}
     </Link>
   );
 }
 
 export function AllSessions({
   sessions,
-  titles,
   title = 'all sessions',
 }: {
   sessions: SessionSummary[];
-  /**
-   * sessionId → generated title, from useSessionTitles(). Partial by design:
-   * rows without an entry fall back to the short session id.
-   */
-  titles?: ReadonlyMap<string, string>;
   /** Heading, so a project-scoped view can name the project it is showing. */
   title?: string;
 }) {
-  const [page, setPage] = useState(0);
   const [query, setQuery] = useState('');
 
   // Newest first: the most recent work is what you are usually looking for.
@@ -152,34 +142,63 @@ export function AllSessions({
 
   // Match the fields the row actually SHOWS, so a hit is always visible in the
   // result: the short id the cell renders (not the full id, which would match
-  // on characters the user cannot see), the harness, and both the raw and
-  // displayed project name — typing "peasant" finds it even though the cell
-  // shows only the leaf segment.
+  // on characters the user cannot see), the preview, the harness, and both the
+  // raw and displayed project name.
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return ordered;
     return ordered.filter(
       (s) =>
-        (titles?.get(s.id) ?? '').toLowerCase().includes(q) ||
+        (s.preview?.trim() ?? '').toLowerCase().includes(q) ||
         shortId(s.id).toLowerCase().includes(q) ||
         s.harness.toLowerCase().includes(q) ||
         (s.project ?? '').toLowerCase().includes(q) ||
         (s.project ? displayProject(s.project).toLowerCase().includes(q) : false),
     );
-  }, [ordered, query, titles]);
+  }, [ordered, query]);
 
-  // A narrowed result usually has fewer pages than the page you were on.
-  // Without this the clamp below would silently show the last page of the new
-  // result, which reads as "search jumped me somewhere random".
-  useEffect(() => {
-    setPage(0);
-  }, [query]);
-
-  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
-  // Clamp rather than store a corrected page: if the payload shrinks under a
-  // live socket update, a stale index must not render an empty table.
-  const current = Math.min(page, pageCount - 1);
-  const rows = visible.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE);
+  const columns = useMemo<TranscriptLibraryColumn<SessionSummary, AllSessionColumn>[]>(() => [
+    {
+      id: AllSessionColumn.Session,
+      label: 'session',
+      align: ColumnAlign.Start,
+      render: (session) => <SessionCell session={session} />,
+    },
+    {
+      id: AllSessionColumn.Project,
+      label: 'project',
+      align: ColumnAlign.Start,
+      render: (session) => (
+        <span className="min-w-0 text-xs text-ink-3 truncate" title={session.project ?? undefined}>
+          {session.project ? displayProject(session.project) : '—'}
+        </span>
+      ),
+    },
+    {
+      id: AllSessionColumn.Harness,
+      label: 'harness',
+      align: ColumnAlign.Start,
+      render: (session) => (
+        <span className="min-w-0 text-[13px] text-ink-2">
+          <ProviderName harness={session.harness} />
+        </span>
+      ),
+    },
+    {
+      id: AllSessionColumn.Turns,
+      label: 'turns',
+      align: ColumnAlign.End,
+      numeric: true,
+      render: (session) => session.turnCount.toLocaleString(),
+    },
+    {
+      id: AllSessionColumn.Tokens,
+      label: 'tokens',
+      align: ColumnAlign.End,
+      numeric: true,
+      render: (session) => formatTokens(session.totalTokens),
+    },
+  ], []);
 
   if (ordered.length === 0) return null;
 
@@ -230,47 +249,20 @@ export function AllSessions({
           no sessions match &ldquo;{query.trim()}&rdquo;.
         </p>
       ) : (
-        <div className="min-w-0 overflow-x-auto border border-rule bg-surface">
-          <div className={`${GRID} py-2 border-b border-rule`}>
-            <span className="v2-eyebrow">project</span>
-            <span className="v2-eyebrow">session</span>
-            <span className="v2-eyebrow">harness</span>
-            <span className="v2-eyebrow text-right">turns</span>
-            <span className="v2-eyebrow text-right">tokens</span>
-          </div>
-
-          <div className="divide-y divide-rule">
-            {rows.map((session) => (
-              <SessionRow key={session.id} session={session} title={titles?.get(session.id)} />
-            ))}
-          </div>
-
-          {pageCount > 1 && (
-            <div className="flex items-center justify-between gap-3 border-t border-rule px-5 py-2">
-              <span className="font-mono text-xs text-ink-4 tabular-nums">
-                page {current + 1} of {pageCount}
-              </span>
-              <span className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPage(current - 1)}
-                  disabled={current === 0}
-                  className="border border-rule px-3 py-1 font-mono text-xs text-ink-2 hover:bg-surface-hover disabled:opacity-40 disabled:pointer-events-none focus-mono cursor-pointer"
-                >
-                  previous
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPage(current + 1)}
-                  disabled={current >= pageCount - 1}
-                  className="border border-rule px-3 py-1 font-mono text-xs text-ink-2 hover:bg-surface-hover disabled:opacity-40 disabled:pointer-events-none focus-mono cursor-pointer"
-                >
-                  next
-                </button>
-              </span>
-            </div>
-          )}
-        </div>
+        <TranscriptLibraryTable<SessionSummary, AllSessionGroupBy, AllSessionColumn>
+          caption={title}
+          rows={visible}
+          rowKey={(session) => session.id}
+          columns={columns}
+          groupBy={AllSessionGroupBy.None}
+          groupByOptions={[AllSessionGroupBy.None]}
+          groupKeys={() => []}
+          groupLabel={(id) => id}
+          nextGroupKeys={null}
+          continuedGroupKeys={null}
+          page={null}
+          viewState={null}
+        />
       )}
     </section>
   );

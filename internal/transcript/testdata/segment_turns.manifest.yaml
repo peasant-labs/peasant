@@ -1,0 +1,6 @@
+requiredNames:
+  - twelve-small-turns-served-whole
+  - oversized-turn-content-bounded
+  - oversized-tool-result-bounded
+  - field-exactly-at-bound-served-whole
+  - field-well-over-bound-shortened

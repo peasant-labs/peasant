@@ -1,759 +1,594 @@
 package store
 
-// V70 fixture-driven tests: the fresh schema, the V69 upgrade and its spawns
-// backfill, the duplicate (team, name) a transcript may already carry, the
-// maintenance writer behind SaveClaudeEvidence, the cascade from a pruned
-// evidence row, and the rebuild that replaces both derived tables.
-//
-// The file is package store so it can swap the spawns seam and reuse the
-// stored spawn layout. The strict fixture decode lives here directly because
-// internal/testutil imports this package.
-
 import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
+	regexp "github.com/wasilibs/go-re2"
 	"io"
+	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed testdata/migrations/v70_derived_lookups.yaml
-var v70DerivedLookupsFixtureBytes []byte
+//go:embed testdata/parent_state.yaml
+var parentStateYAML []byte
 
-type v70Expectation struct {
-	Name string `yaml:"name"`
-	Kind string `yaml:"kind"`
+//go:embed testdata/parent_state.manifest.yaml
+var parentStateManifestYAML []byte
+
+// parentStateCase is one stored child and the inputs that decide its parent
+// lane. The same row drives the V70 backfill over the predecessor schema and
+// the drift check over the production writers.
+type parentStateCase struct {
+	Name               string `yaml:"name"`
+	Child              string `yaml:"child"`
+	EvidenceKind       string `yaml:"evidenceKind"`
+	EvidenceState      string `yaml:"evidenceState"`
+	EvidenceTarget     string `yaml:"evidenceTarget"`
+	CacheParent        string `yaml:"cacheParent"`
+	Snapshot           string `yaml:"snapshot"`
+	InactiveEvidence   bool   `yaml:"inactiveEvidence"`
+	WantState          string `yaml:"wantState"`
+	WantResolvedParent string `yaml:"wantResolvedParent"`
 }
 
-type v70SpawnRef struct {
-	Team string `yaml:"team"`
-	Name string `yaml:"name"`
+// parentStateRejection is one value the projection column must refuse.
+type parentStateRejection struct {
+	Name         string `yaml:"name"`
+	StateLiteral string `yaml:"stateLiteral"`
 }
 
-type v70Evidence struct {
-	SourcePath   string        `yaml:"source_path"`
-	Scope        string        `yaml:"scope"`
-	IdentityTeam *string       `yaml:"identity_team"`
-	IdentityName *string       `yaml:"identity_name"`
-	Spawns       []v70SpawnRef `yaml:"spawns"`
+type parentStateFixture struct {
+	Target     string                 `yaml:"target"`
+	Unstored   string                 `yaml:"unstored"`
+	Snapshot   string                 `yaml:"snapshot"`
+	Cases      []parentStateCase      `yaml:"cases"`
+	Rejections []parentStateRejection `yaml:"rejections"`
 }
 
-type v70Spawn struct {
-	SpawnerPath string `yaml:"spawner_path"`
-	Team        string `yaml:"team"`
-	Name        string `yaml:"name"`
+type parentStateManifest struct {
+	RequiredCases      []string `yaml:"requiredCases"`
+	RequiredRejections []string `yaml:"requiredRejections"`
 }
 
-type v70Rollout struct {
-	Path      string `yaml:"path"`
-	SessionID string `yaml:"session_id"`
-}
-
-// v70MaintenanceStep is one save driven through the production writer. It
-// carries the exact projection that save must leave, so a wrong row or a
-// missing delete fails the step.
-type v70MaintenanceStep struct {
-	Name           string        `yaml:"name"`
-	SourcePath     string        `yaml:"source_path"`
-	Scope          string        `yaml:"scope"`
-	Spawns         []v70SpawnRef `yaml:"spawns"`
-	ExpectedSpawns []v70Spawn    `yaml:"expected_spawns"`
-}
-
-type v70Fixture struct {
-	RequiredNames            []string             `yaml:"requiredNames"`
-	Expectations             []v70Expectation     `yaml:"expectations"`
-	Evidence                 []v70Evidence        `yaml:"evidence"`
-	ExpectedSpawns           []v70Spawn           `yaml:"expected_spawns"`
-	Walk                     []v70Rollout         `yaml:"walk"`
-	ExpectedCatalog          []v70Rollout         `yaml:"expected_catalog"`
-	ExpectedCatalogOnUpgrade []v70Rollout         `yaml:"expected_catalog_on_upgrade"`
-	InvalidWalkEntry         v70Rollout           `yaml:"invalid_walk_entry"`
-	CorruptSpawns            []v70Spawn           `yaml:"corrupt_spawns"`
-	CorruptCatalog           []v70Rollout         `yaml:"corrupt_catalog"`
-	DuplicateProbe           v70Spawn             `yaml:"duplicate_probe"`
-	RequiredMaintenanceNames []string             `yaml:"required_maintenance_names"`
-	MaintenanceSteps         []v70MaintenanceStep `yaml:"maintenance_steps"`
-	PruneProbe               struct {
-		SpawnerPath string `yaml:"spawner_path"`
-	} `yaml:"prune_probe"`
-}
-
-// v70ExpectationKinds is the closed set of assertions the fixture may name.
-var v70ExpectationKinds = map[string]struct{}{
-	"spawns-backfill":                 {},
-	"duplicate-dedupe":                {},
-	"catalog-empty":                   {},
-	"rebuild-refuses-incomplete-walk": {},
-	"rebuild-spawns":                  {},
-	"rebuild-catalog":                 {},
-	"prune-cascade":                   {},
-}
-
-// requireV70NameSet fails on a blank, duplicate, missing, or undeclared name,
-// so each fixture section is protected by an exact name set rather than a
-// count.
-func requireV70NameSet(t *testing.T, label string, required, actual []string) {
+func loadParentStateFixture(t *testing.T) parentStateFixture {
 	t.Helper()
-	if len(required) == 0 {
-		t.Fatalf("v70 derived-lookups fixture declares no required %s names", label)
-	}
-	requiredSet := make(map[string]struct{}, len(required))
-	for _, name := range required {
-		if strings.TrimSpace(name) == "" {
-			t.Fatalf("v70 derived-lookups fixture declares a blank required %s name", label)
-		}
-		if _, duplicate := requiredSet[name]; duplicate {
-			t.Fatalf("v70 derived-lookups fixture repeats required %s name %q", label, name)
-		}
-		requiredSet[name] = struct{}{}
-	}
-	actualSet := make(map[string]struct{}, len(actual))
-	for _, name := range actual {
-		if strings.TrimSpace(name) == "" {
-			t.Fatalf("v70 derived-lookups fixture declares a %s row with a blank name", label)
-		}
-		if _, duplicate := actualSet[name]; duplicate {
-			t.Fatalf("v70 derived-lookups fixture repeats %s %q", label, name)
-		}
-		actualSet[name] = struct{}{}
-	}
-	for _, name := range required {
-		if _, ok := actualSet[name]; !ok {
-			t.Fatalf("v70 derived-lookups fixture requires %s %q but declares no such row", label, name)
-		}
-	}
-	for name := range actualSet {
-		if _, ok := requiredSet[name]; !ok {
-			t.Fatalf("v70 derived-lookups fixture carries undeclared %s %q; add it to its required name list", label, name)
-		}
-	}
-}
-
-func loadV70DerivedLookupsFixture(t *testing.T) v70Fixture {
-	t.Helper()
-	var fixture v70Fixture
-	decoder := yaml.NewDecoder(bytes.NewReader(v70DerivedLookupsFixtureBytes))
+	var fixture parentStateFixture
+	decoder := yaml.NewDecoder(bytes.NewReader(parentStateYAML))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixture); err != nil {
-		t.Fatalf("decode v70 derived-lookups fixture: %v", err)
+		t.Fatalf("decode testdata/parent_state.yaml: %v", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("v70 derived-lookups fixture must contain exactly one YAML document: %v", err)
+		t.Fatalf("testdata/parent_state.yaml must contain exactly one YAML document: %v", err)
 	}
-
-	expectationNames := make([]string, 0, len(fixture.Expectations))
-	for _, expectation := range fixture.Expectations {
-		expectationNames = append(expectationNames, expectation.Name)
-		if _, ok := v70ExpectationKinds[expectation.Kind]; !ok {
-			t.Fatalf("v70 derived-lookups fixture expectation %q names unknown kind %q; use one of the closed kinds", expectation.Name, expectation.Kind)
-		}
+	var manifest parentStateManifest
+	decoder = yaml.NewDecoder(bytes.NewReader(parentStateManifestYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&manifest); err != nil {
+		t.Fatalf("decode testdata/parent_state.manifest.yaml: %v", err)
 	}
-	requireV70NameSet(t, "expectation", fixture.RequiredNames, expectationNames)
-
-	maintenanceNames := make([]string, 0, len(fixture.MaintenanceSteps))
-	for _, step := range fixture.MaintenanceSteps {
-		maintenanceNames = append(maintenanceNames, step.Name)
-		if strings.TrimSpace(step.SourcePath) == "" {
-			t.Fatalf("v70 derived-lookups maintenance step %q carries a blank source_path", step.Name)
-		}
-		if !ingest.ClaudeEvidenceScope(step.Scope).IsValid() {
-			t.Fatalf("v70 derived-lookups maintenance step %q names unknown scope %q", step.Name, step.Scope)
-		}
-		// An empty expected projection is meaningful: the scope-flip step ends
-		// with no rows, so only the row fields are validated here.
-		for _, row := range step.ExpectedSpawns {
-			if strings.TrimSpace(row.SpawnerPath) == "" {
-				t.Fatalf("v70 derived-lookups maintenance step %q expects a row with a blank spawner_path", step.Name)
+	cases := make([]string, 0, len(fixture.Cases))
+	for _, tc := range fixture.Cases {
+		cases = append(cases, tc.Name)
+		for _, token := range []string{tc.EvidenceState, tc.EvidenceTarget, tc.CacheParent, tc.Snapshot, tc.WantResolvedParent} {
+			switch token {
+			case "", "target", "unstored", "snapshot", "explicit_none", "target_known", "target_known_retained", "unknown", "conflicting_current_native_evidence":
+			default:
+				t.Fatalf("parent state case %q names the unknown token %q", tc.Name, token)
 			}
 		}
-	}
-	requireV70NameSet(t, "maintenance", fixture.RequiredMaintenanceNames, maintenanceNames)
-
-	for _, evidence := range fixture.Evidence {
-		if strings.TrimSpace(evidence.SourcePath) == "" {
-			t.Fatal("v70 derived-lookups fixture carries evidence with a blank source_path")
+		switch tc.EvidenceKind {
+		case "", "started_by", "context_from":
+		default:
+			t.Fatalf("parent state case %q names the unknown evidence kind %q", tc.Name, tc.EvidenceKind)
 		}
-		if !ingest.ClaudeEvidenceScope(evidence.Scope).IsValid() {
-			t.Fatalf("v70 derived-lookups fixture evidence %q names unknown scope %q", evidence.SourcePath, evidence.Scope)
-		}
-		if (evidence.IdentityTeam == nil) != (evidence.IdentityName == nil) {
-			t.Fatalf("v70 derived-lookups fixture evidence %q sets one half of an identity; set both or neither", evidence.SourcePath)
+		if _, err := NewParentState(tc.WantState); err != nil {
+			t.Fatalf("parent state case %q: %v", tc.Name, err)
 		}
 	}
-	if len(fixture.ExpectedSpawns) == 0 {
-		t.Fatal("v70 derived-lookups fixture declares no expected spawn rows")
+	if err := validateRecoveryRequiredNames(manifest.RequiredCases, cases, "parent state"); err != nil {
+		t.Fatal(err)
 	}
-	if len(fixture.Walk) == 0 {
-		t.Fatal("v70 derived-lookups fixture declares no enumerated walk")
+	rejections := make([]string, 0, len(fixture.Rejections))
+	for _, rejection := range fixture.Rejections {
+		rejections = append(rejections, rejection.Name)
 	}
-	if len(fixture.ExpectedCatalog) == 0 {
-		t.Fatal("v70 derived-lookups fixture declares no expected catalog rows")
+	if err := validateRecoveryRequiredNames(manifest.RequiredRejections, rejections, "parent state rejection"); err != nil {
+		t.Fatal(err)
 	}
-	if strings.TrimSpace(fixture.InvalidWalkEntry.Path) == "" {
-		t.Fatal("v70 derived-lookups fixture declares no incomplete walk entry")
-	}
-	if len(fixture.CorruptSpawns) == 0 {
-		t.Fatal("v70 derived-lookups fixture declares no spawns corruption to repair")
-	}
-	if len(fixture.CorruptCatalog) == 0 {
-		t.Fatal("v70 derived-lookups fixture declares no catalog corruption to repair")
-	}
-	if fixture.DuplicateProbe.SpawnerPath == "" || fixture.DuplicateProbe.Team == "" || fixture.DuplicateProbe.Name == "" {
-		t.Fatal("v70 derived-lookups fixture declares an incomplete duplicate probe")
-	}
-	if fixture.PruneProbe.SpawnerPath == "" {
-		t.Fatal("v70 derived-lookups fixture declares no prune probe")
+	if fixture.Target == "" || fixture.Unstored == "" || fixture.Snapshot == "" {
+		t.Fatal("parent state fixture must name the stored, unstored, and snapshot parent identifiers")
 	}
 	return fixture
 }
 
-// seedV69WithEvidence installs the predecessor schema and the fixture's
-// evidence rows through raw SQL, the way a store installed before V70 exists.
-func seedV69WithEvidence(t *testing.T, dbPath string, fixture v70Fixture) {
+// parentStateIDs resolves the fixture tokens for one case.
+func parentStateIDs(t *testing.T, fixture parentStateFixture, tc parentStateCase) (child string, cacheParent string, evidenceTarget string, snapshot string) {
 	t.Helper()
-	ctx := t.Context()
-	conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite, sqlite.OpenCreate)
+	child = tc.Child
+	switch tc.CacheParent {
+	case "":
+	case "target":
+		cacheParent = fixture.Target
+	default:
+		t.Fatalf("case %q names the unknown cache token %q", tc.Name, tc.CacheParent)
+	}
+	switch tc.EvidenceTarget {
+	case "":
+	case "target":
+		evidenceTarget = fixture.Target
+	case "unstored":
+		evidenceTarget = fixture.Unstored
+	default:
+		t.Fatalf("case %q names the unknown evidence token %q", tc.Name, tc.EvidenceTarget)
+	}
+	switch tc.Snapshot {
+	case "":
+	case "snapshot":
+		snapshot = fixture.Snapshot
+	default:
+		t.Fatalf("case %q names the unknown snapshot token %q", tc.Name, tc.Snapshot)
+	}
+	return child, cacheParent, evidenceTarget, snapshot
+}
+
+// schemaSlotBeforeV70 is the migration slot the V70 test seeds on. It is pinned
+// by number, not len(Migrations)-1, so a later migration cannot silently move
+// the predecessor past V70 and turn the backfill test into a no-op.
+const schemaSlotBeforeV70 = 69
+
+// openPredecessorConn opens a database migrated through exactly the migrations
+// that shipped before V70, so the V70 test seeds the state an installed store
+// holds.
+func openPredecessorConn(t *testing.T) *sqlite.Conn {
+	t.Helper()
+	conn, err := sqlite.OpenConn(filepath.Join(t.TempDir(), "v70.db"), sqlite.OpenReadWrite, sqlite.OpenCreate)
 	if err != nil {
-		t.Fatalf("open the V69 seed database: %v", err)
+		t.Fatalf("open predecessor database: %v", err)
 	}
-	if err := sqlitemigration.Migrate(ctx, conn, frozenSchema(69)); err != nil {
-		_ = conn.Close()
-		t.Fatalf("migrate the seed database to V69: %v", err)
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := sqlitemigration.Migrate(context.Background(), conn, frozenSchema(schemaSlotBeforeV70)); err != nil {
+		t.Fatalf("migrate predecessor schema: %v", err)
 	}
-	for _, evidence := range fixture.Evidence {
-		spawns := make([]claudeSpawnRow, 0, len(evidence.Spawns))
-		for _, spawn := range evidence.Spawns {
-			spawns = append(spawns, claudeSpawnRow{Team: spawn.Team, Name: spawn.Name})
-		}
-		spawnsJSON, err := json.Marshal(spawns)
-		if err != nil {
-			_ = conn.Close()
-			t.Fatalf("encode spawns for %q: %v", evidence.SourcePath, err)
-		}
-		var team, name any
-		if evidence.IdentityTeam != nil {
-			team = *evidence.IdentityTeam
-			name = *evidence.IdentityName
-		}
-		if err := sqlitex.Execute(conn,
-			`INSERT INTO claude_transcript_evidence (
-    source_path, scope, mod_time_unix_nano, size_bytes, has_conversation,
-    identity_team, identity_name, spawns_json, title, branch, cwd
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{
-				Args: []any{
-					evidence.SourcePath, evidence.Scope, int64(1), int64(2), int64(0),
-					team, name, string(spawnsJSON), "", "", "",
-				},
-			}); err != nil {
-			_ = conn.Close()
-			t.Fatalf("seed evidence %q: %v", evidence.SourcePath, err)
-		}
-	}
-	if err := conn.Close(); err != nil {
-		t.Fatalf("close the V69 seed database: %v", err)
+	return conn
+}
+
+func TestMigrationV70BackfillsParentState(t *testing.T) {
+	t.Parallel()
+	fixture := loadParentStateFixture(t)
+	for _, tc := range fixture.Cases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			conn := openPredecessorConn(t)
+			child, cacheParent, evidenceTarget, snapshot := parentStateIDs(t, fixture, tc)
+			seedParentStateRow(t, conn, fixture.Target, child, cacheParent, tc.EvidenceKind, tc.EvidenceState, evidenceTarget, snapshot, tc.InactiveEvidence)
+			if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
+				t.Fatalf("migrate to V70: %v", err)
+			}
+			state, resolved := readParentState(t, conn, child)
+			assertParentState(t, tc, fixture, state, resolved)
+		})
 	}
 }
 
-func formatSpawn(row v70Spawn) string {
-	return row.SpawnerPath + "\x00" + row.Team + "\x00" + row.Name
-}
-
-func formatRollout(row v70Rollout) string {
-	return row.Path + "\x00" + row.SessionID
-}
-
-func sortedSpawnRows(rows []v70Spawn) []string {
-	out := make([]string, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, formatSpawn(row))
-	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedRolloutRows(rows []v70Rollout) []string {
-	out := make([]string, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, formatRollout(row))
-	}
-	sort.Strings(out)
-	return out
-}
-
-// withV70Conn scopes one connection to one assertion, so no test puts a
-// connection back twice and the pool size never depends on the test body.
-func withV70Conn(t *testing.T, db *Store, fn func(*sqlite.Conn)) {
+// seedParentStateRow stores one fixture row on the predecessor schema, before
+// the projection columns exist. It seeds the availability cache, the managed
+// metadata ParentUUID snapshot, and the generation evidence the case names, so
+// the backfill and the drift test describe the same stored state.
+func seedParentStateRow(t *testing.T, conn *sqlite.Conn, target, child, cacheParent, evidenceKind, evidenceState, evidenceTarget, snapshot string, inactiveEvidence bool) {
 	t.Helper()
-	conn, err := db.pool.Take(t.Context())
-	if err != nil {
-		t.Fatalf("take a store connection: %v", err)
+	if err := sqlitex.ExecuteScript(conn, `
+INSERT OR IGNORE INTO host_slugs(opaque_id, host_slug) VALUES('state-host','state-host');
+INSERT OR IGNORE INTO projects(project_hash, canonical_cwd) VALUES('state-project','/synthetic/state');
+INSERT OR IGNORE INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
+VALUES('`+target+`','claude-code','state-model','state-host','state-project',1,2,3,'/synthetic/parent.jsonl','jsonl');`, nil); err != nil {
+		t.Fatalf("seed the stored parent row: %v", err)
 	}
-	defer db.pool.Put(conn)
-	fn(conn)
-}
-
-func readSpawnRows(t *testing.T, db *Store) []v70Spawn {
-	t.Helper()
-	var rows []v70Spawn
-	withV70Conn(t, db, func(conn *sqlite.Conn) {
-		if err := sqlitex.ExecuteTransient(conn, `SELECT spawner_path, team, name FROM claude_teammate_spawns`, &sqlitex.ExecOptions{
-			ResultFunc: func(stmt *sqlite.Stmt) error {
-				rows = append(rows, v70Spawn{SpawnerPath: stmt.ColumnText(0), Team: stmt.ColumnText(1), Name: stmt.ColumnText(2)})
-				return nil
-			},
+	if cacheParent != "" {
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO sessions(session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
+VALUES(?, ?, 'claude-code','state-model','state-host','state-project',1,2,3,'/synthetic/child.jsonl','jsonl')`, &sqlitex.ExecOptions{
+			Args: []any{child, cacheParent},
 		}); err != nil {
-			t.Fatalf("read the teammate spawns projection: %v", err)
+			t.Fatalf("seed the child with its availability cache: %v", err)
 		}
-	})
-	return rows
-}
-
-func readCatalogRows(t *testing.T, db *Store) []v70Rollout {
-	t.Helper()
-	var rows []v70Rollout
-	withV70Conn(t, db, func(conn *sqlite.Conn) {
-		if err := sqlitex.ExecuteTransient(conn, `SELECT source_path, session_id FROM codex_rollout_catalog`, &sqlitex.ExecOptions{
-			ResultFunc: func(stmt *sqlite.Stmt) error {
-				rows = append(rows, v70Rollout{Path: stmt.ColumnText(0), SessionID: stmt.ColumnText(1)})
-				return nil
-			},
+	} else if err := sqlitex.ExecuteTransient(conn, `INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
+VALUES(?, 'claude-code','state-model','state-host','state-project',1,2,3,'/synthetic/child.jsonl','jsonl')`, &sqlitex.ExecOptions{
+		Args: []any{child},
+	}); err != nil {
+		t.Fatalf("seed the child row: %v", err)
+	}
+	if snapshot != "" {
+		metadata := `{"parentUuid":"` + snapshot + `"}`
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_publication_metadata(session_id, capture_revision, schema_version, metadata_json, metadata_hash, content_hash, captured_at)
+VALUES(?, 1, 1, ?, ?, ?, 1)`, &sqlitex.ExecOptions{
+			Args: []any{child, metadata, strings.Repeat("a", 64), strings.Repeat("b", 64)},
 		}); err != nil {
-			t.Fatalf("read the Codex rollout catalog: %v", err)
+			t.Fatalf("seed the managed metadata snapshot: %v", err)
 		}
-	})
-	return rows
-}
-
-func requireSpawnRowsEqual(t *testing.T, db *Store, want []v70Spawn) {
-	t.Helper()
-	wantRows := sortedSpawnRows(want)
-	gotRows := sortedSpawnRows(readSpawnRows(t, db))
-	if strings.Join(wantRows, "\n") != strings.Join(gotRows, "\n") {
-		t.Fatalf("claude_teammate_spawns = %q, want %q", gotRows, wantRows)
+	}
+	if inactiveEvidence {
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = 'active' WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{child}}); err != nil {
+			t.Fatalf("put the inactive child generation in scope: %v", err)
+		}
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
+VALUES(?, 'old-one', 0, 'started_by', 'explicit_none', NULL, 'native_typed', '', '', ''),
+       (?, 'old-two', 0, 'started_by', 'target_known', ?, 'native_typed', '', '', '')`, &sqlitex.ExecOptions{
+			Args: []any{child, child, target},
+		}); err != nil {
+			t.Fatalf("seed the inactive-generation evidence: %v", err)
+		}
+		return
+	}
+	if evidenceState == "" {
+		return
+	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET active_generation_id = 'gen-state' WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{child}}); err != nil {
+		t.Fatalf("put the child generation in scope: %v", err)
+	}
+	kind := evidenceKind
+	if kind == "" {
+		kind = "started_by"
+	}
+	var targetValue any
+	if evidenceTarget != "" {
+		targetValue = evidenceTarget
+	}
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref)
+VALUES(?, 'gen-state', 0, ?, ?, ?, 'native_typed', '', '', '')`, &sqlitex.ExecOptions{
+		Args: []any{child, kind, evidenceState, targetValue},
+	}); err != nil {
+		t.Fatalf("seed the started_by evidence: %v", err)
 	}
 }
 
-func requireCatalogRowsEqual(t *testing.T, db *Store, want []v70Rollout) {
+func readParentState(t *testing.T, conn *sqlite.Conn, sessionID string) (string, *string) {
 	t.Helper()
-	wantRows := sortedRolloutRows(want)
-	gotRows := sortedRolloutRows(readCatalogRows(t, db))
-	if strings.Join(wantRows, "\n") != strings.Join(gotRows, "\n") {
-		t.Fatalf("codex_rollout_catalog = %q, want %q", gotRows, wantRows)
-	}
-}
-
-func countOnConn(t *testing.T, conn *sqlite.Conn, query string, args ...any) int {
-	t.Helper()
-	count := 0
-	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
-		Args: args,
+	var state string
+	var resolved *string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT parent_state, resolved_parent_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			count = int(stmt.ColumnInt64(0))
+			state = stmt.ColumnText(0)
+			if stmt.ColumnType(1) != sqlite.TypeNull {
+				value := stmt.ColumnText(1)
+				resolved = &value
+			}
 			return nil
 		},
 	}); err != nil {
-		t.Fatalf("count %q: %v", query, err)
+		t.Fatalf("read the parent lane of %s: %v", sessionID, err)
 	}
-	return count
+	return state, resolved
 }
 
-func countOnStore(t *testing.T, db *Store, query string, args ...any) int {
+func assertParentState(t *testing.T, tc parentStateCase, fixture parentStateFixture, state string, resolved *string) {
 	t.Helper()
-	count := 0
-	withV70Conn(t, db, func(conn *sqlite.Conn) {
-		count = countOnConn(t, conn, query, args...)
-	})
-	return count
+	if state != tc.WantState {
+		t.Fatalf("%s: parent_state = %q, want %q", tc.Name, state, tc.WantState)
+	}
+	want := ""
+	switch tc.WantResolvedParent {
+	case "target":
+		want = fixture.Target
+	case "unstored":
+		want = fixture.Unstored
+	case "snapshot":
+		want = fixture.Snapshot
+	}
+	if want == "" {
+		if resolved != nil {
+			t.Fatalf("%s: resolved_parent_id = %q, want NULL", tc.Name, *resolved)
+		}
+		return
+	}
+	if resolved == nil {
+		t.Fatalf("%s: resolved_parent_id = NULL, want %q", tc.Name, want)
+	}
+	if *resolved != want {
+		t.Fatalf("%s: resolved_parent_id = %q, want %q", tc.Name, *resolved, want)
+	}
 }
 
-// plantCorruptDerivedState writes rows no source derives. INSERT OR IGNORE
-// keeps the planting idempotent so two expectations can share it.
-func plantCorruptDerivedState(t *testing.T, db *Store, fixture v70Fixture) {
-	t.Helper()
-	withV70Conn(t, db, func(conn *sqlite.Conn) {
-		for _, row := range fixture.CorruptSpawns {
-			if err := sqlitex.Execute(conn,
-				`INSERT OR IGNORE INTO claude_teammate_spawns (spawner_path, team, name) VALUES (?, ?, ?)`,
-				&sqlitex.ExecOptions{Args: []any{row.SpawnerPath, row.Team, row.Name}}); err != nil {
-				t.Fatalf("plant corrupt spawn row %v: %v", row, err)
+func TestMigrationV70ParentStateRefusesNullAndUnknown(t *testing.T) {
+	t.Parallel()
+	fixture := loadParentStateFixture(t)
+	conn := openPredecessorConn(t)
+	if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
+		t.Fatalf("migrate to V70: %v", err)
+	}
+	if err := sqlitex.ExecuteScript(conn, `
+INSERT OR IGNORE INTO host_slugs(opaque_id, host_slug) VALUES('reject-host','reject-host');
+INSERT OR IGNORE INTO projects(project_hash, canonical_cwd) VALUES('reject-project','/synthetic/reject');`, nil); err != nil {
+		t.Fatalf("seed the rejection parents: %v", err)
+	}
+	for _, rejection := range fixture.Rejections {
+		rejection := rejection
+		t.Run(rejection.Name, func(t *testing.T) {
+			err := sqlitex.ExecuteTransient(conn, fmt.Sprintf(`INSERT INTO sessions(session_id, parent_state, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
+VALUES(?, %s, 'claude-code','state-model','reject-host','reject-project',1,2,3,'/synthetic/reject.jsonl','jsonl')`, rejection.StateLiteral), &sqlitex.ExecOptions{
+				Args: []any{rejection.Name},
+			})
+			if err == nil {
+				t.Fatalf("%s: the projection column accepted %s; the NOT NULL/CHECK contract is missing", rejection.Name, rejection.StateLiteral)
 			}
-		}
-		for _, row := range fixture.CorruptCatalog {
-			if err := sqlitex.Execute(conn,
-				`INSERT OR IGNORE INTO codex_rollout_catalog (source_path, session_id) VALUES (?, ?)`,
-				&sqlitex.ExecOptions{Args: []any{row.Path, row.SessionID}}); err != nil {
-				t.Fatalf("plant corrupt catalog row %v: %v", row, err)
+			if !strings.Contains(err.Error(), "parent_state") {
+				t.Fatalf("%s: the insert failed for an unrelated reason, not the closed parent-state contract: %v", rejection.Name, err)
 			}
-		}
-	})
-}
-
-func fixtureRolloutFiles(fixture v70Fixture) []ingest.RolloutFile {
-	rollouts := make([]ingest.RolloutFile, 0, len(fixture.Walk))
-	for _, row := range fixture.Walk {
-		rollouts = append(rollouts, ingest.RolloutFile{
-			Path:      ingest.ResolvedPath(row.Path),
-			SessionID: ingest.SessionID(row.SessionID),
 		})
 	}
-	return rollouts
-}
-
-// TestMigrationV70DerivedLookups upgrades a seeded V69 store through the real
-// Open path and asserts every fixture expectation in order.
-func TestMigrationV70DerivedLookups(t *testing.T) {
-	fixture := loadV70DerivedLookupsFixture(t)
-	dbPath := filepath.Join(t.TempDir(), "v70-upgrade.db")
-	seedV69WithEvidence(t, dbPath, fixture)
-
-	// The migration test runs the real upgrade path (and its pragmas), which
-	// a skip-less Open performs on the seeded predecessor.
-	db, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("open the seeded V69 store: %v", err)
+	// The resolved_parent_id CHECK is a row invariant, not a trigger-only
+	// convention: neither direction of an inconsistent projection may persist.
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
+VALUES('pair-check','claude-code','state-model','reject-host','reject-project',1,2,3,'/synthetic/pair.jsonl','jsonl')`, &sqlitex.ExecOptions{}); err != nil {
+		t.Fatalf("insert the pair-check session: %v", err)
 	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Errorf("close the upgraded store: %v", err)
-		}
-	}()
-
-	rollouts := fixtureRolloutFiles(fixture)
-	incomplete := append(append([]ingest.RolloutFile{}, rollouts...), ingest.RolloutFile{
-		Path: ingest.ResolvedPath(fixture.InvalidWalkEntry.Path),
-		// SessionID is deliberately empty: the fixture names the incomplete entry.
-	})
-
-	for _, expectation := range fixture.Expectations {
-		switch expectation.Kind {
-		case "spawns-backfill":
-			requireSpawnRowsEqual(t, db, fixture.ExpectedSpawns)
-		case "duplicate-dedupe":
-			probe := fixture.DuplicateProbe
-			got := countOnStore(t, db,
-				`SELECT COUNT(*) FROM claude_teammate_spawns WHERE spawner_path = ? AND team = ? AND name = ?`,
-				probe.SpawnerPath, probe.Team, probe.Name)
-			if got != 1 {
-				t.Fatalf("the repeated (team, name) in %q produced %d rows, want 1", probe.SpawnerPath, got)
-			}
-		case "catalog-empty":
-			requireCatalogRowsEqual(t, db, fixture.ExpectedCatalogOnUpgrade)
-		case "rebuild-refuses-incomplete-walk":
-			// The planting is what makes the rollback observable: a rebuild that
-			// cleared the tables and did not roll back would replace these rows.
-			plantCorruptDerivedState(t, db, fixture)
-			beforeSpawns := readSpawnRows(t, db)
-			beforeCatalog := readCatalogRows(t, db)
-			rebuildErr := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: incomplete})
-			if rebuildErr == nil {
-				t.Fatal("RebuildDerivedLookups accepted a walk entry with an empty session id")
-			}
-			if !strings.Contains(rebuildErr.Error(), "empty session id") {
-				t.Fatalf("RebuildDerivedLookups error = %q, want it to name the empty session id", rebuildErr)
-			}
-			requireSpawnRowsEqual(t, db, beforeSpawns)
-			requireCatalogRowsEqual(t, db, beforeCatalog)
-		case "rebuild-spawns":
-			plantCorruptDerivedState(t, db, fixture)
-			beforeSpawns := readSpawnRows(t, db)
-			beforeCatalog := readCatalogRows(t, db)
-			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{}); !errors.Is(err, ingest.ErrIncompleteRolloutEnumeration) {
-				t.Fatalf("unset enumeration error = %v", err)
-			}
-			requireSpawnRowsEqual(t, db, beforeSpawns)
-			requireCatalogRowsEqual(t, db, beforeCatalog)
-			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationNotWalked}); err != nil {
-				t.Fatalf("rebuild without Codex: %v", err)
-			}
-			requireSpawnRowsEqual(t, db, fixture.ExpectedSpawns)
-			requireCatalogRowsEqual(t, db, beforeCatalog)
-			var deletes []ingest.ResolvedPath
-			for _, row := range fixture.CorruptCatalog {
-				deletes = append(deletes, ingest.ResolvedPath(row.Path))
-			}
-			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: rollouts, Deletes: deletes}); err != nil {
-				t.Fatalf("rebuild the derived lookups: %v", err)
-			}
-			requireSpawnRowsEqual(t, db, fixture.ExpectedSpawns)
-		case "rebuild-catalog":
-			// The explicitly deleted row is removed alongside the upserts.
-			requireCatalogRowsEqual(t, db, fixture.ExpectedCatalog)
-		case "prune-cascade":
-			pruned := fixture.PruneProbe.SpawnerPath
-			if err := db.SaveClaudeEvidence(t.Context(), nil, []ingest.ResolvedPath{ingest.ResolvedPath(pruned)}); err != nil {
-				t.Fatalf("prune the evidence row for %q through the evidence cache: %v", pruned, err)
-			}
-			if got := countOnStore(t, db, `SELECT COUNT(*) FROM claude_transcript_evidence WHERE source_path = ?`, pruned); got != 0 {
-				t.Fatalf("the evidence cache left %d evidence rows for the pruned path %q, want 0", got, pruned)
-			}
-			if got := countOnStore(t, db, `SELECT COUNT(*) FROM claude_teammate_spawns WHERE spawner_path = ?`, pruned); got != 0 {
-				t.Fatalf("the spawn rows for pruned path %q survived its evidence row's deletion: %d rows remain, want 0; the derived table was not cleared with its parent", pruned, got)
-			}
-		default:
-			t.Fatalf("fixture expectation %q names kind %q with no runner", expectation.Name, expectation.Kind)
-		}
-	}
-
-	// The scope filter behind the projection: the subagent transcript records
-	// spawns, and only a root record may project them.
-	for _, evidence := range fixture.Evidence {
-		if evidence.Scope != string(ingest.ClaudeEvidenceScopeSubagent) {
-			continue
-		}
-		if got := countOnStore(t, db,
-			`SELECT COUNT(*) FROM claude_teammate_spawns WHERE spawner_path = ?`, evidence.SourcePath); got != 0 {
-			t.Fatalf("the subagent transcript %q holds %d spawn rows, want none", evidence.SourcePath, got)
-		}
-	}
-}
-
-// TestSaveClaudeEvidenceWritesTeammateSpawns drives the production writer and
-// compares the whole projection after each save against the fixture's
-// expectations: a root save, a re-save that drops a pair, a subagent save
-// whose non-empty spawns must not be projected, and a scope flip that ends
-// with no rows. A recorder delegates to the production writer, so the row
-// assertions still observe it, and it also proves the maintenance runs for a
-// non-root upsert: skipping it leaves the recorder short one call.
-func TestSaveClaudeEvidenceWritesTeammateSpawns(t *testing.T) {
-	fixture := loadV70DerivedLookupsFixture(t)
-	dbPath := filepath.Join(t.TempDir(), "v70-maintenance.db")
-	// The maintenance write is this test's subject, so the store opens through
-	// the shipped migration chain and then writes through SaveClaudeEvidence.
-	db, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("open the maintenance store: %v", err)
-	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Errorf("close the maintenance store: %v", err)
-		}
-	}()
-
-	type spawnCall struct {
-		Path   string
-		Spawns []ingest.ClaudeTeammateIdentity
-	}
-	var calls []spawnCall
-	previous := swapSaveClaudeTeammateSpawns(func(conn *sqlite.Conn, sourcePath string, spawns []ingest.ClaudeTeammateIdentity) error {
-		calls = append(calls, spawnCall{Path: sourcePath, Spawns: append([]ingest.ClaudeTeammateIdentity(nil), spawns...)})
-		return writeClaudeTeammateSpawns(conn, sourcePath, spawns)
-	})
-	defer swapSaveClaudeTeammateSpawns(previous)
-
-	for _, step := range fixture.MaintenanceSteps {
-		path, err := ingest.NewResolvedPath(step.SourcePath)
-		if err != nil {
-			t.Fatalf("maintenance step %q names an invalid source path %q: %v", step.Name, step.SourcePath, err)
-		}
-		record := ingest.ClaudeTranscriptEvidence{
-			SourcePath:      path,
-			Scope:           ingest.ClaudeEvidenceScope(step.Scope),
-			ModTimeUnixNano: 1,
-			SizeBytes:       2,
-			Origin:          sessionorigin.User,
-			ProofVersion:    ingest.ClaudeIdentityProofVersion,
-		}
-		for _, spawn := range step.Spawns {
-			record.Spawns = append(record.Spawns, ingest.ClaudeTeammateIdentity{Team: spawn.Team, Name: spawn.Name})
-		}
-		if err := db.SaveClaudeEvidence(t.Context(), []ingest.ClaudeTranscriptEvidence{record}, nil); err != nil {
-			t.Fatalf("maintenance step %q: SaveClaudeEvidence: %v", step.Name, err)
-		}
-		requireSpawnRowsEqual(t, db, step.ExpectedSpawns)
-	}
-
-	// The scope flip: a path saved as a root and then re-saved as a subagent.
-	// The fixture derives it so no test hardcodes the step name.
-	flipIndex := -1
-	rootPaths := make(map[string]struct{}, len(fixture.MaintenanceSteps))
-	for index := range fixture.MaintenanceSteps {
-		step := &fixture.MaintenanceSteps[index]
-		if step.Scope == string(ingest.ClaudeEvidenceScopeRoot) {
-			rootPaths[step.SourcePath] = struct{}{}
-			continue
-		}
-		if _, wasRoot := rootPaths[step.SourcePath]; wasRoot {
-			flipIndex = index
-		}
-	}
-	if flipIndex < 0 {
-		t.Fatal("v70 derived-lookups fixture re-saves no root path as a subagent; the scope flip is untested")
-	}
-	if len(calls) != len(fixture.MaintenanceSteps) {
-		t.Fatalf("SaveClaudeEvidence made %d spawn maintenance calls for %d saves; the maintenance must run for every upserted path, including a non-root one", len(calls), len(fixture.MaintenanceSteps))
-	}
-	flip := &fixture.MaintenanceSteps[flipIndex]
-	if calls[flipIndex].Path != flip.SourcePath {
-		t.Fatalf("spawn maintenance call %d is for %q, want the scope-flip path %q", flipIndex, calls[flipIndex].Path, flip.SourcePath)
-	}
-	if len(calls[flipIndex].Spawns) != 0 {
-		t.Fatalf("the scope flip for %q passed %d spawns to the projection, want none: a non-root record contributes no rows", flip.SourcePath, len(calls[flipIndex].Spawns))
-	}
-}
-
-// TestMigrationV70FreshSchema proves a brand-new store carries the V70 objects
-// with the ratified shapes and that the schema version advanced by one.
-func TestMigrationV70FreshSchema(t *testing.T) {
-	t.Parallel()
-	dbPath := filepath.Join(t.TempDir(), "v70-fresh.db")
-	// The fresh install is this test's subject, so it opens without skipping
-	// migrations and asserts the schema they produce.
-	db, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("open a fresh store: %v", err)
-	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Errorf("close the fresh store: %v", err)
-		}
-	}()
-
-	conn, err := db.pool.Take(t.Context())
-	if err != nil {
-		t.Fatalf("take the fresh store's connection: %v", err)
-	}
-	defer db.pool.Put(conn)
-
-	if got := CurrentSchemaVersion(); got < 70 {
-		t.Fatalf("CurrentSchemaVersion() = %d, want at least 70: the derived-lookup migration must be registered", got)
-	}
-	var version int
-	if err := sqlitex.ExecuteTransient(conn, `PRAGMA user_version`, &sqlitex.ExecOptions{
-		ResultFunc: func(stmt *sqlite.Stmt) error { version = int(stmt.ColumnInt64(0)); return nil },
-	}); err != nil {
-		t.Fatalf("read the fresh store's user_version: %v", err)
-	}
-	if version < 70 {
-		t.Fatalf("fresh user_version = %d, want at least 70", version)
-	}
-
-	for _, name := range []string{"claude_teammate_spawns", "codex_rollout_catalog"} {
-		strict := 0
-		if err := sqlitex.ExecuteTransient(conn,
-			`SELECT strict FROM pragma_table_list WHERE name = ? AND schema = 'main'`,
-			&sqlitex.ExecOptions{Args: []any{name}, ResultFunc: func(stmt *sqlite.Stmt) error {
-				strict = int(stmt.ColumnInt64(0))
-				return nil
-			}}); err != nil {
-			t.Fatalf("read the table classification for %q: %v", name, err)
-		}
-		if strict != 1 {
-			t.Fatalf("table %q is not STRICT", name)
-		}
-	}
-	for _, name := range []string{
-		"idx_claude_evidence_identity_root",
-		"idx_claude_teammate_spawns_identity",
-		"idx_codex_rollout_catalog_session",
+	for _, update := range []string{
+		`UPDATE sessions SET parent_state = 'resolved', resolved_parent_id = NULL WHERE session_id = 'pair-check'`,
+		`UPDATE sessions SET parent_state = 'root', resolved_parent_id = 'some-parent' WHERE session_id = 'pair-check'`,
 	} {
-		if got := countOnConn(t, conn, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, name); got != 1 {
-			t.Fatalf("index %q is missing from a fresh store", name)
+		if err := sqlitex.ExecuteTransient(conn, update, &sqlitex.ExecOptions{}); err == nil {
+			t.Fatalf("the resolved_parent_id CHECK accepted an inconsistent pair: %s", update)
 		}
-	}
-
-	// The ratified shape: the identity index is partial over root rows, and the
-	// session_id index is deliberately non-unique so two paths may share one id.
-	partial := ""
-	if err := sqlitex.ExecuteTransient(conn,
-		`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_claude_evidence_identity_root'`,
-		&sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error { partial = stmt.ColumnText(0); return nil }}); err != nil {
-		t.Fatalf("read the partial identity index SQL: %v", err)
-	}
-	if !strings.Contains(partial, "WHERE scope = 'root'") || !strings.Contains(partial, "identity_team IS NOT NULL") {
-		t.Fatalf("idx_claude_evidence_identity_root is not the ratified partial index: %s", partial)
-	}
-	nonUnique := ""
-	if err := sqlitex.ExecuteTransient(conn,
-		`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_codex_rollout_catalog_session'`,
-		&sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error { nonUnique = stmt.ColumnText(0); return nil }}); err != nil {
-		t.Fatalf("read the rollout session index SQL: %v", err)
-	}
-	if strings.Contains(strings.ToUpper(nonUnique), "UNIQUE") {
-		t.Fatalf("idx_codex_rollout_catalog_session must stay non-unique so a duplicate id is visible: %s", nonUnique)
 	}
 }
 
-// TestSaveClaudeEvidenceRollsBackTeammateSpawnsOnFailure proves the evidence
-// row and its derived spawn rows share one transaction: the seam fails only
-// after the row is visible on the transaction's connection, and neither row
-// may survive the rollback.
-func TestSaveClaudeEvidenceRollsBackTeammateSpawnsOnFailure(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "v70-rollback.db")
-	// The production transaction is this test's subject, so the store opens
-	// through the shipped migration chain and then writes through SaveClaudeEvidence.
-	db, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("open the rollback store: %v", err)
-	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Errorf("close the rollback store: %v", err)
+// TestMigrationV70ParentStateCheckBijective proves the stored CHECK admits
+// exactly AllParentStates. SQLite cannot ALTER a CHECK, so a widened or
+// narrowed set needs a new migration and fails here until one lands.
+func TestMigrationV70ParentStateCheckBijective(t *testing.T) {
+	t.Parallel()
+	var matches []string
+	for _, statement := range strings.Split(migrationV70, ";") {
+		flat := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(flat, "ADD COLUMN parent_state TEXT NOT NULL DEFAULT 'root'") && strings.Contains(flat, "IN (") {
+			matches = append(matches, flat)
 		}
-	}()
-
-	path := "/synthetic/claude/rollback.jsonl"
-	record := ingest.ClaudeTranscriptEvidence{
-		SourcePath:      ingest.ResolvedPath(path),
-		Scope:           ingest.ClaudeEvidenceScopeRoot,
-		ModTimeUnixNano: 1,
-		SizeBytes:       2,
-		Origin:          sessionorigin.User,
-		ProofVersion:    ingest.ClaudeIdentityProofVersion,
-		Spawns:          []ingest.ClaudeTeammateIdentity{{Team: "team-x", Name: "worker-y"}},
 	}
-
-	sawEvidenceRow := false
-	previous := swapSaveClaudeTeammateSpawns(func(conn *sqlite.Conn, sourcePath string, spawns []ingest.ClaudeTeammateIdentity) error {
-		found := 0
-		if err := sqlitex.ExecuteTransient(conn,
-			`SELECT COUNT(*) FROM claude_transcript_evidence WHERE source_path = ?`,
-			&sqlitex.ExecOptions{Args: []any{sourcePath}, ResultFunc: func(stmt *sqlite.Stmt) error {
-				found = int(stmt.ColumnInt64(0))
-				return nil
-			}}); err != nil {
-			return fmt.Errorf("inspect the transaction's evidence row: %w", err)
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly one parent_state column statement carrying an IN (...) CHECK, found %d", len(matches))
+	}
+	statement := matches[0]
+	rest := statement[strings.Index(statement, "IN (")+len("IN ("):]
+	end := strings.Index(rest, ")")
+	if end < 0 {
+		t.Fatalf("parent_state CHECK has an unterminated IN (...) clause: %s", statement)
+	}
+	got := make(map[string]bool)
+	for _, part := range strings.Split(rest[:end], ",") {
+		got[strings.Trim(strings.TrimSpace(part), "'")] = true
+	}
+	want := make(map[string]bool, len(AllParentStates))
+	for _, state := range AllParentStates {
+		want[string(state)] = true
+	}
+	for value := range got {
+		if !want[value] {
+			t.Errorf("sessions.parent_state CHECK accepts %q, which is not in AllParentStates; add a rebuild migration that drops it", value)
 		}
-		sawEvidenceRow = found == 1
-		return errors.New("injected teammate-spawn write failure")
-	})
-	defer swapSaveClaudeTeammateSpawns(previous)
+	}
+	for value := range want {
+		if !got[value] {
+			t.Errorf("AllParentStates carries %q, which the sessions.parent_state CHECK refuses; add a rebuild migration that admits it", value)
+		}
+	}
+}
 
-	err = db.SaveClaudeEvidence(context.Background(), []ingest.ClaudeTranscriptEvidence{record}, nil)
-	if err == nil {
-		t.Fatal("SaveClaudeEvidence returned nil despite the injected spawns failure")
-	}
-	wantFragment := fmt.Sprintf("store.SaveClaudeEvidence: write teammate spawns for transcript %q: injected teammate-spawn write failure", path)
-	if !strings.Contains(err.Error(), wantFragment) {
-		t.Fatalf("SaveClaudeEvidence error = %q, want it to contain %q", err, wantFragment)
-	}
-	if !sawEvidenceRow {
-		t.Fatal("the spawns seam did not see the evidence row on the transaction's connection; the rollback case proves nothing")
-	}
-
-	conn, err := db.pool.Take(t.Context())
+// TestMigrationV70SessionsUpdateTriggerCoversSchema keeps the trigger's UPDATE
+// OF list exhaustive. Every writable sessions column that can change a page
+// must fire the trigger; only the projection outputs and the publication
+// trigger's own columns are excluded, because firing on them would re-enter.
+func TestMigrationV70SessionsUpdateTriggerCoversSchema(t *testing.T) {
+	t.Parallel()
+	s, _ := openGenerationStore(t)
+	conn, err := s.pool.Take(context.Background())
 	if err != nil {
-		t.Fatalf("take the rollback store's connection: %v", err)
+		t.Fatalf("Pool.Take: %v", err)
 	}
-	defer db.pool.Put(conn)
-	if got := countOnConn(t, conn, `SELECT COUNT(*) FROM claude_transcript_evidence WHERE source_path = ?`, path); got != 0 {
-		t.Fatalf("the rolled-back transaction left %d evidence rows for %q, want 0", got, path)
+	defer s.pool.Put(conn)
+	trigger := readTriggerSQL(t, conn, "sessions_parent_state_au")
+	match := regexp.MustCompile(`(?s)AFTER UPDATE OF (.*?) ON sessions`).FindStringSubmatch(trigger)
+	if len(match) != 2 {
+		t.Fatalf("cannot read the UPDATE OF column list from the trigger: %s", trigger)
 	}
-	if got := countOnConn(t, conn, `SELECT COUNT(*) FROM claude_teammate_spawns WHERE spawner_path = ?`, path); got != 0 {
-		t.Fatalf("the rolled-back transaction left %d spawn rows for %q, want 0", got, path)
+	fired := make(map[string]bool)
+	for _, column := range strings.Split(match[1], ",") {
+		fired[strings.TrimSpace(column)] = true
+	}
+	excluded := map[string]bool{
+		"session_id":                           true,
+		"parent_state":                         true,
+		"resolved_parent_id":                   true,
+		"indexed_publication_capture_revision": true,
+		"cwd_provenance_kind":                  true,
+	}
+	want := make(map[string]bool)
+	for _, column := range sessionsColumnNames(t, conn) {
+		if !excluded[column] {
+			want[column] = true
+		}
+	}
+	for column := range want {
+		if !fired[column] {
+			t.Errorf("sessions column %q can change a page but is missing from the parent-state trigger's UPDATE OF list; add it to parentStateSessionsTriggerFiresOn and ship a migration that redefines the trigger", column)
+		}
+	}
+	for column := range fired {
+		if !want[column] {
+			t.Errorf("the parent-state trigger fires on %q, which is not a page-relevant sessions column; remove it, because an excluded projection or publication column would re-enter the trigger", column)
+		}
+	}
+}
+
+func sessionsColumnNames(t *testing.T, conn *sqlite.Conn) []string {
+	t.Helper()
+	var names []string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT name FROM pragma_table_info('sessions')`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			names = append(names, stmt.ColumnText(0))
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read the sessions column names: %v", err)
+	}
+	return names
+}
+
+func readTriggerSQL(t *testing.T, conn *sqlite.Conn, name string) string {
+	t.Helper()
+	var sql string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?`, &sqlitex.ExecOptions{
+		Args: []any{name},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			sql = stmt.ColumnText(0)
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read trigger %s: %v", name, err)
+	}
+	if sql == "" {
+		t.Fatalf("trigger %s is absent; the migration did not install it", name)
+	}
+	return sql
+}
+
+// TestMigrationV70PageQueriesUseTheirIndexes proves the root and child reads
+// have an ordered index each. Without the root index the read would filter the
+// whole sessions table; without the child index it would scan the resolved set.
+func TestMigrationV70PageQueriesUseTheirIndexes(t *testing.T) {
+	t.Parallel()
+	s, _ := openGenerationStore(t)
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatalf("Pool.Take: %v", err)
+	}
+	defer s.pool.Put(conn)
+	// Explain the statement production actually runs, including the
+	// session_metrics join and the OFFSET, not a reduced stand-in.
+	rootQuery, rootArgs := offsetPageSQL(ParentStateRoot, "", SyncWindowFilter{Publication: schema.LocalSyncPublicationAll}, 26, 0)
+	rootPlan := explainQueryPlan(t, conn, rootQuery, rootArgs...)
+	if !strings.Contains(rootPlan, "idx_sessions_root_page") {
+		t.Fatalf("the root page plan does not use idx_sessions_root_page: %s", rootPlan)
+	}
+	childQuery, childArgs := offsetPageSQL(ParentStateResolved, "any-parent", SyncWindowFilter{Publication: schema.LocalSyncPublicationAll}, 26, 0)
+	childPlan := explainQueryPlan(t, conn, childQuery, childArgs...)
+	if !strings.Contains(childPlan, "idx_sessions_child_page") {
+		t.Fatalf("the child page plan does not use idx_sessions_child_page: %s", childPlan)
+	}
+	rootDDL := readIndexSQL(t, conn, "idx_sessions_root_page")
+	if !strings.Contains(rootDDL, "(start_ms DESC, session_id ASC)") || !strings.Contains(rootDDL, "parent_state = 'root'") {
+		t.Fatalf("idx_sessions_root_page key order or partial predicate changed: %s", rootDDL)
+	}
+	childDDL := readIndexSQL(t, conn, "idx_sessions_child_page")
+	if !strings.Contains(childDDL, "(resolved_parent_id, start_ms DESC, session_id ASC)") || !strings.Contains(childDDL, "parent_state = 'resolved'") {
+		t.Fatalf("idx_sessions_child_page key order or partial predicate changed: %s", childDDL)
+	}
+}
+
+func explainQueryPlan(t *testing.T, conn *sqlite.Conn, query string, args ...any) string {
+	t.Helper()
+	var details []string
+	if err := sqlitex.ExecuteTransient(conn, "EXPLAIN QUERY PLAN "+query, &sqlitex.ExecOptions{
+		Args: args,
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			details = append(details, stmt.ColumnText(stmt.ColumnCount()-1))
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("explain %q: %v", query, err)
+	}
+	return strings.Join(details, "\n")
+}
+
+func readIndexSQL(t *testing.T, conn *sqlite.Conn, name string) string {
+	t.Helper()
+	var sql string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT sql FROM sqlite_master WHERE type='index' AND name=?`, &sqlitex.ExecOptions{
+		Args: []any{name},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			sql = stmt.ColumnText(0)
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read index %s: %v", name, err)
+	}
+	if sql == "" {
+		t.Fatalf("index %s is absent", name)
+	}
+	return sql
+}
+
+// TestParentStateTriggerTextMatchesGolden pins the exact trigger SQL to a
+// checked-in golden file. It is deliberately NOT a comparison against
+// LogicalParentSQL: that would compare the generator to itself and pass through
+// any rule change. The golden is the reviewed text; a rule change updates the
+// golden in the same diff and, once V70 has shipped, lands as a NEW migration.
+// Update it deliberately with UPDATE_PARENT_STATE_TRIGGER_GOLDEN=1.
+func TestParentStateTriggerTextMatchesGolden(t *testing.T) {
+	t.Parallel()
+	s, _ := openGenerationStore(t)
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatalf("Pool.Take: %v", err)
+	}
+	defer s.pool.Put(conn)
+	var text strings.Builder
+	for _, name := range []string{
+		"sessions_parent_state_ai", "sessions_parent_state_au", "sessions_parent_state_ad",
+		"session_relationship_evidence_parent_state_ai",
+		"session_relationship_evidence_parent_state_au",
+		"session_relationship_evidence_parent_state_ad",
+		"session_publication_metadata_parent_state_ai",
+		"session_publication_metadata_parent_state_au",
+		"session_publication_metadata_parent_state_ad",
+	} {
+		text.WriteString("-- " + name + "\n")
+		text.WriteString(readTriggerSQL(t, conn, name))
+		text.WriteString("\n\n")
+	}
+	path := filepath.Join("testdata", "parent_state_triggers.golden.sql")
+	if os.Getenv("UPDATE_PARENT_STATE_TRIGGER_GOLDEN") == "1" {
+		if err := os.WriteFile(path, []byte(text.String()), 0o644); err != nil {
+			t.Fatalf("write the parent-state trigger golden: %v", err)
+		}
+		return
+	}
+	golden, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the parent-state trigger golden: %v", err)
+	}
+	if string(golden) != text.String() {
+		t.Fatalf("the parent-state trigger text differs from testdata/parent_state_triggers.golden.sql; the parent rule or a trigger changed. Review the new text and update the golden deliberately with UPDATE_PARENT_STATE_TRIGGER_GOLDEN=1, then land a new migration if V70 has shipped")
+	}
+}
+
+// TestParentStateAllStatesAreStable keeps the closed set in one place: a state
+// that NewParentState accepts must be one AllParentStates lists.
+func TestParentStateAllStatesAreStable(t *testing.T) {
+	t.Parallel()
+	for _, state := range AllParentStates {
+		parsed, err := NewParentState(state.String())
+		if err != nil || parsed != state {
+			t.Fatalf("NewParentState(%q) = %v, %v; every listed state must parse to itself", state, parsed, err)
+		}
+	}
+	if _, err := NewParentState("child"); err == nil {
+		t.Fatal("NewParentState accepted a state outside the closed set")
+	}
+	if !slices.Contains(AllParentStates, ParentStateRoot) || !slices.Contains(AllParentStates, ParentStateResolved) || !slices.Contains(AllParentStates, ParentStateUnresolved) {
+		t.Fatalf("AllParentStates = %v, want root, resolved, and unresolved", AllParentStates)
 	}
 }

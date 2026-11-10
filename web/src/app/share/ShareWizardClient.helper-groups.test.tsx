@@ -108,12 +108,12 @@ function installFetch(options: FetchOptions = {}) {
             return response({ code: 'group_scope_expired', error: 'scope expired' }, options.memberStatus ?? 409);
           }
           const members = memberSpecsFor(groupId);
-          const pageSize = fixture.paging[groupId] ?? (members.length || 1);
+          const pageSize = fixture.paging[groupId] ?? 25;
           const page = Number(requested.searchParams.get('page') ?? '1');
           const start = (page - 1) * pageSize;
           return response(buildGroupedMembersResponse(members.slice(start, start + pageSize), {
             page,
-            limit: pageSize,
+            perPage: pageSize,
             total: members.length,
           }));
         }
@@ -211,7 +211,7 @@ describe('mounted Share helper-group chooser', () => {
 
     // Expanding a second, independently scoped group must not clear the first
     // group's explicit pick.
-    await user.click(screen.getByRole('button', { name: /2 helper threads/ }));
+    await user.click(screen.getByRole('button', { name: /26 helper threads/ }));
     await waitFor(() => expect(document.querySelector('[data-thread-id="second-group-member"]')).not.toBeNull());
     expect(memberCheckbox('eligible-member')).toBeChecked();
     await user.click(memberCheckbox('second-group-member'));
@@ -233,7 +233,7 @@ describe('mounted Share helper-group chooser', () => {
     await waitFor(() => expect(document.querySelector('[data-thread-id="eligible-member"]')).not.toBeNull());
 
     // The second group is paged one member at a time. Select on page one.
-    await user.click(screen.getByRole('button', { name: /2 helper threads/ }));
+    await user.click(screen.getByRole('button', { name: /26 helper threads/ }));
     await waitFor(() => expect(document.querySelector('[data-thread-id="second-group-member"]')).not.toBeNull());
     await user.click(memberCheckbox('second-group-member'));
 
@@ -298,7 +298,7 @@ describe('mounted Share helper-group chooser', () => {
 
     // Loading a second group's page must not reset the chooser back to the
     // deep-linked session, and must not drop the helper pick.
-    await user.click(screen.getByRole('button', { name: /2 helper threads/ }));
+    await user.click(screen.getByRole('button', { name: /26 helper threads/ }));
     await waitFor(() => expect(document.querySelector('[data-thread-id="second-group-member"]')).not.toBeNull());
     expect(sessionCheckbox('owner-1')).toBeChecked();
     expect(memberCheckbox('eligible-member')).toBeChecked();
@@ -353,7 +353,7 @@ describe('mounted Share helper-group chooser', () => {
     expect((document.querySelector('.gms-tally') as HTMLElement).textContent).toContain('2 selected');
 
     // Expanding the second group refuses its scope and refreshes the list.
-    await user.click(screen.getByRole('button', { name: /2 helper threads/ }));
+    await user.click(screen.getByRole('button', { name: /26 helper threads/ }));
     await waitFor(() => expect(syncListCalls).toBeGreaterThan(1));
 
     // The refreshed list confirms owner-1 but cannot confirm the helper member,

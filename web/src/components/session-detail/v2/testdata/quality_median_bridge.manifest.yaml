@@ -1,35 +1,43 @@
 expectedCaseCount: 3
 requiredNames:
-  - a resolved outcome reaches computePersonalMedians unchanged
-  - an empty (not-yet-computed) outcome bridges to an empty string, never undefined
-  - an association-target annotation stays out of computePersonalMedians
+  - the read payload medians reach the scorecard unchanged
+  - an absent medians baseline stays absent
+  - a new read revision carries the new medians
 expectedLoaderMutationCount: 2
 loaderMutations:
-  - name: median bridge case count drift is rejected
+  - name: read payload metadata case count drift is rejected
     target: manifest
     find: "expectedCaseCount: 3\nrequiredNames:"
     replace: "expectedCaseCount: 2\nrequiredNames:"
     expectedError: independent manifest
-  - name: median bridge duplicate names are rejected
+  - name: read payload metadata duplicate names are rejected
     target: cases
-    find: "an empty (not-yet-computed) outcome bridges to an empty string, never undefined"
-    replace: "a resolved outcome reaches computePersonalMedians unchanged"
+    find: "an absent medians baseline stays absent"
+    replace: "the read payload medians reach the scorecard unchanged"
     expectedError: duplicate
-expectedMutationCount: 2
+expectedMutationCount: 3
 mutations:
-  - name: quality median bridge cannot regress to passing outcome through unbridged
+  - name: the scorecard cannot lose the read payload medians
     target: /src/components/session-detail/v2/SessionDetailV2.tsx
-    find: "outcome: session.outcome ?? '',"
-    replace: "outcome: session.outcome,"
+    find: "      medians,\n    });"
+    replace: "    });"
     expectedTestFile: src/components/session-detail/v2/SessionDetailV2.qualityMedianBridge.test.tsx
     expectedFailedTestNames:
-      - an empty (not-yet-computed) outcome bridges to an empty string, never undefined
-    expectedFailurePattern: "expected 'undefined' to be 'string'"
-  - name: quality median bridge cannot restore association-target annotations
+      - the read payload medians reach the scorecard unchanged
+    expectedFailurePattern: 'expected undefined to deeply equal'
+  - name: the hero heading cannot lose the stored read title
     target: /src/components/session-detail/v2/SessionDetailV2.tsx
-    find: "            ...medianSession,\n            outcome: session.outcome ?? '',"
-    replace: "            ...medianSession,\n            effectiveAnnotations: session.effectiveAnnotations,\n            outcome: session.outcome ?? '',"
+    find: "title: sessionTitle ?? UNTITLED_SESSION_TITLE"
+    replace: "title: UNTITLED_SESSION_TITLE"
     expectedTestFile: src/components/session-detail/v2/SessionDetailV2.qualityMedianBridge.test.tsx
     expectedFailedTestNames:
-      - an association-target annotation stays out of computePersonalMedians
-    expectedFailurePattern: 'to not have property "effectiveAnnotations"'
+      - the read payload medians reach the scorecard unchanged
+    expectedFailurePattern: 'refactor the ingest pipeline'
+  - name: the durable push payload cannot absorb read-only metadata
+    target: /src/components/session-detail/v2/SessionDetailV2.tsx
+    find: "      title: _title,\n"
+    replace: ""
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.qualityMedianBridge.test.tsx
+    expectedFailedTestNames:
+      - the read payload medians reach the scorecard unchanged
+    expectedFailurePattern: 'the durable payload must not carry title'

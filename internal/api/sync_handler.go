@@ -151,7 +151,7 @@ func (h *syncHandler) handleSyncSessions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	view := query.View
-	if view == "home" || view == "project-options" {
+	if query.Home() || view == "project-options" {
 		home := h.home
 		if home == nil {
 			var reader homeReader

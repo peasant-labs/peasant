@@ -1112,7 +1112,14 @@ CREATE TABLE sessions (
     latest_attempt_captured_at_ms IS NULL OR latest_attempt_captured_at_ms >= 0
 ), latest_attempt_stats_json TEXT CHECK (
     latest_attempt_stats_json IS NULL OR json_valid(latest_attempt_stats_json)
-)) STRICT;
+), parent_state TEXT NOT NULL DEFAULT 'root'
+  CHECK (parent_state IN ('root','resolved','unresolved')), resolved_parent_id TEXT
+  CHECK ((parent_state = 'resolved') = (resolved_parent_id IS NOT NULL))) STRICT;
+
+CREATE TABLE store_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0)
+) STRICT;
 
 CREATE TABLE target_kinds (
     id   INTEGER PRIMARY KEY,
@@ -1270,6 +1277,10 @@ CREATE INDEX idx_session_publication_parent_uuid
 
 CREATE INDEX idx_session_publications_project ON session_publications(project_hash);
 
+CREATE INDEX idx_sessions_child_page
+  ON sessions(resolved_parent_id, start_ms DESC, session_id ASC)
+  WHERE parent_state = 'resolved';
+
 CREATE INDEX idx_sessions_harness ON sessions(model_harness);
 
 CREATE INDEX idx_sessions_host ON sessions(opaque_host_id);
@@ -1277,6 +1288,10 @@ CREATE INDEX idx_sessions_host ON sessions(opaque_host_id);
 CREATE INDEX idx_sessions_parent ON sessions(parent_id) WHERE parent_id IS NOT NULL;
 
 CREATE INDEX idx_sessions_project ON sessions(project_hash);
+
+CREATE INDEX idx_sessions_root_page
+  ON sessions(start_ms DESC, session_id ASC)
+  WHERE parent_state = 'root';
 
 CREATE INDEX idx_sessions_start ON sessions(start_ms);
 
@@ -1359,6 +1374,736 @@ BEGIN
   SELECT RAISE(ABORT, 'generation rows are immutable; a new generation gets a new row');
 END;
 
+CREATE TRIGGER session_publication_metadata_parent_state_ad
+AFTER DELETE ON session_publication_metadata
+BEGIN
+  UPDATE sessions
+   SET parent_state = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN 'unresolved'
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN 'resolved'
+         ELSE 'root'
+       END,
+       resolved_parent_id = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN NULL
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END
+         ELSE NULL
+       END
+ WHERE sessions.session_id = OLD.session_id;
+  UPDATE store_state SET revision = revision + 1 WHERE id = 1 AND revision < 9223372036854775807;
+  SELECT RAISE(ABORT, 'store: store_state.revision cannot advance past its integer ceiling; export the store and start a new one')
+   WHERE changes() = 0;
+END;
+
+CREATE TRIGGER session_publication_metadata_parent_state_ai
+AFTER INSERT ON session_publication_metadata
+BEGIN
+  UPDATE sessions
+   SET parent_state = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN 'unresolved'
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN 'resolved'
+         ELSE 'root'
+       END,
+       resolved_parent_id = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN NULL
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END
+         ELSE NULL
+       END
+ WHERE sessions.session_id = NEW.session_id;
+  UPDATE store_state SET revision = revision + 1 WHERE id = 1 AND revision < 9223372036854775807;
+  SELECT RAISE(ABORT, 'store: store_state.revision cannot advance past its integer ceiling; export the store and start a new one')
+   WHERE changes() = 0;
+END;
+
+CREATE TRIGGER session_publication_metadata_parent_state_au
+AFTER UPDATE OF metadata_json ON session_publication_metadata
+BEGIN
+  UPDATE sessions
+   SET parent_state = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN 'unresolved'
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN 'resolved'
+         ELSE 'root'
+       END,
+       resolved_parent_id = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN NULL
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END
+         ELSE NULL
+       END
+ WHERE sessions.session_id = NEW.session_id;
+  UPDATE store_state SET revision = revision + 1 WHERE id = 1 AND revision < 9223372036854775807;
+  SELECT RAISE(ABORT, 'store: store_state.revision cannot advance past its integer ceiling; export the store and start a new one')
+   WHERE changes() = 0;
+END;
+
+CREATE TRIGGER session_relationship_evidence_parent_state_ad
+AFTER DELETE ON session_relationship_evidence
+BEGIN
+  UPDATE sessions
+   SET parent_state = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN 'unresolved'
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN 'resolved'
+         ELSE 'root'
+       END,
+       resolved_parent_id = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN NULL
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END
+         ELSE NULL
+       END
+ WHERE sessions.session_id = OLD.session_id;
+  UPDATE store_state SET revision = revision + 1 WHERE id = 1 AND revision < 9223372036854775807;
+  SELECT RAISE(ABORT, 'store: store_state.revision cannot advance past its integer ceiling; export the store and start a new one')
+   WHERE changes() = 0;
+END;
+
+CREATE TRIGGER session_relationship_evidence_parent_state_ai
+AFTER INSERT ON session_relationship_evidence
+BEGIN
+  UPDATE sessions
+   SET parent_state = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN 'unresolved'
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN 'resolved'
+         ELSE 'root'
+       END,
+       resolved_parent_id = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN NULL
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END
+         ELSE NULL
+       END
+ WHERE sessions.session_id = NEW.session_id;
+  UPDATE store_state SET revision = revision + 1 WHERE id = 1 AND revision < 9223372036854775807;
+  SELECT RAISE(ABORT, 'store: store_state.revision cannot advance past its integer ceiling; export the store and start a new one')
+   WHERE changes() = 0;
+END;
+
+CREATE TRIGGER session_relationship_evidence_parent_state_au
+AFTER UPDATE ON session_relationship_evidence
+BEGIN
+  UPDATE sessions
+   SET parent_state = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN 'unresolved'
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN 'resolved'
+         ELSE 'root'
+       END,
+       resolved_parent_id = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN NULL
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END
+         ELSE NULL
+       END
+ WHERE sessions.session_id = NEW.session_id;
+  UPDATE store_state SET revision = revision + 1 WHERE id = 1 AND revision < 9223372036854775807;
+  SELECT RAISE(ABORT, 'store: store_state.revision cannot advance past its integer ceiling; export the store and start a new one')
+   WHERE changes() = 0;
+END;
+
+CREATE TRIGGER sessions_parent_state_ad AFTER DELETE ON sessions
+BEGIN
+  UPDATE store_state SET revision = revision + 1 WHERE id = 1 AND revision < 9223372036854775807;
+  SELECT RAISE(ABORT, 'store: store_state.revision cannot advance past its integer ceiling; export the store and start a new one')
+   WHERE changes() = 0;
+END;
+
+CREATE TRIGGER sessions_parent_state_ai AFTER INSERT ON sessions
+BEGIN
+  UPDATE sessions
+   SET parent_state = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN 'unresolved'
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN 'resolved'
+         ELSE 'root'
+       END,
+       resolved_parent_id = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN NULL
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END
+         ELSE NULL
+       END
+ WHERE sessions.session_id = NEW.session_id;
+  UPDATE store_state SET revision = revision + 1 WHERE id = 1 AND revision < 9223372036854775807;
+  SELECT RAISE(ABORT, 'store: store_state.revision cannot advance past its integer ceiling; export the store and start a new one')
+   WHERE changes() = 0;
+END;
+
+CREATE TRIGGER sessions_parent_state_au
+AFTER UPDATE OF parent_id, model_harness, model_id, opaque_host_id,
+  project_hash, start_ms, end_ms, ingested_ms, source_path, source_format,
+  schema_version, git_branch, git_worktree, git_tracking, tool_version,
+  pushed_at, tags, index_version, indexed_at, license_id, session_origin,
+  origin_version, session_entries_hash, source_fingerprint, session_cwd,
+  publication_capture_revision, index_format_version, adapter_version,
+  artifact_hash, metric_seed_json, indexed_input_hash, active_generation_id,
+  root_session_id, session_purpose, input_submission_count,
+  content_sweep_pending, thinking_level, thinking_level_raw,
+  thinking_level_history, latest_attempt_generation_id,
+  latest_attempt_artifact_hash, latest_attempt_indexer_version,
+  latest_attempt_failure_code, latest_attempt_failure_message,
+  latest_attempt_captured_at_ms, latest_attempt_stats_json ON sessions
+BEGIN
+  UPDATE sessions
+   SET parent_state = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN 'unresolved'
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN 'resolved'
+         ELSE 'root'
+       END,
+       resolved_parent_id = CASE
+         WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence r
+   WHERE r.session_id = sessions.session_id
+     AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND r.kind = 'started_by'
+     AND r.target_state IN ('unknown','conflicting_current_native_evidence')
+) THEN NULL
+         WHEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END IS NOT NULL THEN CASE
+  WHEN EXISTS (
+  SELECT 1 FROM session_relationship_evidence e
+   WHERE e.session_id = sessions.session_id
+     AND e.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+     AND e.kind IN ('started_by','context_from')
+) THEN (
+    SELECT r.target_local_id FROM session_relationship_evidence r
+     WHERE r.session_id = sessions.session_id
+       AND r.generation_id = COALESCE(sessions.active_generation_id, sessions.latest_attempt_generation_id)
+       AND r.kind = 'started_by'
+       AND r.target_state IN ('target_known','target_known_retained')
+       AND r.target_local_id IS NOT NULL AND r.target_local_id <> ''
+  )
+  ELSE COALESCE(
+    NULLIF((SELECT CASE WHEN json_valid(p.metadata_json) THEN json_extract(p.metadata_json, '$.parentUuid') END
+              FROM session_publication_metadata p
+             WHERE p.session_id = sessions.session_id), ''),
+    sessions.parent_id)
+END
+         ELSE NULL
+       END
+ WHERE sessions.session_id = NEW.session_id;
+  UPDATE store_state SET revision = revision + 1 WHERE id = 1 AND revision < 9223372036854775807;
+  SELECT RAISE(ABORT, 'store: store_state.revision cannot advance past its integer ceiling; export the store and start a new one')
+   WHERE changes() = 0;
+END;
+
 CREATE TRIGGER sessions_publication_metadata_changed
 AFTER UPDATE OF parent_id,model_harness,model_id,opaque_host_id,project_hash,
  start_ms,end_ms,ingested_ms,source_path,source_format,schema_version,
@@ -1420,6 +2165,7 @@ INSERT INTO "scale_kinds" ("id", "name") VALUES (1, 'nominal');
 INSERT INTO "scale_kinds" ("id", "name") VALUES (2, 'ordinal');
 INSERT INTO "scale_kinds" ("id", "name") VALUES (3, 'continuous');
 INSERT INTO "session_search_state" ("id", "needs_rebuild") VALUES (1, 0);
+INSERT INTO "store_state" ("id", "revision") VALUES (1, 0);
 INSERT INTO "target_kinds" ("id", "name") VALUES (1, 'session');
 INSERT INTO "target_kinds" ("id", "name") VALUES (2, 'entry');
 INSERT INTO "target_kinds" ("id", "name") VALUES (3, 'annotation');
@@ -1444,4 +2190,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 71;
+PRAGMA user_version = 72;

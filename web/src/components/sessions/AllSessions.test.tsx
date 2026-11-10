@@ -63,27 +63,23 @@ describe('AllSessions', () => {
     expect(screen.getByText('bbbb2222')).toBeInTheDocument();
   });
 
-  it('shows the generated title when there is one, and the id when there is not', () => {
+  it('shows the stored preview when there is one, and the id when there is not', () => {
     const sessions = [
-      session({ id: 'titled00zzzz', projectHash: hash('b') }),
+      session({ id: 'titled00zzzz', projectHash: hash('b'), preview: 'refactor the ingest pipeline' }),
       session({ id: 'untitled0zzz', projectHash: hash('c') }),
     ];
-    render(
-      <AllSessions sessions={sessions} titles={new Map([['titled00zzzz', 'refactor the ingest pipeline']])} />,
-    );
+    render(<AllSessions sessions={sessions} />);
     expect(screen.getByText('refactor the ingest pipeline')).toBeInTheDocument();
-    // No title stored for the second session, so it keeps its short id.
+    // No preview stored for the second session, so it keeps its short id.
     expect(screen.getByText('untitled')).toBeInTheDocument();
   });
 
-  it('finds a session by its title', () => {
+  it('finds a session by its stored preview', () => {
     const sessions = [
       session({ id: 'aaaa1111zzzz', projectHash: hash('b') }),
-      session({ id: 'bbbb2222zzzz', projectHash: hash('c') }),
+      session({ id: 'bbbb2222zzzz', projectHash: hash('c'), preview: 'fix the redaction gate' }),
     ];
-    render(
-      <AllSessions sessions={sessions} titles={new Map([['bbbb2222zzzz', 'fix the redaction gate']])} />,
-    );
+    render(<AllSessions sessions={sessions} />);
     fireEvent.change(screen.getByLabelText('search sessions'), { target: { value: 'redaction' } });
     expect(screen.getByText('fix the redaction gate')).toBeInTheDocument();
     expect(screen.queryByText('aaaa1111')).not.toBeInTheDocument();
@@ -97,8 +93,9 @@ describe('AllSessions', () => {
     expect(screen.getByText(/no sessions match/)).toBeInTheDocument();
   });
 
-  it('returns to the first page when the query narrows the result', () => {
-    // 60 sessions over a 25-row page size = 3 pages.
+  it('renders the complete list with no pager and narrows on search', () => {
+    // 60 sessions: a complete list renders every row because there is no
+    // server page to page through.
     const many = Array.from({ length: 60 }, (_, i) =>
       session({
         id: `id${String(i).padStart(6, '0')}`,
@@ -108,13 +105,14 @@ describe('AllSessions', () => {
     );
     render(<AllSessions sessions={many} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'next' }));
-    expect(screen.getByText(/page 2 of 3/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'next' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'next page' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('link')).toHaveLength(60);
 
-    // Narrowing to a single match must land on page 1, not a stale page 2.
+    // Narrowing to a single match leaves only that row.
     fireEvent.change(screen.getByLabelText('search sessions'), { target: { value: 'needle' } });
-    expect(screen.queryByText(/page 2/)).not.toBeInTheDocument();
     expect(screen.getByText('id000059')).toBeInTheDocument();
+    expect(screen.getAllByRole('link')).toHaveLength(1);
   });
 
   it('shows the filtered count against the total while searching', () => {

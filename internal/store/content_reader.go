@@ -665,6 +665,35 @@ func contentPageBudget(from int, override int64) int64 {
 	return defaults.TranscriptContinuationReadBytes
 }
 
+// LoadAvailableSessionEntries returns the entries an Available-mode read
+// serves, whole, from one snapshot. That mode is the one the transcript segment
+// read serves: verified full text when the capture is complete, and the bounded
+// stored projection otherwise. The segment directory must measure exactly this
+// content, because a directory built from the preview projection would declare a
+// byte length the segment read can never match.
+func (s *Store) LoadAvailableSessionEntries(ctx context.Context, id ingest.SessionID) (_ []schema.SessionEntry, retErr error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store available content read: take a connection: %w; no transcript directory was measured; restore database access and retry", err)
+	}
+	defer s.pool.Put(conn)
+	end := sqlitex.Transaction(conn)
+	defer func() {
+		end(&retErr)
+		if retErr != nil {
+			retErr = fmt.Errorf("store available content read for session %s: %w; no transcript directory was measured; re-index the session and retry", id, retErr)
+		}
+	}()
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{id}); err != nil {
+		return nil, err
+	}
+	entries, _, err := loadAvailableSessionEntriesOnConn(ctx, conn, id)
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
 // LoadFullSessionEntries releases its snapshot and pooled connection before
 // returning entries to rendering, redaction or network consumers.
 func (s *Store) LoadFullSessionEntries(ctx context.Context, id ingest.SessionID, softMaxBytes int64) (entries []schema.SessionEntry, capture ingest.SessionContentCapture, err error) {

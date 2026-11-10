@@ -23,6 +23,7 @@ requiredNames:
   - nested-helper-owner
   - project-scoped-grouped
   - project-invalid-refused
+  - grouped-page-two
 # The collective/project/profile scope variant belongs to the transcript commons
 # route set, whose route owner registers its own predicate through the same
 # member seam. It is recorded here so the local corpus never silently drops it.
@@ -47,8 +48,8 @@ cases:
     expected:
       statusCode: 200
       page: 1
-      limit: 3
-      totalItems: 3
+      perPage: 25
+      total: 3
       ordinarySessionTotal: 3
       helperThreadTotal: 3
       items:
@@ -56,13 +57,11 @@ cases:
         - {kind: transcript, sessionId: agent-a2, groupCount: 1, helperThreadCount: 1, memberIds: [agent-b3]}
         - {kind: transcript, sessionId: agent-a3, groupCount: 0}
       topLevelPages:
-        - {page: 1, limit: 2, sessionIds: [agent-a1, agent-a2]}
-        - {page: 2, limit: 2, sessionIds: [agent-a3]}
+        - {page: 1, perPage: 25, sessionIds: [agent-a1, agent-a2, agent-a3]}
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 1, total: 2, memberIds: [agent-b1]}
-            - {page: 2, limit: 1, total: 2, memberIds: [agent-b2]}
+            - {page: 1, perPage: 25, total: 2, memberIds: [agent-b1, agent-b2]}
       reListIdentical: true
 
   - name: helper-only-search
@@ -81,7 +80,7 @@ cases:
         - {id: agent-b3, startMs: 470, purpose: helper_review, origin: agent, owner: agent-a2, ownerState: target_known, text: "unrelated text"}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 2
       items:
@@ -89,7 +88,7 @@ cases:
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 20, total: 2, memberIds: [agent-b1, agent-b2]}
+            - {page: 1, perPage: 25, total: 2, memberIds: [agent-b1, agent-b2]}
       reListIdentical: true
 
   - name: selected-helper-search
@@ -108,7 +107,7 @@ cases:
         - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle two"}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 2
       items:
@@ -116,7 +115,7 @@ cases:
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 20, total: 2, memberIds: [agent-b1, agent-b2]}
+            - {page: 1, perPage: 25, total: 2, memberIds: [agent-b1, agent-b2]}
       reListIdentical: true
 
   - name: search-limit-selected-backfill
@@ -135,7 +134,7 @@ cases:
         - {id: agent-b3, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "needle"}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 1
       items:
@@ -154,7 +153,7 @@ cases:
         - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 1
       items:
@@ -172,7 +171,7 @@ cases:
         - {id: agent-b2, startMs: 90, purpose: helper_review, origin: agent}
     expected:
       statusCode: 200
-      totalItems: 2
+      total: 2
       ordinarySessionTotal: 0
       helperThreadTotal: 2
       distinctGroupIDs: true
@@ -192,7 +191,7 @@ cases:
         - {id: agent-b2, startMs: 90, purpose: helper_review, origin: agent, owner: agent-b1, ownerState: target_known}
     expected:
       statusCode: 200
-      totalItems: 2
+      total: 2
       ordinarySessionTotal: 0
       helperThreadTotal: 2
       distinctGroupIDs: true
@@ -211,7 +210,7 @@ cases:
         - {id: agent-b1, startMs: 100, purpose: helper_review, origin: agent, owner: agent-b1, ownerState: target_known}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 1
       items:
@@ -230,7 +229,7 @@ cases:
         - {id: agent-g2, startMs: 460, purpose: helper_review, origin: agent, owner: agent-g1, ownerState: target_known}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 2
       items:
@@ -257,7 +256,7 @@ cases:
         - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "sameword"}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 2
       items:
@@ -277,7 +276,7 @@ cases:
         - {id: agent-b4, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 3
       items:
@@ -297,7 +296,7 @@ cases:
         - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "guardian review one"}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 2
       items:
@@ -315,7 +314,7 @@ cases:
         - {id: agent-a2, startMs: 400, purpose: interaction, origin: user, text: "guardian"}
     expected:
       statusCode: 200
-      totalItems: 2
+      total: 2
       ordinarySessionTotal: 2
       helperThreadTotal: 0
       items:
@@ -336,7 +335,7 @@ cases:
         - {id: agent-b2, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 2
       items:
@@ -357,7 +356,7 @@ cases:
         - {id: agent-b2, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, text: "no match here"}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 1
       items:
@@ -365,7 +364,7 @@ cases:
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+            - {page: 1, perPage: 25, total: 1, memberIds: [agent-b1]}
 
   - name: denied-child-no-widening
     classification: must-pass
@@ -381,7 +380,7 @@ cases:
         - {id: agent-b2, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a2, ownerState: target_known}
     expected:
       statusCode: 200
-      totalItems: 2
+      total: 2
       ordinarySessionTotal: 2
       helperThreadTotal: 2
       items:
@@ -390,7 +389,7 @@ cases:
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+            - {page: 1, perPage: 25, total: 1, memberIds: [agent-b1]}
 
   - name: project-scoped-grouped
     classification: must-pass
@@ -407,7 +406,7 @@ cases:
         - {id: agent-t1, startMs: 380, purpose: helper_review, origin: agent, owner: agent-s1, ownerState: target_known, projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 1
       items:
@@ -415,7 +414,7 @@ cases:
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 20, total: 1, memberIds: [agent-r1]}
+            - {page: 1, perPage: 25, total: 1, memberIds: [agent-r1]}
       reListIdentical: true
 
   - name: project-invalid-refused
@@ -445,7 +444,7 @@ cases:
         - {id: agent-b2, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 2
       items:
@@ -455,7 +454,7 @@ cases:
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+            - {page: 1, perPage: 25, total: 1, memberIds: [agent-b1]}
 
   - name: scope-expired
     classification: must-pass
@@ -490,7 +489,7 @@ cases:
         - {id: agent-b3, startMs: 470, purpose: helper_review, origin: agent, owner: agent-a2, ownerState: target_known, pushable: true}
     expected:
       statusCode: 200
-      totalItems: 3
+      total: 3
       ordinarySessionTotal: 3
       helperThreadTotal: 3
       items:
@@ -500,8 +499,7 @@ cases:
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 1, total: 2, memberIds: [agent-b1]}
-            - {page: 2, limit: 1, total: 2, memberIds: [agent-b2]}
+            - {page: 1, perPage: 25, total: 2, memberIds: [agent-b1, agent-b2]}
       reListIdentical: true
 
   - name: sync-nonpushable-helper-absent
@@ -517,7 +515,7 @@ cases:
         - {id: agent-b2, startMs: 480, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 1
       items:
@@ -525,7 +523,7 @@ cases:
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+            - {page: 1, perPage: 25, total: 1, memberIds: [agent-b1]}
 
   - name: sync-owner-not-pushable-context
     classification: must-pass
@@ -539,7 +537,7 @@ cases:
         - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, pushable: true}
     expected:
       statusCode: 200
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 1
       items:
@@ -547,7 +545,7 @@ cases:
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+            - {page: 1, perPage: 25, total: 1, memberIds: [agent-b1]}
 
   - name: sync-selection-scope
     classification: must-pass
@@ -563,7 +561,7 @@ cases:
         - {id: agent-b1, startMs: 490, purpose: helper_review, origin: agent, owner: agent-a1, ownerState: target_known, pushable: true}
     expected:
       statusCode: 200
-      totalItems: 2
+      total: 2
       ordinarySessionTotal: 2
       helperThreadTotal: 1
       items:
@@ -572,4 +570,107 @@ cases:
       memberPages:
         - itemIndex: 0
           pages:
-            - {page: 1, limit: 20, total: 1, memberIds: [agent-b1]}
+            - {page: 1, perPage: 25, total: 1, memberIds: [agent-b1]}
+  - name: grouped-page-two
+    classification: must-pass
+    provenance: {source: requirement, ref: "grouped list and member pages remain reachable past the first 25-unit page"}
+    mutation: {description: "twenty-six ordinary units and one owner with twenty-six saved helpers"}
+    input:
+      route: sessions
+      selection: all
+      sessions:
+        - {id: agent-o01, startMs: 1999, purpose: interaction, origin: user}
+        - {id: agent-o02, startMs: 1998, purpose: interaction, origin: user}
+        - {id: agent-o03, startMs: 1997, purpose: interaction, origin: user}
+        - {id: agent-o04, startMs: 1996, purpose: interaction, origin: user}
+        - {id: agent-o05, startMs: 1995, purpose: interaction, origin: user}
+        - {id: agent-o06, startMs: 1994, purpose: interaction, origin: user}
+        - {id: agent-o07, startMs: 1993, purpose: interaction, origin: user}
+        - {id: agent-o08, startMs: 1992, purpose: interaction, origin: user}
+        - {id: agent-o09, startMs: 1991, purpose: interaction, origin: user}
+        - {id: agent-o10, startMs: 1990, purpose: interaction, origin: user}
+        - {id: agent-o11, startMs: 1989, purpose: interaction, origin: user}
+        - {id: agent-o12, startMs: 1988, purpose: interaction, origin: user}
+        - {id: agent-o13, startMs: 1987, purpose: interaction, origin: user}
+        - {id: agent-o14, startMs: 1986, purpose: interaction, origin: user}
+        - {id: agent-o15, startMs: 1985, purpose: interaction, origin: user}
+        - {id: agent-o16, startMs: 1984, purpose: interaction, origin: user}
+        - {id: agent-o17, startMs: 1983, purpose: interaction, origin: user}
+        - {id: agent-o18, startMs: 1982, purpose: interaction, origin: user}
+        - {id: agent-o19, startMs: 1981, purpose: interaction, origin: user}
+        - {id: agent-o20, startMs: 1980, purpose: interaction, origin: user}
+        - {id: agent-o21, startMs: 1979, purpose: interaction, origin: user}
+        - {id: agent-o22, startMs: 1978, purpose: interaction, origin: user}
+        - {id: agent-o23, startMs: 1977, purpose: interaction, origin: user}
+        - {id: agent-o24, startMs: 1976, purpose: interaction, origin: user}
+        - {id: agent-o25, startMs: 1975, purpose: interaction, origin: user}
+        - {id: agent-o26, startMs: 1974, purpose: interaction, origin: user}
+        - {id: agent-h01, startMs: 2999, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h02, startMs: 2998, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h03, startMs: 2997, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h04, startMs: 2996, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h05, startMs: 2995, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h06, startMs: 2994, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h07, startMs: 2993, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h08, startMs: 2992, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h09, startMs: 2991, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h10, startMs: 2990, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h11, startMs: 2989, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h12, startMs: 2988, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h13, startMs: 2987, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h14, startMs: 2986, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h15, startMs: 2985, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h16, startMs: 2984, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h17, startMs: 2983, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h18, startMs: 2982, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h19, startMs: 2981, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h20, startMs: 2980, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h21, startMs: 2979, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h22, startMs: 2978, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h23, startMs: 2977, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h24, startMs: 2976, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h25, startMs: 2975, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+        - {id: agent-h26, startMs: 2974, purpose: helper_review, origin: agent, owner: agent-o01, ownerState: target_known}
+    expected:
+      statusCode: 200
+      page: 1
+      perPage: 25
+      total: 26
+      ordinarySessionTotal: 26
+      helperThreadTotal: 26
+      items:
+        - {kind: transcript, sessionId: agent-o01, groupCount: 1, helperThreadCount: 26, memberIds: [agent-h26, agent-h25, agent-h24, agent-h23, agent-h22, agent-h21, agent-h20, agent-h19, agent-h18, agent-h17, agent-h16, agent-h15, agent-h14, agent-h13, agent-h12, agent-h11, agent-h10, agent-h09, agent-h08, agent-h07, agent-h06, agent-h05, agent-h04, agent-h03, agent-h02]}
+        - {kind: transcript, sessionId: agent-o02, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o03, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o04, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o05, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o06, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o07, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o08, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o09, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o10, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o11, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o12, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o13, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o14, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o15, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o16, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o17, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o18, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o19, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o20, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o21, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o22, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o23, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o24, groupCount: 0, helperThreadCount: 0, memberIds: []}
+        - {kind: transcript, sessionId: agent-o25, groupCount: 0, helperThreadCount: 0, memberIds: []}
+      topLevelPages:
+            - {page: 1, perPage: 25, sessionIds: [agent-o01, agent-o02, agent-o03, agent-o04, agent-o05, agent-o06, agent-o07, agent-o08, agent-o09, agent-o10, agent-o11, agent-o12, agent-o13, agent-o14, agent-o15, agent-o16, agent-o17, agent-o18, agent-o19, agent-o20, agent-o21, agent-o22, agent-o23, agent-o24, agent-o25], nextSessionIds: [agent-o26]}
+            - {page: 2, perPage: 25, sessionIds: [agent-o26], nextSessionIds: []}
+      memberPages:
+        - itemIndex: 0
+          pages:
+            - {page: 1, perPage: 25, total: 26, memberIds: [agent-h26, agent-h25, agent-h24, agent-h23, agent-h22, agent-h21, agent-h20, agent-h19, agent-h18, agent-h17, agent-h16, agent-h15, agent-h14, agent-h13, agent-h12, agent-h11, agent-h10, agent-h09, agent-h08, agent-h07, agent-h06, agent-h05, agent-h04, agent-h03, agent-h02], nextMemberIds: [agent-h01]}
+            - {page: 2, perPage: 25, total: 26, memberIds: [agent-h01], nextMemberIds: []}
+      afterList: {page2: true}
+      reListIdentical: true

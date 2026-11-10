@@ -9,14 +9,16 @@
  * the footer renders.
  */
 
-/** Default member page size. Matches the server's member page default. */
-export const DEFAULT_HELPER_MEMBER_LIMIT = 20;
+import { PageSize, isPageSize } from '@peasant-labs/schema';
+
+/** Default member page size. Matches the schema-owned 25-row page size. */
+export const DEFAULT_HELPER_MEMBER_PAGE_SIZE = PageSize.P25;
 
 export interface HelperMemberPaging {
   /** 1-based page number. */
   page: number;
-  /** Page size, at least 1. */
-  limit: number;
+  /** Page size, one of the schema-owned 25/50/100 members. */
+  perPage: PageSize;
   /** Server-reported total members for the scope; 0 before the first page. */
   total: number;
 }
@@ -26,7 +28,7 @@ export interface HelperMemberPageWindow {
   start: number;
   /** Exclusive index after the last row on this page. */
   end: number;
-  /** Number of pages at the current total and limit, at least 1. */
+  /** Number of pages at the current total and page size, at least 1. */
   pageCount: number;
   hasPrevious: boolean;
   hasNext: boolean;
@@ -35,18 +37,27 @@ export interface HelperMemberPageWindow {
 function requirePositiveInteger(value: number, field: string): number {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new Error(
-      `Helper member paging rejected ${field}=${String(value)} in helperGroups because paging values must be positive integers. No request was issued and no page was rendered. Use a page number and limit of at least 1, then retry.`,
+      `Helper member paging rejected ${field}=${String(value)} in helperGroups because paging values must be positive integers. No request was issued and no page was rendered. Use a page number and page size of at least 1, then retry.`,
+    );
+  }
+  return value;
+}
+
+function requirePageSize(value: PageSize): PageSize {
+  if (!isPageSize(value)) {
+    throw new Error(
+      `Helper member paging rejected perPage=${String(value)} in helperGroups because a page size must be one of the schema-owned 25, 50, or 100 members. No request was issued and no page was rendered. Use 25, 50, or 100, then retry.`,
     );
   }
   return value;
 }
 
 /** The first page for a group, before any member fetch has resolved. */
-export function firstHelperMemberPage(limit = DEFAULT_HELPER_MEMBER_LIMIT): HelperMemberPaging {
-  return { page: 1, limit: requirePositiveInteger(limit, 'limit'), total: 0 };
+export function firstHelperMemberPage(perPage: PageSize = DEFAULT_HELPER_MEMBER_PAGE_SIZE): HelperMemberPaging {
+  return { page: 1, perPage: requirePageSize(perPage), total: 0 };
 }
 
-/** Move to one page, keeping the limit and current total. */
+/** Move to one page, keeping the page size and current total. */
 export function gotoHelperMemberPage(paging: HelperMemberPaging, page: number): HelperMemberPaging {
   return { ...paging, page: requirePositiveInteger(page, 'page') };
 }
@@ -75,11 +86,11 @@ export function withHelperMemberTotal(
  * refused rather than clamped.
  */
 export function helperMemberPageWindow(paging: HelperMemberPaging): HelperMemberPageWindow {
-  const limit = requirePositiveInteger(paging.limit, 'limit');
+  const perPage = requirePageSize(paging.perPage);
   const requested = requirePositiveInteger(paging.page, 'page');
-  const pageCount = Math.max(1, Math.ceil(paging.total / limit));
+  const pageCount = Math.max(1, Math.ceil(paging.total / perPage));
   const page = Math.min(requested, pageCount);
-  const start = (page - 1) * limit;
-  const end = Math.min(start + limit, paging.total);
+  const start = (page - 1) * perPage;
+  const end = Math.min(start + perPage, paging.total);
   return { start, end, pageCount, hasPrevious: page > 1, hasNext: page < pageCount };
 }

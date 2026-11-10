@@ -55,6 +55,15 @@ residual:
       SyncParentIdentities. The shared identity reader applies generation and
       snapshot authority before this last fallback; candidate root/child
       membership and child counts never use the cache directly.
+  - name: store-parent-cache-reader
+    file: internal/store/parent_reader.go
+    declaration: Store.ParentCacheForSession
+    literals: 1
+    class: availability
+    reason: >-
+      Reads the raw availability cache for the orphan reconciliation's own
+      assertions and for any caller that asks which cached row can join. It
+      never answers who the logical parent is.
   - name: store-logical-parent-renderer
     file: internal/store/parent_reader.go
     declaration: LogicalParentSQL
@@ -250,8 +259,51 @@ residual:
     reason: >-
       The legacy durable half of the same read: it selects only children whose
       cache is empty, so a populated cache is never reported twice.
+  - name: store-parent-state-projection-update
+    file: internal/store/schema_v70.go
+    declaration: parentStateProjectionUpdateSQL
+    literals: 1
+    class: ddl
+    reason: The frozen projection UPDATE shared by the parent-state triggers and the backfill.
+  - name: store-parent-state-trigger-columns
+    file: internal/store/schema_v70.go
+    declaration: parentStateSessionsTriggerFiresOn
+    literals: 1
+    class: ddl
+    reason: The frozen UPDATE OF column list that keeps the parent-state trigger from re-entering.
+  - name: store-migration-v70
+    file: internal/store/schema_v70.go
+    declaration: migrationV70
+    literals: 2
+    class: ddl
+    reason: Immutable historical migration text for the parent lane, page indexes, and store revision.
+  - name: store-offset-page-child-filter
+    file: internal/store/offset_page_reader.go
+    declaration: offsetPageWhere
+    literals: 1
+    class: availability
+    reason: >-
+      The child page predicate reads the resolved-child projection column the
+      trigger maintains, not sessions.parent_id. It answers which resolved rows
+      belong to the page.
+  - name: store-offset-page-child-count
+    file: internal/store/offset_page_reader.go
+    declaration: Store.ResolvedChildCounts
+    literals: 3
+    class: availability
+    reason: >-
+      The grouped immediate-child count reads the resolved-child index; it never
+      answers who a session's logical parent is. The typed state predicate
+      splits the SELECT, the IN clause, and the GROUP BY into three literals.
 
 routed:
+  - name: store-parent-state-logical-parent
+    file: internal/store/schema_v70.go
+    declaration: parentStateLogicalParentSQL
+    class: routed
+    reason: >-
+      The migration projection embeds LogicalParentSQL directly instead of
+      re-spelling the parent rule in frozen text.
   - name: store-all-sessions
     file: internal/store/reader.go
     declaration: sqlAllSessions

@@ -1,0 +1,106 @@
+# The quality page contract cases. The server seeds this many stored sessions
+# (ids sess_root000.. in page order) and asserts each request against the
+# closed-set row counts, the offset windows, and the clamp rule. The manifest
+# names every case so a deleted case fails the bijection rather than silently
+# shrinking coverage.
+seed_sessions: 60
+default_page_size: 25
+required_case_names:
+  - twenty-five-row-first-page
+  - twenty-five-row-second-page
+  - twenty-five-row-third-page
+  - fifty-row-first-page
+  - fifty-row-second-page
+  - hundred-row-first-page
+  - omitted-max-items-is-twenty-five
+  - zero-max-items-is-twenty-five
+  - past-the-last-page-clamps-to-the-last-page
+cases:
+  - name: twenty-five-row-first-page
+    query: "page=1&maxItems=25"
+    page: 1
+    perPage: 25
+    items: 25
+    next: 25
+    firstID: sess_root000
+    lastID: sess_root024
+  - name: twenty-five-row-second-page
+    query: "page=2&maxItems=25"
+    page: 2
+    perPage: 25
+    items: 25
+    next: 10
+    firstID: sess_root025
+    lastID: sess_root049
+  - name: twenty-five-row-third-page
+    query: "page=3&maxItems=25"
+    page: 3
+    perPage: 25
+    items: 10
+    next: 0
+    firstID: sess_root050
+    lastID: sess_root059
+  - name: fifty-row-first-page
+    query: "page=1&maxItems=50"
+    page: 1
+    perPage: 50
+    items: 50
+    next: 10
+    firstID: sess_root000
+    lastID: sess_root049
+  - name: fifty-row-second-page
+    query: "page=2&maxItems=50"
+    page: 2
+    perPage: 50
+    items: 10
+    next: 0
+    firstID: sess_root050
+    lastID: sess_root059
+  - name: hundred-row-first-page
+    query: "page=1&maxItems=100"
+    page: 1
+    perPage: 100
+    items: 60
+    next: 0
+    firstID: sess_root000
+    lastID: sess_root059
+  - name: omitted-max-items-is-twenty-five
+    query: "page=1"
+    page: 1
+    perPage: 25
+    items: 25
+    next: 25
+    firstID: sess_root000
+    lastID: sess_root024
+  - name: zero-max-items-is-twenty-five
+    query: "page=1&maxItems=0"
+    page: 1
+    perPage: 25
+    items: 25
+    next: 25
+    firstID: sess_root000
+    lastID: sess_root024
+  - name: past-the-last-page-clamps-to-the-last-page
+    query: "page=99&maxItems=25"
+    page: 3
+    perPage: 25
+    items: 10
+    next: 0
+    firstID: sess_root050
+    lastID: sess_root059
+required_invalid_names:
+  - max-items-outside-the-closed-set
+  - max-items-malformed
+  - max-items-negative
+  - page-zero
+  - page-malformed
+  - unsupported-query-field
+  - repeated-page
+invalid_cases:
+  - {name: max-items-outside-the-closed-set, query: "maxItems=26", code: quality_page_size_invalid}
+  - {name: max-items-malformed, query: "maxItems=abc", code: quality_page_size_invalid}
+  - {name: max-items-negative, query: "maxItems=-1", code: quality_page_size_invalid}
+  - {name: page-zero, query: "page=0", code: quality_page_invalid}
+  - {name: page-malformed, query: "page=two", code: quality_page_invalid}
+  - {name: unsupported-query-field, query: "perPage=25", code: request_query_unknown}
+  - {name: repeated-page, query: "page=1&page=2", code: request_query_duplicate}

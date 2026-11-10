@@ -107,7 +107,8 @@ func TestMemberRouteRefusesFiltersAndStaleScopes(t *testing.T) {
 		{"missing scope", membersPath, http.StatusBadRequest, "request_query_required"},
 		{"extra filter", membersPath + "?scope=" + group.MemberScope + "&project=secret", http.StatusBadRequest, "request_query_unknown"},
 		{"invalid page", membersPath + "?scope=" + group.MemberScope + "&page=0", http.StatusBadRequest, "grouped_page_invalid"},
-		{"invalid limit", membersPath + "?scope=" + group.MemberScope + "&limit=zero", http.StatusBadRequest, "grouped_limit_invalid"},
+		{"invalid perPage", membersPath + "?scope=" + group.MemberScope + "&perPage=zero", http.StatusBadRequest, "grouped_per_page_invalid"},
+		{"perPage outside the set", membersPath + "?scope=" + group.MemberScope + "&perPage=26", http.StatusBadRequest, "grouped_per_page_invalid"},
 		{"wrong group", base + "/api/v1/session-groups/hg_other/members?scope=" + group.MemberScope, http.StatusConflict, "group_scope_expired"},
 		{"unknown scope", membersPath + "?scope=not-a-live-scope", http.StatusConflict, "group_scope_expired"},
 	}
@@ -122,6 +123,36 @@ func TestMemberRouteRefusesFiltersAndStaleScopes(t *testing.T) {
 				t.Fatalf("error code = %q, want %q (body %s)", code, tc.code, body)
 			}
 		})
+	}
+}
+
+// TestGroupedRoutesDefaultPageSize proves both grouped list routes share the
+// one 25-row default when the caller omits perPage.
+func TestGroupedRoutesDefaultPageSize(t *testing.T) {
+	db := storetest.Open(t)
+	seedGroupedRouteBoundarySessions(t, db)
+	policy := sessionvisibility.New(config.SelectionConfig{Mode: config.SelectionModeAll})
+	provider := NewStoreDataProvider(db, policy)
+	base := startHelperGroupServer(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{}, Provider: provider})
+
+	for _, rawURL := range []string{
+		base + "/api/v1/sessions?view=grouped",
+		base + "/api/v1/search?q=needle&view=grouped",
+	} {
+		body, status := helperGroupGET(t, rawURL)
+		if status != http.StatusOK {
+			t.Fatalf("%s status = %d (body %s)", rawURL, status, body)
+		}
+		var payload schema.LocalSessionListPayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("decode %s: %v (body %s)", rawURL, err, body)
+		}
+		if payload.PerPage != schema.PageSize25 || payload.Page != 1 {
+			t.Fatalf("%s page/perPage = (%d,%d), want (1,25)", rawURL, payload.Page, payload.PerPage)
+		}
+		if payload.Revision == "" {
+			t.Fatalf("%s carries no revision", rawURL)
+		}
 	}
 }
 
@@ -200,7 +231,7 @@ func TestRegisteredRouteVariantSeamServesMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	members := helperGroupMembers(t, base, group.groupID, scope, 1, 20)
+	members := helperGroupMembers(t, base, group.groupID, scope, 1, 25)
 	want := make([]string, 0, len(group.members))
 	for _, member := range group.members {
 		want = append(want, member.StableID)

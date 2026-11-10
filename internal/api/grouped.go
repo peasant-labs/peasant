@@ -68,6 +68,11 @@ type GroupedFilters struct {
 type GroupedCandidate struct {
 	// Summary is the ordinary session row projection for the transcript item.
 	Summary schema.SessionSummary
+	// Title is the stored display title of the session. A grouped or sync row
+	// carries it so the client renders titles without the retired full sessions
+	// channel; the search variant omits it because its match rows already carry
+	// the matched content.
+	Title string
 	// StartMs orders the item. It is the stored session start, never a page or
 	// query artifact.
 	StartMs int64
@@ -364,13 +369,37 @@ func candidateIndex(candidates []GroupedCandidate) map[string]bool {
 	return index
 }
 
+// storedTitle reads the nullable stored session title into a wire row. An
+// absent stored title stays an empty string so the row's omitempty field is
+// absent and the client falls back to the preview or id.
+func storedTitle(title *string) string {
+	if title == nil {
+		return ""
+	}
+	return *title
+}
+
+// groupedRowTitle is the stored title one grouped row carries. The search
+// variant omits it because its match rows already carry the matched content;
+// every list and sync row sets it so a client can render titles from the
+// bounded page instead of the retired full sessions channel.
+func groupedRowTitle(candidate GroupedCandidate, variant GroupedRouteVariant) string {
+	if variant == GroupedRouteSearch {
+		return ""
+	}
+	return candidate.Title
+}
+
 // buildGroupedListPayload assembles the opt-in grouped list response. It orders
 // and counts exactly the route candidates, attaches each rendered group's opaque
 // member scope, and pages the TOP-LEVEL units only. Helper expansion pages
 // through the member operation.
-func buildGroupedListPayload(filters GroupedFilters, candidates []GroupedCandidate, page, limit int, issuer groupedScopeIssuer) (*schema.LocalSessionListPayload, error) {
+func buildGroupedListPayload(filters GroupedFilters, candidates []GroupedCandidate, page int, perPage schema.PageSize, revision string, issuer groupedScopeIssuer) (*schema.LocalSessionListPayload, error) {
 	if !filters.Variant.IsValid() {
 		return nil, fmt.Errorf("api.buildGroupedListPayload: originating route %q is outside the closed set; no grouped list was assembled and the caller cannot replay a member scope; request view=grouped from a registered route", filters.Variant)
+	}
+	if !perPage.IsValid() {
+		return nil, fmt.Errorf("api.buildGroupedListPayload: perPage %d is outside the closed 25/50/100 set; no grouped list was assembled; validate the requested page size before building the payload", int(perPage))
 	}
 	view := buildGroupedView(candidates)
 	present := candidateIndex(candidates)
@@ -391,7 +420,7 @@ func buildGroupedListPayload(filters GroupedFilters, candidates []GroupedCandida
 			stable:  candidate.StableID,
 			item: schema.LocalSessionListItem{
 				Kind:         schema.SessionListItemTranscript,
-				Transcript:   &schema.LocalSessionRow{Session: candidate.Summary, Sync: candidate.Sync, Matches: candidate.Matches},
+				Transcript:   &schema.LocalSessionRow{Session: candidate.Summary, Sync: candidate.Sync, Matches: candidate.Matches, Title: groupedRowTitle(candidate, filters.Variant)},
 				HelperGroups: groups,
 			},
 		})
@@ -431,34 +460,33 @@ func buildGroupedListPayload(filters GroupedFilters, candidates []GroupedCandida
 		return itemOrderLess(items[i].startMs, items[i].stable, items[j].startMs, items[j].stable)
 	})
 
-	totalItems := len(items)
-	if limit <= 0 {
-		limit = totalItems
-		if limit < 1 {
-			limit = 1
-		}
+	total := len(items)
+	page = clampPage(page, total, int(perPage))
+	start := (page - 1) * int(perPage)
+	end := start + int(perPage)
+	if end > total {
+		end = total
 	}
-	if page < 1 {
-		page = 1
-	}
-	start := (page - 1) * limit
-	if start > len(items) {
-		start = len(items)
-	}
-	end := start + limit
-	if end > len(items) {
-		end = len(items)
+	nextEnd := end + int(perPage)
+	if nextEnd > total {
+		nextEnd = total
 	}
 	pageItems := make([]schema.LocalSessionListItem, 0, end-start)
 	for _, item := range items[start:end] {
 		pageItems = append(pageItems, item.item)
 	}
+	nextItems := make([]schema.LocalSessionListItem, 0, nextEnd-end)
+	for _, item := range items[end:nextEnd] {
+		nextItems = append(nextItems, item.item)
+	}
 
 	payload := &schema.LocalSessionListPayload{
 		Items:                pageItems,
+		NextItems:            nextItems,
 		Page:                 page,
-		Limit:                limit,
-		TotalItems:           totalItems,
+		PerPage:              perPage,
+		Total:                total,
+		Revision:             revision,
 		OrdinarySessionTotal: len(view.ordinary),
 		HelperThreadTotal:    len(view.helpers),
 	}
@@ -511,9 +539,12 @@ func (v *groupedView) helperGroupSummaries(groups []*helperGroup, filters Groupe
 // predicate-applied candidates and pages them. It returns errGroupedGroupUnknown
 // when the group key no longer matches, so the handler refuses with an
 // actionable refresh instead of an empty lie.
-func buildGroupedMembersPayload(groupID string, filters GroupedFilters, candidates []GroupedCandidate, page, limit int, issuer groupedScopeIssuer) (*schema.LocalHelperMembersPayload, error) {
+func buildGroupedMembersPayload(groupID string, filters GroupedFilters, candidates []GroupedCandidate, page int, perPage schema.PageSize, revision string, issuer groupedScopeIssuer) (*schema.LocalHelperMembersPayload, error) {
 	if !filters.Variant.IsValid() {
 		return nil, fmt.Errorf("api.buildGroupedMembersPayload: originating route %q is outside the closed set; member paging cannot replay the predicate; refresh the grouped list", filters.Variant)
+	}
+	if !perPage.IsValid() {
+		return nil, fmt.Errorf("api.buildGroupedMembersPayload: perPage %d is outside the closed 25/50/100 set; no member page was assembled; validate the requested page size before building the payload", int(perPage))
 	}
 	view := buildGroupedView(candidates)
 	var group *helperGroup
@@ -527,23 +558,19 @@ func buildGroupedMembersPayload(groupID string, filters GroupedFilters, candidat
 		return nil, fmt.Errorf("api.buildGroupedMembersPayload: group %q has no members under the replayed %s predicate: %w", groupID, filters.Variant, errGroupedGroupUnknown)
 	}
 
-	if limit <= 0 {
-		limit = groupedMembersDefaultLimit
-	}
-	if limit > groupedMembersMaxLimit {
-		limit = groupedMembersMaxLimit
-	}
-	if page < 1 {
-		page = 1
-	}
 	total := len(group.members)
-	start := (page - 1) * limit
+	page = clampPage(page, total, int(perPage))
+	start := (page - 1) * int(perPage)
 	if start > total {
 		start = total
 	}
-	end := start + limit
+	end := start + int(perPage)
 	if end > total {
 		end = total
+	}
+	nextEnd := end + int(perPage)
+	if nextEnd > total {
+		nextEnd = total
 	}
 
 	members := make([]schema.LocalSessionListItem, 0, end-start)
@@ -554,16 +581,30 @@ func buildGroupedMembersPayload(groupID string, filters GroupedFilters, candidat
 		}
 		members = append(members, schema.LocalSessionListItem{
 			Kind:         schema.SessionListItemTranscript,
-			Transcript:   &schema.LocalSessionRow{Session: member.Summary, Sync: member.Sync, Matches: member.Matches},
+			Transcript:   &schema.LocalSessionRow{Session: member.Summary, Sync: member.Sync, Matches: member.Matches, Title: groupedRowTitle(member, filters.Variant)},
+			HelperGroups: groups,
+		})
+	}
+	nextItems := make([]schema.LocalSessionListItem, 0, nextEnd-end)
+	for _, member := range group.members[end:nextEnd] {
+		groups, err := view.helperGroupSummaries(view.groupsNestedUnder(member.StableID), filters, issuer)
+		if err != nil {
+			return nil, err
+		}
+		nextItems = append(nextItems, schema.LocalSessionListItem{
+			Kind:         schema.SessionListItemTranscript,
+			Transcript:   &schema.LocalSessionRow{Session: member.Summary, Sync: member.Sync, Matches: member.Matches, Title: groupedRowTitle(member, filters.Variant)},
 			HelperGroups: groups,
 		})
 	}
 
 	payload := &schema.LocalHelperMembersPayload{
-		Members: members,
-		Page:    page,
-		Limit:   limit,
-		Total:   total,
+		Members:   members,
+		NextItems: nextItems,
+		Page:      page,
+		PerPage:   perPage,
+		Total:     total,
+		Revision:  revision,
 	}
 	if err := payload.Validate(); err != nil {
 		return nil, fmt.Errorf("api.buildGroupedMembersPayload: validate members of group %q: %w; no member page was emitted", groupID, err)

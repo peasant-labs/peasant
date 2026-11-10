@@ -1,0 +1,109 @@
+# The consumer copy of the schema-owned ProjectAnalytics field set. The schema
+# module owns the contract; this file is Peasant's producer-side assertion that
+# the aggregate it computes carries exactly that set. A field added on either
+# side fails the parity test until both copies move together.
+types:
+  - name: ProjectAnalytics
+    fields:
+      - totalSessions
+      - totalContributors
+      - totalProjects
+      - sessionsPerWeek
+      - weeklyActiveContributors
+      - returningContributorRate
+      - longestStreak
+      - newContributorVelocity
+      - sessionToCommitRate
+      - avgDurationPerActiveWeek
+      - outcomeDistribution
+      - sessionStats
+      - perContributorBreakdown
+  - name: WeekCount
+    fields: [week, count]
+  - name: WeekContributors
+    fields: [week, contributors]
+  - name: ReturningContributorRate
+    fields: [total, returning, rate]
+  - name: LongestStreak
+    fields: [weeks, startWeek, endWeek]
+  - name: WeekNewContributors
+    fields: [week, newContributors]
+  - name: SessionToCommitRate
+    fields: [total, withCommit, rate]
+  - name: WeekAvgDuration
+    fields: [week, avgDurationMins, sessions]
+  - name: OutcomeDistribution
+    fields: [resolved, partial, failed, unknown, total]
+  - name: MedianP90
+    fields: [count, median, p90]
+  - name: AnalyticsSessionStats
+    fields: [durationMins, totalTokens, turnCount, toolCallCount]
+  - name: ContributorBreakdown
+    fields:
+      - contributorId
+      - sessions
+      - activeWeeks
+      - totalTokens
+      - totalDurationMins
+      - totalTurns
+      - totalToolCalls
+      - sessionsWithCommit
+      - totalCommits
+      - outcomes
+      - firstSeen
+      - lastSeen
+
+# One library sample the aggregate must fold into the bundle below. Every
+# session belongs to the one local contributor the store can attribute; the
+# three Monday-of-week buckets exercise the streak, velocity, and weekly
+# averages. Outcomes include the unknown arm a NULL stored outcome produces.
+sessions:
+  - {id: s1, startTime: "2026-01-05T09:00:00Z", project: proj-a, outcome: resolved, durationMins: 20, totalTokens: 5000, turnCount: 10, toolCalls: 4}
+  - {id: s2, startTime: "2026-01-07T15:00:00Z", project: proj-b, outcome: failed, durationMins: 40, totalTokens: 20000, turnCount: 25, toolCalls: 18}
+  - {id: s3, startTime: "2026-01-13T11:00:00Z", project: proj-a, outcome: partial, durationMins: 60, totalTokens: 30000, turnCount: 30, toolCalls: 22}
+  - {id: s4, startTime: "2026-01-14T11:00:00Z", project: proj-b, outcome: resolved, durationMins: 15, totalTokens: 8000, turnCount: 6, toolCalls: 3}
+  - {id: s5, startTime: "2026-01-15T18:00:00Z", project: proj-a, outcome: resolved, durationMins: 35, totalTokens: 12000, turnCount: 14, toolCalls: 9}
+  - {id: s6, startTime: "2026-01-19T08:00:00Z", project: proj-a, outcome: resolved, durationMins: 25, totalTokens: 9000, turnCount: 11, toolCalls: 7}
+  - {id: s7, startTime: "2026-01-21T08:00:00Z", project: proj-b, outcome: "", durationMins: 50, totalTokens: 18000, turnCount: 20, toolCalls: 15}
+  - {id: s8, startTime: "2026-01-22T20:00:00Z", project: proj-a, outcome: failed, durationMins: 10, totalTokens: 4000, turnCount: 5, toolCalls: 2}
+
+expected:
+  totalSessions: 8
+  totalContributors: 1
+  totalProjects: 2
+  sessionsPerWeek:
+    - {week: "2026-01-05", count: 2}
+    - {week: "2026-01-12", count: 3}
+    - {week: "2026-01-19", count: 3}
+  weeklyActiveContributors:
+    - {week: "2026-01-05", contributors: 1}
+    - {week: "2026-01-12", contributors: 1}
+    - {week: "2026-01-19", contributors: 1}
+  returningContributorRate: {total: 1, returning: 1, rate: 1}
+  longestStreak: {weeks: 3, startWeek: "2026-01-05", endWeek: "2026-01-19"}
+  newContributorVelocity:
+    - {week: "2026-01-05", newContributors: 1}
+  sessionToCommitRate: {total: 8, withCommit: 0, rate: 0}
+  avgDurationPerActiveWeek:
+    - {week: "2026-01-05", avgDurationMins: 30, sessions: 2}
+    - {week: "2026-01-12", avgDurationMins: 36.666666666666664, sessions: 3}
+    - {week: "2026-01-19", avgDurationMins: 28.333333333333332, sessions: 3}
+  outcomeDistribution: {resolved: 4, partial: 1, failed: 2, unknown: 1, total: 8}
+  sessionStats:
+    durationMins: {count: 8, median: 30, p90: 53}
+    totalTokens: {count: 8, median: 10500, p90: 23000}
+    turnCount: {count: 8, median: 12.5, p90: 26.5}
+    toolCallCount: {count: 8, median: 8, p90: 19.2}
+  perContributorBreakdown:
+    - contributorId: "local user"
+      sessions: 8
+      activeWeeks: 3
+      totalTokens: 106000
+      totalDurationMins: 255
+      totalTurns: 121
+      totalToolCalls: 80
+      sessionsWithCommit: 0
+      totalCommits: 0
+      outcomes: {resolved: 4, partial: 1, failed: 2, unknown: 1, total: 8}
+      firstSeen: "2026-01-05"
+      lastSeen: "2026-01-22"

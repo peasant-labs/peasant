@@ -29,8 +29,10 @@ function okResponse(payload: unknown) {
 function groupedPayload(over: Record<string, unknown> = {}) {
   return {
     page: 1,
-    limit: 20,
-    totalItems: 1,
+    perPage: 25,
+    total: 1,
+    nextItems: [],
+    revision: '0',
     ordinarySessionTotal: 1,
     helperThreadTotal: 0,
     items: [{ kind: 'transcript', transcript: { session: makeSession({ id: 'agent-a1' }) } }],

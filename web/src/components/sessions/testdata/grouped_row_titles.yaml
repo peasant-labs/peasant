@@ -1,0 +1,26 @@
+# The grouped row title is the stored title the grouped page carries. A row
+# without one falls back to its redaction-safe preview, then the short session
+# id. The search variant omits the stored title, so its rows take the preview
+# path.
+requiredNames:
+  - a stored title is the row title
+  - a row without a stored title falls back to its preview
+  - a row with neither title nor preview falls back to the short id
+  - a search row without a stored title falls back to its preview
+cases:
+  - name: a stored title is the row title
+    sessionId: agent-a1
+    title: refactor the ingest pipeline
+    preview: the raw first prompt
+    expectedTitle: refactor the ingest pipeline
+  - name: a row without a stored title falls back to its preview
+    sessionId: agent-a2
+    preview: the raw first prompt
+    expectedTitle: the raw first prompt
+  - name: a row with neither title nor preview falls back to the short id
+    sessionId: session-long-identifier
+    expectedTitle: session-
+  - name: a search row without a stored title falls back to its preview
+    sessionId: agent-a3
+    preview: a matching first prompt
+    expectedTitle: a matching first prompt

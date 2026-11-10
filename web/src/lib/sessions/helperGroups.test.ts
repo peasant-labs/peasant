@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { PageSize } from '@peasant-labs/schema';
 import {
   parseStrictYAML,
   requireExactFields,
@@ -9,7 +10,7 @@ import {
   requireUniqueNames,
 } from '@/test/strictYaml';
 import {
-  DEFAULT_HELPER_MEMBER_LIMIT,
+  DEFAULT_HELPER_MEMBER_PAGE_SIZE,
   firstHelperMemberPage,
   gotoHelperMemberPage,
   helperMemberPageWindow,
@@ -33,19 +34,19 @@ type PagingCase = {
   name: string;
   operation: PagingOperation;
   paging?: HelperMemberPaging;
-  limit?: number;
+  perPage?: number;
   page?: number;
   served?: { page: number; total: number };
   expected?: HelperMemberPageWindow | Partial<HelperMemberPaging>;
   expectError?: boolean;
 };
 
-const CASE_FIELDS = ['name', 'operation', 'paging', 'limit', 'page', 'served', 'expected', 'expectError'] as const;
+const CASE_FIELDS = ['name', 'operation', 'paging', 'perPage', 'page', 'served', 'expected', 'expectError'] as const;
 const OPERATIONS: readonly PagingOperation[] = ['window', 'firstPage', 'gotoPage', 'withTotal'];
 
 const OPERATION_FIELDS: Record<PagingOperation, readonly string[]> = {
   window: ['name', 'operation', 'paging'],
-  firstPage: ['name', 'operation', 'limit'],
+  firstPage: ['name', 'operation', 'perPage'],
   gotoPage: ['name', 'operation', 'paging', 'page'],
   withTotal: ['name', 'operation', 'paging', 'served'],
 };
@@ -138,7 +139,7 @@ function runPagingCase(testCase: PagingCase): unknown {
     case 'window':
       return helperMemberPageWindow(testCase.paging!);
     case 'firstPage':
-      return firstHelperMemberPage(testCase.limit);
+      return firstHelperMemberPage(testCase.perPage as PageSize);
     case 'gotoPage':
       return gotoHelperMemberPage(testCase.paging!, testCase.page!);
     case 'withTotal':
@@ -174,9 +175,9 @@ describe('helper member paging fixture', () => {
     });
   }
 
-  it('defaults the group limit to the server member page size', () => {
-    expect(firstHelperMemberPage().limit).toBe(DEFAULT_HELPER_MEMBER_LIMIT);
-    expect(firstHelperMemberPage().limit).toBe(20);
+  it('defaults the group page size to the schema 25-row member page', () => {
+    expect(firstHelperMemberPage().perPage).toBe(DEFAULT_HELPER_MEMBER_PAGE_SIZE);
+    expect(firstHelperMemberPage().perPage).toBe(25);
   });
 });
 

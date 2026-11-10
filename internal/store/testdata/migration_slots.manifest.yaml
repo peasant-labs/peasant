@@ -1,6 +1,7 @@
 requiredNames:
-  - v71-compact-identity-facts
-  - v70-derived-lookups
+  - v72-compact-identity-facts
+  - v70-parent-state
+  - v71-derived-lookups
   - v69-source-unavailability-cause
   - v68-collective-observations
   - v01-initial-schema

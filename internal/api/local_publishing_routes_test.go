@@ -191,7 +191,7 @@ func TestLocalPublishingRoutesAnswerWithTheSchemaTypes(t *testing.T) {
 	if login.Status != schema.SyncLoginAlreadyAuthenticated {
 		t.Fatalf("login = %+v; a signed-in computer starts no sign-in", login)
 	}
-	var sessions schema.LocalSyncSessionsPayload
+	var sessions schema.LocalSyncSessionPage
 	world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String(), &sessions)
 	var redactions schema.SyncRedactionsResponse
 	world.decode(t, http.MethodGet, defaults.RouteSyncRedactions.String()+"?session_id="+insideSessionID, &redactions)
@@ -201,8 +201,8 @@ func TestLocalPublishingRoutesAnswerWithTheSchemaTypes(t *testing.T) {
 	if len(steps) != 3 || steps[1].Outcome != schema.SyncPushStepSucceeded || steps[2].Outcome != schema.SyncPushStepPendingApproval || pushed.Sessions[0].TranscriptURL == "" {
 		t.Fatalf("typed push through the mounted route = %+v", pushed)
 	}
-	for _, row := range sessions.Sessions {
-		if row.ID == insideSessionID && (row.SyncStatus != schema.SyncStatusNew || row.PreviouslyPushed) {
+	for _, row := range sessions.Items {
+		if row.Sync.ID == insideSessionID && (row.Sync.SyncStatus != schema.SyncStatusNew || row.Sync.PreviouslyPushed) {
 			t.Fatalf("sync row before the publish = %+v", row)
 		}
 	}
@@ -223,10 +223,10 @@ func TestLocalPublishingRoutesAnswerWithTheSchemaTypes(t *testing.T) {
 	if _, stillReads := audience[publishingCollectives["platform"].ID]; stillReads || audience[publishingCollectives["review"].ID] != schema.VillageShareStatusPending {
 		t.Fatalf("Village audience after the removal = %v; platform must be gone and review still pending", audience)
 	}
-	var published schema.LocalSyncSessionsPayload
+	var published schema.LocalSyncSessionPage
 	world.decode(t, http.MethodGet, defaults.RouteSyncSessions.String(), &published)
-	for _, row := range published.Sessions {
-		if row.ID == insideSessionID && (row.SyncStatus == schema.SyncStatusNew || !row.PreviouslyPushed) {
+	for _, row := range published.Items {
+		if row.Sync.ID == insideSessionID && (row.Sync.SyncStatus == schema.SyncStatusNew || !row.Sync.PreviouslyPushed) {
 			t.Fatalf("sync row after the publish = %+v; it was published", row)
 		}
 	}

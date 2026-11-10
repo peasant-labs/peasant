@@ -73,8 +73,9 @@ slots:
   - {name: v67-latest-attempt-pointer, slot: 67, needle: "ADD COLUMN latest_attempt_generation_id TEXT"}
   - {name: v68-collective-observations, slot: 68, needle: "CREATE TABLE collective_observation_scopes"}
   - {name: v69-source-unavailability-cause, slot: 69, needle: "original-source-present-record-unusable"}
-  - {name: v70-derived-lookups, slot: 70, needle: "CREATE TABLE claude_teammate_spawns ("}
-  - {name: v71-compact-identity-facts, slot: 71, needle: "ADD COLUMN identity_session_ids_json TEXT"}
+  - {name: v70-parent-state, slot: 70, needle: "parent_state TEXT NOT NULL DEFAULT 'root'"}
+  - {name: v71-derived-lookups, slot: 71, needle: "CREATE TABLE claude_teammate_spawns ("}
+  - {name: v72-compact-identity-facts, slot: 72, needle: "ADD COLUMN identity_session_ids_json TEXT"}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot

@@ -246,6 +246,19 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	slog.Info("ws: client disconnected", "remote", r.RemoteAddr)
 }
 
+// sessionDetailFrame builds the durable session_detail frame and checks the
+// metadata-only header projection beside it. A header fault is logged, never
+// returned: the current viewer still reads the durable turns until the released
+// viewer consumes segments, so a projection defect must not suppress the frame.
+func sessionDetailFrame(sub ChannelSubscription, detail *schema.SessionDetailReadPayload) ServerMessage {
+	if header := SessionDetailHeaderPayloadFromRead(detail); header != nil {
+		if err := header.Validate(); err != nil {
+			slog.Error("session detail header projection is invalid; serving the durable frame", "session_id", sub.ID, "err", err)
+		}
+	}
+	return ServerMessage{Type: MsgSessionDetail, Data: detail}
+}
+
 // sendSnapshots pushes current data for each subscription.
 // Each ChannelSubscription carries the topic and any topic-specific fields (ID, Axis).
 func (h *Hub) sendSnapshots(ctx context.Context, conn *Conn, subs []ChannelSubscription) {
@@ -292,7 +305,12 @@ func (h *Hub) sendSnapshots(ctx context.Context, conn *Conn, subs []ChannelSubsc
 			} else if len(refs) > 0 {
 				detail.ChildSessions = refs
 			}
-			msg = ServerMessage{Type: MsgSessionDetail, Data: detail}
+			// The metadata-only header is the frame body the segment viewer
+			// adopts. Check it from the same read while the current frame still
+			// carries the durable turns. A projection fault is logged and never
+			// drops the frame the current viewer reads; the frame switch lands
+			// only after the released viewer consumes segments.
+			msg = sessionDetailFrame(sub, detail)
 		case TopicProjectFamiliarity:
 			projectHash, hashErr := schema.NewProjectHash(sub.ID)
 			if hashErr != nil {

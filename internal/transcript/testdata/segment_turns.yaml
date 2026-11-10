@@ -1,0 +1,64 @@
+cases:
+  # A page of ordinary turns is served whole, and each row carries the pre-bound
+  # JSON size of its own text so the truncation notice can stay silent.
+  - name: twelve-small-turns-served-whole
+    perFieldBytes: 1048576
+    turns:
+      - {index: 4, role: user, contentBytes: 1024}
+      - {index: 7, role: assistant, contentBytes: 1024}
+      - {index: 11, role: assistant, contentBytes: 1024}
+      - {index: 14, role: assistant, contentBytes: 1024}
+      - {index: 17, role: assistant, contentBytes: 1024}
+      - {index: 18, role: assistant, contentBytes: 1024}
+      - {index: 20, role: assistant, contentBytes: 1024}
+      - {index: 21, role: user, contentBytes: 1024}
+      - {index: 25, role: assistant, contentBytes: 1024}
+      - {index: 29, role: assistant, contentBytes: 1024}
+      - {index: 33, role: assistant, contentBytes: 1024}
+      - {index: 37, role: assistant, contentBytes: 1024}
+    expected:
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+      - {truncated: false, byteLength: 1026}
+  # A single turn over 1 MiB is bounded per field and still reports its pre-bound
+  # size, so the segment can tell the reader what the full continuation read will
+  # return.
+  - name: oversized-turn-content-bounded
+    perFieldBytes: 1048576
+    turns:
+      - {index: 4, role: assistant, contentBytes: 4194304}
+    expected:
+      - {truncated: true, byteLength: 4194306}
+  # A turn whose tool result is oversized is bounded on that field, and the
+  # turn's byteLength stays the pre-bound sum.
+  - name: oversized-tool-result-bounded
+    perFieldBytes: 1048576
+    turns:
+      - {index: 4, role: assistant, contentBytes: 10, argumentsBytes: [64], resultBytes: [2097152]}
+    expected:
+      - {truncated: true, byteLength: 2097232}
+  # A field exactly at the bound is served whole: the bound compares bytes, and
+  # content of exactly 1 MiB is not over it.
+  - name: field-exactly-at-bound-served-whole
+    perFieldBytes: 1048576
+    turns:
+      - {index: 4, role: assistant, contentBytes: 1048576}
+    expected:
+      - {truncated: false, byteLength: 1048578}
+  # A field far over the bound is shortened; the note must be shorter than the
+  # text it replaces, which is why a one-byte overshoot is left whole by design.
+  - name: field-well-over-bound-shortened
+    perFieldBytes: 1048576
+    turns:
+      - {index: 4, role: assistant, contentBytes: 2097152}
+    expected:
+      - {truncated: true, byteLength: 2097154}
