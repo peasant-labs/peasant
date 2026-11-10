@@ -1,0 +1,115 @@
+{
+  "sourceHead": "df9810a37f941c3a9be5e66913c498dbc1c8ab22",
+  "reviewedHead": "d3ca5e10a6f603f0b8be595b470cf0b00afacdef",
+  "baseHead": "39daa06af6dc044f5ef59450250839fc2aa91e7a",
+  "branch": "peasant-857--feat-home-adoption--shared-table",
+  "screenshotsBranch": "peasant-857--screenshots",
+  "pins": {
+    "@peasant-labs/fairtrade": "0.0.62",
+    "@peasant-labs/schema": "0.43.0"
+  },
+  "binarySha256": "0371293f15e9e00d47f35e1d6b4ec36507ca05f0e76629187e2d33206f323f55",
+  "chunks": {
+    "home": "web/out/_next/static/chunks/app/page-d9f5e838f99bd018.js"
+  },
+  "commands": [
+    {
+      "command": "pnpm --dir web typecheck",
+      "exit": 0
+    },
+    {
+      "command": "pnpm --dir web test",
+      "exit": 0,
+      "files": 136,
+      "tests": 1761,
+      "transcript": "web-test-transcript.log"
+    },
+    {
+      "command": "make build",
+      "exit": 0
+    },
+    {
+      "command": "PLAYWRIGHT_MODULE=@playwright/test CHROME_PATH=/home/minttea/.nix-profile/bin/google-chrome CAPTURES=/tmp/opencode/home-adoption-captures node scripts/visual/home-pages-visual.mjs",
+      "exit": 0
+    },
+    {
+      "command": "PLAYWRIGHT_MODULE=@playwright/test CHROME_PATH=/home/minttea/.nix-profile/bin/google-chrome CAPTURES=/tmp/opencode/home-adoption-captures node scripts/visual/root-page-visual.mjs",
+      "exit": 0
+    }
+  ],
+  "captures": {
+    "home": [
+      "home/evidence.json",
+      "home/home-dark-desktop.png",
+      "home/home-dark-phone.png",
+      "home/home-light-desktop.png",
+      "home/home-light-phone.png"
+    ],
+    "rootPage": [
+      "root-page/dark/phone/collapsed-group.png",
+      "root-page/dark/phone/empty.content.png",
+      "root-page/dark/phone/empty.png",
+      "root-page/dark/phone/expanded-group.png",
+      "root-page/dark/phone/filter-all.png",
+      "root-page/dark/phone/filter-auto.png",
+      "root-page/dark/phone/filter-not-published.png",
+      "root-page/dark/phone/filter-published.png",
+      "root-page/dark/phone/home-projects.content.png",
+      "root-page/dark/phone/home-projects.png",
+      "root-page/dark/phone/map-projects.content.png",
+      "root-page/dark/phone/map-projects.png",
+      "root-page/dark/phone/nested-group.png",
+      "root-page/dark/phone/review-projects.content.png",
+      "root-page/dark/phone/review-projects.png",
+      "root-page/dark/phone/search.png",
+      "root-page/dark/desktop/collapsed-group.png",
+      "root-page/dark/desktop/empty.content.png",
+      "root-page/dark/desktop/empty.png",
+      "root-page/dark/desktop/expanded-group.png",
+      "root-page/dark/desktop/filter-all.png",
+      "root-page/dark/desktop/filter-auto.png",
+      "root-page/dark/desktop/filter-not-published.png",
+      "root-page/dark/desktop/filter-published.png",
+      "root-page/dark/desktop/home-projects.content.png",
+      "root-page/dark/desktop/home-projects.png",
+      "root-page/dark/desktop/map-projects.content.png",
+      "root-page/dark/desktop/map-projects.png",
+      "root-page/dark/desktop/nested-group.png",
+      "root-page/dark/desktop/review-projects.content.png",
+      "root-page/dark/desktop/review-projects.png",
+      "root-page/dark/desktop/search.png",
+      "root-page/light/phone/collapsed-group.png",
+      "root-page/light/phone/empty.content.png",
+      "root-page/light/phone/empty.png",
+      "root-page/light/phone/expanded-group.png",
+      "root-page/light/phone/filter-all.png",
+      "root-page/light/phone/filter-auto.png",
+      "root-page/light/phone/filter-not-published.png",
+      "root-page/light/phone/filter-published.png",
+      "root-page/light/phone/home-projects.content.png",
+      "root-page/light/phone/home-projects.png",
+      "root-page/light/phone/map-projects.content.png",
+      "root-page/light/phone/map-projects.png",
+      "root-page/light/phone/nested-group.png",
+      "root-page/light/phone/review-projects.content.png",
+      "root-page/light/phone/review-projects.png",
+      "root-page/light/phone/search.png",
+      "root-page/light/desktop/collapsed-group.png",
+      "root-page/light/desktop/empty.content.png",
+      "root-page/light/desktop/empty.png",
+      "root-page/light/desktop/expanded-group.png",
+      "root-page/light/desktop/filter-all.png",
+      "root-page/light/desktop/filter-auto.png",
+      "root-page/light/desktop/filter-not-published.png",
+      "root-page/light/desktop/filter-published.png",
+      "root-page/light/desktop/home-projects.content.png",
+      "root-page/light/desktop/home-projects.png",
+      "root-page/light/desktop/map-projects.content.png",
+      "root-page/light/desktop/map-projects.png",
+      "root-page/light/desktop/nested-group.png",
+      "root-page/light/desktop/review-projects.content.png",
+      "root-page/light/desktop/review-projects.png",
+      "root-page/light/desktop/search.png"
+    ]
+  }
+}

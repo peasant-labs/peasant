@@ -1,0 +1,130 @@
+[
+  {
+    "theme": "dark",
+    "viewport": {
+      "name": "desktop",
+      "width": 1440,
+      "height": 1100
+    },
+    "file": "/tmp/opencode/home-adoption-captures/home-dark-desktop.png",
+    "pages": [
+      "?view=home&maxItems=25&page=1",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0"
+    ],
+    "chunk": "/home/minttea/dev/peasant-labs/peasant/peasant-857--feat-home-adoption--shared-table/web/out/_next/static/chunks/app/page-d9f5e838f99bd018.js",
+    "binarySha256": "0371293f15e9e00d47f35e1d6b4ec36507ca05f0e76629187e2d33206f323f55",
+    "fontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "teammate": {
+      "present": true,
+      "text": "teammate tests · migration",
+      "fontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+      "metaFontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+      "color": "rgb(205, 200, 187)",
+      "opacity": "1",
+      "width": 309.28,
+      "clientWidth": 309,
+      "scrollWidth": 309
+    }
+  },
+  {
+    "theme": "dark",
+    "viewport": {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    "file": "/tmp/opencode/home-adoption-captures/home-dark-phone.png",
+    "pages": [
+      "?view=home&maxItems=25&page=1",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0"
+    ],
+    "chunk": "/home/minttea/dev/peasant-labs/peasant/peasant-857--feat-home-adoption--shared-table/web/out/_next/static/chunks/app/page-d9f5e838f99bd018.js",
+    "binarySha256": "0371293f15e9e00d47f35e1d6b4ec36507ca05f0e76629187e2d33206f323f55",
+    "fontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "teammate": {
+      "present": true,
+      "text": "teammate tests · migration",
+      "fontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+      "metaFontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+      "color": "rgb(205, 200, 187)",
+      "opacity": "1",
+      "width": 79.94,
+      "clientWidth": 80,
+      "scrollWidth": 80
+    }
+  },
+  {
+    "theme": "light",
+    "viewport": {
+      "name": "desktop",
+      "width": 1440,
+      "height": 1100
+    },
+    "file": "/tmp/opencode/home-adoption-captures/home-light-desktop.png",
+    "pages": [
+      "?view=home&maxItems=25&page=1",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0"
+    ],
+    "chunk": "/home/minttea/dev/peasant-labs/peasant/peasant-857--feat-home-adoption--shared-table/web/out/_next/static/chunks/app/page-d9f5e838f99bd018.js",
+    "binarySha256": "0371293f15e9e00d47f35e1d6b4ec36507ca05f0e76629187e2d33206f323f55",
+    "fontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "teammate": {
+      "present": true,
+      "text": "teammate tests · migration",
+      "fontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+      "metaFontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+      "color": "rgb(61, 57, 50)",
+      "opacity": "1",
+      "width": 309.28,
+      "clientWidth": 309,
+      "scrollWidth": 309
+    }
+  },
+  {
+    "theme": "light",
+    "viewport": {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    "file": "/tmp/opencode/home-adoption-captures/home-light-phone.png",
+    "pages": [
+      "?view=home&maxItems=25&page=1",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0",
+      "?view=home&maxItems=25&page=2",
+      "?view=home&maxItems=25&page=1&parentSessionId=root-0"
+    ],
+    "chunk": "/home/minttea/dev/peasant-labs/peasant/peasant-857--feat-home-adoption--shared-table/web/out/_next/static/chunks/app/page-d9f5e838f99bd018.js",
+    "binarySha256": "0371293f15e9e00d47f35e1d6b4ec36507ca05f0e76629187e2d33206f323f55",
+    "fontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+    "teammate": {
+      "present": true,
+      "text": "teammate tests · migration",
+      "fontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+      "metaFontFamily": "atkinsonHyperlegibleMono, \"atkinsonHyperlegibleMono Fallback\", ui-monospace, Menlo, Consolas, monospace",
+      "color": "rgb(61, 57, 50)",
+      "opacity": "1",
+      "width": 79.94,
+      "clientWidth": 80,
+      "scrollWidth": 80
+    }
+  }
+]
