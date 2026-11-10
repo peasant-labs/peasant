@@ -1,7 +1,53 @@
 package defaults
 
+import "time"
+
 // TranscriptInitialReadBytes is the soft initial transcript read budget.
 const TranscriptInitialReadBytes int64 = 256 << 10
+
+// TranscriptSegmentBudgetBytes is the target byte size of one transcript
+// segment. A segment fills with whole turns until the next turn would push it
+// past this size; that turn starts the next segment, so a segment ends on a
+// complete entry and turn boundary. The one exception is a single turn larger
+// than the budget, which is alone in its segment and bounded per field.
+const TranscriptSegmentBudgetBytes int = 1 << 20
+
+// TranscriptSegmentDirectoryCapacity is the number of segment directories one
+// producer keeps, keyed by session and store revision, in LRU order. The
+// directory holds refs only, never turn content, so eight entries are tens of
+// kilobytes rather than transcripts.
+const TranscriptSegmentDirectoryCapacity = 8
+
+// TranscriptSegmentCutBuildBudget is the in-memory cut target for the 32 MiB
+// synthetic fixture with an empty producer cache. It pins the cut itself (turn
+// projection, measurement, and segmentation) without a store pass, so it is
+// stable enough to assert on a shared runner.
+const TranscriptSegmentCutBuildBudget = 400 * time.Millisecond
+
+// TranscriptSegmentColdBuildBudget is the ratified cold-build target for one
+// segment directory on the 32 MiB synthetic fixture, measured through the full
+// store content pass. The pass reads and verifies the stored transcript, so the
+// measurement is reported beside this target and warns when it is exceeded; it
+// is not a hard pass/fail on a shared runner.
+const TranscriptSegmentColdBuildBudget = 600 * time.Millisecond
+
+// TranscriptSegmentColdBuildCeiling is the fail-closed guard for the store-path
+// measurement. It exists to catch a catastrophic regression (a full-session
+// fold per page, a lost index, an unbounded read), not to police normal runner
+// contention: the recorded local range is roughly 0.43-0.51 s.
+const TranscriptSegmentColdBuildCeiling = 2 * time.Second
+
+// TranscriptWindowSpanDefault is the design number of assistant turns a window
+// collects on each side of its anchor.
+const TranscriptWindowSpanDefault = 10
+
+// TranscriptWindowSpanMaximum is the widest span a caller may request. The
+// parameter exists to narrow a window for a smaller context; it cannot widen the
+// design value.
+const TranscriptWindowSpanMaximum = 10
+
+// TranscriptWindowSpanMinimum is the narrowest span a caller may request.
+const TranscriptWindowSpanMinimum = 1
 
 // TranscriptContinuationReadBytes is the soft body and continuation read budget.
 // Each boundary measures its own payload bytes; oversized entries remain whole.
