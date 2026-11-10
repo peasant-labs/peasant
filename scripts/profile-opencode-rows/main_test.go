@@ -80,7 +80,7 @@ func TestIgnoredOnlyCorpusKeepsTiming(t *testing.T) {
 	const baselineReps = 256
 	ignored := ignoredOnlyInputs()[0]
 	best := time.Duration(math.MaxInt64)
-	for range 3 {
+	for range 5 {
 		sampleStart := time.Now()
 		for range baselineReps {
 			if _, _, err := ingest.DecodeOpenCodeProvenanceRow(ignored.Row, ignored.Scope); err != nil && !ingest.OpenCodeControlRowIgnored(err) {
@@ -96,7 +96,7 @@ func TestIgnoredOnlyCorpusKeepsTiming(t *testing.T) {
 	// A ten-times lower bound still catches the mutation: the mutated report
 	// lands about four orders below the real decode time, three below this bound.
 	if slow.DecodeSeconds < best.Seconds()/10 {
-		t.Fatalf("reported %v for %d rows, but the same decodes take %v here: the timing bracket no longer encloses the decode loop", slow.DecodeSeconds, baselineReps, best)
+		t.Fatalf("reported %v s for %d rows, but the same decodes take %v here: the timing bracket no longer encloses the decode loop", slow.DecodeSeconds, baselineReps, best)
 	}
 }
 
