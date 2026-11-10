@@ -1,0 +1,11 @@
+requiredNames:
+  - dedupe_across_sessions
+  - missing_file_is_missing
+  - webp_is_unsupported
+  - gif_is_unsupported
+  - too_large_keeps_metadata_without_bytes
+  - gc_rendezvous_preserves_committed_blob
+  - gc_removes_unreferenced_blob
+  - prune_removes_rows_and_unreferenced_files
+  - route_serves_64_hex_and_fails_closed
+  - partition_key_is_session_and_source_ref

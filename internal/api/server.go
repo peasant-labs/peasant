@@ -175,6 +175,9 @@ func (s *Server) Listen(ctx context.Context) error {
 
 	// API routes
 	mux.HandleFunc("GET "+defaults.RouteHealth.String(), s.handleHealth)
+	if s.cfg.Store != nil {
+		mux.Handle("GET "+defaults.RouteAttachment.String(), s.handleAttachment())
+	}
 	mux.HandleFunc("POST "+defaults.RouteShutdown.String(), s.handleShutdown(ctx))
 	mux.HandleFunc(defaults.RouteWS.String(), s.handleWebSocket)
 	mux.HandleFunc("GET "+defaults.RouteConfigMock.String(), s.handleMockConfig)

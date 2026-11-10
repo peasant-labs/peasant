@@ -35,7 +35,10 @@ type Route string
 func (r Route) String() string { return string(r) }
 
 const (
-	RouteHealth             Route = "/api/v1/health"
+	RouteHealth Route = "/api/v1/health"
+	// RouteAttachment serves one content-addressed image. The path value is a
+	// lowercase 64-hex digest. Anything else, and a digest with no file, is 404.
+	RouteAttachment         Route = "/api/v1/attachments/{ref}"
 	RouteShutdown           Route = "/api/v1/shutdown"
 	RouteWS                 Route = "/api/v1/ws"
 	RouteConfigMock         Route = "/api/v1/config/mock"

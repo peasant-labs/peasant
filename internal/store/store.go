@@ -282,6 +282,8 @@ type Store struct {
 	// writeConfig carries the resolved write.* budgets for the staging and
 	// activation lanes (see WithWriteConfig).
 	writeConfig ingest.WriteConfig
+	// attachmentDir is the content-addressed image directory beside the database.
+	attachmentDir string
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,
@@ -579,7 +581,7 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: load installation salt: %w", err)
 	}
 
-	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker}
+	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker, attachmentDir: AttachmentDir(dbPath)}
 	opened.writeConfig = resolveStoreWriteConfig(o.writeConfig)
 	return opened, nil
 }
