@@ -503,11 +503,10 @@ jobs:
       (!startsWith(github.event.pull_request.title, 'release(') ||
        github.workflow == 'Release PR')
     # Routed to the container pool. The guard needs no Nix: it shells out only
-    # to git, tar, and `go test` (see scripts/harvester-version-guard). The
-    # capture does not use the race detector; the gate's race lane owns race
-    # detection. The pool image carries git and tar, and setup-go supplies the
-    # toolchain `nix develop` used to. The Makefile target stays the single
-    # source of the guard invocation.
+    # to git, tar, and `go test -race` (see scripts/harvester-version-guard),
+    # and the pool image already carries git, tar, and the C compiler the race
+    # detector requires. setup-go supplies the toolchain `nix develop` used to,
+    # and the Makefile target stays the single source of the guard invocation.
     needs: determine-runner
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 30
@@ -526,10 +525,11 @@ jobs:
           # the whole shared cache for an upload over the 10 GB limit.
           cache: ${{ needs.determine-runner.outputs.pool != 'true' }}
 
-      # The guard compiles two archived revisions, so it keeps an isolated cache
-      # lane rather than evicting the plain `make check` artifacts. The lane is
-      # still namespaced `-go-r1-`; without the race detector it no longer needs
-      # the C compiler, but the key is kept stable rather than churning caches.
+      # The guard's probes compile and run under -race, so it keeps its own race
+      # lane rather than sharing the plain `make check` artifacts. The key and its
+      # restore-key are both namespaced `-go-r1-` so no other job can restore (or
+      # seed) this race lane, and this lane cannot restore another architecture's
+      # tarball.
       - name: Cache Go build + modules
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:

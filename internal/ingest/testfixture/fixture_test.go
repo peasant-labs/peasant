@@ -653,4 +653,17 @@ func TestChangedCaseNamesTracksEditedBodies(t *testing.T) {
 	if err != nil || len(changed) != 1 || changed[0] != "current-idle-control-tolerated" {
 		t.Fatalf("changed cases = %v (%v), want the edited idle case", changed, err)
 	}
+	// A case only one side declares is an addition or a removal, not an edit.
+	// The shared builder can only replay cases both corpora declare.
+	renamed := bytes.Replace(fixtureYAML, []byte("name: current-idle-control-tolerated"), []byte("name: current-idle-control-renamed"), 1)
+	renamed = bytes.Replace(renamed, []byte("  - current-idle-control-tolerated"), []byte("  - current-idle-control-renamed"), 1)
+	if bytes.Equal(renamed, fixtureYAML) {
+		t.Fatal("fixture no longer contains the case the test renames")
+	}
+	if changed, err := ChangedCaseNames(fixtureYAML, renamed); err != nil || len(changed) != 0 {
+		t.Fatalf("candidate-only case was reported for replay: %v %v", changed, err)
+	}
+	if changed, err := ChangedCaseNames(renamed, fixtureYAML); err != nil || len(changed) != 0 {
+		t.Fatalf("base-only case was reported for replay: %v %v", changed, err)
+	}
 }

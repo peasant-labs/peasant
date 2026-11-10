@@ -7,10 +7,9 @@ nix develop -c make check-harvester-versions BASE=<base-commit> CANDIDATE=HEAD
 ```
 
 Working edits are excluded. The PR test workflow compares its base SHA with the
-checked-out candidate. Each parser capture runs the shared probe without the race
-detector: race detection belongs to the gate's race lane, and the comparison is
-single-goroutine. Set `PEASANT_GUARD_RACE=1` to run the captures under `-race`
-when a concurrency question needs it. Ordinary builds do not invoke the guard.
+checked-out candidate. Each parser capture uses `go test -race` with the native
+cases in parallel; the fan-out is the guard's own concurrent code. Ordinary builds
+do not invoke the guard.
 
 The runner archives both revisions into a temporary directory and runs one shared
 probe over both revisions' existing named synthetic corpora. The candidate
