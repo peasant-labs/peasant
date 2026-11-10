@@ -1,6 +1,7 @@
 # Captured from the terminal review summary before the explanation moved.
 # A hidden choice is absent. The summary never prints "because".
 requiredNames:
+  - selection-scope-omits-unasked-fields
   - first-run-disconnected-all
   - first-run-connected-selected
   - skipped-license-boundary
@@ -9,6 +10,19 @@ requiredNames:
   - zero-effective-selection
   - review-summary-never-prints-hidden-because
 cases:
+  - name: selection-scope-omits-unasked-fields
+    scope: selection
+    selectionMode: selected
+    villageConnected: true
+    claudeSessions: true
+    retentionDays: 30
+    autoPublishIntent: true
+    values:
+      - "selection: only the buffered projects, branches, and sessions"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
   - name: first-run-disconnected-all
     selectionMode: all
     villageConnected: false

@@ -14,6 +14,7 @@ var consentParityData []byte
 
 type consentCase struct {
 	Name             string `yaml:"name"`
+	Scope            string `yaml:"scope"`
 	SelectionMode    string `yaml:"selectionMode"`
 	VillageConnected bool   `yaml:"villageConnected"`
 	ClaudeSessions   bool   `yaml:"claudeSessions"`
@@ -44,11 +45,15 @@ func TestConsentParity(t *testing.T) {
 		names[i] = row.Name
 	}
 	requireNames(t, document.RequiredNames, names)
-	model := onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeFull})
 	for _, row := range document.Cases {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
+			scope := onboarding.ScopeFull
+			if row.Scope == "selection" {
+				scope = onboarding.ScopeSelection
+			}
+			model := onboarding.BuildModel(onboarding.Options{Scope: scope})
 			cfg := config.BaseConfig()
 			cfg.Selection.Mode = config.SelectionMode(row.SelectionMode)
 			cfg.ClaudeRetentionDays = row.RetentionDays
