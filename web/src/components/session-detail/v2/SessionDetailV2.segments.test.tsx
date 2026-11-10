@@ -284,6 +284,34 @@ describe('SessionDetailV2 segmented transcript', () => {
     await waitFor(() => expect(reads).toContain('segment:0'));
   });
 
+  it('renders local image parts from a segment without resolving omitted parts', async () => {
+    const plan = cases.find((row) => row.name === 'mount-segment-zero');
+    if (!plan) throw new Error('mount-segment-zero fixture is missing');
+    const content = requireRecord(parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/transcript_host_content.yaml'), 'utf8'), 'transcript host content'), 'transcript host content');
+    const manifest = requireRecord(parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/transcript_host_content.manifest.yaml'), 'utf8'), 'transcript host manifest'), 'transcript host manifest');
+    expect(content.requiredNames).toEqual(manifest.requiredNames);
+    const rows = content.cases as Array<{ name: string; ref: string; parts: unknown[] }>;
+    expect(rows.map((row) => row.name)).toEqual(content.requiredNames);
+    const row = rows[0];
+    activeCase = plan;
+    revision = plan.revision;
+    channelData = detail(plan);
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      const response = await answer(input);
+      if (classify(String(input)) !== 'segment:0') return response;
+      const body = await response.json();
+      body.turns[0].contentParts = row.parts;
+      return Response.json(body);
+    }));
+    const view = render(<TestDetail turn={null} />);
+    await waitFor(() => expect(view.container.querySelector(`img[src="/api/v1/attachments/${row.ref}"]`)).toBeInTheDocument());
+    expect(view.container.querySelector('[data-image-omitted="not_published"]')).toBeInTheDocument();
+    expect(view.container.querySelectorAll('img[src*="/api/v1/attachments/"]')).toHaveLength(1);
+    expect(requests.some((url) => url.includes('/api/v1/attachments/'))).toBe(false);
+  });
+
   for (const plan of cases) {
     it(plan.name, async () => {
       activeCase = plan;

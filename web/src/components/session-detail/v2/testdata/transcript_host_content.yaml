@@ -1,0 +1,16 @@
+requiredNames:
+  - retained-and-omitted-images
+cases:
+  - name: retained-and-omitted-images
+    ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    parts:
+      - type: text
+        text: inspect these images
+      - type: image
+        image:
+          ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          mediaType: image/png
+          byteSize: 2048
+      - type: image
+        image:
+          omittedReason: not_published
