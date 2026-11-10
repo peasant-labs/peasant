@@ -40,6 +40,7 @@ required_cases:
   - current-control-rows-tolerated
   - current-idle-control-tolerated
   - current-idle-failure-tolerated
+  - current-idle-type-only-failure
   - current-control-mixed-unknown
   - content-aware-selection
   - legacy-scrollable-session

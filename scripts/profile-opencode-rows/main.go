@@ -23,12 +23,16 @@ type input struct {
 type decoded struct {
 	Message ingest.OpenCodeProvenanceMessage
 	Settled bool
+	// Ignored is omitted at its zero value, so a digest from before the field
+	// existed stays byte-identical for every row that was not an ignored marker.
+	Ignored bool `json:"ignored,omitempty"`
 	Refused bool
 }
 
 type caseResult struct {
 	Case    int    `json:"case"`
 	Digest  string `json:"digest"`
+	Ignored bool   `json:"ignored,omitempty"`
 	Refused bool   `json:"refused"`
 }
 
@@ -38,6 +42,7 @@ type report struct {
 	Cases          int          `json:"cases"`
 	Repetitions    int          `json:"repetitions"`
 	Success        int          `json:"success"`
+	Ignored        int          `json:"ignored,omitempty"`
 	Refused        int          `json:"refused"`
 	Rows           []caseResult `json:"rows,omitempty"`
 	DecodeSeconds  float64      `json:"decodeSeconds,omitempty"`
@@ -86,19 +91,25 @@ func run(corpus, phase string, repetitions int) error {
 		for i, in := range inputs {
 			message, settled, decodeErr := ingest.DecodeOpenCodeProvenanceRow(in.Row, in.Scope)
 			last = message
-			if decodeErr == nil {
+			ignored := decodeErr != nil && ingest.OpenCodeControlRowIgnored(decodeErr)
+			refused := decodeErr != nil && !ignored
+			switch {
+			case decodeErr == nil:
 				out.Success++
-			} else {
+			case ignored:
+				out.Ignored++
+			default:
 				out.Refused++
 			}
 			if phase == "parity" {
 				// Maps encode deterministically; raw payload bytes, settled state,
-				// and partial returned messages on refusal all participate.
+				// interpretation, and partial returned messages on refusal all
+				// participate.
 				h := sha256.New()
-				if json.NewEncoder(h).Encode(decoded{Message: message, Settled: settled, Refused: decodeErr != nil}) != nil {
+				if json.NewEncoder(h).Encode(decoded{Message: message, Settled: settled, Ignored: ignored, Refused: refused}) != nil {
 					return fmt.Errorf("case %d: output encoding failed; inspect the decoder return types", i)
 				}
-				out.Rows = append(out.Rows, caseResult{Case: i, Digest: fmt.Sprintf("%x", h.Sum(nil)), Refused: decodeErr != nil})
+				out.Rows = append(out.Rows, caseResult{Case: i, Digest: fmt.Sprintf("%x", h.Sum(nil)), Ignored: ignored, Refused: refused})
 			}
 		}
 	}

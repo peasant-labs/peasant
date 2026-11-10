@@ -14,6 +14,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 )
 
 //go:embed probe_test.go.txt
@@ -21,8 +23,9 @@ var probe []byte
 
 type versions struct{ AdapterVersion, IndexerVersion int }
 type snapshot struct {
-	Versions map[string]versions
-	Outputs  map[string]json.RawMessage
+	Versions       map[string]versions
+	Outputs        map[string]json.RawMessage
+	NativeObserved []string
 }
 
 func main() {
@@ -112,15 +115,51 @@ func run(base, candidate string) error {
 			return err
 		}
 	}
+	baseNames, err := testfixture.CaseNames(nativeCorpora[baseTree])
+	if err != nil {
+		return err
+	}
+	candidateNames, err := testfixture.CaseNames(nativeCorpora[candidateTree])
+	if err != nil {
+		return err
+	}
+	sort.Strings(baseNames)
+	sort.Strings(candidateNames)
+	// The candidate corpus is compared in full. The base pass replays only the
+	// cases whose bytes changed, so an edit that weakens a fixture is judged
+	// against the old body; an unchanged case would repeat the candidate pass,
+	// and a removed case is guarded by required_cases instead.
+	changedNames, err := testfixture.ChangedCaseNames(nativeCorpora[baseTree], nativeCorpora[candidateTree])
+	if err != nil {
+		return err
+	}
 	var failures []string
 	for _, corpus := range []string{baseTree, candidateTree} {
-		old, err := capture(baseTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus])
+		names := changedNames
+		if corpus == candidateTree {
+			names = candidateNames
+		}
+		namesJSON, err := json.Marshal(names)
 		if err != nil {
 			return err
 		}
-		current, err := capture(candidateTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus])
+		// One native root per corpus pass: the two parsers must see the same
+		// absolute locator, because unattributed sessions derive project
+		// identity from it.
+		nativeRoot, err := os.MkdirTemp(temp, "native-")
 		if err != nil {
 			return err
+		}
+		old, err := capture(baseTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus], string(namesJSON), nativeRoot)
+		if err != nil {
+			return err
+		}
+		current, err := capture(candidateTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus], string(namesJSON), nativeRoot)
+		if err != nil {
+			return err
+		}
+		if unobserved := unobservedNative(names, old.NativeObserved); len(unobserved) > 0 {
+			return fmt.Errorf("native fixtures were not observed by the base parser: %v", unobserved)
 		}
 		failures = append(failures, compare(old, current)...)
 	}
@@ -210,7 +249,24 @@ func supplyFixtureDriver(tree, candidateTree string) error {
 	return nil
 }
 
-func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []byte) (snapshot, error) {
+// unobservedNative lists the passed cases the probe did not process. A name is
+// observed because the probe recorded it, not because its output is non-empty:
+// an empty database is a legitimate observation.
+func unobservedNative(names, observed []string) []string {
+	seen := make(map[string]bool, len(observed))
+	for _, name := range observed {
+		seen[name] = true
+	}
+	var missing []string
+	for _, name := range names {
+		if !seen[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []byte, observedNames string, nativeRoot string) (snapshot, error) {
 	var result snapshot
 	err := filepath.WalkDir(builder, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -266,9 +322,12 @@ func parserVersions() map[string]versions {
 		return result, err
 	}
 	output := filepath.Join(temp, "snapshot.json")
-	cmd := exec.Command("go", "test", "-race", "-count=1", "-run", "^TestHarvesterGuardCapture$", "./internal/ingest")
+	// The native corpus runs in parallel, so keep the race detector on: the
+	// fan-out is the guard's own concurrent code, and the gate's race lane does
+	// not execute this injected probe.
+	cmd := exec.Command("go", "test", "-race", "-count=1", "-parallel=8", "-run", "^TestHarvesterGuardCapture$", "./internal/ingest")
 	cmd.Dir = tree
-	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_FALLBACK_CORPUS="+fallbackCorpus, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+filepath.Join(temp, "native"))
+	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_FALLBACK_CORPUS="+fallbackCorpus, "PEASANT_GUARD_OBSERVED_NATIVE="+observedNames, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+nativeRoot)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return result, fmt.Errorf("cannot compare %s against corpus %s; restore compatible probe APIs/fixtures before claiming a guard result: %w\n%s", filepath.Base(tree), filepath.Base(corpus), err, out)
 	}

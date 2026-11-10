@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,8 +53,9 @@ func guardCorpusPath(corpus, name string) (string, bool) {
 
 type versions struct{ AdapterVersion, IndexerVersion int }
 type guardSnapshot struct {
-	Versions map[string]versions
-	Outputs  map[string]json.RawMessage
+	Versions       map[string]versions
+	Outputs        map[string]json.RawMessage
+	NativeObserved []string
 }
 
 // Only the runner injects this test into temporary archived revisions.
@@ -349,8 +352,22 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			nativeNames[row.SourceFixture] = true
 		}
 	}
-	for name := range nativeNames {
-		source := testfixture.MaterializeByName(t, name)
+	// The runner hands over every source case the candidate corpus declares,
+	// so a behavior change exercised by any of them is visible to both parsers.
+	// All of them exist in the candidate-derived shared builder.
+	if observed := os.Getenv("PEASANT_GUARD_OBSERVED_NATIVE"); observed != "" {
+		var names []string
+		if err := json.Unmarshal([]byte(observed), &names); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range names {
+			if name != "" {
+				nativeNames[name] = true
+			}
+		}
+	}
+	observeNative := func(t *testing.T, name string, source testfixture.MaterializedSource) {
+		t.Helper()
 		// Reuse the exact same physical locator and file clock across runs:
 		// unattributed sessions derive project identity from this path.
 		nativePath := filepath.Join(os.Getenv("PEASANT_GUARD_NATIVE"), name, "opencode.db")
@@ -391,24 +408,44 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		}
 		guardRecord(t, &result, "opencode/AdapterVersion/native/"+name, outputs, discoverErr)
 	}
-	for harness := range result.Versions {
-		for _, stage := range []string{"AdapterVersion", "IndexerVersion"} {
-			found := false
-			for name := range result.Outputs {
-				found = found || strings.HasPrefix(name, harness+"/"+stage+"/")
-			}
-			if !found {
-				t.Fatalf("registered harness %s has no %s corpus; add native fixture coverage", harness, stage)
+	// Each case is independent and builds its own database, so run them in
+	// parallel: the full corpus is too slow serially for the job budget.
+	for name := range nativeNames {
+		name := name
+		t.Run("native/"+name, func(t *testing.T) {
+			t.Parallel()
+			// Every name here must exist: the anchors and the candidate's
+			// declared cases are all part of the candidate-derived builder. A
+			// typo or a dropped case is a guard error, not a historical shape.
+			observeNative(t, name, testfixture.MaterializeByName(t, name))
+			guardMu.Lock()
+			result.NativeObserved = append(result.NativeObserved, name)
+			guardMu.Unlock()
+		})
+	}
+	// Parallel subtests finish after the parent body, so the aggregate check
+	// and the snapshot write belong to cleanup, which runs after them.
+	t.Cleanup(func() {
+		sort.Strings(result.NativeObserved)
+		for harness := range result.Versions {
+			for _, stage := range []string{"AdapterVersion", "IndexerVersion"} {
+				found := false
+				for name := range result.Outputs {
+					found = found || strings.HasPrefix(name, harness+"/"+stage+"/")
+				}
+				if !found {
+					t.Fatalf("registered harness %s has no %s corpus; add native fixture coverage", harness, stage)
+				}
 			}
 		}
-	}
-	data, err := json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(os.Getenv("PEASANT_GUARD_OUTPUT"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
+		data, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(os.Getenv("PEASANT_GUARD_OUTPUT"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 // Both historical APIs execute the real adapter. Only their return envelope
@@ -570,8 +607,12 @@ type guardEnvironment map[string]string
 
 func (e guardEnvironment) LookupEnv(key string) (string, bool) { value, ok := e[key]; return value, ok }
 
+var guardMu sync.Mutex
+
 func guardRecord(t *testing.T, result *guardSnapshot, name string, value any, err error) {
 	t.Helper()
+	guardMu.Lock()
+	defer guardMu.Unlock()
 	if _, exists := result.Outputs[name]; exists {
 		t.Fatalf("duplicate observation %s", name)
 	}

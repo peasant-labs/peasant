@@ -33,6 +33,12 @@ func TestCompareRequiresAffectedVersion(t *testing.T) {
 	}
 }
 
+func TestEmbeddedProbeSharesTheObservedNamesContract(t *testing.T) {
+	if !bytes.Contains(probe, []byte("PEASANT_GUARD_OBSERVED_NATIVE")) || !bytes.Contains(probe, []byte("NativeObserved")) {
+		t.Fatal("the embedded probe no longer reads PEASANT_GUARD_OBSERVED_NATIVE and reports NativeObserved; the runner would hand it names it never sees")
+	}
+}
+
 func TestNewHarnessNeedsNoInventedHistoricalOutput(t *testing.T) {
 	base := snapshot{Versions: map[string]versions{}, Outputs: map[string]json.RawMessage{}}
 	name := "pi/IndexerVersion/native/header-only"
@@ -51,5 +57,17 @@ func TestNewHarnessNeedsNoInventedHistoricalOutput(t *testing.T) {
 func TestEmbeddedProbeIsValidGo(t *testing.T) {
 	if _, err := parser.ParseFile(token.NewFileSet(), "harvester_guard_probe_test.go", probe, parser.AllErrors); err != nil {
 		t.Fatalf("archived-revision probe has invalid Go syntax: %v", err)
+	}
+}
+
+func TestUnobservedNativeUsesProcessedNames(t *testing.T) {
+	name := "empty-valid"
+	if missing := unobservedNative([]string{name}, nil); len(missing) != 1 {
+		t.Fatalf("an unprocessed name was not reported missing: %v", missing)
+	}
+	// An empty database is a legitimate observation; the probe records the
+	// name it processed, not the number of sessions it found.
+	if missing := unobservedNative([]string{name}, []string{name}); len(missing) != 0 {
+		t.Fatalf("a processed empty case was reported missing: %v", missing)
 	}
 }
