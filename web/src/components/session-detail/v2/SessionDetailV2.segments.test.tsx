@@ -7,6 +7,8 @@ import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/pr
 import { parseStrictYAML, requireExactRequiredFields, requireRecord } from '@/test/strictYaml';
 import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2 } from './SessionDetailV2';
+import { FaultCause, FaultOperation, FaultRemedy, TranscriptWindowEvidence, WebFault } from '@/lib/faults';
+import type { TranscriptSegmentState } from './lib/useTranscriptSegments';
 
 const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ProjectHash;
 const SESSION_ID = 'sess-segment-host';
@@ -46,6 +48,7 @@ let failNextDirectory = false;
 let failSegment: number | null = null;
 let windowRejected = false;
 let releaseFailure: (() => void) | null = null;
+let observedSegments: TranscriptSegmentState | null = null;
 let activeCase: SegmentCase | null = null;
 
 vi.mock('@/lib/share/publishing', async (importOriginal) => ({
@@ -81,13 +84,22 @@ vi.mock('@/hooks/useTheme', () => ({
   useTheme: () => ({ theme: 'dark', setTheme: vi.fn(), toggle: vi.fn() }),
 }));
 vi.mock('@peasant-labs/fairtrade/graph', () => ({ TrajectoryGraph: () => null }));
+vi.mock('./lib/useTranscriptSegments', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./lib/useTranscriptSegments')>();
+  return { ...actual, useTranscriptSegments: (...args: Parameters<typeof actual.useTranscriptSegments>) => {
+    const result = actual.useTranscriptSegments(...args);
+    if (activeCase?.name === 'window-cover-failure') observedSegments = result;
+    return result;
+  } };
+});
 vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@peasant-labs/fairtrade/ui')>();
   return { ...actual, TranscriptViewer: (props: React.ComponentProps<typeof actual.TranscriptViewer>) => <>
     {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => {
-      void Promise.resolve(props.onLoadWindow?.(4, 10)).catch(() => { windowRejected = true; });
+      void Promise.resolve(props.onLoadWindow?.(windowFailureFixture.anchor, windowFailureFixture.span)).catch(() => { windowRejected = true; });
     }}>request window</button>}
     {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => { void props.onLoadSegment?.(2); }}>request unrelated segment</button>}
+    {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => { void props.onLoadWindow?.(windowFailureFixture.unrelatedAnchor, windowFailureFixture.span); }}>request unrelated window</button>}
     {/* The published viewer predates its covering-read rejection handler. */}
     <actual.TranscriptViewer {...props} onLoadSegment={activeCase?.name === 'window-cover-failure' ? (index) => {
       void Promise.resolve(props.onLoadSegment?.(index)).catch(() => {});
@@ -174,7 +186,9 @@ function directoryBody(plan: SegmentCase) {
 }
 
 function windowBody(plan: SegmentCase, anchor: number) {
-  const declared = plan.window;
+  const declared = plan.name === 'window-cover-failure' && anchor === windowFailureFixture.unrelatedAnchor
+    ? { requestedAnchor: anchor, anchorTurn: anchor, segments: [2] }
+    : plan.window;
   if (!declared) throw new Error(`${plan.name} has no window to answer anchor ${anchor}`);
   const segments = declared.segments;
   const first = plan.segments.find((segment) => segment.index === segments[0]);
@@ -372,11 +386,11 @@ describe('SessionDetailV2 segmented transcript', () => {
   }
 });
 
-type WindowFailureFixture = { name: string; anchor: number; failedSegment: number; heldTurn: number; unrelatedTurn: number; copy: string };
+type WindowFailureFixture = { name: string; anchor: number; span: number; failedSegment: number; heldTurn: number; unrelatedTurn: number; unrelatedAnchor: number; copy: string };
 const windowFailureFixture = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/window_failure.yaml'), 'utf8'), 'window failure') as WindowFailureFixture;
 
 describe('failed covering window on the mounted transcript', () => {
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); reads.length = 0; activeCase = null; failSegment = null; releaseFailure = null; windowRejected = false; });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); reads.length = 0; activeCase = null; failSegment = null; releaseFailure = null; windowRejected = false; observedSegments = null; });
 
   it(windowFailureFixture.name, async () => {
     const base = loadCases().find((row) => row.name === 'mount-segment-zero');
@@ -394,6 +408,15 @@ describe('failed covering window on the mounted transcript', () => {
     await act(async () => { releaseFailure?.(); });
     await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent(windowFailureFixture.copy));
     expect(windowRejected).toBe(true);
+    const fault = observedSegments?.windowFaults[0];
+    expect(fault).toBeInstanceOf(WebFault);
+    expect(fault?.operation).toBe(FaultOperation.TranscriptWindowRead);
+    expect(fault?.cause).toBe(FaultCause.TranscriptReadFailed);
+    expect(fault?.remedy).toBe(FaultRemedy.Retry);
+    expect(fault?.evidence).toBeInstanceOf(TranscriptWindowEvidence);
+    if (!(fault?.evidence instanceof TranscriptWindowEvidence)) throw new Error('missing window evidence');
+    expect(fault.evidence.anchor).toBe(windowFailureFixture.anchor);
+    expect(fault.evidence.span).toBe(windowFailureFixture.span);
     expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).not.toBeNull();
     const boundary = view.container.querySelector('[data-segment-boundary="newer"] button');
     if (!(boundary instanceof HTMLButtonElement)) throw new Error('the surrounding boundary was not restored');
@@ -401,11 +424,17 @@ describe('failed covering window on the mounted transcript', () => {
     fireEvent.click(view.getByRole('button', { name: 'request unrelated segment' }));
     await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.unrelatedTurn}"]`)).not.toBeNull());
     expect(view.getByRole('alert')).toHaveTextContent(windowFailureFixture.copy);
+    fireEvent.click(view.getByRole('button', { name: 'request unrelated window' }));
+    await waitFor(() => expect(reads.filter((read) => read === 'window')).toHaveLength(2));
+    expect(observedSegments?.window?.requestedAnchor).toBe(windowFailureFixture.unrelatedAnchor);
+    expect(observedSegments?.windowFaults[0]).toBe(fault);
+    expect(view.getByRole('alert')).toHaveTextContent(windowFailureFixture.copy);
     fireEvent.click(view.getByRole('button', { name: 'try again' }));
     await waitFor(() => expect(view.queryByText(windowFailureFixture.copy, { exact: false })).toBeNull());
-    expect(reads.filter((read) => read === 'window')).toHaveLength(2);
+    expect(observedSegments?.windowFaults).toHaveLength(0);
+    expect(reads.filter((read) => read === 'window')).toHaveLength(3);
     expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).not.toBeNull();
-    expect(view.container.querySelector('[data-turn="4"]')).not.toBeNull();
+    expect(view.container.querySelector(`[data-turn="${windowFailureFixture.anchor}"]`)).not.toBeNull();
   });
 });
 

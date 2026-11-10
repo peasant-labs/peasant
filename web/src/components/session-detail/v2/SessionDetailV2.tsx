@@ -26,7 +26,7 @@ import { useSessionExtras } from '@/hooks/useSessionExtras';
 import '@xyflow/react/dist/style.css';
 import { Button, FeedbackPanel, Skeleton, type MenuItem } from '@/lib/ft-ui';
 import { useChannel } from '@/contexts/WebSocketContext';
-import { isRetryableConnectionFault } from '@/lib/faults';
+import { isRetryableConnectionFault, TranscriptWindowEvidence } from '@/lib/faults';
 import { subscribe } from '@/types/messages';
 import type {
   SessionDetailPayload,
@@ -549,11 +549,11 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       />
     );
   }
-  if (!frameHasTurns && detail.turnCount > 0 && segmentRead.error && cookedSegments.length === 0) {
+  if (!frameHasTurns && detail.turnCount > 0 && segmentRead.initialFault && cookedSegments.length === 0) {
     return (
       <div className="asb-page">
         <FeedbackPanel variant="error" title="transcript unavailable">
-          {segmentRead.error}
+          {segmentRead.initialFault.message}
         </FeedbackPanel>
         <div className="mt-3">
           <Button variant="secondary" size="sm" onClick={segmentRead.reload}>try again</Button>
@@ -611,18 +611,18 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           </FeedbackPanel>
         </div>
       )}
-      {segmentRead.windowFault && (
-        <div role="alert">
+      {segmentRead.windowFaults.map((fault) => fault.evidence instanceof TranscriptWindowEvidence && (
+        <div role="alert" key={`${fault.evidence.anchor}:${fault.evidence.span}`}>
           <FeedbackPanel variant="empty" title="transcript window unavailable">
-            The window around turn {segmentRead.windowFault.anchor} could not be loaded. The surrounding transcript is still available.
+            {fault.message}
             {' '}
             <button type="button" onClick={() => {
-              const fault = segmentRead.windowFault;
-              if (fault) void segmentRead.loadWindow(fault.anchor, fault.span).catch(() => {});
-            }}>try again</button>
+              const evidence = fault.evidence;
+              if (evidence instanceof TranscriptWindowEvidence) void segmentRead.loadWindow(evidence.anchor, evidence.span).catch(() => {});
+            }}>{fault.remedy.label}</button>
           </FeedbackPanel>
         </div>
-      )}
+      ))}
       {requestedTurn != null && !requestedTurnExists && (
         <div role="alert">
           <FeedbackPanel variant="empty" title="linked turn is no longer available">

@@ -15,6 +15,7 @@ export {
   MAX_EVIDENCE_DETAIL,
   PayloadEvidence,
   TopicEvidence,
+  TranscriptWindowEvidence,
   type FaultEvidence,
 } from './evidence';
 export { codeFromFault, faultFromDiscoveryError } from './discovery';

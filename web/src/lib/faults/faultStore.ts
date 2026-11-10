@@ -23,6 +23,12 @@ export class FaultStore {
     return this.faults.get(FaultStore.key(operation, requestKey)) ?? null;
   }
 
+  /** The retained faults for one operation, including distinct request keys. */
+  forOperation(operation: FaultOperation, requestKeyPrefix = ''): WebFault[] {
+    const prefix = `${operation.wire}${SEPARATOR}${requestKeyPrefix}`;
+    return [...this.faults.entries()].filter(([key]) => key.startsWith(prefix)).map(([, fault]) => fault);
+  }
+
   /** Store a fault. Returns whether the stored fault changed. */
   set(operation: FaultOperation, requestKey: string, fault: WebFault): boolean {
     if (fault.operation !== operation) {

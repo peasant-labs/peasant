@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { FaultOperation, FaultStore, WebFault } from '@/lib/faults';
 import {
   TRANSCRIPT_WINDOW_SPAN,
   TranscriptRevisionConflict,
+  TranscriptSegmentReadError,
   transcriptSegments,
   windowCacheKey,
   type RegionCache,
@@ -18,8 +20,8 @@ export type TranscriptSegmentState = {
   segments: TranscriptSegment[];
   window: TranscriptWindow | null;
   loading: boolean;
-  error: string | null;
-  windowFault: { anchor: number; span: number } | null;
+  initialFault: WebFault | null;
+  windowFaults: WebFault[];
   reload: () => void;
   loadSegment: (index: number) => Promise<void>;
   loadWindow: (anchor: number, span?: number) => Promise<void>;
@@ -52,13 +54,22 @@ export function useTranscriptSegments({
 }): TranscriptSegmentState {
   const [cache, setCache] = useState<RegionCache | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [windowFault, setWindowFault] = useState<{ anchor: number; span: number } | null>(null);
+  const faultStore = useRef(new FaultStore());
+  const [, notifyFaults] = useReducer((value: number) => value + 1, 0);
   const [reloadNonce, setReloadNonce] = useState(0);
   const cacheRef = useRef<RegionCache | null>(null);
   const inflight = useRef(new Map<string, Promise<void>>());
   const opened = useRef<OpenedJump>({ sessionId: '', opened: false, anchor: null });
   const generation = useRef(0);
+  const requestKey = JSON.stringify([sessionId, frameRevision]);
+  const windowKeyPrefix = `${JSON.stringify([sessionId]).slice(0, -1)},`;
+
+  const clearFault = useCallback((operation: FaultOperation, key: string) => {
+    if (faultStore.current.clear(operation, key)) notifyFaults();
+  }, []);
+  const recordFault = useCallback((operation: FaultOperation, key: string, fault: WebFault) => {
+    if (faultStore.current.set(operation, key, fault)) notifyFaults();
+  }, []);
 
   if (opened.current.sessionId !== sessionId) {
     opened.current = { sessionId, opened: jumpAnchor != null, anchor: jumpAnchor };
@@ -153,18 +164,12 @@ export function useTranscriptSegments({
     if (!enabled) {
       publish(null);
       setLoading(false);
-      setError(null);
-      setWindowFault(null);
       return undefined;
     }
     const controller = new AbortController();
     const ticket = generation.current + 1;
     generation.current = ticket;
     setLoading(true);
-    setError(null);
-    if (cacheRef.current?.sessionId !== sessionId || cacheRef.current.frameRevision !== frameRevision) {
-      setWindowFault(null);
-    }
     const revisionChanged = cacheRef.current?.sessionId === sessionId
       && cacheRef.current.frameRevision !== frameRevision;
     const anchor = revisionChanged && opened.current.opened
@@ -179,13 +184,19 @@ export function useTranscriptSegments({
           current = await replaceDirectory(controller.signal, ticket);
         }
         if (!current || generation.current !== ticket || controller.signal.aborted) return;
-        if (current.directory.totalSegments === 0) return;
+        if (current.directory.totalSegments === 0) {
+          clearFault(FaultOperation.TranscriptInitialRead, requestKey);
+          return;
+        }
         if (anchor != null) {
           const descriptor = await loadWindowInto(current, anchor, TRANSCRIPT_WINDOW_SPAN, controller.signal);
           if (descriptor) await coverJump(descriptor, controller.signal);
+          if (descriptor) clearFault(FaultOperation.TranscriptWindowRead, `${windowKeyPrefix}${anchor},${TRANSCRIPT_WINDOW_SPAN}]`);
+          clearFault(FaultOperation.TranscriptInitialRead, requestKey);
           return;
         }
         if (!current.segments.has(0)) await loadSegmentInto(current, 0, controller.signal);
+        clearFault(FaultOperation.TranscriptInitialRead, requestKey);
       } catch (caught) {
         if (controller.signal.aborted || generation.current !== ticket) return;
         if (caught instanceof TranscriptRevisionConflict) {
@@ -195,19 +206,21 @@ export function useTranscriptSegments({
             if (anchor != null) {
               const descriptor = await loadWindowInto(refreshed, anchor, TRANSCRIPT_WINDOW_SPAN, controller.signal);
               if (descriptor) await coverJump(descriptor, controller.signal);
+              if (descriptor) clearFault(FaultOperation.TranscriptWindowRead, `${windowKeyPrefix}${anchor},${TRANSCRIPT_WINDOW_SPAN}]`);
             } else if (refreshed.directory.totalSegments > 0) {
               await loadSegmentInto(refreshed, 0, controller.signal);
             }
+            clearFault(FaultOperation.TranscriptInitialRead, requestKey);
             return;
           } catch (retryError) {
             if (controller.signal.aborted || generation.current !== ticket) return;
             publish(null);
-            setError(retryError instanceof Error ? retryError.message : String(retryError));
+            recordFault(FaultOperation.TranscriptInitialRead, requestKey, WebFault.transcriptInitialRead(readFailureDetail(retryError)));
             return;
           }
         }
         publish(null);
-        setError(caught instanceof Error ? caught.message : String(caught));
+        recordFault(FaultOperation.TranscriptInitialRead, requestKey, WebFault.transcriptInitialRead(readFailureDetail(caught)));
       } finally {
         if (generation.current === ticket) setLoading(false);
       }
@@ -226,6 +239,10 @@ export function useTranscriptSegments({
     reloadNonce,
     replaceDirectory,
     sessionId,
+    clearFault,
+    recordFault,
+    requestKey,
+    windowKeyPrefix,
   ]);
 
   const loadSegment = useCallback(async (index: number) => {
@@ -238,13 +255,14 @@ export function useTranscriptSegments({
     const current = cacheRef.current;
     if (!current) throw new Error('The transcript directory is unavailable. Reload the transcript and try again.');
     const key = windowCacheKey(anchor, span);
+    const faultKey = `${windowKeyPrefix}${anchor},${span}]`;
     const ticket = generation.current;
     try {
       const descriptor = await loadWindowInto(current, anchor, span);
       if (!descriptor) throw new Error('The transcript changed while the window was loading. Reload the transcript and try again.');
       await loadListed(descriptor);
       if (generation.current === ticket && cacheRef.current?.revision === current.revision) {
-        setWindowFault((fault) => fault?.anchor === anchor && fault.span === span ? null : fault);
+        clearFault(FaultOperation.TranscriptWindowRead, faultKey);
       }
     } catch (caught) {
       const live = cacheRef.current;
@@ -252,11 +270,11 @@ export function useTranscriptSegments({
         const windows = new Map(live.windows);
         windows.delete(key);
         publish({ ...live, windows, activeWindowKey: live.activeWindowKey === key ? null : live.activeWindowKey });
-        setWindowFault({ anchor, span });
+        recordFault(FaultOperation.TranscriptWindowRead, faultKey, WebFault.transcriptWindowRead(anchor, span, readFailureDetail(caught)));
       }
       throw caught;
     }
-  }, [loadListed, loadWindowInto, publish]);
+  }, [clearFault, loadListed, loadWindowInto, publish, recordFault, windowKeyPrefix]);
 
   const live = cache?.sessionId === sessionId ? cache : null;
   return {
@@ -264,17 +282,23 @@ export function useTranscriptSegments({
     segments: live ? [...live.segments.values()].sort((left, right) => left.index - right.index) : [],
     window: live?.activeWindowKey ? live.windows.get(live.activeWindowKey) ?? null : null,
     loading,
-    error,
-    windowFault,
+    initialFault: faultStore.current.get(FaultOperation.TranscriptInitialRead, requestKey),
+    windowFaults: faultStore.current.forOperation(FaultOperation.TranscriptWindowRead, windowKeyPrefix),
     reload: () => {
       cacheRef.current = null;
       inflight.current.clear();
-      setWindowFault(null);
       setReloadNonce((value) => value + 1);
     },
     loadSegment,
     loadWindow,
   };
+}
+
+function readFailureDetail(error: unknown): string {
+  if (error instanceof TranscriptRevisionConflict) return 'the transcript changed during the read';
+  if (error instanceof TranscriptSegmentReadError && error.status === 200) return 'the local server returned an unusable response';
+  if (error instanceof TranscriptSegmentReadError && error.status > 0) return `the local server returned HTTP ${error.status}`;
+  return 'the local server did not answer or returned an unusable response';
 }
 
 function anchorKey(anchor: number | null): string {
