@@ -209,25 +209,3 @@ func runCurrentControlRowsCase(t *testing.T, testCase currentControlRowsCase) {
 		t.Errorf("model switch did not land as observation %q on the following assistant turn", testCase.ExpectedObservedModel)
 	}
 }
-
-// TestOpenCodeCurrentIdleMarkerTolerated proves that an interpreted idle
-// marker is skipped without being reported as uninterpreted retained evidence,
-// while the surrounding conversation still materializes.
-//
-// Mutation proof: removing the "idle" arm from the current-row dispatch sends
-// the marker down the unknown-control path, which reports it as retained
-// evidence and makes this case go red by name.
-func TestOpenCodeCurrentIdleMarkerTolerated(t *testing.T) {
-	document, err := loadCurrentControlRowsDocument(currentControlRowsYAML)
-	if err != nil {
-		t.Fatalf("load current control rows expectations: %v", err)
-	}
-	for _, testCase := range document.Cases {
-		if testCase.Name != "idle-marker-tolerated-without-omission" {
-			continue
-		}
-		runCurrentControlRowsCase(t, testCase)
-		return
-	}
-	t.Fatal("fixture has no idle-marker case")
-}
