@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -244,7 +245,7 @@ func assertRetentionNeverTransient(t *testing.T, model onboarding.Model, field o
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded), "claude") || strings.Contains(string(encoded), "90") {
+	if strings.Contains(string(encoded), string(defaults.LegacyHarnessClaude)) || strings.Contains(string(encoded), "90") {
 		t.Fatalf("retention entered the document:\n%s", encoded)
 	}
 }
