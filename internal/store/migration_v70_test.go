@@ -470,13 +470,28 @@ func TestMigrationV70DerivedLookups(t *testing.T) {
 			requireCatalogRowsEqual(t, db, beforeCatalog)
 		case "rebuild-spawns":
 			plantCorruptDerivedState(t, db, fixture)
-			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: rollouts}); err != nil {
+			beforeSpawns := readSpawnRows(t, db)
+			beforeCatalog := readCatalogRows(t, db)
+			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{}); !errors.Is(err, ingest.ErrIncompleteRolloutEnumeration) {
+				t.Fatalf("unset enumeration error = %v", err)
+			}
+			requireSpawnRowsEqual(t, db, beforeSpawns)
+			requireCatalogRowsEqual(t, db, beforeCatalog)
+			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationNotWalked}); err != nil {
+				t.Fatalf("rebuild without Codex: %v", err)
+			}
+			requireSpawnRowsEqual(t, db, fixture.ExpectedSpawns)
+			requireCatalogRowsEqual(t, db, beforeCatalog)
+			var deletes []ingest.ResolvedPath
+			for _, row := range fixture.CorruptCatalog {
+				deletes = append(deletes, ingest.ResolvedPath(row.Path))
+			}
+			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: rollouts, Deletes: deletes}); err != nil {
 				t.Fatalf("rebuild the derived lookups: %v", err)
 			}
 			requireSpawnRowsEqual(t, db, fixture.ExpectedSpawns)
 		case "rebuild-catalog":
-			// The catalog equals the complete walk exactly: the rebuild replaces
-			// the table, so the planted row the walk does not enumerate is gone.
+			// The explicitly deleted row is removed alongside the upserts.
 			requireCatalogRowsEqual(t, db, fixture.ExpectedCatalog)
 		case "prune-cascade":
 			pruned := fixture.PruneProbe.SpawnerPath

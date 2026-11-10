@@ -5337,14 +5337,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Reuse canonical discovery facts (notably Cursor workspace and SQLite
 	// source kind) instead of reconstructing them from a managed sidecar.
 	sourceSessions := make(map[SessionID]DiscoveredSession)
-	// A `harvest index --all` rebuild replaces the derived lookup tables, and
-	// the Codex rollout catalog can only be replaced from the enumeration the
-	// Codex walk reports: a discovered session list is not that set, because a
-	// rollout that never became a session is still a catalog row, and a walk
-	// that could not read part of the tree reports fewer paths than exist. A
-	// run with no Codex source — or with one whose roots all failed to resolve —
-	// reports NotWalked, which leaves the catalog as it is; a partial walk is
-	// refused by the rebuild.
+	// The rebuild reconciles the rollout catalog from discovery while retaining
+	// rows that no complete root walk can establish as absent.
 	rolloutEnumeration := RolloutEnumeration{Status: RolloutEnumerationNotWalked}
 	for harness, config := range p.config.Sources {
 		if !config.Enabled {
@@ -5368,8 +5362,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		// facts, so it must attach the same writer: otherwise a database that
 		// is only ever maintained through `harvest index` never gains the
 		// catalog, and the stored-id duplicate lookup that reads it stays
-		// blind. A `--all` rebuild replaces the catalog from this walk's own
-		// enumeration below, so the walk does not write it first.
+		// blind. The rebuild reconciles the catalog itself, so it does not
+		// attach the maintenance writer.
 		if catalog, ok := p.store.(CodexRolloutCatalogStore); ok && !p.config.DryRun && !p.config.RebuildAll {
 			AttachCodexRolloutCatalog(adapter, catalog)
 		}

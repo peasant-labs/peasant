@@ -140,11 +140,13 @@ func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discov
 		if err != nil {
 			return nil, err
 		}
-		if !complete {
+		if complete {
+			a.enumeration.CompletedRoots = append(a.enumeration.CompletedRoots, basePath)
+		} else {
 			// A directory or file the walk could not read may hold rollouts
 			// that are still on disk, so the enumerated set is short. The walk
-			// keeps the sessions it did read; a caller that would REPLACE the
-			// catalog must not treat this set as the whole tree.
+			// keeps the sessions it did read; the rebuild must retain rows
+			// under this root.
 			a.enumeration.Status = RolloutEnumerationPartial
 		}
 		// Every enumerated path is catalogued, not only the ones that survive
@@ -165,8 +167,9 @@ func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discov
 // returns a copy: the caller cannot edit the set the walk used.
 func (a *CodexAdapter) EnumeratedRollouts() RolloutEnumeration {
 	return RolloutEnumeration{
-		Status: a.enumeration.Status,
-		Files:  append([]RolloutFile(nil), a.enumeration.Files...),
+		Status:         a.enumeration.Status,
+		Files:          append([]RolloutFile(nil), a.enumeration.Files...),
+		CompletedRoots: append([]ResolvedPath(nil), a.enumeration.CompletedRoots...),
 	}
 }
 

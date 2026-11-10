@@ -677,7 +677,7 @@ func (p *Pipeline) scopedIndexMissError(misses []ScopeMiss) error {
 	return &SessionScopeError{Misses: misses, Command: command, Prefix: p.config.CommandPrefix, Store: StoreAttached}
 }
 
-// rebuildIndexDerivedLookups replaces the derived lookup tables from the walk
+// rebuildIndexDerivedLookups reconciles the derived lookup tables from the walk
 // this run just enumerated. `harvest index --all` runs it: the teammate spawns
 // are re-derived from the stored transcript evidence, and the Codex rollout
 // catalog from the enumeration the Codex walk reported.
@@ -691,10 +691,19 @@ func (p *Pipeline) rebuildIndexDerivedLookups(ctx context.Context, enumeration R
 	if rebuilder == nil {
 		return fmt.Errorf("ingest: the attached store cannot rebuild the derived lookup tables, which `harvest index --all` is the entry point for; where: ingest.Pipeline.rebuildIndexDerivedLookups in internal/ingest/index_selection.go; when: rebuilding the derived lookups after the source walk; impact: the derived tables were left as they were and no saved pair was indexed; fix: run `harvest index --all` with its analytics database attached")
 	}
-	if err := rebuilder.RebuildDerivedLookups(ctx, enumeration); err != nil {
-		if errors.Is(err, ErrIncompleteRolloutEnumeration) {
-			return fmt.Errorf("ingest: `harvest index --all` cannot rebuild the derived lookup tables because this run did not enumerate every Codex rollout completely; a walk that could not read part of the tree leaves the catalog short, and replacing the table with that set would delete the rows that answer the duplicate question for rollouts still on disk; where: ingest.Pipeline.rebuildIndexDerivedLookups in internal/ingest/index_selection.go; when: enumerating the Codex sources before the derived lookup rebuild; impact: the derived lookup tables were left as they were and no saved pair was indexed; fix: check every configured Codex source path and its read access (an unreadable directory is named in the run's discovery diagnostics), then rerun `harvest index --all`: %w", err)
+	if len(enumeration.CompletedRoots) > 0 {
+		catalog, ok := p.store.(CodexRolloutCatalogStore)
+		if !ok {
+			return fmt.Errorf("pipeline reindex: cannot read the Codex rollout catalog; attach the analytics database and retry")
 		}
+		existing, err := catalog.LoadCodexRolloutCatalog(ctx)
+		if err != nil {
+			return fmt.Errorf("pipeline reindex: load Codex rollout catalog before reconciliation: %w", err)
+		}
+		enumeration.Deletes = codexCatalogDeletes(p.fs, existing, enumeration.Files, enumeration.CompletedRoots)
+	}
+	if err := rebuilder.RebuildDerivedLookups(ctx, enumeration); err != nil {
+
 		return fmt.Errorf("pipeline reindex: rebuild the derived lookup tables: %w; no saved pair was indexed after the failure; repair the store and rerun `harvest index --all`", err)
 	}
 	return nil
