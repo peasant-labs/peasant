@@ -611,6 +611,18 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           </FeedbackPanel>
         </div>
       )}
+      {segmentRead.windowFault && (
+        <div role="alert">
+          <FeedbackPanel variant="empty" title="transcript window unavailable">
+            The window around turn {segmentRead.windowFault.anchor} could not be loaded. The surrounding transcript is still available.
+            {' '}
+            <button type="button" onClick={() => {
+              const fault = segmentRead.windowFault;
+              if (fault) void segmentRead.loadWindow(fault.anchor, fault.span).catch(() => {});
+            }}>try again</button>
+          </FeedbackPanel>
+        </div>
+      )}
       {requestedTurn != null && !requestedTurnExists && (
         <div role="alert">
           <FeedbackPanel variant="empty" title="linked turn is no longer available">

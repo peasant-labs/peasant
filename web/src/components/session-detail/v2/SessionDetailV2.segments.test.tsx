@@ -43,6 +43,9 @@ const scanRequests = vi.hoisted(() => vi.fn());
 let revision = '7';
 let servePreBoundInline = false;
 let failNextDirectory = false;
+let failSegment: number | null = null;
+let windowRejected = false;
+let releaseFailure: (() => void) | null = null;
 let activeCase: SegmentCase | null = null;
 
 vi.mock('@/lib/share/publishing', async (importOriginal) => ({
@@ -78,6 +81,19 @@ vi.mock('@/hooks/useTheme', () => ({
   useTheme: () => ({ theme: 'dark', setTheme: vi.fn(), toggle: vi.fn() }),
 }));
 vi.mock('@peasant-labs/fairtrade/graph', () => ({ TrajectoryGraph: () => null }));
+vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@peasant-labs/fairtrade/ui')>();
+  return { ...actual, TranscriptViewer: (props: React.ComponentProps<typeof actual.TranscriptViewer>) => <>
+    {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => {
+      void Promise.resolve(props.onLoadWindow?.(4, 10)).catch(() => { windowRejected = true; });
+    }}>request window</button>}
+    {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => { void props.onLoadSegment?.(2); }}>request unrelated segment</button>}
+    {/* The published viewer predates its covering-read rejection handler. */}
+    <actual.TranscriptViewer {...props} onLoadSegment={activeCase?.name === 'window-cover-failure' ? (index) => {
+      void Promise.resolve(props.onLoadSegment?.(index)).catch(() => {});
+    } : props.onLoadSegment} />
+  </> };
+});
 
 let currentSearch = new URLSearchParams();
 let channelData: unknown;
@@ -238,6 +254,11 @@ async function answer(input: RequestInfo | URL): Promise<Response> {
   }
   const segment = url.match(/\/transcript\/segments\/(\d+)/);
   if (segment) {
+    if (failSegment === Number(segment[1])) {
+      failSegment = null;
+      await new Promise<void>((resolve) => { releaseFailure = resolve; });
+      return Response.json({ error: 'fixture segment read refused' }, { status: 503 });
+    }
     const found = plan.segments.find((item) => item.index === Number(segment[1]));
     if (!found) return new Response(JSON.stringify({ error: `segment ${segment[1]} is not in ${plan.name}` }), { status: 404 });
     return Response.json(segmentBody(found, plan.totalSegments, plan));
@@ -349,6 +370,43 @@ describe('SessionDetailV2 segmented transcript', () => {
       assertReads(plan);
     });
   }
+});
+
+type WindowFailureFixture = { name: string; anchor: number; failedSegment: number; heldTurn: number; unrelatedTurn: number; copy: string };
+const windowFailureFixture = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/window_failure.yaml'), 'utf8'), 'window failure') as WindowFailureFixture;
+
+describe('failed covering window on the mounted transcript', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); reads.length = 0; activeCase = null; failSegment = null; releaseFailure = null; windowRejected = false; });
+
+  it(windowFailureFixture.name, async () => {
+    const base = loadCases().find((row) => row.name === 'mount-segment-zero');
+    if (!base) throw new Error('missing initial segment fixture');
+    activeCase = { ...base, name: 'window-cover-failure', window: { requestedAnchor: windowFailureFixture.anchor, anchorTurn: windowFailureFixture.anchor, segments: [0, windowFailureFixture.failedSegment] } };
+    revision = base.revision;
+    channelData = detail(activeCase);
+    vi.stubGlobal('fetch', vi.fn(answer));
+    const view = render(<TestDetail turn={null} />);
+    await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).not.toBeNull());
+    failSegment = windowFailureFixture.failedSegment;
+    fireEvent.click(view.getByRole('button', { name: 'request window' }));
+    await waitFor(() => expect(releaseFailure).not.toBeNull());
+    await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).toBeNull());
+    await act(async () => { releaseFailure?.(); });
+    await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent(windowFailureFixture.copy));
+    expect(windowRejected).toBe(true);
+    expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).not.toBeNull();
+    const boundary = view.container.querySelector('[data-segment-boundary="newer"] button');
+    if (!(boundary instanceof HTMLButtonElement)) throw new Error('the surrounding boundary was not restored');
+    // Segment 2 is not part of the failed window.
+    fireEvent.click(view.getByRole('button', { name: 'request unrelated segment' }));
+    await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.unrelatedTurn}"]`)).not.toBeNull());
+    expect(view.getByRole('alert')).toHaveTextContent(windowFailureFixture.copy);
+    fireEvent.click(view.getByRole('button', { name: 'try again' }));
+    await waitFor(() => expect(view.queryByText(windowFailureFixture.copy, { exact: false })).toBeNull());
+    expect(reads.filter((read) => read === 'window')).toHaveLength(2);
+    expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).not.toBeNull();
+    expect(view.container.querySelector('[data-turn="4"]')).not.toBeNull();
+  });
 });
 
 type HistoryCase = { name: string; segmentCase: string; actions: string[]; reads: number };

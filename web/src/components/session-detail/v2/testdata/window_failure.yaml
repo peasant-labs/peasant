@@ -1,0 +1,6 @@
+name: covering failure restores the boundary and retry clears only its fault
+anchor: 4
+failedSegment: 1
+heldTurn: 0
+unrelatedTurn: 8
+copy: The window around turn 4 could not be loaded.

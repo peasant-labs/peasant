@@ -19,6 +19,7 @@ export type TranscriptSegmentState = {
   window: TranscriptWindow | null;
   loading: boolean;
   error: string | null;
+  windowFault: { anchor: number; span: number } | null;
   reload: () => void;
   loadSegment: (index: number) => Promise<void>;
   loadWindow: (anchor: number, span?: number) => Promise<void>;
@@ -52,6 +53,7 @@ export function useTranscriptSegments({
   const [cache, setCache] = useState<RegionCache | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [windowFault, setWindowFault] = useState<{ anchor: number; span: number } | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
   const cacheRef = useRef<RegionCache | null>(null);
   const inflight = useRef(new Map<string, Promise<void>>());
@@ -152,6 +154,7 @@ export function useTranscriptSegments({
       publish(null);
       setLoading(false);
       setError(null);
+      setWindowFault(null);
       return undefined;
     }
     const controller = new AbortController();
@@ -159,6 +162,9 @@ export function useTranscriptSegments({
     generation.current = ticket;
     setLoading(true);
     setError(null);
+    if (cacheRef.current?.sessionId !== sessionId || cacheRef.current.frameRevision !== frameRevision) {
+      setWindowFault(null);
+    }
     const revisionChanged = cacheRef.current?.sessionId === sessionId
       && cacheRef.current.frameRevision !== frameRevision;
     const anchor = revisionChanged && opened.current.opened
@@ -230,10 +236,27 @@ export function useTranscriptSegments({
 
   const loadWindow = useCallback(async (anchor: number, span: number = TRANSCRIPT_WINDOW_SPAN) => {
     const current = cacheRef.current;
-    if (!current) return;
-    const descriptor = await loadWindowInto(current, anchor, span);
-    if (descriptor) await loadListed(descriptor);
-  }, [loadListed, loadWindowInto]);
+    if (!current) throw new Error('The transcript directory is unavailable. Reload the transcript and try again.');
+    const key = windowCacheKey(anchor, span);
+    const ticket = generation.current;
+    try {
+      const descriptor = await loadWindowInto(current, anchor, span);
+      if (!descriptor) throw new Error('The transcript changed while the window was loading. Reload the transcript and try again.');
+      await loadListed(descriptor);
+      if (generation.current === ticket && cacheRef.current?.revision === current.revision) {
+        setWindowFault((fault) => fault?.anchor === anchor && fault.span === span ? null : fault);
+      }
+    } catch (caught) {
+      const live = cacheRef.current;
+      if (generation.current === ticket && live?.sessionId === current.sessionId && live.revision === current.revision) {
+        const windows = new Map(live.windows);
+        windows.delete(key);
+        publish({ ...live, windows, activeWindowKey: live.activeWindowKey === key ? null : live.activeWindowKey });
+        setWindowFault({ anchor, span });
+      }
+      throw caught;
+    }
+  }, [loadListed, loadWindowInto, publish]);
 
   const live = cache?.sessionId === sessionId ? cache : null;
   return {
@@ -242,9 +265,11 @@ export function useTranscriptSegments({
     window: live?.activeWindowKey ? live.windows.get(live.activeWindowKey) ?? null : null,
     loading,
     error,
+    windowFault,
     reload: () => {
       cacheRef.current = null;
       inflight.current.clear();
+      setWindowFault(null);
       setReloadNonce((value) => value + 1);
     },
     loadSegment,
