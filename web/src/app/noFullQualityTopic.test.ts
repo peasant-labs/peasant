@@ -15,8 +15,8 @@ const source = readFileSync(resolve(process.cwd(), 'src/app/testdata/no_full_qua
 
 function loadFixture() {
   const root = requireRecord(parseStrictYAML(source, 'no full quality topic guard'), 'no full quality topic guard');
-  requireExactRequiredFields(root, ['requiredNames', 'cases', 'mutations'], 'no full quality topic guard');
-  if (!Array.isArray(root.requiredNames) || !Array.isArray(root.cases) || !Array.isArray(root.mutations)) {
+  requireExactRequiredFields(root, ['requiredNames', 'cases', 'deletedPaths', 'mutations'], 'no full quality topic guard');
+  if (!Array.isArray(root.requiredNames) || !Array.isArray(root.cases) || !Array.isArray(root.deletedPaths) || !Array.isArray(root.mutations)) {
     throw new Error('no full quality topic guard requires requiredNames, cases, and mutations');
   }
   const cases = root.cases.map((value, index) => {
@@ -32,6 +32,10 @@ function loadFixture() {
   if (required.length !== cases.length || required.some((name) => !cases.some((row) => row.name === name))) {
     throw new Error('no full quality topic guard cases do not match their required names');
   }
+  const deletedPaths = root.deletedPaths.map((value, index) => {
+    if (typeof value !== 'string' || value.length === 0) throw new Error(`no full quality topic guard.deletedPaths[${index}] is invalid`);
+    return value;
+  });
   const mutations = root.mutations.map((value, index) => {
     const row = requireRecord(value, `no full quality topic guard.mutations[${index}]`);
     requireExactFields(row, ['name', 'path', 'find', 'replace', 'expectedError'], `no full quality topic guard.mutations[${index}]`);
@@ -40,7 +44,7 @@ function loadFixture() {
     }
     return row as unknown as GuardMutation;
   });
-  return { cases, mutations };
+  return { cases, deletedPaths, mutations };
 }
 
 function forbiddenIn(sourceText: string, guard: GuardCase): string[] {
@@ -54,6 +58,12 @@ describe('the full quality topic has no consumer on the rewritten surfaces', () 
     it(guard.name, () => {
       const sourceText = readFileSync(resolve(process.cwd(), guard.path), 'utf8');
       expect(forbiddenIn(sourceText, guard)).toEqual([]);
+    });
+  }
+
+  for (const path of fixture.deletedPaths) {
+    it(`${path} is deleted`, () => {
+      expect(() => readFileSync(resolve(process.cwd(), path), 'utf8')).toThrow();
     });
   }
 

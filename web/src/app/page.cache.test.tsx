@@ -281,7 +281,7 @@ describe('mounted Home offset pages', () => {
       await screen.findByRole('link', { name: 'root-one' });
       fireEvent.click(screen.getByRole('button', { name: 'next page' }));
       await screen.findByRole('link', { name: 'root-two' });
-      fireEvent.change(screen.getByRole('combobox', { name: 'sessions per page' }), { target: { value: '50' } });
+      fireEvent.change(screen.getByRole('combobox', { name: 'page size' }), { target: { value: '50' } });
       await screen.findByRole('link', { name: 'root-one' });
       await currentPage('page 1');
       const last = rootReads().at(-1)!;
@@ -346,7 +346,7 @@ describe('grouping changes', () => {
     expect(new URLSearchParams(window.location.search).get('page')).toBe('2');
 
     fireEvent.click(screen.getByRole('button', { name: 'group by: project' }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'none' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'none' }));
     await waitFor(() => expect(new URLSearchParams(window.location.search).get('groupBy')).toBe('none'));
     // A grouping change starts at page one; the page was already in the tab.
     expect(new URLSearchParams(window.location.search).get('page')).toBeNull();

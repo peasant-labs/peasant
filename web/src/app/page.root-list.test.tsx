@@ -496,8 +496,8 @@ describe('root page publish filters', () => {
         for (const child of children) {
           const spec = specs.find((row) => row.id === child.getAttribute('data-session-group-child'))!;
           expect(child).not.toHaveAttribute('data-session-id');
-          // The state has its own column; only the phone summary repeats it in the title cell.
-          expect([...child.querySelectorAll('.pub-state')].filter((state) => !state.closest('.home-session-phone'))).toEqual([]);
+          // The state has its own column, so the title cell carries no state.
+          expect(child.querySelector('.pub-state')).toBeNull();
           const link = within(child as HTMLElement).getByRole('link');
           expect(link).toHaveAttribute('href', `/projects/${PROJECTS[spec.project].hash}/${spec.id}`);
           expect(link.textContent?.trim()).not.toBe('');
@@ -684,7 +684,7 @@ describe('root page list reads', () => {
     await screen.findByRole('region', { name: 'sessions' });
     fireEvent.change(screen.getByRole('searchbox', { name: 'search your sessions' }), { target: { value: 'flakes' } });
 
-    const results = await screen.findByText('search results');
+    const results = await screen.findByRole('heading', { name: 'search results' });
     const section = results.closest('[data-grouped-sessions-section]') as HTMLElement;
     expect(await within(section).findByText('the ingest test flakes on CI')).toBeInTheDocument();
     expect(within(section).getByText('you:', { exact: false })).toBeInTheDocument();

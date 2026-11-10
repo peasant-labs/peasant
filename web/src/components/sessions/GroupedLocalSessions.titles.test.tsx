@@ -1,15 +1,15 @@
-import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseStrictYAML, requireExactFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
 import type { LocalSessionListPayload } from '@/lib/api/grouped';
-import { GroupedLocalSessions } from './GroupedLocalSessions';
+import { GroupedSessionsSection } from './GroupedSessionsSection';
 
 // The grouped row title comes from the bounded page's stored `title`, not from
-// the retired full sessions channel. Each case mounts one row and asserts the
-// rendered title, including the preview and short-id fallbacks and the search
-// variant that omits the stored title.
+// the retired full sessions channel. Each case mounts one row through the
+// shared-table adapter and asserts the rendered title, including the preview
+// and short-id fallbacks and the search variant that omits the stored title.
 
 const caseFields = ['name', 'sessionId', 'title', 'preview', 'expectedTitle'] as const;
 
@@ -80,13 +80,17 @@ function payloadFor(row: TitleCase): LocalSessionListPayload {
   } as unknown as LocalSessionListPayload;
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('grouped row titles', () => {
   for (const row of cases) {
-    it(row.name, () => {
-      const view = render(<GroupedLocalSessions payload={payloadFor(row)} onRefreshList={() => {}} />);
-      expect(view.getByText(row.expectedTitle)).toBeInTheDocument();
+    it(row.name, async () => {
+      vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: async () => payloadFor(row) } as Response)));
+      render(<GroupedSessionsSection variant="sessions" />);
+      expect(await screen.findByText(row.expectedTitle)).toBeInTheDocument();
     });
   }
 });

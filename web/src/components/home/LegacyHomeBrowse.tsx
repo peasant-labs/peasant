@@ -13,7 +13,6 @@ import { isRetryableConnectionFault } from '@/lib/faults';
 import { FolderOpen, MessageSquare, Sparkles, GitBranch } from 'lucide-react';
 import { AllSessions } from '@/components/sessions/AllSessions';
 import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
-import { useSessionTitles } from '@/hooks/useSessionTitles';
 
 const CHANNELS: ['sessions'] = ['sessions'];
 
@@ -27,7 +26,6 @@ const CHANNELS: ['sessions'] = ['sessions'];
  */
 export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped' | 'flat' }) {
   const { data, connected, channelFault, connectionFault, refresh } = useChannel<SessionsPayload>(CHANNELS);
-  const titles = useSessionTitles();
   const sessions = useMemo(() => data?.sessions ?? [], [data]);
   const [summaries, setSummaries] = useState<DecodedProjectSummariesPayload | null>(() => cachedProjectSummaries());
   const [settled, setSettled] = useState(false);
@@ -87,7 +85,7 @@ export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped
         <ProjectPicker rows={rows} destination="sessions" statsPending={!settled} />
       </>}
       {view === 'grouped' && <GroupedSessionsSection variant="sessions" invalidationKey={data} heading="all sessions" />}
-      {view === 'flat' && <AllSessions sessions={sessions} titles={titles} title="every session" />}
+      {view === 'flat' && <AllSessions sessions={sessions} title="every session" />}
     </DataState>}
   </div>;
 }

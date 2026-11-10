@@ -233,8 +233,10 @@ function searchAnswer(sessions, query) {
       helperGroups: [],
     })),
     page: 1,
-    limit: 20,
-    totalItems: matching.length,
+    perPage: 25,
+    total: matching.length,
+    nextItems: [],
+    revision: '0',
     ordinarySessionTotal: matching.length,
     helperThreadTotal: 0,
   }
@@ -259,7 +261,9 @@ async function installRoutes(page, { answers, summary, diagnostics }) {
     if (url.pathname === '/api/v1/sync/sessions' && url.searchParams.get('view') === 'home') {
       const parent = url.searchParams.get('parentSessionId')
       const publication = url.searchParams.get('publication') ?? 'all'
-      const start = url.searchParams.get('pageToken') === 'more-sessions' ? 25 : 0
+      const page = Number(url.searchParams.get('page') ?? '1')
+      const perPage = Number(url.searchParams.get('maxItems') ?? '25')
+      const start = (page - 1) * perPage
       const source = !answers ? [] : answers.sync.filter(row => {
         const receipt = answers.publications.get(row.id)
         return receipt && !row.parentUnresolved
@@ -267,11 +271,19 @@ async function installRoutes(page, { answers, summary, diagnostics }) {
           && (parent || publication === 'all' || publication === 'auto' && receipt.autoPublish
             || publication === 'published' && receipt.state === 'published' || publication === 'not-published' && receipt.state === 'unpublished')
       })
-      return respond(json({ items: source.slice(start, start + 25).map(sync => {
+      const pageRows = source.map(sync => {
         const { audience, ...publication } = answers.publications.get(sync.id)
         const session = answers.sessions.find(session => session.id === sync.id)
         return { sync, publication, title: session?.title ?? '', preview: sync.firstPrompt ?? session?.preview ?? '', childCount: answers.sync.filter(child => child.parentSessionId === sync.id && answers.publications.get(child.id)).length }
-      }), next: start + 25 < source.length ? 'more-sessions' : '' }))
+      })
+      return respond(json({
+        items: pageRows.slice(start, start + perPage),
+        nextItems: pageRows.slice(start + perPage, start + 2 * perPage),
+        page,
+        perPage,
+        total: source.length,
+        revision: '0',
+      }))
     }
     if (answers && url.pathname === '/api/v1/sync/sessions') return respond(json({ sessions: answers.sync }))
     if (answers && url.pathname === '/api/v1/publications') {
@@ -489,12 +501,19 @@ async function probeGroupAttachment(page, where) {
       sameCell: group.closest('td') === cell && cell.parentElement.firstElementChild === cell,
       order: parent.nextElementSibling === group && group.parentElement === family && !parent.contains(group),
       rootLeak: !!group.querySelector('[data-session-id]'),
-      // Every list row is either one root row (exactly one session id) or one
-      // child row (no session id, but a child marker); anything else is stray.
-      extraRows: [...document.querySelectorAll('[data-root-session-list] tbody tr')].some((row) => {
-        const sessions = row.querySelectorAll('[data-session-id]').length
-        return sessions > 1 || (sessions === 0 && !row.querySelector('[data-session-group-child]'))
-      }),
+      // The shared table owns its structural rows (group, continuation,
+      // continues, empty). Every remaining body row is either one root row
+      // (exactly one session id) or one child row (no session id, but a child
+      // marker); anything else is stray.
+      extraRows: [...document.querySelectorAll('[data-root-session-list] tbody tr')]
+        .filter((row) => {
+          const kind = row.getAttribute('data-row-kind')
+          return kind === null || kind === 'row'
+        })
+        .some((row) => {
+          const sessions = row.querySelectorAll('[data-session-id]').length
+          return sessions > 1 || (sessions === 0 && !row.querySelector('[data-session-group-child]'))
+        }),
       bare: disclosure.classList.contains('sgd-bare'), indented: disclosure.classList.contains('sgd-indent'),
       bareBorder: px(style.borderTopWidth) + px(style.borderRightWidth) + px(style.borderBottomWidth) + px(style.borderLeftWidth),
       indent, padY, padX, target, rules,
@@ -652,6 +671,10 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
       await assertMissingParentOmitted(page, `${where}/filter-${filter.id}/reload`)
     }
 
+    // The publish filter is URL state, so the last loop iteration leaves the
+    // list filtered. The family probe needs the unfiltered list.
+    await pressFilter(page, 'all')
+    await page.locator(`[data-session-group="${CONTEXT.parentId}"]`).waitFor({ state: 'visible' })
     const group = page.locator(`[data-session-group="${CONTEXT.parentId}"]`)
     const control = group.getByRole('button', { name: /subagents/ })
     if (await control.getAttribute('aria-expanded') !== 'false'
@@ -669,8 +692,8 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
       href: node.querySelector('a')?.getAttribute('href'),
       title: node.querySelector('a')?.textContent?.trim(),
       fontSize: getComputedStyle(node.querySelector('a')).fontSize,
-      // The state has its own column; only the phone summary repeats it in the title cell.
-      publishChrome: [...node.querySelectorAll('.pub-state')].some((state) => !state.closest('.home-session-phone')),
+      // The state has its own column; the title cell carries no state.
+      publishChrome: node.querySelector('.pub-state') !== null,
     }))
     const childSync = answers.sync.find((row) => row.id === CONTEXT.childSessionId)
     if (familyProbe.topLevel || familyProbe.publishChrome || !familyProbe.title || familyProbe.fontSize !== '16px'

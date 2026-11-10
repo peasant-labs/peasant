@@ -18,13 +18,19 @@ import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { displayProject } from '@/lib/quality/utils';
 import { newProjectHash, type ProjectHash } from '@peasant-labs/schema';
 import { clearHomeCollapsedGroups, readHomeDeviceView, writeHomeDeviceView, type HomeDeviceView } from '@/lib/home/deviceView';
-import { HOME_COLUMN_IDS, type HomeSavedView } from '@/components/home/homeColumns';
+import {
+  ALL_HOME_COLUMNS,
+  HomeColumn,
+  parseHomeColumn,
+  type HomeGroupBy,
+  type HomeSavedView,
+} from '@/components/home/homeColumns';
+import type { SavedView } from '@peasant-labs/fairtrade/ui';
 import {
   ALL_BROWSE_VIEWS,
   BrowseView,
   decodeHomeViewState,
   encodeHomeViewState,
-  HOME_GROUP_BYS,
   isPublishFilter,
   PUBLISH_FILTERS,
   PUBLISH_FILTER_LABELS,
@@ -177,16 +183,30 @@ function HomeView() {
   }, [home.projects, view.project, commit]);
 
   // The table receives ONE saved view: the URL-owned grouping composed with
-  // the device-owned columns and open groups.
+  // the device-owned columns and open groups. The table owns the pickers and
+  // reports one change; the host writes the URL half and the device half.
   const tableState = useMemo<HomeSavedView>(() => ({
     groupBy: view.groupBy,
-    visibleColumns: deviceView.visibleColumns ?? HOME_COLUMN_IDS,
-    collapsed: deviceView.collapsed,
+    visibleColumns: deviceView.visibleColumns === null
+      ? ALL_HOME_COLUMNS
+      : deviceView.visibleColumns
+        .map((wire) => parseHomeColumn(wire))
+        .filter((column): column is HomeColumn => column !== null),
+    collapsed: deviceView.collapsed ?? [],
   }), [view.groupBy, deviceView]);
-  const onCollapsedChange = useCallback((collapsed: readonly string[] | null) => {
-    writeHomeDeviceView({ visibleColumns: deviceView.visibleColumns, collapsed });
+  const onTableViewChange = useCallback((next: SavedView<HomeGroupBy, HomeColumn>) => {
+    const visibleColumns = next.visibleColumns.map((column) => column.wire);
+    if (next.groupBy !== viewRef.current.groupBy) {
+      // A new grouping names different groups, so the device open set resets;
+      // the URL keeps the grouping, the device keeps the columns.
+      commit({ groupBy: next.groupBy });
+      writeHomeDeviceView({ visibleColumns, collapsed: [] });
+      setDeviceView(readHomeDeviceView());
+      return;
+    }
+    writeHomeDeviceView({ visibleColumns, collapsed: next.collapsed });
     setDeviceView(readHomeDeviceView());
-  }, [deviceView.visibleColumns]);
+  }, [commit]);
 
   const rows = useMemo(() => {
     const seen = new Set<string>();
@@ -246,22 +266,8 @@ function HomeView() {
     }]}
   />;
 
-  // The grouping is URL state; the open groups are device state. Changing the
-  // grouping resets to page one and clears the device's collapsed set.
-  const groupMenu = <ChoiceMenu
-    ariaLabel="group by"
-    align="end"
-    trigger={<>group by: {view.groupBy.label}</>}
-    groups={[{
-      id: 'groupBy',
-      value: view.groupBy.wire,
-      items: HOME_GROUP_BYS.map(member => ({ value: member.wire, label: member.label })),
-      onChoose: next => {
-        const chosen = HOME_GROUP_BYS.find(member => member.wire === next);
-        if (chosen) commit({ groupBy: chosen });
-      },
-    }]}
-  />;
+  // The grouping is URL state; the open groups are device state. The shared
+  // table owns the group-by and column pickers and reports one composed view.
   const sessionsView = view.browse === BrowseView.Sessions;
   const searching = sessionsView && view.query !== '';
   return <div className="asb-page home-page" data-home-bounded="true">
@@ -292,7 +298,6 @@ function HomeView() {
             actions={[{ label: 'clear filters', disabled: filterCount === 0, onSelect: () => commit({ publication: 'all', project: null }) }]}
           />}
           {browseMenu}
-          {sessionsView && groupMenu}
         </div>
       </div>
       {sessionsView ? <>
@@ -309,7 +314,7 @@ function HomeView() {
             pageSize={view.pageSize}
             total={home.total}
             viewState={tableState}
-            onCollapsedChange={onCollapsedChange}
+            onViewStateChange={onTableViewChange}
             onPageChange={next => commit({ page: next })}
             onPageSizeChange={size => commit({ pageSize: size, page: 1 })}
             loading={home.loading && home.rootPage === null}

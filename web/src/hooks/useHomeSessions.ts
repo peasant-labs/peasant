@@ -545,6 +545,8 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
 
   return {
     rootPage,
+    /** The page before the current one this tab holds, for continuation rows. */
+    previousPage: rootPage === null ? null : memory.current.get(rootPage.page - 1) ?? null,
     total: rootPage?.total ?? 0,
     revision: rootPage?.revision ?? null,
     loading,

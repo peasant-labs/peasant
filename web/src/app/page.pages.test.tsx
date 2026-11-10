@@ -31,7 +31,7 @@ interface Fixture {
   expectView?: { browse: string; publication: string; project: string | null; perPage: number; page: number; groupBy: string };
 }
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-pages.yaml'), 'utf8')) as { requiredNames: string[]; cases: Fixture[]; publish: { request: unknown; response: unknown; loadedPages: { parent: string | null; page: number }[]; failedRefreshPages: { parent: string | null; page: number }[] } };
-const required = ['numbered-pages-from-the-url', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-error-keeps-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-error-retry-failure-keeps-loaded-content', 'selection-error-account-change-refreshes-loaded-content', 'claude-teammate-line', 'no-claude-teammate-line', 'refresh-restores-view-and-page', 'interleaved-project-grouping', 'hidden-session-column-grouping', 'collapsed-group-does-not-hide-page-two'];
+const required = ['numbered-pages-from-the-url', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-error-keeps-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-error-retry-failure-keeps-loaded-content', 'selection-error-account-change-refreshes-loaded-content', 'claude-teammate-line', 'no-claude-teammate-line', 'refresh-restores-view-and-page', 'interleaved-project-grouping', 'stored-columns-keep-the-identity-column', 'collapsed-group-does-not-hide-page-two'];
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
 expect(fixture.cases.map(row => row.name).sort()).toEqual([...required].sort());
 
@@ -149,7 +149,7 @@ describe('mounted bounded Home', () => {
       const restoring = testCase.name === 'refresh-restores-view-and-page';
       const hiddenSession = testCase.visibleColumns !== undefined && !testCase.visibleColumns.includes('session');
       if (hiddenSession) {
-        await waitFor(() => expect(document.querySelector('[data-home-group]')).not.toBeNull());
+        await waitFor(() => expect(document.querySelector('[data-root-session-list] [data-row-kind="group"]')).not.toBeNull());
       } else {
         await screen.findByRole('link', { name: customRows ? `title ${testCase.rows![0].id}` : restoring ? 'title root-50' : 'title root-0' });
       }
@@ -179,12 +179,6 @@ describe('mounted bounded Home', () => {
           expect(line).toHaveTextContent(`teammate ${testCase.teammate.name} · ${testCase.teammate.team}`);
           expect(childCell.querySelector('.home-session-title')).toHaveTextContent('title child-0');
           expect(childCell.querySelector('.home-session-meta')).toHaveTextContent('tokens');
-          // The identity is its own line in the session cell, never folded into
-          // the phone block that carries the other columns' facts.
-          const phone = childCell.querySelector('.home-session-phone');
-          expect(phone).not.toBeNull();
-          expect(phone?.querySelector('.home-session-teammate')).toBeNull();
-          expect(line?.closest('.home-session-phone')).toBeNull();
         } else {
           expect(document.querySelector('.home-session-teammate')).toBeNull();
         }
@@ -250,9 +244,9 @@ describe('mounted bounded Home', () => {
         await screen.findByRole('link', { name: 'title root-50' });
         await waitFor(() => expect(screen.getByRole('button', { name: 'page 2' })).toHaveAttribute('aria-current', 'page'));
         expect(screen.queryByRole('link', { name: 'title root-0' })).not.toBeInTheDocument();
-        // groupBy=none comes from the URL, so the local list renders no project
+        // groupBy=none comes from the URL, so the table renders no project
         // group header even though the device holds an open set.
-        expect(document.querySelector('[data-home-group]')).toBeNull();
+        expect(document.querySelector('[data-row-kind="group"]')).toBeNull();
       }
       if (testCase.name === 'stale-filter-response') {
         delayed = deferred<Response>(); delayFilter = 'published';
@@ -484,37 +478,41 @@ describe('mounted bounded Home', () => {
       }
       if (testCase.name === 'interleaved-project-grouping') {
         expect(new URLSearchParams(window.location.search).get('groupBy')).toBe('project');
-        const groups = [...document.querySelectorAll('[data-home-group]')];
-        expect(groups.map(group => group.getAttribute('data-home-group'))).toEqual([
-          `project:${ALPHA_HASH}`,
-          `project:${BETA_HASH}`,
-        ]);
-        expect(groups.map(group => group.textContent?.trim())).toEqual(['fixture-project', 'beta-project']);
+        const groupRows = () => [...document.querySelectorAll<HTMLElement>('[data-root-session-list] [data-row-kind="group"], [data-root-session-list] [data-row-kind="continuation"]')];
+        const groupByLabel = (label: string) => {
+          const row = groupRows().find(candidate => (candidate.textContent ?? '').trim().replace(/, continued$/, '') === label);
+          if (!row) throw new Error(`no group ${label}; groups are ${groupRows().map(candidate => candidate.textContent?.trim()).join(', ')}`);
+          return row;
+        };
+        expect(groupRows().map(group => (group.textContent ?? '').trim())).toEqual(['fixture-project', 'beta-project']);
         // Stable partition: A1, B1, A2 renders A1, A2 under A, then B1 under B.
         expect([...document.querySelectorAll('[data-session-id]')].map(node => node.getAttribute('data-session-id'))).toEqual(['a1', 'a2', 'b1']);
         // Collapsing a project group hides exactly its rows and writes the
         // device open set; expanding it restores them.
-        const alphaGroup = () => document.querySelector(`[data-home-group="project:${ALPHA_HASH}"]`) as HTMLElement;
-        fireEvent.click(within(alphaGroup()).getByRole('button'));
+        fireEvent.click(within(groupByLabel('fixture-project')).getByRole('button'));
         await waitFor(() => expect(screen.queryByRole('link', { name: 'title a1' })).not.toBeInTheDocument());
         expect(screen.getByRole('link', { name: 'title b1' })).toBeInTheDocument();
         const stored = JSON.parse(window.localStorage.getItem('peasant.home') ?? '{}');
         expect(stored.collapsed).toEqual([`project:${ALPHA_HASH}`]);
-        fireEvent.click(within(alphaGroup()).getByRole('button'));
+        fireEvent.click(within(groupByLabel('fixture-project')).getByRole('button'));
         await screen.findByRole('link', { name: 'title a1' });
         return;
       }
       if (testCase.name === 'collapsed-group-does-not-hide-page-two') {
-        const alphaGroup = () => document.querySelector(`[data-home-group="project:${ALPHA_HASH}"]`) as HTMLElement;
-        fireEvent.click(within(alphaGroup()).getByRole('button'));
+        const groupRows = () => [...document.querySelectorAll<HTMLElement>('[data-root-session-list] [data-row-kind="group"], [data-root-session-list] [data-row-kind="continuation"]')];
+        const groupByLabel = (label: string) => {
+          const row = groupRows().find(candidate => (candidate.textContent ?? '').trim().replace(/, continued$/, '') === label);
+          if (!row) throw new Error(`no group ${label}; groups are ${groupRows().map(candidate => candidate.textContent?.trim()).join(', ')}`);
+          return row;
+        };
+        fireEvent.click(within(groupByLabel('fixture-project')).getByRole('button'));
         await waitFor(() => expect(screen.queryByRole('link', { name: 'title a01' })).not.toBeInTheDocument());
         fireEvent.click(screen.getByRole('button', { name: 'next page' }));
         await screen.findByRole('link', { name: 'title c01' });
         // Page 2's projects were never collapsed, so they are open.
-        for (const [id, hash] of [['c01', FIXTURE_PROJECTS.gamma.hash], ['d01', FIXTURE_PROJECTS.delta.hash]] as const) {
+        for (const [id, label] of [['c01', 'gamma-project'], ['d01', 'delta-project']] as const) {
           expect(await screen.findByRole('link', { name: `title ${id}` })).toBeInTheDocument();
-          const header = document.querySelector(`[data-home-group="project:${hash}"]`);
-          expect(header?.querySelector('button')).toHaveAttribute('aria-expanded', 'true');
+          expect(groupByLabel(label).querySelector('.libt-group-toggle')).toHaveAttribute('aria-expanded', 'true');
         }
         // Page 1 keeps its own collapsed project.
         fireEvent.click(screen.getByRole('button', { name: 'page 1' }));
@@ -522,10 +520,12 @@ describe('mounted bounded Home', () => {
         expect(screen.queryByRole('link', { name: 'title a01' })).not.toBeInTheDocument();
         return;
       }
-      if (testCase.name === 'hidden-session-column-grouping') {
-        const table = document.querySelector('.home-table') as HTMLElement;
-        expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent?.trim())).toEqual(['project', 'status']);
-        const group = document.querySelector('[data-home-group]');
+      if (testCase.name === 'stored-columns-keep-the-identity-column') {
+        const table = document.querySelector('[data-root-session-list] table') as HTMLElement;
+        // The shared table keeps the first declared column (the row identity)
+        // even when the stored set omits it, so the session column still shows.
+        expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent?.trim())).toEqual(['session', 'project', 'status']);
+        const group = document.querySelector('[data-row-kind="group"]');
         expect(group).not.toBeNull();
         expect(group).toHaveTextContent('fixture-project');
         expect(screen.getAllByText('fixture-project').length).toBeGreaterThan(0);
