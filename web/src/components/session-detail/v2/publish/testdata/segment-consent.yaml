@@ -6,6 +6,7 @@ requiredNames:
   - partial-segments-omit-no-new-turns
   - complete-segments-compare-new-turns
   - push-names-session-and-level
+  - advanced-revision-complete-segments-publish-bar
 cases:
   - name: scan-version-follows-revision
     kind: scan
@@ -46,3 +47,23 @@ cases:
     expectedRequest:
       sessionIds: [sess-segment-host]
       redactionLevel: standard
+  - name: advanced-revision-complete-segments-publish-bar
+    kind: bar
+    previousRevision: "7"
+    revision: "8"
+    loadedSegments: 8
+    totalSegments: 8
+    publishedAt: "2026-07-15T08:00:00Z"
+    turns:
+      - timestamp: "2026-07-15T07:59:59Z"
+      - timestamp: "2026-07-15T08:00:01Z"
+      - timestamp: "2026-07-15T08:00:02Z"
+    publication:
+      sessionId: sess-segment-host
+      state: published
+      autoPublish: false
+      outsideSelection: false
+      audience: []
+      publishedAt: "2026-07-15T08:00:00Z"
+    expectedNewTurns: 2
+    expectedSummary: "2 new turns since you published"
