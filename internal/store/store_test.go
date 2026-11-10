@@ -583,7 +583,7 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 	// The version-only selector cannot see it, and must not pretend to: the
 	// stamped indexer revision IS the current target, and inventing staleness
 	// there would re-index every unchanged session on every harvest.
-	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry)
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry, ingest.AllStoredSessions())
 	if err != nil || len(stale) != 0 {
 		t.Fatalf("a current indexer revision was reported stale: %v, %v", stale, err)
 	}
@@ -749,9 +749,7 @@ func TestStore_UpdateDailySummary_MultiDay(t *testing.T) {
 		makeStoreEntry(t, "99999999-9999-9999-9999-999999999999", hash, "github.com-test", defaults.HarnessOpenCode, day2Ms, 3000, 1200),
 	}
 
-	if err := s.InsertSessions(ctx, entries); err != nil {
-		t.Fatalf("InsertSessions: %v", err)
-	}
+	insertEntriesWithConversationCounts(t, s, entries)
 
 	// UpdateDailySummary as standalone re-computation (idempotent with InsertSessions).
 	if err := s.UpdateDailySummary(ctx, []string{"2024-01-15", "2024-01-16"}); err != nil {
@@ -926,9 +924,7 @@ func TestStore_AllSessions(t *testing.T) {
 	worktree := "/home/test/project-worktree"
 	entries[2].Metadata.Git.Worktree = &worktree
 
-	if err := s.InsertSessions(ctx, entries); err != nil {
-		t.Fatalf("InsertSessions: %v", err)
-	}
+	insertEntriesWithConversationCounts(t, s, entries)
 
 	rows, err := s.AllSessions(ctx)
 	if err != nil {
@@ -1005,9 +1001,7 @@ func TestStore_SessionByID_Found(t *testing.T) {
 	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	entry := makeStoreEntry(t, "11111111-1111-1111-1111-111111111111", hash, "github.com-user-repo1", defaults.HarnessClaudeCode, 1700000000000, 1000, 500)
 
-	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
-		t.Fatalf("InsertSessions: %v", err)
-	}
+	insertEntriesWithConversationCounts(t, s, []ingest.StoreEntry{entry})
 
 	row, err := s.SessionByID(ctx, "11111111-1111-1111-1111-111111111111")
 	if err != nil {
@@ -1106,9 +1100,7 @@ func TestStore_DashboardAggregates(t *testing.T) {
 		makeStoreEntry(t, "33333333-3333-3333-3333-333333333333", hash, "github.com-test", defaults.HarnessOpenCode, day2Ms, 3000, 1200),
 	}
 
-	if err := s.InsertSessions(ctx, entries); err != nil {
-		t.Fatalf("InsertSessions: %v", err)
-	}
+	insertEntriesWithConversationCounts(t, s, entries)
 	if err := s.UpdateDailySummary(ctx, []string{"2024-01-15", "2024-01-16"}); err != nil {
 		t.Fatalf("UpdateDailySummary: %v", err)
 	}
@@ -1234,9 +1226,7 @@ func TestStore_DailySummaries(t *testing.T) {
 		makeStoreEntry(t, "33333333-3333-3333-3333-333333333333", hash, "github.com-test", defaults.HarnessOpenCode, day2Ms, 3000, 1200),
 	}
 
-	if err := s.InsertSessions(ctx, entries); err != nil {
-		t.Fatalf("InsertSessions: %v", err)
-	}
+	insertEntriesWithConversationCounts(t, s, entries)
 	if err := s.UpdateDailySummary(ctx, []string{"2024-01-15", "2024-01-16"}); err != nil {
 		t.Fatalf("UpdateDailySummary: %v", err)
 	}
@@ -1570,6 +1560,36 @@ func seedSession(t *testing.T, s *store.Store, sessionID string) {
 	}
 }
 
+// seedConversationTurnCount records the producer's conversation count the way
+// the capture lane does, for tests that assert a session-list count.
+func seedConversationTurnCount(t *testing.T, s *store.Store, sessionID string, count int) {
+	t.Helper()
+	if _, err := s.UpsertCapturedStats(context.Background(), store.CapturedStats{
+		SessionID:             schema.SessionID(sessionID),
+		ConversationTurnCount: &count,
+		Source:                store.StatsSourceHarness,
+		UpdatedAtMs:           1,
+	}); err != nil {
+		t.Fatalf("seed conversation turn count: %v", err)
+	}
+}
+
+// insertEntriesWithConversationCounts inserts a batch and records each
+// session's metadata turn count as its stored conversation count, the state a
+// completed harvest produces.
+func insertEntriesWithConversationCounts(t *testing.T, s *store.Store, entries []ingest.StoreEntry) {
+	t.Helper()
+	if err := s.InsertSessions(context.Background(), entries); err != nil {
+		t.Fatalf("InsertSessions: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Metadata == nil {
+			continue
+		}
+		seedConversationTurnCount(t, s, string(entry.Metadata.SessionID), entry.Metadata.Stats.TurnCount)
+	}
+}
+
 func intPtr(v int) *int             { return &v }
 func int64Ptr(v int64) *int64       { return &v }
 func strPtr(v string) *string       { return &v }
@@ -1762,6 +1782,7 @@ func TestStore_SaveMetrics_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	sid := "33333333-3333-3333-3333-333333333333"
 	seedSession(t, s, sid)
+	seedConversationTurnCount(t, s, sid, 15)
 
 	sessionID := ingest.SessionID(sid)
 	now := int64(1700000099000)
@@ -1892,8 +1913,10 @@ func TestStore_SaveMetrics_NullPreservation(t *testing.T) {
 	}
 
 	// All optional fields should be nil.
-	if got.TurnCount != nil {
-		t.Errorf("turn_count: expected nil, got %v", got.TurnCount)
+	// Turn count is no longer a nullable analysis column: the count surface
+	// reads the NOT NULL conversation column, which is zero here.
+	if got.TurnCount == nil || *got.TurnCount != 0 {
+		t.Errorf("turn_count: expected the stored conversation column, got %v", got.TurnCount)
 	}
 	if got.TitleGenerated != nil {
 		t.Errorf("title: expected nil, got %v", got.TitleGenerated)
@@ -1945,6 +1968,7 @@ func TestStore_SaveMetrics_NullM7BoolColumns(t *testing.T) {
 	ctx := context.Background()
 	sid := "66666666-6666-6666-6666-666666666666"
 	seedSession(t, s, sid)
+	seedConversationTurnCount(t, s, sid, 5)
 
 	sessionID := ingest.SessionID(sid)
 
@@ -2375,7 +2399,7 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 
 	// ListStaleIndexSessions(currentVersion=2): sessions with version < 2.
 	// Session 2 (v=1) and Session 3 (v=0) should be returned.
-	stale2, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 2}})
+	stale2, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 2}}, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(2): %v", err)
 	}
@@ -2398,7 +2422,7 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 
 	// ListStaleIndexSessions(currentVersion=1): sessions with version < 1.
 	// Only Session 3 (v=0) should be returned.
-	stale1, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 1}})
+	stale1, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 1}}, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(1): %v", err)
 	}
@@ -2457,7 +2481,7 @@ func assertOpenCodeSessionAtIndexVersionIsStale(t *testing.T, storedVersion int,
 		t.Fatalf("UpdateIndexState(opencode, %s): %v", versionLabel, err)
 	}
 
-	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry)
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(current): %v", err)
 	}

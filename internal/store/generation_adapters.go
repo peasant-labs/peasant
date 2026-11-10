@@ -132,16 +132,22 @@ func (s *Store) SweepSessionForHarvest(ctx context.Context, sessionID schema.Ses
 	return err
 }
 
-// SweepFlaggedSessionsForHarvest sweeps every flagged session through the
-// harvest-side entry point: the harvest-start recovery pass with
+// SweepFlaggedSessionsForHarvest sweeps every flagged session in scope through
+// the harvest-side entry point: the harvest-start recovery pass with
 // pipeline-neutral types (a swept count, per-session warnings, and a fatal
 // error). The pipeline calls it before discovery. Like the per-session
 // entry point, it skips silently without managed-generation support.
-func (s *Store) SweepFlaggedSessionsForHarvest(ctx context.Context) (int, []error, error) {
+func (s *Store) SweepFlaggedSessionsForHarvest(ctx context.Context, scope ingest.StoreScope) (int, []error, error) {
+	if err := scope.Validate("SweepFlaggedSessionsForHarvest"); err != nil {
+		return 0, nil, err
+	}
+	if narrowedSessionsEmpty(scope) {
+		return 0, nil, nil
+	}
 	if err := s.requireGenerationSupport(); err != nil {
 		return 0, nil, nil
 	}
-	report, err := s.SweepFlaggedSessions(ctx)
+	report, err := s.sweepFlaggedSessions(ctx, scope)
 	if err != nil {
 		return 0, nil, err
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/selectionfilter"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/spf13/cobra"
@@ -99,6 +100,7 @@ func TestHarvestCmd_Flags(t *testing.T) {
 
 	stringFlags := []flagCheck{
 		{"source-harness", ""},
+		{"harness", ""},
 		{"source-path", ""},
 		{"output", ""},
 		{"since", ""},
@@ -113,6 +115,7 @@ func TestHarvestCmd_Flags(t *testing.T) {
 		{defaults.JSONFlagName, "false"},
 		{"all", "false"},
 		{"detect-commits", "true"},
+		{"no-related", "false"},
 	}
 
 	sliceFlags := []flagCheck{
@@ -1447,7 +1450,7 @@ func TestHarvestCmd_SinceFlag_ValidDuration(t *testing.T) {
 // exercise a withheld conflict discard the recorder
 // explicitly here, so the discard is visible in the test that chooses it.
 
-func prepareHarvestFilterForTest(t *testing.T, filter *harvestSelectionFilter, sessions ...ingest.DiscoveredSession) {
+func prepareHarvestFilterForTest(t *testing.T, filter *selectionfilter.Filter, sessions ...ingest.DiscoveredSession) {
 	t.Helper()
 	if err := filter.Prepare(context.Background(), sessions); err != nil {
 		t.Fatalf("prepare harvest selection cohort: %v", err)
@@ -1464,7 +1467,7 @@ func TestBuildSelectionFilter_ProviderNotInSelection(t *testing.T) {
 		string(defaults.HarnessClaudeCode): {},
 	}
 
-	filter, _ := buildSelectionFilterWithResolver(cfg, nil, fixturePathIdentityResolver{})
+	filter, _ := selectionfilter.New(cfg, nil, fixturePathIdentityResolver{})
 	session := ingest.DiscoveredSession{
 		SessionID: "sess-1",
 		Harness:   ingest.HarnessOpenCode,
@@ -1485,7 +1488,7 @@ func TestBuildSelectionFilter_ProviderImportAll(t *testing.T) {
 		string(defaults.HarnessClaudeCode): {}, // empty = import all
 	}
 
-	filter, _ := buildSelectionFilterWithResolver(cfg, nil, fixturePathIdentityResolver{})
+	filter, _ := selectionfilter.New(cfg, nil, fixturePathIdentityResolver{})
 	session := ingest.DiscoveredSession{
 		SessionID:   "any-session",
 		Harness:     ingest.HarnessClaudeCode,
@@ -1508,7 +1511,7 @@ func TestBuildSelectionFilter_ExplicitSessionID(t *testing.T) {
 		},
 	}
 
-	filter, _ := buildSelectionFilterWithResolver(cfg, nil, fixturePathIdentityResolver{})
+	filter, _ := selectionfilter.New(cfg, nil, fixturePathIdentityResolver{})
 
 	// Matching session ID should pass.
 	target := ingest.DiscoveredSession{
@@ -1544,7 +1547,7 @@ func TestBuildSelectionFilter_ProjectMatchByName(t *testing.T) {
 		},
 	}
 
-	filter, _ := buildSelectionFilterWithResolver(cfg, nil, fixturePathIdentityResolver{})
+	filter, _ := selectionfilter.New(cfg, nil, fixturePathIdentityResolver{})
 
 	selected := ingest.DiscoveredSession{
 		SessionID:   "sess-1",
@@ -1586,7 +1589,7 @@ func TestBuildSelectionFilter_ProjectMatchByGitRemote_MixedFormsNormalize(t *tes
 	}
 
 	stubGit := &stubBranchGitResolver{remote: "git@github.com:example-org/garden-app.git"}
-	filter, _ := buildSelectionFilterWithResolver(cfg, stubGit, fixturePathIdentityResolver{})
+	filter, _ := selectionfilter.New(cfg, stubGit, fixturePathIdentityResolver{})
 
 	session := ingest.DiscoveredSession{
 		SessionID:  "sess-1",
@@ -1601,7 +1604,7 @@ func TestBuildSelectionFilter_ProjectMatchByGitRemote_MixedFormsNormalize(t *tes
 
 	// A different repo, in the same SSH form family, must not match.
 	stubGitOther := &stubBranchGitResolver{remote: "git@github.com:example-org/other-repo.git"}
-	filterOther, _ := buildSelectionFilterWithResolver(cfg, stubGitOther, fixturePathIdentityResolver{})
+	filterOther, _ := selectionfilter.New(cfg, stubGitOther, fixturePathIdentityResolver{})
 	other := ingest.DiscoveredSession{
 		SessionID:  "sess-2",
 		Harness:    ingest.HarnessClaudeCode,
@@ -1632,7 +1635,7 @@ func TestBuildSelectionFilter_BranchFilter(t *testing.T) {
 		},
 	}
 
-	filter, _ := buildSelectionFilterWithResolver(cfg, nil, fixturePathIdentityResolver{})
+	filter, _ := selectionfilter.New(cfg, nil, fixturePathIdentityResolver{})
 
 	// Without a git resolver, branch cannot be resolved, so even a matching project
 	// with branch filtering won't pass (branch is empty, not in allowlist).
@@ -1668,7 +1671,7 @@ func TestBuildSelectionFilter_AutoIngestNewBranches(t *testing.T) {
 
 	// Use a stub git resolver that returns a "feature" branch (not in allowlist).
 	stubGit := &stubBranchGitResolver{branch: "feature-xyz"}
-	filter, _ := buildSelectionFilterWithResolver(cfg, stubGit, fixturePathIdentityResolver{})
+	filter, _ := selectionfilter.New(cfg, stubGit, fixturePathIdentityResolver{})
 
 	session := ingest.DiscoveredSession{
 		SessionID:   "sess-1",
@@ -1684,7 +1687,7 @@ func TestBuildSelectionFilter_AutoIngestNewBranches(t *testing.T) {
 
 	// Disable auto-ingest: same session should now be rejected.
 	cfg.Selection.AutoIngestNewBranches = false
-	filter2, _ := buildSelectionFilterWithResolver(cfg, stubGit, fixturePathIdentityResolver{})
+	filter2, _ := selectionfilter.New(cfg, stubGit, fixturePathIdentityResolver{})
 	prepareHarvestFilterForTest(t, filter2, session)
 	if filter2.Match(session) {
 		t.Error("filter should reject new branch when AutoIngestNewBranches is false")
@@ -1744,7 +1747,7 @@ func TestBuildSelectionFilter_ProjectMatchByGitRemote(t *testing.T) {
 	}
 
 	stubGit := &stubBranchGitResolver{remote: "https://github.com/org/repo.git"}
-	filter, _ := buildSelectionFilterWithResolver(cfg, stubGit, fixturePathIdentityResolver{})
+	filter, _ := selectionfilter.New(cfg, stubGit, fixturePathIdentityResolver{})
 
 	session := ingest.DiscoveredSession{
 		SessionID:  "sess-1",
@@ -1759,7 +1762,7 @@ func TestBuildSelectionFilter_ProjectMatchByGitRemote(t *testing.T) {
 
 	// Different remote should not match.
 	stubGit2 := &stubBranchGitResolver{remote: "https://github.com/org/other-repo.git"}
-	filter2, _ := buildSelectionFilterWithResolver(cfg, stubGit2, fixturePathIdentityResolver{})
+	filter2, _ := selectionfilter.New(cfg, stubGit2, fixturePathIdentityResolver{})
 	other := ingest.DiscoveredSession{
 		SessionID:  "sess-2",
 		Harness:    ingest.HarnessOpenCode,

@@ -52,11 +52,11 @@ type maintenanceStore struct {
 	mu           sync.Mutex
 }
 
-func (s *maintenanceStore) ListStaleIndexSessions(context.Context, map[Harness]HarvesterVersions) ([]SessionID, error) {
+func (s *maintenanceStore) ListStaleIndexSessions(context.Context, map[Harness]HarvesterVersions, StoreScope) ([]SessionID, error) {
 	return s.ids, nil
 }
 
-func (s *maintenanceStore) ListStaleAdapterSessions(context.Context, map[Harness]HarvesterVersions, []int) ([]SessionID, error) {
+func (s *maintenanceStore) ListStaleAdapterSessions(context.Context, map[Harness]HarvesterVersions, []int, StoreScope) ([]SessionID, error) {
 	return s.ids, nil
 }
 

@@ -1,0 +1,15 @@
+requiredNames:
+  - not_found
+  - harness_filtered
+  - since_filtered
+  - lookup_failed
+  - harness_disabled
+  - several_misses
+  - several_misses_lookup_failed
+  - several_misses_shared_search
+  - store_not_attached
+  - store_unstated
+  - no_misses
+  - unstated_miss_reason
+  - harvest_index
+  - lookup_failed_multiline_detail

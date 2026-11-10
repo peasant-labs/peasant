@@ -1,0 +1,24 @@
+peasant: harvest failed: session 1111... could not be looked up in all sources, so nothing was recorded
+  what:     this session-scoped harvest looked for session 1111...; no source that was searched holds it, and the lookup in opencode failed
+  why:      the store has no row for this id, and the opencode lookup could not run, so the session may be there
+  where:    session lookup (ingest scoped locate)
+  when:     before any session was swept, recorded, or indexed
+  searched:
+    store         no recorded session with this id
+    claude-code   not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
+    codex         not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
+    opencode      lookup failed: the OpenCode lookup for session 11111111-2222-4333-8444-555566667777 could not read database "/sandbox/opencode/opencode.db"
+    cursor        not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
+    strike        not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
+    pi            not enabled (config.yaml excludes it); enable it with `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' kickstart`
+  impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+            store migration, search-index repair) may still have run. No full scan was run.
+  fix:      repair the opencode database at
+            /sandbox/opencode/opencode.db
+            (its lookup failed: the OpenCode lookup for session 11111111-2222-4333-8444-555566667777
+            could not read database
+            "/sandbox/opencode/opencode.db"),
+            then run
+            `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' harvest --session 11111111-2222-4333-8444-555566667777`
+            again, or check the id with
+            `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' sessions list`

@@ -1,6 +1,9 @@
 package settings
 
-import "github.com/peasant-labs/peasant/internal/config"
+import (
+	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/onboarding"
+)
 
 // FieldWrites shows what each field of r writes into a configuration, so a
 // caller can learn which configuration keys the registry edits from the
@@ -18,9 +21,9 @@ func (r Registry) FieldWrites(newBaseline, newWorking func() config.Config, visi
 			if field == nil {
 				continue
 			}
-			draft := &Draft{baseline: newBaseline(), working: newWorking()}
+			draft := &Draft{core: onboarding.DraftFrom(newBaseline(), newWorking())}
 			field.reset(draft)
-			visit(field, &draft.working)
+			visit(field, draft.Working())
 		}
 	}
 }

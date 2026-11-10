@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +17,15 @@ import (
 
 var _ ingest.PublicationInputReader = (*Store)(nil)
 var _ ingest.PublicationCaptureStore = (*Store)(nil)
+
+// stampMetadataConversationTurnCount replaces the served metadata's record
+// count with the store's one conversation count and re-signs the document, so
+// an envelope that carries the repaired count still validates against its own
+// integrity digest. The stored capture document keeps the adapter's raw count.
+func stampMetadataConversationTurnCount(metadata *schema.UnifiedMetadata, stats CapturedStats) {
+	metadata.Stats.TurnCount = capturedStatsToWire(stats).TurnCount
+	metadata.MetadataHash = schema.ComputeMetadataHash(metadata)
+}
 
 func publicationRepairError(reason string) error {
 	return fmt.Errorf("store: %s during publication metadata capture/read; publication is held to avoid mixing source evidence; run peasant ingest with stored sources and retry", reason)
@@ -354,6 +364,13 @@ func (s *Store) loadPublicationInputOnConn(ctx context.Context, conn *sqlite.Con
 	if bundle.ContentCapture.SessionID != id || bundle.ContentCapture.PublicationCaptureRevision != bundle.CaptureRevision {
 		return bundle, publicationRepairError("full content identity or publication revision disagrees with eligible metadata")
 	}
+	// The published metadata part must agree with the served detail: both read
+	// the one stored conversation count, never the raw capture document.
+	if stats, statsErr := readCapturedStatsOnConn(conn, id); statsErr == nil {
+		stampMetadataConversationTurnCount(&bundle.Metadata, stats)
+	} else if !errors.Is(statsErr, ErrNoCapturedStats) {
+		return bundle, statsErr
+	}
 	metrics, err := getMetricsOnConn(conn, id)
 	if err != nil {
 		return bundle, err
@@ -561,6 +578,13 @@ func (s *Store) LoadPublicationMetadata(ctx context.Context, ids []ingest.Sessio
 				return parseErr
 			}
 			bundle, scanErr := scanPublicationMetadata(stmt, id, false)
+			if scanErr == nil && bundle.Readiness == ingest.PublicationReady {
+				if stats, statsErr := readCapturedStatsOnConn(conn, id); statsErr == nil {
+					stampMetadataConversationTurnCount(&bundle.Metadata, stats)
+				} else if !errors.Is(statsErr, ErrNoCapturedStats) {
+					return statsErr
+				}
+			}
 			result[id] = ingest.PublicationMetadata{Metadata: bundle.Metadata, Readiness: bundle.Readiness, CaptureRevision: bundle.CaptureRevision, Error: scanErr}
 			return nil
 		},

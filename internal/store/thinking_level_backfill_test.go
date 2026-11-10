@@ -59,11 +59,11 @@ func TestStore_ThinkingLevelBackfillSelection(t *testing.T) {
 			}
 			assertSelected := func(want bool) {
 				t.Helper()
-				adapters, err := s.ListStaleAdapterSessions(ctx, targets, nil)
+				adapters, err := s.ListStaleAdapterSessions(ctx, targets, nil, ingest.AllStoredSessions())
 				if err != nil {
 					t.Fatal(err)
 				}
-				indexers, err := s.ListStaleIndexSessions(ctx, targets)
+				indexers, err := s.ListStaleIndexSessions(ctx, targets, ingest.AllStoredSessions())
 				if err != nil {
 					t.Fatal(err)
 				}

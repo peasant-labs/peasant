@@ -1,8 +1,10 @@
 requiredNames:
   - configured_secret_whole_record_label
   - configured_secret_nested_block_label
+  - image_source_strips_local_fields_keeps_number
   - managed_partition_preserves_unknown
   - earlier_history_restores_source_order
+  - managed_earlier_image_source_strips_local_fields_keeps_number
   - full_record_between_known_records
   - nested_large_payload_keeps_precision
   - escaped_secret_is_redacted

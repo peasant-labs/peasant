@@ -20,9 +20,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/selectionfilter"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/redact"
@@ -39,6 +41,7 @@ type syncHandler struct {
 	// resolves config, data, and state paths under. Empty keeps the process
 	// environment as the default, so only tests inject explicit roots and the
 	// CLI keeps its environment-derived defaults. Mirrors ServerConfig.
+	configPath string
 	configHome string
 	dataHome   string
 	stateHome  string
@@ -1191,7 +1194,7 @@ func (h *syncHandler) handleSyncIngestSession(w http.ResponseWriter, r *http.Req
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	pipeline, closeStore, err := h.newIngestPipeline(ingest.NewProgressState(), &ingestSessionScope{id: id, harness: harness})
+	pipeline, closeStore, _, err := h.newIngestPipeline(ingest.NewProgressState(), &ingestSessionScope{id: id, harness: harness})
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error(), "session_ingest_failed")
 		return
@@ -1208,6 +1211,14 @@ func (h *syncHandler) handleSyncIngestSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err != nil {
+		// A scope miss already states why the id could not be used and the
+		// command that fixes it; the popup shows both instead of a quoted Go
+		// error.
+		var scopeErr *ingest.SessionScopeError
+		if errors.As(err, &scopeErr) {
+			writeAPIError(w, http.StatusUnprocessableEntity, fmt.Sprintf("re-indexing this session: %s; %s", scopeErr.Reason(), scopeErr.FixLine()), "session_ingest_refused")
+			return
+		}
 		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("re-indexing this session: %v; the previous index was kept", err), "session_ingest_failed")
 		return
 	}
@@ -1229,6 +1240,16 @@ func (h *syncHandler) handleSyncIngestSession(w http.ResponseWriter, r *http.Req
 			notes = append(notes, diagnostic.Message)
 			if line, ok := ingest.MalformedJSONLRecordLine(diagnostic.Message); ok {
 				unreadable = append(unreadable, sessionIngestUnreadable{Line: line, Reason: diagnostic.Message})
+			}
+		}
+	}
+	// A recording that is recorded but no longer readable keeps its stored copy.
+	// `open` says so on one stderr line; the popup shows the same line as a note,
+	// so the user knows why the copy it is about to publish did not change.
+	if result.ScopeReport != nil {
+		if member, ok := result.ScopeReport.SelectedMember(id); ok {
+			if line := member.UnreadableOpenLine(); line != "" {
+				notes = append(notes, line)
 			}
 		}
 	}
@@ -1294,6 +1315,13 @@ func storedEvidenceStillRefusedNote(evidenceErr error) string {
 }
 
 func sessionIngestFailure(result *ingest.PipelineResult, id ingest.SessionID) string {
+	// A recorded session whose source is gone is not a failure: the run kept the
+	// stored copy, and the response carries the same warning `open` prints.
+	if result.ScopeReport != nil {
+		if member, ok := result.ScopeReport.SelectedMember(id); ok && member.Outcome == ingest.LocateStoredUnreadable {
+			return ""
+		}
+	}
 	reached := false
 	for _, session := range result.Sessions {
 		if session.SessionID != id {
@@ -1318,7 +1346,7 @@ func sessionIngestFailure(result *ingest.PipelineResult, id ingest.SessionID) st
 // runIngestPipeline constructs and runs the full ingest pipeline, mirroring
 // the pattern from buildFTUEIngestRunner in cmd/peasant/cmd_kickstart.go.
 func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
-	pipeline, closeStore, err := h.newIngestPipeline(progState, nil)
+	pipeline, closeStore, recorder, err := h.newIngestPipeline(progState, nil)
 	if err != nil {
 		h.setIngestError(err)
 		return
@@ -1326,6 +1354,7 @@ func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
 	defer closeStore()
 
 	result, err := pipeline.Run(context.Background())
+	appendSelectionConflictDiagnostics(result, recorder, h.selectionConfigPath())
 	if errors.Is(err, ingest.ErrHarvestRunning) {
 		h.setIngestError(fmt.Errorf("another harvest is running on this data dir (for example `peasant harvest` in a terminal); retry when it finishes"))
 		return
@@ -1347,17 +1376,25 @@ type ingestSessionScope struct {
 	harness ingest.Harness
 }
 
+// selectionConfigPath is the configuration file a withheld-conflict notice names.
+func (h *syncHandler) selectionConfigPath() string {
+	return h.configPath
+}
+
 // newIngestPipeline builds the ingest pipeline the web routes run, and the
-// release of the store it opened. A nil scope runs every configured source; a
-// session scope reads that session's harness source only and processes that
-// session only, re-reading its recording even when the index looks current.
-func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *ingestSessionScope) (*ingest.Pipeline, func(), error) {
+// release of the store it opened. A nil scope runs every configured source and,
+// when the saved selection is selected, applies that selection. A session scope
+// reads that session's harness source only and processes that session only,
+// re-reading its recording even when the index looks current, and does not
+// apply the saved selection. The recorder is nil unless the selection filter
+// was installed.
+func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *ingestSessionScope) (*ingest.Pipeline, func(), *selectionfilter.ConflictRecorder, error) {
 	cfg := h.currentConfig()
 	if cfg == nil {
-		return nil, nil, fmt.Errorf("config not available")
+		return nil, nil, nil, fmt.Errorf("config not available")
 	}
 	if err := config.ValidateSelection(cfg.Selection); err != nil {
-		return nil, nil, fmt.Errorf("web ingest: invalid saved selection while preparing the pipeline in internal/api.newIngestPipeline: %w; no source was read or imported; run `peasant kickstart` to repair the saved selection, then retry", err)
+		return nil, nil, nil, fmt.Errorf("web ingest: invalid saved selection while preparing the pipeline in internal/api.newIngestPipeline: %w; no source was read or imported; run `peasant kickstart` to repair the saved selection, then retry", err)
 	}
 	fs := &ingest.OSFileSystem{}
 	git := &ingest.ExecGitResolver{}
@@ -1367,7 +1404,7 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	if scope != nil {
 		source, ok := sources[scope.harness]
 		if !ok {
-			return nil, nil, fmt.Errorf("the %s source is not enabled in config.yaml, so this session's recording cannot be read again; nothing was changed; enable sources.%s and retry", scope.harness, scope.harness)
+			return nil, nil, nil, fmt.Errorf("the %s source is not enabled in config.yaml, so this session's recording cannot be read again; nothing was changed; enable sources.%s and retry", scope.harness, scope.harness)
 		}
 		sources = map[defaults.Harness]ingest.SourceConfig{scope.harness: source}
 	}
@@ -1378,7 +1415,7 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	}
 	resolvedOutput, err := ingest.NewResolvedPath(outputPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve output path: %w", err)
+		return nil, nil, nil, fmt.Errorf("resolve output path: %w", err)
 	}
 
 	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
@@ -1393,9 +1430,29 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		Write:              cfg.Write,
 		Progress:           progState,
 	}
+	// A full import applies the saved selection. An explicit session re-index
+	// keeps the allowlist scope of `peasant harvest --session` and does not.
+	var selectionConflicts *selectionfilter.ConflictRecorder
+	if scope == nil && cfg.Selection.Mode == config.SelectionModeSelected {
+		filter, recorder := selectionfilter.New(cfg, git, ingest.NewPhysicalPathResolver())
+		pipelineCfg.PrepareSessionFilter = filter.Prepare
+		pipelineCfg.SessionFilter = filter.Match
+		pipelineCfg.SessionExclusionFilter = filter.Excludes
+		selectionConflicts = recorder
+	}
 	if scope != nil {
-		// The same scope as `peasant harvest --session <id> --force`.
-		pipelineCfg.AllowedSessionIDs = map[ingest.SessionID]bool{scope.id: true}
+		// The same scope as `peasant harvest --session <id> --force`: related
+		// sessions are included by default, the harness narrows the source, and
+		// the force re-reads a recording whose index looks current. The command
+		// prefix always carries this handler's data directory, so a message's
+		// suggested commands read the store this run wrote.
+		sessionScope, err := ingest.NewSessionScope([]ingest.SessionID{scope.id}, ingest.RelatedInclude)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("build the one-session scope for the web ingest: %w; nothing was changed", err)
+		}
+		pipelineCfg.Scope = &sessionScope
+		pipelineCfg.Command = "harvest"
+		pipelineCfg.CommandPrefix = githooks.CommandPrefix(githooks.Binding{DataDir: string(h.dataDir())})
 		pipelineCfg.Harness = &scope.harness
 		pipelineCfg.Force = true
 	}
@@ -1405,7 +1462,7 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	// supported level redacts while ingest writes: that is the deferred redaction
 	// model, and redaction happens on the way out.
 	if !config.RedactionLevelSupported(cfg.Redaction.Level) {
-		return nil, nil, &config.UnsupportedRedactionLevelError{
+		return nil, nil, nil, &config.UnsupportedRedactionLevelError{
 			Level:     cfg.Redaction.Level,
 			Source:    "the loaded configuration",
 			Operation: "the web ingest",
@@ -1417,17 +1474,17 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	// Open DB and wire analytics stages.
 	dataDir := string(h.dataDir())
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
-		return nil, nil, fmt.Errorf("create data directory: %w", err)
+		return nil, nil, nil, fmt.Errorf("create data directory: %w", err)
 	}
 	// The same store a CLI harvest writes through, so this run indexes at the
 	// managed revision and can re-index what a harvest stored.
 	storeOptions, err := store.ManagedGenerationOptions(string(resolvedOutput))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	db, err := store.Open(string(h.dbPath()), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open analytics store: %w", err)
+		return nil, nil, nil, fmt.Errorf("open analytics store: %w", err)
 	}
 
 	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg,
@@ -1449,9 +1506,9 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	)
 	if err != nil {
 		_ = db.Close()
-		return nil, nil, fmt.Errorf("create pipeline: %w", err)
+		return nil, nil, nil, fmt.Errorf("create pipeline: %w", err)
 	}
-	return pipeline, func() { _ = db.Close() }, nil
+	return pipeline, func() { _ = db.Close() }, selectionConflicts, nil
 }
 
 // setIngestError records a pipeline error under the mutex.

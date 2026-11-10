@@ -46,13 +46,11 @@ func TestRecomputeMetricsPreservesActualProducerAndLastGoodValues(t *testing.T) 
 		SessionID     string   `yaml:"sessionID"`
 		ProjectHash   string   `yaml:"projectHash"`
 		HostSlug      string   `yaml:"hostSlug"`
-		PriorTurns    int      `yaml:"priorTurns"`
 		StartedAt     int64    `yaml:"startedAt"`
 		Cases         []struct {
 			Name         string `yaml:"name"`
 			VersionDelta int    `yaml:"versionDelta"`
 			FailSave     bool   `yaml:"failSave"`
-			WantTurns    int    `yaml:"wantTurns"`
 			WantComputed int    `yaml:"wantComputed"`
 			WantError    bool   `yaml:"wantError"`
 		} `yaml:"cases"`
@@ -87,7 +85,7 @@ func TestRecomputeMetricsPreservesActualProducerAndLastGoodValues(t *testing.T) 
 				t.Fatal(err)
 			}
 			version := metrics.CurrentComputeVersion + row.VersionDelta
-			if err := db.SaveMetrics(t.Context(), &ingest.SessionMetrics{SessionID: sid, QualityMetrics: schema.QualityMetrics{TurnCount: &fixture.PriorTurns, ComputeVersion: &version}}); err != nil {
+			if err := db.SaveMetrics(t.Context(), &ingest.SessionMetrics{SessionID: sid, QualityMetrics: schema.QualityMetrics{ComputeVersion: &version}}); err != nil {
 				t.Fatal(err)
 			}
 			before, err := db.GetMetrics(t.Context(), sid)
@@ -104,7 +102,7 @@ func TestRecomputeMetricsPreservesActualProducerAndLastGoodValues(t *testing.T) 
 				t.Fatalf("recompute count=%d error=%v", count, err)
 			}
 			after, err := db.GetMetrics(t.Context(), sid)
-			if err != nil || after == nil || after.TurnCount == nil || *after.TurnCount != row.WantTurns {
+			if err != nil || after == nil {
 				t.Fatalf("unexpected recomputed metrics: %+v %v", after, err)
 			}
 			if row.WantComputed == 0 && !reflect.DeepEqual(before, after) {
@@ -119,5 +117,53 @@ func TestRecomputeMetricsPreservesActualProducerAndLastGoodValues(t *testing.T) 
 		if !seen[name] {
 			t.Fatalf("missing metric recompute fixture %q", name)
 		}
+	}
+}
+
+// TestRecomputePreservesTheStoredConversationTurnCount proves the metrics
+// engine no longer owns the turn count: after a real recompute, the captured
+// conversation column still reports the producer's count, and the metrics read
+// surface reports the same number.
+func TestRecomputePreservesTheStoredConversationTurnCount(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := storetest.OpenWith(t, store.WithPoolSize(1))
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	storetest.SeedSession(t, db, string(sid))
+	content := "run the checks"
+	if err := db.IndexSessionEntries(ctx, sid, []schema.SessionEntry{
+		{SessionID: schema.SessionID(sid), Harness: ingest.HarnessClaudeCode, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &content},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turnCount := 5
+	if _, err := db.UpsertCapturedStats(ctx, store.CapturedStats{
+		SessionID:             schema.SessionID(sid),
+		ConversationTurnCount: &turnCount,
+		Source:                store.StatsSourceHarness,
+		UpdatedAtMs:           1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := metrics.NewEngine(db)
+	recompute, ok := any(engine).(ingest.MetricsRecomputer)
+	if !ok {
+		t.Fatal("production metrics engine cannot recompute stored sessions")
+	}
+	if _, err := recompute.RecomputeMetrics(ctx, []ingest.SessionID{sid}); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := db.ReadCapturedStats(ctx, schema.SessionID(sid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.ConversationTurnCount == nil || *stats.ConversationTurnCount != turnCount {
+		t.Fatalf("captured conversation turn count = %v, want %d after recompute", stats.ConversationTurnCount, turnCount)
+	}
+	read, err := db.GetMetrics(ctx, sid)
+	if err != nil || read == nil || read.TurnCount == nil || *read.TurnCount != turnCount {
+		t.Fatalf("metrics read turn count = %+v (err %v), want %d", read, err, turnCount)
 	}
 }

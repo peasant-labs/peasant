@@ -23,13 +23,18 @@ const (
 	CapabilityGated Capability = "gated"
 	// CapabilityBounded is the bound/read-only behavior of BoundedFS.
 	CapabilityBounded Capability = "bounded"
+	// CapabilityRecording is the exact read/readdir/stat op-set behavior of
+	// OpRecorderFS: it records which paths each operation touched, with
+	// multiplicity, so a parity test can assert set equality rather than a
+	// subset.
+	CapabilityRecording Capability = "recording"
 	// CapabilityNone is not a capability: it records that the decorator needs
 	// none of the three and is deleted with its rationale.
 	CapabilityNone Capability = "none"
 )
 
 // AllCapabilities lists the closed set, in contract order.
-var AllCapabilities = []Capability{CapabilityCounting, CapabilityGated, CapabilityBounded, CapabilityNone}
+var AllCapabilities = []Capability{CapabilityCounting, CapabilityGated, CapabilityBounded, CapabilityRecording, CapabilityNone}
 
 // NewCapability converts a fixture name into a capability, refusing anything
 // outside the closed set.

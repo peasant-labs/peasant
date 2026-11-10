@@ -10,48 +10,18 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/tui/mdrender"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/schema"
 )
 
-// SessionListing is a simplified session entry for display in the FTUE wizard.
-// It keeps discovery details independent from ingest's full session type.
-type SessionListing struct {
-	Harness     string    `yaml:"harness"`
-	ProjectName string    `yaml:"projectName"` // human-readable project name (empty if unknown)
-	GitRemote   string    `yaml:"gitRemote"`   // git remote URL for project grouping (empty if unknown)
-	Branch      string    `yaml:"branch"`      // git branch or worktree name (empty if unknown/non-git)
-	Title       string    `yaml:"title"`       // session title (empty if unknown)
-	Agent       string    `yaml:"agent"`       // agent label for a subagent session (empty if unknown), like a Claude teammate's agent type
-	Date        time.Time `yaml:"date"`        // creation time when known, otherwise file mod time
-	TurnCount   int       `yaml:"turnCount"`   // may be 0 if unknown from discovery
-	SessionID   string    `yaml:"sessionId"`   // raw session ID string supplied by discovery
-	SubagentIDs []string  `yaml:"subagentIds"` // child subagent session IDs (populated from discovery)
-	WorkingDir  string    `yaml:"workingDir"`  // session working directory, used only to focus its containing project
-	// Origin is who drove the session, as discovery's classifier decided it
-	// (internal/sessionorigin). The zero value is the empty string, which is
-	// NOT a menu value: it marks a listing an adapter mined no evidence for,
-	// and callers must resolve it to sessionorigin.Unknown (the visible
-	// fail-safe) before relying on it — never treat empty as User or Agent
-	// directly. Kickstart is the sole consumer that reads this field to hide
-	// agent-driven rows from the picker; it is DISCOVERY scope only and never
-	// gates opening an already-stored session by link.
-	Origin sessionorigin.Origin `yaml:"origin"`
-	// Source locates the transcript the harness wrote. The selection step reads
-	// it to preview a session that Peasant has not imported yet.
-	Source SessionSource `yaml:"source"`
-}
+// SessionListing is one discovered session the picker and later stages consume.
+type SessionListing = discovery.SessionListing
 
 // StageProgress reports progress for a single pipeline stage.
-type StageProgress struct {
-	Done   int
-	Total  int
-	Ended  bool
-	HasErr bool
-}
+type StageProgress = discovery.StageProgress
 
 // ProgressSnapshot provides a point-in-time view of pipeline progress.
 // Defined here (not in ingest) to avoid an import cycle.
@@ -67,28 +37,20 @@ type ProviderIngestCount struct {
 }
 
 // ProviderDiscovery carries the inventory and configured state for one harness.
-type ProviderDiscovery struct {
-	SessionCount int
-	Enabled      bool
-	State        DiscoveryState
-	Detail       string
-}
+type ProviderDiscovery = discovery.ProviderDiscovery
 
 // DiscoveryState distinguishes an honest empty scan from a harness that could
-// not be inspected. The zero value is kept as ready for older callers that
-// construct inventory entries directly.
-type DiscoveryState string
+// not be inspected. The zero value is ready.
+type DiscoveryState = discovery.DiscoveryState
 
 const (
-	DiscoveryReady       DiscoveryState = ""
-	DiscoveryUnavailable DiscoveryState = "unavailable"
-	DiscoveryFailed      DiscoveryState = "failed"
+	DiscoveryReady       = discovery.DiscoveryReady
+	DiscoveryUnavailable = discovery.DiscoveryUnavailable
+	DiscoveryFailed      = discovery.DiscoveryFailed
 )
 
-func (s DiscoveryState) IsOperational() bool { return s == DiscoveryReady }
-
 // ProviderInventory is the typed discovery result consumed by the setup wizard.
-type ProviderInventory map[defaults.Harness]ProviderDiscovery
+type ProviderInventory = discovery.ProviderInventory
 
 // IngestResult holds the outcome of a pipeline run for display in the wizard.
 type IngestResult struct {

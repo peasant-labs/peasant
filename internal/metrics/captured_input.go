@@ -62,7 +62,9 @@ func (e *Engine) computeCapturedSession(ctx context.Context, backing ingest.Metr
 	merged := &ingest.SessionMetrics{SessionID: sid}
 	if input.Seed != nil {
 		seed := *input.Seed
-		merged.TurnCount, merged.SubagentCount = &seed.TurnCount, &seed.SubagentCount
+		// The retired seed turn count is intentionally not carried forward: the
+		// conversation count is producer state, read from its own store column.
+		merged.SubagentCount = &seed.SubagentCount
 		merged.InputTokens, merged.OutputTokens = &seed.TokensIn, &seed.TokensOut
 		merged.ToolCalls = &seed.ToolCallCount
 		duration := float64(seed.DurationMs) / 60000

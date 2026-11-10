@@ -10,6 +10,7 @@ import (
 	"io"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -292,6 +293,64 @@ func loadCorpus(data []byte) (corpus, error) {
 		}
 	}
 	return fixtures, nil
+}
+
+// CaseNames lists the case names a corpus declares, keeping the corpus schema
+// and validation in one place. The version guard compares two revisions, so a
+// historical corpus may lack fields the current builder added; the shared loader
+// already accepts that, and rejects a corpus that declares no cases.
+func CaseNames(data []byte) ([]string, error) {
+	fixtures, err := loadCorpus(data)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(fixtures.Cases))
+	for _, fixtureCase := range fixtures.Cases {
+		names = append(names, fixtureCase.Name)
+	}
+	return names, nil
+}
+
+// CaseBodies returns a stable representation of every declared case. A caller
+// comparing two revisions' corpora uses it to find the cases whose bytes
+// changed, so only those need the old body replayed.
+func CaseBodies(data []byte) (map[string]string, error) {
+	fixtures, err := loadCorpus(data)
+	if err != nil {
+		return nil, err
+	}
+	bodies := make(map[string]string, len(fixtures.Cases))
+	for _, fixtureCase := range fixtures.Cases {
+		encoded, err := yaml.Marshal(fixtureCase)
+		if err != nil {
+			return nil, fmt.Errorf("encode synthetic OpenCode source case %q: %w", fixtureCase.Name, err)
+		}
+		bodies[fixtureCase.Name] = string(encoded)
+	}
+	return bodies, nil
+}
+
+// ChangedCaseNames lists the cases the candidate corpus declares with a body
+// different from the base corpus's same-named case. A case only the base
+// declares is a removal; the required_cases manifest guards that.
+func ChangedCaseNames(base, candidate []byte) ([]string, error) {
+	baseBodies, err := CaseBodies(base)
+	if err != nil {
+		return nil, err
+	}
+	candidateBodies, err := CaseBodies(candidate)
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for name, body := range candidateBodies {
+		baseBody, shared := baseBodies[name]
+		if shared && baseBody != body {
+			changed = append(changed, name)
+		}
+	}
+	sort.Strings(changed)
+	return changed, nil
 }
 
 func (c caseSpec) validate() error {

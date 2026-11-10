@@ -249,11 +249,8 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 // sessionDetailFrame serves the session_detail frame without turn content.
 // The released viewer reads the directory and segments, so this frame keeps
 // the session metadata, title, medians, revision, and navigation, and sends
-// turns as an empty list. The durable read is not mutated: push and export
-// still carry the transcript. Earlier-history turns stay on that durable read
-// and are omitted here, because a metadata frame cannot vouch for content it
-// does not carry. Earlier-history sections are omitted with those turns: an
-// emptied section would render as "earlier history 0". Attachment-bearing
+// turns as an empty list. Earlier-history sections remain available to the
+// viewer, and the durable read is not mutated. Attachment-bearing
 // native metadata is omitted for the same reason: the contract resolves those
 // records against the frame's turns, and a frame with no turns cannot name
 // the turn they attach to. A session-level record, whose attachment is
@@ -270,10 +267,7 @@ func sessionDetailFrame(sub ChannelSubscription, detail *schema.SessionDetailRea
 	served := *detail
 	served.Turns = []schema.TurnDetail{}
 	served.NativeMetadata = sessionLevelNativeMetadata(detail.NativeMetadata)
-	// A section whose turns were removed cannot be shown. An empty section
-	// renders as "earlier history 0". Omit it. The durable read keeps the
-	// sections and their turns.
-	served.EarlierHistory = nil
+	// Keep section order and empty sections: route disclosure IDs use their index.
 	return ServerMessage{Type: MsgSessionDetail, Data: &served}
 }
 

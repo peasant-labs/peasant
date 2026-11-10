@@ -178,7 +178,10 @@ func (p *segmentProducer) buildDirectory(ctx context.Context, id ingest.SessionI
 	if err != nil {
 		return segmentDirectory{}, fmt.Errorf("api.transcriptSegments: load the available stored entries of session %s for its segment directory: %w; no directory was served; re-index the session and retry", id, err)
 	}
-	turns := transcript.EntriesToTurns(entries)
+	turns, err := p.foldEntries(ctx, id, entries)
+	if err != nil {
+		return segmentDirectory{}, err
+	}
 	refs, totalTurns := transcript.CutSegments(turns, p.budget)
 	meta := make([]segmentTurnMeta, len(turns))
 	for i := range turns {
@@ -191,6 +194,20 @@ func (p *segmentProducer) buildDirectory(ctx context.Context, id ingest.SessionI
 		entryCounts: transcript.SegmentEntryCounts(entries, refs),
 		turns:       meta,
 	}, nil
+}
+
+// foldEntries uses the same attachment join as full detail. Both directory and
+// segment reads must use it: the image metadata contributes to their byte count.
+func (p *segmentProducer) foldEntries(ctx context.Context, id ingest.SessionID, entries []schema.SessionEntry) ([]ingest.Turn, error) {
+	reader, ok := p.reader.(ingest.ImageFactReader)
+	if !ok {
+		return ingest.EntriesToTurns(entries), nil
+	}
+	facts, err := reader.ImageFacts(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("api.transcriptSegments: join image metadata for session %s: %w; no segment was served; restore store access and retry", id, err)
+	}
+	return ingest.EntriesToTurnsWithImages(entries, facts), nil
 }
 
 func (p *segmentProducer) lookupLocked(key segmentCacheKey) *segmentDirectoryEntry {
@@ -323,6 +340,11 @@ func (s *Server) handleTranscriptSegment(w http.ResponseWriter, r *http.Request)
 		writeTranscriptReadError(w, "read the stored entries for transcript segment", err)
 		return
 	}
+	turns, err := s.segments.foldEntries(r.Context(), id, page.Entries)
+	if err != nil {
+		writeTranscriptReadError(w, "join image metadata for transcript segment", err)
+		return
+	}
 	current, revErr := s.segments.reader.Revision(r.Context())
 	if revErr != nil {
 		writeTranscriptReadError(w, "re-check the store revision for transcript segment", revErr)
@@ -332,7 +354,6 @@ func (s *Server) handleTranscriptSegment(w http.ResponseWriter, r *http.Request)
 		writeJSONError(w, http.StatusConflict, fmt.Sprintf("the transcript segment read began under revision %s but the store advanced to revision %s while reading; no segment was served; read the transcript directory again and use its revision", directory.revision, current))
 		return
 	}
-	turns := transcript.EntriesToTurns(page.Entries)
 	filtered := make([]ingest.Turn, 0, len(turns))
 	for _, turn := range turns {
 		if turn.Index < ref.FirstTurn || turn.Index > ref.LastTurn {
@@ -376,6 +397,15 @@ func (s *Server) handleTranscriptSegment(w http.ResponseWriter, r *http.Request)
 	}
 	if err := schema.ValidateTranscriptSegmentBoundaries(segment, len(directory.refs)); err != nil {
 		writeTranscriptReadError(w, "check transcript segment boundaries", err)
+		return
+	}
+	encoded, err := json.Marshal(segment)
+	if err != nil {
+		writeTranscriptReadError(w, "encode transcript segment", err)
+		return
+	}
+	if len(encoded) > defaults.SessionDetailDocumentCapBytes {
+		writeTranscriptReadError(w, "bound transcript segment", fmt.Errorf("segment %d exceeds the %d-byte document cap after text was bounded; no segment was served; re-index the session or reduce its unbounded metadata", index, defaults.SessionDetailDocumentCapBytes))
 		return
 	}
 	writeTranscriptJSON(w, segment)

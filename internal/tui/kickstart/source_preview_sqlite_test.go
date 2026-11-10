@@ -1,7 +1,6 @@
 package kickstart_test
 
 import (
-	_ "embed"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,8 +13,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
 
-//go:embed testdata/source_preview_sqlite.yaml
-var sourcePreviewSQLiteData []byte
+func sourcePreviewSQLiteData(t *testing.T) []byte {
+	t.Helper()
+	return readMovedDiscoveryFixture(t, "source_preview_sqlite.yaml")
+}
 
 // sourcePreviewSQLiteCase drives one preview over a synthetic OpenCode SQLite
 // source. The synthetic database is materialized by the testfixture package and
@@ -42,7 +43,7 @@ type sourcePreviewSQLiteDoc struct {
 func loadSourcePreviewSQLiteDoc(t *testing.T) sourcePreviewSQLiteDoc {
 	t.Helper()
 	var doc sourcePreviewSQLiteDoc
-	if err := testutil.DecodeFixtureYAML(sourcePreviewSQLiteData, &doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(sourcePreviewSQLiteData(t), &doc); err != nil {
 		t.Fatalf("decode SQLite preview fixture: %v", err)
 	}
 	if len(doc.RequiredCases) == 0 {

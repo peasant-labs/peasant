@@ -334,6 +334,15 @@ func seedAnalyticsFixture(t *testing.T, database *store.Store, sessions []analyt
 		if err := database.SaveMetrics(ctx, metrics); err != nil {
 			t.Fatalf("SaveMetrics(%s): %v", sessionID, err)
 		}
+		turnCount := session.TurnCount
+		if _, err := database.UpsertCapturedStats(ctx, store.CapturedStats{
+			SessionID:             schema.SessionID(sessionID),
+			ConversationTurnCount: &turnCount,
+			Source:                store.StatsSourceHarness,
+			UpdatedAtMs:           1,
+		}); err != nil {
+			t.Fatalf("seed conversation turn count(%s): %v", sessionID, err)
+		}
 	}
 }
 

@@ -18,7 +18,7 @@ type HarvesterVersions struct {
 // 1 is the relational representation, not that parser revision.
 var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 	HarnessPi:         {AdapterVersion: 3, IndexerVersion: 18, IndexVersion: 1},
-	HarnessClaudeCode: {AdapterVersion: 4, IndexerVersion: 22, IndexVersion: 1},
+	HarnessClaudeCode: {AdapterVersion: 4, IndexerVersion: 24, IndexVersion: 1},
 	HarnessOpenCode:   {AdapterVersion: 4, IndexerVersion: 18, IndexVersion: 1},
 	HarnessCodex:      {AdapterVersion: 2, IndexerVersion: 19, IndexVersion: 1},
 	HarnessCursor:     {AdapterVersion: 1, IndexerVersion: 18, IndexVersion: 1},
@@ -33,7 +33,7 @@ var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 // baseline, so the managed-generation path is never advertised before its writer and reader
 // exist. When a harness is absent from the baseline it is also absent here.
 var GenerationRepairTargets = map[Harness]HarvesterVersions{
-	HarnessClaudeCode: {AdapterVersion: 4, IndexerVersion: 23, IndexVersion: 2},
+	HarnessClaudeCode: {AdapterVersion: 4, IndexerVersion: 25, IndexVersion: 2},
 	HarnessCodex:      {AdapterVersion: 3, IndexerVersion: 21, IndexVersion: 2},
 	HarnessOpenCode:   {AdapterVersion: 5, IndexerVersion: 19, IndexVersion: 2},
 }
@@ -155,6 +155,28 @@ func (p *Pipeline) resolveVersionTargets() map[Harness]HarvesterVersions {
 		return GenerationTargets(HarvesterVersionRegistry)
 	}
 	return HarvesterVersionRegistry
+}
+
+// storedAdapterRevision is the revision a stored artifact records, or baseline
+// 1 when the producer omitted it. The selector's COALESCE(adapter_version, 1)
+// is the SQL twin; provenance keeps an omitted stamp unknown until an actual
+// extraction succeeds.
+func storedAdapterRevision(version *int) int {
+	if version == nil {
+		return 1
+	}
+	return *version
+}
+
+// adapterRevisionBehind reports whether a stored artifact was produced by an
+// adapter revision older than target. An absent harness yields a zero target
+// and is not behind, the same answer the previous map miss gave; declared
+// targets are validated positive.
+func adapterRevisionBehind(version *int, target HarvesterVersions) bool {
+	if target.AdapterVersion < 1 {
+		return false
+	}
+	return storedAdapterRevision(version) < target.AdapterVersion
 }
 
 func (p *Pipeline) versionTargets() map[Harness]HarvesterVersions {

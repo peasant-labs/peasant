@@ -145,6 +145,7 @@ func claudeContentBlockKindRules() []recordKindRule {
 		recordKindLiteral("tool_use", indexformat.OutcomeToolCall),
 		recordKindLiteral("tool_result", indexformat.OutcomeToolResult),
 		recordKindLiteral("tool_reference", indexformat.OutcomeIgnored),
+		recordKindLiteral("image", indexformat.OutcomeText),
 	}
 }
 

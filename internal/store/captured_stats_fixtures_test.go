@@ -21,20 +21,33 @@ var sessionCapturedStatsYAML []byte
 var sessionCapturedStatsManifestYAML []byte
 
 type capturedStatsValues struct {
-	TurnCount            *int              `yaml:"turnCount"`
-	ToolCallCount        *int              `yaml:"toolCallCount"`
-	InputSubmissionCount *int64            `yaml:"inputSubmissionCount"`
-	TokensOut            *int              `yaml:"tokensOut"`
-	SeedJSON             *string           `yaml:"seedJSON"`
-	Overflow             *string           `yaml:"overflow"`
-	Source               store.StatsSource `yaml:"source"`
-	UpdatedAtMs          int64             `yaml:"updatedAtMs"`
+	TurnCount             *int              `yaml:"turnCount"`
+	ConversationTurnCount *int              `yaml:"conversationTurnCount"`
+	ToolCallCount         *int              `yaml:"toolCallCount"`
+	InputSubmissionCount  *int64            `yaml:"inputSubmissionCount"`
+	TokensOut             *int              `yaml:"tokensOut"`
+	SeedJSON              *string           `yaml:"seedJSON"`
+	Overflow              *string           `yaml:"overflow"`
+	Source                store.StatsSource `yaml:"source"`
+	UpdatedAtMs           int64             `yaml:"updatedAtMs"`
 }
 
 func (v capturedStatsValues) row(id schema.SessionID) store.CapturedStats {
-	return store.CapturedStats{SessionID: id, TurnCount: v.TurnCount, ToolCallCount: v.ToolCallCount,
-		InputSubmissionCount: v.InputSubmissionCount, TokensOut: v.TokensOut, SeedJSON: v.SeedJSON,
-		Overflow: v.Overflow, Source: v.Source, UpdatedAtMs: v.UpdatedAtMs}
+	return store.CapturedStats{SessionID: id, TurnCount: v.TurnCount, ConversationTurnCount: v.ConversationTurnCount,
+		ToolCallCount: v.ToolCallCount, InputSubmissionCount: v.InputSubmissionCount, TokensOut: v.TokensOut,
+		SeedJSON: v.SeedJSON, Overflow: v.Overflow, Source: v.Source, UpdatedAtMs: v.UpdatedAtMs}
+}
+
+// wantRow is row with the NOT NULL conversation column's zero default filled
+// in, so a fixture that does not exercise the conversation count still states
+// the value a read returns.
+func (v capturedStatsValues) wantRow(id schema.SessionID) store.CapturedStats {
+	out := v.row(id)
+	if out.ConversationTurnCount == nil {
+		zero := 0
+		out.ConversationTurnCount = &zero
+	}
+	return out
 }
 
 type capturedStatsUpdate struct {
@@ -158,7 +171,7 @@ func TestSessionCapturedStatsFamily(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if want := c.Want.row(id); !reflect.DeepEqual(got, want) {
+			if want := c.Want.wantRow(id); !reflect.DeepEqual(got, want) {
 				t.Fatalf("captured row = %+v, want %+v", got, want)
 			}
 			var mirror any

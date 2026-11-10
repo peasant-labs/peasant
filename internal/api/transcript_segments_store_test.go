@@ -1,9 +1,12 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"os"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/api"
+	"github.com/peasant-labs/peasant/internal/attachments"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
@@ -93,6 +97,36 @@ func TestTranscriptOversizedDurableReadComparison(t *testing.T) {
 	t.Logf("segment content bytes=%d byteLength=%d truncated=%v; durable content bytes=%d; per-field bound=%d document budget=%d; input bytes=%d", len(turn.Content), turn.ByteLength, turn.Truncated, len(detail.Turns[0].Content), defaults.ServedTextFieldBudgetBytes, defaults.ServedDetailDocumentBudgetBytes, size)
 	if !turn.Truncated || len(detail.Turns[0].Content) != len(turn.Content) {
 		t.Fatal("expected a truncated segment and equal durable and segment content byte lengths")
+	}
+}
+
+func TestTranscriptSegmentJoinsImageMetadata(t *testing.T) {
+	db := openTestStore(t)
+	id := "77777777-7777-4777-8777-777777777777"
+	entries := storeTranscriptEntries(t, id, []storeTranscriptTurn{{index: 0, role: schema.RoleUser, contentBytes: 4}})
+	ref, kind, preview := "img-segment", "image", "image"
+	extra := `{"ref":"` + ref + `"}`
+	parent := 0
+	entries = append(entries, schema.SessionEntry{SessionID: ingest.SessionID(id), EntryIndex: 1, Harness: schema.HarnessClaudeCode, EntryType: schema.EntryTypeImage, Role: schema.RoleUser, Depth: 1, ParentIndex: &parent, PartType: &kind, Extra: &extra, ContentPreview: &preview})
+	seedStoreTranscript(t, db, id, 1, entries)
+	if err := db.EnsureAttachmentDir(); err != nil {
+		t.Fatal(err)
+	}
+	var imageBytes bytes.Buffer
+	if err := png.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	row, err := db.AttachmentStore().Put(context.Background(), attachments.Pending{Row: attachments.Row{SessionID: id, SourceEntryRef: ref, PartitionID: "main", MediaType: "image/png"}, Bytes: imageBytes.Bytes()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment := servedSegmentZero(t, db, id)
+	if len(segment.Turns) != 1 || len(segment.Turns[0].ContentParts) != 1 || segment.Turns[0].ContentParts[0].Image == nil {
+		t.Fatalf("segment image parts = %+v", segment.Turns)
+	}
+	got := segment.Turns[0].ContentParts[0].Image
+	if got.Ref != row.SHA256 || string(got.MediaType) != "image/png" || got.ByteSize != imageBytes.Len() {
+		t.Fatalf("segment image = %+v; want ref %s, image/png, %d bytes", got, row.SHA256, imageBytes.Len())
 	}
 }
 

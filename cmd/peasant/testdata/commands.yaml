@@ -16,6 +16,7 @@ commands:
     aliases: [ingest]
     flags:
       - { name: source-harness, type: string, default: "" }
+      - { name: harness, type: string, default: "" }
       - { name: source-path, type: string, default: "" }
       - { name: output, type: string, default: "" }
       - { name: dry-run, type: bool, default: "false" }
@@ -27,7 +28,9 @@ commands:
       - { name: json, type: bool, default: "false" }
       - { name: detect-commits, type: bool, default: "true" }
       - { name: profile-index, type: bool, default: "false" }
+      - { name: refresh-commits, type: bool, default: "false" }
       - { name: session, type: stringSlice, default: "[]" }
+      - { name: no-related, type: bool, default: "false" }
       - { name: since, type: string, default: "" }
     subcommands:
       - use: logs
@@ -39,8 +42,10 @@ commands:
           - { name: debug, type: bool, default: "false", hidden: true }
           - { name: json, type: bool, default: "false" }
           - { name: session, type: stringSlice, default: "[]" }
+          - { name: no-related, type: bool, default: "false" }
           - { name: since, type: string, default: "" }
           - { name: source-harness, type: string, default: "" }
+          - { name: harness, type: string, default: "" }
           - { name: source-path, type: string, default: "" }
           - { name: output, type: string, default: "" }
           - { name: include-active, type: bool, default: "true" }
@@ -53,11 +58,13 @@ commands:
           - { name: debug, type: bool, default: "false", hidden: true }
           - { name: json, type: bool, default: "false" }
           - { name: session, type: stringSlice, default: "[]" }
+          - { name: no-related, type: bool, default: "false" }
           - { name: since, type: string, default: "" }
           - { name: output, type: string, default: "" }
           - { name: detect-commits, type: bool, default: "true" }
           - { name: profile-index, type: bool, default: "false" }
           - { name: source-harness, type: string, default: "" }
+          - { name: harness, type: string, default: "" }
       - use: verify
         flags:
           - { name: verbose, type: bool, default: "false" }
@@ -93,6 +100,7 @@ commands:
       - { name: session, type: string, default: "" }
       - { name: port, type: int, default: "8690" }
       - { name: hook, type: bool, default: "false" }
+      - { name: no-related, type: bool, default: "false" }
     exit_cases:
       - args: ["--help"]
         expect_error: false
@@ -320,3 +328,17 @@ commands:
       - args: ["--help"]
         expect_error: false
         output_contains: ["service", "install", "status", "uninstall"]
+
+  - name: Layout
+    use: layout
+    subcommands:
+      - use: list
+      - use: capture
+        flags:
+          - { name: path, type: stringSlice, default: "[]" }
+          - { name: limit, type: int, default: "5" }
+          - { name: include-metadata, type: bool, default: "false" }
+    exit_cases:
+      - args: ["capture", "no-such-tool"]
+        expect_error: true
+        error_contains: ["unknown layout tool"]

@@ -217,6 +217,7 @@ func mapMetadataWithPolicy(opts MapOptions, limitBytes int) (_ []byte, err error
 	}
 
 	// Content-layer entries: include when the caller provides mapped entries.
+	opts.Entries = publishImages(nil, opts.Entries)
 	if len(opts.Entries) > 0 {
 		for _, entry := range opts.Entries {
 			if ingest.IsPiCarrier(entry) {

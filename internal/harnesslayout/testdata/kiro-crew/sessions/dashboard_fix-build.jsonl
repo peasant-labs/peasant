@@ -1,0 +1,8 @@
+{"_type": "metadata", "created_at": "2026-09-20T10:00:00+00:00", "last_consolidated": 0, "closed": false, "pinned": true, "title": "Fix the flaky build", "agent": "kirocrew", "model": "claude-sonnet-4.5", "project": "/work/example-app", "workspace": "/home/example/workplace/kirocrew-workspace", "tags": ["ci"], "tab_id": "tab-0001", "turn_in_flight_prompt": {"role": "user", "content": "SENTINEL-KIROCREW-PROMPT"}}
+{"role": "user", "content": "SENTINEL-KIROCREW-USER the build fails on the second run", "ts": "2026-09-20T10:20:00+00:00", "source_thread": "dashboard", "source_user": "dashboard", "meta": {"mid": "a1b2c3d4e5f60718293a4b5c6d7e8f90"}}
+{"role": "tool", "content": "read scripts/build.sh", "ts": "2026-09-20T10:20:10+00:00", "source_thread": "dashboard", "source_user": "dashboard"}
+{"role": "assistant", "content": "SENTINEL-KIROCREW-ASSISTANT the cache directory is reused", "ts": "2026-09-20T10:20:40+00:00", "source_thread": "dashboard", "source_user": "dashboard", "meta": {"mid": "b2c3d4e5f60718293a4b5c6d7e8f90a1"}}
+{"role": "system", "content": "Model switched to a fallback.", "ts": "2026-09-20T10:59:00+00:00", "cls": "notice", "source_thread": "dashboard", "source_user": "dashboard"}
+{"role": "user", "content": "Clear it before each run.", "ts": "2026-09-20T11:00:00+00:00", "source_thread": "dashboard", "source_user": "dashboard"}
+{"role": "assistant", "content": "Done.", "ts": "2026-09-20T11:00:20+00:00", "source_thread": "dashboard", "source_user": "dashboard", "variants": [{"content": "Done.", "ts": "2026-09-20T11:00:20+00:00"}], "variant_idx": 0}
+{"role": "assistant", "content": "cut off

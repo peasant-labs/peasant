@@ -125,9 +125,9 @@ VALUES(?, ?, ?, ?, 'opencode', 'text', ?, 0, 0, 0, 0, ?, ?)`,
 		exec(`INSERT INTO session_generation_entries(session_id, generation_id, partition_id, entry_index, source_entry_ref, body_digest)
 VALUES(?, ?, 0, ?, ?, ?)`, id, gen, i, ref, bodyDigest)
 	}
-	exec(`INSERT INTO session_captured_stats(session_id, turn_count, input_submission_count, tool_call_count,
+	exec(`INSERT INTO session_captured_stats(session_id, turn_count, conversation_turn_count, input_submission_count, tool_call_count,
 subagent_count, duration_ms, tokens_in, tokens_out, source, updated_at_ms)
-VALUES(?, 2, 1, 0, 0, 9000, 10, 20, 'harness', 1720000009000)`, id)
+VALUES(?, 2, 2, 1, 1, 0, 9000, 10, 20, 'harness', 1720000009000)`, id)
 }
 
 // TestHarmonizedSnapshotDetail builds one harmonized snapshot through the

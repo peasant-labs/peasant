@@ -1,0 +1,25 @@
+cases:
+  - name: dedupe_across_sessions
+    action: dedupe
+  - name: missing_file_is_missing
+    action: missing
+  - name: webp_is_unsupported
+    action: unsupported
+    media_type: image/webp
+  - name: gif_is_unsupported
+    action: unsupported
+    media_type: image/gif
+  - name: too_large_keeps_metadata_without_bytes
+    action: too_large
+  - name: gc_rendezvous_preserves_committed_blob
+    action: gc_rendezvous
+  - name: gc_removes_unreferenced_blob
+    action: gc_unreferenced
+  - name: prune_removes_rows_and_unreferenced_files
+    action: prune
+  - name: prune_keeps_blob_referenced_by_another_session
+    action: prune_shared
+  - name: route_serves_64_hex_and_fails_closed
+    action: route
+  - name: partition_key_is_session_and_source_ref
+    action: partition_key

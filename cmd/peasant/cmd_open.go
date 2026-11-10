@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -106,6 +107,7 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 		sessionID string
 		port      int
 		hook      bool
+		noRelated bool
 	)
 	cmd := &cobra.Command{
 		Use:   "open",
@@ -134,17 +136,23 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
 			restoreLoggers := muteDefaultLoggers()
-			lines, failure := runOpen(cmd, deps, sessionID, port)
+			lines, warning, failure := runOpen(cmd, deps, sessionID, port, noRelated)
 			restoreLoggers()
 			cmd.SetOut(nil)
 			cmd.SetErr(nil)
 
 			if hook {
+				if warning != "" {
+					lines = append(lines, warning)
+				}
 				reason := strings.Join(lines, "\n")
 				if failure != nil {
 					reason = failure.line()
 				}
 				return writeHookStop(stdout, reason)
+			}
+			if warning != "" {
+				fmt.Fprintln(stderr, warning)
 			}
 			if failure != nil {
 				fmt.Fprintln(stderr, failure.line())
@@ -159,6 +167,7 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 	cmd.Flags().StringVar(&sessionID, "session", "", "ID of the session to record and open (required)")
 	portFlagVar(cmd.Flags(), &port, defaults.DefaultPort, "Port of the web dashboard (1-65535)")
 	cmd.Flags().BoolVar(&hook, "hook", false, "Print the Claude Code hook response JSON instead of plain lines, and exit 0 on every outcome")
+	cmd.Flags().BoolVar(&noRelated, "no-related", false, "Process only the named sessions. By default a session-scoped run also processes each named session's child sessions and its ancestors that are not recorded yet.")
 	return cmd
 }
 
@@ -179,47 +188,59 @@ func muteDefaultLoggers() (restore func()) {
 // runOpen records the session, reads what the output reports, makes sure the
 // dashboard serves it, and opens the transcript. It returns the two output
 // lines, or the failure of the first step that failed.
-func runOpen(cmd *cobra.Command, deps openDependencies, rawSessionID string, port int) ([]string, *openFailure) {
+func runOpen(cmd *cobra.Command, deps openDependencies, rawSessionID string, port int, noRelated bool) ([]string, string, *openFailure) {
 	id, err := ingest.NewSessionID(rawSessionID)
 	if err != nil {
 		reason := fmt.Sprintf("%q is not a session id: %s", rawSessionID, firstErrorLine(err))
 		if rawSessionID == "" {
 			reason = "no session id was given"
 		}
-		return nil, &openFailure{step: openStepSession, reason: reason, fix: "pass the session to open as `peasant open --session <id>`"}
+		return nil, "", &openFailure{step: openStepSession, reason: reason, fix: "pass the session to open as `peasant open --session <id>`"}
 	}
-	if err := recordOpenSession(cmd, id); err != nil {
-		return nil, &openFailure{
+	warning, err := recordOpenSession(cmd, id, noRelated)
+	if err != nil {
+		// A scope miss already renders as a full, actionable sentence pair: the
+		// reason names the searched sources and the fix names the command, so
+		// open passes both through instead of quoting only the first line.
+		var scopeErr *ingest.SessionScopeError
+		if errors.As(err, &scopeErr) {
+			return nil, warning, &openFailure{step: openStepHarvest, reason: scopeErr.Reason(), fix: scopeErr.FixLine()}
+		}
+		return nil, warning, &openFailure{
 			step:   openStepHarvest,
 			reason: firstErrorLine(err),
-			fix:    fmt.Sprintf("run `%s` to see the full report", openHarvestCommand(cmd, id)),
+			fix:    fmt.Sprintf("run `%s` to see the full report", openHarvestCommand(cmd, id, noRelated)),
 		}
 	}
-	session, failure := lookupOpenSession(cmd, id)
+	session, failure := lookupOpenSession(cmd, id, noRelated)
 	if failure != nil {
-		return nil, failure
+		return nil, warning, failure
 	}
 	if failure := ensureDashboard(cmd, deps, port, id); failure != nil {
-		return nil, failure
+		return nil, warning, failure
 	}
 	address := transcriptURL(port, session.projectHash, id)
 	// A browser that cannot open, as on a headless host, is not a failure: the
 	// printed address is the deliverable.
 	_ = deps.openBrowser(address)
-	return []string{openedLine(session.title, session.state), address}, nil
+	return []string{openedLine(session.title, session.state), address}, warning, nil
 }
 
 // openHarvestArgs is the harvest `open` runs, as `peasant harvest` arguments.
 // The flags the harvest runs with and the command a failure line suggests are
 // both built from it, so the two cannot differ.
-func openHarvestArgs(id ingest.SessionID) []string {
-	return []string{"--session", string(id), "--force", "--detect-commits"}
+func openHarvestArgs(id ingest.SessionID, noRelated bool) []string {
+	args := []string{"--session", string(id), "--detect-commits", "--refresh-commits"}
+	if noRelated {
+		args = append(args, "--no-related")
+	}
+	return args
 }
 
 // openHarvestCommand is the harvest `open` runs, as a command the user can
 // paste: the same arguments, on the configuration and directories of this run.
-func openHarvestCommand(cmd *cobra.Command, id ingest.SessionID) string {
-	return peasantCommand(cmd, append([]string{"harvest"}, openHarvestArgs(id)...)...)
+func openHarvestCommand(cmd *cobra.Command, id ingest.SessionID, noRelated bool) string {
+	return peasantCommand(cmd, append([]string{"harvest"}, openHarvestArgs(id, noRelated)...)...)
 }
 
 // peasantCommand renders a peasant command line with the configuration and
@@ -230,16 +251,33 @@ func peasantCommand(cmd *cobra.Command, args ...string) string {
 
 // recordOpenSession harvests exactly this session, with commit detection,
 // through the production harvest wiring. It prints nothing.
-func recordOpenSession(cmd *cobra.Command, id ingest.SessionID) error {
+func recordOpenSession(cmd *cobra.Command, id ingest.SessionID, noRelated bool) (string, error) {
 	var flags harvestFlags
 	parser := &cobra.Command{Use: "harvest"}
 	registerHarvestFlags(parser, &flags, harvestAll)
-	if err := parser.ParseFlags(openHarvestArgs(id)); err != nil {
-		return fmt.Errorf("parse the harvest arguments: %w", err)
+	if err := parser.ParseFlags(openHarvestArgs(id, noRelated)); err != nil {
+		return "", fmt.Errorf("parse the harvest arguments: %w", err)
 	}
-	return runHarvestWith(cmd, harvestAll, &flags, &ingest.OSFileSystem{}, func(_ *cobra.Command, execution harvestExecution, _ harvestOutputOptions) error {
+	var warning string
+	err := runHarvestWith(cmd, harvestAll, &flags, &ingest.OSFileSystem{}, func(_ *cobra.Command, execution harvestExecution, _ harvestOutputOptions) error {
+		warning = openUnreadableWarning(execution, id)
 		return openHarvestOutcome(execution, id)
 	})
+	return warning, err
+}
+
+// openUnreadableWarning is open's one stderr line when the selected session is
+// recorded but its source could not be read again. The run still succeeds: the
+// stored copy is what open shows.
+func openUnreadableWarning(execution harvestExecution, id ingest.SessionID) string {
+	if execution.result == nil || execution.result.ScopeReport == nil {
+		return ""
+	}
+	member, ok := execution.result.ScopeReport.SelectedMember(id)
+	if !ok {
+		return ""
+	}
+	return member.UnreadableOpenLine()
 }
 
 // openHarvestOutcome reduces a harvest execution to whether this session was
@@ -278,7 +316,7 @@ type openedSession struct {
 	state       publishState
 }
 
-func lookupOpenSession(cmd *cobra.Command, id ingest.SessionID) (openedSession, *openFailure) {
+func lookupOpenSession(cmd *cobra.Command, id ingest.SessionID, noRelated bool) (openedSession, *openFailure) {
 	storeFailure := func(err error) *openFailure {
 		return &openFailure{step: openStepLookup, reason: firstErrorLine(err), fix: fmt.Sprintf("run `%s` to check the database", peasantCommand(cmd, "harvest", "verify"))}
 	}
@@ -305,7 +343,7 @@ func lookupOpenSession(cmd *cobra.Command, id ingest.SessionID) (openedSession, 
 		return openedSession{}, &openFailure{
 			step:   openStepLookup,
 			reason: fmt.Sprintf("session %s is recorded without a valid project: %s", id, firstErrorLine(err)),
-			fix:    fmt.Sprintf("record it again with `%s`", openHarvestCommand(cmd, id)),
+			fix:    fmt.Sprintf("record it again with `%s`", openHarvestCommand(cmd, id, noRelated)),
 		}
 	}
 	published, err := db.HasPublication(ctx, string(id))

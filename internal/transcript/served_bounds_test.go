@@ -37,6 +37,8 @@ type servedBoundsCase struct {
 	Fill                          string                    `yaml:"fill"`
 	FieldBytes                    []int                     `yaml:"fieldBytes"`
 	Expected                      []servedBoundsExpectation `yaml:"expected,omitempty"`
+	TextPart                      string                    `yaml:"textPart,omitempty"`
+	Image                         bool                      `yaml:"image,omitempty"`
 	EqualBoundAcrossBoundedFields bool                      `yaml:"equalBoundAcrossBoundedFields,omitempty"`
 	AllBounded                    bool                      `yaml:"allBounded,omitempty"`
 	// EveryBoundedFieldShowsBytes requires that a bounded field still shows the
@@ -60,10 +62,10 @@ func servedBoundsKind(name string) (ServedTextKind, error) {
 		return ServedTextToolResult, nil
 	case "tool_arguments":
 		return ServedTextToolArguments, nil
-	case "turn_content":
+	case "turn_content", "content_parts":
 		return ServedTextTurnContent, nil
 	}
-	return 0, fmt.Errorf("served bounds fixture names field kind %q; use tool_result, tool_arguments or turn_content", name)
+	return 0, fmt.Errorf("served bounds fixture names field kind %q; use tool_result, tool_arguments, turn_content, or content_parts", name)
 }
 
 func decodeServedBoundsFixture(raw []byte) (servedBoundsFixture, error) {
@@ -179,9 +181,25 @@ func servedBoundsSession(t *testing.T, fixtureCase servedBoundsCase) (*ingest.Se
 		case ServedTextToolResult:
 			turn.ToolCalls = []ingest.ToolCall{{ID: fmt.Sprintf("call-%d", index), Name: "Bash", Result: text}}
 		}
+		if fixtureCase.TextPart != "" || fixtureCase.Image {
+			turn.Parts = contentPartFixture(fixtureCase)
+		}
 		session.Turns = append(session.Turns, turn)
 	}
 	return session, originals
+}
+
+func contentPartFixture(fixtureCase servedBoundsCase) []ingest.TurnPart {
+	var parts []ingest.TurnPart
+	if fixtureCase.TextPart != "" {
+		parts = append(parts, ingest.TurnPart{Kind: ingest.TurnPartText, Text: fixtureCase.TextPart})
+	}
+	if fixtureCase.Image {
+		parts = append(parts, ingest.TurnPart{Kind: ingest.TurnPartImage, ImageRef: strings.Repeat("a", 64), Image: &schema.ImagePart{
+			Ref: strings.Repeat("a", 64), MediaType: schema.ImageMediaTypePNG, ByteSize: 8,
+		}})
+	}
+	return parts
 }
 
 // servedBoundsTarget is the served field of the case's kind at index, as a
@@ -263,6 +281,11 @@ func TestServedBoundsProductionPath(t *testing.T) {
 			encoded, err := json.Marshal(detail)
 			if err != nil {
 				t.Fatalf("marshal served detail: %v", err)
+			}
+			if fixtureCase.Image || fixtureCase.TextPart != "" {
+				if !strings.Contains(string(encoded), fixtureCase.TextPart) || ImagePartBaseBytes(detail) == 0 || !strings.Contains(string(encoded), originals[0]) {
+					t.Fatalf("served document did not count content, text part, and image base: base=%d", ImagePartBaseBytes(detail))
+				}
 			}
 			if len(encoded) > defaults.ServedDetailDocumentBudgetBytes {
 				t.Errorf("served document is %d bytes, over the budget of %d", len(encoded), defaults.ServedDetailDocumentBudgetBytes)

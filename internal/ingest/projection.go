@@ -301,7 +301,7 @@ func buildGenerationAndContent(capture ClassifiedCapture, allocator RefAllocator
 		Aliases:              aliases,
 		SourceEvidenceDigest: capture.SourceEvidenceDigest,
 	}
-	applyStrictCounts(&generation, capture.Completeness)
+	applyStrictCounts(&generation, capture.Completeness, EntriesToTurns(hydrateProjectionEntriesForCount(partitions.main.Entries, contentBytes)))
 	if err := generation.Validate(); err != nil {
 		return indexformat.Generation{}, nil, err
 	}
@@ -1435,12 +1435,47 @@ func buildProjectionAliases(resolved []*resolvedBlock) ([]indexformat.NativeAlia
 	return aliases, nil
 }
 
+// hydrateProjectionEntriesForCount fills each emitted entry's display field
+// from its captured content bytes before the count fold, exactly as every
+// reader hydrates a served projection. A native carrier can hold no preview of
+// its own; counting the raw rows would suppress every carrier and report zero
+// turns for a transcript a reader sees. Retained-unknown carriers are left
+// alone: their bytes are evidence, never display prose.
+func hydrateProjectionEntriesForCount(entries []schema.SessionEntry, content map[schema.SourceEntryRef][]byte) []schema.SessionEntry {
+	out := make([]schema.SessionEntry, len(entries))
+	for i := range entries {
+		entry := entries[i]
+		if entry.SourceEntryRef == "" || IsRetainedUnknownCarrier(entry) {
+			out[i] = entry
+			continue
+		}
+		full, ok := content[entry.SourceEntryRef]
+		if !ok {
+			out[i] = entry
+			continue
+		}
+		text := string(full)
+		switch entry.EntryType {
+		case schema.EntryTypeToolUse:
+			entry.ToolInput = &text
+		case schema.EntryTypeToolResult:
+			entry.ToolOutput = &text
+		default:
+			entry.ContentPreview = &text
+		}
+		out[i] = entry
+	}
+	return out
+}
+
 // applyStrictCounts writes the single count authority and the prose-title refs.
-// TurnCount is the emitted main entry cardinality after folding; the input
-// count is the distinct submission refs that satisfy the strict predicate.
-func applyStrictCounts(generation *indexformat.Generation, completeness indexformat.GenerationCompleteness) {
+// TurnCount is the conversation turn count: the folded projection's turns whose
+// rendered role is not system. It is computed here, once, from the same fold
+// every reader uses, so a stored or published count is never a raw record count
+// and every count surface reports the same thing. The input count is the
+// distinct submission refs that satisfy the strict predicate.
+func applyStrictCounts(generation *indexformat.Generation, completeness indexformat.GenerationCompleteness, turns []Turn) {
 	main := generation.Main.Entries
-	turnCount := 0
 	submissions := make(map[schema.SubmissionRef]struct{})
 	var titleRefs []schema.SourceEntryRef
 	for i := range main {
@@ -1454,9 +1489,6 @@ func applyStrictCounts(generation *indexformat.Generation, completeness indexfor
 			// from the count the same way an evidence-only carrier is.
 			continue
 		}
-		if entry.Depth == 0 {
-			turnCount++
-		}
 		if !eligibleInputProvenance(entry.Provenance) {
 			continue
 		}
@@ -1465,7 +1497,7 @@ func applyStrictCounts(generation *indexformat.Generation, completeness indexfor
 			titleRefs = append(titleRefs, entry.SourceEntryRef)
 		}
 	}
-	generation.Metadata.Stats.TurnCount = turnCount
+	generation.Metadata.Stats.TurnCount = ConversationTurnCount(turns)
 	generation.TitleRefs = titleRefs
 	if completeness == indexformat.GenerationCompletenessComplete {
 		count := int64(len(submissions))

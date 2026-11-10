@@ -109,6 +109,10 @@ type ServedBoundReport struct {
 	// It is false only when text this projection does not bound already fills
 	// the budget by itself.
 	WithinDocumentBudget bool
+	// ImageBaseBytes is the encoded size of image parts. BoundServedDetail records
+	// it so the document bound counts image metadata and does not treat image
+	// bytes as served text.
+	ImageBaseBytes int
 }
 
 // servedTextField is one bounded text field: where it lives and what it held.
@@ -128,7 +132,7 @@ type servedTextField struct {
 // treat the note as part of the record and bound it again. Every served path
 // reaches the producer, so there is no second application to guard against.
 func BoundServedDetail(detail *schema.SessionDetailPayload, budget ServedDocumentBudget) ServedBoundReport {
-	report := ServedBoundReport{AppliedBytes: budget.perField, WithinDocumentBudget: true}
+	report := ServedBoundReport{AppliedBytes: budget.perField, WithinDocumentBudget: true, ImageBaseBytes: ImagePartBaseBytes(detail)}
 	if detail == nil {
 		return report
 	}
@@ -160,6 +164,7 @@ func collectServedTextFields(detail *schema.SessionDetailPayload) []servedTextFi
 	for turnIndex := range detail.Turns {
 		turn := &detail.Turns[turnIndex]
 		fields = append(fields, servedTextField{target: &turn.Content, original: turn.Content, kind: ServedTextTurnContent})
+		fields = append(fields, textPartFields(turn)...)
 		for callIndex := range turn.ToolCalls {
 			call := &turn.ToolCalls[callIndex]
 			fields = append(fields, servedTextField{target: &call.Arguments, original: call.Arguments, kind: ServedTextToolArguments})
@@ -171,6 +176,7 @@ func collectServedTextFields(detail *schema.SessionDetailPayload) []servedTextFi
 		for turnIndex := range section.Turns {
 			turn := &section.Turns[turnIndex]
 			fields = append(fields, servedTextField{target: &turn.Content, original: turn.Content, kind: ServedTextTurnContent})
+			fields = append(fields, textPartFields(turn)...)
 			for callIndex := range turn.ToolCalls {
 				call := &turn.ToolCalls[callIndex]
 				fields = append(fields, servedTextField{target: &call.Arguments, original: call.Arguments, kind: ServedTextToolArguments})
@@ -184,6 +190,46 @@ func collectServedTextFields(detail *schema.SessionDetailPayload) []servedTextFi
 	return fields
 }
 
+func textPartFields(turn *schema.TurnDetail) []servedTextField {
+	fields := make([]servedTextField, 0, len(turn.ContentParts))
+	for i := range turn.ContentParts {
+		part := &turn.ContentParts[i]
+		if part.Type != schema.TurnPartTypeText {
+			continue
+		}
+		fields = append(fields, servedTextField{target: &part.Text, original: part.Text, kind: ServedTextTurnContent})
+	}
+	return fields
+}
+
+// ImagePartBaseBytes is the encoded size of the image parts in detail. BoundServedDetail
+// counts this base in the document size and does not treat image bytes as served text.
+func ImagePartBaseBytes(detail *schema.SessionDetailPayload) int {
+	if detail == nil {
+		return 0
+	}
+	total := 0
+	count := func(turns []schema.TurnDetail) {
+		for _, turn := range turns {
+			for _, part := range turn.ContentParts {
+				if part.Type != schema.TurnPartTypeImage || part.Image == nil {
+					continue
+				}
+				encoded, err := json.Marshal(part.Image)
+				if err != nil {
+					continue
+				}
+				total += len(encoded)
+			}
+		}
+	}
+	count(detail.Turns)
+	for _, section := range detail.EarlierHistory {
+		count(section.Turns)
+	}
+	return total
+}
+
 // servedDocumentBaseSize is the encoded size of the document with every bounded
 // field emptied. The bounded fields all carry a non-omitted JSON key, so the
 // size at a given bound is this base plus each field's encoded value, and the
@@ -192,7 +238,9 @@ func servedDocumentBaseSize(detail *schema.SessionDetailPayload, fields []served
 	held := make([]string, len(fields))
 	for index, field := range fields {
 		held[index] = *field.target
-		*field.target = ""
+		// A non-empty sentinel keeps omitempty text parts in the encoded base;
+		// an empty string would remove the key and undercount its overhead.
+		*field.target = "x"
 	}
 	encoded, err := json.Marshal(detail)
 	for index, field := range fields {
@@ -204,8 +252,8 @@ func servedDocumentBaseSize(detail *schema.SessionDetailPayload, fields []served
 		// validated producer boundary, raises it with the failing value.
 		return 0, false
 	}
-	// Each emptied field contributed the two quote bytes of "".
-	return len(encoded) - 2*len(fields), true
+	// Each sentinel contributed the three JSON bytes of "x".
+	return len(encoded) - 3*len(fields), true
 }
 
 // servedBoundSearchDipBytes is how far the search looks above a bound that fits

@@ -42,6 +42,8 @@ type retainedPublicationCase struct {
 	MissingCoordinates bool   `yaml:"missingCoordinates"`
 	Duplicate          bool   `yaml:"duplicate"`
 	WriteError         bool   `yaml:"writeError"`
+	ImageStrip         bool   `yaml:"imageStrip"`
+	NumberText         string `yaml:"numberText"`
 }
 
 func loadRetainedPublicationCases(t *testing.T) []retainedPublicationCase {
@@ -241,8 +243,27 @@ func TestRetainedUnknownPublication(t *testing.T) {
 			if err := json.Unmarshal(publisher.Calls[0].TranscriptBody, &envelope); err != nil {
 				t.Fatal(err)
 			}
-			if envelope.SessionDetail.RetainedUnknown[0].Payload != expected {
-				t.Fatalf("payload changed or escaped secret leaked: %q", envelope.SessionDetail.RetainedUnknown[0].Payload)
+			uploaded := envelope.SessionDetail.RetainedUnknown[0].Payload
+			if uploaded != expected {
+				t.Fatalf("payload changed or escaped secret leaked: %q", uploaded)
+			}
+			if c.ImageStrip {
+				if len(envelope.SessionDetail.RetainedUnknown) != wantRecords {
+					t.Fatalf("uploaded retained records = %d, want %d", len(envelope.SessionDetail.RetainedUnknown), wantRecords)
+				}
+				for i, record := range envelope.SessionDetail.RetainedUnknown {
+					if record.Payload != expected {
+						t.Fatalf("uploaded retained[%d] = %q, want the stripped document %q", i, record.Payload, expected)
+					}
+					if c.NumberText == "" || !strings.Contains(record.Payload, c.NumberText) {
+						t.Fatalf("uploaded retained[%d] %q lost the exact number %q", i, record.Payload, c.NumberText)
+					}
+					for _, token := range []string{`"data"`, `"ref"`, `"mediaType"`, `"media_type"`, "IMAGEBYTES"} {
+						if strings.Contains(record.Payload, token) {
+							t.Fatalf("uploaded retained[%d] still carries %s: %s", i, token, record.Payload)
+						}
+					}
+				}
 			}
 			last := envelope.SessionDetail.RetainedUnknown[wantRecords-1]
 			if c.ExpectedKind != "" && (last.Kind != c.ExpectedKind || last.Namespace != c.ExpectedNamespace) {

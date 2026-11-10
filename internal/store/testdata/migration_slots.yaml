@@ -73,7 +73,12 @@ slots:
   - {name: v67-latest-attempt-pointer, slot: 67, needle: "ADD COLUMN latest_attempt_generation_id TEXT"}
   - {name: v68-collective-observations, slot: 68, needle: "CREATE TABLE collective_observation_scopes"}
   - {name: v69-source-unavailability-cause, slot: 69, needle: "original-source-present-record-unusable"}
-  - {name: v70-parent-state, slot: 70, needle: "parent_state TEXT NOT NULL DEFAULT 'root'"}
+  - {name: v70-parent-state, slot: 70, needle: "ALTER TABLE sessions ADD COLUMN resolved_parent_id TEXT"}
+  - {name: v71-derived-lookups, slot: 71, needle: "CREATE TABLE claude_teammate_spawns ("}
+  - {name: v72-compact-identity-facts, slot: 72, needle: "ADD COLUMN identity_session_ids_json TEXT"}
+  - {name: v73-harness-check-widening, slot: 73, needle: "CREATE TABLE sessions_v73 AS SELECT * FROM sessions;"}
+  - {name: v74-conversation-turn-count, slot: 74, needle: "conversation_turn_count INTEGER NOT NULL DEFAULT 0"}
+  - {name: v75-image-attachments, slot: 75, needle: "CREATE TABLE session_attachments ("}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot
@@ -84,7 +89,7 @@ guards:
     targetSlot: 46
     replacementNeedle: session_origin
     expectedFragments: ["session_origin", "expects slot 46", "matches migration slots"]
-    expectedSlots: [46, 51, 53]
+    expectedSlots: [46, 51, 53, 73]
   - name: uncovered-appended-slot
     operation: append-uncovered-slot
     appendedScript: "SELECT 1;"

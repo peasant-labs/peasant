@@ -1,4 +1,5 @@
 requiredNames:
+  - image-and-text-parts-counted-and-bounded
   - twelve-small-turns-served-whole
   - oversized-turn-content-bounded
   - oversized-tool-result-bounded

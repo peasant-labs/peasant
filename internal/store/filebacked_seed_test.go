@@ -165,27 +165,27 @@ func seedFileBackedGeneration(t *testing.T, s *Store, root string, sid schema.Se
 		t.Fatal(err)
 	}
 	seedDocText := string(seedDoc)
-	turnCount := generation.Metadata.Stats.TurnCount
+	conversationTurnCount := generation.Metadata.Stats.TurnCount
 	toolCallCount := generation.Metadata.Stats.ToolCallCount
 	subagentCount := generation.Metadata.Stats.SubagentCount
 	durationMs := generation.Metadata.Stats.DurationMs
 	tokensIn := generation.Metadata.Stats.TokensIn
 	tokensOut := generation.Metadata.Stats.TokensOut
 	if _, err := upsertCapturedStatsOnConn(conn, CapturedStats{
-		SessionID:            sid,
-		TurnCount:            &turnCount,
-		InputSubmissionCount: generation.Metadata.Stats.InputSubmissionCount,
-		ToolCallCount:        &toolCallCount,
-		SubagentCount:        &subagentCount,
-		DurationMs:           &durationMs,
-		TokensIn:             &tokensIn,
-		TokensOut:            &tokensOut,
-		ThoughtTokens:        generation.Metadata.Stats.ThoughtTokens,
-		CachedReadTokens:     generation.Metadata.Stats.CachedReadTokens,
-		CachedWriteTokens:    generation.Metadata.Stats.CachedWriteTokens,
-		SeedJSON:             &seedDocText,
-		Source:               StatsSourceHarness,
-		UpdatedAtMs:          1,
+		SessionID:             sid,
+		ConversationTurnCount: &conversationTurnCount,
+		InputSubmissionCount:  generation.Metadata.Stats.InputSubmissionCount,
+		ToolCallCount:         &toolCallCount,
+		SubagentCount:         &subagentCount,
+		DurationMs:            &durationMs,
+		TokensIn:              &tokensIn,
+		TokensOut:             &tokensOut,
+		ThoughtTokens:         generation.Metadata.Stats.ThoughtTokens,
+		CachedReadTokens:      generation.Metadata.Stats.CachedReadTokens,
+		CachedWriteTokens:     generation.Metadata.Stats.CachedWriteTokens,
+		SeedJSON:              &seedDocText,
+		Source:                StatsSourceHarness,
+		UpdatedAtMs:           1,
 	}); err != nil {
 		t.Fatalf("seed captured stats row: %v", err)
 	}

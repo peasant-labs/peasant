@@ -1,5 +1,6 @@
-expectedCaseCount: 11
+expectedCaseCount: 12
 requiredNames:
+  - system-only
   - mount-segment-zero
   - jump-window
   - load-more-appends

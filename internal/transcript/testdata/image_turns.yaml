@@ -1,0 +1,38 @@
+cases:
+  - name: folds_text_and_image_in_order
+    entries:
+      - {index: 0, depth: 0, role: user, entry_type: text, text: look}
+      - {index: 1, depth: 1, parent: 0, role: user, entry_type: text, part_type: text, text: look}
+      - {index: 2, depth: 1, parent: 0, role: user, entry_type: image, part_type: image, ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, media_type: image/png, byte_size: 8}
+      - {index: 3, depth: 1, parent: 0, role: user, entry_type: text, part_type: text, text: again}
+    want_turns: 1
+    want_parts:
+      - {kind: text, text: look}
+      - {kind: image, ref: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+      - {kind: text, text: again}
+    want_content: look
+    counts: 1
+  - name: image_only_carrier_is_retained_and_counts_once
+    entries:
+      - {index: 0, depth: 0, role: user, entry_type: text, text: ""}
+      - {index: 1, depth: 1, parent: 0, role: user, entry_type: image, part_type: image, ref: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, media_type: image/jpeg, byte_size: 4}
+    want_turns: 1
+    want_parts:
+      - {kind: image, ref: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+    want_content: ""
+    counts: 1
+  - name: text_only_prompt_has_no_parts
+    entries:
+      - {index: 0, depth: 0, role: user, entry_type: text, text: hello}
+    want_turns: 1
+    want_parts: []
+    want_content: hello
+    counts: 1
+  - name: omitted_image_keeps_reason
+    entries:
+      - {index: 0, depth: 0, role: assistant, entry_type: text, text: ""}
+      - {index: 1, depth: 1, parent: 0, role: assistant, entry_type: image, part_type: image, omitted_reason: unsupported}
+    want_turns: 1
+    want_parts:
+      - {kind: image, omitted_reason: unsupported}
+    counts: 1

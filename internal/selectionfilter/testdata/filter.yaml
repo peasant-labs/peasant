@@ -1,0 +1,154 @@
+# Cohort preparation and matching for the shared selection filter.
+# requiredNames is the deletion guard: every name below must still be present.
+# A count is not the contract.
+requiredNames:
+  - prepare-builds-complete-cohort
+  - match-admits-selected-session
+  - match-refuses-unselected-session
+  - match-withheld-conflict-records-once
+  - match-unknown-session-fails-closed
+  - excludes-fails-closed-before-prepare
+  - excludes-refuses-excluded-session
+  - pathless-rule-uses-resolved-clone-path
+  - git-resolution-skipped-when-not-needed
+  - auto-ingest-new-branches-follows-config
+cases:
+  - name: prepare-builds-complete-cohort
+    harness: claude-code
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+      - id: bbbb2222-2222-4222-8222-222222222222
+        cwd: /workspace/tool
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: main
+    expectPrepared: 2
+    expectGitCalls: 2
+    checkSecondMatch: true
+    expectMatch: true
+    expectSecondMatch: true
+  - name: match-admits-selected-session
+    harness: claude-code
+    explicitSessions:
+      - aaaa1111-1111-4111-8111-111111111111
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+    expectGitCalls: 0
+    checkExcludes: true
+    expectMatch: true
+    expectExcludes: false
+    expectConflictCount: 0
+  - name: match-refuses-unselected-session
+    harness: claude-code
+    explicitSessions:
+      - aaaa1111-1111-4111-8111-111111111111
+    sessions:
+      - id: bbbb2222-2222-4222-8222-222222222222
+    expectGitCalls: 0
+    checkExcludes: true
+    expectMatch: false
+    expectExcludes: false
+    expectConflictCount: 0
+  - name: match-withheld-conflict-records-once
+    harness: claude-code
+    projects:
+      - name: demo
+        branches: [main]
+      - name: demo
+        branches: [other]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        projectName: demo
+        cwd: /workspace/demo
+    gitBranch: main
+    repeatMatch: true
+    expectGitCalls: 2
+    expectMatch: false
+    expectConflictCount: 1
+    noticeContains:
+      - withheld
+      - aaaa1111-1111-4111-8111-111111111111
+      - claude-code
+      - name "demo"
+      - /config/chosen.yaml
+  - name: match-unknown-session-fails-closed
+    harness: claude-code
+    explicitSessions:
+      - aaaa1111-1111-4111-8111-111111111111
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+    unknownSession: cccc3333-3333-4333-8333-333333333333
+    expectGitCalls: 0
+    expectMatch: true
+    expectUnknownMatch: false
+  - name: excludes-fails-closed-before-prepare
+    harness: claude-code
+    explicitSessions:
+      - aaaa1111-1111-4111-8111-111111111111
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+    excludesBeforePrepare: true
+    expectGitCalls: 0
+    checkExcludes: true
+    expectMatch: true
+    expectExcludes: false
+  - name: excludes-refuses-excluded-session
+    harness: claude-code
+    exclusions:
+      sessions:
+        - aaaa1111-1111-4111-8111-111111111111
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+      - id: bbbb2222-2222-4222-8222-222222222222
+        cwd: /workspace/other
+    expectPrepared: 2
+    expectGitCalls: 0
+    checkExcludes: true
+    checkSecondMatch: true
+    checkSecondExcludes: true
+    expectMatch: false
+    expectExcludes: true
+    expectSecondMatch: true
+    expectSecondExcludes: false
+  - name: pathless-rule-uses-resolved-clone-path
+    harness: claude-code
+    pathless: true
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+      - id: bbbb2222-2222-4222-8222-222222222222
+        unrelatedSlug: true
+    expectPrepared: 2
+    expectGitCalls: 2
+    checkSecondMatch: true
+    expectMatch: true
+    expectSecondMatch: false
+  - name: git-resolution-skipped-when-not-needed
+    harness: claude-code
+    explicitSessions:
+      - aaaa1111-1111-4111-8111-111111111111
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+        projectName: tool
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: main
+    expectGitCalls: 0
+    expectMatch: true
+  - name: auto-ingest-new-branches-follows-config
+    harness: claude-code
+    autoIngestNewBranches: true
+    compareDisabled: true
+    projects:
+      - name: demo
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        projectName: demo
+        cwd: /workspace/demo
+    gitBranch: feature
+    expectGitCalls: 2
+    expectMatch: true
+    expectMatchWhenDisabled: false

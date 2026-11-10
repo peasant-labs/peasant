@@ -3,11 +3,199 @@ package ingest
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
+
+// StoreScope narrows a database-driven pass to a named set of stored sessions.
+//
+// The ZERO VALUE IS INVALID. Every pass that takes one refuses it with an
+// actionable error before it reads or writes anything, so a forgotten argument
+// or a never-initialized caller value can never silently become whole-store
+// work. Build one with AllStoredSessions or StoredSessions.
+type StoreScope struct {
+	kind storeScopeKind
+	ids  []SessionID
+}
+
+type storeScopeKind uint8
+
+const (
+	storeScopeUnset storeScopeKind = iota // invalid
+	storeScopeAll
+	storeScopeNarrowed
+)
+
+// AllStoredSessions is the full-run scope: every stored session. A full run's
+// SQL result is unchanged by carrying it.
+func AllStoredSessions() StoreScope {
+	return StoreScope{kind: storeScopeAll}
+}
+
+// StoredSessions narrows the scope to ids. The scope owns a sorted,
+// deduplicated copy and drops empty ids.
+//
+// A nil or empty input is a NARROWED scope that selects NO session. It never
+// widens to the whole store: an empty selection must stay empty, because a
+// silently-wide scope would turn every scoped run into a full run. Use
+// AllStoredSessions for the full run.
+func StoredSessions(ids []SessionID) StoreScope {
+	unique := make([]SessionID, 0, len(ids))
+	seen := make(map[SessionID]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	slices.Sort(unique)
+	return StoreScope{kind: storeScopeNarrowed, ids: unique}
+}
+
+// Narrowed reports whether the scope names a cohort, and returns a copy of its
+// ids. The all-store scope reports false. The zero scope also reports false, so
+// a caller MUST call Validate before asking: Narrowed alone cannot tell
+// "everything" from "uninitialized".
+func (s StoreScope) Narrowed() ([]SessionID, bool) {
+	if s.kind != storeScopeNarrowed {
+		return nil, false
+	}
+	return slices.Clone(s.ids), true
+}
+
+// IsAll reports whether the scope is the full-store value.
+func (s StoreScope) IsAll() bool { return s.kind == storeScopeAll }
+
+// Validate refuses the zero scope. operation names the pass that received it,
+// so the error states where the bad value was met.
+func (s StoreScope) Validate(operation string) error {
+	if s.kind == storeScopeAll || s.kind == storeScopeNarrowed {
+		return nil
+	}
+	return fmt.Errorf(
+		"store: %s was given a zero StoreScope; a pass with no scope would read or write the whole store, "+
+			"which a narrowed run must never do; where: the ingest.StoreScope argument of store.%s in internal/ingest/store_iface.go; "+
+			"when: before any connection was taken or row was read; impact: no row was read or written; "+
+			"fix: pass ingest.AllStoredSessions() for a full run or ingest.StoredSessions(ids) for a named cohort",
+		operation, operation)
+}
+
+// ProjectScope narrows CleanupOrphanProjects to a named set of project
+// identities. The ZERO VALUE IS INVALID, on the same rule as StoreScope:
+// every pass that takes one refuses it before doing any work.
+type ProjectScope struct {
+	kind   storeScopeKind
+	hashes []ProjectHash
+}
+
+// AllProjects is the full-run scope: every stored project.
+func AllProjects() ProjectScope {
+	return ProjectScope{kind: storeScopeAll}
+}
+
+// Projects narrows the scope to hashes. The scope owns a sorted, deduplicated
+// copy and drops empty hashes.
+//
+// A nil or empty input is a NARROWED scope that selects NO project. It never
+// widens to the whole store. Use AllProjects for the full run.
+func Projects(hashes []ProjectHash) ProjectScope {
+	unique := make([]ProjectHash, 0, len(hashes))
+	seen := make(map[ProjectHash]struct{}, len(hashes))
+	for _, hash := range hashes {
+		if hash == "" {
+			continue
+		}
+		if _, duplicate := seen[hash]; duplicate {
+			continue
+		}
+		seen[hash] = struct{}{}
+		unique = append(unique, hash)
+	}
+	slices.Sort(unique)
+	return ProjectScope{kind: storeScopeNarrowed, hashes: unique}
+}
+
+// Narrowed reports whether the scope names projects, and returns a copy of
+// their hashes. The all-store scope reports false. The zero scope also reports
+// false, so a caller MUST call Validate before asking.
+func (s ProjectScope) Narrowed() ([]ProjectHash, bool) {
+	if s.kind != storeScopeNarrowed {
+		return nil, false
+	}
+	return slices.Clone(s.hashes), true
+}
+
+// IsAll reports whether the scope is the full-store value.
+func (s ProjectScope) IsAll() bool { return s.kind == storeScopeAll }
+
+// Validate refuses the zero scope, naming the pass that received it.
+func (s ProjectScope) Validate(operation string) error {
+	if s.kind == storeScopeAll || s.kind == storeScopeNarrowed {
+		return nil
+	}
+	return fmt.Errorf(
+		"store: %s was given a zero ProjectScope; a pass with no scope would delete orphan projects across the whole store, "+
+			"which a narrowed run must never do; where: the ingest.ProjectScope argument of store.%s in internal/ingest/store_iface.go; "+
+			"when: before any connection was taken or row was deleted; impact: no row was read or deleted; "+
+			"fix: pass ingest.AllProjects() for a full run or ingest.Projects(hashes) for a named set",
+		operation, operation)
+}
+
+// SessionSourceReader is the store capability LOCATE uses to re-read sessions
+// the store already records. Both reads are batched: one primary-key read and
+// one parent-index read, never a scan of the session population.
+type SessionSourceReader interface {
+	// StoredSessionSources returns the stored rows named by ids, keyed by id.
+	// Sessions that are not stored are absent from the map; an empty input
+	// returns an empty map without reading anything.
+	StoredSessionSources(ctx context.Context, ids []SessionID) (map[SessionID]StoredSessionSource, error)
+	// StoredChildren returns the stored sessions whose logical parent is one of
+	// the named parents, keyed by that parent.
+	//
+	// It covers both halves of a stored child. A child whose availability cache
+	// is populated is read through idx_sessions_parent. A child stored before
+	// its parent is found only through its durable logical-parent evidence: the
+	// started_by target of its generation, or, for a legacy pair that carries no
+	// generation evidence, the publication metadata's parentUuid. Both durable
+	// reads are driven from the named parents and seek their target indexes.
+	// Without the second half a Codex or OpenCode child stored before its
+	// parent would be invisible.
+	StoredChildren(ctx context.Context, parents []SessionID) (map[SessionID][]StoredSessionSource, error)
+}
+
+// DerivedLookupReader is the store capability the teammate-link and Codex
+// duplicate/parent decisions use. Every method is an indexed read; none scans
+// the stored population.
+type DerivedLookupReader interface {
+	// CountClaudeIdentityDeclarers counts the stored root transcripts that
+	// declare id, through the partial identity index (one row per root path).
+	CountClaudeIdentityDeclarers(ctx context.Context, id ClaudeTeammateIdentity) (int, error)
+	// CountClaudeIdentitySpawners counts the distinct spawner transcripts that
+	// name id, through the (team, name) spawns index.
+	CountClaudeIdentitySpawners(ctx context.Context, id ClaudeTeammateIdentity) (int, error)
+	// ClaudeIdentitySpawnerPaths returns the stored spawner transcript paths
+	// that name (team, name), read through the (team, name) spawns index.
+	//
+	// The read is bounded: at most two paths are returned, which is enough for
+	// the caller's zero/one/many decision. Every path the bound reads comes
+	// back, in path order, so a caller that sees more than one can refuse the
+	// ambiguous identity instead of silently taking the first. An identity no
+	// stored transcript spawns returns an empty slice.
+	ClaudeIdentitySpawnerPaths(ctx context.Context, team, name string) ([]string, error)
+	// CountCodexRolloutsBySession counts the catalogued rollout paths that carry
+	// id. Two paths mean the id is a duplicate and the run must refuse it.
+	CountCodexRolloutsBySession(ctx context.Context, id SessionID) (int, error)
+	// CodexRolloutPaths returns the catalogued rollout paths that carry id, in
+	// path order, for a parent lookup.
+	CodexRolloutPaths(ctx context.Context, id SessionID) ([]ResolvedPath, error)
+}
 
 // CurrentCommitAssociation is the push-facing projection of a durable local
 // association. It carries no session ID because the enclosing publish identity
@@ -22,11 +210,14 @@ type CurrentCommitAssociation struct {
 // before the DIFF stage so classifySession can use DB state without reading metadata.json.
 type SessionLocation struct {
 	// Readiness is a bulk repair hint, not a substitute for the bundle read.
-	ProjectHash             schema.ProjectHash
-	OpaqueHostID            string
-	GitRemote               *string
-	PublicationReadiness    PublicationReadiness
-	CaptureRevision         int64
+	ProjectHash          schema.ProjectHash
+	OpaqueHostID         string
+	GitRemote            *string
+	PublicationReadiness PublicationReadiness
+	CaptureRevision      int64
+	// AdapterVersion is sessions.adapter_version: the newest adapter revision
+	// this row's stored work has been parsed at. A retained latest attempt
+	// advances it without replacing the active generation.
 	AdapterVersion          *int
 	HostSlug                string
 	ParentID                string // empty string if the session has no parent
@@ -47,21 +238,6 @@ type SessionLocation struct {
 	// the write recorded no proof, so nothing anchors the stored result to the
 	// bytes it claims to describe.
 	IndexedInputHash *string
-}
-
-// adapterStampBehind reports whether the stored artifact was produced by an
-// adapter revision older than this build's target for the harness. A missing
-// stamp is not behind: it is an unknown producer, and the ordinary clock and
-// schema rules decide whether to re-read it.
-func (l SessionLocation) adapterStampBehind(harness Harness, targets map[Harness]HarvesterVersions) bool {
-	if l.AdapterVersion == nil {
-		return false
-	}
-	target, ok := targets[harness]
-	if !ok {
-		return false
-	}
-	return *l.AdapterVersion < target.AdapterVersion
 }
 
 // MetricSeedStore reads stored adapter statistics independently of computed
@@ -148,11 +324,11 @@ type OrphanParentReconciler interface {
 	// other update commits or the whole reconciliation rolls back.
 	ReconcileParentCache(ctx context.Context, updates []ParentCacheReconcile) error
 	// InvalidateStaleParentOrigins resets origin_version to 0 for every stored
-	// codex or opencode row that carries a parent link but an unknown origin
-	// verdict at the current rule version, and returns how many rows it
-	// re-queued. It is whole-population and idempotent: a second application
-	// returns zero. Claude Code rows and parentless roots are never touched.
-	InvalidateStaleParentOrigins(ctx context.Context) (int64, error)
+	// codex or opencode row in scope that carries a parent link but an unknown
+	// origin verdict at the current rule version, and returns how many rows it
+	// re-queued. It is idempotent: a second application returns zero. Claude
+	// Code rows and parentless roots are never touched.
+	InvalidateStaleParentOrigins(ctx context.Context, scope StoreScope) (int64, error)
 }
 
 // SessionStore abstracts SQLite persistence for the pipeline.
@@ -178,7 +354,7 @@ type SessionStore interface {
 	// when sessions are deleted from the DB (e.g., via prune) but their project
 	// dimension rows are left behind.
 	// Best-effort: callers should log and continue on error.
-	CleanupOrphanProjects(ctx context.Context) error
+	CleanupOrphanProjects(ctx context.Context, scope ProjectScope) error
 	Close() error
 }
 
@@ -239,8 +415,9 @@ type MetricsStore interface {
 	UpdateIndexState(ctx context.Context, sessionID SessionID, version int, indexedAtMs int64) error
 	// ListStaleIndexSessions compares each session's historical index_version
 	// (the producing indexer revision) against its harness target. Harnesses absent
-	// from targets are excluded; an empty map selects nothing.
-	ListStaleIndexSessions(ctx context.Context, targets map[Harness]HarvesterVersions) ([]SessionID, error)
+	// from targets are excluded; an empty map selects nothing. A narrowed scope
+	// restricts the comparison to its ids and is refused when it is the zero value.
+	ListStaleIndexSessions(ctx context.Context, targets map[Harness]HarvesterVersions, scope StoreScope) ([]SessionID, error)
 	// LookupSessionLocation returns the host_slug and parent_id for a session.
 	// Returns ("", "", nil) if the session is not found in the DB.
 	// Used by reconstructFromMetadata to avoid scanning all host directories.
@@ -615,7 +792,7 @@ type MetricSession struct {
 }
 
 type MetricSessionReader interface {
-	ListMetricSessions(context.Context, SessionID, int) ([]MetricSession, error)
+	ListMetricSessions(context.Context, SessionID, int, StoreScope) ([]MetricSession, error)
 }
 
 // InsightsComputer recomputes daily_summary aggregations for the given days.
@@ -1165,7 +1342,7 @@ type AnnotationPushRow struct {
 // ordinary harvest used to run to find adapter-refresh work. The production
 // store implements it; a store that does not is treated as having no such work.
 type StaleAdapterSessionLister interface {
-	ListStaleAdapterSessions(ctx context.Context, targets map[Harness]HarvesterVersions, nativeRefreshVersions []int) ([]SessionID, error)
+	ListStaleAdapterSessions(ctx context.Context, targets map[Harness]HarvesterVersions, nativeRefreshVersions []int, scope StoreScope) ([]SessionID, error)
 }
 
 // RepairSessionLister is the database-driven inventory of sessions a crash
@@ -1173,5 +1350,5 @@ type StaleAdapterSessionLister interface {
 // proof was cleared, or a current publication capture the index is not bound
 // to. Both settle in one ordinary harvest. The production store implements it.
 type RepairSessionLister interface {
-	ListSessionsNeedingRepair(ctx context.Context, targets map[Harness]HarvesterVersions) ([]SessionID, error)
+	ListSessionsNeedingRepair(ctx context.Context, targets map[Harness]HarvesterVersions, scope StoreScope) ([]SessionID, error)
 }

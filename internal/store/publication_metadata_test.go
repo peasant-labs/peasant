@@ -238,6 +238,9 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 					t.Fatal(getErr)
 				}
 				turns := 777
+				if _, statsErr := s.UpsertCapturedStats(ctx, store.CapturedStats{SessionID: id, ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); statsErr != nil {
+					t.Fatal(statsErr)
+				}
 				m.TurnCount = &turns
 				err = s.SaveMetrics(ctx, m)
 			case "unsupported":
@@ -335,8 +338,25 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 				if bundle.Readiness != tc.Readiness {
 					t.Fatalf("readiness %s, want %s", bundle.Readiness, tc.Readiness)
 				}
-				if bundle.Metadata.SessionID != "" && !reflect.DeepEqual(bundle.Metadata, *e.Metadata) {
+				// Every other field round trips; the count does not, because
+				// the published envelope carries the store's conversation count
+				// while the extracted document keeps the adapter's raw record
+				// count.
+				roundTrip := bundle.Metadata
+				roundTrip.Stats.TurnCount = e.Metadata.Stats.TurnCount
+				roundTrip.MetadataHash = e.Metadata.MetadataHash
+				if bundle.Metadata.SessionID != "" && !reflect.DeepEqual(roundTrip, *e.Metadata) {
 					t.Fatalf("metadata did not round trip losslessly")
+				}
+				if bundle.Metadata.SessionID != "" && bundle.Metadata.MetadataHash != schema.ComputeMetadataHash(&bundle.Metadata) {
+					t.Fatal("served metadata digest does not sign the served document")
+				}
+				if bundle.Readiness == ingest.PublicationReady {
+					if stats, statsErr := s.ReadCapturedStats(readCtx, id); statsErr != nil || stats.ConversationTurnCount == nil {
+						t.Fatal("a ready publication has no stored conversation count")
+					} else if bundle.Metadata.Stats.TurnCount != *stats.ConversationTurnCount {
+						t.Fatalf("published metadata turnCount = %d, want the stored conversation count %d", bundle.Metadata.Stats.TurnCount, *stats.ConversationTurnCount)
+					}
 				}
 				if bundle.SessionOrigin != sessionorigin.User || bundle.ReceiptProjectHash != e.Metadata.Project.Hash {
 					t.Fatal("stored attribution lost")
@@ -353,8 +373,16 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 						t.Fatal("unready state changed indexed entries or extension fields")
 					}
 				}
-				if tc.Action == "metrics" && (bundle.Quality == nil || bundle.Quality.TurnCount == nil || *bundle.Quality.TurnCount != 777 || bundle.Metadata.Stats.TurnCount == 777) {
-					t.Fatal("current metrics conflated with extracted stats")
+				if tc.Action == "metrics" {
+					if bundle.Quality == nil || bundle.Quality.TurnCount == nil || *bundle.Quality.TurnCount != 777 {
+						t.Fatal("current metrics did not report the stored conversation count")
+					}
+					if bundle.Metadata.Stats.TurnCount != 777 {
+						t.Fatal("the published metadata count must agree with the served detail")
+					}
+					if e.Metadata.Stats.TurnCount == 777 {
+						t.Fatal("the extracted seed must not be rewritten by current metrics")
+					}
 				}
 			}
 			locations, lookupErr := s.BulkLookupSessionLocations(readCtx, []ingest.SessionID{id})

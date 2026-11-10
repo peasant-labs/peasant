@@ -134,7 +134,7 @@ func TestPruneCmd_InvalidHarness_Error(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid harness")
 	}
-	wantSubstr := "must be one of " + joinHarnesses(defaults.AllHarnesses)
+	wantSubstr := "must be one of " + joinHarnesses(defaults.Harnesses())
 	if !strings.Contains(err.Error(), wantSubstr) {
 		t.Errorf("invalid --harness error should contain %q; got: %v", wantSubstr, err)
 	}

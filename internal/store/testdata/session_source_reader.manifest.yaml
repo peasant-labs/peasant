@@ -1,0 +1,8 @@
+requiredNames:
+  - sources_primary_key_batch
+  - sources_empty_input
+  - children_cached_parent
+  - children_uncached_relationship_evidence
+  - children_uncached_publication_metadata
+  - children_absent_parent
+  - children_uncached_missing_parent_row

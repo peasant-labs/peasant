@@ -1,0 +1,16 @@
+# Every read surface that reports, sorts by, bounds, or aggregates a session
+# turn count must splice the ONE shared expression over the conversation column.
+# The retired raw columns (session_captured_stats.turn_count and
+# session_metrics.turn_count) may not appear as a count source in any of them.
+expectedCaseCount: 10
+requiredNames:
+  - session_list_reader
+  - session_detail_reader
+  - session_detail_latest_attempt_reader
+  - metrics_reader
+  - push_reader
+  - prune_reader
+  - legacy_snapshot_reader
+  - dashboard_summary_writer
+  - dashboard_harness_writer
+  - friction_review_queue_reader

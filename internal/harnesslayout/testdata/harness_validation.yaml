@@ -1,0 +1,6 @@
+requiredNames: [empty, unknown]
+cases:
+  - name: empty
+    harness: ""
+  - name: unknown
+    harness: not-a-known-harness

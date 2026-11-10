@@ -6,6 +6,7 @@
 # the segment, which the per-field bound case must reject.
 servePreBoundInline: false
 requiredNames:
+  - system-only
   - mount-segment-zero
   - jump-window
   - load-more-appends
@@ -18,6 +19,22 @@ requiredNames:
   - revision-refetch-segment-zero
   - revision-directory-fails
 cases:
+  - name: system-only
+    revision: "7"
+    nextRevision: null
+    turn: null
+    totalSegments: 1
+    segments:
+      - { index: 0, turns: [0] }
+    window: null
+    actions: []
+    reads: [directory, segment:0]
+    absent: [window, turns]
+    boundaries: "0"
+    mountedTurns: [0]
+    notIndexed: false
+    segmentMode: true
+
   - name: mount-segment-zero
     revision: "7"
     nextRevision: null

@@ -53,7 +53,7 @@ func (s *sweepRecordingStore) SweepSessionForHarvest(_ context.Context, session 
 	return nil
 }
 
-func (s *sweepRecordingStore) SweepFlaggedSessionsForHarvest(_ context.Context) (int, []error, error) {
+func (s *sweepRecordingStore) SweepFlaggedSessionsForHarvest(_ context.Context, _ StoreScope) (int, []error, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.flagged++

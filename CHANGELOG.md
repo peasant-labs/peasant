@@ -8,6 +8,11 @@ Release, which holds the signed artifacts and checksums.
 ## [Unreleased]
 
 ### Added
+- `harvest --session` and `harvest index --session` process the named sessions
+  together with their child sessions and any ancestors that are not recorded
+  yet. `--no-related` narrows the run to the named sessions themselves.
+- `--harness` is accepted as an alias for `--source-harness` on `harvest` and
+  `harvest index`; both names set the same filter.
 - `peasant sessions review` checks named sessions for what redaction leaves
   behind, in memory and writing nothing: credentials in formats no rule knows,
   passwords on a `mysql -p<password>` command line, tool calls that read or
@@ -43,6 +48,30 @@ Release, which holds the signed artifacts and checksums.
   prints the plan. It uploads nothing and changes no visibility or license. It
   exits 3 whenever it sent no share request, every target failing included,
   and 1 only when it sent one and something failed.
+
+### Changed
+- `open --session` no longer passes `--force`. An unchanged session is not
+  re-extracted or re-indexed; opening it still refreshes that session's commits.
+  `harvest` gains `--refresh-commits`, off by default, for the same refresh
+  without opening the dashboard.
+- `harvest --session <unknown>` now exits non-zero and prints the reason it
+  could not use the session. It used to exit 0 and report the session as
+  unchanged.
+- A `--source-harness`/`--harness` or `--since` that excludes a named session is
+  now an error naming the filter that excluded it. It used to be silent.
+- The dashboard's one-session re-index now processes that session's related
+  sessions too, matching `harvest --session`.
+- `open --session` and `harvest --session` re-capture the named session's
+  subagents as well, so `open` time grows with the session's subagent count.
+- A named session that is recorded but can no longer be read keeps its stored
+  transcript, receives the same store-side upkeep a full harvest gives it,
+  exits 0, and prints one warning on stderr. `open` opens the stored copy and
+  says so on stderr; `harvest index --session` names the saved pair it could
+  not read instead of a source. It used to be silent.
+- A plain `harvest index` now keeps the Codex rollout catalog current as it
+  walks the Codex source for canonical facts. It used to walk Codex and write
+  nothing, so a database maintained only through `harvest index` never gained
+  the catalog.
 
 ## [0.14.0] - 2026-11-04
 
@@ -109,6 +138,12 @@ Release, which holds the signed artifacts and checksums.
   24 hours incorrectly added.
 
 ### Fixed
+- A harvest that finds a stored transcript written by an older adapter revision
+  now re-reads and republishes it once, then settles. This includes
+  `harvest logs`, which has no database and used to keep the old projection
+  forever, and rows that recorded no adapter revision at all. A retained latest
+  attempt parsed at the current revision also advances the stored stamp, so the
+  row is not re-read on every harvest.
 - Only one writing harvest runs at a time per data directory. Two harvests
   started together on one data dir used to race each other's index
   replacement. Now `peasant harvest`, `harvest logs`, `harvest index` and

@@ -27,7 +27,7 @@ var ErrNoCapturedStats = errors.New("store: the session has no captured stats ro
 const capturedStatsColumns = `session_id, turn_count, input_submission_count,
     tool_call_count, subagent_count, duration_ms, tokens_in, tokens_out,
     thought_tokens, cached_read_tokens, cached_write_tokens,
-    seed_json, source, updated_at_ms, overflow`
+    seed_json, source, updated_at_ms, overflow, conversation_turn_count`
 
 // ReadCapturedStats returns one session's mutable measurements with a single
 // primary-key read. NULL columns stay nil (unknown); the wire mapping
@@ -89,6 +89,7 @@ func scanCapturedStats(stmt *sqlite.Stmt, stats *CapturedStats) error {
 		overflow := stmt.ColumnText(14)
 		stats.Overflow = &overflow
 	}
+	stats.ConversationTurnCount = nullableIntCol(stmt, 15)
 	return nil
 }
 
@@ -125,7 +126,7 @@ func nullableText(stmt *sqlite.Stmt, col int) *string {
 // 0/absent; unknown stays distinguishable only at the stats layer.
 func capturedStatsToWire(stats CapturedStats) schema.SessionStats {
 	return schema.SessionStats{
-		TurnCount:            derefOrZero(stats.TurnCount),
+		TurnCount:            derefOrZero(stats.ConversationTurnCount),
 		InputSubmissionCount: stats.InputSubmissionCount,
 		ToolCallCount:        derefOrZero(stats.ToolCallCount),
 		SubagentCount:        derefOrZero(stats.SubagentCount),
@@ -168,10 +169,11 @@ const sqlUpsertCapturedStats = `INSERT INTO session_captured_stats (
     session_id, turn_count, input_submission_count, tool_call_count,
     subagent_count, duration_ms, tokens_in, tokens_out, thought_tokens,
     cached_read_tokens, cached_write_tokens, seed_json, source, updated_at_ms,
-    overflow
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    overflow, conversation_turn_count
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0))
 ON CONFLICT(session_id) DO UPDATE SET
     turn_count = COALESCE(excluded.turn_count, session_captured_stats.turn_count),
+    conversation_turn_count = COALESCE(?, session_captured_stats.conversation_turn_count),
     input_submission_count = COALESCE(excluded.input_submission_count, session_captured_stats.input_submission_count),
     tool_call_count = COALESCE(excluded.tool_call_count, session_captured_stats.tool_call_count),
     subagent_count = COALESCE(excluded.subagent_count, session_captured_stats.subagent_count),
@@ -237,7 +239,8 @@ func upsertCapturedStatsOnConn(conn *sqlite.Conn, stats CapturedStats) (bool, er
 			nullableArg(stats.TokensIn), nullableArg(stats.TokensOut),
 			nullableArg(stats.ThoughtTokens),
 			nullableArg(stats.CachedReadTokens), nullableArg(stats.CachedWriteTokens),
-			seed, string(stats.Source), stats.UpdatedAtMs, nullableStr(stats.Overflow),
+			seed, string(stats.Source), stats.UpdatedAtMs, nullableStr(stats.Overflow), nullableArg(stats.ConversationTurnCount),
+			nullableArg(stats.ConversationTurnCount),
 		},
 	}); err != nil {
 		return false, fmt.Errorf("store: upsert captured stats for session %s: %w; prior measurements are unchanged", stats.SessionID, err)
@@ -453,27 +456,27 @@ WHERE d.session_id = ? AND d.error_type = 'stats-overflow'`, &sqlitex.ExecOption
 // fields are measurements, including zero. Raw retained documents preserve
 // absence separately through capturedStatsFromRaw before wire decoding.
 func capturedStatsForHarnessWrite(sessionID schema.SessionID, stats schema.SessionStats, seedDoc string, updatedAtMs int64) CapturedStats {
-	turnCount := stats.TurnCount
+	conversationTurnCount := stats.TurnCount
 	toolCallCount := stats.ToolCallCount
 	subagentCount := stats.SubagentCount
 	durationMs := stats.DurationMs
 	tokensIn := stats.TokensIn
 	tokensOut := stats.TokensOut
 	return CapturedStats{
-		SessionID:            sessionID,
-		TurnCount:            &turnCount,
-		InputSubmissionCount: stats.InputSubmissionCount,
-		ToolCallCount:        &toolCallCount,
-		SubagentCount:        &subagentCount,
-		DurationMs:           &durationMs,
-		TokensIn:             &tokensIn,
-		TokensOut:            &tokensOut,
-		ThoughtTokens:        stats.ThoughtTokens,
-		CachedReadTokens:     stats.CachedReadTokens,
-		CachedWriteTokens:    stats.CachedWriteTokens,
-		SeedJSON:             &seedDoc,
-		Source:               StatsSourceHarness,
-		UpdatedAtMs:          updatedAtMs,
+		SessionID:             sessionID,
+		ConversationTurnCount: &conversationTurnCount,
+		InputSubmissionCount:  stats.InputSubmissionCount,
+		ToolCallCount:         &toolCallCount,
+		SubagentCount:         &subagentCount,
+		DurationMs:            &durationMs,
+		TokensIn:              &tokensIn,
+		TokensOut:             &tokensOut,
+		ThoughtTokens:         stats.ThoughtTokens,
+		CachedReadTokens:      stats.CachedReadTokens,
+		CachedWriteTokens:     stats.CachedWriteTokens,
+		SeedJSON:              &seedDoc,
+		Source:                StatsSourceHarness,
+		UpdatedAtMs:           updatedAtMs,
 	}
 }
 

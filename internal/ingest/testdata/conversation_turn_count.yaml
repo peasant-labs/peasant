@@ -1,0 +1,37 @@
+# Every case folds the same entry shape every reader folds and asks for the
+# conversation turn count: projected turns whose rendered role is not system.
+cases:
+  - name: user_and_assistant_turns_count
+    entries:
+      - {index: 0, role: user, entryType: text, content: "run the checks"}
+      - {index: 1, role: assistant, entryType: text, content: "running them"}
+    expected: 2
+  - name: system_control_turns_stay_served_and_do_not_count
+    entries:
+      - {index: 0, role: user, entryType: text, content: "run the checks"}
+      - {index: 1, role: system, entryType: text, partType: mode, content: "mode: normal"}
+      - {index: 2, role: system, entryType: system, content: "Build finished in 12s"}
+      - {index: 3, role: assistant, entryType: text, content: "checks are running"}
+    expected: 2
+    expectedServed: 4
+  - name: folded_tool_call_is_not_a_second_turn
+    entries:
+      - {index: 0, role: user, entryType: text, content: "find the parser"}
+      - {index: 1, role: assistant, entryType: tool_use, toolCallId: call-1, toolName: Grep, content: "rg parser", hasToolUse: true}
+      - {index: 2, role: tool, entryType: tool_result, depth: 1, parentIndex: 1, toolCallId: call-1, content: "parser.go:12"}
+    expected: 2
+    expectedServed: 2
+  - name: injected_command_wrapper_is_a_system_turn
+    entries:
+      - {index: 0, role: user, entryType: text, content: "<command-name>/review</command-name>"}
+      - {index: 1, role: user, entryType: text, content: "review the change"}
+      - {index: 2, role: assistant, entryType: text, content: "reading it"}
+    expected: 2
+    expectedServed: 3
+  - name: empty_system_control_is_neither_counted_nor_served
+    entries:
+      - {index: 0, role: user, entryType: text, content: "run the checks"}
+      - {index: 1, role: system, entryType: system}
+      - {index: 2, role: assistant, entryType: text, content: "checks are running"}
+    expected: 2
+    expectedServed: 2

@@ -108,9 +108,10 @@ func TestCompute_Turns(t *testing.T) {
 
 	m := runMetrics(t, sid, entries)
 
-	// TurnCount = depth=0 user + assistant entries = 4.
-	if m.TurnCount == nil || *m.TurnCount != 4 {
-		t.Errorf("turn_count: expected 4, got %v", m.TurnCount)
+	// The metric functions report no turn count: the conversation count is
+	// producer state computed once during indexing, not a derived metric.
+	if m.TurnCount != nil {
+		t.Errorf("turn_count: expected nil, got %v", *m.TurnCount)
 	}
 	if m.ToolCalls == nil || *m.ToolCalls != 2 {
 		t.Errorf("tool_calls: expected 2, got %v", m.ToolCalls)

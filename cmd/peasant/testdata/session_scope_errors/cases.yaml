@@ -1,0 +1,151 @@
+# Command-level goldens for a session-scoped run. Each case states the sandbox
+# it needs, the arguments it passes, and the exact bytes the command prints.
+# The output of a suggested command carries the run's own flags, so every golden
+# is normalized by replacing the sandbox root with /sandbox.
+#
+# required_names is a deletion-protection manifest: every listed case must be
+# present. It does not bound how many cases exist.
+required_names:
+  - harvest-not_found
+  - harvest-harness_filtered
+  - harvest-since_filtered
+  - harvest-lookup_failed
+  - harvest-source_gone
+  - harvest-source_gone_two_roots
+  - harvest-harness_disabled
+  - harvest-source_failed
+  - harvest-index-not_found
+  - harvest-index-source_gone
+  - harvest-index-stored
+  - harvest-index-unstored_pair
+  - harvest-index-subagent_pair_misses
+  - harvest-session_related
+  - harvest-session_no_related
+  - open-not_found
+  - open-lookup_failed
+  - open-source_gone
+  - open-harness_disabled
+  - open-source_failed
+  - open-hook-source_gone
+# One recorded root session. SESSION_ID is the session's id.
+session_record: |
+  {"sessionId":"SESSION_ID","type":"user","uuid":"SESSION_ID-user-1","timestamp":"2026-01-01T00:00:01Z","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"run the checks"}}
+  {"sessionId":"SESSION_ID","type":"assistant","uuid":"SESSION_ID-assistant-1","timestamp":"2026-01-01T00:00:02Z","cwd":"/workspace","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"checks pass"}]}}
+# One subagent transcript, as Claude writes it under its parent's directory.
+# SESSION_ID is the parent; AGENT_ID is the saved child id and AGENT_NAME its agent id.
+subagent_record: |
+  {"sessionId":"SESSION_ID","agentId":"AGENT_NAME","isSidechain":true,"type":"user","uuid":"AGENT_ID-user-1","timestamp":"2026-01-01T00:00:03Z","cwd":"/workspace","message":{"role":"user","content":"read the change"}}
+  {"sessionId":"SESSION_ID","agentId":"AGENT_NAME","isSidechain":true,"type":"assistant","uuid":"AGENT_ID-assistant-1","timestamp":"2026-01-01T00:00:04Z","cwd":"/workspace","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
+cases:
+  # A miss is the whole output: the block goes to stderr and nothing reaches
+  # stdout.
+  - name: harvest-not_found
+    command: harvest
+    setup: empty
+    args: ["--session", "{unknown}"]
+    kind: miss_block
+  - name: harvest-harness_filtered
+    command: harvest
+    setup: stored
+    args: ["--session", "{session}", "--harness", "codex"]
+    kind: miss_block
+  - name: harvest-since_filtered
+    command: harvest
+    setup: stored_old
+    args: ["--session", "{session}", "--since", "1h"]
+    kind: miss_block
+  - name: harvest-lookup_failed
+    command: harvest
+    setup: lookup_failed
+    args: ["--session", "{unknown}"]
+    kind: miss_block
+  # A recorded session whose source is gone keeps its stored copy: one warning
+  # block on stderr, the summary on stdout, exit 0.
+  - name: harvest-source_gone
+    command: harvest
+    setup: stored_gone_child
+    args: ["--session", "{session}"]
+    kind: warning
+  - name: harvest-source_gone_two_roots
+    command: harvest
+    setup: stored_gone_two_roots
+    args: ["--session", "{session}", "--session", "{session2}"]
+    kind: warning
+  - name: harvest-harness_disabled
+    command: harvest
+    setup: stored_disabled
+    args: ["--session", "{session}"]
+    kind: warning
+  - name: harvest-source_failed
+    command: harvest
+    setup: outside_roots
+    args: ["--session", "{session}"]
+    kind: warning
+  # harvest index names its sessions the same way and prints the same warning.
+  - name: harvest-index-not_found
+    command: index
+    setup: empty
+    args: ["--session", "{unknown}"]
+    kind: miss_block
+  - name: harvest-index-source_gone
+    command: index
+    setup: index_pair_gone
+    args: ["--session", "{session}"]
+    kind: warning
+  - name: harvest-index-stored
+    command: index
+    setup: stored
+    args: ["--session", "{session}"]
+    kind: index_ok
+  - name: harvest-index-unstored_pair
+    command: index
+    setup: logs_pair
+    args: ["--session", "{session}"]
+    kind: index_unstored_pair_ok
+  - name: harvest-index-subagent_pair_misses
+    command: index
+    setup: logs_pair_child
+    args: ["--session", "{child}"]
+    kind: miss_block
+  # Related sessions are processed by default; --no-related leaves them alone.
+  - name: harvest-session_related
+    command: harvest
+    setup: stored_child_changed
+    args: ["--session", "{session}"]
+    kind: related_updated
+  - name: harvest-session_no_related
+    command: harvest
+    setup: stored_child_changed
+    args: ["--session", "{session}", "--no-related"]
+    kind: related_excluded
+  # open renders a miss as one line and a kept stored copy as one stderr line.
+  - name: open-not_found
+    command: open
+    setup: empty
+    args: ["--session", "{unknown}"]
+    kind: miss_line
+  - name: open-lookup_failed
+    command: open
+    setup: lookup_failed
+    args: ["--session", "{unknown}"]
+    kind: miss_line
+  - name: open-source_gone
+    command: open
+    setup: stored_gone
+    args: ["--session", "{session}"]
+    kind: open_warning
+  - name: open-harness_disabled
+    command: open
+    setup: stored_disabled
+    args: ["--session", "{session}"]
+    kind: open_warning
+  - name: open-source_failed
+    command: open
+    setup: outside_roots
+    args: ["--session", "{session}"]
+    kind: open_warning
+  - name: open-hook-source_gone
+    command: open
+    setup: stored_gone
+    args: ["--session", "{session}", "--hook"]
+    kind: open_hook_warning

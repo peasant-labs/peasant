@@ -105,11 +105,32 @@ type Turn struct {
 	TokensOut   *int               // output tokens for this turn
 	PartType    *string            // provider's original part type label; a depth=0 control record keeps its kind here
 
+	// Parts are the ordered text and image blocks of this turn. Content remains
+	// the concatenated text fallback. Nil means the turn has no ordered parts.
+	Parts []TurnPart
+
 	// ControlKind is the producer's control-record kind for this turn, or nil.
 	// The fold sets it only on a depth-0 turn, from the entry's harness and part
 	// type through ControlRecordKindFor. A compaction notice keeps its stored
 	// part type but is never a control kind.
 	ControlKind *string
+}
+
+// TurnPartKind is the closed kind of one ordered turn content block.
+type TurnPartKind string
+
+const (
+	TurnPartText  TurnPartKind = "text"
+	TurnPartImage TurnPartKind = "image"
+)
+
+// TurnPart is one ordered text or image block. Image is the local image shape.
+// ImageRef is the content address when the bytes were stored.
+type TurnPart struct {
+	Kind     TurnPartKind
+	Text     string
+	ImageRef string
+	Image    *schema.ImagePart
 }
 
 // ToolCall represents a tool invocation within a turn.

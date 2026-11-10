@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -62,5 +64,32 @@ WHERE s.session_id = ?1`, &sqlitex.ExecOptions{
 	if err != nil {
 		return nil, fmt.Errorf("store: read recorded metadata for session %s before stored recovery: %w; no stored files were changed; restore valid stored metadata and retry harvest", sid, err)
 	}
-	return data, nil
+	if len(data) == 0 {
+		return data, nil
+	}
+	// The document's stats are the adapter seed. The count a served or
+	// published surface reports is the producer's stored conversation count, so
+	// overlay it here; the seed field itself stays unchanged for evidence.
+	stats, statsErr := readCapturedStatsOnConn(conn, sid)
+	if statsErr != nil {
+		if errors.Is(statsErr, ErrNoCapturedStats) {
+			return data, nil
+		}
+		return nil, statsErr
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, fmt.Errorf("store: decode recorded metadata for session %s before overlaying its conversation count: %w", sid, err)
+	}
+	statsDocument, _ := document["stats"].(map[string]any)
+	if statsDocument == nil {
+		statsDocument = map[string]any{}
+	}
+	statsDocument["turnCount"] = capturedStatsToWire(stats).TurnCount
+	document["stats"] = statsDocument
+	overlaid, err := json.Marshal(document)
+	if err != nil {
+		return nil, fmt.Errorf("store: encode recorded metadata for session %s after overlaying its conversation count: %w", sid, err)
+	}
+	return overlaid, nil
 }

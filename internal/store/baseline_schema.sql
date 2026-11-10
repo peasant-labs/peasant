@@ -155,6 +155,13 @@ CREATE TABLE annotators (
     CHECK (kind_id = 2 OR (model_id IS NULL AND provider_key IS NULL))
 ) STRICT;
 
+CREATE TABLE claude_teammate_spawns (
+  spawner_path TEXT NOT NULL REFERENCES claude_transcript_evidence(source_path) ON DELETE CASCADE,
+  team         TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  PRIMARY KEY (spawner_path, team, name)
+) STRICT;
+
 CREATE TABLE claude_transcript_evidence (
   source_path TEXT PRIMARY KEY,
   scope TEXT NOT NULL CHECK(scope IN ('root', 'subagent')),
@@ -167,8 +174,13 @@ CREATE TABLE claude_transcript_evidence (
   title TEXT NOT NULL,
   branch TEXT NOT NULL,
   cwd TEXT NOT NULL, origin TEXT NOT NULL DEFAULT ''
-  CHECK (origin IN ('', 'user', 'agent', 'unknown')), proof_version INTEGER NOT NULL DEFAULT 0 CHECK(proof_version >= 0), native_agent_id TEXT NOT NULL DEFAULT '', native_agent_valid INTEGER NOT NULL DEFAULT 0 CHECK(native_agent_valid IN (0, 1)), content_digest TEXT NOT NULL DEFAULT '', identity_records_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_records_json)),
+  CHECK (origin IN ('', 'user', 'agent', 'unknown')), proof_version INTEGER NOT NULL DEFAULT 0 CHECK(proof_version >= 0), native_agent_id TEXT NOT NULL DEFAULT '', native_agent_valid INTEGER NOT NULL DEFAULT 0 CHECK(native_agent_valid IN (0, 1)), content_digest TEXT NOT NULL DEFAULT '', identity_records_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_records_json)), identity_session_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_session_ids_json)), identity_spawn_agent_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_spawn_agent_ids_json)), identity_legacy_agent_proof INTEGER NOT NULL DEFAULT 0 CHECK(identity_legacy_agent_proof IN (0, 1)), identity_contradictory_sidechain INTEGER NOT NULL DEFAULT 0 CHECK(identity_contradictory_sidechain IN (0, 1)), identity_chain_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_chain_json)),
   CHECK((identity_team IS NULL) = (identity_name IS NULL))
+) STRICT;
+
+CREATE TABLE codex_rollout_catalog (
+  source_path TEXT PRIMARY KEY,
+  session_id  TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE collective_attempt_sources (
@@ -278,7 +290,7 @@ CREATE TABLE daily_summary_by_project (
 
 CREATE TABLE daily_summary_harness (
     date_utc TEXT NOT NULL,
-    model_harness TEXT NOT NULL CHECK (model_harness IN ('claude-code','opencode','codex','gemini-cli','cursor','antigravity','strike','pi')),
+    model_harness TEXT NOT NULL CHECK (model_harness IN ('claude-code','opencode','codex','gemini-cli','cursor','antigravity','strike','pi','grok-build','devin-desktop','cline','kiro','kiro-cli','kiro-crew')),
     session_count INTEGER NOT NULL DEFAULT 0,
     tokens_in INTEGER NOT NULL DEFAULT 0,
     tokens_out INTEGER NOT NULL DEFAULT 0,
@@ -514,6 +526,19 @@ CREATE TABLE scale_kinds (
     name TEXT NOT NULL UNIQUE
 ) STRICT;
 
+CREATE TABLE session_attachments (
+    session_id       TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    source_entry_ref TEXT NOT NULL,
+    partition_id     TEXT NOT NULL DEFAULT '',
+    sha256           TEXT,
+    media_type       TEXT,
+    byte_size        INTEGER NOT NULL DEFAULT 0 CHECK (byte_size >= 0),
+    width            INTEGER NOT NULL DEFAULT 0 CHECK (width >= 0),
+    height           INTEGER NOT NULL DEFAULT 0 CHECK (height >= 0),
+    omitted_reason   TEXT CHECK (omitted_reason IS NULL OR omitted_reason IN ('too_large','unsupported','missing')),
+    PRIMARY KEY (session_id, source_entry_ref)
+) STRICT;
+
 CREATE TABLE session_captured_stats (
   session_id             TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
   turn_count             INTEGER,
@@ -530,7 +555,8 @@ CREATE TABLE session_captured_stats (
   source                 TEXT NOT NULL CHECK(source IN ('harness','derived')),
   updated_at_ms          INTEGER NOT NULL CHECK(updated_at_ms >= 0),
   overflow               TEXT
-) STRICT;
+, conversation_turn_count INTEGER NOT NULL DEFAULT 0
+ CHECK(conversation_turn_count >= 0)) STRICT;
 
 CREATE TABLE session_commands (
     session_id   TEXT NOT NULL,
@@ -622,11 +648,11 @@ CREATE TABLE "session_context_segments" (
   PRIMARY KEY (session_id, generation_id, segment_ordinal)
 ) STRICT;
 
-CREATE TABLE session_entries (
+CREATE TABLE "session_entries" (
     session_id      TEXT NOT NULL REFERENCES sessions(session_id),
     entry_index     INTEGER NOT NULL,
     provider        TEXT NOT NULL,
-    entry_type      TEXT NOT NULL CHECK (entry_type IN ('text','tool_use','tool_result','thinking','system','error','result')),
+    entry_type      TEXT NOT NULL CHECK (entry_type IN ('text','tool_use','tool_result','thinking','system','error','result','image')),
     role            TEXT NOT NULL CHECK (role IN ('user','assistant','tool','system')),
     timestamp_ms    INTEGER,
     content_preview TEXT,
@@ -637,10 +663,17 @@ CREATE TABLE session_entries (
     has_thinking    INTEGER NOT NULL DEFAULT 0 CHECK (has_thinking IN (0,1)),
     is_error        INTEGER NOT NULL DEFAULT 0 CHECK (is_error IN (0,1)),
     raw_byte_length INTEGER,
-    tool_call_id     TEXT,
+    tool_call_id    TEXT,
     entry_id        TEXT,
     parent_entry_id TEXT,
-    extra           TEXT, depth INTEGER NOT NULL DEFAULT 0, parent_index INTEGER, tool_input TEXT, tool_output TEXT, tool_kind TEXT, stop_reason TEXT, part_type TEXT,
+    extra           TEXT,
+    depth           INTEGER NOT NULL DEFAULT 0,
+    parent_index    INTEGER,
+    tool_input      TEXT,
+    tool_output     TEXT,
+    tool_kind       TEXT,
+    stop_reason     TEXT,
+    part_type       TEXT,
     PRIMARY KEY (session_id, entry_index)
 ) STRICT;
 
@@ -656,7 +689,8 @@ CREATE TABLE session_entries_ext (
       REFERENCES session_entries(session_id, entry_index) ON DELETE CASCADE
 ) STRICT;
 
-CREATE VIRTUAL TABLE session_entries_fts USING fts5(
+CREATE VIRTUAL TABLE session_entries_fts
+USING fts5(
     content_preview,
     tool_input,
     tool_output,
@@ -1057,7 +1091,7 @@ CREATE TABLE session_source_unavailability (
 CREATE TABLE sessions (
     session_id TEXT PRIMARY KEY,
     parent_id TEXT REFERENCES sessions(session_id),
-    model_harness TEXT NOT NULL CHECK (model_harness IN ('claude-code','opencode','codex','gemini-cli','cursor','antigravity','strike','pi')),
+    model_harness TEXT NOT NULL CHECK (model_harness IN ('claude-code','opencode','codex','gemini-cli','cursor','antigravity','strike','pi','grok-build','devin-desktop','cline','kiro','kiro-cli','kiro-crew')),
     model_id TEXT NOT NULL,
     opaque_host_id TEXT NOT NULL REFERENCES host_slugs(opaque_id),
     project_hash TEXT NOT NULL REFERENCES projects(project_hash),
@@ -1181,6 +1215,14 @@ CREATE INDEX idx_anntype_family_id ON annotation_types(family_id);
 
 CREATE INDEX idx_anntype_status ON annotation_types(status_id);
 
+CREATE INDEX idx_claude_evidence_identity_root
+  ON claude_transcript_evidence(identity_team, identity_name)
+  WHERE scope = 'root' AND identity_team IS NOT NULL;
+
+CREATE INDEX idx_claude_teammate_spawns_identity ON claude_teammate_spawns(team, name);
+
+CREATE INDEX idx_codex_rollout_catalog_session ON codex_rollout_catalog(session_id);
+
 CREATE UNIQUE INDEX idx_collective_observation_versions_current ON collective_observation_versions(village_url,user_id,collective_id) WHERE current=1;
 
 CREATE INDEX idx_daily_project_hash ON daily_summary_by_project(project_hash);
@@ -1227,6 +1269,8 @@ CREATE INDEX idx_pulled_annotations_transcript ON pulled_annotations(village_hos
 
 CREATE INDEX idx_relationship_evidence_started_by_target
   ON session_relationship_evidence(kind, target_local_id, session_id, target_state);
+
+CREATE INDEX idx_session_attachments_sha ON session_attachments(sha256) WHERE sha256 IS NOT NULL;
 
 CREATE INDEX idx_session_commands_name ON session_commands(command_name);
 
@@ -2167,7 +2211,7 @@ DELETE FROM "session_search_fts_config";
 INSERT INTO "session_search_fts_config" ("k", "v") VALUES ('version', 4);
 
 DELETE FROM "session_search_fts_data";
-INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'');
+INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'000000000000');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 70;
+PRAGMA user_version = 75;

@@ -40,7 +40,7 @@ cases:
         winning_marker: LEGACY_JSON
         losing_markers: [JSON_LEGACY]
         ordered_entry_ids: [msg_legacy_json, part_legacy_json]
-        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 9}
+        expected_metrics: {turn_count: 2, tool_calls: 0, compute_version: 9}
       - name: current-only
         combination: current_only
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv9
@@ -54,7 +54,7 @@ cases:
         winning_marker: LEGACY_ONLY
         losing_markers: []
         ordered_entry_ids: [msg_legacy_only, part_legacy_only]
-        expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 9}
+        expected_metrics: {turn_count: 2, tool_calls: 0, compute_version: 9}
       - name: json-only
         combination: json_only
         session_id: ses_3cd91f52effeXd3QAJ54jOyzvB

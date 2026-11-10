@@ -26,11 +26,36 @@ func (s *Store) UpsertSessionCommits(ctx context.Context, sessionID ingest.Sessi
 }
 
 var _ ingest.SessionCommitMergeStore = (*Store)(nil)
+var _ ingest.SessionCommitProjectionStore = (*Store)(nil)
 
 // MergeSessionCommits adds recovered observations without deleting historical
 // bindings merely because current Git inspection could not rediscover them.
 func (s *Store) MergeSessionCommits(ctx context.Context, sessionID ingest.SessionID, commits []ingest.CommitInfo) error {
 	return s.writeSessionCommits(ctx, sessionID, commits, true)
+}
+
+// WriteSessionCommitProjection replaces or merges the current commit
+// projection and leaves sessions.artifact_hash alone. A detection-only
+// refresh has no new file manifest: the saved pair is still the one the
+// hash names, so clearing it would drop provenance and make the next harvest
+// treat a valid pair as unidentified. The extraction path uses the same
+// projection helper inside the mirror transaction, then restores the digest.
+// This write has nothing to restore, so it never clears the column.
+// preserveExisting false replaces the projection. true merges. The
+// association ledger stays append-only either way.
+func (s *Store) WriteSessionCommitProjection(ctx context.Context, sessionID ingest.SessionID, commits []ingest.CommitInfo, preserveExisting bool) (err error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return fmt.Errorf("store.WriteSessionCommitProjection: take connection for session %s: %w; no commit rows were changed and the saved pair identity was left intact; restore database access and retry", sessionID, err)
+	}
+	defer s.pool.Put(conn)
+
+	endFn := sqlitex.Transaction(conn)
+	defer endFn(&err)
+	if err = upsertSessionCommitsOnConn(conn, sessionID, commits, preserveExisting); err != nil {
+		return fmt.Errorf("store.WriteSessionCommitProjection: write the current commit projection for session %s: %w; the projection write was rolled back and the saved pair identity was left intact; restore database access and retry", sessionID, err)
+	}
+	return nil
 }
 
 func (s *Store) writeSessionCommits(ctx context.Context, sessionID ingest.SessionID, commits []ingest.CommitInfo, preserveExisting bool) (err error) {

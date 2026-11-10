@@ -53,7 +53,7 @@ func saveMetricsOnConn(conn *sqlite.Conn, m *ingest.SessionMetrics, inputHash, o
 	}
 	args := []any{
 		string(m.SessionID),
-		derefInt(m.TurnCount),
+		nil, // turn_count is retired; the conversation count lives in session_captured_stats
 		derefInt(m.SubagentCount),
 		derefString2(m.TitleGenerated),
 		derefSessionOutcome(m.Outcome),
@@ -105,9 +105,9 @@ func saveMetricsOnConn(conn *sqlite.Conn, m *ingest.SessionMetrics, inputHash, o
 		// the captured stats row now. The analysis record keeps only its
 		// analysis columns (peak context, quality, cost, versions); the
 		// moved measurements go out through the derived upsert below.
-		// Positions: 1 turn_count, 2 subagent_count, 7 output_tokens,
-		// 8 tool_calls, 11 duration_minutes.
-		args[1], args[2], args[7], args[8], args[11] = nil, nil, nil, nil, nil
+		// Positions: 2 subagent_count, 7 output_tokens, 8 tool_calls,
+		// 11 duration_minutes.
+		args[2], args[7], args[8], args[11] = nil, nil, nil, nil
 	}
 	if err := sqlitex.ExecuteTransient(conn, sqlSaveMetrics, &sqlitex.ExecOptions{
 		Args: args,
@@ -140,7 +140,6 @@ func upsertDerivedStatsOnConn(conn *sqlite.Conn, m *ingest.SessionMetrics) (bool
 	}
 	return upsertCapturedStatsOnConn(conn, CapturedStats{
 		SessionID:     schema.SessionID(m.SessionID),
-		TurnCount:     m.TurnCount,
 		SubagentCount: m.SubagentCount,
 		TokensOut:     m.OutputTokens,
 		ToolCallCount: m.ToolCalls,

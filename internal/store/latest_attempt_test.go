@@ -60,6 +60,56 @@ func storedArtifactHash(t *testing.T, s *Store, sid schema.SessionID) (string, b
 	return value, found
 }
 
+// sessionAdapterRevision reads the session row's adapter stamp, distinguishing
+// NULL.
+func sessionAdapterRevision(t *testing.T, s *Store, sid schema.SessionID) *int {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatalf("Pool.Take: %v", err)
+	}
+	defer s.pool.Put(conn)
+	var version *int
+	if err := sqlitex.ExecuteTransient(conn, `SELECT adapter_version FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				value := stmt.ColumnInt(0)
+				version = &value
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read session adapter revision: %v", err)
+	}
+	return version
+}
+
+// generationAdapterRevision reads one immutable generation row's adapter
+// revision, distinguishing NULL.
+func generationAdapterRevision(t *testing.T, s *Store, sid schema.SessionID, generationID string) *int {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatalf("Pool.Take: %v", err)
+	}
+	defer s.pool.Put(conn)
+	var version *int
+	if err := sqlitex.ExecuteTransient(conn, `SELECT adapter_version FROM session_generations WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(sid), generationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if stmt.ColumnType(0) != sqlite.TypeNull {
+				value := stmt.ColumnInt(0)
+				version = &value
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read generation adapter revision: %v", err)
+	}
+	return version
+}
+
 // setStoredArtifactHash seeds the session's stored pair identity directly, the
 // state a legacy row carries once the pipeline has established it.
 func setStoredArtifactHash(t *testing.T, s *Store, sid schema.SessionID, hash string) {
@@ -155,7 +205,13 @@ func TestLatestAttemptPreviewOverFullAuthority(t *testing.T) {
 	seedFullAuthority(t, s, sid)
 	setStoredArtifactHash(t, s, sid, identity)
 
-	outcome, err := s.ActivateGeneration(context.Background(), previewCandidate(t, sid, "gen_preview_b"))
+	if seeded := sessionAdapterRevision(t, s, sid); seeded != nil {
+		t.Fatalf("seeded session adapter = %v, want NULL before a retained attempt", *seeded)
+	}
+	adapterTarget := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].AdapterVersion
+	candidate := previewCandidate(t, sid, "gen_preview_b")
+	candidate.Generation.Generation.Metadata.AdapterVersion = &adapterTarget
+	outcome, err := s.ActivateGeneration(context.Background(), candidate)
 	if err != nil {
 		t.Fatalf("latest-attempt activation: %v", err)
 	}
@@ -164,6 +220,35 @@ func TestLatestAttemptPreviewOverFullAuthority(t *testing.T) {
 	}
 	if active, readErr := s.activeGenerationID(context.Background(), sid); readErr != nil || active != "gen_full_prior" {
 		t.Fatalf("active = %q (err=%v), want the full authority", active, readErr)
+	}
+	// The active authority and its generation row stay untouched, but the
+	// session stamp advances to the revision the retained attempt parsed.
+	if stamped := sessionAdapterRevision(t, s, sid); stamped == nil || *stamped != adapterTarget {
+		t.Fatalf("session adapter after retention = %v, want %d", stamped, adapterTarget)
+	}
+	if prior := generationAdapterRevision(t, s, sid, "gen_full_prior"); prior != nil {
+		t.Fatalf("active generation adapter = %v, want its own NULL revision", *prior)
+	}
+	if retained := generationAdapterRevision(t, s, sid, "gen_preview_b"); retained == nil || *retained != adapterTarget {
+		t.Fatalf("retained generation adapter = %v, want %d", retained, adapterTarget)
+	}
+	// A stored revision ahead of the attempt is producer evidence and must not
+	// be lowered by a repeat retention. A fresh identifier with the same
+	// binding exercises the true-no-op route, which still reads the faces.
+	execGenerationSQL(t, s, `UPDATE sessions SET adapter_version = 9 WHERE session_id = '`+string(sid)+`';`)
+	repeat, repeatBlobs := buildTestGeneration(t, sid, "gen_preview_b2", "preview text", "preview input", "preview output")
+	repeat.Generation.Metadata.AdapterVersion = &adapterTarget
+	if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{
+		Generation:     repeat,
+		Blobs:          repeatBlobs,
+		IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion,
+		IndexedAtMs:    3,
+		ContentCapture: sourceOmittedPreviewWrite(),
+	}); err != nil {
+		t.Fatalf("repeat latest-attempt activation: %v", err)
+	}
+	if stamped := sessionAdapterRevision(t, s, sid); stamped == nil || *stamped != 9 {
+		t.Fatalf("repeat retention changed the stored revision: %v, want 9", stamped)
 	}
 	pointer := latestAttemptPointerFor(t, s, sid)
 	if pointer.generationID != "gen_preview_b" {

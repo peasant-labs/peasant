@@ -50,6 +50,7 @@ func TestExportSession_CarriesControlKind(t *testing.T) {
 	if err := testutil.WriteFullEntries(context.Background(), db, sid, entries); err != nil {
 		t.Fatalf("WriteFullEntries: %v", err)
 	}
+	seedConversationTurnCount(t, context.Background(), db, sessionID, entries)
 
 	payload, err := export.ExportSession(context.Background(), db, testutil.NewMemFS(), sessionID)
 	if err != nil {

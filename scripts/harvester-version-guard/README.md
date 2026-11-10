@@ -7,12 +7,16 @@ nix develop -c make check-harvester-versions BASE=<base-commit> CANDIDATE=HEAD
 ```
 
 Working edits are excluded. The PR test workflow compares its base SHA with the
-checked-out candidate. Each parser capture uses `go test -race`; ordinary builds
+checked-out candidate. Each parser capture uses `go test -race` with the native
+cases in parallel; the fan-out is the guard's own concurrent code. Ordinary builds
 do not invoke the guard.
 
 The runner archives both revisions into a temporary directory and runs one shared
-probe over both revisions' existing named synthetic corpora. Each corpus is fed
-unchanged to both implementations. It compares native adapter extraction and
+probe over both revisions' existing named synthetic corpora. The candidate
+corpus pass observes every case it declares; the base pass replays the shared
+cases whose bodies changed, so an edit is judged against the old bytes. A case
+the probe did not actually process fails the run. Each corpus is fed unchanged
+to both implementations. It compares native adapter extraction and
 OpenCode SQLite materialization separately from completion-checked index
 results (the data accepted for persistence, including authoritative full content
 where supported). It never opens the user's native
@@ -22,15 +26,23 @@ Every changed harness must increase its affected `AdapterVersion` or
 `IndexerVersion` in `internal/ingest/harvester_versions.go`. Shared helpers can
 require several harness bumps. Failure becoming success, or success becoming
 failure, is a behavior change. A new fixture alone causes no bump when both
-parsers produce the same result. Old fixture inputs remain covered even if the
-candidate edits or removes them. There are no editable expected digests.
+parsers produce the same result. Old fixture inputs remain covered when the
+candidate edits them; a removal is caught by the `required_cases` manifest.
+There are no editable expected digests.
 
 Inputs come from the native Claude/Codex/Cursor E2E manifests, Strike protocol
 files, Pi capture and native-v3 structure cases, and the named index-completion
 and OpenCode native fixture families.
 Existing required-name manifests remain enforced. The OpenCode SQLite builder
 is copied identically into both temporary trees so builder changes cannot be
-mistaken for parser changes. A newly registered harness without observations
+mistaken for parser changes. Each case directory is cleared before a capture, so
+a `-wal`/`-shm` sidecar left by the first capture of a pass cannot be read with
+the second capture's main file.
+
+The base corpus is read with the current strict loader: any base whose corpus
+uses only today's case fields loads, but removing a field -- or adding a required
+one -- makes older bases fail the guard rather than the comparison, so that
+change needs a guard-side migration. A newly registered harness without observations
 fails; add it to the probe using an existing synthetic corpus.
 Historical revisions without Pi do not simulate a Pi parser. When a corpus
 predates Pi, registered Pi parsers use the candidate's first native corpus;

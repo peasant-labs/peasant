@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/attachments"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -282,6 +283,11 @@ type Store struct {
 	// writeConfig carries the resolved write.* budgets for the staging and
 	// activation lanes (see WithWriteConfig).
 	writeConfig ingest.WriteConfig
+	// attachmentDir is the content-addressed image directory beside the database.
+	attachmentDir string
+	// attachments is the one file-and-row store for this database. Put, GC, and
+	// prune share its lock. It is constructed in Open and never replaced.
+	attachments *attachments.Store
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,
@@ -502,6 +508,16 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		_ = pool.Close()
 		return nil, err
 	}
+	// The pre-migration version decides whether the one-time Go backfills
+	// below run. A fresh database (version zero) is built at head and needs
+	// none; a database already at head must not re-fold its sessions on every
+	// open.
+	versionBeforeMigration, err := readPragmaInt(conn, "PRAGMA user_version")
+	if err != nil {
+		pool.Put(conn)
+		_ = pool.Close()
+		return nil, fmt.Errorf("store: read the pre-migration schema version: %w", err)
+	}
 	if !o.skipMigrations {
 		if err := refuseUnmappableCaptureFormats(conn); err != nil {
 			pool.Put(conn)
@@ -541,6 +557,19 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 			_ = pool.Close()
 			return nil, fmt.Errorf("store: apply V23 data migration: %w", err)
 		}
+
+		// V71 Go-driven phase: a store upgraded from a pre-V71 version folds
+		// each managed session's stored entries once and records the
+		// conversation turn count. A fresh baseline and an already-upgraded
+		// store skip it, so a normal open never pays for the fold.
+		if shouldBackfillConversationTurnCounts(versionBeforeMigration) {
+			report, err := backfillConversationTurnCounts(pool)
+			if err != nil {
+				_ = pool.Close()
+				return nil, fmt.Errorf("store: apply the conversation turn count backfill: %w", err)
+			}
+			logConversationTurnCountBackfill(report)
+		}
 	} else {
 		// The caller guarantees the schema: the newer-schema check above
 		// already ran on this connection, so return it before the salt
@@ -556,7 +585,8 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: load installation salt: %w", err)
 	}
 
-	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker}
+	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker, attachmentDir: AttachmentDir(dbPath)}
+	opened.attachments = attachments.New(opened.attachmentDir, attachmentRows{opened}, attachments.Hooks{})
 	opened.writeConfig = resolveStoreWriteConfig(o.writeConfig)
 	return opened, nil
 }

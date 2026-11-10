@@ -321,11 +321,11 @@ func TestFullContentLegacyBackfillAndKeyset(t *testing.T) {
 	if _, err := s.ReadSessionEntries(ctx, id, ingest.SessionEntryReadOptions{Mode: ingest.SessionEntryReadFullContent}); err == nil {
 		t.Fatal("legacy full read succeeded")
 	}
-	targets, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", 1)
+	targets, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", 1, ingest.AllStoredSessions())
 	if err != nil || len(targets) != 1 || targets[0].SessionID != id {
 		t.Fatalf("first targets: %v %v", targets, err)
 	}
-	later, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, id, 1)
+	later, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, id, 1, ingest.AllStoredSessions())
 	if err != nil || len(later) != 1 || later[0].SessionID != next {
 		t.Fatalf("later targets: %v %v", later, err)
 	}
@@ -363,7 +363,7 @@ PRAGMA ignore_check_constraints=OFF;`)
 
 	// One eligible row is behind two ineligible ones, so a page of one proves
 	// the LIMIT counted only eligible rows.
-	targets, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", 1)
+	targets, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", 1, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("first page: %v", err)
 	}
@@ -373,14 +373,14 @@ PRAGMA ignore_check_constraints=OFF;`)
 	if targets[0].Harness != ingest.HarnessClaudeCode {
 		t.Fatalf("recoverable target lost its harness: %+v", targets[0])
 	}
-	page, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", 3)
+	page, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, "", 3, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("full page: %v", err)
 	}
 	if len(page) != 1 || page[0].SessionID != recoverable {
 		t.Fatalf("unrecognised sessions were offered as recovery targets: %+v", page)
 	}
-	after, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, recoverable, 1)
+	after, err := s.ListContentCaptureIncompleteSessionsAfter(ctx, recoverable, 1, ingest.AllStoredSessions())
 	if err != nil || len(after) != 0 {
 		t.Fatalf("the walk did not end after the last eligible session: %v %v", after, err)
 	}

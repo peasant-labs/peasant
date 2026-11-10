@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/selectionfilter"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -275,7 +276,7 @@ func TestOpenCodeProjectDirectoriesReachHarvestCohortPreparation(t *testing.T) {
 			},
 		},
 	}
-	filter, _ := buildSelectionFilterWithResolver(cfg, git, ingest.NewPhysicalPathResolver())
+	filter, _ := selectionfilter.New(cfg, git, ingest.NewPhysicalPathResolver())
 	outputDir, err := ingest.NewResolvedPath(world.outputDir)
 	if err != nil {
 		t.Fatalf("resolve harvest output directory: %v", err)

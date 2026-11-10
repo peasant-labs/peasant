@@ -262,7 +262,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   const frameHasTurns = turns.length > 0;
   const segmentRead = useTranscriptSegments({
     sessionId,
-    enabled: detail != null && !frameHasTurns && detail.turnCount > 0,
+    enabled: detail != null && !frameHasTurns,
     frameRevision: detail?.revision ?? '',
     jumpAnchor: requestedTurn,
   });

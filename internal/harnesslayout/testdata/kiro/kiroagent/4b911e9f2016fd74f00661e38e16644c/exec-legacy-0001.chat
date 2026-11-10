@@ -1,0 +1,22 @@
+{
+  "executionId": "exec-legacy-0001",
+  "actionId": "act",
+  "context": [],
+  "validations": {},
+  "chat": [
+    {"role": "human", "content": "<identity>\nfixture system prompt\n</identity>"},
+    {"role": "bot", "content": ""},
+    {"role": "tool", "content": "fixture workspace tree"},
+    {"role": "bot", "content": "I will follow these instructions."},
+    {"role": "human", "content": "legacy-chat fixture prompt that must never leak"},
+    {"role": "bot", "content": "fixture reply <tool_use><name>readFile</name></tool_use> and <tool_use><name>runCommand</name></tool_use>"}
+  ],
+  "metadata": {
+    "modelId": "claude-haiku-4.5",
+    "modelProvider": "qdev",
+    "workflow": "act",
+    "workflowId": "wf-legacy-0001",
+    "startTime": 1767225600000,
+    "endTime": 1767225610000
+  }
+}

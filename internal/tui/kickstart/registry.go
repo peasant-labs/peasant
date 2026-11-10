@@ -1,238 +1,87 @@
 package kickstart
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
-	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
-// Options carries the runtime seams the kickstart registry composes over. Every
-// field is data the legacy wizard already resolved from the same places
-// (discovery/inventory, existing credentials, the Claude retention file); the
-// registry stays declarative by taking them as inputs rather than reaching for
-// os/discovery itself.
+// Options carries the runtime seams the kickstart presentation composes over.
+// Copy, option menus, and visibility live on the shared onboarding model.
 type Options struct {
 	// Source feeds the selection tree its provider->remote->worktree->session
 	// forest. In production it is the real scanner adapter over discovery; in the
 	// dev loop and tests it is scannerfix.FixtureTreeSource.
 	Source kit.TreeSource
-	// VillageConnected gates the destination/visibility fields, which only make
-	// sense once a village login has succeeded. It remains the static fallback
-	// for callers such as config Screen that do not need live authentication.
+	// VillageConnected gates the destination field when no live function is set.
 	VillageConnected bool
 	// VillageConnectedFunc reports live connection state for the guided Program.
-	// When present it takes precedence over VillageConnected, allowing one
-	// mounted Registry and Flow to reveal sharing after login without replacing
-	// any field instance or presentation state.
+	// When present it takes precedence over VillageConnected.
 	VillageConnectedFunc func() bool
-	// ClaudeSessionsPresent gates the Claude transcript-retention field, which is
-	// only offered when Claude sessions were discovered (legacy shouldSkip parity).
+	// ClaudeSessionsPresent gates the Claude transcript-retention field.
 	ClaudeSessionsPresent bool
-	// Preview loads the transcript shown beside the selection tree for the
-	// highlighted row. When nil the step renders the tree alone.
+	// Preview loads the transcript shown beside the selection tree. When nil
+	// the step renders the tree alone.
 	Preview kit.BodySource
 }
 
-// Section keys are stable identifiers the flow steps through and the equivalence
-// and smoke tests address by name.
+// Section keys are the shared model's section tokens.
 const (
-	SectionSelection   = "selection"
-	SectionAutoIngest  = "auto-ingest"
-	SectionPublication = "publication"
-	SectionAutoPublish = "auto-publish"
-	SectionPrivacy     = "privacy"
-	SectionLicense     = "license"
-	SectionDestination = "destination"
-	SectionRetention   = "retention"
+	SectionSelection   = string(onboarding.FlowSelection)
+	SectionAutoIngest  = string(onboarding.FlowAutoIngest)
+	SectionPublication = string(onboarding.FlowPublication)
+	SectionAutoPublish = string(onboarding.FlowAutoPublish)
+	SectionPrivacy     = string(onboarding.FlowPrivacy)
+	SectionLicense     = string(onboarding.FlowLicense)
+	SectionDestination = string(onboarding.FlowDestination)
+	SectionRetention   = string(onboarding.FlowRetention)
 )
 
-// Field keys are stable within their section.
+// Field keys are the shared model's field tokens.
 const (
-	FieldSelection   = "transcripts"
-	FieldAutoIngest  = "auto-ingest-new-branches"
-	FieldPublication = "publication-preference"
-	FieldAutoPublish = "publish-automatically"
-	FieldPrivacy     = "redaction-level"
-	FieldLicense     = "content-license"
-	FieldVisibility  = "default-visibility"
-	FieldRetention   = "claude-retention-days"
+	FieldSelection   = string(onboarding.FieldSelection)
+	FieldAutoIngest  = string(onboarding.FieldAutoIngest)
+	FieldPublication = string(onboarding.FieldPublication)
+	FieldAutoPublish = string(onboarding.FieldAutoPublish)
+	FieldPrivacy     = string(onboarding.FieldPrivacy)
+	FieldLicense     = string(onboarding.FieldLicense)
+	FieldVisibility  = string(onboarding.FieldVisibility)
+	FieldRetention   = string(onboarding.FieldRetention)
 )
-
-// neverExpireDays is the cleanupPeriodDays value that keeps Claude Code
-// transcripts forever. It matches the legacy onboarding sentinel so the
-// retention write path receives the same value it always has.
-const neverExpireDays = 99999
 
 // RecommendedRetentionDays is the retention choice a first-run flow starts on
-// when Claude Code has no cleanup period set: keep transcripts forever, the
-// safe default for peasant users who want their history preserved.
-const RecommendedRetentionDays = neverExpireDays
+// when Claude Code has no cleanup period set.
+const RecommendedRetentionDays = onboarding.RecommendedRetentionDays
 
-// licenseNone is the sentinel label/value for "no default push license".
-const licenseNone = "none (do not attach a license)"
-
-// BuildRegistry composes the kickstart onboarding as a settings.Registry: the
-// selection tree, the conditional auto-ingest-new-branches toggle, the
-// publication preference, the "publish automatically?" intent, the privacy
-// (redaction) choice, and the content-license choice. The village
-// destination/visibility and Claude retention fields are gated by opts. Final
-// review and save guidance belongs to each presentation rather than appearing
-// here as a false setting.
-//
-// Every field edits the draft through an Accessor whose target IS the real
-// config.Config layout, so a committed draft is field-for-field the same shape
-// the ingest pipeline, push, discovery, and prune already consume - there is no
-// parallel model to keep in sync.
+// BuildRegistry adapts the shared model into a settings.Registry. It switches
+// on field kind and carries no copy, no option set, and no visibility rule.
 func BuildRegistry(opts Options) settings.Registry {
-	sections := []settings.Section{
-		{
-			Key:   SectionSelection,
-			Title: "choose sessions to import",
-			Fields: []settings.Field{
-				settings.Tree(FieldSelection, "", selectionAccessor(), opts.Source,
-					selectionTreeOptions(opts)...),
-			},
-		},
-		{
-			Key:   SectionAutoIngest,
-			Title: "auto-ingest new branches",
-			Guide: sectionGuide(
-				"decide how future branches enter your saved local selection.",
-				"this applies only to new branches in projects selected in full.",
-				"it never broadens an explicit branch or session selection.",
-			),
-			// Only offered for a narrowed selection: with mode:all every future
-			// branch is already ingested, so the question is meaningless.
-			When: func(d *settings.Draft) bool {
-				return d.Working().Selection.Mode == config.SelectionModeSelected
-			},
-			Fields: []settings.Field{
-				settings.WithDescription(
-					settings.Toggle(FieldAutoIngest, "auto-ingest new branches in fully-selected projects", autoIngestAccessor()),
-					"turn this on to import new branches of a fully-selected project without asking again."),
-			},
-		},
-		{
-			Key:   SectionPublication,
-			Title: "publication",
-			Guide: sectionGuide(
-				"choose whether to keep transcripts local or plan to publish later.",
-				"this only records a preference; kickstart itself publishes nothing.",
-				"nothing is published now, and nothing is published when kickstart finishes.",
-				"to publish later, run `peasant village push` as a separate, explicit step.",
-			),
-			// Always offered: the keep-local choice is a first-class decision every
-			// first-run user should see, not the side effect of declining a connect
-			// prompt. It stands independent of any village connection.
-			Fields: []settings.Field{
-				settings.WithDescription(
-					settings.Radio(FieldPublication, "publication preference", publicationAccessor(), publicationOptions()...),
-					"keep local means nothing ever leaves this machine until you explicitly publish."),
-			},
-		},
-		{
-			Key:   SectionAutoPublish,
-			Title: "auto-publish",
-			// One question, two answers, and one line under the question. The
-			// answer is an intent only: which folders publish, and to which
-			// collectives, is chosen later in settings, so kickstart saves no
-			// rule and installs no hook whatever the answer. Always offered,
-			// because the intent needs no village connection.
-			Guide: sectionGuide(autoPublishNote),
-			Fields: []settings.Field{
-				settings.Radio(FieldAutoPublish, "publish automatically?", autoPublishAccessor(), autoPublishOptions()...),
-			},
-		},
-		{
-			Key:   SectionPrivacy,
-			Title: "privacy",
-			// The before/after examples render beside the radio control in a
-			// scrollable split pane (see the Fields entry below), not inline
-			// under this guide, so the control itself never scrolls off the
-			// smallest supported terminal. Guide.Example stays populated with
-			// the same provider so it remains directly callable (e.g. by
-			// tests) independent of that split rendering.
-			Guide: &settings.Guide{
-				Intro: "preview how standard redaction changes your text before you publish.",
-				// The canonical project-identity sentence (config.ProjectIdentitySentence),
-				// shared verbatim with the push wizard's noticePanel so the two
-				// surfaces cannot describe this differently. It replaced a hint
-				// that said standard "hides project identity" - the opposite of
-				// what this epoch made the default (D8: the repository label and
-				// git remote are sent unless explicitly withheld).
-				Hints:              []string{config.ProjectIdentitySentence()},
-				Example:            privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
-				ExampleInSplitPane: true,
-			},
-			Fields: []settings.Field{
-				settings.WithExamplePane(
-					settings.WithDescription(
-						settings.Radio(FieldPrivacy, "redaction level", privacyAccessor(), privacyOptions()...),
-						"choose how much sensitive data peasant removes before a later explicit publication; this does not rewrite local imports."),
-					privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
-				),
-			},
-		},
-		{
-			Key:   SectionLicense,
-			Title: "content license",
-			Guide: sectionGuide(
-				"choose the default license for a later explicit publish.",
-				"no license is the default unless your loaded config already chose one.",
-				"no license keeps all rights; anyone who wants to reuse the transcript must ask.",
-			),
-			Fields: []settings.Field{
-				settings.WithDescription(
-					settings.Radio(FieldLicense, "default license attached to pushed transcripts", licenseAccessor(), licenseOptions()...),
-					"choose the license peasant attaches when you push a transcript to peasant online."),
-			},
-		},
-		{
-			Key:   SectionDestination,
-			Title: "sharing",
-			Guide: sectionGuide(
-				"choose who may see transcripts after a later explicit publish.",
-				"private means only you; group means group members; public means anyone.",
-				"saving this default does not publish anything.",
-			),
-			// Only meaningful once a village connection exists: the default
-			// visibility governs transcripts PUSHED to that village. With no
-			// village connected there is nowhere to push, so the question is
-			// hidden (its edits are dropped before the receipt).
-			When: func(_ *settings.Draft) bool {
-				return opts.villageConnected()
-			},
-			Fields: []settings.Field{
-				settings.WithDescription(
-					settings.Radio(FieldVisibility, "default visibility for pushed transcripts", visibilityAccessor(), visibilityOptions()...),
-					"choose who can see a transcript by default after you push it."),
-			},
-		},
-		{
-			Key:   SectionRetention,
-			Title: "claude retention",
-			Guide: sectionGuide(
-				"choose how long claude code keeps its source transcript files.",
-				"the selected value is applied after config saves and before local import.",
-				"changing claude retention does not delete transcripts already imported into peasant.",
-			),
-			// Only offered when Claude Code sessions were discovered: the field
-			// edits Claude Code's own cleanup setting, which is meaningless when no
-			// Claude sessions exist (legacy shouldSkip parity).
-			When: func(_ *settings.Draft) bool {
-				return opts.ClaudeSessionsPresent
-			},
-			Fields: []settings.Field{
-				settings.WithDescription(
-					settings.Radio(FieldRetention, "how long claude code keeps its transcripts", retentionAccessor(), retentionOptions()...),
-					"choose when claude code deletes its own transcript files."),
-			},
-		},
+	model := onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeFull})
+	sections := make([]settings.Section, 0, len(model.SectionStops()))
+	for _, stop := range model.SectionStops() {
+		if len(stop.Fields) != 1 || stop.Fields[0] == nil {
+			panic(fmt.Errorf("adapt setup stop %s: a settings section has one field", stop.Key))
+		}
+		field := stop.Fields[0]
+		example := adaptExample(field)
+		adapted := adaptField(field, opts)
+		if stop.Guide.ExampleInSplitPane {
+			adapted = settings.WithExamplePane(adapted, example)
+		}
+		sections = append(sections, settings.Section{
+			Key:    stop.Key.String(),
+			Title:  stop.Title,
+			Fields: []settings.Field{adapted},
+			When:   adaptWhen(stop, opts),
+			Guide:  adaptGuide(stop, example),
+		})
 	}
 	return settings.Registry{Sections: sections}
 }
@@ -244,15 +93,199 @@ func (o Options) villageConnected() bool {
 	return o.VillageConnected
 }
 
-// sectionGuide keeps the canonical registry's optional framing concise and
-// static. It describes a section without changing its fields or visibility.
-func sectionGuide(intro string, hints ...string) *settings.Guide {
-	return &settings.Guide{Intro: intro, Hints: hints}
+func adaptWhen(stop onboarding.Stop, opts Options) func(*settings.Draft) bool {
+	if len(stop.Visible) == 0 {
+		return nil
+	}
+	conditions := append([]onboarding.Condition(nil), stop.Visible...)
+	return func(d *settings.Draft) bool {
+		return onboarding.ConditionsHold(conditions, presentationContext(d, opts))
+	}
 }
 
-// selectionTreeOptions composes the selection tree's options: the harness facet
-// gutter always, and the side preview only when the mount supplied a source for
-// it (a run with no readable local store renders the tree alone).
+func presentationContext(d *settings.Draft, opts Options) onboarding.WriteContext {
+	var cfg *config.Config
+	if d != nil {
+		cfg = d.Working()
+	}
+	return onboarding.WriteContext{
+		Config:           cfg,
+		VillageConnected: opts.villageConnected(),
+		ClaudeSessions:   opts.ClaudeSessionsPresent,
+	}
+}
+
+func adaptGuide(stop onboarding.Stop, example settings.GuideExampleFunc) *settings.Guide {
+	if stop.Guide.Intro == "" && len(stop.Guide.Hints) == 0 && !stop.Guide.ExampleInSplitPane {
+		return nil
+	}
+	guide := &settings.Guide{
+		Intro:              stop.Guide.Intro,
+		Hints:              append([]string(nil), stop.Guide.Hints...),
+		ExampleInSplitPane: stop.Guide.ExampleInSplitPane,
+	}
+	if stop.Guide.ExampleInSplitPane {
+		guide.Example = example
+	}
+	return guide
+}
+
+func adaptField(field onboarding.Field, opts Options) settings.Field {
+	key := field.Key().String()
+	label := field.Label()
+	var adapted settings.Field
+	switch field.Kind() {
+	case onboarding.FieldKindToggle:
+		adapted = settings.Toggle(key, label, boolAccessor(field))
+	case onboarding.FieldKindChoice:
+		adapted = settings.Radio(key, label, stringAccessor(field), radioOptions(field)...)
+	case onboarding.FieldKindTree:
+		adapted = settings.Tree(key, label, treeAccessor(field), opts.Source, selectionTreeOptions(opts)...)
+	default:
+		panic(fmt.Errorf(
+			"adapt setup field %s.\nwhat: kind %s has no settings control.\nwhy: the terminal registry only mounts toggle, choice, and tree fields.\nwhere: kickstart.BuildRegistry.\nwhen: the shared model was adapted.\nmeans: the registry was not built.\nfix: keep phase action and notice fields off the settings sections.",
+			key, field.Kind()))
+	}
+	if field.Description() != "" {
+		adapted = settings.WithDescription(adapted, field.Description())
+	}
+	return adapted
+}
+
+func radioOptions(field onboarding.Field) []settings.Option[string] {
+	options := field.Options()
+	out := make([]settings.Option[string], len(options))
+	for i, option := range options {
+		out[i] = settings.Option[string]{
+			Label:       option.Label,
+			Value:       option.Value,
+			Description: option.Description,
+		}
+	}
+	return out
+}
+
+func boolAccessor(field onboarding.Field) settings.Accessor[bool] {
+	return settings.Accessor[bool]{
+		Get: func(cfg *config.Config) bool {
+			value, err := field.Read(cfg)
+			if err != nil {
+				return false
+			}
+			on, err := onboarding.BoolToken(value)
+			if err != nil {
+				return false
+			}
+			return on
+		},
+		Set: func(cfg *config.Config, on bool) {
+			_ = field.Write(cfg, onboarding.WriteContext{Config: cfg}, onboarding.BoolValue(on))
+		},
+	}
+}
+
+func stringAccessor(field onboarding.Field) settings.Accessor[string] {
+	return settings.Accessor[string]{
+		Restore: func(dst, src *config.Config) { _ = field.Restore(dst, src) },
+		Get: func(cfg *config.Config) string {
+			value, err := field.Read(cfg)
+			if err != nil {
+				return ""
+			}
+			if token, err := onboarding.StringToken(value); err == nil {
+				return token
+			}
+			// An integer choice is stored as a JSON number and shown as its decimal token.
+			if number, err := onboarding.IntToken(value); err == nil {
+				return strconv.Itoa(number)
+			}
+			return ""
+		},
+		Set: func(cfg *config.Config, token string) {
+			_ = field.Write(cfg, onboarding.WriteContext{Config: cfg}, onboarding.StringValue(token))
+		},
+	}
+}
+
+func treeAccessor(field onboarding.Field) settings.Accessor[settings.TreeSelection] {
+	return settings.Accessor[settings.TreeSelection]{
+		Get: func(cfg *config.Config) settings.TreeSelection {
+			if cfg == nil {
+				return settings.TreeSelection{}
+			}
+			return settings.TreeSelection{Mode: cfg.Selection.Mode, Harnesses: cfg.Selection.Harnesses}
+		},
+		Set: func(cfg *config.Config, selection settings.TreeSelection) {
+			value, err := onboarding.SelectionMappingValue(selection.Mode, selection.Harnesses)
+			if err != nil {
+				return
+			}
+			_ = field.Write(cfg, onboarding.WriteContext{Config: cfg}, value)
+		},
+	}
+}
+
+func retentionAccessor() settings.Accessor[int] {
+	model := onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeFull})
+	field, ok := model.Field(onboarding.FieldRetention)
+	if !ok {
+		panic("adapt retention: the shared model has no retention field")
+	}
+	return settings.Accessor[int]{
+		Get: func(cfg *config.Config) int {
+			value, err := field.Read(cfg)
+			if err != nil {
+				return 0
+			}
+			days, err := onboarding.IntToken(value)
+			if err != nil {
+				return 0
+			}
+			return days
+		},
+		Set: func(cfg *config.Config, days int) {
+			_ = field.Write(cfg, onboarding.WriteContext{Config: cfg}, onboarding.IntValue(days))
+		},
+	}
+}
+
+func adaptExample(field onboarding.Field) settings.GuideExampleFunc {
+	return func(_ *settings.Draft) ([]settings.GuideExampleLine, error) {
+		lines, err := field.Example(onboarding.WriteContext{})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]settings.GuideExampleLine, len(lines))
+		for i, line := range lines {
+			kind, err := exampleKind(line.Kind)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = settings.GuideExampleLine{Kind: kind, Text: line.Text}
+		}
+		return out, nil
+	}
+}
+
+func exampleKind(kind onboarding.ExampleLineKind) (settings.GuideExampleLineKind, error) {
+	switch kind {
+	case onboarding.ExampleLineText:
+		return settings.GuideExampleLineText, nil
+	case onboarding.ExampleLineLabel:
+		return settings.GuideExampleLineLabel, nil
+	case onboarding.ExampleLineBefore:
+		return settings.GuideExampleLineBefore, nil
+	case onboarding.ExampleLineAfter:
+		return settings.GuideExampleLineAfter, nil
+	case onboarding.ExampleLineSpacer:
+		return settings.GuideExampleLineSpacer, nil
+	default:
+		return settings.GuideExampleLineUnknown, fmt.Errorf(
+			"adapt privacy example line.\nwhat: kind %s has no guide role.\nwhy: the example renderer returned a kind the settings guide does not draw.\nwhere: kickstart example adapter.\nwhen: a privacy example was prepared.\nmeans: the example was withheld.\nfix: return text, label, before, after, or spacer.",
+			kind)
+	}
+}
+
 func selectionTreeOptions(opts Options) []settings.TreeOption {
 	out := []settings.TreeOption{
 		settings.WithFacet(settings.MetaHarness, "harness"),
@@ -271,242 +304,35 @@ func selectionTreeOptions(opts Options) []settings.TreeOption {
 	return out
 }
 
-// harnessDisplayName renders a harness the way this flow's chrome names it: the
-// canonical schema.HarnessDisplayName, lowercased, because every chrome string
-// here is lowercase. It is the ONE renderer the facet gutter and the session
-// preview share, so a harness is never named two ways in one screen.
 func harnessDisplayName(harness string) string {
 	return strings.ToLower(schema.HarnessDisplayName(defaults.Harness(harness)))
 }
 
-// harnessFacetLabel renders one harness value of the selection tree's facet
-// gutter.
 func harnessFacetLabel(harness string) string { return harnessDisplayName(harness) }
 
-// selectionAccessor lenses the config's SelectionConfig into the tree's
-// TreeSelection (mode + per-harness allowlist). The AutoIngestNewBranches flag is
-// owned by its own toggle field. A project-first all-checked forest now derives
-// an exact selected-mode project list, so this legacy mode-all branch is reached
-// only before the dedicated conversion boundary replaces an old policy.
-func selectionAccessor() settings.Accessor[settings.TreeSelection] {
-	return settings.Accessor[settings.TreeSelection]{
-		Get: func(cfg *config.Config) settings.TreeSelection {
-			return settings.TreeSelection{
-				Mode:      cfg.Selection.Mode,
-				Harnesses: cfg.Selection.Harnesses,
-			}
-		},
-		Set: func(cfg *config.Config, v settings.TreeSelection) {
-			cfg.Selection.Mode = v.Mode
-			cfg.Selection.Harnesses = v.Harnesses
-			if v.Mode == config.SelectionModeAll {
-				// Preserve compatibility for a non-project-first settings forest.
-				cfg.Selection.AutoIngestNewBranches = true
-			}
-		},
+func adaptNextSteps(steps []onboarding.NextStep) []NextStepKind {
+	out := make([]NextStepKind, 0, len(steps))
+	for _, step := range steps {
+		kind, ok := kickstartNextStep(step)
+		if !ok {
+			return []NextStepKind{NextStepUnknown}
+		}
+		out = append(out, kind)
 	}
+	return out
 }
 
-func autoIngestAccessor() settings.Accessor[bool] {
-	return settings.Accessor[bool]{
-		Get: func(cfg *config.Config) bool { return cfg.Selection.AutoIngestNewBranches },
-		Set: func(cfg *config.Config, v bool) { cfg.Selection.AutoIngestNewBranches = v },
-	}
-}
-
-func privacyAccessor() settings.Accessor[redact.RedactionLevel] {
-	return settings.Accessor[redact.RedactionLevel]{
-		Get: func(cfg *config.Config) redact.RedactionLevel { return cfg.Redaction.Level },
-		Set: func(cfg *config.Config, v redact.RedactionLevel) { cfg.Redaction.Level = v },
-	}
-}
-
-func privacyOptions() []settings.Option[redact.RedactionLevel] {
-	opts := make([]settings.Option[redact.RedactionLevel], 0, len(config.OfferedRedactionLevels))
-	for _, level := range config.OfferedRedactionLevels {
-		opts = append(opts, settings.Option[redact.RedactionLevel]{
-			Label:       level.String(),
-			Value:       level,
-			Description: privacyLevelDescription(level),
-		})
-	}
-	return opts
-}
-
-// privacyLevelDescription states, in plain language, what each redaction level
-// removes. The text is keyed by the level so the menu stays honest when the set
-// of offered levels widens. A level with no entry gets no help line.
-func privacyLevelDescription(level redact.RedactionLevel) string {
-	switch level {
-	case redact.Minimal:
-		return "removes secrets and file paths. keeps personal data and project identity."
-	case redact.Standard:
-		return "removes secrets, file paths, personal data, and project identity. keeps git remote urls and branch names."
-	case redact.Maximum:
-		return "removes everything standard removes, plus git remotes, branch names, and code identifiers."
+func kickstartNextStep(step onboarding.NextStep) (NextStepKind, bool) {
+	switch step {
+	case onboarding.NextStepConfig:
+		return NextStepConfig, true
+	case onboarding.NextStepWebStart:
+		return NextStepWebStart, true
+	case onboarding.NextStepVillageLogin:
+		return NextStepVillageLogin, true
+	case onboarding.NextStepVillagePush:
+		return NextStepVillagePush, true
 	default:
-		return ""
-	}
-}
-
-// visibilityAccessor lenses the config's default push visibility. It is the real
-// config.Push.Visibility field the push wizard and `peasant village push` already
-// consume, so a choice made here is the same value those paths read - no parallel
-// model.
-func visibilityAccessor() settings.Accessor[config.Visibility] {
-	return settings.Accessor[config.Visibility]{
-		Get: func(cfg *config.Config) config.Visibility { return cfg.Push.Visibility },
-		Set: func(cfg *config.Config, v config.Visibility) { cfg.Push.Visibility = v },
-	}
-}
-
-func visibilityOptions() []settings.Option[config.Visibility] {
-	opts := make([]settings.Option[config.Visibility], 0, len(schema.AllVisibilities))
-	for _, v := range schema.AllVisibilities {
-		opts = append(opts, settings.Option[config.Visibility]{
-			Label:       string(v),
-			Value:       config.Visibility(v),
-			Description: visibilityDescription(v),
-		})
-	}
-	return opts
-}
-
-// visibilityDescription states who can see a transcript at each visibility. The
-// text is keyed by the value so the menu stays honest as the set widens.
-func visibilityDescription(v schema.Visibility) string {
-	switch v {
-	case schema.VisibilityPrivate:
-		return "only you can see the transcript."
-	case schema.VisibilityGroup:
-		return "members of your group can see the transcript."
-	case schema.VisibilityPublic:
-		return "anyone can see the transcript."
-	default:
-		return ""
-	}
-}
-
-// publicationAccessor lenses the config's stored publication preference. It reads
-// and writes the raw stored value so an untouched field never rewrites the config
-// (a legacy file with no stored preference stays byte-for-byte unchanged). A fresh
-// kickstart draft starts from config.BaseConfig, which defaults to keep-local, so
-// the radio still highlights that safe default on a first run. The value it writes
-// is a preference only; nothing in the flow publishes.
-func publicationAccessor() settings.Accessor[config.SharePreference] {
-	return settings.Accessor[config.SharePreference]{
-		Get: func(cfg *config.Config) config.SharePreference { return cfg.Push.SharePreference },
-		Set: func(cfg *config.Config, v config.SharePreference) {
-			cfg.Push.SharePreference = v
-			// Keep local never coexists with the auto-publish intent.
-			if v == config.SharePreferenceKeepLocal {
-				cfg.Push.AutoPublishIntent = false
-			}
-		},
-	}
-}
-
-func publicationOptions() []settings.Option[config.SharePreference] {
-	return []settings.Option[config.SharePreference]{
-		{
-			Label:       "keep local, do not publish",
-			Value:       config.SharePreferenceKeepLocal,
-			Description: "keep every transcript on this machine. nothing is published until you explicitly run `peasant village push`.",
-		},
-		{
-			Label:       "plan to publish later",
-			Value:       config.SharePreferenceShareLater,
-			Description: "record that you intend to publish later. this still publishes nothing now; sharing remains a separate, explicit push.",
-		},
-	}
-}
-
-// autoPublishNote is the one line under the "publish automatically?" question.
-const autoPublishNote = "you choose which folders go to which collectives in settings later."
-
-// autoPublishAccessor lenses the auto-publish intent. It reads the intent that
-// holds (config.PushConfig.AutoPublishIntended), so a stored intent beside
-// keep-local reads as "not now". "yes" also records that the user plans to
-// publish, because the intent never coexists with keep local; "not now"
-// changes only the intent. Neither answer saves a rule or installs a hook.
-func autoPublishAccessor() settings.Accessor[bool] {
-	return settings.Accessor[bool]{
-		Get: func(cfg *config.Config) bool { return cfg.Push.AutoPublishIntended() },
-		Set: func(cfg *config.Config, v bool) {
-			cfg.Push.AutoPublishIntent = v
-			if v {
-				cfg.Push.SharePreference = config.SharePreferenceShareLater
-			}
-		},
-	}
-}
-
-// autoPublishOptions offers "yes" first and "not now" second, as the question
-// reads. The default is "not now": a config that never answered holds no
-// intent, so the radio starts there.
-func autoPublishOptions() []settings.Option[bool] {
-	return []settings.Option[bool]{
-		{Label: "yes", Value: true},
-		{Label: "not now", Value: false},
-	}
-}
-
-func licenseAccessor() settings.Accessor[config.License] {
-	return settings.Accessor[config.License]{
-		Get: func(cfg *config.Config) config.License { return cfg.Push.License },
-		Set: func(cfg *config.Config, v config.License) { cfg.Push.License = v },
-	}
-}
-
-func licenseOptions() []settings.Option[config.License] {
-	opts := make([]settings.Option[config.License], 0, len(schema.AllLicenses)+1)
-	opts = append(opts, settings.Option[config.License]{
-		Label:       licenseNone,
-		Value:       config.License(""),
-		Description: "attach no license. you keep all rights and others must ask to reuse the transcript.",
-	})
-	for _, l := range schema.AllLicenses {
-		opts = append(opts, settings.Option[config.License]{
-			Label:       l.String(),
-			Value:       config.License(l),
-			Description: licenseDescription(l),
-		})
-	}
-	return opts
-}
-
-// licenseDescription states what each content license permits, in one plain
-// line. The text is keyed by the value so the menu stays honest as it widens.
-func licenseDescription(l schema.License) string {
-	switch l {
-	case schema.LicenseCC0:
-		return "place the transcript in the public domain. anyone may reuse it without credit."
-	case schema.LicenseCCBY:
-		return "allow anyone to reuse the transcript with credit to you."
-	case schema.LicenseCCBYSA:
-		return "allow anyone to reuse the transcript with credit, under this same license."
-	default:
-		return ""
-	}
-}
-
-// retentionAccessor lenses the chosen Claude Code cleanup period. The value is a
-// Claude Code concern (cleanupPeriodDays in ~/.claude/settings.json), not a
-// peasant config value, so the field it targets is transient: it is never
-// written to config.yaml, and the kickstart program hands the committed choice
-// to the existing retention writer after the config save.
-func retentionAccessor() settings.Accessor[int] {
-	return settings.Accessor[int]{
-		Get: func(cfg *config.Config) int { return cfg.ClaudeRetentionDays },
-		Set: func(cfg *config.Config, v int) { cfg.ClaudeRetentionDays = v },
-	}
-}
-
-func retentionOptions() []settings.Option[int] {
-	return []settings.Option[int]{
-		{Label: "30 days", Value: 30, Description: "removes claude transcripts after 30 days. this is the claude code default."},
-		{Label: "90 days", Value: 90, Description: "removes claude transcripts after 90 days."},
-		{Label: "1 year", Value: 365, Description: "removes claude transcripts after 365 days."},
-		{Label: "never expire", Value: neverExpireDays, Description: "keeps claude transcripts forever. recommended for peasant users."},
+		return NextStepUnknown, false
 	}
 }

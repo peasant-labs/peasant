@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/export"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/push"
@@ -362,4 +364,105 @@ func piFixtureEntry(t *testing.T, sid schema.SessionID, index int, e piProjectio
 		t.Fatal(err)
 	}
 	return entry
+}
+
+// TestPiV1IngestCarriesOneConversationTurnCount proves the production V1 entry
+// lane records the producer's conversation count for a non-native session. A
+// Pi capture writes indexformat.V1 entries, not a managed generation, so the
+// count must come from that write; nothing else supplies it, and no
+// captured-stats seed is written here. Detail, list, export and publication
+// must all report the two conversation turns (the system row is served but
+// excluded from the conversation count).
+func TestPiV1IngestCarriesOneConversationTurnCount(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	sid := schema.SessionID(testutil.TestSessionUUID)
+	root := filepath.Join(t.TempDir(), "artifacts")
+	artifacts, err := store.NewOSGenerationArtifactStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locker, err := store.NewFileSessionLocker(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := storetest.OpenWith(t, store.WithPoolSize(2), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
+	ingested := int64(3)
+	rawTurns := 3
+	submissions := int64(1)
+	// The adapter's own document reports its raw record count; the producer's
+	// conversation count is what the store must serve.
+	meta := &ingest.UnifiedMetadata{
+		SchemaVersion: ingest.CurrentSchemaVersion,
+		SessionID:     sid,
+		ModelHarness:  schema.HarnessPi,
+		Model:         "fixture-model",
+		CWD:           "/fixture",
+		HostSlug:      "testslug",
+		Project:       schema.ProjectContext{Hash: schema.ProjectHash(strings.Repeat("a", 64)), Name: "testproj", FilePath: "/fixture"},
+		Timestamp:     schema.TimestampInfo{Start: 1, End: 2, Ingested: &ingested},
+		Source:        schema.SourceInfo{FilePath: "/fixture.jsonl", Format: schema.SourceFormatJSONL},
+		Stats:         schema.SessionStats{TurnCount: rawTurns, InputSubmissionCount: &submissions},
+	}
+	meta.ContentHash = strings.Repeat("b", 64)
+	meta.MetadataHash = schema.ComputeMetadataHash(meta)
+	revisions, err := db.InsertSessionsWithRevisions(ctx, []ingest.StoreEntry{{Metadata: meta, PublicationCapture: true, CWDProvenance: ingest.CWDSourceExact}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, system, assistant := "run the checks", "mode: normal", "done"
+	entries := []schema.SessionEntry{
+		piFixtureEntry(t, sid, 0, piProjectionEntry{ID: "u1", Role: "user", Content: user}),
+		piFixtureEntry(t, sid, 1, piProjectionEntry{ID: "s1", Role: "system", Content: system}),
+		piFixtureEntry(t, sid, 2, piProjectionEntry{ID: "a1", Role: "assistant", Content: assistant}),
+	}
+	writes := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+		SessionID: sid, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, IndexerVersion: 1, IndexedAtMs: 4,
+		RequireFullContent: true, CaptureRevision: revisions[sid],
+		ContentCapture: ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceProviderSource, TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: 4},
+	}})
+	if len(writes) != 1 || writes[0].Err != nil {
+		t.Fatalf("index Pi session through the V1 lane: %v", writes)
+	}
+	const want = 2
+	// A V1 Pi session serves from its stored entries, not a managed
+	// generation, so the detail is the provider's session projection.
+	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
+	session, err := provider.SessionByID(ctx, string(sid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := transcript.SessionToDetailValidated(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.TurnCount != want {
+		t.Fatalf("detail turnCount = %d, want %d", detail.TurnCount, want)
+	}
+	sessions, err := provider.Sessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Metadata.TurnCount != want {
+		t.Fatalf("list turnCount = %+v, want %d", sessions, want)
+	}
+	exported, err := export.ExportSession(ctx, db, testutil.NewMemFS(), string(sid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exported.TurnCount != want {
+		t.Fatalf("export turnCount = %d, want %d", exported.TurnCount, want)
+	}
+	bundle, _, err := push.LoadPublicationInput(ctx, db, string(sid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A legacy V1 input has no managed snapshot detail; the published
+	// envelope's stats are the publication count the upload sends.
+	if bundle.Readiness != ingest.PublicationReady {
+		t.Fatalf("publication readiness = %v, want ready", bundle.Readiness)
+	}
+	if bundle.Metadata.Stats.TurnCount != want {
+		t.Fatalf("publication metadata turnCount = %d, want %d", bundle.Metadata.Stats.TurnCount, want)
+	}
 }

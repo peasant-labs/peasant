@@ -400,7 +400,27 @@ func rollbackSessionEntrySavepoint(conn *sqlite.Conn, savepointName string, caus
 	return cause, false
 }
 
+// indexSessionEntriesOnConn replaces the V1 mirror rows and records the
+// producer's conversation turn count for a session that has no activation lane.
 func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
+	outcome, err := indexSessionEntriesRowsOnConn(conn, sessionID, entries, stmts)
+	if err != nil {
+		return outcome, err
+	}
+	native, err := isNativeSessionOnConn(conn, sessionID)
+	if err != nil {
+		return outcome, err
+	}
+	if !native {
+		count := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
+		if err := writeConversationTurnCountOnConn(conn, sessionID, count); err != nil {
+			return outcome, err
+		}
+	}
+	return outcome, nil
+}
+
+func indexSessionEntriesRowsOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
 	for _, entry := range entries {
 		if entry.SessionID != sessionID {
 			return sessionEntryWriteOutcome{}, publicationRepairError("entry session identity differs from index request; existing entries were not changed")

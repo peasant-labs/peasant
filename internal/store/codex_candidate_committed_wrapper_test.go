@@ -156,10 +156,10 @@ func TestCodexCommittedWrapperDetailKeepsLiteralBodies(t *testing.T) {
 	if snapshot.Detail == nil {
 		t.Fatal("committed detail row is absent")
 	}
-	// The committed row copies durable generation stats, not the served header.
-	// The system entry remains in that stored count.
-	if snapshot.Detail.TurnCount != fixture.Expected.TurnCount {
-		t.Errorf("committed detail turn count = %d, want %d", snapshot.Detail.TurnCount, fixture.Expected.TurnCount)
+	// The committed row copies the durable generation stats: conversation turns,
+	// with the system entry excluded.
+	if snapshot.Detail.TurnCount != fixture.Expected.ConversationTurnCount {
+		t.Errorf("committed detail turn count = %d, want %d", snapshot.Detail.TurnCount, fixture.Expected.ConversationTurnCount)
 	}
 	if snapshot.Detail.Title == nil || *snapshot.Detail.Title != fixture.Expected.Title {
 		t.Errorf("committed detail title = %v, want the literal %q", snapshot.Detail.Title, fixture.Expected.Title)
@@ -181,8 +181,8 @@ func TestCodexCommittedWrapperDetailKeepsLiteralBodies(t *testing.T) {
 	}
 
 	err = s.WithSessionSnapshot(ctx, sessionID, func(read indexformat.ReadSnapshot) error {
-		if read.Metadata.Stats.TurnCount != fixture.Expected.TurnCount {
-			return fmt.Errorf("durable snapshot turn count = %d, want %d", read.Metadata.Stats.TurnCount, fixture.Expected.TurnCount)
+		if read.Metadata.Stats.TurnCount != fixture.Expected.ConversationTurnCount {
+			return fmt.Errorf("durable snapshot turn count = %d, want %d", read.Metadata.Stats.TurnCount, fixture.Expected.ConversationTurnCount)
 		}
 		if fixture.Expected.InputSubmissionCount != nil {
 			got := read.Metadata.Stats.InputSubmissionCount
