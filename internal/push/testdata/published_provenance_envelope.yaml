@@ -137,7 +137,9 @@ cases:
       requiredCapabilities: [session_graph_provenance_v1]
       mirrors: true
       detail:
-        turnCount: 4
+        # The metadata part carries the durable generation mirror (four); the
+        # published detail reports the conversation turns a reader sees.
+        turnCount: 1
         inputSubmissionCount: 0
         rootSessionId: target
         purpose: interaction
@@ -199,15 +201,15 @@ cases:
     advertisement: graph
     redaction: none
     entries: provenance
-    # The durable turn mirror differs from len(Turns) so this case proves the
-    # published turnCount is the captured generation mirror, not a recount.
+    # The durable turn mirror (seven) stays on the metadata part; the published
+    # detail reports the conversation turns a reader sees.
     generationTurnCount: 7
     expect:
       uploads: 1
       requiredCapabilities: [session_graph_provenance_v1]
       mirrors: true
       detail:
-        turnCount: 7
+        turnCount: 1
         inputSubmissionCount: 3
         rootSessionId: target
         purpose: interaction

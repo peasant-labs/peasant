@@ -118,7 +118,7 @@ export function MapShell({
   projectName: string;
   showLedger?: boolean;
 }) {
-  const { data: sessionsData, connected, error: sessionsError } = useChannel<SessionsPayload>(SESSIONS_SUB);
+  const { data: sessionsData, connected, channelFault: sessionsFault } = useChannel<SessionsPayload>(SESSIONS_SUB);
   const navigate = useNavigate();
   const nowMs = useMemo(() => Date.now(), []);
 
@@ -408,9 +408,9 @@ export function MapShell({
     >
 
       {/* One-line state notes keep stale or degraded data unambiguous. */}
-      {sessionsError ? <StatusNote>live updates stopped. the map still works; reload the page to refresh the conversation list.</StatusNote> : null}
-      {!sessionsError && !sessionsData ? <StatusNote>{connected ? 'waiting for live updates. the map is ready.' : CONNECTION.staleNote}</StatusNote> : null}
-      {!sessionsError && !connected && sessionsData && <StatusNote>{CONNECTION.staleNote}</StatusNote>}
+      {sessionsFault ? <StatusNote>{sessionsFault.message}</StatusNote> : null}
+      {!sessionsFault && !sessionsData ? <StatusNote>{connected ? 'waiting for live updates. the map is ready.' : CONNECTION.staleNote}</StatusNote> : null}
+      {!sessionsFault && !connected && sessionsData && <StatusNote>{CONNECTION.staleNote}</StatusNote>}
       {graph && !graph.repoFound && (
         <StatusNote>
           this folder isn&rsquo;t a git repository, so the map shows recorded work only.

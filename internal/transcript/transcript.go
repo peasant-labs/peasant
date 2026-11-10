@@ -454,7 +454,18 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 			role = schema.RoleSystem
 		}
 
+		// The producer's control classification is set on the depth-0 turn it
+		// describes and nowhere else. A depth-1 block part type is conversation
+		// structure, never a control kind, so the guard is part of the rule.
+		var controlKind *string
+		if e.Depth == 0 && e.PartType != nil {
+			if kind := ingest.ControlRecordKindFor(e.Harness, *e.PartType); kind != "" {
+				controlKind = &kind
+			}
+		}
+
 		t := ingest.Turn{
+			ControlKind:    controlKind,
 			SourceEntryRef: evidence[e.EntryIndex].SourceRef,
 			Usage:          evidence[e.EntryIndex].Usage,
 			Provenance:     copyProvenance(e.Provenance),
@@ -577,13 +588,15 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra)
 		hasContent := strings.TrimSpace(t.Content) != ""
 		hasTools := len(t.ToolCalls) > 0
 		hasObservation := turnObservations[t.Index].present
-		// A managed generation puts a source ref on every entry, including a
-		// control record that carries no conversation. Those empty system turns
-		// are headers over an empty body in the viewer, so suppress them while
-		// keeping every other source-referenced empty turn as the evidence
-		// boundary it is.
-		suppressibleEmpty := t.SourceEntryRef == "" || (t.Role == schema.RoleSystem && t.EntryType == schema.EntryTypeSystem)
-		if suppressibleEmpty && t.Command == nil && suppressEmptyTurn(hasContent, hasTools, hasObservation) {
+		// An empty depth-0 system turn is never a turn, whatever record kind
+		// produced it: a managed generation puts a source ref on every entry,
+		// and Claude stores control records as entry_type=text plus a part type,
+		// so neither the source ref nor entry_type can stand in for "this is
+		// conversation". The command and suppressEmptyTurn gates still decide
+		// whether a turn that carries content, a tool call, a command or an
+		// observation survives.
+		suppressionCandidate := t.SourceEntryRef == "" || (t.Role == schema.RoleSystem && t.Depth == 0)
+		if suppressionCandidate && t.Command == nil && suppressEmptyTurn(hasContent, hasTools, hasObservation) {
 			continue
 		}
 		filtered = append(filtered, t)
@@ -755,7 +768,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		TotalTokens:          s.Metadata.TotalTokens,
 		TokensIn:             s.Metadata.TokensIn,
 		TokensOut:            s.Metadata.TokensOut,
-		TurnCount:            s.Metadata.TurnCount,
+		TurnCount:            ConversationTurnCount(turns),
 		ToolCallCount:        s.Metadata.ToolCallCount,
 		Turns:                turns,
 		Source:               source,
@@ -795,6 +808,22 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	return detail
 }
 
+// ConversationTurnCount counts the projected turns that are conversation: every
+// turn whose rendered role is not system. System rows stay served (a reader can
+// reveal them and search can land on them), but they are harness state, not
+// turns of the conversation, so the header count does not include them. Every
+// producer path that reports a turn count uses this one function, so the local
+// detail, export and publication cannot disagree about what a turn is.
+func ConversationTurnCount(turns []schema.TurnDetail) int {
+	count := 0
+	for _, turn := range turns {
+		if turn.Role != schema.RoleSystem {
+			count++
+		}
+	}
+	return count
+}
+
 // turnsToDetail converts folded turns to wire turns. It is the single
 // turn-projection site for main turns and every earlier-history partition, so
 // the two cannot drift in what a turn carries.
@@ -822,6 +851,7 @@ func turnsToDetail(folded []ingest.Turn) []schema.TurnDetail {
 			}
 		}
 		turns[i] = schema.TurnDetail{
+			ControlKind:      t.ControlKind,
 			SourceEntryRef:   schema.SourceEntryRef(t.SourceEntryRef),
 			Provenance:       t.Provenance,
 			Usage:            t.Usage,

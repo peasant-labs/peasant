@@ -1,0 +1,37 @@
+cases:
+  - name: consecutive wordless turns render no files-read panel
+    search: ''
+    workingDirectory: /workspace/transcript
+    turns:
+      - index: 1
+        toolPath: /workspace/transcript/src/index.ts
+      - index: 2
+        toolPath: /workspace/transcript/src/index.ts
+      - index: 3
+        toolPath: /workspace/transcript/src/lib/api.ts
+    expectedTurns: [1, 2, 3]
+    expectedAbsentTurns: []
+    expectedToolPaths:
+      - /workspace/transcript/src/index.ts
+      - /workspace/transcript/src/lib/api.ts
+    expectedFilesTabPaths:
+      - /workspace/transcript/src/index.ts
+      - /workspace/transcript/src/lib/api.ts
+    expectedFileRowCount: 2
+  - name: a file-scoped link still filters wordless turns without a panel
+    search: 'scope=file&scopeVal=/workspace/transcript/src/lib/api.ts'
+    workingDirectory: /workspace/transcript
+    turns:
+      - index: 1
+        toolPath: /workspace/transcript/src/index.ts
+      - index: 2
+        toolPath: /workspace/transcript/src/index.ts
+      - index: 3
+        toolPath: /workspace/transcript/src/lib/api.ts
+    expectedTurns: [3]
+    expectedAbsentTurns: [1, 2]
+    expectedToolPaths:
+      - /workspace/transcript/src/lib/api.ts
+    expectedFilesTabPaths:
+      - /workspace/transcript/src/lib/api.ts
+    expectedFileRowCount: 1

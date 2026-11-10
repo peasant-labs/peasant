@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
@@ -86,8 +87,10 @@ const sqlEntryIsClearCommand = `(e.role = 'system' AND (
   OR ltrim(e.content_preview, char(32, 9, 10, 13)) GLOB '<command-message>*</command-message>*<command-name>/clear</command-name>*'))`
 
 // sqlEntryIsCompaction matches the compaction markers: Claude's boundary, a
-// Codex control record, and an OpenCode part.
-const sqlEntryIsCompaction = `e.part_type IN ('compact-boundary', 'compacted', 'compaction')`
+// Codex control record, and an OpenCode part. The first two labels are named by
+// the indexer, which is the one definition of each; OpenCode's part type is the
+// raw wire value it was stored from, so it is spelled here.
+const sqlEntryIsCompaction = `e.part_type IN ('` + ingest.ClaudeCompactBoundaryLabel + `', '` + ingest.CodexTypeCompacted + `', 'compaction')`
 
 // sqlEntryIsGeneratedSummary matches the compaction summary of a native Codex
 // or OpenCode session, which carries no part type. Nothing else writes this

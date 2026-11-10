@@ -37,7 +37,12 @@ const ws = vi.hoisted(() => ({
 }));
 
 vi.mock('@/contexts/WebSocketContext', () => ({
-  useChannel: () => ({ data: ws.data, connected: ws.connected, error: ws.error, errorCode: ws.errorCode }),
+  useChannel: () => ({
+    data: ws.data,
+    connected: ws.connected,
+    channelFault: ws.error ? { message: ws.error } : null,
+    errorCode: ws.errorCode,
+  }),
 }));
 
 type CodeMapProps = ComponentProps<typeof CodeMapComposition>;
@@ -204,7 +209,7 @@ describe('MapShell — one map without lenses', () => {
   ws.errorCode = 'selection_visibility';
     render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} />);
     expect(await screen.findByTestId('map-canvas')).toBeInTheDocument();
-    expect(screen.getByText(/live updates stopped/)).toBeInTheDocument();
+    expect(screen.getByText(/live session updates failed/)).toBeInTheDocument();
   });
 
   it('shows the shimmer (never a blank screen) while the graph loads', async () => {

@@ -366,8 +366,10 @@ func (e *symlinkCycleFound) Error() string {
 }
 
 // checkOwnedImports fails on the first Go source under repoRoot that imports
-// the upstream driver module. Paths with a .git or node_modules part are not
-// owned source and are skipped.
+// the upstream driver module. Paths with a .git, node_modules, or vendor part
+// are not owned source and are skipped: a Nix build vends the module's
+// dependencies before it runs the tests, and a vendored dependency's own
+// imports are not Peasant's.
 func checkOwnedImports(repoRoot string) error {
 	rootInfo, err := os.Stat(repoRoot)
 	if err != nil {
@@ -413,7 +415,7 @@ func walkOwnedTree(fsPath, rel string, ancestors []os.FileInfo) error {
 		}
 		skipped := false
 		for _, part := range strings.Split(childRel, "/") {
-			if part == ".git" || part == "node_modules" {
+			if part == ".git" || part == "node_modules" || part == "vendor" {
 				skipped = true
 				break
 			}

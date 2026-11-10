@@ -7,7 +7,7 @@ import { ServerCapabilitiesProvider } from '@/contexts/ServerCapabilitiesContext
 import { PublishProvider } from '@/contexts/PublishContext';
 import { AppSidebarLayout } from '@/lib/ft-ui';
 import { LocalSidebar } from '@/components/LocalSidebar';
-import { LocalOfflineNotice } from '@/components/LocalOfflineNotice';
+import { PageNotices } from '@/components/PageNotices';
 import { CommandPalette } from '@/components/command/CommandPalette';
 import { DevAnnotateOverlay } from '@/components/dev/DevAnnotateOverlay';
 import { playEnter } from '@/lib/motion/enter';
@@ -69,7 +69,7 @@ export function LayoutShell({ children }: { children: ReactNode }) {
     <WebSocketProvider>
       <ServerCapabilitiesProvider>
         <PublishProvider>
-          <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<LocalOfflineNotice />} mainAs="main">
+          <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} mainAs="main">
             {children}
           </AppSidebarLayout>
           <PageEnter />

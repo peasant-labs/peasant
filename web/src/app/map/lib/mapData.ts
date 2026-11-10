@@ -35,9 +35,9 @@ import type {
 /**
  * Query-param names read by the Map page (`/map/{project}?node=`).
  * `Node` re-exports the viewer-owned `MapNodeParam` (scopeTurns.ts) — one
- * source of truth for the deep-link param that the touched-files panel and
- * the Map origin crumb emit. Values are repo-relative `MapNode.id` paths on
- * both ends. (The v2 `?lens=` param died with the lens switcher.)
+ * source of truth for the deep-link param the Map origin crumb emits. Values
+ * are repo-relative `MapNode.id` paths on both ends. (The v2 `?lens=` param
+ * died with the lens switcher.)
  */
 export const MapParam = {
   Project: 'project',

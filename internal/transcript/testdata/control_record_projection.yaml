@@ -1,0 +1,211 @@
+cases:
+  - name: claude_attachment_no_preview_suppressed
+    level: entries_to_turns
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: text, part_type: attachment, source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+  - name: claude_control_whitespace_only_suppressed
+    level: entries_to_turns
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: text, part_type: mode, content: "   ", source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+  # Two origin records (Claude's last-prompt and file-history-snapshot) share one
+  # projected shape: a depth-0 system text row with no part type and no content.
+  # The origin-specific proof lives in internal/ingest/testdata/control_record_absence.yaml;
+  # these two names pin that one shape from both origins deliberately, so neither
+  # origin can drift into a different stored shape.
+  - name: claude_last_prompt_empty_suppressed
+    level: entries_to_turns
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: text, source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+  - name: claude_file_history_snapshot_empty_suppressed
+    level: entries_to_turns
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: text, source_ref: "source:1"}
+      - {index: 2, role: assistant, entry_type: text, content: "checks are running", source_ref: "source:2"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 2, role: assistant, content: "checks are running"}
+  - name: claude_permission_mode_with_preview_kept
+    level: entries_to_turns
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: text, part_type: permission-mode, content: "permission mode: acceptEdits", source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 1, role: system, content: "permission mode: acceptEdits", control_kind: permission-mode}
+  - name: claude_mode_with_preview_kept
+    level: entries_to_turns
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: text, part_type: mode, content: "mode: normal", source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 1, role: system, content: "mode: normal", control_kind: mode}
+  - name: claude_compact_boundary_is_system_notice
+    level: entries_to_turns
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: system, part_type: compact-boundary, content: "Conversation compacted", source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 1, role: system, content: "Conversation compacted"}
+  - name: claude_depth_one_control_part_type_not_classified
+    level: entries_to_turns
+    harness: claude-code
+    # The producer classification is depth-0 only. A depth-1 block that carries
+    # a control part type is conversation structure, so it must survive with no
+    # control kind; this fails if the depth guard is dropped from the fold.
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: assistant, entry_type: text, content: "reading the fixture", source_ref: "source:1"}
+      - {index: 2, role: system, entry_type: text, part_type: mode, content: "mode: normal", source_ref: "source:2", depth: 1}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 1, role: assistant, content: "reading the fixture"}
+        - {index: 2, role: system, content: "mode: normal"}
+  - name: claude_artifact_prefixed_kept
+    level: entries_to_turns
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: text, part_type: artifact-transcript, content: "transcript artifact", source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 1, role: system, content: "transcript artifact", control_kind: artifact-transcript}
+  - name: claude_ordinary_system_message_with_content_kept
+    level: entries_to_turns
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: system, content: "Build finished in 12s", source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 1, role: system, content: "Build finished in 12s"}
+  - name: codex_compacted_kept
+    level: entries_to_turns
+    harness: codex
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "inspect the fixture", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: system, part_type: compacted, content: "Context compacted", source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "inspect the fixture"}
+        - {index: 1, role: system, content: "Context compacted"}
+  - name: codex_empty_control_suppressed
+    level: entries_to_turns
+    harness: codex
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "inspect the fixture", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: system, part_type: world_state, source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "inspect the fixture"}
+  - name: codex_expected_turn_list_unchanged
+    level: entries_to_turns
+    harness: codex
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "inspect the fixture", source_ref: "source:0"}
+      - {index: 1, role: assistant, entry_type: text, content: "I will inspect the fixture now.", source_ref: "source:1"}
+      - {index: 2, role: system, entry_type: system, part_type: world_state, content: "state: synthetic", source_ref: "source:2"}
+      - {index: 3, role: system, entry_type: system, part_type: compacted, content: "Context compacted", source_ref: "source:3"}
+      - {index: 4, role: system, entry_type: system, part_type: sub_agent_activity, content: "Sub-agent activity: started /root/worker", source_ref: "source:4"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "inspect the fixture"}
+        - {index: 1, role: assistant, content: "I will inspect the fixture now."}
+        - {index: 2, role: system, content: "state: synthetic", control_kind: world_state}
+        - {index: 3, role: system, content: "Context compacted"}
+        - {index: 4, role: system, content: "Sub-agent activity: started /root/worker", control_kind: sub_agent_activity}
+  - name: opencode_orphan_part_not_control
+    level: entries_to_turns
+    harness: opencode
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "inspect the fixture", source_ref: "source:0"}
+      - {index: 1, role: assistant, entry_type: text, content: "I will inspect the fixture now.", source_ref: "source:1"}
+      - {index: 2, role: assistant, entry_type: text, depth: 1, content: "orphan block text", source_ref: "source:2"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "inspect the fixture"}
+        - {index: 1, role: assistant, content: "I will inspect the fixture now."}
+        - {index: 2, role: assistant, content: "orphan block text"}
+  - name: pi_carrier_never_a_turn
+    level: entries_to_turns
+    harness: pi
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "inspect the fixture", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: system, part_type: pi.carrier, source_ref: "source:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "inspect the fixture"}
+  - name: surviving_turn_indices_unchanged
+    level: entries_to_turns
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: text, part_type: attachment, source_ref: "source:1"}
+      - {index: 2, role: assistant, entry_type: text, content: "checks are running", source_ref: "source:2"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 2, role: assistant, content: "checks are running"}
+  - name: control_kind_present_only_on_control_turns
+    level: session_to_detail
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: system, entry_type: text, part_type: mode, content: "mode: normal", source_ref: "source:1"}
+      - {index: 2, role: system, entry_type: text, part_type: attachment, source_ref: "source:2"}
+      - {index: 3, role: system, entry_type: system, content: "Build finished in 12s", source_ref: "source:3"}
+      - {index: 4, role: assistant, entry_type: text, content: "checks are running", source_ref: "source:4"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 1, role: system, content: "mode: normal", control_kind: mode}
+        - {index: 3, role: system, content: "Build finished in 12s"}
+        - {index: 4, role: assistant, content: "checks are running"}
+      turn_count: 2
+  - name: earlier_history_control_kind_present
+    level: session_to_detail
+    harness: claude-code
+    entries:
+      - {index: 0, role: user, entry_type: text, content: "run the checks", source_ref: "source:0"}
+      - {index: 1, role: assistant, entry_type: text, content: "checks are running", source_ref: "source:1"}
+    earlier_history:
+      - state: uncertain_migrated
+        entries:
+          - {index: 0, role: assistant, entry_type: text, content: "earlier answer", source_ref: "earlier:0"}
+          - {index: 1, role: system, entry_type: text, part_type: permission-mode, content: "permission mode: auto", source_ref: "earlier:1"}
+    expected:
+      turns:
+        - {index: 0, role: user, content: "run the checks"}
+        - {index: 1, role: assistant, content: "checks are running"}
+      earlier_history_turns:
+        - {index: 0, role: assistant, content: "earlier answer"}
+        - {index: 1, role: system, content: "permission mode: auto", control_kind: permission-mode}
+      turn_count: 2

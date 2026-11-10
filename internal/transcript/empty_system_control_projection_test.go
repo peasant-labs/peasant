@@ -25,13 +25,16 @@ func TestEntriesToTurns_SuppressesEmptySystemControlTurn(t *testing.T) {
 			ContentPreview: transcriptStringPtr("run the checks"), SourceEntryRef: "source:0",
 		},
 		{
+			// The production stored shape: a Claude control record is
+			// entry_type=text plus a part type, not entry_type=system, so the
+			// suppression rule must not depend on entry type.
 			SessionID: sid, EntryIndex: 1, Harness: schema.HarnessClaudeCode,
-			Role: schema.RoleSystem, EntryType: schema.EntryTypeSystem,
+			Role: schema.RoleSystem, EntryType: schema.EntryTypeText,
 			PartType: &attachment, SourceEntryRef: "source:1",
 		},
 		{
 			SessionID: sid, EntryIndex: 2, Harness: schema.HarnessClaudeCode,
-			Role: schema.RoleSystem, EntryType: schema.EntryTypeSystem,
+			Role: schema.RoleSystem, EntryType: schema.EntryTypeText,
 			PartType: &permission, ContentPreview: transcriptStringPtr("permission mode: acceptEdits"),
 			SourceEntryRef: "source:2",
 		},

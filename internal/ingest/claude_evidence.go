@@ -108,7 +108,9 @@ func (e ClaudeTranscriptEvidence) Fresh(scope ClaudeEvidenceScope, info os.FileI
 // a different version (older or newer) re-mines the row and rewrites it with
 // its own version. Unchanged rows at the current version need no transcript
 // read. Version 3 re-mines rows whose cached Title came from an isMeta record.
-const ClaudeIdentityProofVersion = 3
+// Version 4 re-mines cached rows whose NativeAgentValid was computed before
+// unmarked request-accounting records were admitted.
+const ClaudeIdentityProofVersion = 4
 
 // ClaudeIdentityRecord retains only native structural coordinates, never message
 // text. Repeated session IDs describe the distribution and chain, not ownership.

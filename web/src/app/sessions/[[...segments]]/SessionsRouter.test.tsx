@@ -19,7 +19,7 @@ let channelData: SessionsPayload | undefined = {
   sessions: [makeSession({ id: 'agent-a1' })],
 };
 vi.mock('@/contexts/WebSocketContext', () => ({
-  useChannel: () => ({ data: channelData, connected: true, error: null, errorCode: undefined }),
+  useChannel: () => ({ data: channelData, connected: true, channelFault: null, errorCode: undefined }),
 }));
 
 function okResponse(payload: unknown) {

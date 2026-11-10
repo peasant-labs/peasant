@@ -1493,9 +1493,47 @@ func TestStoreDataProvider_SessionByID_EmptyEntrySuppression(t *testing.T) {
 			ContentPreview: strPtr("Go interfaces are implicit contracts"),
 			HasToolUse:     false,
 		},
+		// The pre-change stored control shape: role=system, entry_type=text,
+		// a part type and a source ref, but no preview. These rows are seeded
+		// directly, bypassing ingest, so the read alone has to suppress them.
+		{
+			SessionID:      sid,
+			EntryIndex:     3,
+			Harness:        defaults.HarnessClaudeCode,
+			EntryType:      ingest.EntryTypeText,
+			Role:           ingest.RoleSystem,
+			TimestampMs:    int64Ptr(1700000003000),
+			PartType:       strPtr("mode"),
+			SourceEntryRef: "source:3",
+		},
+		{
+			SessionID:      sid,
+			EntryIndex:     4,
+			Harness:        defaults.HarnessClaudeCode,
+			EntryType:      ingest.EntryTypeText,
+			Role:           ingest.RoleSystem,
+			TimestampMs:    int64Ptr(1700000004000),
+			SourceEntryRef: "source:4",
+		},
+		// A control record with a preview still renders and keeps its kind.
+		{
+			SessionID:      sid,
+			EntryIndex:     5,
+			Harness:        defaults.HarnessClaudeCode,
+			EntryType:      ingest.EntryTypeText,
+			Role:           ingest.RoleSystem,
+			TimestampMs:    int64Ptr(1700000005000),
+			PartType:       strPtr("permission-mode"),
+			ContentPreview: strPtr("permission mode: auto"),
+			SourceEntryRef: "source:5",
+		},
 	}
 	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
+	}
+	before, err := s.ReadIndexState(ctx, sid)
+	if err != nil || before == nil || before.IndexVersion == nil {
+		t.Fatalf("read stored index state before the detail read: %v", err)
 	}
 
 	sess, err := provider.SessionByID(ctx, "10101010-1010-1010-1010-101010101010")
@@ -1506,15 +1544,92 @@ func TestStoreDataProvider_SessionByID_EmptyEntrySuppression(t *testing.T) {
 		t.Fatal("SessionByID: expected non-nil session")
 	}
 
-	// The empty entry (index 1) must be suppressed; only 2 turns returned.
-	if len(sess.Turns) != 2 {
-		t.Fatalf("Turns: expected 2 after empty-entry suppression, got %d", len(sess.Turns))
+	// The empty entry (index 1) and both headerless control rows (3, 4) must be
+	// suppressed; the two conversation turns and the previewed control record
+	// remain.
+	if len(sess.Turns) != 3 {
+		t.Fatalf("Turns: expected 3 after empty-entry suppression, got %d", len(sess.Turns))
 	}
 	if sess.Turns[0].Content != "Tell me about Go interfaces" {
 		t.Errorf("Turns[0].Content: expected %q, got %q", "Tell me about Go interfaces", sess.Turns[0].Content)
 	}
 	if sess.Turns[1].Content != "Go interfaces are implicit contracts" {
 		t.Errorf("Turns[1].Content: expected %q, got %q", "Go interfaces are implicit contracts", sess.Turns[1].Content)
+	}
+	if sess.Turns[2].Content != "permission mode: auto" {
+		t.Errorf("Turns[2].Content: expected the kept control preview, got %q", sess.Turns[2].Content)
+	}
+	after, err := s.ReadIndexState(ctx, sid)
+	if err != nil || after == nil || after.IndexVersion == nil {
+		t.Fatalf("read stored index state after the detail read: %v", err)
+	}
+	if *after.IndexVersion != *before.IndexVersion {
+		t.Fatalf("stored indexer version changed from %d to %d during a read; suppression must not require a re-ingest", *before.IndexVersion, *after.IndexVersion)
+	}
+}
+
+// TestStoreDataProvider_SessionByID_ControlKind seeds control rows in the
+// stored production shape and asserts the detail read carries the producer's
+// kind on exactly the control-record turns. A compaction notice keeps its
+// system row and carries no kind.
+func TestStoreDataProvider_SessionByID_ControlKind(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	entry := makeStoreEntry(t, "30303030-3030-3030-3030-303030303030", hash1, "github.com-test",
+		defaults.HarnessClaudeCode, day1Ms, 1000, 500, "project-control-kind", 10, 5, 60000)
+	provider := seedStore(t, s, []ingest.StoreEntry{entry})
+
+	sid := ingest.SessionID("30303030-3030-3030-3030-303030303030")
+	entries := []schema.SessionEntry{
+		{
+			SessionID: sid, EntryIndex: 0, Harness: defaults.HarnessClaudeCode,
+			EntryType: ingest.EntryTypeText, Role: ingest.RoleUser,
+			ContentPreview: strPtr("run the checks"), SourceEntryRef: "source:0",
+		},
+		{
+			SessionID: sid, EntryIndex: 1, Harness: defaults.HarnessClaudeCode,
+			EntryType: ingest.EntryTypeText, Role: ingest.RoleSystem,
+			PartType: strPtr("mode"), ContentPreview: strPtr("mode: normal"), SourceEntryRef: "source:1",
+		},
+		{
+			SessionID: sid, EntryIndex: 2, Harness: defaults.HarnessClaudeCode,
+			EntryType: ingest.EntryTypeText, Role: ingest.RoleSystem,
+			PartType: strPtr("attachment"), SourceEntryRef: "source:2",
+		},
+		{
+			SessionID: sid, EntryIndex: 3, Harness: defaults.HarnessClaudeCode,
+			EntryType: ingest.EntryTypeSystem, Role: ingest.RoleSystem,
+			PartType: strPtr("compact-boundary"), ContentPreview: strPtr("Conversation compacted"), SourceEntryRef: "source:3",
+		},
+		{
+			SessionID: sid, EntryIndex: 4, Harness: defaults.HarnessClaudeCode,
+			EntryType: ingest.EntryTypeText, Role: ingest.RoleAssistant,
+			ContentPreview: strPtr("checks are running"), SourceEntryRef: "source:4",
+		},
+	}
+	if err := testutil.WriteFullEntries(ctx, s, sid, entries); err != nil {
+		t.Fatalf("write stored entries: %v", err)
+	}
+
+	sess, err := provider.SessionByID(ctx, "30303030-3030-3030-3030-303030303030")
+	if err != nil {
+		t.Fatalf("SessionByID: %v", err)
+	}
+	if len(sess.Turns) != 4 {
+		t.Fatalf("turns = %d, want 4 (the empty attachment is suppressed)", len(sess.Turns))
+	}
+	wantKinds := map[int]string{1: "mode"}
+	for _, turn := range sess.Turns {
+		var kind string
+		if turn.ControlKind != nil {
+			kind = *turn.ControlKind
+		}
+		want := wantKinds[turn.Index]
+		if kind != want {
+			t.Fatalf("turn %d controlKind = %q, want %q", turn.Index, kind, want)
+		}
 	}
 }
 

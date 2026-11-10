@@ -202,7 +202,7 @@ type codexHistoryRecord struct {
 }
 
 func codexNativeEnvelopeKinds() []string {
-	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, codexTypeCompacted, codexTypeWorldState}
+	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, CodexTypeCompacted, codexTypeWorldState}
 }
 
 // recognizedCodexEnvelopeType reports whether an envelope type advances the

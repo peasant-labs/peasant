@@ -1,6 +1,5 @@
 import { prefilterTurns as packagePrefilterTurns } from '@peasant-labs/fairtrade/ui';
-import type { TurnDetail, ToolCallDetail } from '@/types/messages';
-import { ToolCallKind } from '@/types/messages';
+import type { TurnDetail } from '@/types/messages';
 import {
   mapHref,
   reviewHref,
@@ -43,12 +42,11 @@ export const ScopeParam = {
 
 /**
  * Query param the Map page reads to focus/select a node:
- * `/map/{project}?node=<repo-relative path>`. The viewer is the link *source*
- * (touched-files panel rows, Map origin crumb), so the param is named and
- * documented here; the Map surface should import this constant when it wires
- * selection-restore from the URL instead of re-typing `'node'`. Values are
- * repo-relative paths matching `MapNode.id` (e.g. `internal/ingest`,
- * `web/src/lib/api.ts`) — see `relativizePath` / `collectFileTouches`.
+ * `/map/{project}?node=<repo-relative path>`. The viewer's Map origin crumb
+ * emits it, so the param is named and documented here; the Map surface should
+ * import this constant when it wires selection-restore from the URL instead of
+ * re-typing `'node'`. Values are repo-relative paths matching `MapNode.id`
+ * (e.g. `internal/ingest`, `web/src/lib/api.ts`).
  */
 export const MapNodeParam = 'node';
 
@@ -66,25 +64,8 @@ export const TurnParam = 'turn';
 //
 // Map node ids are repo-relative (`internal/ingest/pipeline.go`) but tool-call
 // `filePath`s are raw wire values — absolute on Claude Code data
-// (`/Users/me/peasant/internal/ingest/pipeline.go`). Everything that crosses
-// the viewer↔Map boundary goes through these two helpers so links carry
-// node-matchable values and file-scope matching tolerates the split.
-
-/**
- * Strip the session's working directory prefix from an absolute tool-call
- * path, yielding the repo-relative form Map nodes use. Paths outside the
- * working directory (or when none is known) are returned unchanged — the
- * suffix-tolerant `pathsMatch` is the fallback for those.
- */
-export function relativizePath(filePath: string, workingDirectory?: string): string {
-  if (!workingDirectory) return filePath;
-  const wd = workingDirectory.endsWith('/') ? workingDirectory : `${workingDirectory}/`;
-  return filePath.startsWith(wd) ? filePath.slice(wd.length) : filePath;
-}
-
-function isAbsoluteFilePath(filePath: string): boolean {
-  return filePath.startsWith('/') || filePath.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(filePath);
-}
+// (`/Users/me/peasant/internal/ingest/pipeline.go`). File-scope matching
+// tolerates that split so the viewer can open aimed at a Map node.
 
 /**
  * True when two paths plausibly refer to the same file, tolerating the
@@ -97,29 +78,6 @@ export function pathsMatch(a: string, b: string): boolean {
   if (a === b) return true;
   if (a.length > b.length) return a.endsWith(`/${b}`);
   return b.endsWith(`/${a}`);
-}
-
-// -- Touch classification ------------------------------------------------------
-
-/**
- * Tool kinds that mutate a file. Mirrors the backend Touch rule:
- * edits are what attribution counts; everything else carrying a filePath is
- * context. Delete/move are file mutations, so they group with edits.
- */
-const EDIT_KINDS: ReadonlySet<string> = new Set([
-  ToolCallKind.Edit,
-  ToolCallKind.Delete,
-  ToolCallKind.Move,
-]);
-
-/** True when the tool call is a file mutation (edit/delete/move with a path). */
-export function isEditTouch(tc: ToolCallDetail): boolean {
-  return !!tc.filePath && tc.toolKind != null && EDIT_KINDS.has(tc.toolKind);
-}
-
-/** True when the tool call carries a file path but is not a mutation (read/search context). */
-export function isReadTouch(tc: ToolCallDetail): boolean {
-  return !!tc.filePath && !isEditTouch(tc);
 }
 
 // -- Scope filtering -----------------------------------------------------------
@@ -256,56 +214,6 @@ export function turnsToMarkdown(turns: TurnDetail[]): string {
  */
 export function prefilterTurns(turns: TurnDetail[]): TurnDetail[] {
   return packagePrefilterTurns(turns);
-}
-
-// -- Touched-files rollup (TouchedFilesRail data) -------------------------------
-
-export interface TurnFileTouches {
-  /** Entry index of the turn (turn.index — matches `#turn-{index}` anchors). */
-  turnIndex: number;
-  /** Deduped file paths mutated in this turn. */
-  edits: string[];
-  /** Deduped read/context paths, excluding paths already listed under edits. */
-  reads: string[];
-}
-
-/**
- * Per-turn file touches for the touched-files panel. A file both edited and
- * read within the same turn appears once, under edits (edits are what
- * attribution counts). Turns with no file-bearing tool calls are omitted.
- *
- * Paths are relativized against `workingDirectory` (when known) so the rows
- * display — and link to the Map with — repo-relative node ids rather than raw
- * absolute wire paths.
- */
-export function collectFileTouches(
-  turns: TurnDetail[],
-  workingDirectory?: string,
-): TurnFileTouches[] {
-  const out: TurnFileTouches[] = [];
-  for (const t of turns) {
-    const edits: string[] = [];
-    const reads: string[] = [];
-    for (const tc of t.toolCalls ?? []) {
-      if (!tc.filePath) continue;
-      const path = relativizePath(tc.filePath, workingDirectory);
-      // A Map node id is always repository-relative. Without the canonical
-      // top-level workingDirectory (or for a path outside it), an absolute
-      // tool path cannot be linked honestly. Legacy nested git context must
-      // never be consulted to manufacture that authority.
-      if (isAbsoluteFilePath(path)) continue;
-      if (isEditTouch(tc)) {
-        if (!edits.includes(path)) edits.push(path);
-      } else if (!reads.includes(path)) {
-        reads.push(path);
-      }
-    }
-    const contextOnly = reads.filter((p) => !edits.includes(p));
-    if (edits.length > 0 || contextOnly.length > 0) {
-      out.push({ turnIndex: t.index, edits, reads: contextOnly });
-    }
-  }
-  return out;
 }
 
 // -- Breadcrumb + chip helpers ---------------------------------------------------

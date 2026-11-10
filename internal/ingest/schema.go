@@ -104,6 +104,12 @@ type Turn struct {
 	TokensIn    *int               // input tokens for this turn
 	TokensOut   *int               // output tokens for this turn
 	PartType    *string            // provider's original part type label; a depth=0 control record keeps its kind here
+
+	// ControlKind is the producer's control-record kind for this turn, or nil.
+	// The fold sets it only on a depth-0 turn, from the entry's harness and part
+	// type through ControlRecordKindFor. A compaction notice keeps its stored
+	// part type but is never a control kind.
+	ControlKind *string
 }
 
 // ToolCall represents a tool invocation within a turn.

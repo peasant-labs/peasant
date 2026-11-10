@@ -1,5 +1,5 @@
 cases:
-  - name: flat git context relativizes touched files
+  - name: flat git context reaches the adapter
     family: flat-git-fields
     harness: antigravity
     turnsMode: populated
@@ -14,7 +14,8 @@ cases:
     legacyWorkingDirectory: /workspace/legacy-project
     filePath: /workspace/flat-project/src/index.ts
     expectedTurnCount: 1
-    expectedFileNode: src/index.ts
+    expectedWorkingDirectory: /workspace/flat-project
+    expectedToolFilePath: /workspace/flat-project/src/index.ts
     expectedScorecardState: absent
   - name: null turns normalize at the mounted boundary
     family: nullable-turns
@@ -31,7 +32,8 @@ cases:
     legacyWorkingDirectory: /workspace/legacy-null-turns
     filePath: ''
     expectedTurnCount: 0
-    expectedFileNode: ''
+    expectedWorkingDirectory: /workspace/null-turns
+    expectedToolFilePath: ''
     expectedScorecardState: absent
   - name: refusal survives canonical transcript adaptation
     family: expanded-stop-reasons
@@ -48,7 +50,8 @@ cases:
     legacyWorkingDirectory: /workspace/legacy-refusal
     filePath: ''
     expectedTurnCount: 1
-    expectedFileNode: ''
+    expectedWorkingDirectory: /workspace/refusal
+    expectedToolFilePath: ''
     expectedScorecardState: absent
   - name: nullable scorecard members reach analytics unchanged
     family: nullable-scorecard-members
@@ -65,9 +68,10 @@ cases:
     legacyWorkingDirectory: /workspace/legacy-scorecard
     filePath: ''
     expectedTurnCount: 1
-    expectedFileNode: ''
+    expectedWorkingDirectory: /workspace/scorecard
+    expectedToolFilePath: ''
     expectedScorecardState: nullable-member
-  - name: legacy working directory cannot relativize touched files
+  - name: legacy working directory never reaches the adapter
     family: legacy-git-context-isolation
     harness: cursor
     turnsMode: populated
@@ -82,5 +86,6 @@ cases:
     legacyWorkingDirectory: /workspace/legacy-only
     filePath: /workspace/legacy-only/src/legacy.ts
     expectedTurnCount: 1
-    expectedFileNode: ''
+    expectedWorkingDirectory: ''
+    expectedToolFilePath: /workspace/legacy-only/src/legacy.ts
     expectedScorecardState: absent

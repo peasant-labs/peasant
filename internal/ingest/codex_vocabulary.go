@@ -17,7 +17,7 @@ var codexVocabulary = recordKindAdapterVocabulary{
 				recordKindLiteral("turn_context", indexformat.OutcomeIgnored),
 				recordKindLiteral("event_msg", indexformat.OutcomeIgnored),
 				recordKindLiteral("response_item", indexformat.OutcomeIgnored),
-				recordKindLiteral(codexTypeCompacted, indexformat.OutcomeControl),
+				recordKindLiteral(CodexTypeCompacted, indexformat.OutcomeControl),
 				recordKindLiteral(codexTypeWorldState, indexformat.OutcomeControl),
 			},
 			Production: func() recordKindProductionSet {

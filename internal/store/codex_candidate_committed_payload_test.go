@@ -57,12 +57,13 @@ type codexCommittedPayloadFixture struct {
 		SubmissionRefs   []string `yaml:"submissionRefs"`
 	} `yaml:"generation"`
 	Expected struct {
-		TurnCount            int                          `yaml:"turnCount"`
-		InputSubmissionCount *int64                       `yaml:"inputSubmissionCount"`
-		Title                string                       `yaml:"title"`
-		TitleRefs            []string                     `yaml:"titleRefs"`
-		MainRefs             []string                     `yaml:"mainRefs"`
-		Main                 []codexCommittedPayloadEntry `yaml:"main"`
+		TurnCount             int                          `yaml:"turnCount"`
+		ConversationTurnCount int                          `yaml:"conversationTurnCount"`
+		InputSubmissionCount  *int64                       `yaml:"inputSubmissionCount"`
+		Title                 string                       `yaml:"title"`
+		TitleRefs             []string                     `yaml:"titleRefs"`
+		MainRefs              []string                     `yaml:"mainRefs"`
+		Main                  []codexCommittedPayloadEntry `yaml:"main"`
 	} `yaml:"expected"`
 	Cases []struct {
 		Name string `yaml:"name"`
@@ -187,8 +188,8 @@ func openCodexCommittedPayloadStore(t *testing.T, dir string) *store.Store {
 
 func assertCodexCommittedPayload(t *testing.T, label string, payload *schema.SessionDetailPayload, fixture codexCommittedPayloadFixture) {
 	t.Helper()
-	if payload.TurnCount != fixture.Expected.TurnCount {
-		t.Errorf("%s turn count = %d, want %d", label, payload.TurnCount, fixture.Expected.TurnCount)
+	if payload.TurnCount != fixture.Expected.ConversationTurnCount {
+		t.Errorf("%s turn count = %d, want %d conversation turns", label, payload.TurnCount, fixture.Expected.ConversationTurnCount)
 	}
 	if len(payload.Turns) != len(fixture.Expected.Main) {
 		t.Fatalf("%s turns = %d, want %d", label, len(payload.Turns), len(fixture.Expected.Main))
@@ -232,9 +233,9 @@ func assertCodexCommittedPayload(t *testing.T, label string, payload *schema.Ses
 // wrapper three ways native case through the real Codex candidate build, the
 // production managed-generation activation, and the durable detail/export
 // payload construction. The serialized bytes must carry every literal body,
-// role, entry type and ref, the measured turn and input submission counts, and
-// the literal title seed, and the resolver must actually hydrate each main
-// content ref.
+// role, entry type and ref, the conversation turn count (the system entry stays
+// served and is not counted), the input submission count, and the literal
+// title seed, and the resolver must actually hydrate each main content ref.
 func TestCodexCommittedWrapperPayloadKeepsLiteralBodies(t *testing.T) {
 	fixture := loadCodexCommittedPayloadFixture(t)
 	sessionID, err := schema.NewSessionID(fixture.Session.ID)

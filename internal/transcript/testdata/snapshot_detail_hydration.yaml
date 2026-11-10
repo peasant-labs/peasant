@@ -44,7 +44,10 @@ cases:
     expectedFoldedTool: {parent: 3, call: e_call1, result: e_result1, arguments: "rg parser", resultText: "parser.go:12 plus fixture result"}
     expectedEarlierCounts: [1]
     expectedInputSubmissionCount: 1
-    expectedTurnCount: 5
+    # The served header counts conversation turns: the system entry at index 1
+    # is served but is not a turn of the conversation, while the stored durable
+    # snapshot still reports five.
+    expectedTurnCount: 4
     expectedTurnContents: {0: "fix parser", 1: "injected AGENTS content", 2: "media display", 3: "I will inspect.", 4: "I will inspect."}
     expectedTurnEntryTypes: {0: text, 1: text, 2: text, 3: text, 4: thinking}
     expectedTurnSubmissions: {0: s_u1, 2: s_u1}
