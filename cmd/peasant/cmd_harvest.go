@@ -23,6 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
+	"github.com/peasant-labs/peasant/internal/selectionfilter"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/spf13/cobra"
@@ -393,10 +394,11 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	}
 
 	// 6d. Saved selection scopes native discovery, not stored maintenance.
-	var selectionConflicts *selectionConflictRecorder
-	implicitSelection := mode != harvestIndexOnly && !flags.all && len(flags.sessionIDs) == 0
-	if implicitSelection && cfg.Selection.Mode == config.SelectionModeSelected {
-		selectionFilter, recorder := buildSelectionFilterWithRecorder(cfg, git)
+	// Index-only, --all, and an explicit --session keep their own scope and do
+	// not apply the saved selection.
+	var selectionConflicts *selectionfilter.ConflictRecorder
+	if harvestAppliesSavedSelection(mode, flags, cfg) {
+		selectionFilter, recorder := selectionfilter.New(cfg, git, ingest.NewPhysicalPathResolver())
 		pipelineCfg.PrepareSessionFilter = selectionFilter.Prepare
 		pipelineCfg.SessionFilter = selectionFilter.Match
 		pipelineCfg.SessionExclusionFilter = selectionFilter.Excludes
@@ -555,7 +557,7 @@ type harvestOutputOptions struct {
 	configPath         string
 	sources            map[defaults.Harness]ingest.SourceConfig
 	customPatternCount int
-	selectionConflicts *selectionConflictRecorder
+	selectionConflicts *selectionfilter.ConflictRecorder
 	indexProfiler      *ingest.IndexProfiler
 	// rebuildAll is set for `harvest index --all`: the run prints the
 	// not-restored summary line at the end.
@@ -585,7 +587,7 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 	}
 	result := execution.result
 	if options.selectionConflicts != nil {
-		options.selectionConflicts.notice(cmd.ErrOrStderr(), options.configPath)
+		options.selectionConflicts.Notice(cmd.ErrOrStderr(), options.configPath)
 	}
 	if options.upgrade.Ran {
 		fmt.Fprintln(cmd.ErrOrStderr(), options.upgrade.Report())
@@ -1598,203 +1600,13 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	}
 }
 
-type selectionConflict struct {
-	session ingest.DiscoveredSession
-	branch  string
-	// entries are the disagreeing entries reported by the matcher itself, not
-	// every entry configured for the harness. Naming the whole harness would
-	// grow less actionable the more projects a user configures — exactly
-	// backwards from what the disclosure is for.
-	entries []ingest.SelectionEntry
-}
-
-type selectionConflictRecorder struct {
-	conflicts []selectionConflict
-}
-
-// entrySeparator joins the disagreeing entries in the withheld-conflict
-// warning. It is named because the boundary is load-bearing for a reader: each
-// entry's identity has to be findable as one run of text, not assembled from
-// pieces of several, so anything asserting about one entry needs the same
-// boundary the renderer used.
-const entrySeparator = " and "
-
-// describeEntries renders the disagreeing entries by the identity the user
-// wrote in their configuration, so the warning names text they can search for.
-func describeEntries(entries []ingest.SelectionEntry) string {
-	rendered := make([]string, len(entries))
-	for i, entry := range entries {
-		rendered[i] = entry.String()
-	}
-	return strings.Join(rendered, entrySeparator)
-}
-
-func (r *selectionConflictRecorder) notice(w io.Writer, configPath string) {
-	const limit = 10
-	for i, conflict := range r.conflicts {
-		if i == limit {
-			fmt.Fprintf(w, "warning: %d additional sessions were withheld because selection rules conflict; inspect %q and edit one project entry or add the branch\n", len(r.conflicts)-limit, configPath)
-			break
-		}
-		fmt.Fprintf(w, "warning: session %s (%s) was withheld during ingest because project selection entries %s disagree on branch %q in %q; the session was not ingested; edit one entry or add the branch\n", conflict.session.SessionID, conflict.session.Harness, describeEntries(conflict.entries), conflict.branch, configPath)
-	}
-}
-
-type preparedHarvestSelection struct {
-	candidate ingest.DiscoveryCandidate
-	decision  ingest.DiscoveryDecision
-	excluded  bool
-	session   ingest.DiscoveredSession
-}
-
-type harvestSelectionFilter struct {
-	matcher               ingest.SelectionMatcher
-	autoIngestNewBranches bool
-	git                   ingest.GitResolver
-	pathResolver          ingest.PathIdentityResolver
-	projectHarnesses      map[ingest.Harness]bool
-	prepared              map[ingest.SessionID]preparedHarvestSelection
-	recordedConflicts     map[ingest.SessionID]bool
-	recorder              *selectionConflictRecorder
-}
-
-func buildSelectionFilterWithRecorder(cfg *config.Config, git ingest.GitResolver) (*harvestSelectionFilter, *selectionConflictRecorder) {
-	return buildSelectionFilterWithResolver(cfg, git, ingest.NewPhysicalPathResolver())
-}
-
-func buildSelectionFilterWithResolver(
-	cfg *config.Config,
-	git ingest.GitResolver,
-	pathResolver ingest.PathIdentityResolver,
-) (*harvestSelectionFilter, *selectionConflictRecorder) {
-	recorder := &selectionConflictRecorder{}
-	projectHarnesses := make(map[ingest.Harness]bool)
-	for harness, selection := range cfg.Selection.Harnesses {
-		if len(selection.Projects) > 0 || len(selection.Exclusions.Branches) > 0 {
-			projectHarnesses[ingest.Harness(harness)] = true
-		}
-	}
-	filter := &harvestSelectionFilter{
-		matcher:               cfg.SelectionMatcher(),
-		autoIngestNewBranches: cfg.Selection.AutoIngestNewBranches,
-		git:                   git,
-		pathResolver:          pathResolver,
-		projectHarnesses:      projectHarnesses,
-		recorder:              recorder,
-	}
-	return filter, recorder
-}
-
-// Prepare materializes every discovered session before the first Match call.
-// Decisions are cached by session ID; Match is lookup-only and fails closed if
-// the pipeline supplies a session outside the prepared cohort.
-func (f *harvestSelectionFilter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSession) error {
-	type gitContext struct{ remote, branch string }
-	resolvedGit := make(map[string]gitContext)
-	inputs := make([]selectionCandidateInput, len(sessions))
-	for index, session := range sessions {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		projectPath := discoveredSessionProjectPath(session)
-		branch := session.Branch
-		gitRemote := ""
-		if (f.projectHarnesses[session.Harness] || f.matcher.DiscoveryNeedsGit(session.Harness, session.SessionID)) && f.git != nil {
-			dir := discoveredSessionGitDirectory(session, projectPath)
-			if dir != "" {
-				gitCtx, ok := resolvedGit[dir]
-				if !ok {
-					if remote, err := f.git.RemoteURL(ctx, dir); err == nil {
-						gitCtx.remote = remote
-					}
-					if resolvedBranch, err := f.git.Branch(ctx, dir); err == nil {
-						gitCtx.branch = resolvedBranch
-					}
-					resolvedGit[dir] = gitCtx
-				}
-				gitRemote = gitCtx.remote
-				if gitCtx.branch != "" {
-					branch = gitCtx.branch
-				}
-			}
-		}
-		inputs[index] = selectionCandidateInput{
-			Harness:     session.Harness,
-			GitRemote:   gitRemote,
-			ProjectName: session.ProjectName,
-			ProjectPath: projectPath,
-			Branch:      branch,
-			SessionID:   session.SessionID,
-		}
-	}
-
-	candidates, err := prepareSelectionCandidates(ctx, inputs, f.pathResolver)
-	if err != nil {
-		return err
-	}
-	f.prepared = make(map[ingest.SessionID]preparedHarvestSelection, len(candidates))
-	f.recordedConflicts = make(map[ingest.SessionID]bool)
-	f.recorder.conflicts = nil
-	for index, candidate := range candidates {
-		f.prepared[candidate.SessionID] = preparedHarvestSelection{
-			candidate: candidate,
-			decision:  f.matcher.MatchDiscoveryCandidateDecision(candidate, f.autoIngestNewBranches),
-			excluded:  f.matcher.ExcludesCandidate(candidate),
-			session:   sessions[index],
-		}
-	}
-	return nil
-}
-
-// Excludes reports the exact-denial result cached during complete-cohort
-// preparation. An unknown session fails closed so a child outside that cohort
-// cannot inherit a selected parent's result.
-func (f *harvestSelectionFilter) Excludes(session ingest.DiscoveredSession) bool {
-	prepared, ok := f.prepared[session.SessionID]
-	return !ok || prepared.excluded
-}
-
-func (f *harvestSelectionFilter) Match(session ingest.DiscoveredSession) bool {
-	prepared, ok := f.prepared[session.SessionID]
-	if !ok {
+// harvestAppliesSavedSelection reports whether this harvest run should scope
+// native discovery with the saved selection. Index-only maintenance, --all, and
+// an explicit --session keep their own scope. A nil config or flag set does not
+// apply a selection.
+func harvestAppliesSavedSelection(mode harvestMode, flags *harvestFlags, cfg *config.Config) bool {
+	if cfg == nil || flags == nil {
 		return false
 	}
-	switch prepared.decision.Match {
-	case ingest.BranchMatchYes:
-		return true
-	case ingest.BranchMatchWithheldConflict:
-		if !f.recordedConflicts[session.SessionID] {
-			f.recorder.conflicts = append(f.recorder.conflicts, selectionConflict{
-				session: prepared.session,
-				branch:  prepared.candidate.Branch,
-				entries: prepared.decision.Conflicting(),
-			})
-			f.recordedConflicts[session.SessionID] = true
-		}
-	}
-	return false
-}
-
-func discoveredSessionProjectPath(session ingest.DiscoveredSession) string {
-	if filepath.IsAbs(session.CWD) {
-		return filepath.Clean(session.CWD)
-	}
-	if session.Harness == defaults.HarnessClaudeCode {
-		slug := filepath.Base(filepath.Dir(string(session.SourcePath)))
-		if decoded := decodeClaudeSlugToPath(slug); decoded != "" {
-			return decoded
-		}
-	}
-	return ""
-}
-
-func discoveredSessionGitDirectory(session ingest.DiscoveredSession, projectPath string) string {
-	if projectPath != "" {
-		return projectPath
-	}
-	dir := string(session.OriginalRoot)
-	if dir == "" && session.SourcePath != "" {
-		dir = filepath.Dir(string(session.SourcePath))
-	}
-	return dir
+	return mode != harvestIndexOnly && !flags.all && len(flags.sessionIDs) == 0 && cfg.Selection.Mode == config.SelectionModeSelected
 }
