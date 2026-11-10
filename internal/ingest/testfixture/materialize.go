@@ -51,22 +51,6 @@ func MaterializeByName(t testing.TB, name string) MaterializedSource {
 	return materialize(t, fixtureCase)
 }
 
-// TryMaterializeByName is MaterializeByName for a caller that compares two
-// revisions against one corpus: a name the shared builder does not declare is
-// absent rather than fatal, because the revision that declared it may be the
-// one being compared against. Any other corpus error still fails.
-func TryMaterializeByName(t testing.TB, name string) (MaterializedSource, bool) {
-	t.Helper()
-	fixtureCase, ok, err := caseByNameIfPresent(name)
-	if err != nil {
-		t.Fatalf("materialize named synthetic OpenCode source: %v", err)
-	}
-	if !ok {
-		return MaterializedSource{}, false
-	}
-	return materialize(t, fixtureCase), true
-}
-
 func materialize(t testing.TB, fixtureCase caseSpec) MaterializedSource {
 	t.Helper()
 	if err := fixtureCase.validate(); err != nil {

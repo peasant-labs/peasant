@@ -349,13 +349,12 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			nativeNames[row.SourceFixture] = true
 		}
 	}
-	// The runner hands over the source shapes only the candidate corpus
-	// declares, so a behavior change first exercised by a new fixture is not
-	// invisible to the comparison. The shared builder is candidate-derived; a
-	// name it does not declare is skipped by the tolerant materializer.
-	if added := os.Getenv("PEASANT_GUARD_ADDED_NATIVE"); added != "" {
+	// The runner hands over every source case the candidate corpus declares,
+	// so a behavior change exercised by any of them is visible to both parsers.
+	// All of them exist in the candidate-derived shared builder.
+	if observed := os.Getenv("PEASANT_GUARD_OBSERVED_NATIVE"); observed != "" {
 		var names []string
-		if err := json.Unmarshal([]byte(added), &names); err != nil {
+		if err := json.Unmarshal([]byte(observed), &names); err != nil {
 			t.Fatal(err)
 		}
 		for _, name := range names {
@@ -364,11 +363,8 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			}
 		}
 	}
-	for name := range nativeNames {
-		source, present := testfixture.TryMaterializeByName(t, name)
-		if !present {
-			continue
-		}
+	observeNative := func(name string, source testfixture.MaterializedSource) {
+		t.Helper()
 		// Reuse the exact same physical locator and file clock across runs:
 		// unattributed sessions derive project identity from this path.
 		nativePath := filepath.Join(os.Getenv("PEASANT_GUARD_NATIVE"), name, "opencode.db")
@@ -408,6 +404,17 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			}{materializeErr != nil, guardMetadata(t, metadata, filepath.Dir(nativePath)), transcript}
 		}
 		guardRecord(t, &result, "opencode/AdapterVersion/native/"+name, outputs, discoverErr)
+	}
+	observed := 0
+	for name := range nativeNames {
+		// Every name here must exist: the anchors and the candidate's declared
+		// cases are all part of the candidate-derived builder. A typo or a
+		// dropped case is a guard error, not an absent historical shape.
+		observeNative(name, testfixture.MaterializeByName(t, name))
+		observed++
+	}
+	if observed == 0 {
+		t.Fatal("no native SQLite case was observed; the guard cannot compare native parser behavior")
 	}
 	for harness := range result.Versions {
 		for _, stage := range []string{"AdapterVersion", "IndexerVersion"} {

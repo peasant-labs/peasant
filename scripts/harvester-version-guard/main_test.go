@@ -53,3 +53,24 @@ func TestEmbeddedProbeIsValidGo(t *testing.T) {
 		t.Fatalf("archived-revision probe has invalid Go syntax: %v", err)
 	}
 }
+
+func TestUnobservedNativeRequiresANonEmptyObservation(t *testing.T) {
+	name := "current-idle-failure-tolerated"
+	key := "opencode/AdapterVersion/native/" + name
+	for _, testCase := range []struct {
+		name    string
+		outputs map[string]json.RawMessage
+		missing bool
+	}{
+		{name: "absent", outputs: map[string]json.RawMessage{}, missing: true},
+		{name: "empty discovery", outputs: map[string]json.RawMessage{key: json.RawMessage(`{"Failed":false,"Output":{}}`)}, missing: true},
+		{name: "observed", outputs: map[string]json.RawMessage{key: json.RawMessage(`{"Failed":false,"Output":{"ses_x":{"Failed":false}}}`)}, missing: false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			missing := unobservedNative([]string{name}, testCase.outputs)
+			if got := len(missing) == 1; got != testCase.missing {
+				t.Fatalf("missing = %v, want %v", missing, testCase.missing)
+			}
+		})
+	}
+}

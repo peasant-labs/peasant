@@ -239,27 +239,16 @@ type historyRow struct {
 }
 
 func caseByName(name string) (caseSpec, error) {
-	fixtureCase, ok, err := caseByNameIfPresent(name)
+	fixtures, err := loadCorpus(fixtureYAML)
 	if err != nil {
 		return caseSpec{}, err
 	}
-	if !ok {
-		return caseSpec{}, fmt.Errorf("load synthetic OpenCode source fixture %q: no such case; choose a name declared in testdata/opencode_sqlite.yaml", name)
-	}
-	return fixtureCase, nil
-}
-
-func caseByNameIfPresent(name string) (caseSpec, bool, error) {
-	fixtures, err := loadCorpus(fixtureYAML)
-	if err != nil {
-		return caseSpec{}, false, err
-	}
 	for _, fixtureCase := range fixtures.Cases {
 		if fixtureCase.Name == name {
-			return fixtureCase, true, nil
+			return fixtureCase, nil
 		}
 	}
-	return caseSpec{}, false, nil
+	return caseSpec{}, fmt.Errorf("load synthetic OpenCode source fixture %q: no such case; choose a name declared in testdata/opencode_sqlite.yaml", name)
 }
 
 func loadCorpus(data []byte) (corpus, error) {
@@ -303,6 +292,22 @@ func loadCorpus(data []byte) (corpus, error) {
 		}
 	}
 	return fixtures, nil
+}
+
+// CaseNames lists the case names a corpus declares, keeping the corpus schema
+// and validation in one place. The version guard compares two revisions, so a
+// historical corpus may lack fields the current builder added; the shared loader
+// already accepts that, and rejects a corpus that declares no cases.
+func CaseNames(data []byte) ([]string, error) {
+	fixtures, err := loadCorpus(data)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(fixtures.Cases))
+	for _, fixtureCase := range fixtures.Cases {
+		names = append(names, fixtureCase.Name)
+	}
+	return names, nil
 }
 
 func (c caseSpec) validate() error {

@@ -610,3 +610,31 @@ func pathIsWithin(root, candidate string) bool {
 	relative, err := filepath.Rel(root, candidate)
 	return err == nil && relative != "." && relative != ".." && !filepath.IsAbs(relative) && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
+
+func TestCaseNamesUsesTheSharedCorpusRule(t *testing.T) {
+	names, err := CaseNames(fixtureYAML)
+	if err != nil {
+		t.Fatalf("read embedded case names: %v", err)
+	}
+	found := false
+	for _, name := range names {
+		found = found || name == "current-idle-failure-tolerated"
+	}
+	if !found {
+		t.Fatal("case names omit a declared case; the guard would not observe it")
+	}
+	for _, malformed := range []struct {
+		name string
+		data string
+	}{
+		{name: "empty corpus", data: "cases: []\nrequired_cases: [a]\n"},
+		{name: "missing cases", data: "required_cases: [a]\n"},
+		{name: "trailing document", data: "cases: []\nrequired_cases: [a]\n---\ncases: []\n"},
+	} {
+		t.Run(malformed.name, func(t *testing.T) {
+			if _, err := CaseNames([]byte(malformed.data)); err == nil {
+				t.Fatal("malformed corpus was accepted; the guard would silently observe nothing")
+			}
+		})
+	}
+}
