@@ -85,6 +85,19 @@ try {
   if (!hostBody.includes(HOST_MARKER)) throw fail('verifying the served host chunk', `${hostPath} does not carry ${HOST_MARKER}`)
   const index = await directory(seeded.sessionId)
   if (index.totalSegments < 3) throw fail('checking the seeded cut', `only ${index.totalSegments} segments; both boundaries need a middle segment with unloaded extents on both sides`)
+  const actionParents = [31, 51]
+  const actionSegments = actionParents.map((turn) => index.segments.find((segment) => segment.firstTurn <= turn && turn <= segment.lastTurn))
+  if (actionSegments.some((segment) => !segment) || actionSegments[0].index === actionSegments[1].index) {
+    throw fail('checking the seeded action run', 'the action parents do not cross a segment boundary')
+  }
+  for (const [position, segment] of actionSegments.entries()) {
+    const response = await fetch(`${ORIGIN}/api/v1/sessions/${seeded.sessionId}/transcript/segments/${segment.index}`)
+    const body = await response.json()
+    const turn = body.turns?.find((entry) => entry.index === actionParents[position])
+    if (!response.ok || !turn?.toolCalls?.some((call) => call.id === `synthetic-tool-${actionParents[position] + 1}`)) {
+      throw fail('reading the seeded action run', `segment ${segment.index} did not serve its expected tool child`)
+    }
+  }
   const middle = index.segments[Math.floor(index.segments.length / 2)]
   const url = `${ORIGIN}/projects/${seeded.projectHash}/${seeded.sessionId}?turn=${middle.firstTurn}`
   const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
@@ -148,10 +161,25 @@ try {
       }
       const older = await edge('older')
       const newer = await edge('newer')
+      const actionGroup = await page.$('.txn-modelactions')
+      if (!actionGroup) throw fail(`capturing ${theme} actions`, 'the action group did not mount')
+      const head = await actionGroup.$('.txn-modelactions-head')
+      if (head && await head.evaluate((node) => node.getAttribute('aria-expanded')) !== 'true') await head.click()
+      const evidence = await actionGroup.evaluate((group) => ({
+        text: group.textContent,
+        rows: group.querySelectorAll('.txn-toolcall').length,
+      }))
+      if (evidence.rows !== 11 || !evidence.text.includes('segment-action-32') || !evidence.text.includes('segment-action-52')) {
+        throw fail(`capturing ${theme} actions`, `the mounted run did not group both segments: ${JSON.stringify(evidence)}`)
+      }
+      await actionGroup.evaluate((group) => group.scrollIntoView({ block: 'center', inline: 'nearest' }))
+      await pause(200)
+      const actions = resolve(OUT, `transcript-segments-${theme}-actions.png`)
+      await viewer.screenshot({ path: actions })
       const path = resolve(OUT, `transcript-segments-${theme}.png`)
       await run('magick', [older, newer, '-append', path])
       const boundaries = await page.$$eval('[data-segment-boundary]', (nodes) => nodes.map((node) => node.getAttribute('data-segment-boundary')))
-      captures.push({ theme, path, boundaries, turn: middle.firstTurn, segments: index.totalSegments })
+      captures.push({ theme, path, actions, actionSegments: actionSegments.map((segment) => segment.index), boundaries, turn: middle.firstTurn, segments: index.totalSegments })
       await page.close()
     }
   } finally {
