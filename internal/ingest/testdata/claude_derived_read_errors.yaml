@@ -2,6 +2,7 @@ required_names:
   - declarer count read failure
   - spawner count read failure
   - spawner path read failure
+  - spawn contribution read failure
 cases:
   - name: declarer count read failure
     method: declarers
@@ -29,6 +30,17 @@ cases:
     method: spawnerPaths
     want: "could not read the stored spawner paths"
     files:
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/workspace","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+
+  - name: spawn contribution read failure
+    method: spawnContributions
+    want: "could not read the stored spawn projection"
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn"}}'
       - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
         lines:
           - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/workspace","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'

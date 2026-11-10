@@ -97,11 +97,25 @@ func TestClaudeScopedLinkExactness(t *testing.T) {
 			if testCase.CorruptSpawns != "" {
 				makeStoredSpawnsUnreadable(t, ctx, database, "/claude/"+testCase.CorruptSpawns)
 			}
-			evidencePath := "/claude/" + testCase.Child
+			evidencePath := ""
+			modBefore := int64(0)
+			hadBefore := false
+			if testCase.DryRun {
+				if testCase.Touch == "" {
+					t.Fatalf("a dry-run case must name the transcript it touches; without one the no-write assertion has no stored row to probe")
+				}
+				// Probe the real evidence key the case touches, not the child's
+				// bare id: a wrong key would compare absent/absent and could
+				// never see a forecast write.
+				evidencePath = "/claude/" + testCase.Touch
+				modBefore, hadBefore = evidenceModTime(t, ctx, database, evidencePath)
+				if !hadBefore {
+					t.Fatalf("the evidence row for %q was not found before the run; the no-write assertion would be vacuous", evidencePath)
+				}
+			}
 			if testCase.Touch != "" {
 				touchTranscript(t, mfs, "/claude/"+testCase.Touch, testCase.Child)
 			}
-			modBefore, hadBefore := evidenceModTime(t, ctx, database, evidencePath)
 
 			ids := make([]ingest.SessionID, 0, len(testCase.Selected))
 			for _, id := range testCase.Selected {
@@ -116,8 +130,11 @@ func TestClaudeScopedLinkExactness(t *testing.T) {
 
 			if testCase.DryRun {
 				modAfter, hadAfter := evidenceModTime(t, ctx, database, evidencePath)
-				if hadAfter != hadBefore || modAfter != modBefore {
-					t.Errorf("the dry run wrote the evidence row (before %d/%v, after %d/%v); a forecast must write nothing", modBefore, hadBefore, modAfter, hadAfter)
+				if !hadAfter {
+					t.Fatalf("the evidence row for %q disappeared during the run", evidencePath)
+				}
+				if modAfter != modBefore {
+					t.Errorf("the dry run wrote the evidence row (before %d, after %d); a forecast must write nothing", modBefore, modAfter)
 				}
 			}
 		})
