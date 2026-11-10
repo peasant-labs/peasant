@@ -121,6 +121,23 @@ func decodeOpenCodeProvenanceRow(row OpenCodeProvenanceRow, scope OpenCodeProven
 		return decodeOpenCodeProvenanceCompaction(row, msg, data, envelope)
 	case "agent-switched", "model-switched":
 		return decodeOpenCodeProvenanceControl(row, msg, data, envelope)
+	case "idle":
+		var value openCodeCurrentIdle
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q idle marker failed to decode: %v; verify the source row and retry", row.ID, err)
+		}
+		if err := requireOpenCodeCurrentObjectFields(envelope, "time", "outcome"); err != nil {
+			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q idle marker misses a required field: %v; verify the source row and retry", row.ID, err)
+		}
+		text, ignored, err := openCodeIdleDisposition(value.Outcome, value.Error)
+		if err != nil {
+			return OpenCodeProvenanceMessage{}, false, fmt.Errorf("ingest.DecodeOpenCodeProvenanceRow: message %q idle marker is malformed: %w", row.ID, err)
+		}
+		if ignored {
+			return OpenCodeProvenanceMessage{}, false, errOpenCodeIgnoredControlRow
+		}
+		msg.SystemText = text
+		return msg, true, nil
 	default:
 		hasID := requireOpenCodeCurrentFields(data, "id") == nil
 		hasTime := requireOpenCodeCurrentFields(data, "time") == nil

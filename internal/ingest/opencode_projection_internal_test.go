@@ -122,7 +122,7 @@ func TestOpenCodeCapturedAbsentParentMetadataAssembly(t *testing.T) {
 
 const (
 	expectedOpenCodeSemanticCases     = 1
-	expectedOpenCodeSemanticNegatives = 11
+	expectedOpenCodeSemanticNegatives = 14
 	expectedOpenCodeSemanticMutations = 4
 	expectedOpenCodeCurrentVariants   = 8
 	expectedOpenCodeSemanticMutants   = 15

@@ -244,7 +244,11 @@ func classifyOpenCodeTypedMessage(msg OpenCodeProvenanceMessage, attr OpenCodeMe
 			return classifyOpenCodeToolFormShell(msg, attr)
 		}
 		return classifyOpenCodeShellAction(msg, attr)
-	case "synthetic", "system", "skill":
+	case "synthetic", "system", "skill", "idle":
+		// A clean or interrupted idle marker contributes no row and never reaches
+		// this classifier. The failed settle that does reach it carries the
+		// failure text the harness emitted about its own run, so it is harness
+		// context like the other system prose.
 		return singleOpenCodeBlock(msg, attr, schema.RoleSystem, schema.EntryTypeSystem, msg.SystemText, openCodeHarnessContext())
 	case "compaction":
 		if msg.CompactionCompleted {

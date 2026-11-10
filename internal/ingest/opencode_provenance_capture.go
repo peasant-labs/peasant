@@ -174,7 +174,7 @@ func readOpenCodeCurrentRows(ctx context.Context, source OpenCodeSQLiteSource, c
 				Data:        row.Data,
 			}, scope, &traversal)
 			if err != nil {
-				if err == errOpenCodeSkipControlRow {
+				if errors.Is(err, errOpenCodeSkipControlRow) || errors.Is(err, errOpenCodeIgnoredControlRow) {
 					continue
 				}
 				return nil, &OpenCodeSnapshotError{SessionID: scope.SessionID, Step: "decode message row", Reason: fmt.Sprintf("the message row at sequence %d failed its typed decode", row.Seq.Value()), Recovery: "verify the source row and retry; no partial capture is certified"}

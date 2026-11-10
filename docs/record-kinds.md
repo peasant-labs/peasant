@@ -16,7 +16,7 @@ remain errors, not successful unknown-kind captures.
 - **Namespace** separates discriminator domains. Equal record and block names
   are not the same key. **Match** is literal unless explicitly marked prefix.
 - **Status** is the closed set below, listed with what this build declares.
-  **represented** (interpreted entries or owning-entry state) — 277 rows;
+  **represented** (interpreted entries or owning-entry state) — 279 rows;
   **tracked-only** (stored non-conversation evidence outside interpreted
   transcript entries) — 7 rows; **ignored-control** (no row; the capture
   accounts for the kind and can still certify complete) — 82 rows;
@@ -321,11 +321,11 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | content_block | `tool_use` | literal | represented | no | tool name and arguments |  | `content_capture.go captureContentBlockKinds` |
 | retained-format-1 | content_block | `tool_result` | literal | represented | yes | tool output |  | `content_capture.go captureContentBlockKinds` |
 
-## opencode (adapter 3, indexer 18)
+## opencode (adapter 4, indexer 18)
 
 Baseline index format: 1.
 
-Managed generation: adapter 4, indexer 19, index format 2.
+Managed generation: adapter 5, indexer 19, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -352,6 +352,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | row | `compaction` | literal | represented | yes | session entries |  | `opencode_current_projection.go normalizeOpenCodeCurrentRowAt; opencode_unknown.go knownOpenCodeCurrentRow` |
 | retained-format-1 | row | `agent-switched` | literal | represented | yes | session entries |  | `opencode_current_projection.go normalizeOpenCodeCurrentRowAt; opencode_unknown.go knownOpenCodeCurrentRow` |
 | retained-format-1 | row | `model-switched` | literal | represented | yes | session entries |  | `opencode_current_projection.go normalizeOpenCodeCurrentRowAt; opencode_unknown.go knownOpenCodeCurrentRow` |
+| retained-format-1 | row | `idle` | literal | represented | yes | session entries |  | `opencode_current_projection.go normalizeOpenCodeCurrentRowAt; opencode_unknown.go knownOpenCodeCurrentRow` |
 | retained-format-1 | assistant_content | `text` | literal | represented | yes | session entries |  | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent; opencode_unknown.go prepareOpenCodeCurrent` |
 | retained-format-1 | assistant_content | `reasoning` | literal | represented | yes | session entries |  | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent; opencode_unknown.go prepareOpenCodeCurrent` |
 | retained-format-1 | assistant_content | `tool` | literal | represented | no | tool name and arguments |  | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent; opencode_unknown.go prepareOpenCodeCurrent` |
@@ -364,6 +365,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | row | `compaction` | literal | represented | yes | session entries |  | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow; opencode_unknown.go knownOpenCodeCurrentRow` |
 | native-generation | row | `agent-switched` | literal | represented | yes | session entries |  | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow; opencode_unknown.go knownOpenCodeCurrentRow` |
 | native-generation | row | `model-switched` | literal | represented | yes | session entries |  | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow; opencode_unknown.go knownOpenCodeCurrentRow` |
+| native-generation | row | `idle` | literal | represented | yes | session entries |  | `opencode_provenance_decode.go DecodeOpenCodeProvenanceRow; opencode_unknown.go knownOpenCodeCurrentRow` |
 | native-generation | assistant_content | `text` | literal | represented | yes | session entries |  | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent; opencode_unknown.go prepareOpenCodeCurrent` |
 | native-generation | assistant_content | `reasoning` | literal | represented | yes | session entries |  | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent; opencode_unknown.go prepareOpenCodeCurrent` |
 | native-generation | assistant_content | `tool` | literal | represented | no | tool name and arguments |  | `opencode_current_projection.go appendOpenCodeCurrentAssistantContent; opencode_unknown.go prepareOpenCodeCurrent` |

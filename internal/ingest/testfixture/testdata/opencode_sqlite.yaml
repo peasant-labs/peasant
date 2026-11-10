@@ -38,6 +38,9 @@ required_cases:
   - extended-attribution
   - legacy-unknown-part-vocabulary
   - current-control-rows-tolerated
+  - current-idle-control-tolerated
+  - current-idle-failure-tolerated
+  - current-control-mixed-unknown
   - content-aware-selection
   - legacy-scrollable-session
   - legacy-out-of-order-parts
@@ -1214,6 +1217,98 @@ cases:
       - {id: msg_ctrl_asst, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: assistant, time_created: 3004, time_updated: 3006, seq: 3, data: '{"id":"msg_ctrl_asst","agent":"build","model":{"id":"","providerID":"openai"},"content":[{"type":"tool","id":"ctrl_tool","name":"read","state":{"status":"completed","input":{"path":"/synthetic/x"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":{"ok":true}},"time":{"created":3005,"completed":3006}}],"time":{"created":3004,"completed":3006}}'}
       - {id: msg_ctrl_agent, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: agent-switched, time_created: 3007, time_updated: 3007, seq: 4, data: '{"time":{"created":3007},"agent":"plan"}'}
       - {id: msg_ctrl_title, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: session-title-changed, time_created: 3008, time_updated: 3008, seq: 5, data: '{"time":{"created":3008},"title":"synthetic renamed title"}'}
+    ignored_history: []
+
+  - name: current-idle-control-tolerated
+    logical_path: current-idle/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 0
+      legacy_parts: 0
+      current_messages: 4
+      ignored_history: 0
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - {id: msg_idle_user, session_id: ses_3cd91f52effeXd3QAJ54jIdl1, type: user, time_created: 5000, time_updated: 5000, seq: 1, data: '{"id":"msg_idle_user","text":"synthetic idle request","files":[],"agents":[],"time":{"created":5000}}'}
+      - {id: msg_idle_marker, session_id: ses_3cd91f52effeXd3QAJ54jIdl1, type: idle, time_created: 5002, time_updated: 5002, seq: 2, data: '{"time":{"created":5002},"outcome":"succeeded"}'}
+      - {id: msg_idle_interrupted, session_id: ses_3cd91f52effeXd3QAJ54jIdl1, type: idle, time_created: 5002, time_updated: 5002, seq: 3, data: '{"time":{"created":5002},"outcome":"interrupted"}'}
+      - {id: msg_idle_asst, session_id: ses_3cd91f52effeXd3QAJ54jIdl1, type: assistant, time_created: 5003, time_updated: 5006, seq: 4, data: '{"id":"msg_idle_asst","agent":"build","model":{"id":"","providerID":"openai"},"content":[{"type":"tool","id":"idle_tool","name":"read","state":{"status":"completed","input":{"path":"/synthetic/x"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":{"ok":true}},"time":{"created":5004,"completed":5006}}],"time":{"created":5003,"completed":5006}}'}
+    ignored_history: []
+
+  - name: current-idle-failure-tolerated
+    logical_path: current-idle-failure/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 0
+      legacy_parts: 0
+      current_messages: 3
+      ignored_history: 0
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - {id: msg_fail_user, session_id: ses_3cd91f52effeXd3QAJ54jIdl2, type: user, time_created: 6000, time_updated: 6000, seq: 1, data: '{"id":"msg_fail_user","text":"synthetic failing request","files":[],"agents":[],"time":{"created":6000}}'}
+      - {id: msg_fail_idle, session_id: ses_3cd91f52effeXd3QAJ54jIdl2, type: idle, time_created: 6002, time_updated: 6002, seq: 2, data: '{"time":{"created":6002},"outcome":"failed","error":{"type":"ProviderAuthError","message":"SYNTHETIC_PROVIDER_FAILURE_TEXT"}}'}
+      - {id: msg_fail_asst, session_id: ses_3cd91f52effeXd3QAJ54jIdl2, type: assistant, time_created: 6003, time_updated: 6006, seq: 3, data: '{"id":"msg_fail_asst","agent":"build","model":{"id":"","providerID":"openai"},"content":[{"type":"tool","id":"fail_tool","name":"read","state":{"status":"completed","input":{"path":"/synthetic/x"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":{"ok":true}},"time":{"created":6004,"completed":6006}}],"time":{"created":6003,"completed":6006}}'}
+    ignored_history: []
+
+  - name: current-control-mixed-unknown
+    logical_path: current-mixed/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 0
+      legacy_parts: 0
+      current_messages: 3
+      ignored_history: 0
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - {id: msg_mixed_user, session_id: ses_3cd91f52effeXd3QAJ54jIdl3, type: user, time_created: 7000, time_updated: 7000, seq: 1, data: '{"id":"msg_mixed_user","text":"synthetic mixed request","files":[],"agents":[],"time":{"created":7000}}'}
+      - {id: msg_mixed_idle, session_id: ses_3cd91f52effeXd3QAJ54jIdl3, type: idle, time_created: 7001, time_updated: 7001, seq: 2, data: '{"time":{"created":7001},"outcome":"succeeded"}'}
+      - {id: msg_mixed_unknown, session_id: ses_3cd91f52effeXd3QAJ54jIdl3, type: session-title-changed, time_created: 7002, time_updated: 7002, seq: 3, data: '{"time":{"created":7002},"title":"synthetic renamed title"}'}
+    ignored_history: []
+
+  - name: current-idle-type-only-failure
+    logical_path: current-idle-type/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 0
+      legacy_parts: 0
+      current_messages: 2
+      ignored_history: 0
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - {id: msg_type_user, session_id: ses_3cd91f52effeXd3QAJ54jIdl4, type: user, time_created: 8000, time_updated: 8000, seq: 1, data: '{"id":"msg_type_user","text":"synthetic type-only request","files":[],"agents":[],"time":{"created":8000}}'}
+      - {id: msg_type_idle, session_id: ses_3cd91f52effeXd3QAJ54jIdl4, type: idle, time_created: 8001, time_updated: 8001, seq: 2, data: '{"time":{"created":8001},"outcome":"failed","error":{"type":"SYNTHETIC_ERROR_TYPE","message":""}}'}
     ignored_history: []
 
   - name: content-aware-selection
