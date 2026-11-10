@@ -1,0 +1,5 @@
+{"_type": "metadata", "created_at": "2026-09-21T08:00:00+00:00", "last_consolidated": 0, "agent": "kirocrew"}
+{"role": "user", "content": "SENTINEL-KIROCREW-SLACK check the deploy", "ts": "2026-09-21T08:00:05+00:00", "source_thread": "1789000000.123", "source_user": "U0EXAMPLE"}
+{"role": "assistant", "content": "The deploy is green.", "ts": "2026-09-21T08:00:40+00:00", "tools": ["read", "grep"], "source_thread": "1789000000.123", "source_user": "U0EXAMPLE"}
+{"role": "user", "content": "And staging?", "ts": "2026-09-21T08:05:00+00:00", "source_thread": "1789000000.123", "source_user": "U0EXAMPLE"}
+{"role": "assistant", "content": "Staging is green too.", "ts": "2026-09-21T08:05:30+00:00", "tools": ["shell"], "source_thread": "1789000000.123", "source_user": "U0EXAMPLE"}

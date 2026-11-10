@@ -1,0 +1,6 @@
+{
+  "executions": [
+    {"executionId": "c3470c42-f002-42c6-ac2a-29cdeeb97fe5", "type": "chat-agent", "status": "succeed", "startTime": 1784030400000}
+  ],
+  "version": 2
+}
