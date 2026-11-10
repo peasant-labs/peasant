@@ -73,7 +73,8 @@ slots:
   - {name: v67-latest-attempt-pointer, slot: 67, needle: "ADD COLUMN latest_attempt_generation_id TEXT"}
   - {name: v68-collective-observations, slot: 68, needle: "CREATE TABLE collective_observation_scopes"}
   - {name: v69-source-unavailability-cause, slot: 69, needle: "original-source-present-record-unusable"}
-  - {name: v70-parent-state, slot: 70, needle: "parent_state TEXT NOT NULL DEFAULT 'root'"}
+  - {name: v70-parent-state, slot: 70, needle: "ALTER TABLE sessions ADD COLUMN parent_state TEXT NOT NULL DEFAULT 'root'"}
+  - {name: v71-harness-menu, slot: 71, needle: "CREATE TABLE sessions_v71 AS SELECT * FROM sessions;"}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot
@@ -84,7 +85,7 @@ guards:
     targetSlot: 46
     replacementNeedle: session_origin
     expectedFragments: ["session_origin", "expects slot 46", "matches migration slots"]
-    expectedSlots: [46, 51, 53]
+    expectedSlots: [46, 51, 53, 71]
   - name: uncovered-appended-slot
     operation: append-uncovered-slot
     appendedScript: "SELECT 1;"

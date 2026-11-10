@@ -1,0 +1,6 @@
+requiredNames:
+  - predecessor-data-and-parent-lane
+  - schema-objects-preserved
+  - known-harnesses-accepted
+  - unknown-harness-rejected
+  - fresh-schema-equivalence

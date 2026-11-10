@@ -1,0 +1,6 @@
+scenarios:
+  - name: predecessor-data-and-parent-lane
+  - name: schema-objects-preserved
+  - name: known-harnesses-accepted
+  - name: unknown-harness-rejected
+  - name: fresh-schema-equivalence

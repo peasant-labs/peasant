@@ -278,7 +278,7 @@ CREATE TABLE daily_summary_by_project (
 
 CREATE TABLE daily_summary_harness (
     date_utc TEXT NOT NULL,
-    model_harness TEXT NOT NULL CHECK (model_harness IN ('claude-code','opencode','codex','gemini-cli','cursor','antigravity','strike','pi')),
+    model_harness TEXT NOT NULL CHECK (model_harness IN ('claude-code','opencode','codex','gemini-cli','cursor','antigravity','strike','pi','grok-build','devin-desktop','cline','kiro','kiro-cli','kiro-crew')),
     session_count INTEGER NOT NULL DEFAULT 0,
     tokens_in INTEGER NOT NULL DEFAULT 0,
     tokens_out INTEGER NOT NULL DEFAULT 0,
@@ -1057,7 +1057,7 @@ CREATE TABLE session_source_unavailability (
 CREATE TABLE sessions (
     session_id TEXT PRIMARY KEY,
     parent_id TEXT REFERENCES sessions(session_id),
-    model_harness TEXT NOT NULL CHECK (model_harness IN ('claude-code','opencode','codex','gemini-cli','cursor','antigravity','strike','pi')),
+    model_harness TEXT NOT NULL CHECK (model_harness IN ('claude-code','opencode','codex','gemini-cli','cursor','antigravity','strike','pi','grok-build','devin-desktop','cline','kiro','kiro-cli','kiro-crew')),
     model_id TEXT NOT NULL,
     opaque_host_id TEXT NOT NULL REFERENCES host_slugs(opaque_id),
     project_hash TEXT NOT NULL REFERENCES projects(project_hash),
@@ -2170,4 +2170,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 70;
+PRAGMA user_version = 71;
