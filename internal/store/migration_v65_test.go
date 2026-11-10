@@ -39,6 +39,23 @@ type claudeIdentityEvidenceCase struct {
 	Records          []claudeIdentityRecordFixture `yaml:"records"`
 }
 
+func sealedEvidence(in ingest.ClaudeTranscriptEvidence) ingest.ClaudeTranscriptEvidence {
+	ingest.SealClaudeIdentity(&in)
+	if in.Scope != ingest.ClaudeEvidenceScopeRoot {
+		in.Chain = []ingest.ClaudeIdentityChainLink{}
+	}
+	if in.SessionIDs == nil {
+		in.SessionIDs = []string{}
+	}
+	if in.SpawnAgentIDs == nil {
+		in.SpawnAgentIDs = []string{}
+	}
+	if in.Chain == nil {
+		in.Chain = []ingest.ClaudeIdentityChainLink{}
+	}
+	return in
+}
+
 func (c claudeIdentityEvidenceCase) evidence() ingest.ClaudeTranscriptEvidence {
 	e := ingest.ClaudeTranscriptEvidence{
 		SourcePath: ingest.ResolvedPath("/synthetic/" + c.Name + ".jsonl"),
@@ -199,6 +216,7 @@ func TestMigrationV65ClaudeEvidence(t *testing.T) {
 		SourcePath: "/synthetic/legacy.jsonl", Scope: ingest.ClaudeEvidenceScopeRoot,
 		ModTimeUnixNano: 7, SizeBytes: 9, HasConversationRecord: true,
 		Title: "old title", Branch: "old branch", CWD: "/synthetic/old", Origin: sessionorigin.Unknown,
+		SessionIDs: []string{}, SpawnAgentIDs: []string{},
 	}
 	if !reflect.DeepEqual(legacy, wantLegacy) {
 		t.Fatalf("migration changed legacy evidence or fabricated proof:\ngot  %+v\nwant %+v", legacy, wantLegacy)
@@ -214,8 +232,23 @@ func TestMigrationV65ClaudeEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := loaded[want.SourcePath]; !reflect.DeepEqual(got, want) {
+			want = sealedEvidence(want)
+			got := loaded[want.SourcePath]
+			// The whole-table read omits the coordinate list. Compare that list
+			// through the by-path read, which is the read a lineage proof uses.
+			if got.Chain != nil {
+				t.Fatalf("whole-table load returned a chain for %s; that column must stay out of the full scan", want.SourcePath)
+			}
+			got.Chain = want.Chain
+			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("round trip changed evidence:\ngot  %+v\nwant %+v", got, want)
+			}
+			byPath, err := s.LoadClaudeEvidenceFor(t.Context(), []ingest.ResolvedPath{want.SourcePath})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(byPath[want.SourcePath].Chain, want.Chain) {
+				t.Fatalf("by-path chain = %#v, want %#v", byPath[want.SourcePath].Chain, want.Chain)
 			}
 			conn, err := s.pool.Take(t.Context())
 			if err != nil {
@@ -224,8 +257,8 @@ func TestMigrationV65ClaudeEvidence(t *testing.T) {
 			defer s.pool.Put(conn)
 			if err := sqlitex.ExecuteTransient(conn, `SELECT identity_records_json FROM claude_transcript_evidence WHERE source_path=?`, &sqlitex.ExecOptions{
 				Args: []any{want.SourcePath.String()}, ResultFunc: func(stmt *sqlite.Stmt) error {
-					if got := stmt.ColumnText(0); got != c.RecordsJSON {
-						t.Errorf("stored record JSON=%s, want %s", got, c.RecordsJSON)
+					if got := stmt.ColumnText(0); got != "[]" {
+						t.Errorf("stored record JSON=%s, want an empty array; the per-line list is no longer stored", got)
 					}
 					return nil
 				},
@@ -262,7 +295,10 @@ func TestMigrationV65ClaudeEvidence(t *testing.T) {
 				t.Fatal("malformed proof was trusted instead of skipped for re-mining")
 			}
 			for _, healthy := range fixtures.Cases {
-				if !reflect.DeepEqual(loaded[healthy.evidence().SourcePath], healthy.evidence()) {
+				want := sealedEvidence(healthy.evidence())
+				got := loaded[want.SourcePath]
+				got.Chain = want.Chain
+				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("corrupt row affected healthy fixture %q", healthy.Name)
 				}
 			}

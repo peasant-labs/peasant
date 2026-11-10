@@ -1,4 +1,5 @@
 requiredNames:
+  - v71-compact-identity-facts
   - v70-derived-lookups
   - v69-source-unavailability-cause
   - v68-collective-observations

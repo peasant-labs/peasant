@@ -15,6 +15,7 @@ import (
 // The local store is also the discovery evidence cache. Claude discovery mines
 // the teammate links from the transcripts, and that mining reads whole files.
 var _ ingest.ClaudeEvidenceCache = (*Store)(nil)
+var _ ingest.ClaudeIdentityChainReader = (*Store)(nil)
 
 // A whole-table load can skip an unreadable row; the caller that counts from
 // the store needs to know so it does not add the readable subset again.
@@ -23,6 +24,8 @@ var _ ingest.ClaudeEvidenceCompleteness = (*Store)(nil)
 const (
 	// sqlSelectClaudeEvidenceColumns is the one column list both the whole-table
 	// read and the by-path read use, so the two shapes cannot drift.
+	// The whole-table read stops before identity_chain_json. That column is the
+	// large coordinate list, and only a lineage proof reads it, by primary key.
 	sqlSelectClaudeEvidenceColumns = `SELECT
     source_path,
     scope,
@@ -40,21 +43,54 @@ const (
     native_agent_id,
     native_agent_valid,
     content_digest,
-    identity_records_json
+    identity_records_json,
+    identity_session_ids_json,
+    identity_spawn_agent_ids_json,
+    identity_legacy_agent_proof,
+    identity_contradictory_sidechain
 FROM claude_transcript_evidence`
 
 	sqlSelectClaudeEvidence = sqlSelectClaudeEvidenceColumns
 
 	// sqlSelectClaudeEvidenceForTemplate is the by-path read over the source_path
-	// primary key. Production renders it through sqlSelectClaudeEvidenceFor, and
-	// its query-plan guard explains the same rendered statement.
-	sqlSelectClaudeEvidenceForTemplate = sqlSelectClaudeEvidenceColumns + ` WHERE source_path IN (%s)`
+	// primary key. It includes the coordinate list because a scoped build reads
+	// the owner and layout parent by path and links from that read. Production
+	// renders it through sqlSelectClaudeEvidenceFor, and its query-plan guard
+	// explains the same rendered statement.
+	sqlSelectClaudeEvidenceForTemplate = `SELECT
+    source_path,
+    scope,
+    mod_time_unix_nano,
+    size_bytes,
+    has_conversation,
+    identity_team,
+    identity_name,
+    spawns_json,
+    title,
+    branch,
+    cwd,
+    origin,
+    proof_version,
+    native_agent_id,
+    native_agent_valid,
+    content_digest,
+    identity_records_json,
+    identity_session_ids_json,
+    identity_spawn_agent_ids_json,
+    identity_legacy_agent_proof,
+    identity_contradictory_sidechain,
+    identity_chain_json
+FROM claude_transcript_evidence WHERE source_path IN (%s)`
+
+	sqlSelectClaudeIdentityChains = `SELECT source_path, identity_chain_json FROM claude_transcript_evidence WHERE source_path IN (%s)`
 
 	sqlUpsertClaudeEvidence = `INSERT OR REPLACE INTO claude_transcript_evidence (
     source_path, scope, mod_time_unix_nano, size_bytes, has_conversation,
     identity_team, identity_name, spawns_json, title, branch, cwd, origin,
-    proof_version, native_agent_id, native_agent_valid, content_digest, identity_records_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    proof_version, native_agent_id, native_agent_valid, content_digest, identity_records_json,
+    identity_session_ids_json, identity_spawn_agent_ids_json, identity_legacy_agent_proof,
+    identity_contradictory_sidechain, identity_chain_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	sqlDeleteClaudeEvidence = `DELETE FROM claude_transcript_evidence WHERE source_path = ?`
 
@@ -166,7 +202,7 @@ func (s *Store) loadClaudeEvidence(ctx context.Context) (map[ingest.ResolvedPath
 	skipped := 0
 	err = sqlitex.Execute(conn, sqlSelectClaudeEvidence, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			record, ok := scanClaudeEvidence(stmt)
+			record, ok := scanClaudeEvidence(stmt, false)
 			if !ok {
 				skipped++
 				return nil
@@ -268,7 +304,7 @@ func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 		err = sqlitex.Execute(conn, sqlSelectClaudeEvidenceFor(len(batch)), &sqlitex.ExecOptions{
 			Args: args,
 			ResultFunc: func(stmt *sqlite.Stmt) error {
-				record, ok, projectionUnreadable := scanClaudeEvidenceWithProjections(stmt, true)
+				record, ok, projectionUnreadable := scanClaudeEvidenceWithProjections(stmt, true, true)
 				if !ok {
 					skipped++
 					return nil
@@ -314,8 +350,8 @@ func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 
 // scanClaudeEvidence reads one row. It reports false for a row whose scope this
 // build does not know or whose spawn or identity record list does not parse.
-func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, bool) {
-	record, ok, _ := scanClaudeEvidenceWithProjections(stmt, false)
+func scanClaudeEvidence(stmt *sqlite.Stmt, includeChain bool) (ingest.ClaudeTranscriptEvidence, bool) {
+	record, ok, _ := scanClaudeEvidenceWithProjections(stmt, false, includeChain)
 	return record, ok
 }
 
@@ -327,7 +363,7 @@ func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, boo
 // way, so a by-path caller can fill its spawn side from the derived spawn
 // projection instead of trusting the unparsed column. The by-path read uses
 // that; the whole-table read keeps skipping such a row.
-func scanClaudeEvidenceWithProjections(stmt *sqlite.Stmt, tolerateUnreadableProjections bool) (ingest.ClaudeTranscriptEvidence, bool, bool) {
+func scanClaudeEvidenceWithProjections(stmt *sqlite.Stmt, tolerateUnreadableProjections, includeChain bool) (ingest.ClaudeTranscriptEvidence, bool, bool) {
 	scope := ingest.ClaudeEvidenceScope(stmt.ColumnText(1))
 	if !scope.IsValid() {
 		return ingest.ClaudeTranscriptEvidence{}, false, false
@@ -402,19 +438,167 @@ func scanClaudeEvidenceWithProjections(stmt *sqlite.Stmt, tolerateUnreadableProj
 	for _, row := range spawnRows {
 		record.Spawns = append(record.Spawns, ingest.ClaudeTeammateIdentity{Team: row.Team, Name: row.Name})
 	}
+	if err := applyClaudeIdentityFacts(&record, stmt, includeChain); err != nil {
+		if !tolerateUnreadableProjections {
+			return ingest.ClaudeTranscriptEvidence{}, false, false
+		}
+		projectionUnreadable = true
+	}
 	if projectionUnreadable {
 		// A proof version no Fresh check accepts forces discovery to mine this
 		// transcript again before any reader trusts its records or spawn list.
 		record.ProofVersion = 0
+		record.Records = nil
 		return record, true, true
 	}
-	for _, row := range identityRows {
-		record.Records = append(record.Records, ingest.ClaudeIdentityRecord{
-			SessionID: row.SessionID, UUID: row.UUID, ParentUUID: row.ParentUUID,
-			Type: row.Type, Subtype: row.Subtype, SpawnAgentID: row.SpawnAgentID, AgentID: row.AgentID, Sidechain: row.Sidechain,
-		})
-	}
+	// The skeleton is validated above and then discarded. Readers use the
+	// compact facts. Keeping the list would reload the column this migration
+	// exists to stop loading.
+	record.Records = nil
 	return record, true, false
+}
+
+// applyClaudeIdentityFacts reads the compact fact columns. identity_records_json
+// is still validated so a corrupt skeleton is not trusted, but its contents are
+// not copied onto the record.
+func applyClaudeIdentityFacts(record *ingest.ClaudeTranscriptEvidence, stmt *sqlite.Stmt, includeChain bool) error {
+	sessionIDs, err := decodeStringSet(stmt.ColumnText(17))
+	if err != nil {
+		return err
+	}
+	for _, id := range sessionIDs {
+		parsed, parseErr := ingest.NewSessionID(id)
+		if parseErr != nil {
+			return parseErr
+		}
+		if parsed.String() != id {
+			return fmt.Errorf("session id %q is not in canonical form", id)
+		}
+	}
+	spawnIDs, err := decodeStringSet(stmt.ColumnText(18))
+	if err != nil {
+		return err
+	}
+	record.SessionIDs = sessionIDs
+	record.SpawnAgentIDs = spawnIDs
+	record.LegacyAgentProof = stmt.ColumnInt64(19) == 1
+	record.ContradictorySidechain = stmt.ColumnInt64(20) == 1
+	if !includeChain {
+		return nil
+	}
+	chain, err := decodeIdentityChain(stmt.ColumnText(21))
+	if err != nil {
+		return err
+	}
+	record.Chain = chain
+	return nil
+}
+
+func validateClaudeIdentityFacts(record *ingest.ClaudeTranscriptEvidence) error {
+	for index, id := range record.SessionIDs {
+		if _, err := ingest.NewSessionID(id); err != nil {
+			return fmt.Errorf("session id %d %q: %w", index, id, err)
+		}
+	}
+	for index, link := range record.Chain {
+		if _, err := ingest.NewSessionID(link.SessionID); err != nil {
+			return fmt.Errorf("chain link %d session id %q: %w", index, link.SessionID, err)
+		}
+	}
+	return nil
+}
+
+func marshalJSONArray(value any) (string, error) {
+	if value == nil {
+		return "[]", nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	if string(raw) == "null" {
+		return "[]", nil
+	}
+	return string(raw), nil
+}
+
+func decodeStringSet(raw string) ([]string, error) {
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil || values == nil {
+		return nil, fmt.Errorf("string set is not a JSON array")
+	}
+	return values, nil
+}
+
+func decodeIdentityChain(raw string) ([]ingest.ClaudeIdentityChainLink, error) {
+	var chain []ingest.ClaudeIdentityChainLink
+	if err := json.Unmarshal([]byte(raw), &chain); err != nil || chain == nil {
+		return nil, fmt.Errorf("identity chain is not a JSON array")
+	}
+	for _, link := range chain {
+		if _, err := ingest.NewSessionID(link.SessionID); err != nil {
+			return nil, err
+		}
+	}
+	return chain, nil
+}
+
+// LoadClaudeIdentityChains reads the coordinate list for the named paths. A
+// path with no stored row is absent. A path whose list cannot be parsed is
+// named in the second result and omitted from the map, so the caller can mine
+// that transcript again instead of treating a missing list as an empty one.
+func (s *Store) LoadClaudeIdentityChains(ctx context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath][]ingest.ClaudeIdentityChainLink, []ingest.ResolvedPath, error) {
+	chains := make(map[ingest.ResolvedPath][]ingest.ClaudeIdentityChainLink)
+	if len(paths) == 0 {
+		return chains, nil, nil
+	}
+	unique := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		value := path.String()
+		if value == "" {
+			continue
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	if len(unique) == 0 {
+		return chains, nil, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("store.LoadClaudeIdentityChains: take connection: %w; what: failed to obtain a database connection for the identity-chain read; why: the pool is exhausted or the context was cancelled; where: store.LoadClaudeIdentityChains in internal/store/claude_evidence.go; when: before the first chain batch ran; impact: no coordinate list was returned, so lineage linking cannot reuse the cache; fix: check the pool size and context deadline, then retry", err)
+	}
+	defer s.pool.Put(conn)
+	var unreadable []ingest.ResolvedPath
+	for start := 0; start < len(unique); start += indexFormatReadBatchSize {
+		end := min(start+indexFormatReadBatchSize, len(unique))
+		batch := unique[start:end]
+		args := make([]any, len(batch))
+		for index, value := range batch {
+			args[index] = value
+		}
+		err = sqlitex.Execute(conn, fmt.Sprintf(sqlSelectClaudeIdentityChains, sqlPlaceholders(len(batch))), &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				path := ingest.ResolvedPath(stmt.ColumnText(0))
+				chain, decodeErr := decodeIdentityChain(stmt.ColumnText(1))
+				if decodeErr != nil {
+					unreadable = append(unreadable, path)
+					return nil
+				}
+				chains[path] = chain
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("store.LoadClaudeIdentityChains: query batch %d-%d of %d: %w; what: the identity-chain query failed; why: the statement could not run against the evidence table; where: store.LoadClaudeIdentityChains in internal/store/claude_evidence.go; when: reading chains for paths %d-%d of %d; impact: the returned map is incomplete, so the caller must not link from it; fix: restore database access and retry", start, end, len(unique), err, start, end, len(unique))
+		}
+	}
+	return chains, unreadable, nil
 }
 
 // SaveClaudeEvidence writes the records one discovery mined and removes the
@@ -436,6 +620,7 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 
 	for i := range upserts {
 		record := &upserts[i]
+		ingest.SealClaudeIdentity(record)
 		if !record.Scope.IsValid() {
 			return fmt.Errorf("store.SaveClaudeEvidence: transcript %q carries unknown scope %q", record.SourcePath, record.Scope)
 		}
@@ -447,20 +632,24 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 		if marshalErr != nil {
 			return fmt.Errorf("store.SaveClaudeEvidence: encode spawns for transcript %q: %w", record.SourcePath, marshalErr)
 		}
-		identityRows := make([]claudeIdentityRecordRow, 0, len(record.Records))
-		for index, identity := range record.Records {
-			id, validationErr := ingest.NewSessionID(identity.SessionID)
-			if validationErr != nil {
-				return fmt.Errorf("store.SaveClaudeEvidence: transcript %q identity record %d has invalid session ID %q; cache transaction rolled back; correct the native recorded ID before retrying: %w", record.SourcePath, index, identity.SessionID, validationErr)
-			}
-			identityRows = append(identityRows, claudeIdentityRecordRow{
-				SessionID: id.String(), UUID: identity.UUID, ParentUUID: identity.ParentUUID,
-				Type: identity.Type, Subtype: identity.Subtype, SpawnAgentID: identity.SpawnAgentID, AgentID: identity.AgentID, Sidechain: identity.Sidechain,
-			})
+		if err := validateClaudeIdentityFacts(record); err != nil {
+			return fmt.Errorf("store.SaveClaudeEvidence: transcript %q identity facts are not storable; cache transaction rolled back; correct the native recorded ID before retrying: %w", record.SourcePath, err)
 		}
-		identityJSON, marshalErr := json.Marshal(identityRows)
+		sessionIDsJSON, marshalErr := marshalJSONArray(record.SessionIDs)
 		if marshalErr != nil {
-			return fmt.Errorf("store.SaveClaudeEvidence: encode identity records for transcript %q: %w", record.SourcePath, marshalErr)
+			return fmt.Errorf("store.SaveClaudeEvidence: encode session ids for transcript %q: %w", record.SourcePath, marshalErr)
+		}
+		spawnIDsJSON, marshalErr := marshalJSONArray(record.SpawnAgentIDs)
+		if marshalErr != nil {
+			return fmt.Errorf("store.SaveClaudeEvidence: encode spawn agent ids for transcript %q: %w", record.SourcePath, marshalErr)
+		}
+		chain := record.Chain
+		if !ingest.ClaudeIdentityChainPersisted(record.Scope) {
+			chain = []ingest.ClaudeIdentityChainLink{}
+		}
+		chainJSON, marshalErr := marshalJSONArray(chain)
+		if marshalErr != nil {
+			return fmt.Errorf("store.SaveClaudeEvidence: encode identity chain for transcript %q: %w", record.SourcePath, marshalErr)
 		}
 		var team, name any
 		if record.Identity != nil {
@@ -485,7 +674,12 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 				record.NativeAgentID,
 				boolToInt(record.NativeAgentValid),
 				record.ContentDigest,
-				string(identityJSON),
+				"[]",
+				sessionIDsJSON,
+				spawnIDsJSON,
+				boolToInt(record.LegacyAgentProof),
+				boolToInt(record.ContradictorySidechain),
+				chainJSON,
 			},
 		}); err != nil {
 			return fmt.Errorf("store.SaveClaudeEvidence: write evidence for transcript %q: %w", record.SourcePath, err)

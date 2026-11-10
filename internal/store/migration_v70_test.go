@@ -614,8 +614,8 @@ func TestMigrationV70FreshSchema(t *testing.T) {
 	}
 	defer db.pool.Put(conn)
 
-	if got, want := CurrentSchemaVersion(), 70; got != want {
-		t.Fatalf("CurrentSchemaVersion() = %d, want %d: V70 advances the shipped version by one", got, want)
+	if got := CurrentSchemaVersion(); got < 70 {
+		t.Fatalf("CurrentSchemaVersion() = %d, want at least 70: the derived-lookup migration must be registered", got)
 	}
 	var version int
 	if err := sqlitex.ExecuteTransient(conn, `PRAGMA user_version`, &sqlitex.ExecOptions{
@@ -623,8 +623,8 @@ func TestMigrationV70FreshSchema(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("read the fresh store's user_version: %v", err)
 	}
-	if version != 70 {
-		t.Fatalf("fresh user_version = %d, want 70", version)
+	if version < 70 {
+		t.Fatalf("fresh user_version = %d, want at least 70", version)
 	}
 
 	for _, name := range []string{"claude_teammate_spawns", "codex_rollout_catalog"} {
