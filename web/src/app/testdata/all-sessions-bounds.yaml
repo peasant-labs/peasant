@@ -1,8 +1,26 @@
 requiredNames:
   - offscreen-match-remains-searchable
+  - exactly-at-the-cap
+  - one-over-the-cap
 cases:
   - name: offscreen-match-remains-searchable
     total: 160
     maximum: 100
     matchIndex: 159
     query: needle
+    notice: true
+    hidden: true
+  - name: exactly-at-the-cap
+    total: 100
+    maximum: 100
+    matchIndex: 99
+    query: needle
+    notice: false
+    hidden: false
+  - name: one-over-the-cap
+    total: 101
+    maximum: 100
+    matchIndex: 100
+    query: needle
+    notice: true
+    hidden: true

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { EarlierHistoryState } from '@peasant-labs/schema';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
@@ -352,7 +353,7 @@ describe('SessionDetailV2 segmented transcript', () => {
 
 type HistoryCase = { name: string; segmentCase: string; actions: string[]; reads: number };
 const historyFixture = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/earlier_history.yaml'), 'utf8'), 'earlier history') as {
-  requiredNames: string[]; cases: HistoryCase[]; history: { state: string; content: string };
+  requiredNames: string[]; cases: HistoryCase[]; history: { content: string; label: string; explanation: string };
 };
 const historyManifest = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/earlier_history.manifest.yaml'), 'utf8'), 'earlier history manifest') as { requiredNames: string[] };
 
@@ -393,7 +394,7 @@ describe('explicit earlier history on the mounted transcript', () => {
           return Response.json({
             ...detail(plan),
             turns: [turnWire(0, plan)],
-            earlierHistory: [{ state: historyFixture.history.state, turns: [{ ...turnWire(40, plan), content: historyFixture.history.content, truncated: undefined, byteLength: undefined }] }],
+            earlierHistory: [{ state: EarlierHistoryState.UncertainUnresolved, turns: [{ ...turnWire(40, plan), content: historyFixture.history.content, truncated: undefined, byteLength: undefined }] }],
           });
         }
         return answer(input);
@@ -438,7 +439,9 @@ describe('explicit earlier history on the mounted transcript', () => {
           view.rerender(component());
           if (action === 'disclose') {
             expect(view.getByText(historyFixture.history.content)).toBeVisible();
-            expect(view.getByText(/state: uncertain_unresolved/)).toBeVisible();
+            expect(view.getByText(historyFixture.history.label)).toBeVisible();
+            expect(view.getByText(new RegExp(historyFixture.history.explanation))).toBeVisible();
+            expect(view.queryByText(/state:/)).toBeNull();
             const stream = view.container.querySelector('.txn-stream');
             const history = stream?.querySelector('[data-earlier-section]');
             const turn = stream?.querySelector('[data-turn="0"]');
@@ -448,8 +451,8 @@ describe('explicit earlier history on the mounted transcript', () => {
           search = 'earlier=earlier-1'; view.rerender(component());
           expect(view.getByText(/section earlier-1 was not returned/)).toBeVisible();
         } else if (action === 'limitation') {
-          expect(view.getByText(/transcript page cannot load more of a truncated turn/)).toBeVisible();
-          expect(view.getByText('the transcript page cannot load more of this turn.')).toBeVisible();
+          expect(view.getAllByText(/this turn's text is truncated/)).toHaveLength(1);
+          expect(view.queryByText(/transcript page cannot load more/)).toBeNull();
           expect(view.queryByRole('button', { name: 'load this turn in full' })).toBeNull();
         }
       }

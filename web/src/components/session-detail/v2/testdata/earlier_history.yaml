@@ -41,5 +41,6 @@ cases:
     actions: [limitation]
     reads: 0
 history:
-  state: uncertain_unresolved
   content: synthetic earlier history content
+  label: uncertain ownership
+  explanation: ownership of this earlier history is uncertain.

@@ -401,13 +401,6 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     () => (detail ? annotateTranscript(displayTurns ?? transcriptTurns) : []),
     [detail, displayTurns, transcriptTurns],
   );
-  const historySections = useMemo(() => history.detail
-    ? adaptTranscript(history.detail, undefined, undefined, { relationshipNavigation }).earlierHistory?.map((section) => ({
-      ...section,
-      explanation: `${section.explanation} state: ${section.state}.`,
-    })) ?? []
-    : null, [history.detail, relationshipNavigation]);
-
   // The ONE wire→view projection (fairtrade's adapter): scope/focus filtering
   // happens on the WIRE turns before cooking, so the composite renders exactly
   // the filtered conversation. Analytics carry the scorecard + personal
@@ -443,7 +436,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // viewer renders as its header commit count and its checkpoint markers.
     // Everything else on the payload is unchanged.
     const adapted = adaptTranscript(
-      { ...durableDetail, turns: visibleTurns, gitContext: toTranscriptGitContext(sessionCommits) },
+      { ...durableDetail, turns: visibleTurns, earlierHistory: history.sections ?? durableDetail.earlierHistory, gitContext: toTranscriptGitContext(sessionCommits) },
       undefined,
       analytics,
       adapterOptions,
@@ -458,10 +451,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // fallback from ever running.
     return {
       ...adapted,
-      earlierHistory: historySections ?? adapted.earlierHistory,
       session: { ...adapted.session, title: sessionTitle ?? UNTITLED_SESSION_TITLE },
     };
-  }, [detail, displayTurns, medians, transcriptTurns, sessionTitle, relationshipNavigation, sessionCommits, historySections]);
+  }, [detail, displayTurns, medians, transcriptTurns, sessionTitle, relationshipNavigation, sessionCommits, history.sections]);
 
   // Cooked tool calls by turn index, fed into the graph engine's tool nodes.
   const toolVMsByTurn = useMemo(
@@ -645,10 +637,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           <Button variant="secondary" size="sm" onClick={refreshDetail}>try again</Button>
         </div>
       )}
-      {segmentMode && segmentRead.segments.some((segment) => segment.turns.some((turn) => turn.truncated)) && (
-        <p role="note">the transcript page cannot load more of a truncated turn; the complete record remains in the original store.</p>
-      )}
-      {!history.detail && (
+      {!history.sections && (
         <div>
           <Button variant="secondary" size="sm" disabled={history.loading} onClick={() => void history.load()}>
             {history.loading ? 'loading earlier history…' : history.error ? 'try loading earlier history again' : 'show earlier history'}
@@ -657,10 +646,10 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           {history.error && <p role="alert">{history.error}</p>}
         </div>
       )}
-      {history.detail && (history.detail.earlierHistory?.length ?? 0) === 0 && (
+      {history.sections && history.sections.length === 0 && (
         <p role="status">the session read did not return any earlier history sections.</p>
       )}
-      {history.detail && routeQuery.earlierHistoryOpen.filter((id) => !vm?.earlierHistory?.some((section) => section.id === id)).map((id) => (
+      {history.sections && routeQuery.earlierHistoryOpen.filter((id) => !vm?.earlierHistory?.some((section) => section.id === id)).map((id) => (
         <p role="status" key={id}>earlier history section {id} was not returned by this session read.</p>
       ))}
     </div>
@@ -714,11 +703,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             window={segmentMode ? segmentRead.window ?? undefined : undefined}
             onLoadSegment={segmentMode ? segmentRead.loadSegment : undefined}
             onLoadWindow={segmentMode ? segmentRead.loadWindow : undefined}
-            {...(segmentMode ? {
-              renderTurnPanel: (turn: (typeof cookedSegments)[number]['turns'][number]) => turn.truncated
-                ? <p role="note">the transcript page cannot load more of this turn.</p>
-                : null,
-            } : {})}
+            // Fairtrade owns the single per-turn truncation notice.
             // Host-owned reading state. The earlier-history disclosure is
             // controlled by the route, so Back, a reload, and a copied link all
             // restore exactly the sections the reader had open. The selected turn

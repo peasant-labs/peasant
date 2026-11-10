@@ -91,8 +91,8 @@ func TestTranscriptOversizedDurableReadComparison(t *testing.T) {
 	}
 	turn := segment.Turns[0]
 	t.Logf("segment content bytes=%d byteLength=%d truncated=%v; durable content bytes=%d; per-field bound=%d document budget=%d; input bytes=%d", len(turn.Content), turn.ByteLength, turn.Truncated, len(detail.Turns[0].Content), defaults.ServedTextFieldBudgetBytes, defaults.ServedDetailDocumentBudgetBytes, size)
-	if !turn.Truncated || len(detail.Turns[0].Content) > len(turn.Content) {
-		t.Fatal("durable read exceeded the segment display")
+	if !turn.Truncated || len(detail.Turns[0].Content) != len(turn.Content) {
+		t.Fatal("expected a truncated segment and equal durable and segment content byte lengths")
 	}
 }
 

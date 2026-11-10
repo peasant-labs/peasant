@@ -1,2 +1,4 @@
 requiredNames:
   - offscreen-match-remains-searchable
+  - exactly-at-the-cap
+  - one-over-the-cap

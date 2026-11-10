@@ -21,10 +21,12 @@ import (
 )
 
 const (
-	sessionID   = "11111111-1111-4111-8111-111111111111"
-	projectHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	projectName = "synthetic-large"
-	hostSlug    = "github.com-synthetic"
+	sessionID         = "11111111-1111-4111-8111-111111111111"
+	projectHash       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	projectName       = "synthetic-large"
+	hostSlug          = "github.com-synthetic"
+	firstActionParent = 31
+	lastActionParent  = 51
 )
 
 func main() {
@@ -112,7 +114,7 @@ func main() {
 	page := strings.Repeat(" ", 400_000)
 	for turn := 0; turn < 80; turn++ {
 		timestamp := start + int64(turn)*1000
-		if turn >= 32 && turn <= 52 && turn%2 == 0 {
+		if turn >= firstActionParent+1 && turn <= lastActionParent+1 && turn%2 == 0 {
 			parent := turn - 1
 			id := fmt.Sprintf("synthetic-tool-%d", turn)
 			name := "Bash"
@@ -131,7 +133,7 @@ func main() {
 		if turn%2 == 1 && turn != 53 {
 			role = schema.RoleAssistant
 			content = fmt.Sprintf("synthetic assistant turn %d.%s end of turn.", turn, page)
-			if turn >= 33 && turn <= 51 {
+			if turn >= firstActionParent+2 && turn <= lastActionParent {
 				content = page
 			}
 		}
@@ -152,11 +154,12 @@ func main() {
 	if err := db.Close(); err != nil {
 		fail(err)
 	}
-	encoded, err := json.Marshal(map[string]string{
-		"dataDir":     root,
-		"sessionId":   sessionID,
-		"projectHash": projectHash,
-		"projectName": projectName,
+	encoded, err := json.Marshal(map[string]any{
+		"dataDir":       root,
+		"sessionId":     sessionID,
+		"projectHash":   projectHash,
+		"projectName":   projectName,
+		"actionParents": []int{firstActionParent, lastActionParent},
 	})
 	if err != nil {
 		fail(err)

@@ -85,7 +85,7 @@ try {
   if (!hostBody.includes(HOST_MARKER)) throw fail('verifying the served host chunk', `${hostPath} does not carry ${HOST_MARKER}`)
   const index = await directory(seeded.sessionId)
   if (index.totalSegments < 3) throw fail('checking the seeded cut', `only ${index.totalSegments} segments; both boundaries need a middle segment with unloaded extents on both sides`)
-  const actionParents = [31, 51]
+  const actionParents = seeded.actionParents
   const actionSegments = actionParents.map((turn) => index.segments.find((segment) => segment.firstTurn <= turn && turn <= segment.lastTurn))
   if (actionSegments.some((segment) => !segment) || actionSegments[0].index === actionSegments[1].index) {
     throw fail('checking the seeded action run', 'the action parents do not cross a segment boundary')
