@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -204,6 +205,12 @@ func TestMigrationV65ClaudeEvidence(t *testing.T) {
 			t.Error(err)
 		}
 	})
+	if strings.Contains(sqlSelectClaudeEvidence, "identity_chain_json") {
+		t.Fatal("whole-table evidence SQL selects identity_chain_json; that column is a separate primary-key read")
+	}
+	if strings.Contains(sqlSelectClaudeEvidenceFor(1), "identity_chain_json") {
+		t.Fatal("by-path evidence SQL selects identity_chain_json; the origin resolver and every other by-path reader must leave the chain unloaded")
+	}
 	loaded, err := s.LoadClaudeEvidence(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -234,8 +241,8 @@ func TestMigrationV65ClaudeEvidence(t *testing.T) {
 			}
 			want = sealedEvidence(want)
 			got := loaded[want.SourcePath]
-			// The whole-table read omits the coordinate list. Compare that list
-			// through the by-path read, which is the read a lineage proof uses.
+			// Neither evidence read selects the coordinate list. A nil chain is
+			// "not loaded", which is what a lineage proof refills by primary key.
 			if got.Chain != nil {
 				t.Fatalf("whole-table load returned a chain for %s; that column must stay out of the full scan", want.SourcePath)
 			}
@@ -247,8 +254,18 @@ func TestMigrationV65ClaudeEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(byPath[want.SourcePath].Chain, want.Chain) {
-				t.Fatalf("by-path chain = %#v, want %#v", byPath[want.SourcePath].Chain, want.Chain)
+			if byPath[want.SourcePath].Chain != nil {
+				t.Fatalf("by-path load returned a chain for %s; that read must leave Chain nil", want.SourcePath)
+			}
+			chains, unreadable, err := s.LoadClaudeIdentityChains(t.Context(), []ingest.ResolvedPath{want.SourcePath})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(unreadable) != 0 {
+				t.Fatalf("stored chain for %s was unreadable: %v", want.SourcePath, unreadable)
+			}
+			if !reflect.DeepEqual(chains[want.SourcePath], want.Chain) {
+				t.Fatalf("primary-key chain = %#v, want %#v", chains[want.SourcePath], want.Chain)
 			}
 			conn, err := s.pool.Take(t.Context())
 			if err != nil {
@@ -265,6 +282,23 @@ func TestMigrationV65ClaudeEvidence(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
+			// A corrupt tombstone must not hide a row whose facts still parse.
+			// identity_records_json is cleared by the migration and will be dropped.
+			if err := sqlitex.ExecuteTransient(conn, `UPDATE claude_transcript_evidence SET identity_records_json='null' WHERE source_path=?`, &sqlitex.ExecOptions{
+				Args: []any{want.SourcePath.String()},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			stillCached, err := s.LoadClaudeEvidence(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, found := stillCached[want.SourcePath]; !found {
+				t.Fatal("corrupt identity_records_json hid a row; that column is a tombstone, not a record list")
+			}
+			if stillCached[want.SourcePath].Chain != nil {
+				t.Fatal("LoadClaudeEvidence returned a chain after the tombstone write")
+			}
 		})
 	}
 	for _, c := range fixtures.Malformed {
@@ -278,7 +312,7 @@ func TestMigrationV65ClaudeEvidence(t *testing.T) {
 				s.pool.Put(conn)
 				t.Fatal(err)
 			}
-			err = sqlitex.ExecuteTransient(conn, `UPDATE claude_transcript_evidence SET identity_records_json=? WHERE source_path='/synthetic/legacy.jsonl'`, &sqlitex.ExecOptions{Args: []any{c.JSON}})
+			err = sqlitex.ExecuteTransient(conn, `UPDATE claude_transcript_evidence SET identity_session_ids_json=? WHERE source_path='/synthetic/legacy.jsonl'`, &sqlitex.ExecOptions{Args: []any{c.JSON}})
 			resetErr := sqlitex.ExecuteTransient(conn, `PRAGMA ignore_check_constraints=OFF`, nil)
 			s.pool.Put(conn)
 			if err != nil {

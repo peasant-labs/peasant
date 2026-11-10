@@ -720,9 +720,15 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 		// An unreadable file fails open, exactly as the conversation check does,
 		// so discovery can surface it instead of discarding it silently. It
 		// carries no evidence, so the rule declares it unknown, which is the
-		// visible answer.
+		// visible answer. Empty slices, not nil, are the marker that this read
+		// failed: a nil chain is "not loaded" and would be refilled from the
+		// store, which would relink a child the full walk refuses.
 		evidence.HasConversationRecord = true
 		evidence.Origin, evidence.Signal = sessionorigin.Classify(sessionorigin.Evidence{})
+		evidence.Records = []ClaudeIdentityRecord{}
+		evidence.Chain = []ClaudeIdentityChainLink{}
+		evidence.SessionIDs = []string{}
+		evidence.SpawnAgentIDs = []string{}
 		return evidence, false
 	}
 	beginClaudeIdentity(data, &evidence)

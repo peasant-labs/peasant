@@ -1,11 +1,26 @@
 package store
 
+// claudeIdentitySkeletonElementFault is the one predicate for a skeleton
+// element this migration cannot turn into facts. It is not a complete JSON
+// parse; a row that fails it is marked for re-mining rather than given a
+// guessed coordinate.
+const claudeIdentitySkeletonElementFault = `json_type(j.value) != 'object'
+       OR IFNULL(json_type(j.value, '$.sessionId'), '') != 'text'
+       OR json_extract(j.value, '$.sessionId') = ''
+       OR (json_type(j.value, '$.uuid') IS NOT NULL AND json_type(j.value, '$.uuid') != 'text')
+       OR (json_type(j.value, '$.parentUuid') IS NOT NULL AND json_type(j.value, '$.parentUuid') != 'text')
+       OR (json_type(j.value, '$.type') IS NOT NULL AND json_type(j.value, '$.type') != 'text')
+       OR (json_type(j.value, '$.subtype') IS NOT NULL AND json_type(j.value, '$.subtype') != 'text')
+       OR (json_type(j.value, '$.spawnAgentId') IS NOT NULL AND json_type(j.value, '$.spawnAgentId') != 'text')
+       OR (json_type(j.value, '$.agentId') IS NOT NULL AND json_type(j.value, '$.agentId') != 'text')
+       OR (json_type(j.value, '$.isSidechain') IS NOT NULL AND json_type(j.value, '$.isSidechain') NOT IN ('true', 'false'))`
+
 // migrationV71 replaces the per-line structural skeleton with the facts the
-// readers ask. identity_records_json is cleared to an empty array after the
-// facts are derived, so an upgraded store does not keep both copies. A row
-// whose skeleton cannot be parsed is marked for re-mining (proof_version 0)
-// and keeps the default facts; the migration does not fail and does not invent
-// a coordinate.
+// readers ask. identity_records_json is cleared to '[]' and is then a
+// tombstone: a later migration will drop the column. Readers must not parse
+// it. A row whose skeleton cannot be parsed is marked for re-mining
+// (proof_version 0) and keeps the default facts; the migration does not fail
+// and does not invent a coordinate.
 //
 // A root row keeps identity_chain_json. A stored lineage proof passes a root
 // transcript as the owner snapshot or the layout-parent artifact, and never
@@ -46,16 +61,7 @@ WHERE json_valid(identity_records_json)
   AND json_type(identity_records_json) = 'array'
   AND EXISTS (
     SELECT 1 FROM json_each(identity_records_json) AS j
-    WHERE json_type(j.value) != 'object'
-       OR IFNULL(json_type(j.value, '$.sessionId'), '') != 'text'
-       OR json_extract(j.value, '$.sessionId') = ''
-       OR (json_type(j.value, '$.uuid') IS NOT NULL AND json_type(j.value, '$.uuid') != 'text')
-       OR (json_type(j.value, '$.parentUuid') IS NOT NULL AND json_type(j.value, '$.parentUuid') != 'text')
-       OR (json_type(j.value, '$.type') IS NOT NULL AND json_type(j.value, '$.type') != 'text')
-       OR (json_type(j.value, '$.subtype') IS NOT NULL AND json_type(j.value, '$.subtype') != 'text')
-       OR (json_type(j.value, '$.spawnAgentId') IS NOT NULL AND json_type(j.value, '$.spawnAgentId') != 'text')
-       OR (json_type(j.value, '$.agentId') IS NOT NULL AND json_type(j.value, '$.agentId') != 'text')
-       OR (json_type(j.value, '$.isSidechain') IS NOT NULL AND json_type(j.value, '$.isSidechain') NOT IN ('true', 'false'))
+    WHERE ` + claudeIdentitySkeletonElementFault + `
   );
 
 UPDATE claude_transcript_evidence
@@ -89,16 +95,7 @@ WHERE json_valid(identity_records_json)
   AND json_type(identity_records_json) = 'array'
   AND NOT EXISTS (
     SELECT 1 FROM json_each(identity_records_json) AS j
-    WHERE json_type(j.value) != 'object'
-       OR IFNULL(json_type(j.value, '$.sessionId'), '') != 'text'
-       OR json_extract(j.value, '$.sessionId') = ''
-       OR (json_type(j.value, '$.uuid') IS NOT NULL AND json_type(j.value, '$.uuid') != 'text')
-       OR (json_type(j.value, '$.parentUuid') IS NOT NULL AND json_type(j.value, '$.parentUuid') != 'text')
-       OR (json_type(j.value, '$.type') IS NOT NULL AND json_type(j.value, '$.type') != 'text')
-       OR (json_type(j.value, '$.subtype') IS NOT NULL AND json_type(j.value, '$.subtype') != 'text')
-       OR (json_type(j.value, '$.spawnAgentId') IS NOT NULL AND json_type(j.value, '$.spawnAgentId') != 'text')
-       OR (json_type(j.value, '$.agentId') IS NOT NULL AND json_type(j.value, '$.agentId') != 'text')
-       OR (json_type(j.value, '$.isSidechain') IS NOT NULL AND json_type(j.value, '$.isSidechain') NOT IN ('true', 'false'))
+    WHERE ` + claudeIdentitySkeletonElementFault + `
   );
 
 UPDATE claude_transcript_evidence
@@ -138,16 +135,7 @@ WHERE scope = 'root'
   AND json_type(identity_records_json) = 'array'
   AND NOT EXISTS (
     SELECT 1 FROM json_each(identity_records_json) AS j
-    WHERE json_type(j.value) != 'object'
-       OR IFNULL(json_type(j.value, '$.sessionId'), '') != 'text'
-       OR json_extract(j.value, '$.sessionId') = ''
-       OR (json_type(j.value, '$.uuid') IS NOT NULL AND json_type(j.value, '$.uuid') != 'text')
-       OR (json_type(j.value, '$.parentUuid') IS NOT NULL AND json_type(j.value, '$.parentUuid') != 'text')
-       OR (json_type(j.value, '$.type') IS NOT NULL AND json_type(j.value, '$.type') != 'text')
-       OR (json_type(j.value, '$.subtype') IS NOT NULL AND json_type(j.value, '$.subtype') != 'text')
-       OR (json_type(j.value, '$.spawnAgentId') IS NOT NULL AND json_type(j.value, '$.spawnAgentId') != 'text')
-       OR (json_type(j.value, '$.agentId') IS NOT NULL AND json_type(j.value, '$.agentId') != 'text')
-       OR (json_type(j.value, '$.isSidechain') IS NOT NULL AND json_type(j.value, '$.isSidechain') NOT IN ('true', 'false'))
+    WHERE ` + claudeIdentitySkeletonElementFault + `
   );
 
 UPDATE claude_transcript_evidence

@@ -23,9 +23,11 @@ var _ ingest.ClaudeEvidenceCompleteness = (*Store)(nil)
 
 const (
 	// sqlSelectClaudeEvidenceColumns is the one column list both the whole-table
-	// read and the by-path read use, so the two shapes cannot drift.
-	// The whole-table read stops before identity_chain_json. That column is the
-	// large coordinate list, and only a lineage proof reads it, by primary key.
+	// read and the by-path read use, so the two shapes cannot drift. Neither
+	// selects identity_chain_json. That column is loaded only by
+	// LoadClaudeIdentityChains, for the owner and layout parent a lineage proof
+	// is about to read. A by-path evidence read, including the origin resolver,
+	// does not need it.
 	sqlSelectClaudeEvidenceColumns = `SELECT
     source_path,
     scope,
@@ -43,7 +45,6 @@ const (
     native_agent_id,
     native_agent_valid,
     content_digest,
-    identity_records_json,
     identity_session_ids_json,
     identity_spawn_agent_ids_json,
     identity_legacy_agent_proof,
@@ -53,34 +54,11 @@ FROM claude_transcript_evidence`
 	sqlSelectClaudeEvidence = sqlSelectClaudeEvidenceColumns
 
 	// sqlSelectClaudeEvidenceForTemplate is the by-path read over the source_path
-	// primary key. It includes the coordinate list because a scoped build reads
-	// the owner and layout parent by path and links from that read. Production
-	// renders it through sqlSelectClaudeEvidenceFor, and its query-plan guard
-	// explains the same rendered statement.
-	sqlSelectClaudeEvidenceForTemplate = `SELECT
-    source_path,
-    scope,
-    mod_time_unix_nano,
-    size_bytes,
-    has_conversation,
-    identity_team,
-    identity_name,
-    spawns_json,
-    title,
-    branch,
-    cwd,
-    origin,
-    proof_version,
-    native_agent_id,
-    native_agent_valid,
-    content_digest,
-    identity_records_json,
-    identity_session_ids_json,
-    identity_spawn_agent_ids_json,
-    identity_legacy_agent_proof,
-    identity_contradictory_sidechain,
-    identity_chain_json
-FROM claude_transcript_evidence WHERE source_path IN (%s)`
+	// primary key. Production renders it through sqlSelectClaudeEvidenceFor, and
+	// its query-plan guard explains the same rendered statement. It uses the
+	// same columns as the whole-table read; the coordinate chain is a separate
+	// primary-key read.
+	sqlSelectClaudeEvidenceForTemplate = sqlSelectClaudeEvidenceColumns + ` WHERE source_path IN (%s)`
 
 	sqlSelectClaudeIdentityChains = `SELECT source_path, identity_chain_json FROM claude_transcript_evidence WHERE source_path IN (%s)`
 
@@ -202,7 +180,7 @@ func (s *Store) loadClaudeEvidence(ctx context.Context) (map[ingest.ResolvedPath
 	skipped := 0
 	err = sqlitex.Execute(conn, sqlSelectClaudeEvidence, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			record, ok := scanClaudeEvidence(stmt, false)
+			record, ok := scanClaudeEvidence(stmt)
 			if !ok {
 				skipped++
 				return nil
@@ -230,12 +208,14 @@ func sqlSelectClaudeEvidenceFor(pathCount int) string {
 // that is not cached is absent from the map. An empty input returns an empty
 // map without reading anything.
 //
-// A row whose spawn list or identity-record list cannot be parsed is still
+// A row whose spawn list or identity fact set cannot be parsed is still
 // returned with its readable scope and identity fields, and with a proof
 // version that forces discovery to mine it again. Its spawn side is filled from
-// claude_teammate_spawns, and a malformed record list leaves Records nil; no
-// caller may treat such a row as fresh. The by-path read does that so a broken
-// projection column cannot hide a row's contribution from the count delta.
+// claude_teammate_spawns. identity_records_json is not among those facts: it
+// is a tombstone a later migration will drop, and a corrupt tombstone must
+// not hide the row. No caller may treat an unreadable fact row as fresh. The
+// by-path read does that so a broken projection column cannot hide a row's
+// contribution from the count delta.
 //
 // The named paths are read in batches of indexFormatReadBatchSize, in the order
 // the caller supplied them, so one unbounded IN list can neither hit SQLite's
@@ -304,7 +284,7 @@ func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 		err = sqlitex.Execute(conn, sqlSelectClaudeEvidenceFor(len(batch)), &sqlitex.ExecOptions{
 			Args: args,
 			ResultFunc: func(stmt *sqlite.Stmt) error {
-				record, ok, projectionUnreadable := scanClaudeEvidenceWithProjections(stmt, true, true)
+				record, ok, projectionUnreadable := scanClaudeEvidenceWithProjections(stmt, true)
 				if !ok {
 					skipped++
 					return nil
@@ -349,21 +329,22 @@ func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 }
 
 // scanClaudeEvidence reads one row. It reports false for a row whose scope this
-// build does not know or whose spawn or identity record list does not parse.
-func scanClaudeEvidence(stmt *sqlite.Stmt, includeChain bool) (ingest.ClaudeTranscriptEvidence, bool) {
-	record, ok, _ := scanClaudeEvidenceWithProjections(stmt, false, includeChain)
+// build does not know or whose spawn list or identity fact set does not parse.
+// identity_records_json is not read. It is a tombstone, not a record list.
+func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, bool) {
+	record, ok, _ := scanClaudeEvidenceWithProjections(stmt, false)
 	return record, ok
 }
 
 // scanClaudeEvidenceWithProjections reads one row. With
-// tolerateUnreadableProjections, a row whose spawn list or identity-record list
+// tolerateUnreadableProjections, a row whose spawn list or identity fact set
 // cannot be parsed is still returned with the fields the identity-count
 // decision reads (scope and identity) and a proof version that forces
 // discovery to re-mine it. The third result says the row was returned that
 // way, so a by-path caller can fill its spawn side from the derived spawn
 // projection instead of trusting the unparsed column. The by-path read uses
 // that; the whole-table read keeps skipping such a row.
-func scanClaudeEvidenceWithProjections(stmt *sqlite.Stmt, tolerateUnreadableProjections, includeChain bool) (ingest.ClaudeTranscriptEvidence, bool, bool) {
+func scanClaudeEvidenceWithProjections(stmt *sqlite.Stmt, tolerateUnreadableProjections bool) (ingest.ClaudeTranscriptEvidence, bool, bool) {
 	scope := ingest.ClaudeEvidenceScope(stmt.ColumnText(1))
 	if !scope.IsValid() {
 		return ingest.ClaudeTranscriptEvidence{}, false, false
@@ -377,36 +358,10 @@ func scanClaudeEvidenceWithProjections(stmt *sqlite.Stmt, tolerateUnreadableProj
 		projectionUnreadable = true
 		spawnRows = nil
 	}
-	var identityRows []*claudeIdentityRecordRow
-	if err := json.Unmarshal([]byte(stmt.ColumnText(16)), &identityRows); err != nil || identityRows == nil {
-		if !tolerateUnreadableProjections {
-			return ingest.ClaudeTranscriptEvidence{}, false, false
-		}
-		projectionUnreadable = true
-		identityRows = nil
-	}
-	if identityRows != nil {
-		for _, row := range identityRows {
-			if row == nil {
-				if !tolerateUnreadableProjections {
-					return ingest.ClaudeTranscriptEvidence{}, false, false
-				}
-				projectionUnreadable = true
-				identityRows = nil
-				break
-			}
-			id, err := ingest.NewSessionID(row.SessionID)
-			if err != nil {
-				if !tolerateUnreadableProjections {
-					return ingest.ClaudeTranscriptEvidence{}, false, false
-				}
-				projectionUnreadable = true
-				identityRows = nil
-				break
-			}
-			row.SessionID = id.String()
-		}
-	}
+	// identity_records_json is not in this column list. Migration V71 cleared it
+	// to '[]' and a later migration will drop it. It is a tombstone, not a
+	// record list: selecting or parsing it would let a corrupt leftover hide a
+	// row whose facts are readable.
 	// Column 11 (origin) is read as raw text and assigned directly, never
 	// through sessionorigin.Parse or Origin.Validate. The empty string is a
 	// legal stored value on THIS table only — it means the row predates the
@@ -438,7 +393,7 @@ func scanClaudeEvidenceWithProjections(stmt *sqlite.Stmt, tolerateUnreadableProj
 	for _, row := range spawnRows {
 		record.Spawns = append(record.Spawns, ingest.ClaudeTeammateIdentity{Team: row.Team, Name: row.Name})
 	}
-	if err := applyClaudeIdentityFacts(&record, stmt, includeChain); err != nil {
+	if err := applyClaudeIdentityFacts(&record, stmt); err != nil {
 		if !tolerateUnreadableProjections {
 			return ingest.ClaudeTranscriptEvidence{}, false, false
 		}
@@ -446,23 +401,20 @@ func scanClaudeEvidenceWithProjections(stmt *sqlite.Stmt, tolerateUnreadableProj
 	}
 	if projectionUnreadable {
 		// A proof version no Fresh check accepts forces discovery to mine this
-		// transcript again before any reader trusts its records or spawn list.
+		// transcript again before any reader trusts its facts or spawn list.
 		record.ProofVersion = 0
 		record.Records = nil
 		return record, true, true
 	}
-	// The skeleton is validated above and then discarded. Readers use the
-	// compact facts. Keeping the list would reload the column this migration
-	// exists to stop loading.
 	record.Records = nil
 	return record, true, false
 }
 
-// applyClaudeIdentityFacts reads the compact fact columns. identity_records_json
-// is still validated so a corrupt skeleton is not trusted, but its contents are
-// not copied onto the record.
-func applyClaudeIdentityFacts(record *ingest.ClaudeTranscriptEvidence, stmt *sqlite.Stmt, includeChain bool) error {
-	sessionIDs, err := decodeStringSet(stmt.ColumnText(17))
+// applyClaudeIdentityFacts reads the compact fact columns. The per-line
+// skeleton and the coordinate chain are not among them. The chain is loaded
+// only by LoadClaudeIdentityChains.
+func applyClaudeIdentityFacts(record *ingest.ClaudeTranscriptEvidence, stmt *sqlite.Stmt) error {
+	sessionIDs, err := decodeStringSet(stmt.ColumnText(16))
 	if err != nil {
 		return err
 	}
@@ -475,22 +427,14 @@ func applyClaudeIdentityFacts(record *ingest.ClaudeTranscriptEvidence, stmt *sql
 			return fmt.Errorf("session id %q is not in canonical form", id)
 		}
 	}
-	spawnIDs, err := decodeStringSet(stmt.ColumnText(18))
+	spawnIDs, err := decodeStringSet(stmt.ColumnText(17))
 	if err != nil {
 		return err
 	}
 	record.SessionIDs = sessionIDs
 	record.SpawnAgentIDs = spawnIDs
-	record.LegacyAgentProof = stmt.ColumnInt64(19) == 1
-	record.ContradictorySidechain = stmt.ColumnInt64(20) == 1
-	if !includeChain {
-		return nil
-	}
-	chain, err := decodeIdentityChain(stmt.ColumnText(21))
-	if err != nil {
-		return err
-	}
-	record.Chain = chain
+	record.LegacyAgentProof = stmt.ColumnInt64(18) == 1
+	record.ContradictorySidechain = stmt.ColumnInt64(19) == 1
 	return nil
 }
 

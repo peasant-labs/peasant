@@ -255,7 +255,7 @@ func makeStoredEvidenceUnreadable(t *testing.T, ctx context.Context, database *s
 	}
 	defer database.Pool().Put(conn)
 	if err := sqlitex.ExecuteTransient(conn,
-		`UPDATE claude_transcript_evidence SET identity_records_json = 'null' WHERE source_path = ?`,
+		`UPDATE claude_transcript_evidence SET identity_session_ids_json = 'null' WHERE source_path = ?`,
 		&sqlitex.ExecOptions{Args: []any{path}}); err != nil {
 		t.Fatalf("make the stored evidence row %q unreadable: %v", path, err)
 	}
