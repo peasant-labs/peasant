@@ -58,15 +58,24 @@ func TestCountRowsSeparatesIgnoredFromRefused(t *testing.T) {
 // TestIgnoredOnlyCorpusKeepsTiming drives the real timing path: an ignored
 // marker must not suppress the decode/allocation numbers.
 func TestIgnoredOnlyCorpusKeepsTiming(t *testing.T) {
-	out, err := runCorpus(t, ignoredOnlyInputs(), "timing")
+	out, err := runCorpus(t, ignoredOnlyInputs(), "timing", 1)
 	if err != nil {
 		t.Fatalf("ignored-only timing run: %v", err)
 	}
 	if out.Refused != 0 || out.Ignored != 1 || out.Success != 0 {
 		t.Fatalf("ignored-only report = %+v, want zero refusals and one ignored", out)
 	}
-	if out.DecodeSeconds <= 0 {
-		t.Fatalf("ignored-only timing reported no decode time: %+v", out)
+	if out.DecodeSeconds <= 0 || out.AllocatedBytes == 0 || out.Allocations == 0 {
+		t.Fatalf("ignored-only timing suppressed a metric: %+v", out)
+	}
+	// The bracket must enclose the repeated decode loop: more repetitions must
+	// report strictly more decode time.
+	slow, err := runCorpus(t, ignoredOnlyInputs(), "timing", 256)
+	if err != nil {
+		t.Fatalf("ignored-only timing at 256 repetitions: %v", err)
+	}
+	if slow.DecodeSeconds <= out.DecodeSeconds {
+		t.Fatalf("256 repetitions reported %v seconds, not more than one repetition's %v", slow.DecodeSeconds, out.DecodeSeconds)
 	}
 }
 
@@ -74,7 +83,7 @@ func TestIgnoredOnlyCorpusKeepsTiming(t *testing.T) {
 // malformed row keeps the run invalid.
 func TestRefusedCorpusSuppressesTiming(t *testing.T) {
 	inputs := []input{profileInput("msg_bad_idle", "idle", `{"outcome":"succeeded"}`)}
-	out, err := runCorpus(t, inputs, "timing")
+	out, err := runCorpus(t, inputs, "timing", 1)
 	if err == nil || !strings.Contains(err.Error(), "timing invalid") {
 		t.Fatalf("refused timing run error = %v, want the invalid-timing refusal", err)
 	}
@@ -85,7 +94,7 @@ func TestRefusedCorpusSuppressesTiming(t *testing.T) {
 
 // runCorpus writes the inputs to a scratch corpus, runs the real profiler, and
 // decodes the report it printed.
-func runCorpus(t *testing.T, inputs []input, phase string) (report, error) {
+func runCorpus(t *testing.T, inputs []input, phase string, repetitions int) (report, error) {
 	t.Helper()
 	raw, err := json.Marshal(inputs)
 	if err != nil {
@@ -96,10 +105,10 @@ func runCorpus(t *testing.T, inputs []input, phase string) (report, error) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	runErr := run(corpus, phase, 1, &out)
-	var report report
-	if err := json.NewDecoder(&out).Decode(&report); err != nil {
+	runErr := run(corpus, phase, repetitions, &out)
+	var decodedReport report
+	if err := json.NewDecoder(&out).Decode(&decodedReport); err != nil {
 		t.Fatalf("decode profiler report: %v", err)
 	}
-	return report, runErr
+	return decodedReport, runErr
 }
