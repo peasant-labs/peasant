@@ -71,4 +71,32 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 
-console.log(`transcript-segments mutations: servePreBoundInline reddened only ${failedName} in a ${baseline.assertions.length}-test inventory`);
+const jumpFind = 'await loadListed(descriptor, signal);';
+const jumpHost = readFileSync(resolve('src/components/session-detail/v2/lib/useTranscriptSegments.ts'), 'utf8');
+if (jumpHost.split(jumpFind).length - 1 !== 1) {
+  throw new Error('the jump load must contain its mutation anchor exactly once');
+}
+const jumpFailed = ['jump-window', 'load-more-prepends', 'repeat-jump', 'revision-refetch'];
+const jumpMutation = {
+  name: 'jump path fetches an extra segment',
+  target: 'useTranscriptSegments.ts',
+  find: jumpFind,
+  replace: `${jumpFind}\n    await loadListed({ ...descriptor, segments: [...descriptor.segments, descriptor.segments.includes(0) ? 1 : 0] }, signal);`,
+};
+const jumped = runFile({ PEASANT_SOURCE_MUTATION_JSON: JSON.stringify(jumpMutation) }, jumpMutation.name);
+if (jumped.assertions.length !== baseline.assertions.length) {
+  throw new Error(`${jumpMutation.name}: expected the full ${baseline.assertions.length}-test inventory, received ${jumped.assertions.length}`);
+}
+const jumpFailures = jumped.assertions.filter((assertion) => assertion.status === 'failed').map((assertion) => assertion.title).sort();
+if (JSON.stringify(jumpFailures) !== JSON.stringify([...jumpFailed].sort())) {
+  throw new Error(`${jumpMutation.name}: expected [${jumpFailed.join(', ')}] to fail, received [${jumpFailures.join(', ')}]`);
+}
+const jumpText = jumped.assertions
+  .filter((assertion) => assertion.title === 'jump-window')
+  .map((assertion) => (Array.isArray(assertion.failureMessages) ? assertion.failureMessages.join('\n') : ''))
+  .join('\n');
+if (!/jump-window mounted bound/.test(jumpText)) {
+  throw new Error(`${jumpMutation.name}: the jump case failed for the wrong reason: ${jumpText}`);
+}
+
+console.log(`transcript-segments mutations: servePreBoundInline reddened only ${failedName}; extra jump fetch reddened ${jumpFailed.join(', ')} in a ${baseline.assertions.length}-test inventory`);

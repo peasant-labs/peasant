@@ -54,7 +54,7 @@ import { TurnLabelPopover } from './canvas/TurnLabelPopover';
 import { DetectedPullRequests } from './panels/DetectedPullRequests';
 import { useTranscriptPublish } from './publish/useTranscriptPublish';
 import { SessionNotIndexed } from './SessionNotIndexed';
-import { cookSegment, directoryContainsTurn } from './lib/transcriptSegments';
+import { cookSegment, heldRefCoversTurn } from './lib/transcriptSegments';
 import { useTranscriptSegments } from './lib/useTranscriptSegments';
 
 /**
@@ -255,10 +255,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     scope.scope === TranscriptScope.Change;
 
   const requestedTurn = routeQuery.turn;
-  // A frame that still carries turns is an older read. Production sends an
-  // empty turn list and this page reads the directory instead. Tests and any
-  // frame that already holds the transcript keep that content and do not issue
-  // a second read.
+  // The shipped session_detail frame carries metadata and an empty turn list.
+  // A frame that still includes turns is an older server or a test fixture;
+  // this page renders those turns and does not start a segment read.
   const frameHasTurns = turns.length > 0;
   const segmentRead = useTranscriptSegments({
     sessionId,
@@ -294,7 +293,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     setSourcePosition({ ...source, requestKey: `source:${sourceSequence.current}` });
   }, [filteringScope, router, pathname, searchParams]);
   const directoryKnowsTurn = segmentRead.directory != null && requestedTurn != null
-    && directoryContainsTurn(segmentRead.directory, requestedTurn);
+    && heldRefCoversTurn(segmentRead.directory.segments, requestedTurn);
   const requestedTurnExists = requestedTurn == null
     || transcriptTurns.some((turn) => turn.index === requestedTurn)
     || (segmentMode && (segmentRead.directory == null || directoryKnowsTurn));
@@ -366,10 +365,18 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     const query = next.toString();
     router.replace(`${pathname}${query ? `?${query}` : ''}`);
   }, [pathname, router, searchParams]);
+  const publishCoverage = frameHasTurns
+    ? { loadedSegments: 1, totalSegments: 1 }
+    : {
+      loadedSegments: segmentRead.segments.length,
+      totalSegments: segmentRead.directory?.totalSegments ?? 0,
+    };
   const publish = useTranscriptPublish({
     sessionId,
     title: sessionTitle ?? UNTITLED_SESSION_TITLE,
     turns: transcriptTurns,
+    revision: detail?.revision ?? '',
+    coverage: publishCoverage,
     loaded: detail != null,
     moreItems,
     openOnArrival: routeQuery.publish,

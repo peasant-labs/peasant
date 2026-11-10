@@ -83,7 +83,7 @@ func main() {
 			},
 			Stats: ingest.StatsInfo{
 				TurnCount:     80,
-				ToolCallCount: 40,
+				ToolCallCount: 0,
 				DurationMs:    60_000,
 				TokensIn:      1000,
 				TokensOut:     500,
@@ -102,50 +102,31 @@ func main() {
 	if err := db.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		fail(err)
 	}
-	entries := make([]schema.SessionEntry, 0, 120)
+	// Depth-0 indexes are the turn numbers the header and the boundary captions
+	// both print. A tool row between them, or one parked past the last turn,
+	// either opens a gap the captions cannot explain or falls outside the span
+	// a segment read is allowed to return. The bulk lives in the turn text, so
+	// the cut still crosses the segment budget and the read can reproduce it.
+	entries := make([]schema.SessionEntry, 0, 80)
+	page := strings.Repeat("synthetic page text ", 20_000)
 	for turn := 0; turn < 80; turn++ {
-		index := turn * 2
 		role := schema.RoleUser
 		content := fmt.Sprintf("synthetic user turn %d. the reader can page from here.", turn)
 		if turn%2 == 1 {
 			role = schema.RoleAssistant
-			content = fmt.Sprintf("synthetic assistant turn %d. the tool result below is collapsed.", turn)
+			content = fmt.Sprintf("synthetic assistant turn %d. %s", turn, page)
 		}
 		timestamp := start + int64(turn)*1000
-		preview := content
 		entries = append(entries, schema.SessionEntry{
 			SessionID:      sid,
-			EntryIndex:     index,
+			EntryIndex:     turn,
 			Harness:        schema.HarnessClaudeCode,
 			EntryType:      schema.EntryTypeText,
 			Role:           role,
 			TimestampMs:    &timestamp,
-			ContentPreview: &preview,
+			ContentPreview: &content,
 			Depth:          0,
-			HasToolUse:     turn%2 == 1,
 		})
-		if turn%2 == 1 {
-			id := fmt.Sprintf("tool-synthetic-%d", turn)
-			name := "Bash"
-			input := `{"command":"echo synthetic"}`
-			output := strings.Repeat("synthetic-tool-result ", 16_000)
-			child := index + 1
-			entries = append(entries, schema.SessionEntry{
-				SessionID:    sid,
-				EntryIndex:   child,
-				Harness:      schema.HarnessClaudeCode,
-				EntryType:    schema.EntryTypeToolUse,
-				Role:         role,
-				TimestampMs:  &timestamp,
-				ToolCallID:   &id,
-				ToolNamesCSV: &name,
-				ToolInput:    &input,
-				ToolOutput:   &output,
-				Depth:        1,
-				ParentIndex:  &index,
-				HasToolUse:   true,
-			})
-		}
 	}
 	if err := testutil.WriteFullEntries(ctx, db, sid, entries); err != nil {
 		fail(err)

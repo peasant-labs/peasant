@@ -50,7 +50,6 @@ export function useTranscriptSegments({
   transport?: TranscriptSegmentTransport;
 }): TranscriptSegmentState {
   const [cache, setCache] = useState<RegionCache | null>(null);
-  const [activeWindow, setActiveWindow] = useState<TranscriptWindow | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -68,8 +67,15 @@ export function useTranscriptSegments({
     setCache(next);
   }, []);
 
-  const replaceDirectory = useCallback(async (signal: AbortSignal): Promise<RegionCache> => {
+  const dropCache = useCallback(() => {
+    inflight.current.clear();
+    publish(null);
+  }, [publish]);
+
+  const replaceDirectory = useCallback(async (signal: AbortSignal, ticket: number): Promise<RegionCache | null> => {
+    dropCache();
     const directory = await transport.directory(sessionId, signal);
+    if (signal.aborted || generation.current !== ticket) return null;
     const next: RegionCache = {
       sessionId,
       frameRevision,
@@ -77,11 +83,11 @@ export function useTranscriptSegments({
       directory,
       segments: new Map(),
       windows: new Map(),
+      activeWindowKey: null,
     };
     publish(next);
-    setActiveWindow(null);
     return next;
-  }, [frameRevision, publish, sessionId, transport]);
+  }, [dropCache, frameRevision, publish, sessionId, transport]);
 
   const loadSegmentInto = useCallback(async (current: RegionCache, index: number, signal?: AbortSignal) => {
     if (current.segments.has(index)) return;
@@ -95,33 +101,33 @@ export function useTranscriptSegments({
       segments.set(segment.index, segment);
       publish({ ...live, segments });
     }).finally(() => {
-      inflight.current.delete(key);
+      if (inflight.current.get(key) === promise) inflight.current.delete(key);
     });
     inflight.current.set(key, promise);
     return promise;
   }, [publish, sessionId, transport]);
 
   const loadWindowInto = useCallback(async (current: RegionCache, anchor: number, span: number, signal?: AbortSignal) => {
-    const cached = current.windows.get(windowCacheKey(anchor, span));
+    const keyName = windowCacheKey(anchor, span);
+    const cached = current.windows.get(keyName);
     if (cached) {
-      setActiveWindow(cached);
+      if (current.activeWindowKey !== keyName) publish({ ...current, activeWindowKey: keyName });
       return cached;
     }
-    const key = `${current.revision}:window:${windowCacheKey(anchor, span)}`;
+    const key = `${current.revision}:window:${keyName}`;
     const pending = inflight.current.get(key);
     if (pending) {
       await pending;
-      return cacheRef.current?.windows.get(windowCacheKey(anchor, span)) ?? null;
+      return cacheRef.current?.windows.get(keyName) ?? null;
     }
     const promise = transport.window(sessionId, anchor, span, current.revision, signal).then((descriptor) => {
       const live = cacheRef.current;
       if (!live || live.revision !== descriptor.revision || live.sessionId !== sessionId) return;
       const windows = new Map(live.windows);
-      windows.set(windowCacheKey(anchor, span), descriptor);
-      publish({ ...live, windows });
-      setActiveWindow(descriptor);
+      windows.set(keyName, descriptor);
+      publish({ ...live, windows, activeWindowKey: keyName });
     }).finally(() => {
-      inflight.current.delete(key);
+      if (inflight.current.get(key) === promise) inflight.current.delete(key);
     });
     inflight.current.set(key, promise);
     await promise;
@@ -136,10 +142,14 @@ export function useTranscriptSegments({
     }
   }, [loadSegmentInto]);
 
+  // Cover exactly the descriptor's segments.
+  const coverJump = useCallback(async (descriptor: TranscriptWindow, signal?: AbortSignal) => {
+    await loadListed(descriptor, signal);
+  }, [loadListed]);
+
   useEffect(() => {
     if (!enabled) {
       publish(null);
-      setActiveWindow(null);
       setLoading(false);
       setError(null);
       return undefined;
@@ -160,14 +170,13 @@ export function useTranscriptSegments({
         let current = cacheRef.current;
         const sameCut = current?.sessionId === sessionId && current.frameRevision === frameRevision && !revisionChanged;
         if (!sameCut || !current) {
-          inflight.current.clear();
-          current = await replaceDirectory(controller.signal);
+          current = await replaceDirectory(controller.signal, ticket);
         }
-        if (generation.current !== ticket || controller.signal.aborted) return;
+        if (!current || generation.current !== ticket || controller.signal.aborted) return;
         if (current.directory.totalSegments === 0) return;
         if (anchor != null) {
           const descriptor = await loadWindowInto(current, anchor, TRANSCRIPT_WINDOW_SPAN, controller.signal);
-          if (descriptor) await loadListed(descriptor, controller.signal);
+          if (descriptor) await coverJump(descriptor, controller.signal);
           return;
         }
         if (!current.segments.has(0)) await loadSegmentInto(current, 0, controller.signal);
@@ -175,21 +184,23 @@ export function useTranscriptSegments({
         if (controller.signal.aborted || generation.current !== ticket) return;
         if (caught instanceof TranscriptRevisionConflict) {
           try {
-            inflight.current.clear();
-            const refreshed = await replaceDirectory(controller.signal);
+            const refreshed = await replaceDirectory(controller.signal, ticket);
+            if (!refreshed || generation.current !== ticket || controller.signal.aborted) return;
             if (anchor != null) {
               const descriptor = await loadWindowInto(refreshed, anchor, TRANSCRIPT_WINDOW_SPAN, controller.signal);
-              if (descriptor) await loadListed(descriptor, controller.signal);
+              if (descriptor) await coverJump(descriptor, controller.signal);
             } else if (refreshed.directory.totalSegments > 0) {
               await loadSegmentInto(refreshed, 0, controller.signal);
             }
             return;
           } catch (retryError) {
-            if (controller.signal.aborted) return;
+            if (controller.signal.aborted || generation.current !== ticket) return;
+            publish(null);
             setError(retryError instanceof Error ? retryError.message : String(retryError));
             return;
           }
         }
+        publish(null);
         setError(caught instanceof Error ? caught.message : String(caught));
       } finally {
         if (generation.current === ticket) setLoading(false);
@@ -202,6 +213,7 @@ export function useTranscriptSegments({
     enabled,
     frameRevision,
     jumpAnchor,
+    coverJump,
     loadListed,
     loadSegmentInto,
     loadWindowInto,
@@ -227,7 +239,7 @@ export function useTranscriptSegments({
   return {
     directory: live?.directory ?? null,
     segments: live ? [...live.segments.values()].sort((left, right) => left.index - right.index) : [],
-    window: live && activeWindow?.revision === live.revision ? activeWindow : null,
+    window: live?.activeWindowKey ? live.windows.get(live.activeWindowKey) ?? null : null,
     loading,
     error,
     reload: () => {

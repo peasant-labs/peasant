@@ -15,6 +15,8 @@ requiredNames:
   - empty-directory
   - indexed-empty-frame
   - per-field-bound
+  - revision-refetch-segment-zero
+  - revision-directory-fails
 cases:
   - name: mount-segment-zero
     revision: "7"
@@ -96,6 +98,7 @@ cases:
     absent: [segment:2, turns]
     boundaries: "1"
     mountedTurns: [0, 1, 4, 5]
+    heldTurn: 4
     notIndexed: false
     segmentMode: true
 
@@ -119,7 +122,7 @@ cases:
       segments: [4]
     actions: [repeat-jump]
     reads: [directory, window, segment:4, window]
-    absent: [segment:0, turns]
+    absent: [segment:0, segment:1, segment:2, segment:3, segment:5, segment:6, segment:7, turns]
     boundaries: "2"
     mountedTurns: [18, 20, 22]
     notIndexed: false
@@ -145,7 +148,7 @@ cases:
       segments: [4]
     actions: [advance-revision]
     reads: [directory, window, segment:4, directory, window, segment:4]
-    absent: [segment:0, turns]
+    absent: [segment:0, segment:1, segment:2, segment:3, segment:5, segment:6, segment:7, turns]
     boundaries: "2"
     mountedTurns: [18, 20, 22]
     notIndexed: false
@@ -177,7 +180,7 @@ cases:
       - { index: 1, turns: [6] }
     actions: []
     reads: [directory, segment:0]
-    absent: [window, turns]
+    absent: [window, segment:1, turns]
     boundaries: "1"
     mountedTurns: [0, 2]
     notIndexed: false
@@ -200,3 +203,41 @@ cases:
     segmentMode: true
     clippedContent: "kept turn text"
     preBoundContent: "kept turn text and the rest that must not ride this segment"
+
+  - name: revision-refetch-segment-zero
+    revision: "7"
+    nextRevision: "8"
+    turn: null
+    totalSegments: 3
+    segments:
+      - { index: 0, turns: [0, 1] }
+      - { index: 1, turns: [4, 5] }
+      - { index: 2, turns: [8] }
+    window: null
+    actions: [advance-revision]
+    reads: [directory, segment:0, directory, segment:0]
+    absent: [window, segment:1, segment:2, turns]
+    boundaries: "1"
+    mountedTurns: [0, 1]
+    notIndexed: false
+    segmentMode: true
+
+  - name: revision-directory-fails
+    revision: "7"
+    nextRevision: "8"
+    turn: null
+    totalSegments: 3
+    segments:
+      - { index: 0, turns: [0, 1] }
+      - { index: 1, turns: [4, 5] }
+      - { index: 2, turns: [8] }
+    window: null
+    actions: [fail-revision]
+    reads: [directory, segment:0, directory]
+    absent: [window, segment:1, segment:2, turns]
+    boundaries: null
+    mountedTurns: []
+    clearedTurns: [0, 1]
+    expectError: true
+    notIndexed: false
+    segmentMode: false

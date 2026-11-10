@@ -32,7 +32,8 @@ import {
   barModel,
   changesSummary,
   collectiveNames,
-  countNewTurns,
+  compareLoadedTurns,
+  scanVersion,
   currentReaderIds,
   initialDraft,
   NO_ACCESS_CHANGE,
@@ -84,8 +85,12 @@ export interface TranscriptPublishOptions {
   sessionId: string;
   /** The session title, kept in its case. */
   title: string;
-  /** Every turn the page received, for the "N new turns" count and the scan version. */
+  /** Every turn the page received. Counted only when the directory is fully loaded. */
   turns: readonly { timestamp: string }[];
+  /** The store revision. The redaction scan is versioned with this, not the loaded turn count. */
+  revision: string;
+  /** How much of the directory this page holds. A short read cannot claim there are no new turns. */
+  coverage: { loadedSegments: number; totalSegments: number };
   /** Whether the page has the session's detail yet; nothing is scanned before it. */
   loaded: boolean;
   /** The transcript's overflow actions, alongside publishing settings when available. */
@@ -115,7 +120,7 @@ export interface TranscriptPublish {
  */
 export function useTranscriptPublish(options: TranscriptPublishOptions): TranscriptPublish {
   const router = useRouter();
-  const { sessionId, title, turns, loaded, moreItems, openOnArrival, onArrivalHandled, onReindexed } = options;
+  const { sessionId, title, turns, revision, coverage, loaded, moreItems, openOnArrival, onArrivalHandled, onReindexed } = options;
   const { redactionCache, updateRedactionCache, publishing, settled, publish } = usePublishState();
 
   // ── the publication state ────────────────────────────────────────────────
@@ -148,7 +153,11 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
 
   const publication = read.status === 'ready' ? read.publication : null;
   const publishedNow: 'publish' | 'update' = publication?.state === 'published' ? 'update' : 'publish';
-  const newTurns = useMemo(() => countNewTurns(turns, publication?.publishedAt), [turns, publication?.publishedAt]);
+  const comparison = useMemo(
+    () => compareLoadedTurns({ ...coverage, turns, publishedAt: publication?.publishedAt }),
+    [coverage, publication?.publishedAt, turns],
+  );
+  const newTurns = comparison.comparable ? comparison.newTurns : undefined;
   const publishingTo = publishing.get(sessionId);
   const readers = useMemo(() => currentReaderIds(publication), [publication]);
 
@@ -349,12 +358,12 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
 
   // ── what leaves the machine: the cached local scan ───────────────────────
   // The scan starts when the popup opens and the session's detail is here,
-  // whatever the sign-in: it runs on this computer. Its version is the turn
-  // count, so a session that grew is scanned again; a failure stays until an
-  // explicit re-scan.
+  // whatever the sign-in: it runs on this computer. Its version is the store
+  // revision, so a later segment cannot leave an older preview looking current.
+  // A failure stays until an explicit re-scan.
   const scanTargets = useMemo<RedactionScanTarget[]>(
-    () => (open && loaded ? [{ id: sessionId, version: String(turns.length) }] : []),
-    [loaded, open, sessionId, turns.length],
+    () => (open && loaded && revision ? [{ id: sessionId, version: scanVersion(revision) }] : []),
+    [loaded, open, revision, sessionId],
   );
   const scan = useRedactionPipeline(scanTargets, DEFAULT_REDACTION_LEVEL, false, redactionCache, updateRedactionCache);
   const scanResult = scan.sessionRedactions.get(sessionId);
@@ -600,7 +609,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   }, [checkingStep]);
   // A step's first render, before its clock starts, has run for no time yet.
   const stepElapsedMs = stepClock.step === checkingStep ? stepClock.now - stepClock.startedAt : 0;
-  const stage = checkingStep === null ? undefined : checkingStage(checkingStep, { turns: turns.length, elapsedMs: stepElapsedMs });
+  const stage = checkingStep === null ? undefined : checkingStage(checkingStep, { turns: comparison.comparable ? turns.length : 0, elapsedMs: stepElapsedMs });
   const checking = stage && checkingStep === 'scanning' && unreadable && !stage.note ? { ...stage, note: unreadable.line } : stage;
 
   const stopped = dialogState === 'stopped'
@@ -667,7 +676,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       checking={checking}
       primaryLabel={checkingStep !== null && checkingStep !== 'reading' ? 'scanning…' : undefined}
       onRescan={rescan}
-      changes={mode === 'update' ? { summary: changesSummary(newTurns) } : undefined}
+      changes={mode === 'update' ? { summary: comparison.comparable ? changesSummary(comparison.newTurns) : comparison.reason } : undefined}
       access={access}
       onRemove={(id) => setDraft((current) => removeFromDraft(current ?? NO_ACCESS_CHANGE, id, readers))}
       onRestore={(id) => setDraft((current) => restoreInDraft(current ?? NO_ACCESS_CHANGE, id))}

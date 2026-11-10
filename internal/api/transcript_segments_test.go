@@ -1377,11 +1377,50 @@ func TestSessionDetailFrameDropsTurnAttachments(t *testing.T) {
 			t.Fatal("the attachment-bearing record survived on a frame with no turns")
 		}
 	}
-	if len(decoded.EarlierHistory) != 1 || len(decoded.EarlierHistory[0].Turns) != 0 || len(decoded.EarlierHistory[0].NativeMetadata) != 0 {
-		t.Fatalf("earlier history = %+v, want empty turns and no native metadata", decoded.EarlierHistory)
+	if len(decoded.EarlierHistory) != 0 {
+		t.Fatalf("earlier history = %+v, want no sections; a stripped section is omitted", decoded.EarlierHistory)
 	}
 	if len(read.Turns) != 1 || len(read.NativeMetadata) != 2 || len(read.EarlierHistory[0].Turns) != 1 || len(read.EarlierHistory[0].NativeMetadata) != 1 {
 		t.Fatal("building the frame mutated the durable read")
+	}
+}
+
+// TestSessionDetailFrameOmitsStrippedEarlierHistory proves a metadata frame
+// does not keep a section after its turns are removed. Tool calls are not
+// compared here: the frame no longer carries them, and that coverage stays on
+// the segment read.
+func TestSessionDetailFrameOmitsStrippedEarlierHistory(t *testing.T) {
+	t.Parallel()
+	read := &schema.SessionDetailReadPayload{SessionDetailPayload: schema.SessionDetailPayload{
+		ID:      "45454545-4545-4545-4545-454545454546",
+		Harness: schema.HarnessClaudeCode,
+		EarlierHistory: []schema.EarlierHistorySection{
+			{State: schema.EarlierHistoryUncertainMigrated},
+			{State: schema.EarlierHistoryUncertainUnresolved, Turns: []schema.TurnDetail{{Index: 4, Role: schema.RoleUser, Content: "kept"}}},
+		},
+	}}
+	message := sessionDetailFrame(ChannelSubscription{Topic: TopicSessionDetail, ID: read.ID}, read)
+	raw, err := json.Marshal(message.Data)
+	if err != nil {
+		t.Fatalf("marshal frame: %v", err)
+	}
+	decoded, err := schema.DecodeSessionDetailPayloadRaw(raw)
+	if err != nil {
+		t.Fatalf("frame did not decode: %v", err)
+	}
+	if len(decoded.Turns) != 0 {
+		t.Fatalf("frame turns = %d, want none", len(decoded.Turns))
+	}
+	for _, section := range decoded.EarlierHistory {
+		if len(section.Turns) == 0 {
+			t.Fatalf("frame carried a zero-turn earlier-history section: %+v", decoded.EarlierHistory)
+		}
+	}
+	if len(decoded.EarlierHistory) != 0 {
+		t.Fatalf("earlier history = %+v, want none after the turn-bearing section was stripped", decoded.EarlierHistory)
+	}
+	if len(read.EarlierHistory) != 2 || len(read.EarlierHistory[1].Turns) != 1 {
+		t.Fatal("building the frame mutated the durable earlier history")
 	}
 }
 

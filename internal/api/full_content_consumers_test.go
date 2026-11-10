@@ -396,6 +396,10 @@ func assertFullPiWebSocket(t *testing.T, provider *StoreDataProvider, expected *
 // assertConversationOnSegmentReads proves the export's conversation is still
 // reachable after the frame stops carrying turns. It uses the directory and
 // segment handlers, not a second copy of the turn list.
+//
+// Tool calls are not compared here. That is a coverage boundary, not an
+// omission: the frame no longer carries them, and folded tool-call fields are
+// asserted on the segment read by TestHub_SessionDetail_ToolCallFields.
 func assertConversationOnSegmentReads(t *testing.T, db *store.Store, expected *schema.SessionDetailPayload) {
 	t.Helper()
 	srv := NewServer(ServerConfig{Store: db})

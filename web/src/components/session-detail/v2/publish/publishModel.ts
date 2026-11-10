@@ -42,6 +42,38 @@ export interface PickerSuggestion {
  * timestamp cannot be read is not counted: the count only ever names turns it
  * can show are new.
  */
+/**
+ * The scan cache key for one session. It is the store revision, not the
+ * number of turns this page has loaded: a later segment can grow without
+ * changing segment 0's length.
+ */
+export function scanVersion(revision: string): string {
+  return revision;
+}
+
+export type TurnComparison =
+  | { comparable: true; newTurns: number }
+  | { comparable: false; reason: string };
+
+/**
+ * New turns are comparable only when every segment the directory names is
+ * loaded. A shorter read cannot say that nothing newer exists.
+ */
+export function compareLoadedTurns(options: {
+  loadedSegments: number;
+  totalSegments: number;
+  turns: readonly { timestamp: string }[];
+  publishedAt: string | undefined;
+}): TurnComparison {
+  if (options.totalSegments <= 0 || options.loadedSegments < options.totalSegments) {
+    return {
+      comparable: false,
+      reason: `loaded ${options.loadedSegments} of ${options.totalSegments} segments; new turns are not compared until the rest of the transcript is loaded`,
+    };
+  }
+  return { comparable: true, newTurns: countNewTurns(options.turns, options.publishedAt) };
+}
+
 export function countNewTurns(turns: readonly { timestamp: string }[], publishedAt: string | undefined): number {
   if (!publishedAt) return 0;
   const published = Date.parse(publishedAt);
@@ -76,7 +108,7 @@ export interface BarModel {
 export function barModel(options: {
   publication: LocalPublication;
   audienceKnown: boolean;
-  newTurns: number;
+  newTurns?: number;
   publishingTo?: number;
 }): BarModel {
   const { publication, audienceKnown, newTurns, publishingTo } = options;
@@ -93,7 +125,7 @@ export function barModel(options: {
   if (publication.autoPublish) {
     return { state: 'auto-publish', collective: readers.length ? readers.map((reader) => reader.name).join(', ') : undefined };
   }
-  if (newTurns > 0) return { state: 'new-turns', collectives, newTurns };
+  if (newTurns !== undefined && newTurns > 0) return { state: 'new-turns', collectives, newTurns };
   return { state: 'published', collectives };
 }
 

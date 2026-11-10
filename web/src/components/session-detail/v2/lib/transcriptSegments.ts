@@ -43,8 +43,6 @@ export type TranscriptSegmentDirectory = {
   totalTurns: number;
   totalSegments: number;
   segments: TranscriptSegmentRef[];
-  directoryPage?: number;
-  directoryPerPage?: number;
 };
 
 export type TranscriptTurnWire = TurnDetail & {
@@ -83,6 +81,7 @@ export type RegionCache = {
   directory: TranscriptSegmentDirectory;
   segments: Map<number, TranscriptSegment>;
   windows: Map<string, TranscriptWindow>;
+  activeWindowKey: string | null;
 };
 
 export type CookedSegment = {
@@ -153,12 +152,6 @@ export function parseTranscriptDirectory(value: unknown, path: string): Transcri
     totalSegments,
     segments,
   };
-  if (value.directoryPage !== undefined) {
-    directory.directoryPage = safeCount(value.directoryPage, path, 'directoryPage');
-  }
-  if (value.directoryPerPage !== undefined) {
-    directory.directoryPerPage = safeCount(value.directoryPerPage, path, 'directoryPerPage');
-  }
   return directory;
 }
 
@@ -257,9 +250,9 @@ export function windowCacheKey(anchor: number, span: number = WINDOW_SPAN): stri
   return `${anchor}:${span}`;
 }
 
-export function directoryContainsTurn(directory: TranscriptSegmentDirectory, turn: number): boolean {
-  if (directory.directoryPage != null) return true;
-  return directory.segments.some((ref) => turn >= ref.firstTurn && turn <= ref.lastTurn);
+/** A turn is known only when a ref this read holds covers it. */
+export function heldRefCoversTurn(refs: readonly TranscriptSegmentRef[], turn: number): boolean {
+  return refs.some((ref) => turn >= ref.firstTurn && turn <= ref.lastTurn);
 }
 
 function refusalMessage(path: string, status: number, body: unknown): string {

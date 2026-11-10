@@ -252,10 +252,12 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 // turns as an empty list. The durable read is not mutated: push and export
 // still carry the transcript. Earlier-history turns stay on that durable read
 // and are omitted here, because a metadata frame cannot vouch for content it
-// does not carry. Attachment-bearing native metadata is omitted for the same
-// reason: the contract resolves those records against the frame's turns, and
-// a frame with no turns cannot name the turn they attach to. A session-level
-// record, whose attachment is absent, stays.
+// does not carry. Earlier-history sections are omitted with those turns: an
+// emptied section would render as "earlier history 0". Attachment-bearing
+// native metadata is omitted for the same reason: the contract resolves those
+// records against the frame's turns, and a frame with no turns cannot name
+// the turn they attach to. A session-level record, whose attachment is
+// absent, stays.
 func sessionDetailFrame(sub ChannelSubscription, detail *schema.SessionDetailReadPayload) ServerMessage {
 	if detail == nil {
 		return ServerMessage{Type: MsgSessionDetail}
@@ -268,15 +270,10 @@ func sessionDetailFrame(sub ChannelSubscription, detail *schema.SessionDetailRea
 	served := *detail
 	served.Turns = []schema.TurnDetail{}
 	served.NativeMetadata = sessionLevelNativeMetadata(detail.NativeMetadata)
-	if len(detail.EarlierHistory) > 0 {
-		sections := make([]schema.EarlierHistorySection, len(detail.EarlierHistory))
-		for i, section := range detail.EarlierHistory {
-			section.Turns = []schema.TurnDetail{}
-			section.NativeMetadata = nil
-			sections[i] = section
-		}
-		served.EarlierHistory = sections
-	}
+	// A section whose turns were removed cannot be shown. An empty section
+	// renders as "earlier history 0". Omit it. The durable read keeps the
+	// sections and their turns.
+	served.EarlierHistory = nil
 	return ServerMessage{Type: MsgSessionDetail, Data: &served}
 }
 
@@ -346,11 +343,10 @@ func (h *Hub) sendSnapshots(ctx context.Context, conn *Conn, subs []ChannelSubsc
 			} else if len(refs) > 0 {
 				detail.ChildSessions = refs
 			}
-			// The metadata-only header is the frame body the segment viewer
-			// adopts. Check it from the same read while the current frame still
-			// carries the durable turns. A projection fault is logged and never
-			// drops the frame the current viewer reads; the frame switch lands
-			// only after the released viewer consumes segments.
+			// The frame that ships is metadata only: an empty turn list, no
+			// earlier-history sections, and session-level native metadata.
+			// Turn content is the directory and segment reads. A header
+			// projection fault is logged and does not drop this frame.
 			msg = sessionDetailFrame(sub, detail)
 		case TopicProjectFamiliarity:
 			projectHash, hashErr := schema.NewProjectHash(sub.ID)

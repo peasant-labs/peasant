@@ -1,4 +1,4 @@
-expectedCaseCount: 9
+expectedCaseCount: 11
 requiredNames:
   - mount-segment-zero
   - jump-window
@@ -9,3 +9,5 @@ requiredNames:
   - empty-directory
   - indexed-empty-frame
   - per-field-bound
+  - revision-refetch-segment-zero
+  - revision-directory-fails

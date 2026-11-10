@@ -32,11 +32,15 @@ type SegmentCase = {
   segmentMode: boolean;
   clippedContent?: string;
   preBoundContent?: string;
+  heldTurn?: number;
+  expectError?: boolean;
+  clearedTurns?: number[];
 };
 
 const reads: string[] = [];
 let revision = '7';
 let servePreBoundInline = false;
+let failNextDirectory = false;
 let activeCase: SegmentCase | null = null;
 
 vi.mock('@/lib/share/publishing', async (importOriginal) => ({
@@ -89,6 +93,8 @@ function loadCases(): SegmentCase[] {
     const row = requireRecord(value, `transcript segment cases[${index}]`);
     const fields = ['name', 'revision', 'nextRevision', 'turn', 'totalSegments', 'segments', 'window', 'actions', 'reads', 'absent', 'boundaries', 'mountedTurns', 'notIndexed', 'segmentMode'];
     if (row.name === 'per-field-bound') fields.push('clippedContent', 'preBoundContent');
+    if (row.name === 'load-more-prepends') fields.push('heldTurn');
+    if (row.name === 'revision-directory-fails') fields.push('clearedTurns', 'expectError');
     requireExactRequiredFields(row, fields, `transcript segment cases[${index}]`);
     if (row.name !== names[index]) throw new Error(`transcript segment cases[${index}] is ${String(row.name)}, want ${names[index]}`);
     return row as SegmentCase;
@@ -209,7 +215,13 @@ async function answer(input: RequestInfo | URL): Promise<Response> {
   if (kind) reads.push(kind);
   const plan = activeCase;
   if (!plan) return new Response(JSON.stringify({ error: 'no case' }), { status: 500 });
-  if (kind === 'directory') return Response.json(directoryBody(plan));
+  if (kind === 'directory') {
+    if (failNextDirectory) {
+      failNextDirectory = false;
+      return new Response(JSON.stringify({ error: 'the directory read failed' }), { status: 500 });
+    }
+    return Response.json(directoryBody(plan));
+  }
   if (kind === 'window') {
     const anchor = Number(new URL(url).searchParams.get('anchor'));
     return Response.json(windowBody(plan, anchor));
@@ -224,11 +236,7 @@ async function answer(input: RequestInfo | URL): Promise<Response> {
 }
 
 function assertReads(plan: SegmentCase) {
-  for (const read of new Set(plan.reads)) {
-    const want = plan.reads.filter((item) => item === read).length;
-    const got = reads.filter((item) => item === read).length;
-    expect(got, `${plan.name} ${read}`).toBe(want);
-  }
+  expect([...reads].sort(), `${plan.name} reads`).toEqual([...plan.reads].sort());
   for (const absent of plan.absent) expect(reads, `${plan.name} must not read ${absent}`).not.toContain(absent);
 }
 
@@ -239,6 +247,7 @@ describe('SessionDetailV2 segmented transcript', () => {
     cleanup();
     vi.unstubAllGlobals();
     reads.length = 0;
+    failNextDirectory = false;
     activeCase = null;
   });
 
@@ -276,11 +285,20 @@ describe('SessionDetailV2 segmented transcript', () => {
           expect(reads.filter((read) => read.startsWith('segment:')).length, plan.name).toBe(before);
           continue;
         }
-        if (action === 'advance-revision') {
+        if (action === 'advance-revision' || action === 'fail-revision') {
+          if (action === 'fail-revision') failNextDirectory = true;
           revision = plan.nextRevision ?? revision;
           channelData = detail(plan);
           view.rerender(<TestDetail turn={plan.turn} />);
         }
+      }
+      if (plan.expectError) {
+        await waitFor(() => expect(view.getByText('transcript unavailable')).toBeInTheDocument());
+        for (const turn of plan.clearedTurns ?? []) {
+          expect(view.container.querySelector(`[data-turn="${turn}"]`), `${plan.name} cleared turn ${turn}`).toBeNull();
+        }
+        assertReads(plan);
+        return;
       }
       await waitFor(() => {
         const node = view.container.querySelector('[data-segment-mode]');
@@ -290,11 +308,17 @@ describe('SessionDetailV2 segmented transcript', () => {
       expect(viewer).not.toBeNull();
       expect(view.queryByTestId('session-not-indexed')).toBeNull();
       const bound = Number(viewer?.getAttribute('data-mounted-turn-bound'));
-      expect(bound).toBe(plan.mountedTurns.length);
+      expect(bound, `${plan.name} mounted bound`).toBe(plan.mountedTurns.length);
       const cards = view.container.querySelectorAll('[data-turn]');
       expect(cards.length).toBeLessThanOrEqual(bound);
       for (const turn of plan.mountedTurns) {
         expect(view.container.querySelector(`[data-turn="${turn}"]`), `${plan.name} turn ${turn}`).not.toBeNull();
+      }
+      if (plan.name === 'jump-window') {
+        expect(reads, `${plan.name} order`).toEqual(plan.reads);
+      }
+      if (plan.heldTurn != null) {
+        expect(view.container.querySelector(`[data-turn="${plan.heldTurn}"]`), `${plan.name} held turn`).not.toBeNull();
       }
       if (plan.name === 'per-field-bound') {
         const card = view.container.querySelector(`[data-turn="${plan.mountedTurns[0]}"]`);
