@@ -33,6 +33,12 @@ func TestCompareRequiresAffectedVersion(t *testing.T) {
 	}
 }
 
+func TestEmbeddedProbeSharesTheObservedNamesContract(t *testing.T) {
+	if !bytes.Contains(probe, []byte("PEASANT_GUARD_OBSERVED_NATIVE")) {
+		t.Fatal("the embedded probe no longer reads PEASANT_GUARD_OBSERVED_NATIVE; the runner would hand it names it never observes")
+	}
+}
+
 func TestNewHarnessNeedsNoInventedHistoricalOutput(t *testing.T) {
 	base := snapshot{Versions: map[string]versions{}, Outputs: map[string]json.RawMessage{}}
 	name := "pi/IndexerVersion/native/header-only"
@@ -63,12 +69,5 @@ func TestUnobservedNativeUsesProcessedNames(t *testing.T) {
 	// name it processed, not the number of sessions it found.
 	if missing := unobservedNative([]string{name}, []string{name}); len(missing) != 0 {
 		t.Fatalf("a processed empty case was reported missing: %v", missing)
-	}
-}
-
-func TestSharedNativeNamesKeepsCasesBothRevisionsDeclare(t *testing.T) {
-	shared := sharedNativeNames([]string{"legacy-message-part", "removed-by-candidate"}, []string{"legacy-message-part", "added-by-candidate"})
-	if len(shared) != 1 || shared[0] != "legacy-message-part" {
-		t.Fatalf("shared names = %v, want only the case both revisions declare", shared)
 	}
 }

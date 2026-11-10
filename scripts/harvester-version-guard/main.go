@@ -125,14 +125,17 @@ func run(base, candidate string) error {
 	}
 	sort.Strings(baseNames)
 	sort.Strings(candidateNames)
-	// The candidate corpus is compared in full. The base pass replays every
-	// case both revisions declare, so an edit that weakens a fixture is judged
-	// against the old bytes; a case the candidate removed has no builder shape
-	// and is guarded by required_cases instead.
-	sharedNames := sharedNativeNames(baseNames, candidateNames)
+	// The candidate corpus is compared in full. The base pass replays only the
+	// cases whose bytes changed, so an edit that weakens a fixture is judged
+	// against the old body; an unchanged case would repeat the candidate pass,
+	// and a removed case is guarded by required_cases instead.
+	changedNames, err := testfixture.ChangedCaseNames(nativeCorpora[baseTree], nativeCorpora[candidateTree])
+	if err != nil {
+		return err
+	}
 	var failures []string
 	for _, corpus := range []string{baseTree, candidateTree} {
-		names := sharedNames
+		names := changedNames
 		if corpus == candidateTree {
 			names = candidateNames
 		}
@@ -246,23 +249,6 @@ func supplyFixtureDriver(tree, candidateTree string) error {
 	return nil
 }
 
-// sharedNativeNames lists the cases both corpora declare, sorted. The shared
-// builder is candidate-derived, so a base-only case cannot be rebuilt.
-func sharedNativeNames(base, candidate []string) []string {
-	inBase := make(map[string]bool, len(base))
-	for _, name := range base {
-		inBase[name] = true
-	}
-	var shared []string
-	for _, name := range candidate {
-		if inBase[name] {
-			shared = append(shared, name)
-		}
-	}
-	sort.Strings(shared)
-	return shared
-}
-
 // unobservedNative lists the passed cases the probe did not process. A name is
 // observed because the probe recorded it, not because its output is non-empty:
 // an empty database is a legitimate observation.
@@ -336,7 +322,9 @@ func parserVersions() map[string]versions {
 		return result, err
 	}
 	output := filepath.Join(temp, "snapshot.json")
-	cmd := exec.Command("go", "test", "-race", "-count=1", "-run", "^TestHarvesterGuardCapture$", "./internal/ingest")
+	// Output parity is single-goroutine; the race suite belongs to the gate,
+	// not to four full corpus passes inside this job.
+	cmd := exec.Command("go", "test", "-count=1", "-run", "^TestHarvesterGuardCapture$", "./internal/ingest")
 	cmd.Dir = tree
 	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_FALLBACK_CORPUS="+fallbackCorpus, "PEASANT_GUARD_OBSERVED_NATIVE="+observedNames, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+nativeRoot)
 	if out, err := cmd.CombinedOutput(); err != nil {

@@ -628,6 +628,7 @@ func TestCaseNamesUsesTheSharedCorpusRule(t *testing.T) {
 		data string
 	}{
 		{name: "empty corpus", data: "cases: []\nrequired_cases: [a]\n"},
+		{name: "no required cases", data: "cases: []\nrequired_cases: []\n"},
 		{name: "missing cases", data: "required_cases: [a]\n"},
 		{name: "trailing document", data: "cases: []\nrequired_cases: [a]\n---\ncases: []\n"},
 	} {
@@ -636,5 +637,20 @@ func TestCaseNamesUsesTheSharedCorpusRule(t *testing.T) {
 				t.Fatal("malformed corpus was accepted; the guard would silently observe nothing")
 			}
 		})
+	}
+}
+
+func TestChangedCaseNamesTracksEditedBodies(t *testing.T) {
+	unchanged, err := ChangedCaseNames(fixtureYAML, fixtureYAML)
+	if err != nil || len(unchanged) != 0 {
+		t.Fatalf("identical corpora reported changed cases: %v %v", unchanged, err)
+	}
+	edited := bytes.Replace(fixtureYAML, []byte("logical_path: current-idle/opencode.db"), []byte("logical_path: current-idle/edited.db"), 1)
+	if bytes.Equal(edited, fixtureYAML) {
+		t.Fatal("fixture no longer contains the case the test edits")
+	}
+	changed, err := ChangedCaseNames(fixtureYAML, edited)
+	if err != nil || len(changed) != 1 || changed[0] != "current-idle-control-tolerated" {
+		t.Fatalf("changed cases = %v (%v), want the edited idle case", changed, err)
 	}
 }

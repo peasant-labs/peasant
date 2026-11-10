@@ -42,7 +42,7 @@ type report struct {
 	Cases          int          `json:"cases"`
 	Repetitions    int          `json:"repetitions"`
 	Success        int          `json:"success"`
-	Interpreted    int          `json:"interpreted,omitempty"`
+	Ignored        int          `json:"ignored,omitempty"`
 	Refused        int          `json:"refused"`
 	Rows           []caseResult `json:"rows,omitempty"`
 	DecodeSeconds  float64      `json:"decodeSeconds,omitempty"`
@@ -97,7 +97,7 @@ func run(corpus, phase string, repetitions int) error {
 			case decodeErr == nil:
 				out.Success++
 			case ignored:
-				out.Interpreted++
+				out.Ignored++
 			default:
 				out.Refused++
 			}
