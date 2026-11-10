@@ -796,8 +796,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		return nil, err
 	}
 	if located != nil {
-		if err := p.applyDeferredWrites(ctx, located); err != nil {
-			return nil, err
+		// A dry run reads the evidence cache so its links are decided exactly,
+		// but it writes nothing: the deferred evidence upserts are what a real
+		// run applies and a forecast must not.
+		if !p.config.DryRun {
+			if err := p.applyDeferredWrites(ctx, located); err != nil {
+				return nil, err
+			}
 		}
 	}
 

@@ -1,0 +1,18 @@
+required_names:
+  - a re-mined stale spawner path is filtered from the stored list
+cases:
+  - name: a re-mined stale spawner path is filtered from the stored list
+    child: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+    stale_spawner: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+    stored_spawner: -workspace/33333333-3333-4333-8333-333333333333.jsonl
+    identity:
+      team: migration
+      name: tests
+    want_parent: "33333333-3333-4333-8333-333333333333"
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","message":{"role":"user","content":"no spawn here any more"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/workspace","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'

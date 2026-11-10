@@ -47,11 +47,12 @@ func loadClaudeDerivedReadErrorFixtures(t *testing.T) claudeDerivedReadErrorFixt
 // failingClaudeDerivedLookup fails exactly the indexed read the case names, so
 // the propagated error of each of the three teammate-link reads is exercised.
 type failingClaudeDerivedLookup struct {
-	declarers   int
-	spawners    int
-	declarerErr error
-	spawnerErr  error
-	pathErr     error
+	declarers    int
+	spawners     int
+	spawnerPaths []string
+	declarerErr  error
+	spawnerErr   error
+	pathErr      error
 }
 
 var _ ingest.DerivedLookupReader = (*failingClaudeDerivedLookup)(nil)
@@ -74,7 +75,7 @@ func (f *failingClaudeDerivedLookup) ClaudeIdentitySpawnerPaths(context.Context,
 	if f.pathErr != nil {
 		return nil, f.pathErr
 	}
-	return nil, nil
+	return f.spawnerPaths, nil
 }
 
 func (*failingClaudeDerivedLookup) CountCodexRolloutsBySession(context.Context, ingest.SessionID) (int, error) {

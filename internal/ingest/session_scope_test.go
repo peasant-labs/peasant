@@ -500,6 +500,13 @@ func (s *scopeStore) LoadClaudeEvidence(ctx context.Context) (map[ingest.Resolve
 	return s.Store.LoadClaudeEvidence(ctx)
 }
 
+func (s *scopeStore) LoadClaudeEvidenceCompletely(ctx context.Context) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, bool, error) {
+	s.mu.Lock()
+	s.wholeLoad++
+	s.mu.Unlock()
+	return s.Store.LoadClaudeEvidenceCompletely(ctx)
+}
+
 func (s *scopeStore) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, error) {
 	s.mu.Lock()
 	for _, path := range paths {
@@ -507,6 +514,15 @@ func (s *scopeStore) LoadClaudeEvidenceFor(ctx context.Context, paths []ingest.R
 	}
 	s.mu.Unlock()
 	return s.Store.LoadClaudeEvidenceFor(ctx, paths)
+}
+
+func (s *scopeStore) LoadClaudeEvidenceForCompletely(ctx context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, bool, error) {
+	s.mu.Lock()
+	for _, path := range paths {
+		s.requested = append(s.requested, path.String())
+	}
+	s.mu.Unlock()
+	return s.Store.LoadClaudeEvidenceForCompletely(ctx, paths)
 }
 
 func (s *scopeStore) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeTranscriptEvidence, deletes []ingest.ResolvedPath) error {
