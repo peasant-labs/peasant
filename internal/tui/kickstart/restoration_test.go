@@ -2,8 +2,8 @@ package kickstart_test
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -20,11 +20,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
-//go:embed testdata/restoration.yaml
-var restorationData []byte
+const restorationFixturePath = "../../onboarding/testdata/restoration.yaml"
 
 type restorationCase struct {
 	Name                   string                 `yaml:"name"`
+	Check                  string                 `yaml:"check"`
 	Listings               []ftue.SessionListing  `yaml:"listings"`
 	Saved                  config.SelectionConfig `yaml:"saved"`
 	ExpectInitiallyChecked []string               `yaml:"expectInitiallyChecked"`
@@ -43,20 +43,27 @@ type restorationBranch struct {
 }
 
 type restorationDocument struct {
+	RequiredNames     []string          `yaml:"requiredNames"`
 	ExpectedCaseCount int               `yaml:"expectedCaseCount"`
 	Cases             []restorationCase `yaml:"cases"`
 }
 
 func loadRestorationDocument(t *testing.T) restorationDocument {
 	t.Helper()
+	data, err := os.ReadFile(restorationFixturePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", restorationFixturePath, err)
+	}
 	var document restorationDocument
-	if err := testutil.DecodeFixtureYAML(restorationData, &document); err != nil {
-		t.Fatalf("decode testdata/restoration.yaml: %v", err)
+	if err := testutil.DecodeFixtureYAML(data, &document); err != nil {
+		t.Fatalf("decode %s: %v", restorationFixturePath, err)
 	}
 	if document.ExpectedCaseCount != len(document.Cases) || len(document.Cases) == 0 {
 		t.Fatalf("expectedCaseCount=%d but %d cases present", document.ExpectedCaseCount, len(document.Cases))
 	}
+	present := make(map[string]bool, len(document.Cases))
 	for _, testCase := range document.Cases {
+		present[testCase.Name] = true
 		testutil.RequireFixtureFields(t, "restoration", testCase.Name, []testutil.FixtureField{
 			{Key: "name", Value: testCase.Name},
 			{Key: "saved.mode", Value: testCase.Saved.Mode.String()},
@@ -69,6 +76,9 @@ func loadRestorationDocument(t *testing.T) restorationDocument {
 			t.Fatalf("restoration case %q must set laterListings and expectLaterChecked together", testCase.Name)
 		}
 	}
+	if err := testutil.RequireFixtureNames(restorationFixturePath, "case", document.RequiredNames, present); err != nil {
+		t.Fatalf("restoration fixture: %v", err)
+	}
 	return document
 }
 
@@ -76,6 +86,9 @@ func TestPrepopulateSelection_RestorationAndMergeMatrix(t *testing.T) {
 	t.Parallel()
 	document := loadRestorationDocument(t)
 	for _, testCase := range document.Cases {
+		if testCase.Check != "" {
+			continue
+		}
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
 			source := kickstart.NewScannerTreeSource(testCase.Listings, withFixturePathResolver())

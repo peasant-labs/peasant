@@ -164,6 +164,15 @@ type Node struct {
 	Candidate  ingest.DiscoveryCandidate
 	State      NodeState
 	Locked     bool
+	// ExplicitBranch is editor provenance: a saved rule named branches, so a
+	// later derive must not widen those branches to every branch.
+	ExplicitBranch bool
+	// ExplicitSession is editor provenance: this session is selected only by
+	// its saved id, so a later derive must not widen it into a branch or project.
+	ExplicitSession bool
+	// Identity is the opaque project identity used to prove remote and name
+	// uniqueness. It is not a display label and is never persisted.
+	Identity string
 }
 
 // Forest is the whole discovered tree. There is no cap and no cursor.

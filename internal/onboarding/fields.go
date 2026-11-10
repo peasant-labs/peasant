@@ -585,7 +585,7 @@ func writeSelection(cfg *config.Config, w WriteContext, value schema.LocalSettin
 	if err := json.Unmarshal(value, &answer); err != nil {
 		return writeValueError(FieldSelection, err)
 	}
-	if len(answer.IDs) > 0 {
+	if selectionAnswerHasIDs(value) {
 		derived, err := DeriveSelection(w.Forest, answer.IDs, cfg.Selection.AutoIngestNewBranches, w.Residual)
 		if err != nil {
 			return err
@@ -656,7 +656,7 @@ func answeredIDs(w WriteContext) []string {
 		return nil
 	}
 	value, ok := w.Answers[FieldSelection]
-	if !ok {
+	if !ok || !selectionAnswerHasIDs(value) {
 		return nil
 	}
 	var answer SelectionAnswer
@@ -664,6 +664,18 @@ func answeredIDs(w WriteContext) []string {
 		return nil
 	}
 	return answer.IDs
+}
+
+// selectionAnswerHasIDs reports whether the answer is an id list, including an
+// explicit empty list. A mapping answer has no ids key and writes mode and
+// harnesses directly.
+func selectionAnswerHasIDs(value schema.LocalSettingValue) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return false
+	}
+	_, ok := raw["ids"]
+	return ok
 }
 
 func destinationFor(path []string) Destination {

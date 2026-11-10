@@ -8,31 +8,15 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 )
 
-// Draft is a mutable editing session over the loaded configuration. It holds a
-// deep-copied baseline (the config as it was when the flow opened) and a working
-// copy the fields edit through their accessors. Dirty tracking is a
-// baseline-vs-working compare; Discard resets the working copy to baseline; and
-// Commit preserves an existing clean source byte-for-byte or routes changed and
-// missing configs through the ONE existing atomic save path with the same drift
-// discipline the kickstart wizard uses, so the settings flow never invents a
-// second way to persist configuration.
+// Draft is a mutable editing session over the loaded configuration. The
+// baseline and working pair, transient seeds, and discard/rebuild live in the
+// neutral draft. This type keeps the on-disk drift snapshot and the one atomic
+// commit path.
 type Draft struct {
-	path     string
-	baseline config.Config
-	working  config.Config
-
-	// transientResets re-applies values intentionally omitted from config YAML
-	// after Discard deep-copies the baseline through YAML. SeedInitial is the
-	// only way to register one of these values, so baseline and working always
-	// start from the same typed value.
-	transientResets []func(*config.Config)
-
-	// expectedBytes is the exact file content observed when the draft opened.
-	// Commit compares the file against it and fails closed if another process
-	// changed the file since - the CheckSnapshot / ExpectedBytes discipline the
-	// kickstart wizard's SaveTo uses.
+	core           *onboarding.Draft
 	expectedBytes  []byte
 	expectedExists bool
 }
@@ -43,7 +27,7 @@ type Draft struct {
 // than config.yaml. The draft and both accessor functions are validated before
 // either copy is mutated.
 func SeedInitial[T comparable](d *Draft, acc Accessor[T], value T) error {
-	if d == nil {
+	if d == nil || d.core == nil {
 		return fmt.Errorf(
 			"seed settings initial value: draft is nil.\n" +
 				"what: no settings draft was provided for paired initialization.\n" +
@@ -53,7 +37,7 @@ func SeedInitial[T comparable](d *Draft, acc Accessor[T], value T) error {
 				"means: no draft state was changed.\n" +
 				"fix: call settings.NewDraft successfully, then pass that draft to SeedInitial.")
 	}
-	if d.path == "" {
+	if d.core.Path() == "" {
 		return fmt.Errorf(
 			"seed settings initial value: draft has no destination path.\n" +
 				"what: the supplied draft is not a valid editing session.\n" +
@@ -71,7 +55,7 @@ func SeedInitial[T comparable](d *Draft, acc Accessor[T], value T) error {
 				"where: settings.SeedInitial.\n"+
 				"when: validating the accessor before draft mutation.\n"+
 				"means: neither baseline nor working state was changed.\n"+
-				"fix: provide one Accessor with both Get and Set functions, then retry.", d.path)
+				"fix: provide one Accessor with both Get and Set functions, then retry.", d.core.Path())
 	}
 	if acc.Set == nil {
 		return fmt.Errorf(
@@ -81,44 +65,22 @@ func SeedInitial[T comparable](d *Draft, acc Accessor[T], value T) error {
 				"where: settings.SeedInitial.\n"+
 				"when: validating the accessor before draft mutation.\n"+
 				"means: neither baseline nor working state was changed.\n"+
-				"fix: provide one Accessor with both Get and Set functions, then retry.", d.path)
+				"fix: provide one Accessor with both Get and Set functions, then retry.", d.core.Path())
 	}
-
-	acc.Set(&d.baseline, value)
-	acc.Set(&d.working, value)
-	d.transientResets = append(d.transientResets, func(cfg *config.Config) {
+	return d.core.SeedTransient(func(cfg *config.Config) {
 		acc.Set(cfg, value)
 	})
-	return nil
 }
 
 // NewDraft opens a draft over loaded, editing the config persisted at path. It
 // deep-copies loaded into an independent baseline and working copy (loaded is
 // never mutated) and snapshots the on-disk bytes at path for drift detection.
 func NewDraft(path string, loaded *config.Config) (*Draft, error) {
-	if path == "" {
-		return nil, fmt.Errorf(
-			"open settings draft: destination path is empty.\n" +
-				"what: no config path was provided to edit.\n" +
-				"where: settings.NewDraft.\n" +
-				"fix: pass the resolved --config path the flow should commit to.")
-	}
-	if loaded == nil {
-		return nil, fmt.Errorf(
-			"open settings draft for %q: loaded configuration is nil.\n"+
-				"what: there is no baseline config to copy.\n"+
-				"where: settings.NewDraft.\n"+
-				"fix: load the config (config.Load) before opening a draft.", path)
-	}
-	baseline, err := cloneConfig(loaded)
+	core, err := onboarding.OpenDraft(path, loaded)
 	if err != nil {
-		return nil, fmt.Errorf("open settings draft for %q: copy baseline: %w", path, err)
+		return nil, err
 	}
-	working, err := cloneConfig(loaded)
-	if err != nil {
-		return nil, fmt.Errorf("open settings draft for %q: copy working set: %w", path, err)
-	}
-	d := &Draft{path: path, baseline: baseline, working: working}
+	d := &Draft{core: core}
 	current, err := os.ReadFile(path)
 	switch {
 	case err == nil:
@@ -136,31 +98,47 @@ func NewDraft(path string, loaded *config.Config) (*Draft, error) {
 }
 
 // Path is the destination the draft commits to.
-func (d *Draft) Path() string { return d.path }
+func (d *Draft) Path() string {
+	if d == nil || d.core == nil {
+		return ""
+	}
+	return d.core.Path()
+}
 
 // Working is the config the fields edit. Accessors read and write through it.
-func (d *Draft) Working() *config.Config { return &d.working }
+func (d *Draft) Working() *config.Config {
+	if d == nil || d.core == nil {
+		return nil
+	}
+	return d.core.Working()
+}
 
 // Baseline is the config as it was when the draft opened, used to drop edits
 // (write a baseline value back into the working copy) and to compute Dirty.
-func (d *Draft) Baseline() *config.Config { return &d.baseline }
+func (d *Draft) Baseline() *config.Config {
+	if d == nil || d.core == nil {
+		return nil
+	}
+	return d.core.Baseline()
+}
 
 // Dirty reports whether the working copy differs from the baseline.
 func (d *Draft) Dirty() bool {
-	equal, err := persistedConfigsEqual(&d.baseline, &d.working)
-	return err != nil || !equal
+	if d == nil || d.core == nil {
+		return false
+	}
+	return d.core.Dirty()
 }
 
-// Discard drops every edit, resetting the working copy to the baseline.
+// Discard drops every edit, resetting the working copy to the baseline and
+// re-applying transient seeds.
 func (d *Draft) Discard() error {
-	baseline, err := cloneConfig(&d.baseline)
-	if err != nil {
-		return fmt.Errorf("discard settings draft for %q: %w", d.path, err)
+	if d == nil || d.core == nil {
+		return fmt.Errorf("discard settings draft: draft is nil")
 	}
-	for _, reset := range d.transientResets {
-		reset(&baseline)
+	if err := d.core.Discard(); err != nil {
+		return fmt.Errorf("discard settings draft for %q: %w", d.Path(), err)
 	}
-	d.working = baseline
 	return nil
 }
 
@@ -171,7 +149,15 @@ func (d *Draft) Discard() error {
 // changed persisted settings delegate to config.SaveAtomic. Nothing is written
 // on any error.
 func (d *Draft) Commit() error {
-	current, err := os.ReadFile(d.path)
+	if d == nil || d.core == nil {
+		return fmt.Errorf(
+			"commit settings: draft is nil.\n" +
+				"what: there is no editing session to commit.\n" +
+				"where: settings.Draft.Commit.\n" +
+				"means: no file was changed.\n" +
+				"fix: open a draft with settings.NewDraft, then commit.")
+	}
+	current, err := os.ReadFile(d.Path())
 	switch {
 	case err == nil:
 		if !d.expectedExists {
@@ -190,10 +176,10 @@ func (d *Draft) Commit() error {
 				"what: the current file could not be read to confirm it is unchanged.\n"+
 				"where: settings.Draft.Commit.\n"+
 				"means: no file was changed.\n"+
-				"fix: ensure the config path is readable and re-run the settings flow.", d.path, err)
+				"fix: ensure the config path is readable and re-run the settings flow.", d.Path(), err)
 	}
 	if d.expectedExists {
-		equal, err := persistedConfigsEqual(&d.baseline, &d.working)
+		equal, err := d.core.Equal()
 		if err != nil {
 			return fmt.Errorf(
 				"commit settings: compare persisted state for %q after drift validation: %w.\n"+
@@ -203,17 +189,16 @@ func (d *Draft) Commit() error {
 					"when: after the exact-byte drift check and before any atomic replacement.\n"+
 					"means: the existing config bytes, comments, ordering, and formatting remain unchanged.\n"+
 					"fix: correct the unsupported configuration value, reopen the editor, and retry ctrl+s.",
-				d.path, err)
+				d.Path(), err)
 		}
 		if equal {
 			return nil
 		}
 	}
-	if err := config.SaveAtomic(d.path, &d.working); err != nil {
+	if err := config.SaveAtomic(d.Path(), d.Working()); err != nil {
 		return err
 	}
-	// The freshly-written file is now the drift baseline for any later commit.
-	written, err := os.ReadFile(d.path)
+	written, err := os.ReadFile(d.Path())
 	if err == nil {
 		d.expectedBytes = written
 		d.expectedExists = true
@@ -221,34 +206,12 @@ func (d *Draft) Commit() error {
 	return nil
 }
 
-func persistedConfigsEqual(left, right *config.Config) (bool, error) {
-	leftBytes, err := yaml.Marshal(left)
-	if err != nil {
-		return false, fmt.Errorf("marshal baseline config: %w", err)
-	}
-	rightBytes, err := yaml.Marshal(right)
-	if err != nil {
-		return false, fmt.Errorf("marshal working config: %w", err)
-	}
-	return bytes.Equal(leftBytes, rightBytes), nil
-}
-
-// driftError formats the fail-closed drift message with the standard
-// what/why/where/fix shape.
-func (d *Draft) driftError(what string) error {
-	return fmt.Errorf("%s.\n"+
-		"why: committing would overwrite an edit made outside this flow.\n"+
-		"where: settings.Draft.Commit.\n"+
-		"means: nothing was written.\n"+
-		"fix: re-run the settings flow to review the current file, then apply your changes again.",
-		fmt.Sprintf(what, d.path))
-}
-
-// cloneConfig deep-copies a config.Config through a YAML round-trip. Every
-// config field is exported with a yaml tag, so the round-trip reproduces the
-// value exactly (maps and slices included) without sharing backing storage with
-// the original.
+// cloneConfig deep-copies a config.Config through a YAML round-trip. Transient
+// fields that are not in config.yaml are omitted and must be copied by the caller.
 func cloneConfig(src *config.Config) (config.Config, error) {
+	if src == nil {
+		return config.Config{}, fmt.Errorf("clone config: source is nil")
+	}
 	data, err := yaml.Marshal(src)
 	if err != nil {
 		return config.Config{}, fmt.Errorf("marshal config for deep copy: %w", err)
@@ -258,4 +221,13 @@ func cloneConfig(src *config.Config) (config.Config, error) {
 		return config.Config{}, fmt.Errorf("unmarshal config for deep copy: %w", err)
 	}
 	return dst, nil
+}
+
+func (d *Draft) driftError(what string) error {
+	return fmt.Errorf("%s.\n"+
+		"why: committing would overwrite an edit made outside this flow.\n"+
+		"where: settings.Draft.Commit.\n"+
+		"means: nothing was written.\n"+
+		"fix: re-run the settings flow to review the current file, then apply your changes again.",
+		fmt.Sprintf(what, d.Path()))
 }

@@ -2,7 +2,6 @@ package kickstart_test
 
 import (
 	"bytes"
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,10 +18,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
 
-//go:embed testdata/legacy_all_conversion.yaml
-var legacyAllConversionData []byte
+const legacyAllConversionFixturePath = "../../onboarding/testdata/legacy_all_conversion.yaml"
 
 type legacyAllConversionDocument struct {
+	RequiredNames     []string                  `yaml:"requiredNames"`
 	ExpectedCaseCount int                       `yaml:"expectedCaseCount"`
 	Cases             []legacyAllConversionCase `yaml:"cases"`
 }
@@ -68,16 +67,26 @@ func (r legacyAllStoredRow) productionRow() store.IngestedSessionRow {
 	}
 }
 
+func loadLegacyAllConversionData(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile(legacyAllConversionFixturePath)
+	if err != nil {
+		t.Fatalf("read legacy all conversion fixture %s: %v", legacyAllConversionFixturePath, err)
+	}
+	return data
+}
+
 func loadLegacyAllConversionDocument(t *testing.T) legacyAllConversionDocument {
 	t.Helper()
 	var document legacyAllConversionDocument
-	if err := decodeStrictFixture(legacyAllConversionData, &document); err != nil {
+	if err := decodeStrictFixture(loadLegacyAllConversionData(t), &document); err != nil {
 		t.Fatalf("decode legacy all conversion fixture: %v", err)
 	}
 	if document.ExpectedCaseCount != len(document.Cases) || len(document.Cases) == 0 {
 		t.Fatalf("expectedCaseCount=%d but %d cases present", document.ExpectedCaseCount, len(document.Cases))
 	}
 	seen := map[string]struct{}{}
+	present := map[string]bool{}
 	for _, testCase := range document.Cases {
 		testutil.RequireFixtureFields(t, "legacy all conversion", testCase.Name, []testutil.FixtureField{
 			{Key: "name", Value: testCase.Name},
@@ -92,6 +101,7 @@ func loadLegacyAllConversionDocument(t *testing.T) legacyAllConversionDocument {
 			t.Fatalf("legacy all conversion fixture repeats case name %q", testCase.Name)
 		}
 		seen[testCase.Name] = struct{}{}
+		present[testCase.Name] = true
 		if *testCase.ExpectedStoredCount != len(testCase.Stored) {
 			t.Fatalf("case %q expectedStoredCount=%d but %d rows present", testCase.Name, *testCase.ExpectedStoredCount, len(testCase.Stored))
 		}
@@ -107,6 +117,9 @@ func loadLegacyAllConversionDocument(t *testing.T) legacyAllConversionDocument {
 		if *testCase.ExpectedUnmatchedCount != explicitSessionCount(testCase.ExpectedUnmatchedHarnesses) {
 			t.Fatalf("case %q expectedUnmatchedCount=%d but expected harnesses contain %d sessions", testCase.Name, *testCase.ExpectedUnmatchedCount, explicitSessionCount(testCase.ExpectedUnmatchedHarnesses))
 		}
+	}
+	if err := testutil.RequireFixtureNames(legacyAllConversionFixturePath, "case", document.RequiredNames, present); err != nil {
+		t.Fatalf("legacy all conversion fixture: %v", err)
 	}
 	return document
 }
@@ -206,8 +219,9 @@ func TestConvertLegacyAll_StoredEvidenceCorpus(t *testing.T) {
 
 func TestLegacyAllConversionFixtureRejectsUnknownStoredIdentityKey(t *testing.T) {
 	t.Parallel()
-	malformed := bytes.Replace(legacyAllConversionData, []byte("gitWorktree:"), []byte("gitWorktreeTypo:"), 1)
-	if bytes.Equal(malformed, legacyAllConversionData) {
+	data := loadLegacyAllConversionData(t)
+	malformed := bytes.Replace(data, []byte("gitWorktree:"), []byte("gitWorktreeTypo:"), 1)
+	if bytes.Equal(malformed, data) {
 		t.Fatal("legacy all conversion fixture has no gitWorktree key to mutate")
 	}
 	var document legacyAllConversionDocument

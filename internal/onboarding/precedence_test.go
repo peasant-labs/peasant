@@ -124,7 +124,7 @@ func precedenceValue(answer precedenceAnswer) (schema.LocalSettingValue, error) 
 
 func assertIDAnswerRefused(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() { onboarding.UseSelectionDeriver(nil) })
+	t.Cleanup(func() { onboarding.InstallSelectionDeriver() })
 	onboarding.UseSelectionDeriver(nil)
 	model := onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeFull})
 	field, ok := model.Field(onboarding.FieldSelection)

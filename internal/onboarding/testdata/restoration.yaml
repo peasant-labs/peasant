@@ -1,7 +1,30 @@
 # Pure restoration and merge cases. All working directories are pre-resolved
 # fixture identities; real symlink and missing-directory behavior is tested with
 # the production resolver and temporary directories.
-expectedCaseCount: 18
+requiredNames:
+  - restore-exact-clone-whole-project
+  - new-project-starts-clear
+  - new-branch-stays-clear-when-policy-is-off
+  - new-branch-follows-enabled-policy
+  - explicit-branches-survive-when-all-visible-branches-are-checked
+  - unavailable-choices-survive-another-edit
+  - explicit-clear-removes-available-choice
+  - explicit-branch-clear-keeps-only-unavailable-branch
+  - clearing-available-project-does-not-recreate-it-for-an-unavailable-branch
+  - clearing-available-clone-keeps-only-the-unavailable-clone
+  - duplicate-name-restores-by-exact-path
+  - duplicate-non-git-paths-keep-separate-branch-policies
+  - ambiguous-pathless-name-selects-nothing
+  - ambiguous-pathless-remote-selects-nothing
+  - select-all-saves-exact-current-clones
+  - explicit-session-wins-over-ambiguous-remote
+  - sole-explicit-session-stays-session-scoped
+  - all-current-explicit-sessions-stay-session-scoped
+  - derived-selection-matches-equivalence-corpus
+  - restore-returns-whole-residual
+  - locked-node-blocks-commit
+  - rescan-keeps-ids-only
+expectedCaseCount: 22
 cases:
   - name: restore-exact-clone-whole-project
     listings:
@@ -355,3 +378,64 @@ cases:
       harnesses:
         claude-code:
           sessions: [explicit-current-a, explicit-current-b]
+
+  - name: derived-selection-matches-equivalence-corpus
+    check: corpus
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/claude/acme-tool, branch: feature/x, sessionId: cc-featx-1}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/claude/acme-tool, branch: feature/x, sessionId: cc-featx-2}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+    expectInitiallyChecked: []
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+
+  - name: restore-returns-whole-residual
+    check: residual
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: visible-session}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+            - {gitRemote: "git@github.com:acme/ghost.git", branches: [main]}
+          sessions: [gone-session]
+    expectInitiallyChecked: [visible-session]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+            - {gitRemote: "git@github.com:acme/ghost.git", branches: [main]}
+          sessions: [gone-session]
+
+  - name: locked-node-blocks-commit
+    check: locked
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: locked-session}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+    expectInitiallyChecked: []
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+
+  - name: rescan-keeps-ids-only
+    check: rescan
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: kept-session}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+    expectInitiallyChecked: []
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
