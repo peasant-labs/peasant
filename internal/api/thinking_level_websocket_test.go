@@ -132,11 +132,15 @@ func TestHubSessionDetailThinkingLevel(t *testing.T) {
 					t.Fatalf("history %d=(%q,%q), want (%q,%q)", i, got.Level, got.Raw, want.Level, want.Raw)
 				}
 			}
-			if len(message.Data.Turns) != len(tc.Turns) {
-				t.Fatalf("turn count mismatch: %s", data)
+			if len(message.Data.Turns) != 0 {
+				t.Fatalf("frame turns = %d, want none; turn evidence is on the segment read", len(message.Data.Turns))
+			}
+			segment := servedSegmentZero(t, db, sid)
+			if len(segment.Turns) != len(tc.Turns) {
+				t.Fatalf("segment turns = %d, want %d", len(segment.Turns), len(tc.Turns))
 			}
 			for i, want := range tc.Turns {
-				got := message.Data.Turns[i]
+				got := segment.Turns[i]
 				if got.ThinkingLevel != want.Level || got.ThinkingLevelRaw != want.Raw {
 					t.Fatalf("turn %d evidence=(%q,%q), want (%q,%q)", i, got.ThinkingLevel, got.ThinkingLevelRaw, want.Level, want.Raw)
 				}

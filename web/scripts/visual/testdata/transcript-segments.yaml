@@ -1,0 +1,243 @@
+# Host transcript-segment cases. The mounted session-detail test loads this
+# file; expectations are recorded here, not in an inline case table.
+#
+# servePreBoundInline is false on the committed fixture. The mutation runner
+# flips that one field to true. A true value serves the pre-bound body inside
+# the segment, which the per-field bound case must reject.
+servePreBoundInline: false
+requiredNames:
+  - mount-segment-zero
+  - jump-window
+  - load-more-appends
+  - load-more-prepends
+  - repeat-jump
+  - revision-refetch
+  - empty-directory
+  - indexed-empty-frame
+  - per-field-bound
+  - revision-refetch-segment-zero
+  - revision-directory-fails
+cases:
+  - name: mount-segment-zero
+    revision: "7"
+    nextRevision: null
+    turn: null
+    totalSegments: 3
+    segments:
+      - { index: 0, turns: [0, 1] }
+      - { index: 1, turns: [4, 5] }
+      - { index: 2, turns: [8] }
+    window: null
+    actions: []
+    reads: [directory, segment:0]
+    absent: [window, segment:1, segment:2, turns]
+    boundaries: "1"
+    mountedTurns: [0, 1]
+    notIndexed: false
+    segmentMode: true
+
+  - name: jump-window
+    revision: "7"
+    nextRevision: null
+    turn: 20
+    totalSegments: 8
+    segments:
+      - { index: 0, turns: [0, 1] }
+      - { index: 1, turns: [4, 5] }
+      - { index: 2, turns: [8, 9] }
+      - { index: 3, turns: [12, 13] }
+      - { index: 4, turns: [18, 20, 22] }
+      - { index: 5, turns: [26, 27] }
+      - { index: 6, turns: [30, 31] }
+      - { index: 7, turns: [34, 35] }
+    window:
+      requestedAnchor: 20
+      anchorTurn: 20
+      segments: [4]
+    actions: []
+    reads: [directory, window, segment:4]
+    absent: [segment:0, segment:1, segment:2, segment:3, segment:5, segment:6, segment:7, turns]
+    boundaries: "2"
+    mountedTurns: [18, 20, 22]
+    notIndexed: false
+    segmentMode: true
+
+  - name: load-more-appends
+    revision: "7"
+    nextRevision: null
+    turn: null
+    totalSegments: 3
+    segments:
+      - { index: 0, turns: [0, 1] }
+      - { index: 1, turns: [4, 5] }
+      - { index: 2, turns: [8] }
+    window: null
+    actions: [click-newer]
+    reads: [directory, segment:0, segment:1]
+    absent: [window, segment:2, turns]
+    boundaries: "1"
+    mountedTurns: [0, 1, 4, 5]
+    notIndexed: false
+    segmentMode: true
+
+  - name: load-more-prepends
+    revision: "7"
+    nextRevision: null
+    turn: 4
+    totalSegments: 3
+    segments:
+      - { index: 0, turns: [0, 1] }
+      - { index: 1, turns: [4, 5] }
+      - { index: 2, turns: [8] }
+    window:
+      requestedAnchor: 4
+      anchorTurn: 4
+      segments: [1]
+    actions: [click-older]
+    reads: [directory, window, segment:1, segment:0]
+    absent: [segment:2, turns]
+    boundaries: "1"
+    mountedTurns: [0, 1, 4, 5]
+    heldTurn: 4
+    notIndexed: false
+    segmentMode: true
+
+  - name: repeat-jump
+    revision: "7"
+    nextRevision: null
+    turn: 20
+    totalSegments: 8
+    segments:
+      - { index: 0, turns: [0, 1] }
+      - { index: 1, turns: [4, 5] }
+      - { index: 2, turns: [8, 9] }
+      - { index: 3, turns: [12, 13] }
+      - { index: 4, turns: [18, 20, 22] }
+      - { index: 5, turns: [26, 27] }
+      - { index: 6, turns: [30, 31] }
+      - { index: 7, turns: [34, 35] }
+    window:
+      requestedAnchor: 20
+      anchorTurn: 20
+      segments: [4]
+    actions: [repeat-jump]
+    reads: [directory, window, segment:4, window]
+    absent: [segment:0, segment:1, segment:2, segment:3, segment:5, segment:6, segment:7, turns]
+    boundaries: "2"
+    mountedTurns: [18, 20, 22]
+    notIndexed: false
+    segmentMode: true
+
+  - name: revision-refetch
+    revision: "7"
+    nextRevision: "8"
+    turn: 20
+    totalSegments: 8
+    segments:
+      - { index: 0, turns: [0, 1] }
+      - { index: 1, turns: [4, 5] }
+      - { index: 2, turns: [8, 9] }
+      - { index: 3, turns: [12, 13] }
+      - { index: 4, turns: [18, 20, 22] }
+      - { index: 5, turns: [26, 27] }
+      - { index: 6, turns: [30, 31] }
+      - { index: 7, turns: [34, 35] }
+    window:
+      requestedAnchor: 20
+      anchorTurn: 20
+      segments: [4]
+    actions: [advance-revision]
+    reads: [directory, window, segment:4, directory, window, segment:4]
+    absent: [segment:0, segment:1, segment:2, segment:3, segment:5, segment:6, segment:7, turns]
+    boundaries: "2"
+    mountedTurns: [18, 20, 22]
+    notIndexed: false
+    segmentMode: true
+
+  - name: empty-directory
+    revision: "7"
+    nextRevision: null
+    turn: null
+    totalSegments: 0
+    segments: []
+    window: null
+    actions: []
+    reads: [directory]
+    absent: [window, segment:0, turns]
+    boundaries: null
+    mountedTurns: []
+    notIndexed: true
+    segmentMode: false
+
+  - name: indexed-empty-frame
+    revision: "7"
+    nextRevision: null
+    turn: null
+    totalSegments: 2
+    window: null
+    segments:
+      - { index: 0, turns: [0, 2] }
+      - { index: 1, turns: [6] }
+    actions: []
+    reads: [directory, segment:0]
+    absent: [window, segment:1, turns]
+    boundaries: "1"
+    mountedTurns: [0, 2]
+    notIndexed: false
+    segmentMode: true
+
+  - name: per-field-bound
+    revision: "7"
+    nextRevision: null
+    turn: null
+    totalSegments: 1
+    segments:
+      - { index: 0, turns: [0] }
+    window: null
+    actions: []
+    reads: [directory, segment:0]
+    absent: [window, turns]
+    boundaries: "0"
+    mountedTurns: [0]
+    notIndexed: false
+    segmentMode: true
+    clippedContent: "kept turn text"
+    preBoundContent: "kept turn text and the rest that must not ride this segment"
+
+  - name: revision-refetch-segment-zero
+    revision: "7"
+    nextRevision: "8"
+    turn: null
+    totalSegments: 3
+    segments:
+      - { index: 0, turns: [0, 1] }
+      - { index: 1, turns: [4, 5] }
+      - { index: 2, turns: [8] }
+    window: null
+    actions: [advance-revision]
+    reads: [directory, segment:0, directory, segment:0]
+    absent: [window, segment:1, segment:2, turns]
+    boundaries: "1"
+    mountedTurns: [0, 1]
+    notIndexed: false
+    segmentMode: true
+
+  - name: revision-directory-fails
+    revision: "7"
+    nextRevision: "8"
+    turn: null
+    totalSegments: 3
+    segments:
+      - { index: 0, turns: [0, 1] }
+      - { index: 1, turns: [4, 5] }
+      - { index: 2, turns: [8] }
+    window: null
+    actions: [fail-revision]
+    reads: [directory, segment:0, directory]
+    absent: [window, segment:1, segment:2, turns]
+    boundaries: null
+    mountedTurns: []
+    clearedTurns: [0, 1]
+    expectError: true
+    notIndexed: false
+    segmentMode: false

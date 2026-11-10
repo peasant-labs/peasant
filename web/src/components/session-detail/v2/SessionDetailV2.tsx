@@ -54,6 +54,8 @@ import { TurnLabelPopover } from './canvas/TurnLabelPopover';
 import { DetectedPullRequests } from './panels/DetectedPullRequests';
 import { useTranscriptPublish } from './publish/useTranscriptPublish';
 import { SessionNotIndexed } from './SessionNotIndexed';
+import { cookSegment, heldRefCoversTurn } from './lib/transcriptSegments';
+import { useTranscriptSegments } from './lib/useTranscriptSegments';
 
 /**
  * The heading shown for a session that has no generated title yet. The hero
@@ -251,13 +253,36 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     scope.scope === TranscriptScope.Task ||
     scope.scope === TranscriptScope.File ||
     scope.scope === TranscriptScope.Change;
-  const displayTurns = useMemo(() => {
-    if (!detail || !filteringScope) return undefined;
-    const list = scopeTurns(prefilterTurns(turns), scope.scope, scope.scopeVal);
-    return list;
-  }, [detail, filteringScope, scope.scope, scope.scopeVal, turns]);
 
   const requestedTurn = routeQuery.turn;
+  // The shipped session_detail frame carries metadata and an empty turn list.
+  // A frame that still includes turns is an older server or a test fixture;
+  // this page renders those turns and does not start a segment read.
+  const frameHasTurns = turns.length > 0;
+  const segmentRead = useTranscriptSegments({
+    sessionId,
+    enabled: detail != null && !frameHasTurns && detail.turnCount > 0,
+    frameRevision: detail?.revision ?? '',
+    jumpAnchor: requestedTurn,
+  });
+  const segmentMode = !frameHasTurns && segmentRead.directory != null;
+  const cookedSegments = useMemo(
+    () => (detail && segmentMode
+      ? segmentRead.segments.map((segment) => cookSegment(detail, segment, {
+        relationshipNavigation,
+      }))
+      : []),
+    [detail, relationshipNavigation, segmentMode, segmentRead.segments],
+  );
+  const loadedWireTurns = useMemo(
+    () => segmentRead.segments.flatMap((segment) => segment.turns),
+    [segmentRead.segments],
+  );
+  const transcriptTurns = segmentMode ? loadedWireTurns : turns;
+  const displayTurns = useMemo(() => {
+    if (!detail || !filteringScope) return undefined;
+    return scopeTurns(prefilterTurns(transcriptTurns), scope.scope, scope.scopeVal);
+  }, [detail, filteringScope, scope.scope, scope.scopeVal, transcriptTurns]);
   const [sourcePosition, setSourcePosition] = useState<(UnverifiedPullRequestSource & { requestKey: string }) | null>(null);
   const sourceSequence = useRef(0);
   useEffect(() => setSourcePosition(null), [requestedTurn]);
@@ -267,8 +292,14 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     sourceSequence.current += 1;
     setSourcePosition({ ...source, requestKey: `source:${sourceSequence.current}` });
   }, [filteringScope, router, pathname, searchParams]);
-  const requestedTurnExists = requestedTurn == null || turns.some((turn) => turn.index === requestedTurn);
-  const requestedTurnVisible = requestedTurn == null || (displayTurns ?? turns).some((turn) => turn.index === requestedTurn);
+  const directoryKnowsTurn = segmentRead.directory != null && requestedTurn != null
+    && heldRefCoversTurn(segmentRead.directory.segments, requestedTurn);
+  const requestedTurnExists = requestedTurn == null
+    || transcriptTurns.some((turn) => turn.index === requestedTurn)
+    || (segmentMode && (segmentRead.directory == null || directoryKnowsTurn));
+  const requestedTurnVisible = requestedTurn == null
+    || (displayTurns ?? transcriptTurns).some((turn) => turn.index === requestedTurn)
+    || (segmentMode && requestedTurn != null && !transcriptTurns.some((turn) => turn.index === requestedTurn) && directoryKnowsTurn);
   // A turn target this view cannot render right now gets NO one-time position
   // (explicitly `null`, not an absent contract): the reader stays put and the
   // stream prelude offers the reveal. An absent contract would let the composite
@@ -282,8 +313,11 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     if (requestedTurn == null) return { kind: 'top' };
     if (!requestedTurnExists) return { kind: 'top', requestKey: `missing-turn:${requestedTurn}` };
     if (!requestedTurnVisible) return null;
-    return { kind: 'turn', turnIndex: requestedTurn };
-  }, [sourcePosition, filteringScope, requestedTurn, requestedTurnExists, requestedTurnVisible]);
+    const landed = segmentRead.window && segmentRead.window.requestedAnchor !== segmentRead.window.anchorTurn
+      ? segmentRead.window.anchorTurn
+      : requestedTurn;
+    return { kind: 'turn', turnIndex: landed };
+  }, [sourcePosition, filteringScope, requestedTurn, requestedTurnExists, requestedTurnVisible, segmentRead.window]);
 
   const revealRequestedTurn = useCallback(() => {
     if (filteringScope) router.replace(`${pathname}${clearScopeQuery(searchParams)}`);
@@ -300,10 +334,10 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // respected), so it pastes cleanly into an issue/PR/doc. Announce only after
   // the browser confirms that the clipboard write succeeded.
   const copyMarkdown = useCallback(() => {
-    const md = turnsToMarkdown(displayTurns ?? turns);
+    const md = turnsToMarkdown(displayTurns ?? transcriptTurns);
     if (!navigator.clipboard) return;
     void navigator.clipboard.writeText(md).then(() => toast.ok('copied as markdown')).catch(() => undefined);
-  }, [toast, displayTurns, turns]);
+  }, [toast, displayTurns, transcriptTurns]);
   const copyLink = useCallback(() => {
     if (!navigator.clipboard) return;
     void navigator.clipboard.writeText(`${window.location.origin}${transcriptHref(projectHash, sessionId)}`)
@@ -331,10 +365,19 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     const query = next.toString();
     router.replace(`${pathname}${query ? `?${query}` : ''}`);
   }, [pathname, router, searchParams]);
+  const publishCoverage = frameHasTurns
+    ? { loadedSegments: 1, totalSegments: 1 }
+    : {
+      loadedSegments: segmentRead.segments.length,
+      totalSegments: segmentRead.directory?.totalSegments ?? 0,
+    };
   const publish = useTranscriptPublish({
     sessionId,
     title: sessionTitle ?? UNTITLED_SESSION_TITLE,
-    turns,
+    turns: transcriptTurns,
+    revision: detail?.revision ?? '',
+    turnCount: detail?.turnCount,
+    coverage: publishCoverage,
     loaded: detail != null,
     moreItems,
     openOnArrival: routeQuery.publish,
@@ -349,12 +392,12 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // the exact list handed to the package — the filtered list while any filter is
   // active — or phase dividers and error/retry markers land on wrong turns.
   const phases = useMemo(
-    () => (detail ? detectPhases(displayTurns ?? turns) : []),
-    [detail, displayTurns, turns],
+    () => (detail ? detectPhases(displayTurns ?? transcriptTurns) : []),
+    [detail, displayTurns, transcriptTurns],
   );
   const annotations = useMemo(
-    () => (detail ? annotateTranscript(displayTurns ?? turns) : []),
-    [detail, displayTurns, turns],
+    () => (detail ? annotateTranscript(displayTurns ?? transcriptTurns) : []),
+    [detail, displayTurns, transcriptTurns],
   );
 
   // The ONE wire→view projection (fairtrade's adapter): scope/focus filtering
@@ -363,7 +406,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // medians into the cooked scorecard bands.
   const vm = useMemo(() => {
     if (!detail) return null;
-    const visibleTurns = displayTurns ?? turns;
+    const visibleTurns = displayTurns ?? transcriptTurns;
     const analytics = computeAnalytics(visibleTurns, {
       scorecard: detail.scorecard ?? undefined,
       medians,
@@ -409,7 +452,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       ...adapted,
       session: { ...adapted.session, title: sessionTitle ?? UNTITLED_SESSION_TITLE },
     };
-  }, [detail, displayTurns, medians, turns, sessionTitle, relationshipNavigation, sessionCommits]);
+  }, [detail, displayTurns, medians, transcriptTurns, sessionTitle, relationshipNavigation, sessionCommits]);
 
   // Cooked tool calls by turn index, fed into the graph engine's tool nodes.
   const toolVMsByTurn = useMemo(
@@ -488,10 +531,37 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     );
   }
 
-  // Recorded turns with nothing indexed: say so and offer the re-index,
-  // rather than a turn count above an empty transcript.
-  if (turns.length === 0 && detail.turnCount > 0) {
-    return <SessionNotIndexed sessionId={sessionId} turnCount={detail.turnCount} crumbs={breadcrumb} onReindexed={readSessionAgain} />;
+  // An empty frame used to mean "recorded but not indexed". That is only true
+  // when the directory itself has no segments. A session with turns and an
+  // empty frame is the normal segmented read, so it must mount the viewer.
+  const directoryEmpty = segmentRead.directory != null && segmentRead.directory.totalSegments === 0;
+  if (!frameHasTurns && detail.turnCount > 0 && directoryEmpty && !segmentRead.loading) {
+    return (
+      <SessionNotIndexed
+        sessionId={sessionId}
+        turnCount={detail.turnCount}
+        crumbs={breadcrumb}
+        onReindexed={() => {
+          readSessionAgain();
+          segmentRead.reload();
+        }}
+      />
+    );
+  }
+  if (!frameHasTurns && detail.turnCount > 0 && segmentRead.error && cookedSegments.length === 0) {
+    return (
+      <div className="asb-page">
+        <FeedbackPanel variant="error" title="transcript unavailable">
+          {segmentRead.error}
+        </FeedbackPanel>
+        <div className="mt-3">
+          <Button variant="secondary" size="sm" onClick={segmentRead.reload}>try again</Button>
+        </div>
+      </div>
+    );
+  }
+  if (!frameHasTurns && detail.turnCount > 0 && cookedSegments.length === 0) {
+    return <SessionDetailSkeleton />;
   }
 
   // The callbacks the host wires into the composite. `onNavigateRelationship`
@@ -532,6 +602,13 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           label={scopeChipLabel(scope.scope, scope.scopeVal)}
           onClear={clearScope}
         />
+      )}
+      {segmentRead.window && segmentRead.window.requestedAnchor !== segmentRead.window.anchorTurn && (
+        <div role="status">
+          <FeedbackPanel variant="empty" title="opened the nearest user turn">
+            Turn {segmentRead.window.requestedAnchor} is not a user turn, so the viewer opened turn {segmentRead.window.anchorTurn}.
+          </FeedbackPanel>
+        </div>
       )}
       {requestedTurn != null && !requestedTurnExists && (
         <div role="alert">
@@ -605,6 +682,11 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
               canExport: false,
             }}
             callbacks={viewerCallbacks}
+            directory={segmentMode ? segmentRead.directory ?? undefined : undefined}
+            segments={segmentMode ? cookedSegments : undefined}
+            window={segmentMode ? segmentRead.window ?? undefined : undefined}
+            onLoadSegment={segmentMode ? segmentRead.loadSegment : undefined}
+            onLoadWindow={segmentMode ? segmentRead.loadWindow : undefined}
             // Host-owned reading state. The earlier-history disclosure is
             // controlled by the route, so Back, a reload, and a copied link all
             // restore exactly the sections the reader had open. The selected turn
@@ -655,9 +737,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             // owns graph topology, pan, and zoom while Fairtrade owns visuals.
             graphSlot={() => (
               <TrajectoryGraph
-                turns={displayTurns ?? turns}
+                turns={displayTurns ?? transcriptTurns}
                 toolVMsByTurn={toolVMsByTurn}
-                filteredTurns={displayTurns ?? turns}
+                filteredTurns={displayTurns ?? transcriptTurns}
                 phases={phases}
                 annotations={annotations}
                 searchMatches={[]}

@@ -1,0 +1,48 @@
+# Publish consent when the transcript is read in segments. The scan is
+# versioned by the store revision. A short read must not claim there are no
+# new turns. The push names the session and the level, not a partial transcript.
+requiredNames:
+  - scan-version-follows-revision
+  - partial-segments-omit-no-new-turns
+  - complete-segments-compare-new-turns
+  - push-names-session-and-level
+cases:
+  - name: scan-version-follows-revision
+    kind: scan
+    revision: "8"
+    previousRevision: "7"
+    loadedSegments: 1
+    totalSegments: 1
+    publishedAt: "2026-07-15T08:00:00Z"
+    turns:
+      - timestamp: "2026-07-15T08:00:01Z"
+    expectVersion: "revision:8"
+    expectPreviousVersion: "revision:7"
+  - name: partial-segments-omit-no-new-turns
+    kind: comparison
+    revision: "7"
+    loadedSegments: 1
+    totalSegments: 8
+    publishedAt: "2026-07-15T08:00:00Z"
+    turns:
+      - timestamp: "2026-07-15T07:00:00Z"
+    forbid: "no new turns since you published"
+    expectedReason: "loaded 1 of 8 segments; new turns are not compared until the rest of the transcript is loaded"
+  - name: complete-segments-compare-new-turns
+    kind: comparison
+    revision: "7"
+    loadedSegments: 8
+    totalSegments: 8
+    publishedAt: "2026-07-15T08:00:00Z"
+    turns:
+      - timestamp: "2026-07-15T07:00:00Z"
+      - timestamp: "2026-07-15T08:00:01Z"
+    expectedNewTurns: 1
+    expectedSummary: "1 new turn since you published"
+  - name: push-names-session-and-level
+    kind: push
+    sessionId: sess-segment-host
+    level: standard
+    expectedRequest:
+      sessionIds: [sess-segment-host]
+      redactionLevel: standard

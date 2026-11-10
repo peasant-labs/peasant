@@ -1302,8 +1302,125 @@ func TestSessionDetailFrameSurvivesInvalidHeader(t *testing.T) {
 	if message.Type != MsgSessionDetail {
 		t.Fatalf("message type = %q, want %q", message.Type, MsgSessionDetail)
 	}
-	if message.Data != read {
-		t.Fatal("the durable read was not served after a header fault")
+	served, ok := message.Data.(*schema.SessionDetailReadPayload)
+	if !ok || served == read {
+		t.Fatal("the frame must be a copy of the read, so emptying turns cannot mutate the durable payload")
+	}
+	if len(served.Turns) != 0 {
+		t.Fatalf("frame turns = %d, want none; turn content is served by the segment read", len(served.Turns))
+	}
+	if len(read.EarlierHistory[0].Turns) != 1 {
+		t.Fatal("the durable read lost its earlier-history turn")
+	}
+}
+
+// TestSessionDetailFrameDropsTurnAttachments proves a metadata-only frame still
+// decodes. An attachment-bearing record names a turn the frame no longer
+// carries, so it is absent; a session-level record has no attachment and stays.
+func TestSessionDetailFrameDropsTurnAttachments(t *testing.T) {
+	t.Parallel()
+	turnIndex := 0
+	sessionLevel := schema.NativeMetadataRecord{
+		ID:         "session-level",
+		Kind:       schema.NativeMetadataPiCustomData,
+		Source:     schema.NativeSourceRef{EntryRef: "custom-entry", SourceType: schema.NativeSourcePiCustom},
+		CustomType: "extension",
+		Data:       json.RawMessage(`{"kept":true}`),
+	}
+	attached := schema.NativeMetadataRecord{
+		ID:   "turn-attachment",
+		Kind: schema.NativeMetadataPiToolResultDetails,
+		Source: schema.NativeSourceRef{
+			EntryRef:    "result-entry",
+			SourceType:  schema.NativeSourcePiMessage,
+			MessageRole: schema.NativePiMessageRoleToolResult,
+		},
+		Attachment: &schema.NativeAttachmentRef{TurnIndex: &turnIndex, ToolCallID: "call-1"},
+		Data:       json.RawMessage(`{"dropped":true}`),
+	}
+	read := &schema.SessionDetailReadPayload{SessionDetailPayload: schema.SessionDetailPayload{
+		ID:      "45454545-4545-4545-4545-454545454545",
+		Harness: schema.HarnessPi,
+		Turns: []schema.TurnDetail{{
+			Index: 0,
+			Role:  schema.RoleAssistant,
+			ToolCalls: []schema.ToolCallDetail{{
+				ID:             "call-1",
+				Name:           "read",
+				ResultEntryRef: "result-entry",
+			}},
+		}},
+		NativeMetadata: []schema.NativeMetadataRecord{sessionLevel, attached},
+		EarlierHistory: []schema.EarlierHistorySection{{
+			State:          schema.EarlierHistoryUncertainMigrated,
+			Turns:          []schema.TurnDetail{{Index: 1, Role: schema.RoleUser, Content: "kept"}},
+			NativeMetadata: []schema.NativeMetadataRecord{attached},
+		}},
+	}}
+	message := sessionDetailFrame(ChannelSubscription{Topic: TopicSessionDetail, ID: read.ID}, read)
+	raw, err := json.Marshal(message.Data)
+	if err != nil {
+		t.Fatalf("marshal frame: %v", err)
+	}
+	decoded, err := schema.DecodeSessionDetailPayloadRaw(raw)
+	if err != nil {
+		t.Fatalf("metadata-only frame did not decode: %v", err)
+	}
+	if len(decoded.Turns) != 0 {
+		t.Fatalf("frame turns = %d, want none", len(decoded.Turns))
+	}
+	if len(decoded.NativeMetadata) != 1 || decoded.NativeMetadata[0].ID != sessionLevel.ID || decoded.NativeMetadata[0].Attachment != nil {
+		t.Fatalf("frame native metadata = %+v, want only the session-level record", decoded.NativeMetadata)
+	}
+	for _, record := range decoded.NativeMetadata {
+		if record.ID == attached.ID {
+			t.Fatal("the attachment-bearing record survived on a frame with no turns")
+		}
+	}
+	if len(decoded.EarlierHistory) != 0 {
+		t.Fatalf("earlier history = %+v, want no sections; a stripped section is omitted", decoded.EarlierHistory)
+	}
+	if len(read.Turns) != 1 || len(read.NativeMetadata) != 2 || len(read.EarlierHistory[0].Turns) != 1 || len(read.EarlierHistory[0].NativeMetadata) != 1 {
+		t.Fatal("building the frame mutated the durable read")
+	}
+}
+
+// TestSessionDetailFrameOmitsStrippedEarlierHistory proves a metadata frame
+// does not keep a section after its turns are removed. Tool calls are not
+// compared here: the frame no longer carries them, and that coverage stays on
+// the segment read.
+func TestSessionDetailFrameOmitsStrippedEarlierHistory(t *testing.T) {
+	t.Parallel()
+	read := &schema.SessionDetailReadPayload{SessionDetailPayload: schema.SessionDetailPayload{
+		ID:      "45454545-4545-4545-4545-454545454546",
+		Harness: schema.HarnessClaudeCode,
+		EarlierHistory: []schema.EarlierHistorySection{
+			{State: schema.EarlierHistoryUncertainMigrated},
+			{State: schema.EarlierHistoryUncertainUnresolved, Turns: []schema.TurnDetail{{Index: 4, Role: schema.RoleUser, Content: "kept"}}},
+		},
+	}}
+	message := sessionDetailFrame(ChannelSubscription{Topic: TopicSessionDetail, ID: read.ID}, read)
+	raw, err := json.Marshal(message.Data)
+	if err != nil {
+		t.Fatalf("marshal frame: %v", err)
+	}
+	decoded, err := schema.DecodeSessionDetailPayloadRaw(raw)
+	if err != nil {
+		t.Fatalf("frame did not decode: %v", err)
+	}
+	if len(decoded.Turns) != 0 {
+		t.Fatalf("frame turns = %d, want none", len(decoded.Turns))
+	}
+	for _, section := range decoded.EarlierHistory {
+		if len(section.Turns) == 0 {
+			t.Fatalf("frame carried a zero-turn earlier-history section: %+v", decoded.EarlierHistory)
+		}
+	}
+	if len(decoded.EarlierHistory) != 0 {
+		t.Fatalf("earlier history = %+v, want none after the turn-bearing section was stripped", decoded.EarlierHistory)
+	}
+	if len(read.EarlierHistory) != 2 || len(read.EarlierHistory[1].Turns) != 1 {
+		t.Fatal("building the frame mutated the durable earlier history")
 	}
 }
 
