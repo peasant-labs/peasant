@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -17,7 +18,11 @@ func TestHarvestHelpRegistry(t *testing.T) {
 	sort.Strings(expected)
 
 	for _, subcommand := range []string{"", "logs", "index"} {
-		t.Run(subcommand, func(t *testing.T) {
+		name := subcommand
+		if name == "" {
+			name = "harvest"
+		}
+		t.Run(name, func(t *testing.T) {
 			cmd := BuildHarvestCommand()
 			var output bytes.Buffer
 			cmd.SetOut(&output)
@@ -40,7 +45,7 @@ func TestHarvestHelpRegistry(t *testing.T) {
 				}
 				list, _, _ = strings.Cut(list, ")")
 				list, _, _ = strings.Cut(list, ";")
-				if got := strings.Split(list, ", "); strings.Join(got, "\x00") != strings.Join(expected, "\x00") {
+				if got := strings.Split(list, ", "); !slices.Equal(got, expected) {
 					t.Fatalf("help harnesses = %q, want %q", got, expected)
 				}
 				return

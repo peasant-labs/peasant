@@ -27,7 +27,7 @@ peasant harvest index [flags]
       --profile-index           Print INDEX parse/write timing diagnostics
       --session strings         Filter to specific session IDs (repeatable, comma-separated)
       --since string            Only sessions newer than this (positive Go duration (e.g. 30m, 1h30m), integer d, w, mo (months), y, YYYY-MM-DD (UTC), or RFC3339)
-      --source-harness string   Filter stored sessions by harness (claude-code, opencode, codex, cursor, strike, pi; cleared by --all)
+      --source-harness string   Filter stored sessions by harness (claude-code, codex, cursor, opencode, pi, strike; cleared by --all)
       --verbose                 Show file-level detail
 ```
 
