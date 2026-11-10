@@ -20,7 +20,7 @@ func ConvertLegacyAll(
 	resolver ingest.PathIdentityResolver,
 	autoIngestNewBranches bool,
 ) (LegacyAllConversion, error) {
-	return onboarding.ConvertLegacyAll(sessionListings(scan), stored, resolver, autoIngestNewBranches)
+	return onboarding.ConvertLegacyAll(scan, stored, resolver, autoIngestNewBranches)
 }
 
 // ConvertLegacySelected replaces selected-mode project rules that do not carry
@@ -32,19 +32,4 @@ func ConvertLegacySelected(
 	resolver ingest.PathIdentityResolver,
 ) (config.SelectionConfig, error) {
 	return onboarding.ConvertLegacySelected(current, stored, resolver)
-}
-
-func sessionListings(scan []ftue.SessionListing) []onboarding.SessionListing {
-	listings := make([]onboarding.SessionListing, len(scan))
-	for index, row := range scan {
-		listings[index] = onboarding.SessionListing{
-			Harness:     row.Harness,
-			ProjectName: row.ProjectName,
-			GitRemote:   row.GitRemote,
-			Branch:      row.Branch,
-			SessionID:   row.SessionID,
-			WorkingDir:  row.WorkingDir,
-		}
-	}
-	return listings
 }

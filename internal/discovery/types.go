@@ -6,31 +6,11 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/sessionorigin"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 )
 
-// SessionListing is one discovered session the picker and later stages consume.
-// It keeps discovery details independent from ingest's full session type.
-type SessionListing struct {
-	Harness     string    `yaml:"harness"`
-	ProjectName string    `yaml:"projectName"`
-	GitRemote   string    `yaml:"gitRemote"`
-	Branch      string    `yaml:"branch"`
-	Title       string    `yaml:"title"`
-	Agent       string    `yaml:"agent"`
-	Date        time.Time `yaml:"date"`
-	TurnCount   int       `yaml:"turnCount"`
-	SessionID   string    `yaml:"sessionId"`
-	SubagentIDs []string  `yaml:"subagentIds"`
-	WorkingDir  string    `yaml:"workingDir"`
-	// Origin is who drove the session. The empty string is not a menu value:
-	// it marks a listing an adapter mined no evidence for, and callers resolve
-	// it to sessionorigin.Unknown before relying on it.
-	Origin sessionorigin.Origin `yaml:"origin"`
-	// Source locates the transcript the harness wrote, so a selection step can
-	// preview a session that has not been imported.
-	Source SessionSource `yaml:"source"`
-}
+// SessionListing is owned by onboarding.
+type SessionListing = onboarding.SessionListing
 
 // StageProgress reports progress for a single pipeline stage.
 type StageProgress struct {

@@ -13,18 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 )
 
-// SessionListing is the discovery row legacy conversion reads. It is the
-// neutral input shared with the terminal listing; display-only fields are not
-// required to build an exact project policy.
-type SessionListing struct {
-	Harness     string
-	ProjectName string
-	GitRemote   string
-	Branch      string
-	SessionID   string
-	WorkingDir  string
-}
-
 // LegacyAllConversion is the in-memory replacement for a legacy mode-all
 // policy. Initial contains only exact available scanner projects. Unmatched
 // carries stored sessions whose physical project is not available, so the
