@@ -7,12 +7,17 @@ nix develop -c make check-harvester-versions BASE=<base-commit> CANDIDATE=HEAD
 ```
 
 Working edits are excluded. The PR test workflow compares its base SHA with the
-checked-out candidate. Each parser capture uses `go test -race`; ordinary builds
-do not invoke the guard.
+checked-out candidate. Each parser capture runs the shared probe without the race
+detector: race detection belongs to the gate's race lane, and the comparison is
+single-goroutine. Set `PEASANT_GUARD_RACE=1` to run the captures under `-race`
+when a concurrency question needs it. Ordinary builds do not invoke the guard.
 
 The runner archives both revisions into a temporary directory and runs one shared
-probe over both revisions' existing named synthetic corpora. Each corpus is fed
-unchanged to both implementations. It compares native adapter extraction and
+probe over both revisions' existing named synthetic corpora. The candidate
+corpus pass observes every case it declares; the base pass replays the shared
+cases whose bodies changed, so an edit is judged against the old bytes. A case
+the probe did not actually process fails the run. Each corpus is fed unchanged
+to both implementations. It compares native adapter extraction and
 OpenCode SQLite materialization separately from completion-checked index
 results (the data accepted for persistence, including authoritative full content
 where supported). It never opens the user's native
@@ -22,8 +27,9 @@ Every changed harness must increase its affected `AdapterVersion` or
 `IndexerVersion` in `internal/ingest/harvester_versions.go`. Shared helpers can
 require several harness bumps. Failure becoming success, or success becoming
 failure, is a behavior change. A new fixture alone causes no bump when both
-parsers produce the same result. Old fixture inputs remain covered even if the
-candidate edits or removes them. There are no editable expected digests.
+parsers produce the same result. Old fixture inputs remain covered when the
+candidate edits them; a removal is caught by the `required_cases` manifest.
+There are no editable expected digests.
 
 Inputs come from the native Claude/Codex/Cursor E2E manifests, Strike protocol
 files, Pi capture and native-v3 structure cases, and the named index-completion

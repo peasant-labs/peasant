@@ -322,9 +322,15 @@ func parserVersions() map[string]versions {
 		return result, err
 	}
 	output := filepath.Join(temp, "snapshot.json")
-	// Output parity is single-goroutine; the race suite belongs to the gate,
-	// not to four full corpus passes inside this job.
-	cmd := exec.Command("go", "test", "-count=1", "-parallel=8", "-run", "^TestHarvesterGuardCapture$", "./internal/ingest")
+	// Race detection belongs to the gate's race lane, not to four full corpus
+	// passes inside this job. Keep it available on demand for the parallel
+	// native fan-out.
+	args := []string{"test", "-count=1", "-parallel=8"}
+	if os.Getenv("PEASANT_GUARD_RACE") != "" {
+		args = append(args, "-race")
+	}
+	args = append(args, "-run", "^TestHarvesterGuardCapture$", "./internal/ingest")
+	cmd := exec.Command("go", args...)
 	cmd.Dir = tree
 	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_FALLBACK_CORPUS="+fallbackCorpus, "PEASANT_GUARD_OBSERVED_NATIVE="+observedNames, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+nativeRoot)
 	if out, err := cmd.CombinedOutput(); err != nil {

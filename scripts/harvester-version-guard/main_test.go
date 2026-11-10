@@ -34,8 +34,8 @@ func TestCompareRequiresAffectedVersion(t *testing.T) {
 }
 
 func TestEmbeddedProbeSharesTheObservedNamesContract(t *testing.T) {
-	if !bytes.Contains(probe, []byte("PEASANT_GUARD_OBSERVED_NATIVE")) {
-		t.Fatal("the embedded probe no longer reads PEASANT_GUARD_OBSERVED_NATIVE; the runner would hand it names it never observes")
+	if !bytes.Contains(probe, []byte("PEASANT_GUARD_OBSERVED_NATIVE")) || !bytes.Contains(probe, []byte("NativeObserved")) {
+		t.Fatal("the embedded probe no longer reads PEASANT_GUARD_OBSERVED_NATIVE and reports NativeObserved; the runner would hand it names it never sees")
 	}
 }
 
