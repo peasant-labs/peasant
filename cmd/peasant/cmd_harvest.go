@@ -75,21 +75,22 @@ const (
 
 // harvestFlags holds all CLI flags shared across harvest subcommands.
 type harvestFlags struct {
-	sourceHarness string
-	sourcePath    string
-	outputPath    string
-	dryRun        bool
-	force         bool
-	all           bool
-	includeActive bool
-	verbose       bool
-	debug         bool
-	jsonOutput    bool
-	detectCommits bool
-	profileIndex  bool
-	sessionIDs    []string
-	since         string
-	noRelated     bool
+	sourceHarness  string
+	sourcePath     string
+	outputPath     string
+	dryRun         bool
+	force          bool
+	all            bool
+	includeActive  bool
+	verbose        bool
+	debug          bool
+	jsonOutput     bool
+	detectCommits  bool
+	refreshCommits bool
+	profileIndex   bool
+	sessionIDs     []string
+	since          string
+	noRelated      bool
 }
 
 // BuildHarvestCommand constructs the harvest command with logs/index subcommands.
@@ -192,6 +193,12 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	if mode != harvestLogsOnly {
 		cmd.Flags().BoolVar(&flags.detectCommits, "detect-commits", true, "Detect and store git commits linked to each session")
 		cmd.Flags().BoolVar(&flags.profileIndex, "profile-index", false, "Print INDEX parse/write timing diagnostics")
+	}
+	// The unchanged-session commit refresh is a harvest-run behavior. logs has
+	// no store to write, and index does not take this path, so neither accepts
+	// the flag.
+	if mode == harvestAll {
+		cmd.Flags().BoolVar(&flags.refreshCommits, "refresh-commits", false, "For a named unchanged session, refresh its commit rows without re-extracting or re-indexing")
 	}
 }
 
@@ -387,6 +394,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		Sources:            sources,
 		OutputDir:          resolvedOutput,
 		Force:              force,
+		RefreshCommits:     flags.refreshCommits,
 		IncludeActive:      flags.includeActive,
 		StalenessThreshold: staleness,
 		DryRun:             flags.dryRun,

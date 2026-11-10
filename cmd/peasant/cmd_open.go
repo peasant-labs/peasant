@@ -230,7 +230,7 @@ func runOpen(cmd *cobra.Command, deps openDependencies, rawSessionID string, por
 // The flags the harvest runs with and the command a failure line suggests are
 // both built from it, so the two cannot differ.
 func openHarvestArgs(id ingest.SessionID, noRelated bool) []string {
-	args := []string{"--session", string(id), "--detect-commits"}
+	args := []string{"--session", string(id), "--detect-commits", "--refresh-commits"}
 	if noRelated {
 		args = append(args, "--no-related")
 	}

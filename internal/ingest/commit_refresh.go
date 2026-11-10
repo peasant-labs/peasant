@@ -14,14 +14,16 @@ import (
 const commitRefreshEmailTimeout = 2 * time.Second
 
 // refreshesUnchangedCommits reports whether this run should detect commits
-// for a session the diff left unchanged. A full harvest does not: unchanged
-// sessions there stay untouched. A dry run writes nothing. Detection is
-// absent when no analyzer is attached.
+// for a session the diff left unchanged. It is opt-in: a plain scoped harvest
+// does not, so it emits no detector warning. A full harvest does not, even
+// when the flag is set. A dry run writes nothing. Detection is absent when no
+// analyzer is attached.
 func (p *Pipeline) refreshesUnchangedCommits() bool {
+	asked := p.config.RefreshCommits
 	named := p.config.Scope != nil
 	writing := !p.config.DryRun && p.store != nil
 	detecting := p.gitAnalyzer != nil
-	return named && writing && detecting
+	return asked && named && writing && detecting
 }
 
 // refreshUnchangedCommits runs the extraction path's commit detector for each

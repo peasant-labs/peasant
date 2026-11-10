@@ -427,13 +427,15 @@ transcript.
    (16.1 MB, nine sessions) took 13.6 s, which is the same cost curve.
 
    That force is no longer how `open` records an unchanged session. `open`
-   harvests the named session with commit detection and does not pass
-   `--force`. An unchanged named session refreshes only its commit rows.
+   harvests the named session with `--detect-commits --refresh-commits` and
+   does not pass `--force`. `--refresh-commits` is off by default, so a plain
+   `harvest --session` does not detect commits for an unchanged session. An
+   unchanged named session opened this way refreshes only its commit rows.
    Measured 2026-11-09 on the large sandbox at `/tmp/opencode/slice17-timing/large`,
    session `9aec3ccd-622c-46ee-b346-92d6e20fd2a5`, port 8799, five runs after
-   one warmup, binary built at `a7f4955a`: median 827.8 ms, max 861.1 ms
-   (762.1, 780.0, 827.8, 831.3, 861.1). Every timed run exited 0 and opened
-   the session. The 7,210 ms median in the issue is the before number.
+   one warmup, with `open` passing `--refresh-commits`: median 810.9 ms, max
+   850.2 ms (722.8, 741.1, 810.9, 815.8, 850.2). Every timed run exited 0 and
+   opened the session. The 7,210 ms median in the issue is the before number.
 2. **The unchanged scoped harvest sits at about 0.68 s on this host**, and the
    settled `--dry-run` is 51 ms, so the source read plus the evidence/audit
    write path is about 0.6 s. It meets the 1 s target with about 0.32 s of

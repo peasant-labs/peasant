@@ -188,6 +188,7 @@ are replayed once through the ordinary push candidate path.
 | `--verbose` | Show file-level detail |
 | `--profile-index` | Print INDEX parse/write timing diagnostics |
 | `--detect-commits` | Detect and store git commits linked to each session (default on; pass `--detect-commits=false` to skip) |
+| `--refresh-commits` | For a named unchanged session, refresh its commit rows without re-extracting or re-indexing (default off) |
 | `--include-active` | Deprecated and has no effect: active sessions are processed by default |
 | `--config <path>` | Path to config file (global flag) |
 | `--data-dir`, `--config-dir`, `--state-dir` | Override the data, config and state directories (global flags; see [`peasant`](docs/cli/peasant.md)) |

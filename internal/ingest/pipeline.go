@@ -242,6 +242,11 @@ type PipelineConfig struct {
 	// means the full run. Build it with NewSessionScope; a scope with no ids or
 	// an unset policy is refused at the start of Run.
 	Scope *SessionScope
+	// RefreshCommits asks a scoped run to detect commits for an unchanged
+	// named session and write only those rows. It does not re-extract or
+	// re-index. Off by default, so a plain scoped harvest leaves an unchanged
+	// session untouched, including emitting no detector warning.
+	RefreshCommits bool
 	// Command is the words the user typed that entered this run: "harvest",
 	// "harvest index", or "harvest logs". `open` sets "harvest", because it
 	// re-enters harvest. It exists only to render a scope miss in the words the
@@ -626,10 +631,10 @@ func WithIndexLogger(l IndexLogger) PipelineOption {
 }
 
 // WithGitDiffAnalyzer injects a GitDiffAnalyzer for commit detection.
-// When set, extraction runs timestamp-based commit detection, and a scoped
-// run also refreshes detection for an unchanged session without extracting
-// or indexing it. Detection errors are non-fatal: warnings are recorded and
-// the run continues.
+// When set, extraction runs timestamp-based commit detection. A scoped run
+// refreshes detection for an unchanged session only when RefreshCommits is
+// set, and then without extracting or indexing it. Detection errors are
+// non-fatal: warnings are recorded and the run continues.
 func WithGitDiffAnalyzer(a GitDiffAnalyzer) PipelineOption {
 	return func(p *Pipeline) { p.gitAnalyzer = a }
 }
@@ -1135,9 +1140,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		}
 	}
 	sessionResults = keptResults
-	// A scoped run refreshes commit detection for sessions that stay
-	// unchanged. A full harvest and a dry run do not. The refresh writes
-	// commit rows only: no extraction, no index rewrite, no transcript write.
+	// A scoped run asked to refresh commits does so for sessions that stay
+	// unchanged. A plain scoped harvest, a full harvest, and a dry run do
+	// not. The refresh writes commit rows only: no extraction, no index
+	// rewrite, no transcript write.
 	p.refreshUnchangedCommits(ctx, unchangedCommitRefresh, maintenanceQueued)
 	keptDryRun := dryRunSessions[:0]
 	for _, result := range dryRunSessions {

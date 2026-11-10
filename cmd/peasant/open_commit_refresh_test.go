@@ -41,9 +41,10 @@ type openCommitRefreshCase struct {
 	AfterRecord string `yaml:"afterRecord"`
 	Command     string `yaml:"command"`
 	Want        struct {
-		Succeeded bool   `yaml:"succeeded"`
-		Commits   string `yaml:"commits"`
-		Stored    string `yaml:"stored"`
+		Succeeded    bool     `yaml:"succeeded"`
+		Commits      string   `yaml:"commits"`
+		Stored       string   `yaml:"stored"`
+		StderrAbsent []string `yaml:"stderrAbsent"`
 	} `yaml:"want"`
 }
 
@@ -65,7 +66,7 @@ func loadOpenCommitRefreshFixture(t *testing.T) openCommitRefreshFixture {
 			t.Fatalf("case %q has unknown afterRecord %q", testCase.Name, testCase.AfterRecord)
 		}
 		switch testCase.Command {
-		case "open", "harvest", "harvest-force", "harvest-dry-run":
+		case "open", "harvest", "harvest-session", "harvest-refresh", "harvest-refresh-all", "harvest-force", "harvest-dry-run":
 		default:
 			t.Fatalf("case %q has unknown command %q", testCase.Name, testCase.Command)
 		}
@@ -114,6 +115,9 @@ func TestOpenHarvestDoesNotForce(t *testing.T) {
 	if !slices.Contains(args, "--detect-commits") {
 		t.Fatalf("open harvest args = %v, want --detect-commits", args)
 	}
+	if !slices.Contains(args, "--refresh-commits") {
+		t.Fatalf("open harvest args = %v, want --refresh-commits", args)
+	}
 	if !slices.Contains(args, "--session") || !slices.Contains(args, openTestSessionID) {
 		t.Fatalf("open harvest args = %v, want the named session", args)
 	}
@@ -156,6 +160,11 @@ func runOpenCommitRefreshCase(t *testing.T, testCase openCommitRefreshCase) {
 		t.Fatalf("%s succeeded, want a failure\n%s%s", testCase.Command, stdout, stderr)
 	}
 	after := world.snapshot(t)
+	for _, absent := range testCase.Want.StderrAbsent {
+		if strings.Contains(stderr, absent) {
+			t.Fatalf("%s wrote %q, which a run without commit refresh must not emit:\n%s", testCase.Command, absent, stderr)
+		}
+	}
 
 	switch testCase.Want.Commits {
 	case "grew":
@@ -383,10 +392,16 @@ func (w *commitRefreshWorld) run(t *testing.T, command string) (string, string, 
 		}), "open", "--session", openTestSessionID, "--port", strconv.Itoa(w.port))
 	case "harvest":
 		return w.harvest(t)
+	case "harvest-session":
+		return w.harvest(t, "--session", openTestSessionID)
+	case "harvest-refresh":
+		return w.harvest(t, "--session", openTestSessionID, "--refresh-commits")
+	case "harvest-refresh-all":
+		return w.harvest(t, "--refresh-commits")
 	case "harvest-force":
 		return w.harvest(t, "--session", openTestSessionID, "--force")
 	case "harvest-dry-run":
-		return w.harvest(t, "--session", openTestSessionID, "--dry-run")
+		return w.harvest(t, "--session", openTestSessionID, "--dry-run", "--refresh-commits")
 	default:
 		t.Fatalf("unknown command %q", command)
 		return "", "", nil

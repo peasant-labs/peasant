@@ -3,8 +3,11 @@
 # this list fails the loader.
 requiredNames:
   - scoped-refresh
+  - scoped-with-flag
+  - scoped-without-flag
   - second-open-idle
   - full-harvest-skips
+  - full-harvest-with-flag
   - force-reprocesses
   - dry-run-skips
   - detection-failure-keeps-commits
@@ -19,6 +22,30 @@ cases:
       succeeded: true
       commits: grew
       stored: identical
+
+  # The same unchanged session with the flag refreshes commits and leaves the
+  # stored transcript and index byte-identical.
+  - name: scoped-with-flag
+    afterRecord: add-commit
+    command: harvest-refresh
+    want:
+      succeeded: true
+      commits: grew
+      stored: identical
+
+  # Without the flag, a scoped harvest is byte-identical to before, including
+  # the commit rows, and emits no detector warning. Removing the flag
+  # requirement records the new commit and fails this case.
+  - name: scoped-without-flag
+    afterRecord: add-commit
+    command: harvest-session
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: identical
+      stderrAbsent:
+        - commit_detector
+        - User email is not configured
 
   # Opening the same unchanged session again does no extraction and no index
   # work, and does not rewrite an identical commit projection. Removing the
@@ -41,6 +68,16 @@ cases:
       commits: unchanged
       stored: identical
 
+  # The flag does not widen a full harvest. Removing the named-session
+  # restriction while the flag is set records the new commit and fails this case.
+  - name: full-harvest-with-flag
+    afterRecord: add-commit
+    command: harvest-refresh-all
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: identical
+
   # --force still re-extracts and re-indexes an unchanged session.
   - name: force-reprocesses
     afterRecord: none
@@ -50,8 +87,8 @@ cases:
       commits: unchanged
       stored: extracted
 
-  # A dry run writes nothing. Removing the dry-run restriction records the
-  # new commit and fails this case.
+  # A dry run writes nothing even when the flag is set. Removing the dry-run
+  # restriction records the new commit and fails this case.
   - name: dry-run-skips
     afterRecord: add-commit
     command: harvest-dry-run
