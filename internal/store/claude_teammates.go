@@ -116,6 +116,13 @@ const sqlClaudeTeammateSpawnsForPathsTemplate = `SELECT spawner_path, team, name
 WHERE spawner_path IN (%s)
 ORDER BY spawner_path, team, name`
 
+// sqlClaudeTeammateSpawnsForPaths renders the by-path spawn read for the given
+// path count. Production and its query-plan guard call it, so the guarded
+// statement is the statement production runs.
+func sqlClaudeTeammateSpawnsForPaths(pathCount int) string {
+	return fmt.Sprintf(sqlClaudeTeammateSpawnsForPathsTemplate, sqlPlaceholders(pathCount))
+}
+
 // ClaudeTeammateSpawnsForPaths returns the stored spawn projection of each
 // named transcript path, keyed by path, in bounded primary-key batches. A path
 // with no row maps to no entry. It reads no JSON column and never scans the
@@ -164,13 +171,11 @@ func (s *Store) claudeTeammateSpawnsForPathsOnConn(ctx context.Context, conn *sq
 	for start := 0; start < len(unique); start += indexFormatReadBatchSize {
 		end := min(start+indexFormatReadBatchSize, len(unique))
 		batch := unique[start:end]
-		placeholders := make([]string, len(batch))
 		args := make([]any, len(batch))
 		for index, value := range batch {
-			placeholders[index] = "?"
 			args[index] = value
 		}
-		query := fmt.Sprintf(sqlClaudeTeammateSpawnsForPathsTemplate, strings.Join(placeholders, ", "))
+		query := sqlClaudeTeammateSpawnsForPaths(len(batch))
 		if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 			Args: args,
 			ResultFunc: func(stmt *sqlite.Stmt) error {

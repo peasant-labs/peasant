@@ -54,6 +54,7 @@ type failingClaudeDerivedLookup struct {
 	declarerErr  error
 	spawnerErr   error
 	pathErr      error
+	spawnsErr    error
 }
 
 var _ ingest.DerivedLookupReader = (*failingClaudeDerivedLookup)(nil)
@@ -82,6 +83,9 @@ func (f *failingClaudeDerivedLookup) ClaudeIdentitySpawnerPaths(context.Context,
 
 // ClaudeTeammateSpawnsForPaths supplies the stored spawn side of the delta.
 func (f *failingClaudeDerivedLookup) ClaudeTeammateSpawnsForPaths(_ context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity, error) {
+	if f.spawnsErr != nil {
+		return nil, f.spawnsErr
+	}
 	spawns := make(map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity, len(paths))
 	for _, path := range paths {
 		if stored, ok := f.spawnsByPath[path]; ok {
@@ -126,6 +130,8 @@ func TestClaudeAdapter_DerivedReadErrorsAreReported(t *testing.T) {
 				reader.spawnerErr = errors.New("synthetic spawner count failure")
 			case "spawnerPaths":
 				reader.pathErr = errors.New("synthetic spawner path failure")
+			case "spawnContributions":
+				reader.spawnsErr = errors.New("synthetic spawn contribution failure")
 			default:
 				t.Fatalf("fixture method %q is outside the declared set", testCase.Method)
 			}

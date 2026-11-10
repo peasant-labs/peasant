@@ -142,6 +142,12 @@ func TestScopedStatementsQueryPlans(t *testing.T) {
 			wantIndex: "idx_claude_teammate_spawns_identity",
 		},
 		{
+			name:      "claude_teammate_spawns_by_path",
+			sql:       sqlClaudeTeammateSpawnsForPaths(2),
+			args:      []any{"/synthetic/a.jsonl", "/synthetic/b.jsonl"},
+			wantIndex: "sqlite_autoindex_claude_teammate_spawns_1",
+		},
+		{
 			name:      "codex_rollout_count",
 			sql:       sqlCountCodexRolloutsBySession,
 			args:      []any{string(idA)},
