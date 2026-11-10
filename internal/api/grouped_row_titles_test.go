@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -58,7 +59,7 @@ func TestGroupedRowsCarryStoredTitles(t *testing.T) {
 				Title:    c.Title,
 				StartMs:  500,
 				StableID: "agent-owner",
-				Harness:  "codex",
+				Harness:  string(defaults.HarnessCodex),
 				Purpose:  schema.SessionPurposeInteraction,
 			}
 			if c.Variant == GroupedRouteSearch {
@@ -76,7 +77,7 @@ func TestGroupedRowsCarryStoredTitles(t *testing.T) {
 					Title:              c.HelperTitle,
 					StartMs:            490,
 					StableID:           "agent-helper",
-					Harness:            "codex",
+					Harness:            string(defaults.HarnessCodex),
 					Purpose:            schema.SessionPurposeHelperReview,
 					OwnerState:         schema.RelationshipTargetKnown,
 					OwnerTargetLocalID: "agent-owner",
