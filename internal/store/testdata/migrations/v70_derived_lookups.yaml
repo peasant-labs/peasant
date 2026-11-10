@@ -118,7 +118,7 @@ corrupt_spawns:
   - {spawner_path: /synthetic/claude/root-a.jsonl, team: omega, name: ghost}
   - {spawner_path: /synthetic/claude/child-a.jsonl, team: shadow, name: stale}
 
-# A rollout path the walk does not enumerate. The rebuild must remove it.
+# A rollout path explicitly deleted during the rebuild.
 corrupt_catalog:
   - {path: /synthetic/codex/2026/01/03/rollout-2026-01-03T00-00-00-33333333.jsonl, session_id: 33333333-3333-4333-8333-333333333333}
 

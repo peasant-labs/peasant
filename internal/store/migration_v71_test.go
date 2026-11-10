@@ -470,13 +470,28 @@ func TestMigrationV71DerivedLookups(t *testing.T) {
 			requireCatalogRowsEqual(t, db, beforeCatalog)
 		case "rebuild-spawns":
 			plantCorruptDerivedState(t, db, fixture)
-			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: rollouts}); err != nil {
+			beforeSpawns := readSpawnRows(t, db)
+			beforeCatalog := readCatalogRows(t, db)
+			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{}); !errors.Is(err, ingest.ErrIncompleteRolloutEnumeration) {
+				t.Fatalf("unset enumeration error = %v", err)
+			}
+			requireSpawnRowsEqual(t, db, beforeSpawns)
+			requireCatalogRowsEqual(t, db, beforeCatalog)
+			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationNotWalked}); err != nil {
+				t.Fatalf("rebuild without Codex: %v", err)
+			}
+			requireSpawnRowsEqual(t, db, fixture.ExpectedSpawns)
+			requireCatalogRowsEqual(t, db, beforeCatalog)
+			var deletes []ingest.ResolvedPath
+			for _, row := range fixture.CorruptCatalog {
+				deletes = append(deletes, ingest.ResolvedPath(row.Path))
+			}
+			if err := db.RebuildDerivedLookups(t.Context(), ingest.RolloutEnumeration{Status: ingest.RolloutEnumerationComplete, Files: rollouts, Deletes: deletes}); err != nil {
 				t.Fatalf("rebuild the derived lookups: %v", err)
 			}
 			requireSpawnRowsEqual(t, db, fixture.ExpectedSpawns)
 		case "rebuild-catalog":
-			// The catalog equals the complete walk exactly: the rebuild replaces
-			// the table, so the planted row the walk does not enumerate is gone.
+			// Explicitly deleted paths are removed alongside the upserts.
 			requireCatalogRowsEqual(t, db, fixture.ExpectedCatalog)
 		case "prune-cascade":
 			pruned := fixture.PruneProbe.SpawnerPath
@@ -614,8 +629,8 @@ func TestMigrationV71FreshSchema(t *testing.T) {
 	}
 	defer db.pool.Put(conn)
 
-	if got, want := CurrentSchemaVersion(), 71; got != want {
-		t.Fatalf("CurrentSchemaVersion() = %d, want %d: V71 advances the shipped version by one", got, want)
+	if got, want := CurrentSchemaVersion(), 72; got != want {
+		t.Fatalf("CurrentSchemaVersion() = %d, want %d", got, want)
 	}
 	var version int
 	if err := sqlitex.ExecuteTransient(conn, `PRAGMA user_version`, &sqlitex.ExecOptions{
@@ -623,8 +638,8 @@ func TestMigrationV71FreshSchema(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("read the fresh store's user_version: %v", err)
 	}
-	if version != 71 {
-		t.Fatalf("fresh user_version = %d, want 71", version)
+	if version != 72 {
+		t.Fatalf("fresh user_version = %d, want 72", version)
 	}
 
 	for _, name := range []string{"claude_teammate_spawns", "codex_rollout_catalog"} {
