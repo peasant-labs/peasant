@@ -29,10 +29,10 @@ Run timing separately, only after parity, without concurrent builds/benchmarks:
 Timing brackets the whole repeated decode loop, including status counting; loading,
 hashing, JSON output, and memory-stat sampling are outside it. Counts cover all
 repetitions. An ignored entryless marker (a control row this build interprets and
-that returns no transcript message) is counted separately and is not a refusal. A
-skipped control row of a type this build does not know is still a refusal: the
-row is omitted, so timing stays suppressed. Any refusal suppresses
-timing/allocation metrics and exits nonzero. Adding the ignored counter changes
+that returns no transcript message) is counted separately and is not a refusal. An
+unknown control row is retained as evidence and counts as a success at this
+decoder. Any decode refusal suppresses timing/allocation metrics and exits
+nonzero. Adding the ignored counter changes
 the parity digest only for rows it classifies, so a stored parity reference stays
 comparable for every other row.
 Filter a corpus by successful parity ordinals if needed, then establish parity

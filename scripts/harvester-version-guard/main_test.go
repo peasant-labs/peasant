@@ -35,7 +35,7 @@ func TestCompareRequiresAffectedVersion(t *testing.T) {
 	}
 }
 
-func TestEmbeddedProbeSharesTheObservedNamesContract(t *testing.T) {
+func TestEmbeddedProbePinsTheRunnerContract(t *testing.T) {
 	reads := probeGetenvNames(t)
 	for _, name := range []string{corpusEnv, fallbackCorpusEnv, observedNativeEnv, outputEnv, nativeRootEnv} {
 		if !reads[name] {
@@ -45,6 +45,9 @@ func TestEmbeddedProbeSharesTheObservedNamesContract(t *testing.T) {
 	if !bytes.Contains(probe, []byte("NativeObserved")) {
 		t.Fatal("the embedded probe no longer reports NativeObserved; the runner would hand it names it never sees")
 	}
+}
+
+func TestEmbeddedProbeClearsBeforeWriting(t *testing.T) {
 	clear := bytes.Index(probe, []byte("os.RemoveAll(filepath.Dir(nativePath))"))
 	write := bytes.Index(probe, []byte("os.WriteFile(nativePath"))
 	if clear < 0 || write < 0 || clear > write {
@@ -54,6 +57,8 @@ func TestEmbeddedProbeSharesTheObservedNamesContract(t *testing.T) {
 
 // probeGetenvNames finds the string literal of every os.Getenv call in the
 // embedded probe, so a comment or a dead string cannot satisfy the contract.
+// A refactor to os.LookupEnv or a helper would fail this check even though the
+// contract still holds; update the walk with that refactor.
 func probeGetenvNames(t *testing.T) map[string]bool {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "probe_test.go", probe, 0)

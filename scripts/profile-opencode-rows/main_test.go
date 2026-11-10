@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 )
@@ -68,14 +69,24 @@ func TestIgnoredOnlyCorpusKeepsTiming(t *testing.T) {
 	if out.DecodeSeconds <= 0 || out.AllocatedBytes == 0 || out.Allocations == 0 {
 		t.Fatalf("ignored-only timing suppressed a metric: %+v", out)
 	}
-	// The bracket must enclose the repeated decode loop: more repetitions must
-	// report strictly more decode time.
-	slow, err := runCorpus(t, ignoredOnlyInputs(), "timing", 256)
-	if err != nil {
-		t.Fatalf("ignored-only timing at 256 repetitions: %v", err)
+	// The bracket must enclose the repeated decode loop. Compare the reported
+	// time against the same decodes measured independently: a bracket moved
+	// outside the loop reports nanoseconds against microseconds of real work.
+	const baselineReps = 256
+	ignored := ignoredOnlyInputs()[0]
+	benchStart := time.Now()
+	for range baselineReps {
+		if _, _, err := ingest.DecodeOpenCodeProvenanceRow(ignored.Row, ignored.Scope); err != nil && !ingest.OpenCodeControlRowIgnored(err) {
+			t.Fatal(err)
+		}
 	}
-	if slow.DecodeSeconds <= out.DecodeSeconds {
-		t.Fatalf("256 repetitions reported %v seconds, not more than one repetition's %v", slow.DecodeSeconds, out.DecodeSeconds)
+	independent := time.Since(benchStart)
+	slow, err := runCorpus(t, ignoredOnlyInputs(), "timing", baselineReps)
+	if err != nil {
+		t.Fatalf("ignored-only timing at %d repetitions: %v", baselineReps, err)
+	}
+	if slow.DecodeSeconds < independent.Seconds()/4 || slow.DecodeSeconds > independent.Seconds()*4 {
+		t.Fatalf("reported %v s for %d rows, but the same decodes take %v s here: the timing bracket no longer encloses the decode loop", slow.DecodeSeconds, baselineReps, independent)
 	}
 }
 
