@@ -238,7 +238,9 @@ func servedDocumentBaseSize(detail *schema.SessionDetailPayload, fields []served
 	held := make([]string, len(fields))
 	for index, field := range fields {
 		held[index] = *field.target
-		*field.target = ""
+		// A non-empty sentinel keeps omitempty text parts in the encoded base;
+		// an empty string would remove the key and undercount its overhead.
+		*field.target = "x"
 	}
 	encoded, err := json.Marshal(detail)
 	for index, field := range fields {
@@ -250,8 +252,8 @@ func servedDocumentBaseSize(detail *schema.SessionDetailPayload, fields []served
 		// validated producer boundary, raises it with the failing value.
 		return 0, false
 	}
-	// Each emptied field contributed the two quote bytes of "".
-	return len(encoded) - 2*len(fields), true
+	// Each sentinel contributed the three JSON bytes of "x".
+	return len(encoded) - 3*len(fields), true
 }
 
 // servedBoundSearchDipBytes is how far the search looks above a bound that fits

@@ -114,10 +114,10 @@ function turnWire(index: number, plan: SegmentCase) {
   if (bounded && (typeof plan.clippedContent !== 'string' || typeof plan.preBoundContent !== 'string' || !plan.preBoundContent.startsWith(plan.clippedContent) || plan.preBoundContent.length <= plan.clippedContent.length)) {
     throw new Error('per-field bound case must record a clipped prefix and a longer pre-bound body');
   }
-  const content = bounded ? (servePreBoundInline ? plan.preBoundContent : plan.clippedContent) : `turn ${index}`;
+  const content = bounded ? (servePreBoundInline ? plan.preBoundContent : plan.clippedContent) : plan.name === 'system-only' ? 'system entry is available' : `turn ${index}`;
   return {
     index,
-    role: index % 2 === 0 ? 'user' : 'assistant',
+    role: plan.name === 'system-only' ? 'system' : index % 2 === 0 ? 'user' : 'assistant',
     depth: 0,
     content,
     timestamp: '2026-07-15T08:00:00Z',
@@ -196,7 +196,7 @@ function detail(plan: SegmentCase) {
     totalTokens: 12,
     tokensIn: 5,
     tokensOut: 7,
-    turnCount: Math.max(plan.totalSegments, 1),
+    turnCount: plan.name === 'system-only' ? 0 : Math.max(plan.totalSegments, 1),
     toolCallCount: 0,
     revision,
     turns: [],
@@ -265,6 +265,25 @@ describe('SessionDetailV2 segmented transcript', () => {
     expect(cases.map((row) => row.name)).toEqual(loadCases().map((row) => row.name));
   });
 
+  it('keeps earlier history reachable while reading current turns by segment', async () => {
+    const plan = cases.find((row) => row.name === 'mount-segment-zero');
+    if (!plan) throw new Error('mount-segment-zero fixture is missing');
+    activeCase = plan;
+    revision = plan.revision;
+    channelData = {
+      ...detail(plan),
+      earlierHistory: [{ state: 'uncertain_migrated', turns: [{ index: 4, depth: 0, timestamp: '2026-07-15T08:00:00Z', role: 'user', content: 'retained earlier conversation', toolCalls: [] }] }],
+    };
+    vi.stubGlobal('fetch', vi.fn(answer));
+    const params = new URLSearchParams('earlier=earlier-0');
+    currentSearch = params;
+    const routeQuery = parseTranscriptRouteQuery(params);
+    if (!routeQuery) throw new Error('earlier history route query must be valid');
+    const view = render(<PublishProvider><SessionDetailV2 sessionId={SESSION_ID} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} /></PublishProvider>);
+    await waitFor(() => expect(view.getByText('retained earlier conversation')).toBeInTheDocument());
+    await waitFor(() => expect(reads).toContain('segment:0'));
+  });
+
   for (const plan of cases) {
     it(plan.name, async () => {
       activeCase = plan;
@@ -323,10 +342,19 @@ describe('SessionDetailV2 segmented transcript', () => {
       const viewer = view.container.querySelector('[data-segment-mode="true"]');
       expect(viewer).not.toBeNull();
       expect(view.queryByTestId('session-not-indexed')).toBeNull();
+      if (plan.name === 'system-only') {
+        await waitFor(() => expect(view.container.querySelector('[data-segment-mode="true"]')?.getAttribute('data-mounted-turn-bound')).toBe('1'));
+      }
       const bound = Number(viewer?.getAttribute('data-mounted-turn-bound'));
       expect(bound, `${plan.name} mounted bound`).toBe(plan.mountedTurns.length);
       const cards = view.container.querySelectorAll('[data-turn]');
       expect(cards.length).toBeLessThanOrEqual(bound);
+      if (plan.name === 'system-only') {
+        await waitFor(() => expect(reads).toContain('segment:0'));
+        fireEvent.click(view.getByRole('button', { name: 'expand filters' }));
+        fireEvent.click(view.getByRole('checkbox', { name: /system/i }));
+        await waitFor(() => expect(view.container.querySelector('[data-turn="0"]')).not.toBeNull());
+      }
       for (const turn of plan.mountedTurns) {
         expect(view.container.querySelector(`[data-turn="${turn}"]`), `${plan.name} turn ${turn}`).not.toBeNull();
       }
