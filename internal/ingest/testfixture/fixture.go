@@ -344,7 +344,8 @@ func ChangedCaseNames(base, candidate []byte) ([]string, error) {
 	}
 	var changed []string
 	for name, body := range candidateBodies {
-		if baseBodies[name] != body {
+		baseBody, shared := baseBodies[name]
+		if shared && baseBody != body {
 			changed = append(changed, name)
 		}
 	}
