@@ -7,7 +7,6 @@ import (
 	"github.com/peasant-labs/schema"
 	"io/fs"
 	"path"
-	"regexp"
 	"slices"
 	"strings"
 )
@@ -121,11 +120,6 @@ var clineTaskFiles = []struct {
 // clineUIToolKinds are the ask and say values that stand for one tool call
 // in tasks recorded before native tool_use blocks.
 var clineUIToolKinds = []string{"tool", "command", "use_mcp_server", "browser_action_launch"}
-
-var (
-	clineModeNotice = regexp.MustCompile(`(?s)<mode_notice>.*?</mode_notice>`)
-	clineInputTag   = regexp.MustCompile(`</?user_(?:input|command)\b[^>]*>`)
-)
 
 func clineRoot(product string) Root {
 	return Root{Path: "{config}/" + product + "/" + clineExtensionDir}
@@ -498,12 +492,67 @@ func clineCountMessage(message any) (userTurn, assistant, toolCalls int) {
 }
 
 func clineTitle(raw string) string {
-	text := clineInputTag.ReplaceAllString(clineModeNotice.ReplaceAllString(raw, ""), "")
+	text := stripClineInputTags(stripClineModeNotices(raw))
 	text = strings.Join(strings.Fields(text), " ")
 	if runes := []rune(text); len(runes) > clineTitleMaxRunes {
 		text = string(runes[:clineTitleMaxRunes-1]) + "…"
 	}
 	return text
+}
+
+// stripClineModeNotices uses string scanning because owned code must not import regexp.
+func stripClineModeNotices(text string) string {
+	const open, close = "<mode_notice>", "</mode_notice>"
+	var out strings.Builder
+	for {
+		start := strings.Index(text, open)
+		if start < 0 {
+			break
+		}
+		end := strings.Index(text[start+len(open):], close)
+		if end < 0 {
+			break
+		}
+		out.WriteString(text[:start])
+		text = text[start+len(open)+end+len(close):]
+	}
+	out.WriteString(text)
+	return out.String()
+}
+
+// stripClineInputTags scans tags instead of importing regexp, which the owned-code guard forbids.
+func stripClineInputTags(text string) string {
+	var out strings.Builder
+	for {
+		start := strings.IndexByte(text, '<')
+		if start < 0 {
+			break
+		}
+		tag := text[start+1:]
+		tag = strings.TrimPrefix(tag, "/")
+		name := ""
+		if strings.HasPrefix(tag, "user_input") {
+			name = "user_input"
+		} else if strings.HasPrefix(tag, "user_command") {
+			name = "user_command"
+		}
+		if name != "" && len(tag) > len(name) && !clineWordByte(tag[len(name)]) {
+			if end := strings.IndexByte(tag[len(name):], '>'); end >= 0 {
+				out.WriteString(text[:start])
+				text = tag[len(name)+end+1:]
+				continue
+			}
+		}
+		out.WriteString(text[:start+1])
+		text = text[start+1:]
+	}
+	out.WriteString(text)
+	return out.String()
+}
+
+// clineWordByte implements the ASCII word boundary used by the original tag pattern.
+func clineWordByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
 }
 
 func clineSubdirs(fsys fs.FS, dir string) ([]string, error) {

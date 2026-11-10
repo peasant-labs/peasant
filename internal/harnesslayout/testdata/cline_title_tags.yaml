@@ -1,0 +1,18 @@
+- name: multiline and multiple notices
+  input: "before<mode_notice>first\nsecond</mode_notice>middle<mode_notice>x</mode_notice>after"
+  want: beforemiddleafter
+- name: unclosed notice retained
+  input: "before<mode_notice>unfinished\ntext"
+  want: "before<mode_notice>unfinished text"
+- name: input and command tags
+  input: '<user_input>hello</user_input> <user_command key="value">world</user_command>'
+  want: hello world
+- name: word boundary
+  input: '<user_inputx>stay</user_inputx> <user_input_foo>stay</user_input_foo> <user_input-foo>gone</user_input>'
+  want: '<user_inputx>stay</user_inputx> <user_input_foo>stay</user_input_foo> gone'
+- name: nested notice is non greedy
+  input: '<mode_notice>a<mode_notice>b</mode_notice>c</mode_notice>'
+  want: 'c</mode_notice>'
+- name: unfinished tag before valid tag
+  input: '<user_inputx <user_input>text'
+  want: '<user_inputx text'
