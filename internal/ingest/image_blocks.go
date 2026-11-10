@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/peasant-labs/peasant/internal/attachments"
 	"github.com/peasant-labs/schema"
@@ -29,32 +30,87 @@ type imageDescriptor struct {
 	RecordedSize  int    `json:"recordedSize,omitempty"`
 }
 
-// extractedImage is one decoded image source ready to persist.
+// extractedImage is one decoded image source ready to stage. Bytes are nil
+// when the image is omitted. Identity is the content address of the decoded
+// bytes, or of the raw input when the bytes do not decode.
 type extractedImage struct {
 	Row          attachments.Row
 	Bytes        []byte
 	RecordedSize int
+	Identity     string
 }
 
-// ImagePersister stores one extracted image during indexing. A nil persister
-// still emits the entry; the file is written when a store is attached.
-type ImagePersister interface {
-	PersistImage(ctx context.Context, pending attachments.Pending) error
+// ImageFactReader joins session_attachments for one session. A reader that
+// cannot do this leaves image media unset.
+type ImageFactReader interface {
+	ImageFacts(ctx context.Context, sessionID SessionID) (map[string]ImageFacts, error)
 }
 
-type imagePersistKey struct{}
-
-// WithImagePersister returns a context the Claude indexer reads while parsing.
-func WithImagePersister(ctx context.Context, persister ImagePersister) context.Context {
-	return context.WithValue(ctx, imagePersistKey{}, persister)
+// ImageFacts is the attachment-row half of one image. Projection joins it by
+// SourceRef. The entry extra is not a second copy of media, size, or dimensions.
+type ImageFacts struct {
+	SourceRef     string
+	SHA256        string
+	MediaType     string
+	ByteSize      int
+	Width         int
+	Height        int
+	OmittedReason string
+	PartitionID   string
 }
 
-func imagePersisterFrom(ctx context.Context) ImagePersister {
-	if ctx == nil {
+// imageStager collects images during parse. It does not write rows. Activation
+// installs the batch only after the generation is accepted.
+type imageStager interface {
+	StageImage(pending attachments.Pending)
+}
+
+type imageStageKey struct{}
+
+// imageBatch is the per-parse collector. A rejected, held, or skipped attempt
+// drops the batch, so it cannot overwrite the active generation's rows.
+type imageBatch struct {
+	mu      sync.Mutex
+	pending []attachments.Pending
+}
+
+func (b *imageBatch) StageImage(pending attachments.Pending) {
+	if b == nil {
+		return
+	}
+	copied := pending
+	if pending.Bytes != nil {
+		copied.Bytes = append([]byte(nil), pending.Bytes...)
+	}
+	b.mu.Lock()
+	b.pending = append(b.pending, copied)
+	b.mu.Unlock()
+}
+
+func (b *imageBatch) snapshot() []attachments.Pending {
+	if b == nil {
 		return nil
 	}
-	persister, _ := ctx.Value(imagePersistKey{}).(ImagePersister)
-	return persister
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]attachments.Pending, len(b.pending))
+	copy(out, b.pending)
+	return out
+}
+
+func withImageStaging(ctx context.Context, stager imageStager) context.Context {
+	return context.WithValue(ctx, imageStageKey{}, stager)
+}
+
+func stageImage(ctx context.Context, pending attachments.Pending) {
+	if ctx == nil {
+		return
+	}
+	stager, _ := ctx.Value(imageStageKey{}).(imageStager)
+	if stager == nil {
+		return
+	}
+	stager.StageImage(pending)
 }
 
 func decodeImageDescriptor(extra *string) (imageDescriptor, bool) {
@@ -139,10 +195,13 @@ func cleanBase64(data string) string {
 func classifyImageSource(mediaType, data string) extractedImage {
 	decoded, err := base64.StdEncoding.DecodeString(cleanBase64(data))
 	if err != nil {
-		return extractedImage{Row: attachments.Row{OmittedReason: string(schema.OmittedReasonUnsupported)}}
+		return extractedImage{
+			Row:      attachments.Row{OmittedReason: string(schema.OmittedReasonUnsupported)},
+			Identity: contentAddress([]byte(data)),
+		}
 	}
 	row, payload := attachments.Classify(mediaType, decoded)
-	image := extractedImage{Row: row, Bytes: payload, RecordedSize: len(decoded)}
+	image := extractedImage{Row: row, Bytes: payload, RecordedSize: len(decoded), Identity: contentAddress(decoded)}
 	if row.OmittedReason != "" {
 		image.Bytes = nil
 		image.Row.ByteSize = 0
@@ -284,6 +343,14 @@ func attachmentImages(raw json.RawMessage) []imageSourceFields {
 	return nil
 }
 
+// claudeLinePartition is the partition known while parsing one Claude line.
+// The JSONL record does not name a generation partition. Activation stamps the
+// partition from the generation layout (main or the earlier section), so the
+// parse does not invent "main" for a block that may land in earlier history.
+func claudeLinePartition(_ claudeIndexLine) string {
+	return ""
+}
+
 func claudeLineImages(line claudeIndexLine) (content []imageSourceFields, attached []imageSourceFields) {
 	raw := line.Message.Content
 	if len(raw) == 0 {
@@ -292,26 +359,17 @@ func claudeLineImages(line claudeIndexLine) (content []imageSourceFields, attach
 	return contentImages(raw), attachmentImages(line.Attachment)
 }
 
-func (idx *ClaudeIndexer) persistImage(ctx context.Context, sessionID SessionID, sourceRef string, partition string, image extractedImage, sha string) error {
-	persister := imagePersisterFrom(ctx)
-	if persister == nil {
-		return nil
-	}
+func stageExtractedImage(ctx context.Context, sessionID SessionID, sourceRef, partition string, image extractedImage) {
 	row := image.Row
 	row.SessionID = string(sessionID)
 	row.SourceEntryRef = sourceRef
 	row.PartitionID = partition
 	if image.Row.OmittedReason == "" {
-		row.SHA256 = sha
 		row.ByteSize = image.Row.ByteSize
 	} else if image.Row.OmittedReason == string(schema.OmittedReasonTooLarge) {
 		row.ByteSize = image.RecordedSize
 	}
-	pending := attachments.Pending{Row: row, Bytes: image.Bytes}
-	if err := persister.PersistImage(ctx, pending); err != nil {
-		return fmt.Errorf("claude indexer: persist image for session %s ref %s: %w", sessionID, sourceRef, err)
-	}
-	return nil
+	stageImage(ctx, attachments.Pending{Row: row, Bytes: image.Bytes})
 }
 
 func contentAddress(payload []byte) string {
@@ -324,26 +382,26 @@ func claudeLineHasImage(line claudeIndexLine) bool {
 	return len(content) > 0 || len(attached) > 0
 }
 
-// imageChildEntry builds one depth-1 image entry and persists its bytes when a
-// persister is attached. The entry Extra carries the descriptor, never the bytes.
+// imageChildEntry builds one depth-1 image entry and stages its bytes. The
+// entry extra keeps only the content-addressed ref. Media, size, and dimensions
+// are written to session_attachments when the generation is activated, and the
+// projection joins that row. A parse that is later held or rejected writes no row.
 func (idx *ClaudeIndexer) imageChildEntry(ctx context.Context, sessionID SessionID, entryIndex, parentIndex int, role Role, partition string, source imageSourceFields) (schema.SessionEntry, error) {
 	image := classifyImageSource(source.MediaType, source.Data)
-	ref, err := imageSourceRef(sessionID, entryIndex)
+	identity := image.Identity
+	if identity == "" {
+		identity = contentAddress([]byte(source.Data))
+	}
+	ref, err := imageSourceRef(identity)
 	if err != nil {
 		return schema.SessionEntry{}, err
 	}
-	var sha string
-	if len(image.Bytes) > 0 {
-		sha = contentAddress(image.Bytes)
-	}
-	if err := idx.persistImage(ctx, sessionID, string(ref), partition, image, sha); err != nil {
-		return schema.SessionEntry{}, err
-	}
-	desc := image.descriptor(sha)
-	extra, err := desc.encode()
+	stageExtractedImage(ctx, sessionID, string(ref), partition, image)
+	extra, err := imageRefExtra(string(ref))
 	if err != nil {
 		return schema.SessionEntry{}, err
 	}
+	desc := image.descriptor(identity)
 	part := imagePartType
 	entry := schema.SessionEntry{
 		SessionID:      sessionID,
@@ -365,8 +423,11 @@ func (idx *ClaudeIndexer) imageChildEntry(ctx context.Context, sessionID Session
 
 // imagePartsByParent folds depth-1 text and image children of an image-bearing
 // parent into ordered turn parts. Text-only parents are left alone so their
-// existing carrier-plus-skip behavior is unchanged.
-func imagePartsByParent(entries []schema.SessionEntry) map[int][]TurnPart {
+// existing carrier-plus-skip behavior is unchanged. facts is the attachment-row
+// join; nil leaves media and the omission reason unset. folded is the set of
+// child indexes consumed by the fold, so the turn projection does not keep a
+// second copy of that child rule.
+func imagePartsByParent(entries []schema.SessionEntry, facts map[string]ImageFacts) (map[int][]TurnPart, map[int]struct{}) {
 	grouped := map[int][]schema.SessionEntry{}
 	hasImage := map[int]bool{}
 	for _, entry := range entries {
@@ -383,18 +444,16 @@ func imagePartsByParent(entries []schema.SessionEntry) map[int][]TurnPart {
 		}
 	}
 	out := map[int][]TurnPart{}
+	folded := map[int]struct{}{}
 	for parent, children := range grouped {
 		if !hasImage[parent] {
 			continue
 		}
 		parts := make([]TurnPart, 0, len(children))
 		for _, child := range children {
+			folded[child.EntryIndex] = struct{}{}
 			if child.EntryType == schema.EntryTypeImage {
-				desc, ok := decodeImageDescriptor(child.Extra)
-				if !ok {
-					desc = imageDescriptor{OmittedReason: string(schema.OmittedReasonUnsupported)}
-				}
-				part := desc.part()
+				part := imagePartFromJoin(child, facts)
 				note := ""
 				if child.ContentPreview != nil {
 					note = *child.ContentPreview
@@ -410,7 +469,31 @@ func imagePartsByParent(entries []schema.SessionEntry) map[int][]TurnPart {
 		}
 		out[parent] = parts
 	}
-	return out
+	return out, folded
+}
+
+func imagePartFromJoin(child schema.SessionEntry, facts map[string]ImageFacts) schema.ImagePart {
+	sourceRef := imageExtraRef(child.Extra)
+	fact, ok := facts[sourceRef]
+	if !ok {
+		// No row was joined. The part stays a valid local omission and carries
+		// no media, size, or content address. Publication replaces it with
+		// not_published. A mounted read joins the row before this fold.
+		return schema.ImagePart{OmittedReason: schema.OmittedReasonUnsupported}
+	}
+	desc := imageDescriptor{
+		Ref:           fact.SHA256,
+		MediaType:     fact.MediaType,
+		ByteSize:      fact.ByteSize,
+		Width:         fact.Width,
+		Height:        fact.Height,
+		OmittedReason: fact.OmittedReason,
+	}
+	if fact.OmittedReason == "" {
+		desc.Ref = fact.SHA256
+		desc.ByteSize = fact.ByteSize
+	}
+	return desc.part()
 }
 
 func joinedPartText(parts []TurnPart) string {
@@ -438,14 +521,69 @@ func StripPublishedImageExtra(extra *string) *string {
 	return nil
 }
 
-func imageSourceRef(sessionID SessionID, entryIndex int) (schema.SourceEntryRef, error) {
-	raw := fmt.Sprintf("img-%s-%d", sessionID, entryIndex)
-	if len(raw) > 96 {
-		raw = fmt.Sprintf("img-%d", entryIndex)
+func imageRefExtra(ref string) (*string, error) {
+	encoded, err := json.Marshal(struct {
+		Ref string `json:"ref"`
+	}{Ref: ref})
+	if err != nil {
+		return nil, fmt.Errorf("encode image ref: %w", err)
 	}
+	text := string(encoded)
+	return &text, nil
+}
+
+func imageExtraRef(extra *string) string {
+	desc, ok := decodeImageDescriptor(extra)
+	if !ok {
+		return ""
+	}
+	return desc.Ref
+}
+
+// imageSourceRef is the content-addressed source ref img-<sha256>. The same
+// bytes share one row. A different image, including one at the same entry index
+// in another partition or a later rejected attempt, gets a different ref and
+// cannot overwrite this row.
+// assignImagePartitions stamps each staged image with the partition the
+// generation layout actually gave its ref. A format-1 write has one relational
+// partition, named main because that is the only entry table. A generation
+// block keeps the layout's partition, including an earlier-history section, so
+// two images at the same entry index in different partitions stay distinct rows.
+func assignImagePartitions(candidate *GenerationCandidate, pending []attachments.Pending) {
+	byRef := map[string]string{}
+	if candidate != nil {
+		stamp := func(entries []schema.SessionEntry, partition string) {
+			for _, entry := range entries {
+				if ref := imageExtraRef(entry.Extra); ref != "" {
+					byRef[ref] = partition
+				}
+			}
+		}
+		stamp(candidate.Result.Generation.Main.Entries, "main")
+		for i, section := range candidate.Result.Generation.Earlier {
+			partition := string(section.State)
+			if partition == "" {
+				partition = fmt.Sprintf("earlier/%d", i)
+			}
+			stamp(section.Content.Entries, partition)
+		}
+	}
+	for i := range pending {
+		if part, ok := byRef[pending[i].Row.SourceEntryRef]; ok {
+			pending[i].Row.PartitionID = part
+			continue
+		}
+		if pending[i].Row.PartitionID == "" && candidate == nil {
+			pending[i].Row.PartitionID = "main"
+		}
+	}
+}
+
+func imageSourceRef(identity string) (schema.SourceEntryRef, error) {
+	raw := "img-" + identity
 	ref, err := schema.NewSourceEntryRef(raw)
 	if err != nil {
-		return "", fmt.Errorf("claude indexer: image source ref for session %s entry %d is not a public ref: %w", sessionID, entryIndex, err)
+		return "", fmt.Errorf("claude indexer: image source ref %q is not a public ref: %w", raw, err)
 	}
 	return ref, nil
 }

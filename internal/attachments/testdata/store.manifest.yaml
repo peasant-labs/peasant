@@ -7,5 +7,6 @@ requiredNames:
   - gc_rendezvous_preserves_committed_blob
   - gc_removes_unreferenced_blob
   - prune_removes_rows_and_unreferenced_files
+  - prune_keeps_blob_referenced_by_another_session
   - route_serves_64_hex_and_fails_closed
   - partition_key_is_session_and_source_ref

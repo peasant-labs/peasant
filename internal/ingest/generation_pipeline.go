@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/attachments"
 	"github.com/peasant-labs/peasant/internal/indexformat"
 )
 
@@ -464,6 +465,41 @@ func (p *Pipeline) commitGenerationResult(ctx context.Context, prepared prepared
 	return p.finishGenerationResult(ctx, prepared, outcome, logPrefix, activationOutcome, activationErr)
 }
 
+// activationInstallsImages reports whether this activation outcome is the
+// read authority. Held, skipped, and rejected attempts are not, so they must
+// not write attachment rows.
+func activationInstallsImages(disposition ActivationDisposition) bool {
+	return disposition == ActivationCommittedNow || disposition == ActivationAlreadyCommitted
+}
+
+// sessionImageReplacer installs one accepted session's image set. A store that
+// cannot do this is not given image rows.
+type sessionImageReplacer interface {
+	ReplaceSessionImages(ctx context.Context, sessionID string, pending []attachments.Pending) error
+}
+
+// commitStagedImages installs the parse-time image batch. The caller decides
+// whether the attempt was accepted. This function does not consult activation
+// outcome itself.
+func (p *Pipeline) commitStagedImages(ctx context.Context, result indexParseResult) error {
+	if result.images == nil {
+		return nil
+	}
+	pending := result.images.snapshot()
+	assignImagePartitions(result.generationCandidate, pending)
+	replacer, ok := p.store.(sessionImageReplacer)
+	if !ok {
+		if len(pending) == 0 {
+			return nil
+		}
+		return fmt.Errorf("ingest: session %s staged %d images but the store cannot install attachment rows; no image row was written; configure a store that installs session images and retry", result.im.session.SessionID, len(pending))
+	}
+	if err := replacer.ReplaceSessionImages(ctx, string(result.im.session.SessionID), pending); err != nil {
+		return fmt.Errorf("ingest: install images for session %s: %w", result.im.session.SessionID, err)
+	}
+	return nil
+}
+
 // latestAttemptHeldReason is the durable free-text reason a kept latest attempt
 // records. The index_log outcome stays the existing skipped value: the write
 // held the latest attempt beside the active authority instead of advancing it,
@@ -487,6 +523,14 @@ func (p *Pipeline) finishGenerationResult(ctx context.Context, prepared prepared
 			// rollback. CommittedNow counts once, AlreadyCommitted zero.
 			// Report repair pending honestly, not as a capture refusal, and
 			// never report duplicate successful retained occurrences.
+			if activationInstallsImages(activationOutcome.Disposition) {
+				// The generation is already the read authority. Install its
+				// images even when a later repair is still pending. A held or
+				// skipped attempt never reaches this disposition.
+				if err := p.commitStagedImages(ctx, prepared.result); err != nil {
+					slog.Warn(logPrefix+": managed generation committed but its images were not stored", "session_id", im.session.SessionID, "error", err)
+				}
+			}
 			if activationOutcome.Disposition == ActivationCommittedNow {
 				slog.Warn(logPrefix+": managed generation committed with pending repair", "session_id", im.session.SessionID, "candidate", activationOutcome.CandidateID, "error", activationErr)
 				logEntry := p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
@@ -512,9 +556,18 @@ func (p *Pipeline) finishGenerationResult(ctx context.Context, prepared prepared
 	// either: the superseded rows and orphans the staging flagged are
 	// deleted and the flag is cleared. A sweep failure never fails the
 	// session; the next harvest recovers it.
-	if activationOutcome.Disposition == ActivationCommittedNow ||
-		activationOutcome.Disposition == ActivationAlreadyCommitted {
+	if activationInstallsImages(activationOutcome.Disposition) {
 		p.sweepCommittedSession(ctx, im.session.SessionID, logPrefix)
+		// The generation is the read authority. Install its images now. Held,
+		// skipped, and rejected dispositions are not installing dispositions,
+		// so they leave this batch unwritten and create no attachment rows.
+		if err := p.commitStagedImages(ctx, prepared.result); err != nil {
+			slog.Warn(logPrefix+": managed generation committed but its images were not stored", "session_id", im.session.SessionID, "error", err)
+			errMsg := err.Error()
+			logEntry := p.makeIndexLogEntry(im, IndexOutcomeError, entriesCount, result.startedAt, nil, &errMsg)
+			profile := p.makeIndexProfileSession(result, logEntry, 0)
+			return indexedMeta{session: im.session, startMs: im.startMs, indexed: true}, logEntry, profile
+		}
 	}
 	var committed []RetainedUnknownKindCount
 	if activationOutcome.Disposition == ActivationCommittedNow {

@@ -846,7 +846,7 @@ func decomposeClaudeContentBlocks(ctx context.Context, idx *ClaudeIndexer, sessi
 			}
 		case "image":
 			source := imageSourceFromRaw(block.Source)
-			child, err := idx.imageChildEntry(ctx, sessionID, *entryIndex, parentIndex, role, "main", source)
+			child, err := idx.imageChildEntry(ctx, sessionID, *entryIndex, parentIndex, role, claudeLinePartition(line), source)
 			if err != nil {
 				return nil, err
 			}
@@ -885,15 +885,24 @@ func decomposeClaudeContentBlocks(ctx context.Context, idx *ClaudeIndexer, sessi
 		entries = append(entries, entry)
 		*entryIndex++
 	}
-	if len(contentImages) == 0 {
-		for _, source := range attachedImages {
-			child, err := idx.imageChildEntry(ctx, sessionID, *entryIndex, parentIndex, role, "main", source)
-			if err != nil {
-				return nil, err
-			}
-			entries = append(entries, child)
-			*entryIndex++
+	// Attachment images are a second source, not a fallback. Dropping them when
+	// the content array also has an image loses that attachment. An attachment
+	// whose bytes were already emitted as a content block is the same image and
+	// is not emitted twice.
+	emitted := map[string]struct{}{}
+	for _, source := range contentImages {
+		emitted[source.MediaType+"\n"+source.Data] = struct{}{}
+	}
+	for _, source := range attachedImages {
+		if _, already := emitted[source.MediaType+"\n"+source.Data]; already {
+			continue
 		}
+		child, err := idx.imageChildEntry(ctx, sessionID, *entryIndex, parentIndex, role, claudeLinePartition(line), source)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, child)
+		*entryIndex++
 	}
 
 	return entries, nil

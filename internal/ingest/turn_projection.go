@@ -20,6 +20,12 @@ import (
 // Old-style entries (ToolCallID on depth=0) are handled directly for backward
 // compatibility.
 func EntriesToTurns(entries []schema.SessionEntry) []Turn {
+	return EntriesToTurnsWithImages(entries, nil)
+}
+
+// EntriesToTurnsWithImages is EntriesToTurns with the attachment-row join.
+// facts is keyed by the content-addressed source ref stored in the entry extra.
+func EntriesToTurnsWithImages(entries []schema.SessionEntry, facts map[string]ImageFacts) []Turn {
 	evidence := make(map[int]PiExtra)
 	for _, entry := range entries {
 		extra, pi, err := DecodePiEntryExtra(entry)
@@ -33,7 +39,7 @@ func EntriesToTurns(entries []schema.SessionEntry) []Turn {
 			evidence[entry.EntryIndex] = extra
 		}
 	}
-	return foldEntries(entries, evidence)
+	return foldEntries(entries, evidence, facts)
 }
 
 // FoldEntries is the fold entry point for a caller that already decoded the
@@ -41,7 +47,12 @@ func EntriesToTurns(entries []schema.SessionEntry) []Turn {
 // native metadata, so it passes that map here instead of decoding twice and
 // then treats the fold's answer as the single turn projection.
 func FoldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra) []Turn {
-	return foldEntries(entries, evidence)
+	return FoldEntriesWithImages(entries, evidence, nil)
+}
+
+// FoldEntriesWithImages joins attachment rows while folding.
+func FoldEntriesWithImages(entries []schema.SessionEntry, evidence map[int]PiExtra, facts map[string]ImageFacts) []Turn {
+	return foldEntries(entries, evidence, facts)
 }
 
 // ConversationTurnCount counts the projected turns that are conversation: every
@@ -298,7 +309,7 @@ func representedClaudeTextBlock(child, parent schema.SessionEntry) bool {
 	return level == "" && rawLevel == ""
 }
 
-func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra) []Turn {
+func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra, facts map[string]ImageFacts) []Turn {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -489,18 +500,12 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra) []Turn
 	}
 
 	// Image-bearing messages keep every text and image child as an ordered part
-	// of the depth-0 carrier. The children are not their own turns.
-	imageParts := imagePartsByParent(entries)
-	for _, entry := range entries {
-		if entry.ParentIndex == nil {
-			continue
-		}
-		if _, ok := imageParts[*entry.ParentIndex]; !ok {
-			continue
-		}
-		if entry.EntryType == schema.EntryTypeImage || (entry.EntryType == schema.EntryTypeText && entry.PartType != nil && *entry.PartType == "text") {
-			suppress[entry.EntryIndex] = true
-		}
+	// of the depth-0 carrier. The children are not their own turns. The fold
+	// returns the child indexes it consumed, so this projection does not keep
+	// a second rule for which children disappear.
+	imageParts, imageChildren := imagePartsByParent(entries, facts)
+	for index := range imageChildren {
+		suppress[index] = true
 	}
 
 	// Pass 3: Emit turns.

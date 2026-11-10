@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/attachments"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -284,6 +285,9 @@ type Store struct {
 	writeConfig ingest.WriteConfig
 	// attachmentDir is the content-addressed image directory beside the database.
 	attachmentDir string
+	// attachments is the one file-and-row store for this database. Put, GC, and
+	// prune share its lock. It is constructed in Open and never replaced.
+	attachments *attachments.Store
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,
@@ -582,6 +586,7 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 	}
 
 	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker, attachmentDir: AttachmentDir(dbPath)}
+	opened.attachments = attachments.New(opened.attachmentDir, attachmentRows{opened}, attachments.Hooks{})
 	opened.writeConfig = resolveStoreWriteConfig(o.writeConfig)
 	return opened, nil
 }

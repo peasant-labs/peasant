@@ -187,7 +187,11 @@ func buildLegacyExportPayload(ctx context.Context, db *store.Store, fs ingest.Fi
 		fullSession.PushedAt = detail.PushedAt
 	}
 	// Convert to the standardized detail payload — same as the session viewer.
-	projection, err := transcript.EntriesToProjectionValidated(dbEntries, transcript.ProjectionOptions{Harness: fullSession.Harness})
+	imageFacts, factErr := db.ImageFacts(ctx, sid)
+	if factErr != nil {
+		return nil, fmt.Errorf("export session %s: join image rows: %w", sessionID, factErr)
+	}
+	projection, err := transcript.EntriesToProjectionValidated(dbEntries, transcript.ProjectionOptions{Harness: fullSession.Harness, ImageFacts: imageFacts})
 	if err != nil {
 		return nil, fmt.Errorf("export session %s: validate captured entries: %w", sessionID, err)
 	}

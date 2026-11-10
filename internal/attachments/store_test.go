@@ -69,6 +69,8 @@ func TestAttachmentStore(t *testing.T) {
 				testAttachmentGCUnreferenced(t)
 			case "prune":
 				testAttachmentPrune(t)
+			case "prune_shared":
+				testAttachmentPruneKeepsSharedBlob(t)
 			case "route":
 				testAttachmentRoute(t)
 			case "partition_key":
@@ -214,6 +216,25 @@ func testAttachmentGCUnreferenced(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(files.Dir(), row.SHA256)); !os.IsNotExist(err) {
 		t.Fatalf("unreferenced blob still present: %v", err)
+	}
+}
+
+func testAttachmentPruneKeepsSharedBlob(t *testing.T) {
+	t.Helper()
+	db, files := openAttachmentFixture(t)
+	second := "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	seedAttachmentSession(t, db, second)
+	payload := onePixelPNG(t)
+	first := putImage(t, files, testutil.TestSessionUUID, "img-shared", "main", "image/png", payload)
+	putImage(t, files, second, "img-shared-other", "main", "image/png", payload)
+	if _, err := db.PruneSessions(context.Background(), []ingest.SessionID{schema.SessionID(testutil.TestSessionUUID)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(files.Dir(), first.SHA256)); err != nil {
+		t.Fatalf("prune removed a blob still referenced by another session: %v", err)
+	}
+	if db.AttachmentStore() != files {
+		t.Fatal("prune and put did not share the store constructed at open")
 	}
 }
 

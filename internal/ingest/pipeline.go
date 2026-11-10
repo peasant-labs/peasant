@@ -1831,11 +1831,15 @@ type indexParseResult struct {
 	// generation. The write path stages and activates it instead of committing
 	// a bare entry replacement.
 	generationCandidate *GenerationCandidate
-	entryCount          int
-	startedAt           int64
-	logEntry            IndexLogEntry
-	parseDuration       time.Duration
-	bytes               int64
+	// images is the parse-time image batch. It is installed only after the
+	// generation is accepted, or after a format-1 entry write commits. A held,
+	// skipped, or rejected attempt drops it.
+	images        *imageBatch
+	entryCount    int
+	startedAt     int64
+	logEntry      IndexLogEntry
+	parseDuration time.Duration
+	bytes         int64
 }
 
 // permanentRefusalCode names the refusal when this build can never clear it,
@@ -2118,9 +2122,11 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			// surface silently and change this dispatch, so a wrapper owns its
 			// optional surfaces explicitly.
 			usedGenerationCandidate := false
-			if persister, ok := p.store.(ImagePersister); ok {
-				ctx = WithImagePersister(ctx, persister)
-			}
+			// Images are staged on the parse, not written. Activation installs
+			// the batch only when the generation is accepted.
+			stagedImages := &imageBatch{}
+			result.images = stagedImages
+			ctx = withImageStaging(ctx, stagedImages)
 			if declared != strictIndexFormat {
 				candidate, builder, candidateErr := p.buildGenerationCandidate(ctx, input, indexer)
 				if builder {
@@ -2537,6 +2543,14 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			continue
 		}
 		result.entryCount = writeResult.EntriesCount
+		if err := p.commitStagedImages(ctx, result); err != nil {
+			p.reportIndexRefusal(result.im.session.SessionID, err)
+			slog.Warn(logPrefix+": store session images", "session_id", result.im.session.SessionID, "error", err)
+			errMsg := err.Error()
+			logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, result.entryCount, result.startedAt, nil, &errMsg)
+			record(position, indexedMeta{session: result.im.session, startMs: result.im.startMs}, logEntry, p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration))
+			continue
+		}
 		logEntry := p.makeIndexLogEntry(result.im, outcome, result.entryCount, result.startedAt, nil, nil)
 		indexed := indexedMeta{session: result.im.session, startMs: result.im.startMs, indexed: true, retainedUnknown: result.retainedUnknown}
 		if len(result.retainedUnknown) > 0 {

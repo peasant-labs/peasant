@@ -17,6 +17,8 @@ cases:
     action: gc_unreferenced
   - name: prune_removes_rows_and_unreferenced_files
     action: prune
+  - name: prune_keeps_blob_referenced_by_another_session
+    action: prune_shared
   - name: route_serves_64_hex_and_fails_closed
     action: route
   - name: partition_key_is_session_and_source_ref

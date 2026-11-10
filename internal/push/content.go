@@ -95,7 +95,7 @@ func BuildPublishTranscriptContent(
 		}
 		return content, err
 	}
-	detail := *committedDetail
+	detail := cloneSessionDetail(committedDetail)
 	publishDetailImages(&detail)
 	applyPublishConsentOverlay(&detail, meta, fields)
 	mirrorInterpretationDiagnostics(meta, &detail)

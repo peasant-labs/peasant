@@ -1,6 +1,7 @@
 package push
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -23,9 +24,58 @@ func publishImages(detail *schema.SessionDetailPayload, entries []schema.Session
 	out := make([]schema.SessionEntry, len(entries))
 	for i, entry := range entries {
 		entry.Extra = ingest.StripPublishedImageExtra(entry.Extra)
+		entry.ContentPreview = stripRecordedSizePreview(entry.ContentPreview)
 		out[i] = entry
 	}
 	return out
+}
+
+// cloneSessionDetail copies the slices publication rewrites so the caller's
+// detail is left unchanged. Scalar fields are copied by the struct assignment.
+func cloneSessionDetail(in *schema.SessionDetailPayload) schema.SessionDetailPayload {
+	if in == nil {
+		return schema.SessionDetailPayload{}
+	}
+	detail := *in
+	detail.Turns = cloneTurns(in.Turns)
+	if in.EarlierHistory != nil {
+		detail.EarlierHistory = make([]schema.EarlierHistorySection, len(in.EarlierHistory))
+		for i, section := range in.EarlierHistory {
+			section.Turns = cloneTurns(section.Turns)
+			detail.EarlierHistory[i] = section
+		}
+	}
+	if in.RetainedUnknown != nil {
+		detail.RetainedUnknown = append([]schema.RetainedUnknownRecord(nil), in.RetainedUnknown...)
+	}
+	return detail
+}
+
+func cloneTurns(turns []schema.TurnDetail) []schema.TurnDetail {
+	if turns == nil {
+		return nil
+	}
+	out := make([]schema.TurnDetail, len(turns))
+	for i, turn := range turns {
+		if turn.ContentParts != nil {
+			turn.ContentParts = append([]schema.TurnContentPart(nil), turn.ContentParts...)
+			for j, part := range turn.ContentParts {
+				if part.Image != nil {
+					copied := *part.Image
+					turn.ContentParts[j].Image = &copied
+				}
+			}
+		}
+		out[i] = turn
+	}
+	return out
+}
+
+func stripRecordedSizePreview(text *string) *string {
+	if text == nil || !strings.HasPrefix(*text, "image omitted:") {
+		return text
+	}
+	return nil
 }
 
 func publishDetailImages(detail *schema.SessionDetailPayload) {
@@ -40,12 +90,18 @@ func publishDetailImages(detail *schema.SessionDetailPayload) {
 
 func publishTurns(turns []schema.TurnDetail) {
 	for i := range turns {
+		if strings.HasPrefix(turns[i].Content, "image omitted:") {
+			turns[i].Content = ""
+		}
 		if len(turns[i].ContentParts) == 0 {
 			continue
 		}
 		next := make([]schema.TurnContentPart, len(turns[i].ContentParts))
 		for j, part := range turns[i].ContentParts {
 			if part.Type != schema.TurnPartTypeImage {
+				if part.Type == schema.TurnPartTypeText && strings.HasPrefix(part.Text, "image omitted:") {
+					part.Text = ""
+				}
 				next[j] = part
 				continue
 			}
@@ -62,8 +118,13 @@ func stripRetainedImagePayload(raw string) string {
 	if raw == "" {
 		return raw
 	}
+	decoder := json.NewDecoder(bytes.NewReader([]byte(raw)))
+	decoder.UseNumber()
 	var value any
-	if json.Unmarshal([]byte(raw), &value) != nil {
+	if err := decoder.Decode(&value); err != nil {
+		return raw
+	}
+	if !imageValuePresent(value) {
 		return raw
 	}
 	stripped := stripImageValue(value)
@@ -72,6 +133,27 @@ func stripRetainedImagePayload(raw string) string {
 		return raw
 	}
 	return string(encoded)
+}
+
+func imageValuePresent(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		if imageSource(typed) || imageDescriptorMap(typed) {
+			return true
+		}
+		for _, child := range typed {
+			if imageValuePresent(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if imageValuePresent(child) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func stripImageValue(value any) any {

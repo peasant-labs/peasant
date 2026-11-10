@@ -3,13 +3,14 @@ package ingest_test
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
-	_ "embed"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -39,11 +40,11 @@ type imageBlockWant struct {
 }
 
 type imageBlockCase struct {
-	Name   string             `yaml:"name"`
-	Role   string             `yaml:"role"`
-	Record string             `yaml:"record"`
+	Name   string              `yaml:"name"`
+	Role   string              `yaml:"role"`
+	Record string              `yaml:"record"`
 	Blocks []imageBlockFixture `yaml:"blocks"`
-	Want   []imageBlockWant   `yaml:"want"`
+	Want   []imageBlockWant    `yaml:"want"`
 }
 
 func TestImageBlocks(t *testing.T) {
@@ -115,20 +116,29 @@ func TestImageBlocks(t *testing.T) {
 				if got.EntryType == schema.EntryTypeImage {
 					var extra map[string]any
 					if got.Extra == nil || json.Unmarshal([]byte(*got.Extra), &extra) != nil {
-						t.Fatalf("entry %d has no image descriptor", i)
+						t.Fatalf("entry %d has no image ref", i)
+					}
+					if len(extra) != 1 {
+						t.Fatalf("entry %d extra = %v, want only the ref; media and size live on the attachment row", i, extra)
 					}
 					ref, _ := extra["ref"].(string)
-					if want.HasRef && len(ref) != 64 {
-						t.Fatalf("entry %d ref = %q, want a 64-hex content address", i, ref)
+					if want.HasRef && !imageContentRef(ref) {
+						t.Fatalf("entry %d ref = %q, want img- plus a 64-hex content address", i, ref)
 					}
 					if !want.HasRef && ref != "" {
 						t.Fatalf("entry %d ref = %q, want none", i, ref)
 					}
-					if want.OmittedReason != "" && extra["omittedReason"] != want.OmittedReason {
-						t.Fatalf("entry %d omittedReason = %v, want %s", i, extra["omittedReason"], want.OmittedReason)
+					if want.OmittedReason != "" {
+						text := ""
+						if got.ContentPreview != nil {
+							text = *got.ContentPreview
+						}
+						if !strings.Contains(text, "image omitted:") {
+							t.Fatalf("entry %d preview = %q, want the omission note; the reason itself is on the attachment row", i, text)
+						}
 					}
-					if _, ok := extra["data"]; ok {
-						t.Fatal("image extra carries bytes")
+					if _, ok := extra["data"]; ok || extra["mediaType"] != nil || extra["byteSize"] != nil {
+						t.Fatal("image extra carries row metadata")
 					}
 				}
 			}
@@ -162,6 +172,14 @@ func imageBlockLine(t *testing.T, fixture imageBlockCase, pngData, jpegData stri
 	if fixture.Record == "attachment" {
 		source := blocks[0].(map[string]any)["source"]
 		line = map[string]any{"type": "attachment", "attachment": map[string]any{"type": "image", "source": source}}
+	} else if fixture.Record == "content_and_attachment" {
+		content := blocks[0]
+		attached := blocks[1].(map[string]any)["source"]
+		line = map[string]any{
+			"type":       fixture.Role,
+			"message":    map[string]any{"role": fixture.Role, "content": []any{content}},
+			"attachment": map[string]any{"type": "image", "source": attached},
+		}
 	} else {
 		line = map[string]any{"type": record, "message": map[string]any{"role": fixture.Role, "content": blocks}}
 	}
@@ -170,6 +188,19 @@ func imageBlockLine(t *testing.T, fixture imageBlockCase, pngData, jpegData stri
 		t.Fatal(err)
 	}
 	return append(encoded, '\n')
+}
+
+func imageContentRef(ref string) bool {
+	const prefix = "img-"
+	if !strings.HasPrefix(ref, prefix) || len(ref) != len(prefix)+64 {
+		return false
+	}
+	for _, r := range ref[len(prefix):] {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func onePixelPNG(t *testing.T) []byte {

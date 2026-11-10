@@ -69,26 +69,45 @@ func TestImagePublication(t *testing.T) {
 				t.Fatalf("build published content: %v", err)
 			}
 			forbidden := []string{strings.Repeat("b", 64), "image/png", "byteSize", "recordedSize"}
+			encodedContent, err := json.Marshal(content)
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, token := range forbidden {
 				if strings.Contains(string(requestBody), token) {
 					t.Fatalf("publication request still carries %q", token)
 				}
-				encoded, err := json.Marshal(content)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if strings.Contains(string(encoded), token) && token != "image/png" {
+				if strings.Contains(string(encodedContent), token) {
 					t.Fatalf("content document still carries %q", token)
 				}
 			}
-			var request struct {
-				Entries []schema.SessionEntry `json:"entries"`
-			}
-			if err := json.Unmarshal(requestBody, &request); err != nil {
+			var document map[string]json.RawMessage
+			if err := json.Unmarshal(requestBody, &document); err != nil {
 				t.Fatal(err)
 			}
-			if len(request.Entries) == 0 {
-				t.Fatal("publication request has no entries")
+			hash, err := json.Marshal(schema.ComputeTranscriptContentHash(encodedContent))
+			if err != nil {
+				t.Fatal(err)
+			}
+			document["contentHash"] = hash
+			authoritative, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := schema.DecodeAuthoritativePublishRequest(authoritative)
+			if err != nil {
+				t.Fatalf("decode publication request: %v", err)
+			}
+			if len(request.Entries) != 1+fixture.Images {
+				t.Fatalf("publication entries = %d, want %d", len(request.Entries), 1+fixture.Images)
+			}
+			for i, entry := range request.Entries {
+				if entry.Extra != nil {
+					t.Fatalf("entry %d extra = %s, want the image descriptor stripped", i, *entry.Extra)
+				}
+				if entry.ContentPreview != nil && strings.Contains(*entry.ContentPreview, "recordedSize") {
+					t.Fatalf("entry %d preview still carries a recorded size", i)
+				}
 			}
 			images := 0
 			for _, turn := range content.SessionDetail.Turns {
@@ -127,6 +146,25 @@ func TestImagePublication(t *testing.T) {
 			}
 			if fixture.Refused && support.UnsupportedReason() == "" {
 				t.Fatal("refusal has no reason, so the caller cannot explain the zero-egress stop")
+			}
+			if content.SessionDetail == nil || len(content.SessionDetail.Turns) == 0 || len(content.SessionDetail.Turns[0].ContentParts) == 0 {
+				return
+			}
+			localDetail := *content.SessionDetail
+			localDetail.Turns = append([]schema.TurnDetail(nil), content.SessionDetail.Turns...)
+			localDetail.Turns[0].ContentParts = append([]schema.TurnContentPart(nil), content.SessionDetail.Turns[0].ContentParts...)
+			image := &schema.ImagePart{Ref: strings.Repeat("a", 64), MediaType: schema.ImageMediaTypePNG, ByteSize: 8}
+			localDetail.Turns[0].ContentParts[0].Image = image
+			localDetail.Turns[0].ContentParts[0].Type = schema.TurnPartTypeImage
+			if _, err := push.ScanPublication(schema.TranscriptContent{SessionDetail: &localDetail}); err == nil {
+				t.Fatal("preflight accepted a local image ref; publication must refuse every local field")
+			}
+			before := content.SessionDetail.Turns[0].ContentParts[0].Image
+			if _, err := push.BuildPublishTranscriptContent(content.SessionDetail, meta, entries, defaults.PublishSchemaVersion, config.PushFieldVisibility{}, sessionorigin.Unknown); err != nil {
+				t.Fatalf("publish committed detail: %v", err)
+			}
+			if content.SessionDetail.Turns[0].ContentParts[0].Image != before || (before != nil && before.OmittedReason != schema.OmittedReasonNotPublished) {
+				t.Fatal("publication rewrote the caller's detail")
 			}
 		})
 	}

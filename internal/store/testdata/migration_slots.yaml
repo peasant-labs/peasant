@@ -75,6 +75,7 @@ slots:
   - {name: v69-source-unavailability-cause, slot: 69, needle: "original-source-present-record-unusable"}
   - {name: v70-parent-state, slot: 70, needle: "parent_state TEXT NOT NULL DEFAULT 'root'"}
   - {name: v71-conversation-turn-count, slot: 71, needle: "conversation_turn_count INTEGER NOT NULL DEFAULT 0"}
+  - {name: v72-image-attachments, slot: 72, needle: "CREATE TABLE session_attachments ("}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot

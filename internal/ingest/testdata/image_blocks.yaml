@@ -36,7 +36,7 @@ cases:
       - {type: image, media_type: image/webp}
     want:
       - {depth: 0, entry_type: text, text: ""}
-      - {depth: 1, entry_type: image, part_type: image, omitted_reason: unsupported, has_ref: false}
+      - {depth: 1, entry_type: image, part_type: image, omitted_reason: unsupported, has_ref: true}
   - name: gif_is_unsupported
     role: assistant
     blocks:
@@ -45,7 +45,17 @@ cases:
     want:
       - {depth: 0, entry_type: text}
       - {depth: 1, entry_type: text, part_type: text, text: before}
-      - {depth: 1, entry_type: image, part_type: image, omitted_reason: unsupported, has_ref: false}
+      - {depth: 1, entry_type: image, part_type: image, omitted_reason: unsupported, has_ref: true}
+  - name: content_and_attachment_both_emit
+    role: user
+    record: content_and_attachment
+    blocks:
+      - {type: image, media_type: image/png}
+      - {type: image, media_type: image/jpeg}
+    want:
+      - {depth: 0, entry_type: text}
+      - {depth: 1, entry_type: image, part_type: image, has_ref: true}
+      - {depth: 1, entry_type: image, part_type: image, has_ref: true}
   - name: attachment_payload_emits_image
     record: attachment
     blocks:

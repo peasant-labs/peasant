@@ -3,6 +3,7 @@ package transcript
 import (
 	_ "embed"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -69,6 +70,7 @@ func TestImageTurns(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
 			entries := make([]schema.SessionEntry, len(fixture.Entries))
+			facts := map[string]ingest.ImageFacts{}
 			for i, row := range fixture.Entries {
 				entry := schema.SessionEntry{
 					SessionID: schema.SessionID(testutil.TestSessionUUID), Harness: schema.HarnessClaudeCode,
@@ -87,25 +89,24 @@ func TestImageTurns(t *testing.T) {
 					entry.ContentPreview = &text
 				}
 				if row.EntryType == "image" {
-					desc := map[string]any{}
-					if row.Ref != "" {
-						desc["ref"] = row.Ref
-						desc["mediaType"] = row.MediaType
-						desc["byteSize"] = row.ByteSize
+					sourceRef := "img-" + row.Ref
+					if row.Ref == "" {
+						sourceRef = "img-" + strings.Repeat("c", 64)
 					}
-					if row.OmittedReason != "" {
-						desc["omittedReason"] = row.OmittedReason
-					}
-					encoded, err := json.Marshal(desc)
+					encoded, err := json.Marshal(map[string]string{"ref": sourceRef})
 					if err != nil {
 						t.Fatal(err)
 					}
 					text := string(encoded)
 					entry.Extra = &text
+					facts[sourceRef] = ingest.ImageFacts{
+						SourceRef: sourceRef, SHA256: row.Ref, MediaType: row.MediaType,
+						ByteSize: row.ByteSize, OmittedReason: row.OmittedReason,
+					}
 				}
 				entries[i] = entry
 			}
-			turns := ingest.EntriesToTurns(entries)
+			turns := ingest.EntriesToTurnsWithImages(entries, facts)
 			if len(turns) != fixture.WantTurns {
 				t.Fatalf("turns = %d, want %d", len(turns), fixture.WantTurns)
 			}

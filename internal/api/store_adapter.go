@@ -389,7 +389,11 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		full := snapshot.Metrics.QualityMetrics
 		s.Metadata.Quality = &full
 	}
-	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness, BoundedPreview: !store.PublishableWithOmissions(snapshot.Capture)})
+	imageFacts, factErr := p.store.ImageFacts(ctx, sessionID)
+	if factErr != nil {
+		return nil, fmt.Errorf("store adapter: session %q image rows could not be joined before session-detail emission: %w", id, factErr)
+	}
+	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness, BoundedPreview: !store.PublishableWithOmissions(snapshot.Capture), ImageFacts: imageFacts})
 	if validationErr != nil {
 		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid before session-detail emission: %w", id, validationErr)
 	}

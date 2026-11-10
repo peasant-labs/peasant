@@ -72,35 +72,12 @@ func ScanPublication(content schema.TranscriptContent) (PublicationScan, error) 
 // durable payload requires. The payload must already have passed the producer
 // trust boundary; this is the pure derivation half of the scan.
 func validatePublicationDetail(detail schema.SessionDetailPayload) error {
-	published, local := publicationImageModes(detail)
-	if published && local {
-		return fmt.Errorf("publication scan failed at push.validatePublicationDetail: the detail mixes a local image part with a not_published image part, so the accepted shape is undefined; strip every image to not_published before scanning")
+	// Publication never infers a local mode. A local ref, media type, size, or
+	// dimension is a local field and is refused here, before any upload.
+	if err := schema.ValidatePublishedSessionDetailPayload(detail); err != nil {
+		return fmt.Errorf("publication scan failed at push.validatePublicationDetail: %w; a local image field is not a published transcript; strip every image to not_published before scanning", err)
 	}
-	if published {
-		return schema.ValidatePublishedSessionDetailPayload(detail)
-	}
-	return schema.ValidateSessionDetailPayload(detail)
-}
-
-func publicationImageModes(detail schema.SessionDetailPayload) (published, local bool) {
-	var turns []schema.TurnDetail
-	turns = append(turns, detail.Turns...)
-	for _, section := range detail.EarlierHistory {
-		turns = append(turns, section.Turns...)
-	}
-	for _, turn := range turns {
-		for _, part := range turn.ContentParts {
-			if part.Type != schema.TurnPartTypeImage || part.Image == nil {
-				continue
-			}
-			if part.Image.OmittedReason == schema.OmittedReasonNotPublished {
-				published = true
-			} else {
-				local = true
-			}
-		}
-	}
-	return published, local
+	return nil
 }
 
 func requiredContentCapabilities(content schema.TranscriptContent) []schema.ContentCapability {

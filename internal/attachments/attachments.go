@@ -48,6 +48,12 @@ type Rows interface {
 	AttachmentsBySHA(ctx context.Context, sha string) ([]Row, error)
 	ReferencedSHAs(ctx context.Context) (map[string]struct{}, error)
 	DeleteSessionAttachments(ctx context.Context, sessionID string) error
+	// ListSessionAttachments returns every row for one session. The projection
+	// joins these rows; the entry extra is not a second copy of the metadata.
+	ListSessionAttachments(ctx context.Context, sessionID string) ([]Row, error)
+	// ReplaceSessionAttachments installs one session's attachment set and
+	// deletes every other row for that session. The caller holds the store lock.
+	ReplaceSessionAttachments(ctx context.Context, sessionID string, rows []Row) error
 }
 
 // Pending is one image the indexer is ready to store. Bytes are nil when the
@@ -85,6 +91,16 @@ func New(dir string, rows Rows, hooks Hooks) *Store {
 
 // Dir returns the content-addressed file directory.
 func (s *Store) Dir() string { return s.dir }
+
+// SetHooks replaces the rendezvous hooks on this store. Production leaves them
+// unset. A test sets them on the store Open constructed, so Put and GC still
+// share that store's lock.
+func (s *Store) SetHooks(hooks Hooks) {
+	if s == nil {
+		return
+	}
+	s.hooks = hooks
+}
 
 // ObjectPath is the file path of one content address. It rejects anything that
 // is not a lowercase 64-hex digest so a caller cannot escape the directory.
@@ -265,6 +281,53 @@ func (s *Store) GC(ctx context.Context) (GCResult, error) {
 		result.Removed = append(result.Removed, name)
 	}
 	return result, nil
+}
+
+// ReplaceSession installs one session's attachment set under the lock shared
+// with GC. Rows not in the new set are deleted. Accepted bytes are written
+// before the row replace, so a failed replace leaves the previous rows and
+// treats the new file as unreferenced garbage.
+func (s *Store) ReplaceSession(ctx context.Context, sessionID string, pending []Pending) error {
+	if sessionID == "" {
+		return fmt.Errorf("attachment replace failed at attachments.Store.ReplaceSession: the session id is empty, so the previous rows cannot be identified; pass the session id before installing images")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows := make([]Row, 0, len(pending))
+	for _, item := range pending {
+		row := item.Row
+		row.SessionID = sessionID
+		if row.SourceEntryRef == "" {
+			return fmt.Errorf("attachment replace failed at attachments.Store.ReplaceSession for session %q: one image has no source ref, so it cannot be keyed; stage a content-addressed ref before activation", sessionID)
+		}
+		if row.OmittedReason == "" {
+			if len(item.Bytes) == 0 {
+				return fmt.Errorf("attachment replace failed at attachments.Store.ReplaceSession for session %q ref %q: an accepted image has no bytes, so there is nothing to address; set an omission reason or pass the decoded bytes", sessionID, row.SourceEntryRef)
+			}
+			sum := sha256.Sum256(item.Bytes)
+			row.SHA256 = hex.EncodeToString(sum[:])
+			row.ByteSize = len(item.Bytes)
+			if err := s.writeBlobLocked(row.SHA256, item.Bytes); err != nil {
+				return err
+			}
+		} else {
+			row.SHA256 = ""
+		}
+		rows = append(rows, row)
+	}
+	if err := s.rows.ReplaceSessionAttachments(ctx, sessionID, rows); err != nil {
+		return fmt.Errorf("attachment replace failed at attachments.Store.ReplaceSession for session %q: %w; the previous rows were kept if the replace rolled back, and a newly written file with no row is collected by the next GC; retry activation", sessionID, err)
+	}
+	return nil
+}
+
+// SessionRows returns one session's attachment rows for the projection join.
+func (s *Store) SessionRows(ctx context.Context, sessionID string) ([]Row, error) {
+	rows, err := s.rows.ListSessionAttachments(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("attachment list failed at attachments.Store.SessionRows for session %q: %w; image metadata was not joined; retry the read", sessionID, err)
+	}
+	return rows, nil
 }
 
 // PruneSession deletes one session's rows and then garbage-collects files no

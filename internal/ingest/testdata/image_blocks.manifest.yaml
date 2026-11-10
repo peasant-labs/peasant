@@ -5,4 +5,5 @@ requiredNames:
   - image_only_keeps_empty_carrier
   - webp_is_unsupported
   - gif_is_unsupported
+  - content_and_attachment_both_emit
   - attachment_payload_emits_image

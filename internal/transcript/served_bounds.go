@@ -109,6 +109,10 @@ type ServedBoundReport struct {
 	// It is false only when text this projection does not bound already fills
 	// the budget by itself.
 	WithinDocumentBudget bool
+	// ImageBaseBytes is the encoded size of image parts. BoundServedDetail records
+	// it so the document bound counts image metadata and does not treat image
+	// bytes as served text.
+	ImageBaseBytes int
 }
 
 // servedTextField is one bounded text field: where it lives and what it held.
@@ -128,7 +132,7 @@ type servedTextField struct {
 // treat the note as part of the record and bound it again. Every served path
 // reaches the producer, so there is no second application to guard against.
 func BoundServedDetail(detail *schema.SessionDetailPayload, budget ServedDocumentBudget) ServedBoundReport {
-	report := ServedBoundReport{AppliedBytes: budget.perField, WithinDocumentBudget: true}
+	report := ServedBoundReport{AppliedBytes: budget.perField, WithinDocumentBudget: true, ImageBaseBytes: ImagePartBaseBytes(detail)}
 	if detail == nil {
 		return report
 	}

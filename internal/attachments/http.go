@@ -14,15 +14,22 @@ const CacheControl = "public, max-age=31536000, immutable"
 // Handler serves GET /api/v1/attachments/{ref}. A ref that is not lowercase
 // 64-hex, a digest with no row, and a row whose file is missing all answer
 // 404. The handler does not echo the rejected ref.
+//
+// The path value comes from the server mux (r.PathValue). A direct call that
+// did not go through that mux falls back to the URL path so a unit test of
+// this handler still names the digest.
 func Handler(store *Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		ref := strings.TrimPrefix(r.URL.Path, "/api/v1/attachments/")
-		if i := strings.IndexByte(ref, '/'); i >= 0 {
-			ref = ref[:i]
+		ref := r.PathValue("ref")
+		if ref == "" {
+			ref = strings.TrimPrefix(r.URL.Path, "/api/v1/attachments/")
+			if i := strings.IndexByte(ref, '/'); i >= 0 {
+				ref = ref[:i]
+			}
 		}
 		row, payload, err := store.Open(r.Context(), ref)
 		if err != nil {

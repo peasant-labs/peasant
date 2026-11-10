@@ -73,7 +73,8 @@ CREATE INDEX idx_session_entries_error ON session_entries(session_id, is_error) 
 CREATE INDEX idx_session_entries_depth ON session_entries(session_id, depth);
 CREATE INDEX idx_session_entries_parent ON session_entries(session_id, parent_index) WHERE parent_index IS NOT NULL;
 
-CREATE VIRTUAL TABLE session_entries_fts USING fts5(
+CREATE VIRTUAL TABLE session_entries_fts
+USING fts5(
     content_preview,
     tool_input,
     tool_output,
