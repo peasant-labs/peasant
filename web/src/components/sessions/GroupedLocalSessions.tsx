@@ -43,12 +43,6 @@ export interface GroupedLocalSessionsProps {
    * expired member scope; the component never falls back to all members.
    */
   onRefreshList: () => void;
-  /**
-   * sessionId -> generated title, from useSessionTitles(). Partial by design:
-   * a row without an entry falls back to the redaction-safe preview, then the
-   * short session id.
-   */
-  titles?: ReadonlyMap<string, string>;
   /** Optional explicit per-member selection. */
   selection?: GroupedSelection;
   /** Shown when the payload carries no items. */
@@ -65,13 +59,15 @@ function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
 }
 
-/** Display title for one session row: generated title, preview, then id. */
-export function groupedRowTitle(
-  row: LocalSessionRow,
-  titles?: ReadonlyMap<string, string>,
-): string {
-  const generated = titles?.get(row.session.id);
-  if (generated) return generated;
+/**
+ * Display title for one session row: the stored title the grouped page carries,
+ * the redaction-safe preview, then the short id. The grouped list and sync
+ * routes set the stored title; the search variant omits it because its match
+ * rows already carry the matched content.
+ */
+export function groupedRowTitle(row: LocalSessionRow): string {
+  const stored = row.title?.trim();
+  if (stored) return stored;
   const preview = row.session.preview?.trim();
   if (preview) return preview;
   return shortId(row.session.id);
@@ -88,17 +84,16 @@ function itemKey(item: LocalSessionListItem): string {
 }
 
 function rowPresentation(
-  session: LocalSessionRow['session'],
-  titles?: ReadonlyMap<string, string>,
+  row: LocalSessionRow,
 ): Pick<HelperThreadRowProps, 'id' | 'title' | 'provider' | 'inputSubmissionCount' | 'turnCount' | 'href'> {
-  const projectHash = parseProjectHash(session.projectHash);
+  const projectHash = parseProjectHash(row.session.projectHash);
   return {
-    id: session.id,
-    title: groupedRowTitle({ session }, titles),
-    provider: session.harness,
-    inputSubmissionCount: session.inputSubmissionCount,
-    turnCount: session.turnCount,
-    href: projectHash ? transcriptHref(projectHash, session.id) : undefined,
+    id: row.session.id,
+    title: groupedRowTitle(row),
+    provider: row.session.harness,
+    inputSubmissionCount: row.session.inputSubmissionCount,
+    turnCount: row.session.turnCount,
+    href: projectHash ? transcriptHref(projectHash, row.session.id) : undefined,
   };
 }
 
@@ -110,19 +105,17 @@ function rowPresentation(
 function SessionRow({
   row,
   groups,
-  titles,
   selection,
   onRefreshList,
   rowDetail,
 }: {
   row: LocalSessionRow;
   groups: NonNullable<LocalSessionListItem['helperGroups']>;
-  titles?: ReadonlyMap<string, string>;
   selection?: GroupedSelection;
   onRefreshList: () => void;
   rowDetail?: (row: LocalSessionRow) => ReactNode;
 }) {
-  const presentation = rowPresentation(row.session, titles);
+  const presentation = rowPresentation(row);
   const selected = selection?.selectedIds.has(row.session.id) ?? false;
   const ownerRow = (
     <HelperThreadRow
@@ -142,7 +135,6 @@ function SessionRow({
           groupId={group.groupId}
           memberScope={group.memberScope}
           helperThreadCount={group.helperThreadCount}
-          titles={titles}
           selection={selection}
           onRefreshList={onRefreshList}
           rowDetail={rowDetail}
@@ -164,7 +156,6 @@ function MountedHelperGroup({
   groupId,
   memberScope,
   helperThreadCount,
-  titles,
   selection,
   onRefreshList,
   rowDetail,
@@ -172,7 +163,6 @@ function MountedHelperGroup({
   groupId: string;
   memberScope: string;
   helperThreadCount: number;
-  titles?: ReadonlyMap<string, string>;
   selection?: GroupedSelection;
   onRefreshList: () => void;
   rowDetail?: (row: LocalSessionRow) => ReactNode;
@@ -281,7 +271,6 @@ function MountedHelperGroup({
             <SessionRow
               row={member}
               groups={(row as GroupedMemberRow).helperGroups ?? []}
-              titles={titles}
               selection={selection}
               onRefreshList={onRefreshList}
               rowDetail={rowDetail}
@@ -317,7 +306,6 @@ function MountedHelperGroup({
 export function GroupedLocalSessions({
   payload,
   onRefreshList,
-  titles,
   selection,
   emptyState,
   rowDetail,
@@ -334,7 +322,6 @@ export function GroupedLocalSessions({
               <SessionRow
                 row={item.transcript}
                 groups={item.helperGroups ?? []}
-                titles={titles}
                 selection={selection}
                 onRefreshList={onRefreshList}
                 rowDetail={rowDetail}
@@ -351,7 +338,6 @@ export function GroupedLocalSessions({
                   groupId={group.groupId}
                   memberScope={group.memberScope}
                   helperThreadCount={group.helperThreadCount}
-                  titles={titles}
                   selection={selection}
                   onRefreshList={onRefreshList}
                   rowDetail={rowDetail}

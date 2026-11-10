@@ -1,0 +1,33 @@
+# The surfaces this change rewrites read their display metadata from the
+# bounded read or the local session read payload. The full quality topic has no
+# consumer here: the transcript no longer derives medians or titles from it, and
+# the project sessions and grouped views render stored row titles. Home adoption
+# and the final hook deletion are tracked separately.
+requiredNames:
+  - the transcript reads its metadata from the read payload
+  - the project sessions page renders stored row titles
+  - the grouped table renders stored row titles
+cases:
+  - name: the transcript reads its metadata from the read payload
+    path: src/components/session-detail/v2/SessionDetailV2.tsx
+    forbidden:
+      - subscribe.quality
+      - QualityPayload
+      - computePersonalMedians
+      - adaptQualitySessions
+  - name: the project sessions page renders stored row titles
+    path: src/app/sessions/[[...segments]]/SessionsRouter.tsx
+    forbidden:
+      - useSessionTitles
+      - subscribe.quality
+  - name: the grouped table renders stored row titles
+    path: src/components/sessions/GroupedLocalSessions.tsx
+    forbidden:
+      - useSessionTitles
+      - subscribe.quality
+mutations:
+  - name: restoring the full quality subscription fails the guard
+    path: src/components/session-detail/v2/SessionDetailV2.tsx
+    find: '  const readSessionAgain = useCallback(() => {'
+    replace: '  const { data: _quality } = useChannel(subscribe.quality());\n  const readSessionAgain = useCallback(() => {'
+    expectedError: subscribe.quality

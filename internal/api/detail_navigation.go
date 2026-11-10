@@ -99,10 +99,11 @@ func resolveRelationshipNavigation(ctx context.Context, relationships []schema.S
 }
 
 // DetailReadPayload returns the local read projection for one stored session:
-// the validated durable detail, authorized current-target navigation, and the
-// recorded Claude Code teammate identity. The durable content is untouched;
-// navigation and the teammate are read-only metadata the host uses to build
-// links and an identity line. Selection never widens or narrows it.
+// the validated durable detail, the stored title, the library-wide personal
+// medians at the current store revision, and the recorded Claude Code teammate
+// identity. The durable content is untouched; the title, medians, revision,
+// navigation, and teammate are read-only metadata the host renders beside it.
+// Selection never widens or narrows it.
 func (p *StoreDataProvider) DetailReadPayload(ctx context.Context, id string) (*schema.SessionDetailReadPayload, error) {
 	detail, err := p.DetailPayload(ctx, id)
 	if err != nil {
@@ -117,6 +118,23 @@ func (p *StoreDataProvider) DetailReadPayload(ctx context.Context, id string) (*
 	if err != nil {
 		return nil, err
 	}
+	// The read payload is the only place the transcript can get its stored title
+	// and the personal-medians baseline now that no transcript surface subscribes
+	// to the full quality topic. Read the revision once so the title, the medians
+	// and the revision all describe the same store state.
+	if row.Title != nil {
+		read.Title = *row.Title
+	}
+	revision, err := p.store.Revision(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: detail read revision for session %s: %w; the local read was withheld because its medians could not be tied to a store revision", id, err)
+	}
+	read.Revision = revision
+	medians, err := p.personalMediansAt(ctx, revision)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: detail read medians for session %s: %w; the local read was withheld because the transcript scorecard baseline could not be read", id, err)
+	}
+	read.Medians = readPayloadMedians(medians)
 	teammates, err := p.store.ClaudeTeammates(ctx, []string{id})
 	if err != nil {
 		return nil, fmt.Errorf("store adapter: detail read teammate evidence for session %s: %w", id, err)
@@ -129,6 +147,17 @@ func (p *StoreDataProvider) DetailReadPayload(ctx context.Context, id string) (*
 		return nil, fmt.Errorf("store adapter: local detail read for session %s carries an invalid teammate identity: %w; the read was withheld rather than served with evidence the contract refuses", id, err)
 	}
 	return read, nil
+}
+
+// readPayloadMedians returns the personal-medians baseline the read payload
+// carries, or nil when the library holds no metric sample. An empty baseline is
+// absent rather than a fabricated zero, so the scorecard degrades instead of
+// comparing every session against a baseline nobody recorded.
+func readPayloadMedians(medians schema.PersonalMedians) *schema.PersonalMedians {
+	if medians.RetryShare == nil && medians.SpecQualityScore == nil && medians.WithinSessionReverts == nil {
+		return nil
+	}
+	return &medians
 }
 
 // withStoredTotals fills the token and duration totals a detail built from a
