@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,14 +32,49 @@ type CodexAdapter struct {
 	fs          FileSystem
 	git         GitResolver
 	salt        salt.Salt
+	windowNow   func() time.Time
 	diagnostics []DiscoveryDiagnostic
+
+	// rolloutCatalog is the derived rollout catalog the full walk keeps
+	// current. A nil value leaves the walk writing nothing, which is the
+	// store-free run's and every test's default.
+	rolloutCatalog CodexRolloutCatalogStore
+
+	// enumeration is what the most recent full walk enumerated, and whether it
+	// covered every configured root. The catalog maintenance and the
+	// `harvest index --all` rebuild both read it, so the two cannot disagree
+	// about which rollout paths this run saw.
+	enumeration RolloutEnumeration
 }
 
 var _ SourceAdapter = (*CodexAdapter)(nil)
+var _ SessionLocator = (*CodexAdapter)(nil)
+var _ RolloutEnumerator = (*CodexAdapter)(nil)
+
+// CodexAdapterOption injects one optional CodexAdapter dependency. Production
+// constructs the adapter without options; a test fixes what would otherwise
+// come from the wall clock.
+type CodexAdapterOption func(*CodexAdapter)
+
+// WithCodexWindowClock fixes the clock the by-name date window is anchored to.
+// The window is the anchor's own day and the day before it, so a test that
+// names the anchor makes the two listed folders — and the whole lookup — the
+// same on every run. A nil clock keeps the wall clock.
+func WithCodexWindowClock(now func() time.Time) CodexAdapterOption {
+	return func(a *CodexAdapter) {
+		if now != nil {
+			a.windowNow = now
+		}
+	}
+}
 
 // NewCodexAdapter creates a CodexAdapter with injected dependencies.
-func NewCodexAdapter(fs FileSystem, git GitResolver, s salt.Salt) *CodexAdapter {
-	return &CodexAdapter{fs: fs, git: git, salt: s}
+func NewCodexAdapter(fs FileSystem, git GitResolver, s salt.Salt, options ...CodexAdapterOption) *CodexAdapter {
+	adapter := &CodexAdapter{fs: fs, git: git, salt: s}
+	for _, option := range options {
+		option(adapter)
+	}
+	return adapter
 }
 
 // Harness returns HarnessCodex.
@@ -45,13 +82,33 @@ func (a *CodexAdapter) Harness() Harness {
 	return HarnessCodex
 }
 
+// windowAnchor is the day the by-name date window is measured from.
+func (a *CodexAdapter) windowAnchor() time.Time {
+	if a.windowNow != nil {
+		return a.windowNow()
+	}
+	return time.Now()
+}
+
 // codexRolloutFilePrefix identifies rollout files in the Codex sessions tree.
 const codexRolloutFilePrefix = "rollout-"
+
+// codexAncestorProbeKind is the one ancestor-probe kind the Codex adapter
+// declares. A Codex rollout names its parent in session_meta, and the layout
+// fixes where that parent's file can be, so an unstored parent costs one
+// catalogued row and then at most the two date folders this adapter's window
+// names — never a walk of the sessions tree. The kind is the adapter's
+// property: it is declared here, beside the probe that carries it.
+const codexAncestorProbeKind = ProbeCatalogWindow
 
 // Discover walks each configured source path looking for rollout-*.jsonl files
 // nested four segments deep (YYYY/MM/DD/file). Symlinks and other files are
 // silently skipped. The session ID is the trailing UUID embedded in the
 // filename; ExtractMetadata cross-checks it against the session_meta payload.
+//
+// Every discovered session comes from buildCodexSession, the same build a
+// located source uses, so a file gets one stat, one read, and one
+// DiscoveredSession value however it was found.
 //
 // For each rollout we also populate DiscoveredSession.Title/ProjectName/Branch/
 // CWD so the FTUE wizard and `peasant ingest --verbose` can render meaningful
@@ -59,89 +116,517 @@ const codexRolloutFilePrefix = "rollout-"
 // branch, and cwd come from the rollout's first line (session_meta).
 func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	a.diagnostics = nil
+	if len(cfg.Paths) == 0 {
+		// An enabled source whose every configured root failed to resolve has
+		// nothing to walk, so it enumerated nothing. That is not an empty tree:
+		// a caller that replaced the catalog from this value would clear rows no
+		// walk re-derived, and the walk's own maintenance would keep them
+		// because it prunes only under the roots it was given. NotWalked states
+		// the fact the two writers agree on.
+		a.enumeration = RolloutEnumeration{Status: RolloutEnumerationNotWalked}
+		return nil, nil
+	}
+	a.enumeration = RolloutEnumeration{Status: RolloutEnumerationComplete}
 	var sessions []DiscoveredSession
+	var enumerated []RolloutFile
 
 	for _, basePath := range cfg.Paths {
-		root := string(basePath)
-
 		// Read sibling session_index.jsonl once per root. Missing/corrupt index
 		// = no titles (graceful degradation; wizard falls back to date).
-		titles := a.loadCodexSessionTitles(root)
+		titles := map[ResolvedPath]map[string]string{
+			basePath: a.loadCodexSessionTitles(string(basePath)),
+		}
+		sources, complete, err := a.enumerateCodexRollouts(ctx, basePath)
+		if err != nil {
+			return nil, err
+		}
+		if complete {
+			a.enumeration.CompletedRoots = append(a.enumeration.CompletedRoots, basePath)
+		} else {
+			// A directory or file the walk could not read may hold rollouts
+			// that are still on disk, so the enumerated set is short. The walk
+			// keeps the sessions it did read; the rebuild must retain rows
+			// under this root.
+			a.enumeration.Status = RolloutEnumerationPartial
+		}
+		// Every enumerated path is catalogued, not only the ones that survive
+		// the build: the catalog answers the duplicate and parent questions,
+		// and both are about rollout files, not about stored sessions.
+		enumerated = append(enumerated, codexRolloutFiles(sources)...)
+		sessions = append(sessions, a.buildCodexSessions(sources, titles)...)
+	}
 
-		walkErr := a.fs.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if err != nil {
-				// Keep walking, but name a directory permissions hid so the
-				// run does not just report fewer sessions.
-				a.noteUnreadable(path, err)
-				return nil
-			}
-			if d.Type()&os.ModeSymlink != 0 {
-				return nil
-			}
-			if d.IsDir() {
-				return nil
-			}
-			if !strings.HasSuffix(path, defaults.ExtJSONL.String()) {
-				return nil
-			}
+	a.enumeration.Files = dedupeRolloutFiles(enumerated)
+	a.maintainCodexRolloutCatalog(ctx, cfg.Paths)
 
-			rel, relErr := filepath.Rel(root, path)
-			if relErr != nil {
-				return nil
-			}
-			parts := strings.Split(rel, string(filepath.Separator))
+	return sessions, nil
+}
 
-			// Expect YYYY/MM/DD/rollout-...-{uuid}.jsonl — depth 4.
-			if len(parts) != 4 {
-				return nil
-			}
-			filename := parts[3]
-			if !strings.HasPrefix(filename, codexRolloutFilePrefix) {
-				return nil
-			}
+// EnumeratedRollouts reports the rollout-file set the most recent Discover
+// enumerated, and whether that enumeration covered every configured root. It
+// returns a copy: the caller cannot edit the set the walk used.
+func (a *CodexAdapter) EnumeratedRollouts() RolloutEnumeration {
+	return RolloutEnumeration{
+		Status:         a.enumeration.Status,
+		Files:          append([]RolloutFile(nil), a.enumeration.Files...),
+		CompletedRoots: append([]ResolvedPath(nil), a.enumeration.CompletedRoots...),
+	}
+}
 
-			sessionIDStr, ok := codexSessionIDFromFilename(filename)
-			if !ok {
+// codexRolloutSource is one rollout file a source root holds, as enumeration
+// names it: the path and the root it was found under. It carries no read data;
+// buildCodexSession reads the file.
+type codexRolloutSource struct {
+	path ResolvedPath
+	root ResolvedPath
+}
+
+// enumerateCodexRollouts lists the rollout files one configured root holds, in
+// walk order, and reports whether the walk could read everything under it. A
+// directory or entry the filesystem could not read is reported and skipped so
+// the walk keeps going; that also makes the enumeration incomplete, because a
+// rollout inside it may still exist. It opens no file: every listed source is
+// read once, by buildCodexSession.
+func (a *CodexAdapter) enumerateCodexRollouts(ctx context.Context, root ResolvedPath) ([]codexRolloutSource, bool, error) {
+	var sources []codexRolloutSource
+	complete := true
+
+	walkErr := a.fs.WalkDir(string(root), func(path string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			if samePath(path, root) && errors.Is(err, fs.ErrNotExist) {
+				// A configured root that is not installed holds no rollout.
+				// Most users have one or two harnesses, not every one, so an
+				// absent tree is the normal case and not a short walk: there is
+				// nothing under it to enumerate and nothing there to miss. The
+				// root contributes no path, and a rollout recorded under it by
+				// an earlier run is pruned for the same reason maintenance
+				// prunes it — its file is gone.
 				return nil
 			}
-			sid, sidErr := NewSessionID(sessionIDStr)
-			if sidErr != nil {
-				return nil
-			}
-
-			info, statErr := a.fs.Stat(path)
-			if statErr != nil {
-				return nil
-			}
-
-			hints := a.extractCodexHints(path)
-
-			sessions = append(sessions, DiscoveredSession{
-				SessionID:     sid,
-				Harness:       HarnessCodex,
-				SourcePath:    ResolvedPath(path),
-				SourceFormat:  SourceFormatJSONL,
-				OriginalRoot:  basePath,
-				SubagentPaths: []ResolvedPath{},
-				DebugPaths:    []ResolvedPath{},
-				ModTime:       info.ModTime(),
-				Title:         titles[sessionIDStr],
-				ProjectName:   hints.projectName,
-				Branch:        hints.branch,
-				CWD:           hints.cwd,
-			})
+			// Keep walking, but name a directory permissions hid so the
+			// run does not just report fewer sessions.
+			a.noteUnreadable(path, err)
+			complete = false
 			return nil
-		})
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, defaults.ExtJSONL.String()) {
+			return nil
+		}
 
-		if walkErr != nil {
-			return nil, fmt.Errorf("CodexAdapter.Discover: walk %q: %w", root, walkErr)
+		rel, relErr := filepath.Rel(string(root), path)
+		if relErr != nil {
+			return nil
+		}
+		parts := strings.Split(rel, string(filepath.Separator))
+
+		// Expect YYYY/MM/DD/rollout-...-{uuid}.jsonl — depth 4.
+		if len(parts) != 4 {
+			return nil
+		}
+		if _, ok := codexSessionIDFromFilename(parts[3]); !ok {
+			return nil
+		}
+
+		sources = append(sources, codexRolloutSource{path: ResolvedPath(path), root: root})
+		return nil
+	})
+
+	if walkErr != nil {
+		return nil, false, fmt.Errorf("CodexAdapter.Discover: walk %q: %w", root, walkErr)
+	}
+	return sources, complete, nil
+}
+
+// samePath reports whether two cleaned filesystem paths name the same location.
+// The walk names a root exactly as it was called, so this only guards against a
+// filesystem that reports the root in another spelling.
+func samePath(path string, root ResolvedPath) bool {
+	return filepath.Clean(path) == filepath.Clean(root.String())
+}
+
+// codexSessionBuild is one rollout file after the shared build.
+type codexSessionBuild struct {
+	// Session is the discovered member both discovery paths use.
+	Session DiscoveredSession
+	// ParentID is the parent the rollout's session_meta names, set only when
+	// the caller asked for it; empty otherwise, or when the rollout names no
+	// usable session id.
+	ParentID SessionID
+	// ReadError is the failure to read the rollout for its hints. A file that
+	// cannot be read is still a discovered session with no hints, so the walk
+	// keeps the member; the located-source path reports the error instead,
+	// because it told the store the path was readable.
+	ReadError error
+}
+
+// codexBuildNeed says what a caller must get back beyond the discovered
+// session, so a fact nobody reads is never parsed.
+type codexBuildNeed uint8
+
+const (
+	// codexBuildNeedUnset is the invalid zero. It is unreachable rather than
+	// refusable: buildCodexSession is unexported and both of its callers name a
+	// declared value, so no caller can ask for a build without saying whether it
+	// needs the parent.
+	codexBuildNeedUnset codexBuildNeed = iota
+	// codexBuildSessionOnly is the full walk, which does not carry the parent a
+	// rollout names, so it never parses for it.
+	codexBuildSessionOnly
+	// codexBuildWithParent is a located source, whose ancestor probe needs the
+	// parent its session_meta names.
+	codexBuildWithParent
+)
+
+// needsParent reports whether this build must return the parent the rollout
+// names.
+func (n codexBuildNeed) needsParent() bool { return n == codexBuildWithParent }
+
+// buildCodexSessions turns enumerated rollout files into discovered sessions.
+// A file this build cannot name or stat yields no member: a source that cannot
+// be identified cannot be processed.
+func (a *CodexAdapter) buildCodexSessions(sources []codexRolloutSource, titles map[ResolvedPath]map[string]string) []DiscoveredSession {
+	sessions := make([]DiscoveredSession, 0, len(sources))
+	for _, source := range sources {
+		build, err := a.buildCodexSession(source, titles[source.root], codexBuildSessionOnly)
+		if err != nil {
+			continue
+		}
+		sessions = append(sessions, build.Session)
+	}
+	return sessions
+}
+
+// buildCodexSession turns one rollout file into a discovered session. It is the
+// one place the DiscoveredSession literal is written and the one place a rollout
+// file is read for its session_meta hints, so the full walk and the
+// located-source path cannot drift apart.
+func (a *CodexAdapter) buildCodexSession(source codexRolloutSource, titles map[string]string, need codexBuildNeed) (codexSessionBuild, error) {
+	rawID, ok := codexSessionIDFromFilename(filepath.Base(string(source.path)))
+	if !ok {
+		return codexSessionBuild{}, fmt.Errorf(
+			"ingest: the Codex rollout file name %q read from %q carries no session id; a rollout is named rollout-{timestamp}-{uuid}.jsonl, so this build cannot tell which session the file holds; where: ingest.CodexAdapter.buildCodexSession in internal/ingest/codex.go; when: building a discovered session; impact: no member is built for the file; fix: restore the rollout under its original name or remove it, then rerun the harvest",
+			filepath.Base(string(source.path)), source.path)
+	}
+	sessionID, err := NewSessionID(rawID)
+	if err != nil {
+		return codexSessionBuild{}, fmt.Errorf("CodexAdapter.buildCodexSession: session id %q in %q: %w", rawID, source.path, err)
+	}
+
+	info, err := a.fs.Stat(string(source.path))
+	if err != nil {
+		return codexSessionBuild{}, fmt.Errorf("CodexAdapter.buildCodexSession: stat %q: %w", source.path, err)
+	}
+
+	data, readErr := a.fs.ReadFile(string(source.path))
+	hints := codexSessionHints{}
+	parentID := SessionID("")
+	if readErr == nil {
+		hints = codexHintsFromRollout(data)
+		if need.needsParent() {
+			parentID = codexParentThreadID(data)
 		}
 	}
 
-	return sessions, nil
+	return codexSessionBuild{
+		Session: DiscoveredSession{
+			SessionID:     sessionID,
+			Harness:       HarnessCodex,
+			SourcePath:    source.path,
+			SourceFormat:  SourceFormatJSONL,
+			OriginalRoot:  source.root,
+			SubagentPaths: []ResolvedPath{},
+			DebugPaths:    []ResolvedPath{},
+			ModTime:       info.ModTime(),
+			Title:         titles[rawID],
+			ProjectName:   hints.projectName,
+			Branch:        hints.branch,
+			CWD:           hints.cwd,
+		},
+		ParentID:  parentID,
+		ReadError: readErr,
+	}, nil
+}
+
+// LookupSessionSources finds the rollout files that can hold id by name: the
+// two date folders a rollout of that session can be in, and nothing else. It
+// never walks and never reads a transcript. Each distinct configured root is
+// listed once, however the roots are written: a root named twice would claim
+// the same rollout twice, and a second claim on one path reads downstream as a
+// duplicate session.
+//
+// The window is the lookup clock's own day and the day before it: a rollout is
+// written into the folder of the day its session started, so a lookup that runs
+// after midnight still finds a rollout that began before it. No third folder is
+// listed, however old the id is; a rollout outside the window is not found by
+// this lookup.
+//
+// A failed lookup is recorded ONCE, by the core: on a returned error the core
+// appends the SearchFailed entry and carries the miss, so this method never
+// appends one itself. It returns the entries it gathered for the roots it
+// completed, so the miss still names where else the id was searched. Every
+// adapter's lookup obeys the same convention.
+func (a *CodexAdapter) LookupSessionSources(ctx context.Context, cfg SourceConfig, id SessionID) (SourceLookup, error) {
+	if err := ctx.Err(); err != nil {
+		return SourceLookup{}, err
+	}
+	if id == "" {
+		return SourceLookup{}, fmt.Errorf(
+			"ingest: CodexAdapter.LookupSessionSources was given an empty session id; an empty id can never match a rollout file, so the lookup could only ever report a miss; where: ingest.CodexAdapter.LookupSessionSources in internal/ingest/codex.go; when: locating a named session by name; impact: no Codex source is searched; fix: pass the session id the user named")
+	}
+
+	anchor := a.windowAnchor()
+	var lookup SourceLookup
+	listed := make(map[ResolvedPath]struct{}, len(cfg.Paths))
+
+	for _, root := range cfg.Paths {
+		if _, duplicate := listed[root]; duplicate {
+			continue
+		}
+		listed[root] = struct{}{}
+
+		folders := codexRolloutWindow(root, anchor)
+		for _, folder := range folders {
+			entries, err := a.fs.ReadDir(string(folder))
+			if err != nil {
+				// A folder that does not exist holds no rollout. Every other
+				// failure is a lookup failure, which the core records; this
+				// lookup keeps the entries it already collected.
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return lookup, fmt.Errorf("CodexAdapter.LookupSessionSources: list %q: %w", folder, err)
+			}
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				if nameID, ok := codexSessionIDFromFilename(entry.Name()); !ok || nameID != string(id) {
+					continue
+				}
+				lookup.Sources = append(lookup.Sources, ResolvedPath(filepath.Join(string(folder), entry.Name())))
+			}
+		}
+		lookup.Searched = append(lookup.Searched, SearchedSource{
+			Harness:  HarnessCodex,
+			Method:   SearchNamePattern,
+			Location: codexSearchLocation(root, id),
+		})
+	}
+
+	slices.Sort(lookup.Sources)
+	return lookup, nil
+}
+
+// codexRolloutWindow returns the two date folders a rollout can be in: the
+// anchor's own day and the day before it. Two folders cover a session that
+// began before midnight; there is never a third, and the tree is never walked.
+func codexRolloutWindow(root ResolvedPath, anchor time.Time) [2]ResolvedPath {
+	return [2]ResolvedPath{
+		codexDayFolder(root, anchor),
+		codexDayFolder(root, anchor.AddDate(0, 0, -1)),
+	}
+}
+
+// codexDayFolder is the {root}/YYYY/MM/DD folder a rollout written on day lives
+// in.
+func codexDayFolder(root ResolvedPath, day time.Time) ResolvedPath {
+	return ResolvedPath(filepath.Join(string(root), day.Format("2006"), day.Format("01"), day.Format("02")))
+}
+
+// codexSearchLocation is the pattern one configured root was searched with, for
+// the miss error's searched block: the day folders the layout nests under the
+// root, then the rollout file name a session's id appears in. The block renders
+// one line per source and composes it from this pattern alone, so it must not
+// carry a resolved folder or a file that happens to exist.
+func codexSearchLocation(root ResolvedPath, id SessionID) string {
+	return filepath.Join(
+		codexDisplayPath(root), "*", "*", "*",
+		codexRolloutFilePrefix+"*-"+string(id)+defaults.ExtJSONL.String(),
+	)
+}
+
+// codexDisplayPath renders a source path with the home directory shortened, the
+// way the searched block shows every location.
+func codexDisplayPath(path ResolvedPath) string {
+	raw := string(path)
+	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(raw, home+string(filepath.Separator)) {
+		return "~" + strings.TrimPrefix(raw, home)
+	}
+	return raw
+}
+
+// DiscoverSessionAt builds the members one located Codex source carries: the
+// source itself, every stored child the store records, and the one ancestor
+// probe its session_meta names. It reads only what it builds and writes
+// nothing: its deferred writes are empty.
+//
+// A Codex source lays no related session out beside itself, so there are no
+// layout relatives to enumerate, and a rollout names its parent rather than its
+// children, so the store's recorded children are the only children there are.
+// That is why related members come from at.Stored alone.
+func (a *CodexAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig, at LocatedSource) (LocatedBuild, error) {
+	if err := ctx.Err(); err != nil {
+		return LocatedBuild{}, err
+	}
+	if at.ID == "" {
+		return LocatedBuild{}, fmt.Errorf(
+			"ingest: CodexAdapter.DiscoverSessionAt was given a located source with no session id at %q; a located source must name the session it holds so the member can be matched to the store row; where: ingest.CodexAdapter.DiscoverSessionAt in internal/ingest/codex.go; when: building a located source; impact: nothing was read and no member was built; fix: pass the id the store or the lookup resolved",
+			at.Path)
+	}
+	if nameID, ok := codexSessionIDFromFilename(filepath.Base(string(at.Path))); !ok || nameID != string(at.ID) {
+		return LocatedBuild{}, codexSourceGoneError(at.Path, at.ID)
+	}
+
+	root, ok := codexEnumeratedRoot(cfg, at.Path)
+	if !ok {
+		return LocatedBuild{}, fmt.Errorf(
+			"ingest: the located Codex path %q lies outside every configured Codex source root; a located source must be attributed to the root the full walk would have found it under, or the member would carry a different OriginalRoot than discovery gives it; where: ingest.CodexAdapter.DiscoverSessionAt in internal/ingest/codex.go; when: resolving the source root of the located path; impact: nothing was read and no member was built; fix: restore the recorded source under a configured Codex source path, or update the configured paths so the recorded location is inside one",
+			at.Path)
+	}
+
+	// One session_index.jsonl read per distinct root, shared with the stored
+	// children, so a child under the same root cannot cost a second read.
+	titles := map[ResolvedPath]map[string]string{
+		root: a.loadCodexSessionTitles(string(root)),
+	}
+	titlesFor := func(childRoot ResolvedPath) map[string]string {
+		if cached, ok := titles[childRoot]; ok {
+			return cached
+		}
+		loaded := a.loadCodexSessionTitles(string(childRoot))
+		titles[childRoot] = loaded
+		return loaded
+	}
+
+	build, err := a.buildCodexSession(codexRolloutSource{path: at.Path, root: root}, titlesFor(root), codexBuildWithParent)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return LocatedBuild{}, codexSourceGoneError(at.Path, at.ID)
+		}
+		return LocatedBuild{}, fmt.Errorf("CodexAdapter.DiscoverSessionAt: build %q: %w", at.Path, err)
+	}
+	if build.ReadError != nil {
+		return LocatedBuild{}, fmt.Errorf("CodexAdapter.DiscoverSessionAt: read %q: %w", at.Path, build.ReadError)
+	}
+
+	members := make([]LocatedMember, 0, 1+len(at.Stored.Children))
+	members = append(members, LocatedMember{
+		ID:          at.ID,
+		Harness:     HarnessCodex,
+		Source:      &build.Session,
+		ParentProbe: codexAncestorProbe(build, at.Stored.Parent),
+	})
+	for _, child := range at.Stored.Children {
+		members = append(members, a.codexStoredChildMember(cfg, child, titlesFor))
+	}
+
+	return LocatedBuild{Members: members, Deferred: NoDeferredWrites{}}, nil
+}
+
+// codexSourceGoneError is the one statement of "this recorded path no longer
+// holds the session it was recorded for". It wraps ErrSourceGone, so the core
+// takes the by-name lookup path for the id.
+func codexSourceGoneError(path ResolvedPath, id SessionID) error {
+	return fmt.Errorf(
+		"ingest: the located Codex path %q no longer holds session %s; a Codex rollout carries its session id only in its file name, so a path that is gone, holds no rollout name, or holds a different id is not this session's source; where: ingest.CodexAdapter.DiscoverSessionAt in internal/ingest/codex.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path; fix: relocate the rollout, or let the by-name lookup find the source it is in now: %w",
+		path, id, ErrSourceGone)
+}
+
+// codexAncestorProbe is the one probe a located Codex source declares for its
+// unstored parent, or nil when there is nothing to locate.
+func codexAncestorProbe(build codexSessionBuild, storedParent *SessionID) *AncestorProbe {
+	if storedParent != nil {
+		// The store already records the parent, so no ancestor has to be found.
+		return nil
+	}
+	if build.ParentID == "" || build.ParentID == build.Session.SessionID {
+		return nil
+	}
+	return &AncestorProbe{Kind: codexAncestorProbeKind, Harness: HarnessCodex, ID: build.ParentID}
+}
+
+// codexStoredChildMember builds one stored child of a located source. A child
+// whose file is gone or unreadable comes back as a member with no source and
+// its reason, never dropped: the stored transcript stays, and the store-side
+// upkeep a full run does for the row still runs.
+func (a *CodexAdapter) codexStoredChildMember(cfg SourceConfig, child StoredSessionSource, titlesFor func(ResolvedPath) map[string]string) LocatedMember {
+	member := LocatedMember{ID: child.ID, Harness: child.Harness}
+
+	if child.Harness != HarnessCodex {
+		// A stored child of another harness is not a Codex source: this adapter
+		// cannot read it, and the child's own adapter would. That is a local
+		// read failure the run continues past — the row keeps its stored
+		// transcript and the store-side upkeep a full run gives it — not a gone
+		// source, because the file may be exactly where the store says, and not
+		// a disabled harness, because the harness was never the reason.
+		reason := "a source with no recorded harness cannot be read by the codex adapter"
+		if child.Harness != "" {
+			reason = fmt.Sprintf("a %s source cannot be read by the codex adapter", child.Harness)
+		}
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = firstLineOr(reason, "the source cannot be read by this adapter")
+		return member
+	}
+	if nameID, ok := codexSessionIDFromFilename(filepath.Base(string(child.Path))); !ok || nameID != string(child.ID) {
+		member.Unreadable = UnreadableSourceGone
+		return member
+	}
+	root, ok := codexEnumeratedRoot(cfg, child.Path)
+	if !ok {
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = firstLineOr("the recorded path is outside every configured codex source root", "the source cannot be attributed to a configured root")
+		return member
+	}
+
+	build, err := a.buildCodexSession(codexRolloutSource{path: child.Path, root: root}, titlesFor(root), codexBuildSessionOnly)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			member.Unreadable = UnreadableSourceGone
+			return member
+		}
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = firstLineOr(err.Error(), "the source could not be read")
+		return member
+	}
+	if build.ReadError != nil {
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = firstLineOr(build.ReadError.Error(), "the source could not be read")
+		return member
+	}
+
+	member.Source = &build.Session
+	return member
+}
+
+// codexEnumeratedRoot returns the configured source root that holds path,
+// preferring the deepest one. A path can be inside more than one configured
+// root — a user may configure both the Codex home and its sessions tree — but
+// only the deepest root admits it at the four-segment depth the layout gives a
+// rollout, so the deepest containing root is the one the full walk would have
+// attributed it to.
+func codexEnumeratedRoot(cfg SourceConfig, path ResolvedPath) (ResolvedPath, bool) {
+	var best ResolvedPath
+	found := false
+	for _, root := range cfg.Paths {
+		rel, err := filepath.Rel(string(root), string(path))
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if !found || len(root) > len(best) {
+			best = root
+			found = true
+		}
+	}
+	return best, found
 }
 
 // codexSessionIndexFile is the filename of the sidecar index Codex CLI writes
@@ -195,16 +680,11 @@ type codexSessionHints struct {
 	projectName string
 }
 
-// extractCodexHints peeks the first non-empty line of the rollout file and
-// parses session_meta for cwd + git.branch. Project name is the basename of
-// cwd. Returns zero hints on any I/O or parse error (the wizard will fall
-// back to UUID/date display, identical to pre-hint behavior).
-func (a *CodexAdapter) extractCodexHints(path string) codexSessionHints {
-	data, err := a.fs.ReadFile(path)
-	if err != nil {
-		return codexSessionHints{}
-	}
-
+// codexHintsFromRollout peeks the first non-empty line of a rollout and parses
+// session_meta for cwd and git.branch. Project name is the basename of cwd.
+// Returns zero hints on any parse error (the wizard will fall back to
+// UUID/date display, identical to pre-hint behavior).
+func codexHintsFromRollout(data []byte) codexSessionHints {
 	scanner := newJSONLRecordScanner(data, defaults.MaxJSONLRecordBytes)
 
 	for scanner.Scan() {
@@ -235,13 +715,38 @@ func (a *CodexAdapter) extractCodexHints(path string) codexSessionHints {
 	return codexSessionHints{}
 }
 
-// codexSessionIDFromFilename extracts the trailing UUID from a
-// rollout-{ISO-timestamp}-{uuid}.jsonl filename. The ISO timestamp uses
-// hyphens for time separators (rollout-2026-05-29T21-14-24-{uuid}.jsonl), so
-// we take the last 5 hyphen-delimited segments as the UUID (8-4-4-4-12).
+// codexParentThreadID reads the parent a rollout's session_meta names, through
+// the same authority parse the native history uses, so a top-level
+// parent_thread_id and the nested source.subagent.thread_spawn form resolve
+// identically. A value that is not a session id names no usable parent.
+func codexParentThreadID(data []byte) SessionID {
+	authority, ok := parseCodexNativeAuthority(data)
+	if !ok {
+		return ""
+	}
+	raw := authority.nativeParentThreadID()
+	if raw == "" {
+		return ""
+	}
+	id, err := NewSessionID(raw)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
+// codexSessionIDFromFilename extracts the session id a rollout file name
+// carries: the trailing UUID of rollout-{ISO-timestamp}-{uuid}.jsonl. The ISO
+// timestamp uses hyphens for time separators
+// (rollout-2026-05-29T21-14-24-{uuid}.jsonl), so the last five
+// hyphen-delimited segments are the UUID (8-4-4-4-12). It reports false for a
+// name that is not a rollout file, so the walk's admission test and the by-name
+// window match read a file name exactly the same way.
 func codexSessionIDFromFilename(filename string) (string, bool) {
-	stem := strings.TrimSuffix(filename, defaults.ExtJSONL.String())
-	stem = strings.TrimPrefix(stem, codexRolloutFilePrefix)
+	if !strings.HasPrefix(filename, codexRolloutFilePrefix) || !strings.HasSuffix(filename, defaults.ExtJSONL.String()) {
+		return "", false
+	}
+	stem := strings.TrimSuffix(strings.TrimPrefix(filename, codexRolloutFilePrefix), defaults.ExtJSONL.String())
 	segments := strings.Split(stem, "-")
 	if len(segments) < 5 {
 		return "", false

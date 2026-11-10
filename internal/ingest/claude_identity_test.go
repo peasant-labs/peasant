@@ -441,7 +441,10 @@ func TestClaudeIdentityDiscoveryExtractionAndEvidence(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					err = sqlitex.ExecuteTransient(conn, `UPDATE claude_transcript_evidence SET identity_records_json=? WHERE source_path=?`, &sqlitex.ExecOptions{Args: []any{corruption.RecordsJSON, artifact.SourcePath.String()}})
+					// identity_records_json is a tombstone and is not parsed. A corrupt
+					// session-id set is a fact this read still rejects, so the row
+					// leaves the cache and discovery mines the transcript again.
+					err = sqlitex.ExecuteTransient(conn, `UPDATE claude_transcript_evidence SET identity_session_ids_json=? WHERE source_path=?`, &sqlitex.ExecOptions{Args: []any{corruption.RecordsJSON, artifact.SourcePath.String()}})
 					database.Pool().Put(conn)
 					if err != nil {
 						t.Fatal(err)

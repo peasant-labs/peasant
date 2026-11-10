@@ -1,146 +1,143 @@
 package store
 
-// migrationV72 admits image entries and records their content-addressed
-// metadata. SQLite cannot alter a CHECK, so session_entries is rebuilt with
-// image in the entry_type set. The new table is created under a temporary
-// name, the old table is dropped, and the new table is renamed back to
-// session_entries. Renaming the old table first would retarget child foreign
-// keys onto the dropped name. Foreign keys are disabled for the drop and
-// recreate. The external-content search index is recreated afterwards.
+// claudeIdentitySkeletonElementFault is the one predicate for a skeleton
+// element this migration cannot turn into facts. It is not a complete JSON
+// parse; a row that fails it is marked for re-mining rather than given a
+// guessed coordinate.
+const claudeIdentitySkeletonElementFault = `json_type(j.value) != 'object'
+       OR IFNULL(json_type(j.value, '$.sessionId'), '') != 'text'
+       OR json_extract(j.value, '$.sessionId') = ''
+       OR (json_type(j.value, '$.uuid') IS NOT NULL AND json_type(j.value, '$.uuid') != 'text')
+       OR (json_type(j.value, '$.parentUuid') IS NOT NULL AND json_type(j.value, '$.parentUuid') != 'text')
+       OR (json_type(j.value, '$.type') IS NOT NULL AND json_type(j.value, '$.type') != 'text')
+       OR (json_type(j.value, '$.subtype') IS NOT NULL AND json_type(j.value, '$.subtype') != 'text')
+       OR (json_type(j.value, '$.spawnAgentId') IS NOT NULL AND json_type(j.value, '$.spawnAgentId') != 'text')
+       OR (json_type(j.value, '$.agentId') IS NOT NULL AND json_type(j.value, '$.agentId') != 'text')
+       OR (json_type(j.value, '$.isSidechain') IS NOT NULL AND json_type(j.value, '$.isSidechain') NOT IN ('true', 'false'))`
+
+// migrationV72 replaces the per-line structural skeleton with the facts the
+// readers ask. identity_records_json is cleared to '[]' and is then a
+// tombstone: a later migration will drop the column. Readers must not parse
+// it. A row whose skeleton cannot be parsed is marked for re-mining
+// (proof_version 0) and keeps the default facts; the migration does not fail
+// and does not invent a coordinate.
 //
-// session_attachments is keyed by (session_id, source_entry_ref). partition_id
-// is recorded and is not part of the key: a source ref is unique within a
-// session, including across partitions. sha256 is empty when no bytes were
-// stored. One file per digest lives outside the database.
+// A root row keeps identity_chain_json. A stored lineage proof passes a root
+// transcript as the owner snapshot or the layout-parent artifact, and never
+// passes a subagent row in either role. Subagent rows keep the session-id set,
+// the spawn-agent set, and the two booleans, and an empty chain.
+//
+// The chain is not a bare (session, uuid, parent) triple. The lineage walk
+// also compares type and subtype, and it accepts a foreign compact-boundary
+// record that has no parent. Those two fields are part of each link. The list
+// keeps the first and last occurrence of each structural key, in file order:
+// the last copy is the parent-transition witness a first-only list would drop,
+// and a repeated foreign link cannot newly fail a walk the first copy passed.
+//
+// proof_version is left as stored on a row the backfill could read. This
+// build's proof version is newer, so discovery re-mines that row once and
+// rewrites the facts from the transcript. The backfill is not a live discovery
+// answer: the old proof version forces a re-mine before its facts are used.
 const migrationV72 = `
-DROP TRIGGER IF EXISTS session_entries_ai;
-DROP TRIGGER IF EXISTS session_entries_ad;
-DROP TRIGGER IF EXISTS session_entries_au;
-DROP TRIGGER IF EXISTS session_entry_bodies_fts_ai;
-DROP TRIGGER IF EXISTS session_entry_bodies_fts_bd;
-DROP TABLE IF EXISTS session_entries_fts;
-DROP TABLE IF EXISTS session_search_fts;
-DROP VIEW IF EXISTS session_search_source;
+ALTER TABLE claude_transcript_evidence
+  ADD COLUMN identity_session_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_session_ids_json));
+ALTER TABLE claude_transcript_evidence
+  ADD COLUMN identity_spawn_agent_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_spawn_agent_ids_json));
+ALTER TABLE claude_transcript_evidence
+  ADD COLUMN identity_legacy_agent_proof INTEGER NOT NULL DEFAULT 0 CHECK(identity_legacy_agent_proof IN (0, 1));
+ALTER TABLE claude_transcript_evidence
+  ADD COLUMN identity_contradictory_sidechain INTEGER NOT NULL DEFAULT 0 CHECK(identity_contradictory_sidechain IN (0, 1));
+ALTER TABLE claude_transcript_evidence
+  ADD COLUMN identity_chain_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_chain_json));
 
-CREATE TABLE session_entries_v72 (
-    session_id      TEXT NOT NULL REFERENCES sessions(session_id),
-    entry_index     INTEGER NOT NULL,
-    provider        TEXT NOT NULL,
-    entry_type      TEXT NOT NULL CHECK (entry_type IN ('text','tool_use','tool_result','thinking','system','error','result','image')),
-    role            TEXT NOT NULL CHECK (role IN ('user','assistant','tool','system')),
-    timestamp_ms    INTEGER,
-    content_preview TEXT,
-    tokens_in       INTEGER,
-    tokens_out      INTEGER,
-    has_tool_use    INTEGER NOT NULL DEFAULT 0 CHECK (has_tool_use IN (0,1)),
-    tool_names_csv  TEXT,
-    has_thinking    INTEGER NOT NULL DEFAULT 0 CHECK (has_thinking IN (0,1)),
-    is_error        INTEGER NOT NULL DEFAULT 0 CHECK (is_error IN (0,1)),
-    raw_byte_length INTEGER,
-    tool_call_id    TEXT,
-    entry_id        TEXT,
-    parent_entry_id TEXT,
-    extra           TEXT,
-    depth           INTEGER NOT NULL DEFAULT 0,
-    parent_index    INTEGER,
-    tool_input      TEXT,
-    tool_output     TEXT,
-    tool_kind       TEXT,
-    stop_reason     TEXT,
-    part_type       TEXT,
-    PRIMARY KEY (session_id, entry_index)
-) STRICT;
+UPDATE claude_transcript_evidence
+SET proof_version = 0
+WHERE json_valid(identity_records_json) = 0
+   OR json_type(identity_records_json) != 'array';
 
-INSERT INTO session_entries_v72 (
-    session_id, entry_index, provider, entry_type, role, timestamp_ms, content_preview,
-    tokens_in, tokens_out, has_tool_use, tool_names_csv, has_thinking, is_error,
-    raw_byte_length, tool_call_id, entry_id, parent_entry_id, extra, depth, parent_index,
-    tool_input, tool_output, tool_kind, stop_reason, part_type
-)
-SELECT
-    session_id, entry_index, provider, entry_type, role, timestamp_ms, content_preview,
-    tokens_in, tokens_out, has_tool_use, tool_names_csv, has_thinking, is_error,
-    raw_byte_length, tool_call_id, entry_id, parent_entry_id, extra, depth, parent_index,
-    tool_input, tool_output, tool_kind, stop_reason, part_type
-FROM session_entries;
+UPDATE claude_transcript_evidence
+SET proof_version = 0
+WHERE json_valid(identity_records_json)
+  AND json_type(identity_records_json) = 'array'
+  AND EXISTS (
+    SELECT 1 FROM json_each(identity_records_json) AS j
+    WHERE ` + claudeIdentitySkeletonElementFault + `
+  );
 
-DROP TABLE session_entries;
-ALTER TABLE session_entries_v72 RENAME TO session_entries;
+UPDATE claude_transcript_evidence
+SET identity_session_ids_json = COALESCE((
+      SELECT json_group_array(session_id ORDER BY session_id)
+      FROM (
+        SELECT DISTINCT json_extract(j.value, '$.sessionId') AS session_id
+        FROM json_each(claude_transcript_evidence.identity_records_json) AS j
+      )
+    ), '[]'),
+    identity_spawn_agent_ids_json = COALESCE((
+      SELECT json_group_array(spawn_id ORDER BY spawn_id)
+      FROM (
+        SELECT DISTINCT json_extract(j.value, '$.spawnAgentId') AS spawn_id
+        FROM json_each(claude_transcript_evidence.identity_records_json) AS j
+        WHERE json_type(j.value, '$.spawnAgentId') = 'text'
+          AND json_extract(j.value, '$.spawnAgentId') != ''
+      )
+    ), '[]'),
+    identity_legacy_agent_proof = CASE WHEN json_array_length(identity_records_json) > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(identity_records_json) AS j
+        WHERE IFNULL(json_extract(j.value, '$.agentId'), '') != native_agent_id
+           OR json_type(j.value, '$.isSidechain') IS NOT NULL
+      ) THEN 1 ELSE 0 END,
+    identity_contradictory_sidechain = CASE WHEN EXISTS (
+        SELECT 1 FROM json_each(identity_records_json) AS j
+        WHERE json_type(j.value, '$.isSidechain') = 'false'
+      ) THEN 1 ELSE 0 END
+WHERE json_valid(identity_records_json)
+  AND json_type(identity_records_json) = 'array'
+  AND NOT EXISTS (
+    SELECT 1 FROM json_each(identity_records_json) AS j
+    WHERE ` + claudeIdentitySkeletonElementFault + `
+  );
 
-CREATE INDEX idx_session_entries_role ON session_entries(session_id, role);
-CREATE INDEX idx_session_entries_type ON session_entries(session_id, entry_type);
-CREATE INDEX idx_session_entries_error ON session_entries(session_id, is_error) WHERE is_error = 1;
-CREATE INDEX idx_session_entries_depth ON session_entries(session_id, depth);
-CREATE INDEX idx_session_entries_parent ON session_entries(session_id, parent_index) WHERE parent_index IS NOT NULL;
+UPDATE claude_transcript_evidence
+SET identity_chain_json = COALESCE((
+  WITH records AS (
+    SELECT j.key AS idx,
+           json_extract(j.value, '$.sessionId') AS session_id,
+           IFNULL(json_extract(j.value, '$.uuid'), '') AS uuid,
+           IFNULL(json_extract(j.value, '$.parentUuid'), '') AS parent_uuid,
+           IFNULL(json_extract(j.value, '$.type'), '') AS type,
+           IFNULL(json_extract(j.value, '$.subtype'), '') AS subtype
+    FROM json_each(claude_transcript_evidence.identity_records_json) AS j
+  ),
+  bounds AS (
+    SELECT session_id, uuid, parent_uuid, type, subtype,
+           MIN(idx) AS first_idx,
+           MAX(idx) AS last_idx
+    FROM records
+    GROUP BY session_id, uuid, parent_uuid, type, subtype
+  ),
+  kept AS (
+    SELECT first_idx AS idx, session_id, uuid, parent_uuid, type, subtype FROM bounds
+    UNION ALL
+    SELECT last_idx, session_id, uuid, parent_uuid, type, subtype FROM bounds WHERE last_idx != first_idx
+  )
+  SELECT json_group_array(json_object(
+    'sessionId', session_id,
+    'uuid', uuid,
+    'parentUuid', parent_uuid,
+    'type', type,
+    'subtype', subtype
+  ) ORDER BY idx)
+  FROM kept
+), '[]')
+WHERE scope = 'root'
+  AND json_valid(identity_records_json)
+  AND json_type(identity_records_json) = 'array'
+  AND NOT EXISTS (
+    SELECT 1 FROM json_each(identity_records_json) AS j
+    WHERE ` + claudeIdentitySkeletonElementFault + `
+  );
 
-CREATE VIRTUAL TABLE session_entries_fts
-USING fts5(
-    content_preview,
-    tool_input,
-    tool_output,
-    session_id UNINDEXED,
-    entry_index UNINDEXED,
-    content='session_entries',
-    content_rowid='rowid',
-    tokenize='unicode61 remove_diacritics 2'
-);
-
-CREATE TRIGGER session_entries_ai AFTER INSERT ON session_entries BEGIN
-    INSERT INTO session_entries_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index)
-    VALUES (new.rowid, new.content_preview, new.tool_input, new.tool_output, new.session_id, new.entry_index);
-END;
-
-CREATE TRIGGER session_entries_ad AFTER DELETE ON session_entries BEGIN
-    INSERT INTO session_entries_fts(session_entries_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index)
-    VALUES ('delete', old.rowid, old.content_preview, old.tool_input, old.tool_output, old.session_id, old.entry_index);
-END;
-
-CREATE TRIGGER session_entries_au AFTER UPDATE ON session_entries BEGIN
-    INSERT INTO session_entries_fts(session_entries_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index)
-    VALUES ('delete', old.rowid, old.content_preview, old.tool_input, old.tool_output, old.session_id, old.entry_index);
-    INSERT INTO session_entries_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index)
-    VALUES (new.rowid, new.content_preview, new.tool_input, new.tool_output, new.session_id, new.entry_index);
-END;
-
-INSERT INTO session_entries_fts(session_entries_fts) VALUES ('rebuild');
-
-CREATE VIEW session_search_source(rid, session_id, entry_index, content_preview, tool_input, tool_output) AS
-  SELECT rowid, session_id, entry_index, content_preview, tool_input, tool_output
-    FROM session_entries
-  UNION ALL
-  SELECT body_id, session_id, entry_index, content_preview, tool_input, tool_output
-    FROM session_entry_bodies;
-
-CREATE VIRTUAL TABLE session_search_fts USING fts5(
-  content_preview, tool_input, tool_output, session_id UNINDEXED, entry_index UNINDEXED,
-  content='session_search_source', content_rowid='rid', tokenize='unicode61 remove_diacritics 2');
-
-CREATE TRIGGER session_entry_bodies_fts_ai AFTER INSERT ON session_entry_bodies BEGIN
-  INSERT INTO session_search_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index)
-    SELECT rid, content_preview, tool_input, tool_output, session_id, entry_index
-      FROM session_search_source WHERE rid = new.body_id;
-END;
-
-CREATE TRIGGER session_entry_bodies_fts_bd BEFORE DELETE ON session_entry_bodies BEGIN
-  INSERT INTO session_search_fts(session_search_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index)
-    SELECT 'delete', rid, content_preview, tool_input, tool_output, session_id, entry_index
-      FROM session_search_source WHERE rid = old.body_id;
-END;
-
-INSERT INTO session_search_fts(session_search_fts) VALUES ('rebuild');
-
-CREATE TABLE session_attachments (
-    session_id       TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-    source_entry_ref TEXT NOT NULL,
-    partition_id     TEXT NOT NULL DEFAULT '',
-    sha256           TEXT,
-    media_type       TEXT,
-    byte_size        INTEGER NOT NULL DEFAULT 0 CHECK (byte_size >= 0),
-    width            INTEGER NOT NULL DEFAULT 0 CHECK (width >= 0),
-    height           INTEGER NOT NULL DEFAULT 0 CHECK (height >= 0),
-    omitted_reason   TEXT CHECK (omitted_reason IS NULL OR omitted_reason IN ('too_large','unsupported','missing')),
-    PRIMARY KEY (session_id, source_entry_ref)
-) STRICT;
-
-CREATE INDEX idx_session_attachments_sha ON session_attachments(sha256) WHERE sha256 IS NOT NULL;
+UPDATE claude_transcript_evidence
+SET identity_records_json = '[]';
 `

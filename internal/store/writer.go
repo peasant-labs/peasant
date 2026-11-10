@@ -634,24 +634,46 @@ func (s *Store) UpdateDailySummary(ctx context.Context, days []string) (err erro
 	return nil
 }
 
-const (
-	// sqlDeleteOrphanDailySummaryByProject removes daily_summary_by_project rows
-	// for project_hash values that no longer appear in the sessions table.
-	sqlDeleteOrphanDailySummaryByProject = `DELETE FROM daily_summary_by_project
-WHERE project_hash NOT IN (SELECT DISTINCT project_hash FROM sessions)`
+// buildDeleteOrphanDailySummaryByProjectSQL renders the daily_summary_by_project
+// orphan delete for the given scope and the hashes to bind. The all-store form
+// keeps the historical NOT IN predicate unchanged. The narrowed form restricts
+// the target rows and asks about their survivors through the sessions project
+// index, so it never scans the session population.
+func buildDeleteOrphanDailySummaryByProjectSQL(scope ingest.ProjectScope) (string, []any) {
+	predicate, args := narrowedProjectPredicate("daily_summary_by_project", scope)
+	if scope.IsAll() {
+		return `DELETE FROM daily_summary_by_project
+WHERE project_hash NOT IN (SELECT DISTINCT project_hash FROM sessions)`, nil
+	}
+	return `DELETE FROM daily_summary_by_project WHERE ` + trimLeadingAnd(predicate) + `
+  AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.project_hash = daily_summary_by_project.project_hash)`, args
+}
 
-	// sqlDeleteOrphanProjects removes projects rows for project_hash values that
-	// no longer appear in the sessions table.
-	sqlDeleteOrphanProjects = `DELETE FROM projects
-WHERE project_hash NOT IN (SELECT DISTINCT project_hash FROM sessions)`
-)
+// buildDeleteOrphanProjectsSQL renders the projects orphan delete for the given
+// scope and the hashes to bind. The narrowed form is driven by the named hashes
+// and asks about their survivors per row through idx_sessions_project.
+func buildDeleteOrphanProjectsSQL(scope ingest.ProjectScope) (string, []any) {
+	predicate, args := narrowedProjectPredicate("projects", scope)
+	if scope.IsAll() {
+		return `DELETE FROM projects
+WHERE project_hash NOT IN (SELECT DISTINCT project_hash FROM sessions)`, nil
+	}
+	return `DELETE FROM projects WHERE ` + trimLeadingAnd(predicate) + `
+  AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.project_hash = projects.project_hash)`, args
+}
 
 // CleanupOrphanProjects deletes projects and related daily_summary_by_project
 // rows that have no matching session. Best-effort: non-fatal in the pipeline.
 //
 // Deletion order matters: daily_summary_by_project references projects via
 // project_hash; the child rows are deleted first to avoid FK constraint errors.
-func (s *Store) CleanupOrphanProjects(ctx context.Context) error {
+func (s *Store) CleanupOrphanProjects(ctx context.Context, scope ingest.ProjectScope) error {
+	if err := scope.Validate("CleanupOrphanProjects"); err != nil {
+		return err
+	}
+	if narrowedProjectsEmpty(scope) {
+		return nil
+	}
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf(
@@ -664,8 +686,9 @@ func (s *Store) CleanupOrphanProjects(ctx context.Context) error {
 	}
 	defer s.pool.Put(conn)
 
+	dailySQL, dailyArgs := buildDeleteOrphanDailySummaryByProjectSQL(scope)
 	// Delete child rows first (daily_summary_by_project → projects).
-	if err := sqlitex.ExecuteTransient(conn, sqlDeleteOrphanDailySummaryByProject, nil); err != nil {
+	if err := sqlitex.ExecuteTransient(conn, dailySQL, &sqlitex.ExecOptions{Args: dailyArgs}); err != nil {
 		return fmt.Errorf(
 			"store.CleanupOrphanProjects: delete orphan daily_summary_by_project: %w — "+
 				"what: DELETE failed on daily_summary_by_project; "+
@@ -675,7 +698,8 @@ func (s *Store) CleanupOrphanProjects(ctx context.Context) error {
 		)
 	}
 
-	if err := sqlitex.ExecuteTransient(conn, sqlDeleteOrphanProjects, nil); err != nil {
+	projectsSQL, projectsArgs := buildDeleteOrphanProjectsSQL(scope)
+	if err := sqlitex.ExecuteTransient(conn, projectsSQL, &sqlitex.ExecOptions{Args: projectsArgs}); err != nil {
 		return fmt.Errorf(
 			"store.CleanupOrphanProjects: delete orphan projects: %w — "+
 				"what: DELETE failed on projects; "+

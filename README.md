@@ -178,14 +178,17 @@ are replayed once through the ordinary push candidate path.
 | `--force` | Force re-process sessions that match current filters |
 | `--all` | Process ALL sessions (clears filters, implies `--force`) |
 | `--session <ids>` | Filter to specific session IDs (repeatable, comma-separated). Overrides the selection index. |
+| `--no-related` | Process only the named sessions. By default a session-scoped run also processes each named session's child sessions and its ancestors that are not recorded yet. |
 | `--since <time>` | Only sessions newer than this: positive Go durations such as `30m`, `1h30m`, or integer calendar units `7d`, `2w`, `3mo` (months), `1y`, or `YYYY-MM-DD`/RFC3339. `sessions list --since/--until` and `prune --before/--after` accept the same values. Relative spans must be positive and unsigned. Harvest formerly treated `m` as months; use `mo` for months now. |
 | `--source-harness <h>` | Discover only this harness using its configured or default path (`claude-code`, `opencode`, `codex`, `cursor`, `strike`, `pi`) |
+| `--harness <h>` | Alias for `--source-harness`; both names set the same filter |
 | `--source-path <path>` | Override the named harness's source paths (requires `--source-harness`; replaces config, not additive) |
 | `--output <path>` | Override output base path |
 | `--json` | Output as JSON instead of human-readable |
 | `--verbose` | Show file-level detail |
 | `--profile-index` | Print INDEX parse/write timing diagnostics |
 | `--detect-commits` | Detect and store git commits linked to each session (default on; pass `--detect-commits=false` to skip) |
+| `--refresh-commits` | For a named unchanged session, refresh its commit rows without re-extracting or re-indexing (default off) |
 | `--include-active` | Deprecated and has no effect: active sessions are processed by default |
 | `--config <path>` | Path to config file (global flag) |
 | `--data-dir`, `--config-dir`, `--state-dir` | Override the data, config and state directories (global flags; see [`peasant`](docs/cli/peasant.md)) |
@@ -307,6 +310,7 @@ session.
 | `--session <id>` | The session to record and open (required) |
 | `--port <n>` | Port of the web dashboard, 1-65535 (default 8690, as for `peasant web start`) |
 | `--hook` | Print the Claude Code hook response `{"continue":false,"stopReason":"..."}` as one line on stdout instead, with the same lines in `stopReason`. Nothing goes to stderr, and the exit status is 0 on every outcome |
+| `--no-related` | Process only the named sessions. By default a session-scoped run also processes each named session's child sessions and its ancestors that are not recorded yet. |
 
 ### `peasant tui` flags (deprecated)
 

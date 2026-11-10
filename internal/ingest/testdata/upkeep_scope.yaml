@@ -1,0 +1,39 @@
+requiredNames:
+  - flagged-sweep
+  - stale-origin-listing
+  - parent-origin-requeue
+  - stale-adapter-listing
+  - stale-index-listing
+  - repair-listing
+  - incomplete-content-listing
+  - metric-session-listing
+
+# One case per store-wide pass that takes a session StoreScope. The case's
+# operation set is the exact set of scope-bearing store calls that pass makes;
+# a pass that stops calling (or calls a second method) fails the case.
+cases:
+  - name: flagged-sweep
+    operations:
+      - SweepFlaggedSessionsForHarvest
+  - name: stale-origin-listing
+    operations:
+      - ListStaleOriginSessions
+  - name: parent-origin-requeue
+    operations:
+      - InvalidateStaleParentOrigins
+  - name: stale-adapter-listing
+    operations:
+      - ListStaleAdapterSessions
+  - name: stale-index-listing
+    operations:
+      - ListStaleIndexSessions
+      - ListSessionsNeedingRepair
+  - name: repair-listing
+    operations:
+      - ListSessionsNeedingRepair
+  - name: incomplete-content-listing
+    operations:
+      - ListContentCaptureIncompleteSessionsAfter
+  - name: metric-session-listing
+    operations:
+      - ListMetricSessions

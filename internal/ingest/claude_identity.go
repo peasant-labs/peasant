@@ -32,6 +32,7 @@ func mineClaudeIdentity(data []byte, evidence *ClaudeTranscriptEvidence) {
 	}
 	complete := scanner.Err() == nil && len(scanner.Oversized()) == 0
 	evidence.NativeAgentValid = evidence.NativeAgentValid && evidence.NativeAgentID != "" && complete
+	SealClaudeIdentity(evidence)
 }
 
 func beginClaudeIdentity(data []byte, evidence *ClaudeTranscriptEvidence) {
@@ -39,7 +40,7 @@ func beginClaudeIdentity(data []byte, evidence *ClaudeTranscriptEvidence) {
 	digest := sha256.Sum256(data)
 	evidence.ContentDigest = hex.EncodeToString(digest[:])
 	evidence.NativeAgentValid = true
-	evidence.Records = nil
+	evidence.Records = []ClaudeIdentityRecord{}
 	evidence.ControlRecordSeen = false
 }
 
@@ -82,24 +83,11 @@ func addClaudeIdentityRecord(value map[string]any, evidence *ClaudeTranscriptEvi
 // native agent ID retain that existing flow, but an explicit false/malformed
 // flag or conflicting native agent identity never becomes legacy proof.
 func claudeLegacyAgentProof(proof ClaudeTranscriptEvidence, agentID string) bool {
-	if len(proof.Records) == 0 {
-		return false
-	}
-	for _, record := range proof.Records {
-		if record.AgentID != agentID || record.Sidechain != nil {
-			return false
-		}
-	}
-	return true
+	return proof.identityLegacyAgentProof(agentID)
 }
 
 func claudeContradictorySidechain(proof ClaudeTranscriptEvidence) bool {
-	for _, record := range proof.Records {
-		if record.Sidechain != nil && !*record.Sidechain {
-			return true
-		}
-	}
-	return false
+	return proof.identityContradictorySidechain()
 }
 
 func claudeAgentAdmissionProof(session DiscoveredSession, proof ClaudeTranscriptEvidence) bool {
@@ -157,21 +145,18 @@ func claudeCorrelatedNativeSpawn(value map[string]any, calls map[string]bool) st
 }
 
 func claudeRecordOwner(evidence ClaudeTranscriptEvidence) (SessionID, bool) {
-	var owner string
-	for _, record := range evidence.Records {
-		if owner == "" {
-			owner = record.SessionID
-		} else if owner != record.SessionID {
-			return "", false
-		}
+	ids := evidence.identitySessionIDs()
+	if len(ids) != 1 {
+		return "", false
 	}
-	id, err := NewSessionID(owner)
+	id, err := NewSessionID(ids[0])
 	return id, err == nil
 }
 
-func claudeNamesSession(records []ClaudeIdentityRecord, owner SessionID) bool {
-	for _, record := range records {
-		if record.SessionID == owner.String() {
+func claudeNamesSession(sessionIDs []string, owner SessionID) bool {
+	want := owner.String()
+	for _, id := range sessionIDs {
+		if id == want {
 			return true
 		}
 	}
@@ -230,10 +215,10 @@ func claudeIdentitySnapshotFrom(fs FileSystem) claudeIdentitySnapshotSource {
 			if err != nil {
 				return ClaudeTranscriptEvidence{}, false
 			}
-			if claudeNamesSession(snapshot.Records, owner) {
+			if claudeNamesSession(snapshot.identitySessionIDs(), owner) {
 				return snapshot, true
 			}
-			if snapshot.ControlRecordSeen && len(snapshot.Records) == 0 {
+			if snapshot.ControlRecordSeen && len(snapshot.identitySessionIDs()) == 0 {
 				// The file exists and holds a recognized control record, but no
 				// record carries a session id: a rotated or truncated owner
 				// transcript that kept only summary and file-history records. A
@@ -256,8 +241,8 @@ func (a *ClaudeAdapter) claudeIdentitySnapshot(path ResolvedPath) (ClaudeTranscr
 // start at a compact boundary, or anchor at any coordinate the snapshot holds.
 // An empty-uuid mirror is ignored. Uncopied records otherwise must connect to
 // proved coordinates; their subtype alone proves no fork.
-func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, snapshot []ClaudeIdentityRecord) bool {
-	byUUID := make(map[string]ClaudeIdentityRecord, len(snapshot))
+func claudeHistoryLink(records []ClaudeIdentityChainLink, own, source SessionID, snapshot []ClaudeIdentityChainLink) bool {
+	byUUID := make(map[string]ClaudeIdentityChainLink, len(snapshot))
 	for _, record := range snapshot {
 		if record.UUID != "" {
 			byUUID[record.UUID] = record
@@ -267,11 +252,11 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 	for _, record := range snapshot {
 		sourcePresent = sourcePresent || record.SessionID == source.String()
 	}
-	foreign := make([]ClaudeIdentityRecord, 0)
+	foreign := make([]ClaudeIdentityChainLink, 0)
 	for _, record := range records {
 		if record.SessionID == own.String() {
 			ownPresent = true
-			if prior, ok := byUUID[record.UUID]; ok && claudeSameCoordinate(prior, record) {
+			if prior, ok := byUUID[record.UUID]; ok && claudeSameChainCoordinate(prior, record) {
 				restamped = true
 			}
 		}
@@ -327,7 +312,7 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 	}
 	for _, record := range records {
 		if record.SessionID == own.String() {
-			if prior, exists := byUUID[record.UUID]; exists && claudeSameCoordinate(prior, record) {
+			if prior, exists := byUUID[record.UUID]; exists && claudeSameChainCoordinate(prior, record) {
 				linked[record.UUID] = true
 			}
 			continue
@@ -336,7 +321,7 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 			continue
 		}
 		prior, copied := byUUID[record.UUID]
-		if copied && !claudeSameCoordinate(prior, record) {
+		if copied && !claudeSameChainCoordinate(prior, record) {
 			return false
 		}
 		if record.UUID == "" {
@@ -362,7 +347,7 @@ func claudeHistoryLink(records []ClaudeIdentityRecord, own, source SessionID, sn
 	return true
 }
 
-func claudeSameCoordinate(left, right ClaudeIdentityRecord) bool {
+func claudeSameChainCoordinate(left, right ClaudeIdentityChainLink) bool {
 	return left.Type == right.Type && left.Subtype == right.Subtype && left.ParentUUID == right.ParentUUID
 }
 
@@ -385,13 +370,13 @@ func (a *ClaudeAdapter) linkClaudeNativeAgents(sessions []DiscoveredSession, evi
 		if sessions[ownerIndex].SourcePath != claudeSourcePath(child.SourcePath, owner) {
 			continue
 		}
-		if !claudeNamesSession(evidence[sessions[ownerIndex].SourcePath].Records, owner) {
+		ownerEvidence := evidence[sessions[ownerIndex].SourcePath]
+		if !claudeNamesSession(ownerEvidence.identitySessionIDs(), owner) {
 			continue
 		}
 		if child.ParentUUID != nil && *child.ParentUUID != owner {
 			layoutIndex, known := byID[*child.ParentUUID]
-			ownerRecords := evidence[sessions[ownerIndex].SourcePath].Records
-			if !claudeNativeSpawn(ownerRecords, proof.NativeAgentID) && (!known || !claudeHistoryLink(evidence[sessions[layoutIndex].SourcePath].Records, *child.ParentUUID, owner, ownerRecords)) {
+			if !claudeNativeSpawn(ownerEvidence.identitySpawnAgentIDs(), proof.NativeAgentID) && (!known || !claudeHistoryLink(evidence[sessions[layoutIndex].SourcePath].identityChain(), *child.ParentUUID, owner, ownerEvidence.identityChain())) {
 				continue
 			}
 		}
@@ -441,9 +426,12 @@ func (a *ClaudeAdapter) linkClaudeNativeAgents(sessions []DiscoveredSession, evi
 	return out
 }
 
-func claudeNativeSpawn(records []ClaudeIdentityRecord, agentID string) bool {
-	for _, record := range records {
-		if record.SpawnAgentID == agentID {
+func claudeNativeSpawn(spawnAgentIDs []string, agentID string) bool {
+	if agentID == "" {
+		return false
+	}
+	for _, id := range spawnAgentIDs {
+		if id == agentID {
 			return true
 		}
 	}
@@ -518,9 +506,9 @@ func verifyClaudeIdentityAgainst(data []byte, session DiscoveredSession, native 
 			if !available {
 				return refuse()
 			}
-			if hasLayout && !claudeNativeSpawn(ownerProof.Records, proof.NativeAgentID) {
+			if hasLayout && !claudeNativeSpawn(ownerProof.identitySpawnAgentIDs(), proof.NativeAgentID) {
 				layoutProof, available := snapshot(claudeSourcePath(session.SourcePath, layout))
-				if !available || !claudeHistoryLink(layoutProof.Records, layout, owner, ownerProof.Records) {
+				if !available || !claudeHistoryLink(layoutProof.identityChain(), layout, owner, ownerProof.identityChain()) {
 					return refuse()
 				}
 			}
@@ -532,9 +520,9 @@ func verifyClaudeIdentityAgainst(data []byte, session DiscoveredSession, native 
 		relationships = append(relationships, schema.SessionRelationship{Kind: schema.SessionRelationshipStartedBy, TargetState: schema.RelationshipTargetKnown, TargetLocalID: &target, Evidence: schema.EvidenceNativeTyped})
 	}
 	foreign := make(map[string]bool)
-	for _, record := range proof.Records {
-		if !allowed[record.SessionID] {
-			foreign[record.SessionID] = true
+	for _, id := range proof.identitySessionIDs() {
+		if !allowed[id] {
+			foreign[id] = true
 		}
 	}
 	ids := make([]string, 0, len(foreign))
@@ -552,7 +540,7 @@ func verifyClaudeIdentityAgainst(data []byte, session DiscoveredSession, native 
 		if !available {
 			return refuse()
 		}
-		if !claudeHistoryLink(proof.Records, session.SessionID, source, snapshotEvidence.Records) {
+		if !claudeHistoryLink(proof.identityChain(), session.SessionID, source, snapshotEvidence.identityChain()) {
 			return refuse()
 		}
 		allowed[id] = true
@@ -669,8 +657,8 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 			if original.ContentHash == "" || original.ContentHash != contentHash {
 				return nil, nil, fmt.Errorf("Claude stored metadata capture for %s: multi-source provenance belongs to different captured bytes; keep the last-good capture and reacquire intact native input", original.SessionID)
 			}
-			for _, record := range proof.Records {
-				allowed[record.SessionID] = true
+			for _, id := range proof.identitySessionIDs() {
+				allowed[id] = true
 			}
 		}
 		if relationship.Kind != schema.SessionRelationshipContextFrom || relationship.TargetLocalID == nil || relationship.Anchor == nil {
@@ -683,7 +671,7 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 			continue
 		}
 		ownUUIDs, foreignUUIDs := make(map[string]bool), make(map[string]bool)
-		for _, record := range proof.Records {
+		for _, record := range proof.identityChain() {
 			if record.UUID == "" {
 				continue
 			}
@@ -694,7 +682,7 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 				foreignUUIDs[record.UUID] = true
 			}
 		}
-		for _, record := range proof.Records {
+		for _, record := range proof.identityChain() {
 			ownTransition := record.SessionID == original.SessionID.String() && foreignUUIDs[record.ParentUUID]
 			foreignTransition := record.SessionID == relationship.TargetLocalID.String() && ownUUIDs[record.ParentUUID]
 			if ownTransition || foreignTransition {
@@ -702,8 +690,8 @@ func verifyRetainedClaudeIdentityWith(data []byte, original *UnifiedMetadata, co
 			}
 		}
 	}
-	for _, record := range proof.Records {
-		if !allowed[record.SessionID] {
+	for _, id := range proof.identitySessionIDs() {
+		if !allowed[id] {
 			// Legacy metadata has no captured relationship proof. It may still
 			// recover from an available native source, never from a guessed link.
 			return verifyClaudeIdentityAgainst(data, DiscoveredSession{

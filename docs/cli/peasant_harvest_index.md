@@ -19,8 +19,10 @@ peasant harvest index [flags]
       --detect-commits          Detect and store git commits linked to each session (default true)
       --dry-run                 Show what would be processed without writing
       --force                   Force re-process sessions that match current filters
+      --harness string          Alias for --source-harness
   -h, --help                    help for index
       --json                    Output as JSON instead of human-readable
+      --no-related              Process only the named sessions. By default a session-scoped run also processes each named session's child sessions and its ancestors that are not recorded yet.
       --output string           Override output base path
       --profile-index           Print INDEX parse/write timing diagnostics
       --session strings         Filter to specific session IDs (repeatable, comma-separated)

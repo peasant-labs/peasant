@@ -94,7 +94,7 @@ func TestFallbackRunIndexesValidatedGeneration(t *testing.T) {
 	// fallback capture and the index capture.
 	needing, err := database.ListSessionsNeedingRepair(ctx, map[ingest.Harness]ingest.HarvesterVersions{
 		ingest.HarnessClaudeCode: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode],
-	})
+	}, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatal(err)
 	}

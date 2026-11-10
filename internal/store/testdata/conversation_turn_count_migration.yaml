@@ -1,4 +1,4 @@
-# The V71 upgrade folds every stored session once. A session with entries takes
+# The V73 upgrade folds every stored session once. A session with entries takes
 # the folded conversation count; a session whose entries are gone copies the
 # legacy value and is named in the migration report, even when that value is
 # NULL (unknown, not a measured zero).

@@ -34,6 +34,9 @@ partition:
   - internal/ingest|TestPiUnknownPersistence
   - internal/ingest|TestOrdinaryHarvestSettlesStaleIndexSessions
   - internal/ingest|TestStoredContentBackfill
+  - internal/ingest|TestSessionScopeParity
+  - internal/ingest|TestSessionScopeReadRecorder
+  - internal/ingest|TestSessionScopeSizeIndependence
   - internal/ingest|TestNativeUnknownSourceToPublication
   - cmd/peasant|TestPiHarvestCommonModes
   - internal/ingest|TestContentRecoveryScope

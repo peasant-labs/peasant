@@ -98,7 +98,7 @@ func (p *Pipeline) appendStoredAdapterWork(ctx context.Context, entries []DiffEn
 	if !ok {
 		return entries
 	}
-	staleIDs, err := lister.ListStaleAdapterSessions(ctx, p.indexerTargets(), p.nativeRefreshSchemaVersions())
+	staleIDs, err := lister.ListStaleAdapterSessions(ctx, p.indexerTargets(), p.nativeRefreshSchemaVersions(), p.runStoreScope())
 	if err != nil {
 		p.reportMetadataRefusal("adapter refresh selection", err)
 		return entries
@@ -179,13 +179,13 @@ func (p *Pipeline) pairRepairCandidateIDs(ctx context.Context) ([]SessionID, err
 	if _, ok := p.metricsStore.(SessionIndexStateReader); !ok {
 		return nil, nil
 	}
-	stale, err := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
+	stale, err := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets(), p.runStoreScope())
 	if err != nil {
 		return nil, err
 	}
 	var repair []SessionID
 	if lister, ok := p.metricsStore.(RepairSessionLister); ok {
-		if repair, err = lister.ListSessionsNeedingRepair(ctx, p.indexerTargets()); err != nil {
+		if repair, err = lister.ListSessionsNeedingRepair(ctx, p.indexerTargets(), p.runStoreScope()); err != nil {
 			return nil, err
 		}
 	}
@@ -888,7 +888,7 @@ func (p *Pipeline) hasUsableRetainedSession(ctx context.Context) bool {
 	// Missing/corrupt metadata is absent from the file inventory. Give the
 	// same stored candidates used by normal maintenance their guarded read
 	// before declaring native discovery failure fatal.
-	staleIDs, err := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
+	staleIDs, err := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets(), p.runStoreScope())
 	if err != nil {
 		p.reportMetadataRefusal("stored discovery recovery", fmt.Errorf("read stored recovery candidates after native discovery failed: %w; no recovery was attempted; restore database access and retry harvest", err))
 		return false

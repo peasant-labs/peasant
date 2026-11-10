@@ -1,0 +1,14 @@
+peasant: harvest index failed: session agen... was not found, so nothing was recorded
+  what:     this session-scoped harvest index looked for session agen... and no enabled source holds it
+  why:      the store has no row for this id, and no harness that can search by id has a file or row with it
+  where:    session lookup (ingest scoped locate)
+  when:     before any session was swept, recorded, or indexed
+  searched:
+    store         no recorded session with this id
+  impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+            store migration, search-index repair) may still have run. No full scan was run.
+  fix:      check the id with
+            `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' sessions list`,
+            or run
+            `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' harvest index`
+            once without --session, then retry

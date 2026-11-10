@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -458,6 +459,15 @@ func (s *Store) clearSweepFlag(ctx context.Context, sessionID schema.SessionID) 
 	return nil
 }
 
+// flaggedSessionsSweepSQL is the harvest-start sweep's work list, with the
+// arguments it binds. The partial index makes the flagged population the
+// driving set; a narrowed scope appends its id predicate over the same
+// statement production runs.
+func flaggedSessionsSweepSQL(scope ingest.StoreScope) (string, []any) {
+	predicate, args := narrowedSessionPredicate("s", scope)
+	return `SELECT s.session_id FROM sessions s WHERE s.content_sweep_pending = 1` + predicate + ` ORDER BY s.session_id`, args
+}
+
 // SweepFlaggedSessions sweeps every session the crash marker flags: the
 // harvest-start recovery pass (design §4.5). It selects through the partial
 // index instead of scanning every session, sweeps each flagged session under
@@ -465,7 +475,15 @@ func (s *Store) clearSweepFlag(ctx context.Context, sessionID schema.SessionID) 
 // them as warnings. A warned session keeps its flag, so the next pass
 // retries it. Unflagged sessions are never touched.
 func (s *Store) SweepFlaggedSessions(ctx context.Context) (SweepFlaggedReport, error) {
+	return s.sweepFlaggedSessions(ctx, ingest.AllStoredSessions())
+}
+
+// sweepFlaggedSessions is the scoped form of SweepFlaggedSessions.
+func (s *Store) sweepFlaggedSessions(ctx context.Context, scope ingest.StoreScope) (SweepFlaggedReport, error) {
 	var report SweepFlaggedReport
+	if err := scope.Validate("SweepFlaggedSessions"); err != nil {
+		return report, err
+	}
 	if err := s.requireGenerationSupport(); err != nil {
 		return report, err
 	}
@@ -474,7 +492,9 @@ func (s *Store) SweepFlaggedSessions(ctx context.Context) (SweepFlaggedReport, e
 		return report, fmt.Errorf("store: take connection to list flagged sessions for the harvest-start sweep: %w; no session was swept", err)
 	}
 	var flagged []schema.SessionID
-	listErr := sqlitex.Execute(conn, `SELECT session_id FROM sessions WHERE content_sweep_pending = 1 ORDER BY session_id`, &sqlitex.ExecOptions{
+	sweepSQL, sweepArgs := flaggedSessionsSweepSQL(scope)
+	listErr := sqlitex.Execute(conn, sweepSQL, &sqlitex.ExecOptions{
+		Args: sweepArgs,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			flagged = append(flagged, schema.SessionID(stmt.ColumnText(0)))
 			return nil

@@ -20,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testkit/scoperecorder"
 	"github.com/peasant-labs/schema"
 )
 
@@ -612,6 +613,31 @@ func (s *StubGitResolver) WalkUpRemoteURL(_ context.Context, _ string) (string, 
 	return s.WalkUpRemoteResult[0], s.WalkUpRemoteResult[1], nil
 }
 
+// --- Scope-bearing call recorder ---
+
+// recordStoreScope records one call that took a StoreScope in the neutral shape
+// the stdlib-only recorder package understands. Keeping the conversion here is
+// what lets the recorder live in a leaf package: package ingest cannot import
+// testutil, but it can import the leaf.
+func recordStoreScope(recorder *scoperecorder.Recorder, operation string, scope ingest.StoreScope) {
+	ids, _ := scope.Narrowed()
+	narrowed := make([]string, 0, len(ids))
+	for _, id := range ids {
+		narrowed = append(narrowed, string(id))
+	}
+	recorder.RecordStore(operation, narrowed, scope.IsAll())
+}
+
+// recordProjectScope records one call that took a ProjectScope.
+func recordProjectScope(recorder *scoperecorder.Recorder, operation string, scope ingest.ProjectScope) {
+	hashes, _ := scope.Narrowed()
+	narrowed := make([]string, 0, len(hashes))
+	for _, hash := range hashes {
+		narrowed = append(narrowed, string(hash))
+	}
+	recorder.RecordProjects(operation, narrowed, scope.IsAll())
+}
+
 // --- StubSessionStore ---
 
 // StubSessionStore is a test double for ingest.SessionStore.
@@ -636,6 +662,8 @@ type StubSessionStore struct {
 	// OnInsert is called by InsertSessions before recording the entries. Useful for
 	// observing side effects at DB INSERT time (e.g., asserting file not yet written).
 	OnInsert func(entries []ingest.StoreEntry)
+	// ScopeCalls records every scope-bearing call this double receives.
+	ScopeCalls scoperecorder.Recorder
 }
 
 var _ ingest.SessionStore = (*StubSessionStore)(nil)
@@ -701,7 +729,8 @@ func (s *StubSessionStore) UpsertSessionCommits(_ context.Context, sessionID ing
 
 // CleanupOrphanProjectsCalled records whether CleanupOrphanProjects was called.
 // Embed in StubSessionStore fields for test assertions.
-func (s *StubSessionStore) CleanupOrphanProjects(_ context.Context) error {
+func (s *StubSessionStore) CleanupOrphanProjects(_ context.Context, scope ingest.ProjectScope) error {
+	recordProjectScope(&s.ScopeCalls, "CleanupOrphanProjects", scope)
 	s.CleanupOrphanProjectsCalled = true
 	return s.CleanupOrphanProjectsErr
 }
@@ -747,6 +776,8 @@ type StubMetricsStore struct {
 	TitleHarness              schema.Harness
 	TitleProjectPath          string
 	TitleContextErr           error
+	// ScopeCalls records every scope-bearing call this double receives.
+	ScopeCalls scoperecorder.Recorder
 }
 
 var _ ingest.MetricsStore = (*StubMetricsStore)(nil)
@@ -873,7 +904,8 @@ func (s *StubMetricsStore) UpdateIndexState(_ context.Context, sessionID ingest.
 	return nil
 }
 
-func (s *StubMetricsStore) ListStaleIndexSessions(_ context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
+func (s *StubMetricsStore) ListStaleIndexSessions(_ context.Context, targets map[ingest.Harness]ingest.HarvesterVersions, scope ingest.StoreScope) ([]ingest.SessionID, error) {
+	recordStoreScope(&s.ScopeCalls, "ListStaleIndexSessions", scope)
 	s.ListStaleCalledWithTargets = maps.Clone(targets)
 	if s.StaleIndexErr != nil {
 		return nil, s.StaleIndexErr

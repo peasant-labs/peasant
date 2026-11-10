@@ -4,7 +4,7 @@ required_names:
   - stale-session-since-intersection
   - force-session-since-intersection
   - stale-session-filter-without-harness
-  - disjoint-harness-and-session-selects-nothing
+  - disjoint-harness-and-session-is-refused
   - since-before-all-sessions-selects-nothing
   - registered-cursor-selector-is-supported
   - force-since-filter-without-harness
@@ -66,16 +66,19 @@ cases:
     refused: [claude-future]
   - name: stale-session-since-intersection
     args: [--source-harness=claude-code, --session, *claude_recent, --session, *claude_old, --session, *codex_recent, --since=7d]
-    indexed: [claude-recent]
+    indexed: []
+    error_contains: which --harness excludes
   - name: force-session-since-intersection
     args: [--source-harness=claude-code, --force, --session, *claude_current, --session, *claude_old, --session, *codex_recent, --since=7d]
-    indexed: [claude-current]
+    indexed: []
+    error_contains: which --harness excludes
   - name: stale-session-filter-without-harness
     args: [--session, *codex_recent]
     indexed: [codex-recent]
-  - name: disjoint-harness-and-session-selects-nothing
+  - name: disjoint-harness-and-session-is-refused
     args: [--force, --source-harness=claude-code, --session, *codex_recent]
     indexed: []
+    error_contains: which --harness excludes
   - name: since-before-all-sessions-selects-nothing
     args: [--force, --source-harness=claude-code, --since=1d]
     indexed: []

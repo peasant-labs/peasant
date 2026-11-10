@@ -674,7 +674,7 @@ var (
 	_ SessionIndexStateReader    = (*budgetTargetStore)(nil)
 )
 
-func (s *budgetTargetStore) ListContentCaptureIncompleteSessionsAfter(_ context.Context, after SessionID, limit int) ([]ContentCaptureIncompleteSession, error) {
+func (s *budgetTargetStore) ListContentCaptureIncompleteSessionsAfter(_ context.Context, after SessionID, limit int, _ StoreScope) ([]ContentCaptureIncompleteSession, error) {
 	s.listCalls++
 	s.listLimits = append(s.listLimits, limit)
 	var out []ContentCaptureIncompleteSession

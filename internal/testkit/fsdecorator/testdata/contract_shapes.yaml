@@ -59,7 +59,7 @@ enums:
       - RemoveAll
       - CopyFile
   - name: fsdecorator.AllCapabilities
-    members: [counting, gated, bounded, none]
+    members: [counting, gated, bounded, recording, none]
 
 interfaces:
   - name: fsdecorator.FileSystem

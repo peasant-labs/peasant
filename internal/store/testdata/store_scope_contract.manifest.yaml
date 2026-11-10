@@ -1,0 +1,8 @@
+requiredNames:
+  - zero_store_scope_refused
+  - zero_project_scope_refused
+  - nil_store_scope_selects_nothing
+  - nil_project_scope_selects_nothing
+  - narrowed_store_scope_sorts_and_deduplicates
+  - all_store_scope_is_the_full_run
+  - all_project_scope_is_the_full_run

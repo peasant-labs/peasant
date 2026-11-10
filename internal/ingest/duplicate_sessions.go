@@ -86,6 +86,12 @@ func refuseDuplicateSessionIDs(fsys FileSystem, sessions []DiscoveredSession, in
 // not asked about the selection here: it inherits its parent's decision in the
 // FILTER stage. Without this, a duplicate elsewhere fails a run scoped to one
 // unrelated session, such as `peasant open`.
+//
+// The session-scoped LOCATE path does NOT use this predicate: its first test is
+// includesSession against the run's upkeep allowlist, so it would drop a
+// second copy that sits outside the cohort before the refusal could see it, and
+// the duplicate would process silently. locateDuplicateScope is that path's
+// predicate.
 func (p *Pipeline) inRunScope(s DiscoveredSession) bool {
 	if !p.includesSession(s.SessionID) || !p.withinRunAge(discoveredSessionStart(s)) {
 		return false
@@ -94,6 +100,19 @@ func (p *Pipeline) inRunScope(s DiscoveredSession) bool {
 		return false
 	}
 	return s.ParentUUID != nil || p.config.SessionFilter == nil || p.config.SessionFilter(s)
+}
+
+// locateDuplicateScope is the predicate the session-scoped LOCATE hands the
+// duplicate refusal. It admits every claim on an id the cohort is already
+// locating and asks nothing else, so a second copy outside the cohort is still
+// refused instead of being filtered away first. It cannot widen processing: the
+// claims are only the sources LOCATE built, and a refused id never joins the
+// processed sources.
+func locateDuplicateScope(cohort map[SessionID]struct{}) func(DiscoveredSession) bool {
+	return func(s DiscoveredSession) bool {
+		_, ok := cohort[s.SessionID]
+		return ok
+	}
 }
 
 // duplicateSessionError names every file, the newer and the larger one, and

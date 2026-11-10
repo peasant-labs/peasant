@@ -82,7 +82,7 @@ type ResolveReport struct {
 type OriginResolverStore interface {
 	// ListStaleOriginSessions returns every session whose origin_version is
 	// below currentVersion.
-	ListStaleOriginSessions(ctx context.Context, currentVersion int) ([]StoredOriginRow, error)
+	ListStaleOriginSessions(ctx context.Context, currentVersion int, scope StoreScope) ([]StoredOriginRow, error)
 	// UpdateOriginState records a verdict and the version it was decided at, in
 	// one statement, so the two can never disagree.
 	UpdateOriginState(ctx context.Context, sessionID SessionID, origin string, version int) error
@@ -136,6 +136,11 @@ func NewOriginResolver(store OriginResolverStore, cache ClaudeEvidenceCache, min
 // ResolveStoredOrigins writes a verdict into every session at or below the given
 // rule version and returns what it did.
 //
+// The scope bounds which stored rows the pass lists. A full run lists the whole
+// store; a scoped run lists only its cohort's rows, and the evidence cache is
+// asked only for those rows' source paths, so neither the SQL nor the cache read
+// touches a session outside the cohort.
+//
 // It is idempotent and crash-safe: a row is advanced past the version line only
 // after its verdict is committed, in the same statement, so an interrupted pass
 // resumes rather than restarting on half-written state. Running it again over a
@@ -169,7 +174,7 @@ func NewOriginResolver(store OriginResolverStore, cache ClaudeEvidenceCache, min
 // reconcile heal, the bounded invalidation — resets origin_version to 0 in the
 // same write, so a later repair re-queues the row and the next pass re-judges
 // it.
-func (r *OriginResolver) ResolveStoredOrigins(ctx context.Context, ruleVersion int) (ResolveReport, error) {
+func (r *OriginResolver) ResolveStoredOrigins(ctx context.Context, ruleVersion int, scope StoreScope) (ResolveReport, error) {
 	var report ResolveReport
 	if ruleVersion < 1 {
 		return report, fmt.Errorf(
@@ -181,7 +186,7 @@ func (r *OriginResolver) ResolveStoredOrigins(ctx context.Context, ruleVersion i
 		)
 	}
 
-	rows, err := r.store.ListStaleOriginSessions(ctx, ruleVersion)
+	rows, err := r.store.ListStaleOriginSessions(ctx, ruleVersion, scope)
 	if err != nil {
 		return report, fmt.Errorf("ingest: list sessions below origin rule version %d: %w", ruleVersion, err)
 	}
@@ -189,7 +194,7 @@ func (r *OriginResolver) ResolveStoredOrigins(ctx context.Context, ruleVersion i
 		return report, nil
 	}
 
-	cached := r.loadCache(ctx)
+	cached := r.loadCacheFor(ctx, staleOriginSourcePaths(rows))
 
 	// Decide everything that needs no content first, so the stored-message
 	// query only covers the rows that actually need it.
@@ -286,14 +291,36 @@ func storedOriginFirstUserText(harness Harness, records []string) string {
 	return ""
 }
 
-// loadCache returns the evidence records discovery has just refreshed. A missing
-// or failing cache is not an error: the pass simply falls through to the miner,
-// which is always correct and only slower.
-func (r *OriginResolver) loadCache(ctx context.Context) map[ResolvedPath]ClaudeTranscriptEvidence {
-	if r.cache == nil {
+// staleOriginSourcePaths is the path set the origin pass may consult the
+// evidence cache for: the source path of every row it has to judge. The pass
+// answers a row only through its own source path, so asking the cache for any
+// other path could not change a verdict — and asking it for the whole table
+// would read rows this run never judges.
+func staleOriginSourcePaths(rows []StoredOriginRow) []ResolvedPath {
+	paths := make([]ResolvedPath, 0, len(rows))
+	seen := make(map[ResolvedPath]struct{}, len(rows))
+	for _, row := range rows {
+		if row.SourcePath == "" {
+			continue
+		}
+		if _, duplicate := seen[row.SourcePath]; duplicate {
+			continue
+		}
+		seen[row.SourcePath] = struct{}{}
+		paths = append(paths, row.SourcePath)
+	}
+	return paths
+}
+
+// loadCacheFor returns the evidence records discovery has just refreshed for
+// the rows this pass judges, keyed by source path. A missing or failing cache
+// is not an error: the pass simply falls through to the miner, which is always
+// correct and only slower.
+func (r *OriginResolver) loadCacheFor(ctx context.Context, paths []ResolvedPath) map[ResolvedPath]ClaudeTranscriptEvidence {
+	if r.cache == nil || len(paths) == 0 {
 		return nil
 	}
-	records, err := r.cache.LoadClaudeEvidence(ctx)
+	records, err := r.cache.LoadClaudeEvidenceFor(ctx, paths)
 	if err != nil {
 		return nil
 	}

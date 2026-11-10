@@ -467,29 +467,29 @@ func TestLatestAttemptSettleGatesSelection(t *testing.T) {
 		}
 	}
 
-	ids, err := s.ListStaleIndexSessions(ctx, settled)
+	ids, err := s.ListStaleIndexSessions(ctx, settled, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions: %v", err)
 	}
 	assertSelected("stale index (settled)", ids, false)
-	ids, err = s.ListStaleIndexSessions(ctx, bumped)
+	ids, err = s.ListStaleIndexSessions(ctx, bumped, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions bumped: %v", err)
 	}
 	assertSelected("stale index (adapter target bumped)", ids, true)
 
-	ids, err = s.ListStaleAdapterSessions(ctx, settled, nil)
+	ids, err = s.ListStaleAdapterSessions(ctx, settled, nil, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleAdapterSessions: %v", err)
 	}
 	assertSelected("stale adapter (settled)", ids, false)
-	ids, err = s.ListStaleAdapterSessions(ctx, bumped, nil)
+	ids, err = s.ListStaleAdapterSessions(ctx, bumped, nil, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleAdapterSessions bumped: %v", err)
 	}
 	assertSelected("stale adapter (adapter target bumped)", ids, true)
 
-	ids, err = s.ListSessionsNeedingRepair(ctx, settled)
+	ids, err = s.ListSessionsNeedingRepair(ctx, settled, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListSessionsNeedingRepair: %v", err)
 	}
@@ -504,17 +504,17 @@ func TestLatestAttemptSettleGatesSelection(t *testing.T) {
 	zeroIndexer := map[ingest.Harness]ingest.HarvesterVersions{
 		ingest.Harness("claude-code"): {IndexerVersion: 0, AdapterVersion: 2},
 	}
-	ids, err = s.ListStaleIndexSessions(ctx, zeroAdapter)
+	ids, err = s.ListStaleIndexSessions(ctx, zeroAdapter, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions with a zero adapter target: %v", err)
 	}
 	assertSelected("stale index (zero adapter target)", ids, true)
-	ids, err = s.ListStaleAdapterSessions(ctx, zeroIndexer, nil)
+	ids, err = s.ListStaleAdapterSessions(ctx, zeroIndexer, nil, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleAdapterSessions with a zero producer target: %v", err)
 	}
 	assertSelected("stale adapter (zero producer target)", ids, true)
-	ids, err = s.ListSessionsNeedingRepair(ctx, zeroAdapter)
+	ids, err = s.ListSessionsNeedingRepair(ctx, zeroAdapter, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListSessionsNeedingRepair with a zero adapter target: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestLatestAttemptSettleGatesSelection(t *testing.T) {
 UPDATE sessions SET publication_capture_revision = 7, indexed_publication_capture_revision = 0, cwd_provenance_kind = 'source_exact', session_cwd = '/tmp/gen' WHERE session_id = '`+string(sid)+`';
 INSERT INTO session_publication_metadata(capture_revision, schema_version, metadata_json, metadata_hash, content_hash, captured_at, session_id)
 VALUES (7, `+strconv.Itoa(int(ingest.CurrentSchemaVersion))+`, '{"seed":true}', '`+strings.Repeat("c", 64)+`', '`+strings.Repeat("d", 64)+`', 1700000000000, '`+string(sid)+`');`)
-	ids, err = s.ListSessionsNeedingRepair(ctx, settled)
+	ids, err = s.ListSessionsNeedingRepair(ctx, settled, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListSessionsNeedingRepair with a pending binding: %v", err)
 	}

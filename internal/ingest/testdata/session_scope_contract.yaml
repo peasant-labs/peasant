@@ -1,0 +1,104 @@
+# Contract cases for the session scope, the two run refusals, and the cohort
+# report's processed/upkeep split.
+#
+# A scope's ids are stated once and asserted as a set in sorted order: the
+# contract is sorted, deduplicated, and a copy, so a case that keeps the input
+# order or hands out its own slice fails here.
+#
+# runRefusals covers what a caller can reach from outside the package: the zero
+# scope, and a valid scope beside an allowlist. The one shape that needs the
+# unexported fields — ids with an unset policy — is exercised by the white-box
+# test beside this one.
+#
+# report members state role and outcome together, because the split is defined
+# on the pair: a context member is never processed, and only a selected or child
+# member that could not be re-read joins the upkeep set beyond processed.
+construction:
+  - name: sorted-deduplicated-and-copied
+    ids:
+      - 6f1d8c2e-0b47-4c9a-9e51-2a3b4c5d6e7f
+      - 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+      - 6f1d8c2e-0b47-4c9a-9e51-2a3b4c5d6e7f
+    related: include
+    wantIDs:
+      - 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+      - 6f1d8c2e-0b47-4c9a-9e51-2a3b4c5d6e7f
+  - name: refuses-no-ids
+    ids: []
+    related: include
+    wantError: names no sessions
+  - name: refuses-unset-policy
+    ids:
+      - 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+    related: ""
+    wantError: carries no related policy
+  - name: refuses-empty-id
+    ids:
+      - ""
+      - 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+    related: exclude
+    wantError: empty session id at position 0
+
+runRefusals:
+  - name: refuses-empty-scope
+    scope: zero
+    wantError: names no sessions
+  - name: refuses-scope-and-allowlist
+    scope: built
+    ids:
+      - 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+    allowed:
+      - 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+    wantError: sets both Scope and AllowedSessionIDs
+
+report:
+  - name: unreadable-selected-and-child-are-upkeep-not-processed
+    members:
+      - id: 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+        role: selected
+        outcome: stored-path
+      - id: 9ab1c2d3-4e5f-4a60-b71c-8d9e0f1a2b3c
+        role: child
+        outcome: stored-unreadable
+      - id: c7d2e3f4-5a6b-4c70-8d1e-2f3a4b5c6d7e
+        role: context
+        outcome: direct-lookup
+      - id: 3e4f5a6b-7c8d-4e90-8f1a-2b3c4d5e6f70
+        role: selected
+        outcome: stored-unreadable
+      - id: 5a6b7c8d-9e0f-4a10-8b2c-3d4e5f6a7b80
+        role: ancestor
+        outcome: direct-lookup
+    wantProcessed:
+      - 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+      - 5a6b7c8d-9e0f-4a10-8b2c-3d4e5f6a7b80
+    wantUpkeep:
+      - 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+      - 9ab1c2d3-4e5f-4a60-b71c-8d9e0f1a2b3c
+      - 3e4f5a6b-7c8d-4e90-8f1a-2b3c4d5e6f70
+      - 5a6b7c8d-9e0f-4a10-8b2c-3d4e5f6a7b80
+  - name: context-members-are-in-neither-set
+    members:
+      - id: 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+        role: context
+        outcome: direct-lookup
+      - id: 9ab1c2d3-4e5f-4a60-b71c-8d9e0f1a2b3c
+        role: context
+        outcome: stored-unreadable
+    wantProcessed: []
+    wantUpkeep: []
+  - name: duplicate-member-id-collapses-to-one
+    members:
+      - id: 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+        role: selected
+        outcome: stored-path
+      - id: 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+        role: child
+        outcome: stored-path
+      - id: 9ab1c2d3-4e5f-4a60-b71c-8d9e0f1a2b3c
+        role: context
+        outcome: direct-lookup
+    wantProcessed:
+      - 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60
+    wantUpkeep:
+      - 0f3c1a2b-4d5e-4f60-8a71-9b2c3d4e5f60

@@ -436,7 +436,7 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	// target came back; a truncated page would drop entries and read as a
 	// mismatch for the wrong reason.
 	incompleteLimit := len(fixture.Cases) + 1
-	incomplete, err := database.ListContentCaptureIncompleteSessionsAfter(t.Context(), "", incompleteLimit)
+	incomplete, err := database.ListContentCaptureIncompleteSessionsAfter(t.Context(), "", incompleteLimit, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatal(err)
 	}
