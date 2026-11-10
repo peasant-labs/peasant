@@ -279,7 +279,7 @@ func decodeOpenCodeCurrentJSON(raw []byte, target any) error {
 	return nil
 }
 
-func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate) (discovered []DiscoveredSession, err error) {
+func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate) (discovered []openCodeSessionSource, err error) {
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
 		return nil, err
@@ -295,7 +295,7 @@ func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, source Open
 			if idErr != nil {
 				return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q found session identifier %q that Peasant cannot store: %w; no partial discovery result is eligible; repair the upstream identifier or use a supported export", candidate.Path, currentID.String(), idErr)
 			}
-			discovered = append(discovered, DiscoveredSession{SessionID: sessionID, Harness: HarnessOpenCode, SourcePath: ResolvedPath(candidate.Path), SourceFormat: SourceFormatJSON, OriginalRoot: ResolvedPath(filepath.Dir(candidate.Path)), TranscriptOrigin: TranscriptOriginOpenCodeCurrentSQLite})
+			discovered = append(discovered, openCodeSQLiteSessionSource(candidate, sessionID, TranscriptOriginOpenCodeCurrentSQLite))
 		}
 		if page.Next == nil {
 			break
@@ -303,6 +303,19 @@ func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, source Open
 		cursor = page.Next
 	}
 	return discovered, nil
+}
+
+// openCodeSQLiteSessionSource is one enumerated SQLite session before the
+// shared build names it. Both projections build it, so the file, the root and
+// the format of a database-backed session are stated once.
+func openCodeSQLiteSessionSource(candidate OpenCodeCandidate, id SessionID, origin TranscriptOrigin) openCodeSessionSource {
+	return openCodeSessionSource{
+		ID:     id,
+		Path:   ResolvedPath(candidate.Path),
+		Root:   ResolvedPath(filepath.Dir(candidate.Path)),
+		Format: SourceFormatJSON,
+		Origin: origin,
+	}
 }
 
 // currentControlOnlySessions probes each discovered current session for a
@@ -313,10 +326,10 @@ func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, source Open
 // session is treated as substantive so a transient read error never demotes a
 // real current conversation to its legacy sibling, and one diagnostic names the
 // affected session.
-func (a *OpenCodeAdapter) currentControlOnlySessions(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, sessions []DiscoveredSession) map[SessionID]bool {
+func (a *OpenCodeAdapter) currentControlOnlySessions(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, sessions []openCodeSessionSource) map[SessionID]bool {
 	controlOnly := make(map[SessionID]bool, len(sessions))
 	for _, session := range sessions {
-		currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+		currentID, err := NewOpenCodeCurrentSessionID(string(session.ID))
 		if err != nil {
 			// Enumeration already validated the identifier, so this is
 			// unreachable; treat it as substantive rather than demote it.
@@ -324,11 +337,11 @@ func (a *OpenCodeAdapter) currentControlOnlySessions(ctx context.Context, source
 		}
 		hasSubstantive, probeErr := source.CurrentSessionHasSubstantive(ctx, currentID)
 		if probeErr != nil {
-			a.recordCandidateFailure(candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("substantive-row probe failed for current session %q; the session stays a current winner rather than deferring to a legacy sibling", session.SessionID), probeErr)
+			a.recordCandidateFailure(candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("substantive-row probe failed for current session %q; the session stays a current winner rather than deferring to a legacy sibling", session.ID), probeErr)
 			continue
 		}
 		if !hasSubstantive {
-			controlOnly[session.SessionID] = true
+			controlOnly[session.ID] = true
 		}
 	}
 	return controlOnly

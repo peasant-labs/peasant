@@ -583,7 +583,7 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 	// The version-only selector cannot see it, and must not pretend to: the
 	// stamped indexer revision IS the current target, and inventing staleness
 	// there would re-index every unchanged session on every harvest.
-	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry)
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry, ingest.AllStoredSessions())
 	if err != nil || len(stale) != 0 {
 		t.Fatalf("a current indexer revision was reported stale: %v, %v", stale, err)
 	}
@@ -2375,7 +2375,7 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 
 	// ListStaleIndexSessions(currentVersion=2): sessions with version < 2.
 	// Session 2 (v=1) and Session 3 (v=0) should be returned.
-	stale2, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 2}})
+	stale2, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 2}}, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(2): %v", err)
 	}
@@ -2398,7 +2398,7 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 
 	// ListStaleIndexSessions(currentVersion=1): sessions with version < 1.
 	// Only Session 3 (v=0) should be returned.
-	stale1, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 1}})
+	stale1, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 1}}, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(1): %v", err)
 	}
@@ -2457,7 +2457,7 @@ func assertOpenCodeSessionAtIndexVersionIsStale(t *testing.T, storedVersion int,
 		t.Fatalf("UpdateIndexState(opencode, %s): %v", versionLabel, err)
 	}
 
-	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry)
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(current): %v", err)
 	}

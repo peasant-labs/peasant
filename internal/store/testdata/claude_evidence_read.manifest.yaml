@@ -1,0 +1,3 @@
+requiredNames:
+  - present_and_absent_paths
+  - empty_paths_read_nothing

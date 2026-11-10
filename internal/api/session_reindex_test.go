@@ -35,6 +35,7 @@ type sessionReindexCase struct {
 	NeighbourAppendTurns    int    `yaml:"neighbour_append_turns"`
 	Unrecorded              bool   `yaml:"unrecorded"`
 	Busy                    bool   `yaml:"busy"`
+	SourceGone              bool   `yaml:"source_gone"`
 	HarvestLockHeld         bool   `yaml:"harvest_lock_held"`
 	Timeout                 string `yaml:"timeout"`
 	Status                  int    `yaml:"status"`
@@ -216,6 +217,12 @@ func TestSessionReindexRoute(t *testing.T) {
 				appendToFile(t, sessionPath, strings.ReplaceAll(fixture.PartialRecord, "SESSION_ID", sessionID))
 			}
 			appendToFile(t, neighbourPath, fixture.turns(neighbourID, c.NeighbourTurns, c.NeighbourTurns+c.NeighbourAppendTurns))
+			if c.SourceGone {
+				// Claude Code removes old transcripts; the stored copy stays.
+				if err := os.Remove(sessionPath); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			if c.Busy {
 				handler.ingestStatus = "running"

@@ -135,6 +135,41 @@ type ClaudeEvidenceCache interface {
 	// SaveClaudeEvidence writes the records mined during one discovery and
 	// deletes the records whose transcripts are gone.
 	SaveClaudeEvidence(ctx context.Context, upserts []ClaudeTranscriptEvidence, deletes []ResolvedPath) error
+	// LoadClaudeEvidenceFor is a primary-key read of the named paths. A path
+	// that is not cached is absent from the map. It carries the same
+	// best-effort contract as LoadClaudeEvidence: a cache that fails makes
+	// discovery do the full work, which is always correct.
+	LoadClaudeEvidenceFor(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath]ClaudeTranscriptEvidence, error)
+}
+
+// ClaudeEvidenceCompleteness is the optional capability a cache implements to
+// say whether a whole-table load returned every stored row.
+//
+// LoadClaudeEvidence skips a row this build cannot parse, so a successful load
+// can be a STRICT SUBSET of the store. A caller that takes its identity counts
+// from the store must not read that subset as "the rows this run replaced" and
+// add its own records again: every path the load did not cover would be
+// double-booked. The production store implements it; an in-memory double that
+// returns every record it holds is complete by construction and need not.
+type ClaudeEvidenceCompleteness interface {
+	// LoadClaudeEvidenceCompletely returns every cached record and reports
+	// whether the load returned every stored row. A false second result still
+	// returns the readable rows, so a caller can fall back to its own view.
+	LoadClaudeEvidenceCompletely(ctx context.Context) (map[ResolvedPath]ClaudeTranscriptEvidence, bool, error)
+	// LoadClaudeEvidenceForCompletely is the same for a named path set. A path
+	// with no stored row is absent and does not make the read incomplete; a
+	// stored row this build cannot parse does.
+	LoadClaudeEvidenceForCompletely(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath]ClaudeTranscriptEvidence, bool, error)
+}
+
+// ClaudeSpawnContributionReader is the store capability the teammate-link
+// count delta uses for the STORED spawn side. It reads claude_teammate_spawns
+// by transcript path, so the delta stays exact even when a transcript's
+// spawns_json cannot be parsed: the derived projection, not the evidence
+// column, is the stored answer. Absent, the delta cannot be exact and the link
+// step refuses instead of guessing.
+type ClaudeSpawnContributionReader interface {
+	ClaudeTeammateSpawnsForPaths(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath][]ClaudeTeammateIdentity, error)
 }
 
 // ClaudeEvidenceCaching is implemented by an adapter that can reuse mined

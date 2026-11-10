@@ -1,0 +1,166 @@
+# V70 adds the derived lookup tables: a partial root-identity index on
+# claude_transcript_evidence, the claude_teammate_spawns projection with its
+# backfill, and the codex_rollout_catalog file catalog. The fixture seeds a V69
+# store through raw SQL, then asserts what the migration, the maintenance
+# writer, and the rebuild leave.
+#
+# Deletion protection is by required NAME, never a declared count. The
+# `evidence` rows are the authoritative input; `expected_spawns` is the
+# projection a correct derivation leaves and `walk` is the enumerated rollout
+# set the rebuild is handed. The subagent row deliberately records spawns: only
+# a root transcript may project them, so deleting the scope filter from the
+# backfill or the rebuild changes the table.
+
+requiredNames:
+  - upgrade-backfills-spawns-from-root-evidence
+  - duplicate-team-name-pair-is-deduped
+  - upgrade-leaves-codex-catalog-empty
+  - rebuild-refuses-an-incomplete-walk
+  - rebuild-replaces-a-corrupted-spawns-table
+  - rebuild-replaces-a-corrupted-rollout-catalog
+  - pruning-evidence-cascades-to-spawns
+
+# ORDER IS LOAD-BEARING. The runner executes these in declaration order:
+#   1. the three upgrade assertions read the state the backfill left, before
+#      any expectation writes;
+#   2. rebuild-refuses-an-incomplete-walk plants the corruption and proves the
+#      refusal leaves it untouched;
+#   3. rebuild-replaces-a-corrupted-spawns-table re-plants idempotently and
+#      repairs, so it depends on the state the refusal left;
+#   4. rebuild-replaces-a-corrupted-rollout-catalog reads what that rebuild wrote;
+#   5. prune-cascade runs last because it deletes an evidence row the earlier
+#      assertions read.
+expectations:
+  - name: upgrade-backfills-spawns-from-root-evidence
+    kind: spawns-backfill
+  - name: duplicate-team-name-pair-is-deduped
+    kind: duplicate-dedupe
+  - name: upgrade-leaves-codex-catalog-empty
+    kind: catalog-empty
+  - name: rebuild-refuses-an-incomplete-walk
+    kind: rebuild-refuses-incomplete-walk
+  - name: rebuild-replaces-a-corrupted-spawns-table
+    kind: rebuild-spawns
+  - name: rebuild-replaces-a-corrupted-rollout-catalog
+    kind: rebuild-catalog
+  - name: pruning-evidence-cascades-to-spawns
+    kind: prune-cascade
+
+# Two root transcripts declare identity and record spawns; one subagent
+# transcript records spawns that must never be projected. The first root
+# deliberately repeats one (team, name), which is the state mining can produce.
+evidence:
+  - source_path: /synthetic/claude/root-a.jsonl
+    scope: root
+    identity_team: alpha
+    identity_name: lead
+    spawns:
+      - {team: beta, name: reviewer}
+      - {team: beta, name: reviewer}
+      - {team: gamma, name: tester}
+  - source_path: /synthetic/claude/child-a.jsonl
+    scope: subagent
+    identity_team: beta
+    identity_name: reviewer
+    spawns:
+      - {team: subagent-only, name: hidden}
+  - source_path: /synthetic/claude/root-b.jsonl
+    scope: root
+    identity_team: null
+    identity_name: null
+    spawns:
+      - {team: delta, name: builder}
+
+expected_spawns:
+  - {spawner_path: /synthetic/claude/root-a.jsonl, team: beta, name: reviewer}
+  - {spawner_path: /synthetic/claude/root-a.jsonl, team: gamma, name: tester}
+  - {spawner_path: /synthetic/claude/root-b.jsonl, team: delta, name: builder}
+
+# The pair the first root records twice; exactly one projected row may carry it.
+duplicate_probe:
+  spawner_path: /synthetic/claude/root-a.jsonl
+  team: beta
+  name: reviewer
+
+# The evidence row the production prune deletes; its spawn rows must go with it.
+prune_probe:
+  spawner_path: /synthetic/claude/root-b.jsonl
+
+# The full walk's enumerated rollouts. A stored path and a discovered path that
+# was never stored both belong in the catalog. The second id deliberately
+# differs from its file-name UUID, so the catalog assertion cannot pass by
+# echoing an id derived from the path. The rebuild replaces the table with
+# exactly this set, so the caller must pass the complete walk: a filtered or
+# partial set deletes the omitted rows.
+walk:
+  - {path: /synthetic/codex/2026/01/01/rollout-2026-01-01T00-00-00-11111111.jsonl, session_id: 11111111-1111-4111-8111-111111111111}
+  - {path: /synthetic/codex/2026/01/02/rollout-2026-01-02T00-00-00-22222222.jsonl, session_id: 44444444-4444-4444-8444-444444444444}
+
+expected_catalog:
+  - {path: /synthetic/codex/2026/01/01/rollout-2026-01-01T00-00-00-11111111.jsonl, session_id: 11111111-1111-4111-8111-111111111111}
+  - {path: /synthetic/codex/2026/01/02/rollout-2026-01-02T00-00-00-22222222.jsonl, session_id: 44444444-4444-4444-8444-444444444444}
+
+# The upgrade backfills no catalog row: a path that was never stored is not in
+# the database, so the table starts empty and stays empty until a discovery
+# walk enumerates rollouts.
+expected_catalog_on_upgrade: []
+
+# An entry the rebuild must refuse: the catalog exists to answer by id, so a
+# row without one is incomplete. The refusal must land before the catalog it
+# governs is cleared, and the transaction must leave both tables as they were.
+invalid_walk_entry:
+  path: /synthetic/codex/2026/01/03/rollout-2026-01-03T00-00-00-incomplete.jsonl
+  session_id: ""
+
+# Rows no source derives: a pair the root never spawned, and a pair attributed
+# to the subagent transcript. The rebuild must remove both.
+corrupt_spawns:
+  - {spawner_path: /synthetic/claude/root-a.jsonl, team: omega, name: ghost}
+  - {spawner_path: /synthetic/claude/child-a.jsonl, team: shadow, name: stale}
+
+# A rollout path the walk does not enumerate. The rebuild must remove it.
+corrupt_catalog:
+  - {path: /synthetic/codex/2026/01/03/rollout-2026-01-03T00-00-00-33333333.jsonl, session_id: 33333333-3333-4333-8333-333333333333}
+
+# Saves driven through the production writer, with no seam stub: each row names
+# one save and the exact projection it must leave. The re-save removes a pair
+# the transcript no longer records, the subagent save carries non-empty spawns
+# that a root-only projection must drop, and the last step re-saves an existing
+# root path as a subagent so the projection must end empty.
+required_maintenance_names:
+  - root-save-projects-every-recorded-pair
+  - resave-drops-a-pair-the-transcript-no-longer-records
+  - a-subagent-save-projects-no-spawns
+  - resaving-a-root-path-as-a-subagent-drops-its-spawns
+
+maintenance_steps:
+  - name: root-save-projects-every-recorded-pair
+    source_path: /synthetic/claude/maintenance-root.jsonl
+    scope: root
+    spawns:
+      - {team: beta, name: reviewer}
+      - {team: beta, name: reviewer}
+      - {team: gamma, name: tester}
+    expected_spawns:
+      - {spawner_path: /synthetic/claude/maintenance-root.jsonl, team: beta, name: reviewer}
+      - {spawner_path: /synthetic/claude/maintenance-root.jsonl, team: gamma, name: tester}
+  - name: resave-drops-a-pair-the-transcript-no-longer-records
+    source_path: /synthetic/claude/maintenance-root.jsonl
+    scope: root
+    spawns:
+      - {team: gamma, name: tester}
+    expected_spawns:
+      - {spawner_path: /synthetic/claude/maintenance-root.jsonl, team: gamma, name: tester}
+  - name: a-subagent-save-projects-no-spawns
+    source_path: /synthetic/claude/maintenance-child.jsonl
+    scope: subagent
+    spawns:
+      - {team: beta, name: reviewer}
+    expected_spawns:
+      - {spawner_path: /synthetic/claude/maintenance-root.jsonl, team: gamma, name: tester}
+  - name: resaving-a-root-path-as-a-subagent-drops-its-spawns
+    source_path: /synthetic/claude/maintenance-root.jsonl
+    scope: subagent
+    spawns:
+      - {team: beta, name: reviewer}
+    expected_spawns: []

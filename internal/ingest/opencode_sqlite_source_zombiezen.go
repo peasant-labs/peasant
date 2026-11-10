@@ -94,6 +94,35 @@ const (
 	openCodeSessionV2ModelRangeStatement       = "SELECT id, model FROM session_v2 WHERE id >= ?1 AND id <= ?2 ORDER BY id LIMIT ?3"
 )
 
+// The parent page reads the rows whose parent link names one session. Each
+// statement is a compile-time constant, the projection is the one the exact-row
+// read uses for the same table, and the only bound values are the parent id, the
+// keyset cursor and the page bound. The first page passes the empty string as
+// its cursor: every validated session id is non-empty, so the empty string sorts
+// before all of them and one constant covers the whole page sequence.
+//
+// The harness database is external and read-only, and parent_id carries no index
+// upstream, so every page of this read scans that database's session table. The
+// caller pages to completion, so a parent with N children costs ceil(N/128)
+// scans of the harness table per supported table. That is a bounded read of the
+// harness source, never a scan of the peasant store.
+const (
+	openCodeSessionChildrenClockStatement         = "SELECT id, time_updated FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionChildrenParentStatement        = "SELECT id, parent_id FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionChildrenParentClockStatement   = "SELECT id, parent_id, time_updated FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionChildrenAttributionStatement   = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionChildrenExtendedStatement      = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionChildrenExtendedModelStatement = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+
+	openCodeSessionV2ChildrenIDsStatement           = "SELECT id FROM session_v2 WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionV2ChildrenClockStatement         = "SELECT id, time_updated FROM session_v2 WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionV2ChildrenParentStatement        = "SELECT id, parent_id FROM session_v2 WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionV2ChildrenParentClockStatement   = "SELECT id, parent_id, time_updated FROM session_v2 WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionV2ChildrenAttributionStatement   = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session_v2 WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionV2ChildrenExtendedStatement      = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session_v2 WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeSessionV2ChildrenExtendedModelStatement = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, model FROM session_v2 WHERE parent_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+)
+
 type zombiezenOpenCodeSQLiteSource struct {
 	path    OpenCodeSQLiteSourcePath
 	options OpenCodeSQLiteSourceOptions
@@ -563,6 +592,13 @@ func validateLegacySessionPartPageRequest(request OpenCodeLegacySessionPartPageR
 // SessionRecords pages one supported metadata table. By default V2 wins,
 // including an empty table; an explicit legacy request lets discovery retain
 // live V1-only identities without changing shared IDs' V2 metadata preference.
+//
+// The same columns serve three reads: the whole table in identifier order, one
+// exact row for a captured session, and one parent's children in identifier
+// order. The parent page is a keyset page like the whole-table read, so it is
+// bounded by the page size and always advances; its projection is the one the
+// exact-row read would use for the same table, so a child row carries the same
+// fields as its own row read.
 func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, request OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
 	var cursor *string
 	if request.After != nil {
@@ -570,6 +606,14 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	}
 	if err := validateOpenCodeCurrentBoundedPage(request.PageSize.value, cursor, "session record cursor"); err != nil {
 		return OpenCodeSessionRecordPage{}, err
+	}
+	if request.SessionID != nil && request.ParentID != nil {
+		return OpenCodeSessionRecordPage{}, fmt.Errorf("read bounded session records failed before source access: the request names both an exact session and a parent, so it asks for one row and for that session's children at once; no row was read; set only SessionID or only ParentID")
+	}
+	if request.ParentID != nil {
+		if err := validateOpenCodeCurrentToken("parent session identifier", request.ParentID.value); err != nil {
+			return OpenCodeSessionRecordPage{}, err
+		}
 	}
 	lease, err := s.beginSourceRead(ctx, "read bounded session record page")
 	if err != nil {
@@ -660,6 +704,62 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 				err = s.executeRowsLocked(lease.ctx, "SELECT id, parent_id FROM session WHERE id = ?1", args, decode)
 			default:
 				err = s.executeRowsLocked(lease.ctx, "SELECT id, time_updated FROM session WHERE id = ?1", args, decode)
+			}
+		}
+	} else if request.ParentID != nil {
+		if !hasParent {
+			// The table records no parent link, so it can name no children.
+			return page, nil
+		}
+		cursorID := ""
+		if request.After != nil {
+			cursorID = request.After.sessionID.value
+		}
+		args := []any{request.ParentID.value, cursorID, request.PageSize.value + 1}
+		if support.table == OpenCodeSessionTableV2 {
+			switch {
+			case readExtended && support.hasModel:
+				projection = "session_v2 extended attribution and model by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ChildrenExtendedModelStatement, args, decode)
+			case readExtended:
+				projection = "session_v2 extended attribution by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ChildrenExtendedStatement, args, decode)
+			case readAttribution:
+				projection = "session_v2(id, parent_id, time_updated, directory, title, time_created) by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ChildrenAttributionStatement, args, decode)
+			case hasParent && hasClock:
+				projection = "session_v2(id, parent_id, time_updated) by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ChildrenParentClockStatement, args, decode)
+			case hasParent:
+				projection = "session_v2(id, parent_id) by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ChildrenParentStatement, args, decode)
+			case hasClock:
+				projection = "session_v2(id, time_updated) by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ChildrenClockStatement, args, decode)
+			default:
+				projection = "session_v2(id) by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ChildrenIDsStatement, args, decode)
+			}
+		} else {
+			switch {
+			case readExtended && support.hasModel:
+				projection = "session extended attribution and model by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionChildrenExtendedModelStatement, args, decode)
+			case readExtended:
+				projection = "session extended attribution by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionChildrenExtendedStatement, args, decode)
+			case readAttribution:
+				projection = "session(id, parent_id, time_updated, directory, title, time_created) by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionChildrenAttributionStatement, args, decode)
+			case hasParent && hasClock:
+				projection = "session(id, parent_id, time_updated) by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionChildrenParentClockStatement, args, decode)
+			case hasParent:
+				projection = "session(id, parent_id) by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionChildrenParentStatement, args, decode)
+			default:
+				projection = "session(id, time_updated) by parent"
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionChildrenClockStatement, args, decode)
 			}
 		}
 	} else if support.table == OpenCodeSessionTableV2 {

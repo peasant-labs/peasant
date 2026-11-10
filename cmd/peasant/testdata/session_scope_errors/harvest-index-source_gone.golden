@@ -1,0 +1,14 @@
+peasant: session 5a1f... was not read again, so its indexed copy was kept
+  what:     this session-scoped harvest index kept the indexed copy of session 5a1f... and did not re-read its saved pair
+  why:      the saved pair recorded for this session is no longer there:
+            /sandbox/data/peasant/peasant-sync/__peasant-untracked__--host--workspace/5a1f0c3e-7b2d-4e8a-9c61-0d4b3e2f1a70/5a1f0c3e-7b2d-4e8a-9c61-0d4b3e2f1a70--metadata.json
+  where:    session lookup (ingest scoped locate)
+  when:     before the saved pair was indexed; its transcript was not re-read or re-indexed
+  impact:   the stored transcript, its index and its links were not recomputed, and `peasant open`
+            shows the stored copy. The bookkeeping a full harvest does for a recorded session (its
+            origin verdict, its metrics, and stored-copy maintenance) ran for it as in a full
+            harvest. Start-up maintenance may also have run.
+  fix:      nothing is needed to keep using the indexed copy. To index this session again, restore
+            its saved pair at that path, then run
+            `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' harvest index --session 5a1f0c3e-7b2d-4e8a-9c61-0d4b3e2f1a70`
+            again

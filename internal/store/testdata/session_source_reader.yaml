@@ -1,0 +1,149 @@
+sessions:
+  - name: parent
+    id: "11111111-1111-4111-8111-111111111111"
+    harness: codex
+    project: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sourcePath: /synthetic/sessions/parent.jsonl
+    parent: ""
+    cacheParent: false
+    relationshipEvidence: false
+    publicationParent: ""
+  - name: cachedChild
+    id: "22222222-2222-4222-8222-222222222222"
+    harness: codex
+    project: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sourcePath: /synthetic/sessions/cached-child.jsonl
+    parent: parent
+    cacheParent: true
+    relationshipEvidence: false
+    publicationParent: ""
+  - name: relationshipChild
+    id: "33333333-3333-4333-8333-333333333333"
+    harness: codex
+    project: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sourcePath: /synthetic/sessions/relationship-child.jsonl
+    parent: parent
+    cacheParent: false
+    relationshipEvidence: true
+    publicationParent: ""
+  - name: publicationChild
+    id: "44444444-4444-4444-8444-444444444444"
+    harness: opencode
+    project: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sourcePath: /synthetic/sessions/publication-child.jsonl
+    parent: parent
+    cacheParent: false
+    relationshipEvidence: false
+    publicationParent: parent
+  - name: unrelated
+    id: "55555555-5555-4555-8555-555555555555"
+    harness: codex
+    project: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    sourcePath: /synthetic/sessions/unrelated.jsonl
+    parent: ""
+    cacheParent: false
+    relationshipEvidence: false
+    publicationParent: ""
+  - name: unstoredParent
+    id: "66666666-6666-4666-8666-666666666666"
+    harness: codex
+    project: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sourcePath: /synthetic/sessions/unstored-parent.jsonl
+    parent: ""
+    cacheParent: false
+    relationshipEvidence: false
+    publicationParent: ""
+  - name: orphanChild
+    id: "77777777-7777-4777-8777-777777777777"
+    harness: codex
+    project: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    sourcePath: /synthetic/sessions/orphan-child.jsonl
+    parent: unstoredParent
+    cacheParent: false
+    relationshipEvidence: true
+    publicationParent: ""
+
+cases:
+  - name: sources_primary_key_batch
+    kind: sources
+    seed:
+      - parent
+      - cachedChild
+    ids:
+      - parent
+      - cachedChild
+    wantSources:
+      - session: parent
+        harness: codex
+        path: /synthetic/sessions/parent.jsonl
+        parent: ""
+      - session: cachedChild
+        harness: codex
+        path: /synthetic/sessions/cached-child.jsonl
+        parent: parent
+
+  - name: sources_empty_input
+    kind: sources
+    seed:
+      - parent
+    ids: []
+    wantSources: []
+
+  - name: children_cached_parent
+    kind: children
+    seed:
+      - parent
+      - cachedChild
+    parents:
+      - parent
+    wantChildren:
+      parent:
+        - cachedChild
+
+  - name: children_uncached_relationship_evidence
+    kind: children
+    seed:
+      - parent
+      - relationshipChild
+    parents:
+      - parent
+    wantChildren:
+      parent:
+        - relationshipChild
+    wantChildCacheEmpty:
+      - relationshipChild
+
+  - name: children_uncached_publication_metadata
+    kind: children
+    seed:
+      - parent
+      - publicationChild
+    parents:
+      - parent
+    wantChildren:
+      parent:
+        - publicationChild
+    wantChildCacheEmpty:
+      - publicationChild
+
+  - name: children_absent_parent
+    kind: children
+    seed:
+      - parent
+      - unrelated
+    parents:
+      - parent
+    wantChildren:
+      parent: []
+
+  - name: children_uncached_missing_parent_row
+    kind: children
+    seed:
+      - orphanChild
+    parents:
+      - unstoredParent
+    wantChildren:
+      unstoredParent:
+        - orphanChild
+    wantChildCacheEmpty:
+      - orphanChild

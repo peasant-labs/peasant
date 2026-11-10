@@ -68,12 +68,12 @@ type openCodeLegacyProjectionPart struct {
 	Data        json.RawMessage `json:"data"`
 }
 
-func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate) ([]DiscoveredSession, error) {
+func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate) ([]openCodeSessionSource, error) {
 	pageSize, err := NewOpenCodeLegacyPageSize(openCodeLegacyMaterializePage)
 	if err != nil {
 		return nil, err
 	}
-	var discovered []DiscoveredSession
+	var discovered []openCodeSessionSource
 	var cursor *OpenCodeLegacySessionCursor
 	for {
 		page, readErr := source.LegacySessionIDs(ctx, OpenCodeLegacySessionPageRequest{PageSize: pageSize, After: cursor})
@@ -85,15 +85,7 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, source OpenC
 			if idErr != nil {
 				return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q found session identifier %q that Peasant cannot store: %w; no partial discovery result is eligible; repair the upstream identifier or use a supported export", candidate.Path, legacyID.String(), idErr)
 			}
-			session := DiscoveredSession{
-				SessionID:        sessionID,
-				Harness:          HarnessOpenCode,
-				SourcePath:       ResolvedPath(candidate.Path),
-				SourceFormat:     SourceFormatJSON,
-				OriginalRoot:     ResolvedPath(filepath.Dir(candidate.Path)),
-				TranscriptOrigin: TranscriptOriginOpenCodeLegacySQLite,
-			}
-			discovered = append(discovered, session)
+			discovered = append(discovered, openCodeSQLiteSessionSource(candidate, sessionID, TranscriptOriginOpenCodeLegacySQLite))
 		}
 		if page.Next == nil {
 			break

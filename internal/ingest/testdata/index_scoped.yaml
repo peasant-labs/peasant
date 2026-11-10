@@ -1,0 +1,373 @@
+# `harvest index --session` locates the saved pair of each named session from
+# the location the database records, probes the retained tree only when the
+# session is unrecorded, and never walks the output root. Every scoped case
+# asserts zero WalkDir under that root; the unscoped `--all` case asserts the
+# whole-tree reader ran and the derived lookup tables were rebuilt.
+#
+# `pairs` are the saved pairs written to the retained tree; `stored` are the
+# database rows. A pair's `parent` places it under the subagent layout
+# ({host}/{parent}/subagents/{session}), which is where a subagent pair lives.
+# `selected` names the sessions the scope carries. `wantMembers` is the exact
+# cohort report; `wantProcessed` is the set DIFF through INDEX may work on;
+# `wantMisses` is the exact refusal.
+requiredNames:
+  - stored-pair-reconstructs-without-walking
+  - stored-child-pair-reconstructs-without-walking
+  - unstored-pair-found-by-host-probe
+  - subagent-pair-without-row-is-a-miss
+  - stored-pair-gone-is-unreadable
+  - stored-harness-disabled-is-unreadable
+  - stored-ancestor-stops-the-walk
+  - unstored-ancestor-pair-joins-the-cohort
+  - related-exclude-keeps-only-the-selected
+  - session-outside-since-is-a-miss
+  - all-rebuilds-derived-lookups
+  - all-refuses-a-partial-codex-walk
+  - all-without-a-codex-source-keeps-the-catalog
+  - all-with-a-disabled-codex-entry-keeps-the-catalog
+  - all-refuses-when-codex-is-enabled-without-an-adapter
+cases:
+  - name: stored-pair-reconstructs-without-walking
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    selected: ["11111111-1111-4111-8111-111111111111"]
+    related: include
+    force: true
+    wantMembers:
+      - session: "11111111-1111-4111-8111-111111111111"
+        outcome: stored-path
+        role: selected
+    wantProcessed: ["11111111-1111-4111-8111-111111111111"]
+
+  - name: stored-child-pair-reconstructs-without-walking
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: "11111111-1111-4111-8111-111111111111"
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: "11111111-1111-4111-8111-111111111111"
+    selected: ["11111111-1111-4111-8111-111111111111"]
+    related: include
+    force: true
+    wantMembers:
+      - session: "11111111-1111-4111-8111-111111111111"
+        outcome: stored-path
+        role: selected
+      - session: "22222222-2222-4222-8222-222222222222"
+        outcome: stored-path
+        role: child
+    wantProcessed:
+      - "11111111-1111-4111-8111-111111111111"
+      - "22222222-2222-4222-8222-222222222222"
+
+  # Two host directories, and the pair lives under the second. The probe is
+  # bounded by the host list and reads no directory below it.
+  - name: unstored-pair-found-by-host-probe
+    pairs:
+      - session: "44444444-4444-4444-8444-444444444444"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+      - session: "33333333-3333-4333-8333-333333333333"
+        host: "github.com--other--second"
+        parent: ""
+    selected: ["33333333-3333-4333-8333-333333333333"]
+    related: include
+    force: true
+    wantMembers:
+      - session: "33333333-3333-4333-8333-333333333333"
+        outcome: direct-lookup
+        role: selected
+    wantProcessed: ["33333333-3333-4333-8333-333333333333"]
+
+  # A subagent pair lives under its parent's directory, so an unrecorded
+  # subagent cannot be found by name. The refusal names the full index.
+  - name: subagent-pair-without-row-is-a-miss
+    pairs:
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: "11111111-1111-4111-8111-111111111111"
+    selected: ["22222222-2222-4222-8222-222222222222"]
+    related: include
+    force: true
+    wantMisses:
+      - session: "22222222-2222-4222-8222-222222222222"
+        reason: not-found
+
+  # The row is recorded but its saved pair is gone. Its native source is still
+  # present, which must not turn this into a re-ingest.
+  - name: stored-pair-gone-is-unreadable
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+        nativeSource: true
+    selected: ["11111111-1111-4111-8111-111111111111"]
+    related: include
+    force: true
+    wantMembers:
+      - session: "11111111-1111-4111-8111-111111111111"
+        outcome: stored-unreadable
+        role: selected
+        reason: source-gone
+    wantProcessed: []
+    wantNoRecompute: true
+
+  - name: stored-harness-disabled-is-unreadable
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+        harness: codex
+    selected: ["11111111-1111-4111-8111-111111111111"]
+    related: include
+    force: true
+    wantMembers:
+      - session: "11111111-1111-4111-8111-111111111111"
+        outcome: stored-unreadable
+        role: selected
+        reason: harness-disabled
+    wantProcessed: []
+    wantNoRecompute: true
+
+  # A stored child whose parent is recorded: the parent stops the walk and is
+  # not this run's work.
+  - name: stored-ancestor-stops-the-walk
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: "11111111-1111-4111-8111-111111111111"
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: "11111111-1111-4111-8111-111111111111"
+    selected: ["22222222-2222-4222-8222-222222222222"]
+    related: include
+    force: true
+    wantMembers:
+      - session: "22222222-2222-4222-8222-222222222222"
+        outcome: stored-path
+        role: selected
+    wantProcessed: ["22222222-2222-4222-8222-222222222222"]
+
+  # A child recorded before its parent names the parent in durable evidence
+  # while its parent cache is nil. The parent is unrecorded, but its saved pair
+  # is on disk, so it joins the cohort as an ancestor.
+  - name: unstored-ancestor-pair-joins-the-cohort
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+        logicalParent: "11111111-1111-4111-8111-111111111111"
+    selected: ["22222222-2222-4222-8222-222222222222"]
+    related: include
+    force: true
+    wantMembers:
+      - session: "22222222-2222-4222-8222-222222222222"
+        outcome: stored-path
+        role: selected
+      - session: "11111111-1111-4111-8111-111111111111"
+        outcome: direct-lookup
+        role: ancestor
+    wantProcessed:
+      - "22222222-2222-4222-8222-222222222222"
+      - "11111111-1111-4111-8111-111111111111"
+
+  - name: related-exclude-keeps-only-the-selected
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: "11111111-1111-4111-8111-111111111111"
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: "11111111-1111-4111-8111-111111111111"
+    selected: ["11111111-1111-4111-8111-111111111111"]
+    related: exclude
+    force: true
+    wantMembers:
+      - session: "11111111-1111-4111-8111-111111111111"
+        outcome: stored-path
+        role: selected
+    wantProcessed: ["11111111-1111-4111-8111-111111111111"]
+
+  - name: session-outside-since-is-a-miss
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    selected: ["11111111-1111-4111-8111-111111111111"]
+    related: include
+    force: true
+    sinceMs: 1708300800001
+    wantMisses:
+      - session: "11111111-1111-4111-8111-111111111111"
+        reason: since-filtered
+
+  # `--all` is the rebuild entry point: unscoped, it walks the tree and rebuilds
+  # both derived lookup tables from the walk it enumerated.
+  - name: all-rebuilds-derived-lookups
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    force: true
+    rebuildAll: true
+    codexSources:
+      - session: "55555555-5555-4555-8555-555555555555"
+        path: "/codex/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl"
+      - session: "66666666-6666-4666-8666-666666666666"
+        path: "/codex/2024/02/20/rollout-2024-02-20T00-00-00-66666666-6666-4666-8666-666666666666.jsonl"
+    # A rollout the walk enumerated that never became a discovered session (a
+    # copy the duplicate stage refuses, or one no harvest stores). It belongs in
+    # the rebuild input, so a rebuild fed the session list instead loses it.
+    codexEnumerationOnly:
+      - session: "77777777-7777-4777-8777-777777777777"
+        path: "/codex/2024/02/20/rollout-2024-02-20T01-00-00-77777777-7777-4777-8777-777777777777.jsonl"
+    wantRebuildCatalog:
+      - "/codex/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl=55555555-5555-4555-8555-555555555555"
+      - "/codex/2024/02/20/rollout-2024-02-20T00-00-00-66666666-6666-4666-8666-666666666666.jsonl=66666666-6666-4666-8666-666666666666"
+      - "/codex/2024/02/20/rollout-2024-02-20T01-00-00-77777777-7777-4777-8777-777777777777.jsonl=77777777-7777-4777-8777-777777777777"
+    # The table equals the enumerated set, including the path no session names.
+    wantCatalogAfter:
+      - "/codex/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl=55555555-5555-4555-8555-555555555555"
+      - "/codex/2024/02/20/rollout-2024-02-20T00-00-00-66666666-6666-4666-8666-666666666666.jsonl=66666666-6666-4666-8666-666666666666"
+      - "/codex/2024/02/20/rollout-2024-02-20T01-00-00-77777777-7777-4777-8777-777777777777.jsonl=77777777-7777-4777-8777-777777777777"
+
+  # A walk that could not read part of the tree reports a partial enumeration.
+  # Replacing the catalog with it would delete the row for every rollout it did
+  # not see, so the run refuses and the table keeps exactly what it held.
+  - name: all-refuses-a-partial-codex-walk
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    force: true
+    rebuildAll: true
+    codexSources:
+      - session: "55555555-5555-4555-8555-555555555555"
+        path: "/codex/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl"
+    codexEnumeration: partial
+    seedCatalog:
+      - session: "55555555-5555-4555-8555-555555555555"
+        path: "/codex/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl"
+      # The rollout inside the directory the partial walk could not read. It is
+      # on disk, so its duplicate answer must survive the refused rebuild.
+      - session: "66666666-6666-4666-8666-666666666666"
+        path: "/codex/2024/02/20/rollout-2024-02-20T00-00-00-66666666-6666-4666-8666-666666666666.jsonl"
+    wantRunErrorContains: "did not enumerate every Codex rollout completely"
+    wantCatalogAfter:
+      - "/codex/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl=55555555-5555-4555-8555-555555555555"
+      - "/codex/2024/02/20/rollout-2024-02-20T00-00-00-66666666-6666-4666-8666-666666666666.jsonl=66666666-6666-4666-8666-666666666666"
+
+  # A run that configures no Codex source has nothing to derive the catalog
+  # from. The rebuild still repairs the teammate spawns and leaves the catalog
+  # exactly as it was, rather than clearing rows no walk re-derived.
+  - name: all-without-a-codex-source-keeps-the-catalog
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    force: true
+    rebuildAll: true
+    codexEnumeration: none
+    seedCatalog:
+      - session: "88888888-8888-4888-8888-888888888888"
+        path: "/codex/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl"
+    wantCatalogAfter:
+      - "/codex/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl=88888888-8888-4888-8888-888888888888"
+
+  # A disabled Codex entry is out of scope, not a source the run failed to walk.
+  # `--all` succeeds and leaves the catalog as it is, even though an adapter for
+  # the harness is registered.
+  - name: all-with-a-disabled-codex-entry-keeps-the-catalog
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    force: true
+    rebuildAll: true
+    codexDisabled: true
+    codexEnumeration: none
+    seedCatalog:
+      - session: "88888888-8888-4888-8888-888888888888"
+        path: "/codex/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl"
+    wantCatalogAfter:
+      - "/codex/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl=88888888-8888-4888-8888-888888888888"
+
+  # An enabled Codex source the run has no adapter for cannot be enumerated at
+  # all, so `--all` cannot rebuild the catalog from it and refuses.
+  - name: all-refuses-when-codex-is-enabled-without-an-adapter
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    force: true
+    rebuildAll: true
+    codexWithoutAdapter: true
+    seedCatalog:
+      - session: "88888888-8888-4888-8888-888888888888"
+        path: "/codex/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl"
+    wantRunErrorContains: "did not enumerate every Codex rollout completely"
+    wantCatalogAfter:
+      - "/codex/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl=88888888-8888-4888-8888-888888888888"

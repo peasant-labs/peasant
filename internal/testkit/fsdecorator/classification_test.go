@@ -47,7 +47,7 @@ func loadDecoratorClassification(t *testing.T) classificationDocument {
 func TestDecoratorClassification_IsCompleteAndResolvable(t *testing.T) {
 	doc := loadDecoratorClassification(t)
 
-	const wantEntries = 28
+	const wantEntries = 29
 	if got := len(doc.Entries); got != wantEntries {
 		t.Fatalf("classification has %d entries, want %d", got, wantEntries)
 	}

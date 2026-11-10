@@ -83,6 +83,7 @@ func (p *Pipeline) resetDiagnostics() {
 	p.diagnostics = nil
 	p.diagnosticSet = nil
 	p.diagnosticSessions = nil
+	p.discoveryDiagnostics = nil
 }
 
 func (p *Pipeline) snapshotDiagnostics() []DiagnosticEntry {

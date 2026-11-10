@@ -276,6 +276,10 @@ var migrationV24 = createSessionCommands + ";\n" +
 // migrationV70 adds the trigger-maintained parent lane (parent_state,
 // resolved_parent_id), the one-row store_state revision, the root and child
 // page indexes, and the backfill. See schema_v70.go.
+// migrationV71 adds the derived lookup objects the scoped harvest reads: the
+// partial teammate-identity index, the claude_teammate_spawns projection with
+// its backfill, and the codex_rollout_catalog file catalog. Create-only and
+// additive; no table is rebuilt. See schema_v71.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -350,6 +354,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV68,
 		migrationV69,
 		migrationV70,
+		migrationV71,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -414,5 +419,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V68: scoped collective observations (additive, no backfill)
 		{DisableForeignKeys: true}, // V69: rebuild session_source_unavailability for the widened reason CHECK
 		nil,                        // V70: parent lane, store revision, page indexes, and backfill (additive, no FK)
+		nil,                        // V71: derived lookup tables (create-only, additive, no data rewrite beyond the spawns backfill)
 	},
 }

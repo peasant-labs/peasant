@@ -100,6 +100,10 @@ type PipelineResult struct {
 	// enumerate. Discovery stayed non-fatal per location, so the run continued;
 	// these records make each skipped location visible to the caller.
 	DiscoveryDiagnostics []DiscoveryDiagnostic
+	// ScopeReport records what a session-scoped run located. It is nil for a
+	// full run, and tagged out of the command JSON so `harvest --format json`
+	// keeps exactly today's fields.
+	ScopeReport *ScopeReport `json:"-"`
 	// Diagnostics carries local nonfatal maintenance warnings to post-render
 	// reporting. It is not a new HTTP/WS or command JSON contract field.
 	Diagnostics []DiagnosticEntry `json:"-"`
@@ -199,10 +203,16 @@ type PipelineConfig struct {
 	// Progress receives ProgressEvents from each pipeline stage.
 	// Nil means no progress reporting.
 	Progress *ProgressState
-	// AllowedSessionIDs restricts which sessions are processed.
+	// AllowedSessionIDs restricts which sessions the run may touch.
 	// nil means all sessions pass the filter (backward compatible).
-	// Non-nil means only sessions in the map are processed.
-	// An empty non-nil map means NO sessions pass.
+	// Non-nil means every discovery-driven session must be in the map.
+	// A session-scoped run sets it to the report's upkeep set: the processed
+	// members plus every recorded member whose source could not be read again,
+	// so store-side upkeep for an unreadable session still runs. An empty
+	// non-nil map means NO session passes.
+	// The session list handed to DIFF holds only the processed members, so this
+	// gate never widens what is processed; it only keeps store passes narrowed
+	// to the set they may touch.
 	AllowedSessionIDs map[SessionID]bool
 	// AllowedSessionIDsIsSelection reports the sessions AllowedSessionIDs
 	// leaves out as excluded by selection rather than unchanged. Kickstart
@@ -228,6 +238,21 @@ type PipelineConfig struct {
 	// selected parent cannot re-admit an exactly denied child. nil means no exact
 	// exclusion filter.
 	SessionExclusionFilter func(DiscoveredSession) bool
+	// Scope narrows the run to named sessions and their related members. nil
+	// means the full run. Build it with NewSessionScope; a scope with no ids or
+	// an unset policy is refused at the start of Run.
+	Scope *SessionScope
+	// Command is the words the user typed that entered this run: "harvest",
+	// "harvest index", or "harvest logs". `open` sets "harvest", because it
+	// re-enters harvest. It exists only to render a scope miss in the words the
+	// user typed.
+	Command string
+	// CommandPrefix is the shell-quoted command that reaches this store, for
+	// example "peasant --data-dir '/srv/peasant'". It is used only inside the
+	// commands a scope message suggests, never in the message label. Empty is
+	// the zero value and renders a bare "peasant"; every command caller sets
+	// it, and the dashboard always sets --data-dir.
+	CommandPrefix string
 }
 
 // Discoverer discovers sessions from configured sources.
@@ -383,10 +408,13 @@ type Pipeline struct {
 	// by adapters during discover(), copied into every PipelineResult so a
 	// skipped database is visible even though discovery stayed non-fatal.
 	discoveryDiagnostics []DiscoveryDiagnostic
-	diagnosticsMu        sync.Mutex
-	diagnostics          []DiagnosticEntry
-	diagnosticSessions   map[sessionDiagnostic]struct{}
-	diagnosticSet        map[DiagnosticEntry]struct{}
+	// scopeReport is what a session-scoped run's LOCATE built. It is nil for a
+	// full run and copied onto PipelineResult at REPORT.
+	scopeReport        *ScopeReport
+	diagnosticsMu      sync.Mutex
+	diagnostics        []DiagnosticEntry
+	diagnosticSessions map[sessionDiagnostic]struct{}
+	diagnosticSet      map[DiagnosticEntry]struct{}
 	// The two maps below record what this harvest has already told the user
 	// about a session's unusable source. They share one mutex because both are
 	// written from the same lanes in the same run.
@@ -724,6 +752,12 @@ func (p *Pipeline) storedParentSet(ctx context.Context, entries []DiffEntry) map
 //  8. REPORT: Return PipelineResult
 //  9. AUDIT: Write ingest_log entry (best-effort)
 func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) {
+	// A scope that cannot narrow a run, or that narrows it twice, is refused
+	// before the run lock and before any stage: a refused run reads no source
+	// and touches no store row.
+	if err := p.config.validateScope(); err != nil {
+		return nil, err
+	}
 	p.resetDiagnostics()
 	p.resetUnavailableSettledThisRun()
 	p.resetUnroutedRepairs()
@@ -753,6 +787,25 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		return p.runReindex(ctx, start)
 	}
 
+	// A session-scoped run locates its cohort first. LOCATE only reads, and it
+	// must finish before the harvest-start sweep, before any deferred write, and
+	// before the audit row: an unusable selection is refused with nothing
+	// recorded. A full run has no located value and keeps DISCOVER below.
+	located, err := p.locateScopedRun(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if located != nil {
+		// A dry run reads the evidence cache so its links are decided exactly,
+		// but it writes nothing: the deferred evidence upserts are what a real
+		// run applies and a forecast must not.
+		if !p.config.DryRun {
+			if err := p.applyDeferredWrites(ctx, located); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// Harvest-start recovery precedes discovery: every session the crash
 	// marker flags is swept before this harvest selects or commits
 	// anything, so crash leftovers recover even when the input is
@@ -763,30 +816,38 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 
 	prog := p.config.Progress
 
-	// Stage 1: DISCOVER
+	// Stage 1: DISCOVER. A session-scoped run already located its cohort, so it
+	// has nothing to discover.
 	discoverProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
-	allSessions, err := p.discover(ctx)
-	if ctx.Err() != nil {
-		err = ctx.Err()
-	}
-	if err != nil {
-		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
-		p.recordIndexProfileStage(StageDiscover, discoverProfileStart, 0, 0)
-		if ctx.Err() != nil || !p.hasUsableRetainedSession(ctx) {
-			if ctx.Err() == nil && p.hasStoredMetricRefresh() {
-				// Native discovery can fail even though stored entries remain
-				// sufficient for downstream retry. Preserve the discovery error.
-				_, _, _, days := p.refreshStoredMetrics(ctx)
-				if len(days) > 0 {
-					if insightErr := p.analyzer.ComputeInsights(ctx, slices.Collect(maps.Keys(days))); insightErr != nil {
-						slog.Warn("harvest: refresh stored-session daily summaries", "error", insightErr)
+	var allSessions []DiscoveredSession
+	var duplicateResults []SessionResult
+	if located != nil {
+		allSessions = located.sessions
+		duplicateResults = located.refusals
+	} else {
+		allSessions, err = p.discover(ctx)
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		if err != nil {
+			emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
+			p.recordIndexProfileStage(StageDiscover, discoverProfileStart, 0, 0)
+			if ctx.Err() != nil || !p.hasUsableRetainedSession(ctx) {
+				if ctx.Err() == nil && p.hasStoredMetricRefresh() {
+					// Native discovery can fail even though stored entries remain
+					// sufficient for downstream retry. Preserve the discovery error.
+					_, _, _, days := p.refreshStoredMetrics(ctx)
+					if len(days) > 0 {
+						if insightErr := p.analyzer.ComputeInsights(ctx, slices.Collect(maps.Keys(days))); insightErr != nil {
+							slog.Warn("harvest: refresh stored-session daily summaries", "error", insightErr)
+						}
 					}
 				}
+				return nil, fmt.Errorf("pipeline discover: %w", err)
 			}
-			return nil, fmt.Errorf("pipeline discover: %w", err)
+			p.reportDiagnostic(DiagnosticEntry{ErrorType: "native_discovery_unavailable", Location: "native discovery", Message: err.Error() + "; continuing maintenance of usable stored sessions", Remediation: "Restore access to the configured harness sources and retry harvest to acquire unseen native changes."})
 		}
-		p.reportDiagnostic(DiagnosticEntry{ErrorType: "native_discovery_unavailable", Location: "native discovery", Message: err.Error() + "; continuing maintenance of usable stored sessions", Remediation: "Restore access to the configured harness sources and retry harvest to acquire unseen native changes."})
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: len(allSessions), Total: len(allSessions)})
 	p.recordIndexProfileStage(StageDiscover, discoverProfileStart, len(allSessions), len(allSessions))
@@ -800,10 +861,12 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			return nil, fmt.Errorf("pipeline prepare session filter after discovery: %w", err)
 		}
 	}
-	// After the selection is prepared, so a duplicate this run does not cover
-	// is skipped by the FILTER stage like any other session instead of failing
-	// a run that was scoped to something else.
-	allSessions, duplicateResults := refuseDuplicateSessionIDs(p.fs, allSessions, p.inRunScope)
+	if located == nil {
+		// After the selection is prepared, so a duplicate this run does not cover
+		// is skipped by the FILTER stage like any other session instead of failing
+		// a run that was scoped to something else.
+		allSessions, duplicateResults = refuseDuplicateSessionIDs(p.fs, allSessions, p.inRunScope)
+	}
 	for _, refused := range duplicateResults {
 		p.reportSessionDiagnostic(refused.SessionID, DiagnosticEntry{ErrorType: "duplicate_session_id", Location: string(refused.Harness) + " " + string(refused.SessionID), Message: refused.Error.Error(), Remediation: "Move one of the files out of the harness directory (keep a copy; it may be the only one) and retry harvest."})
 	}
@@ -1094,6 +1157,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			Duration:             time.Since(start),
 			Sessions:             dryRunSessions,
 			DiscoveryDiagnostics: p.discoveryDiagnostics,
+			ScopeReport:          p.scopeReport,
 		}
 		result.Summary.ReminedEvidenceRecords = p.reminedEvidence
 		result.Summary.HarvesterVersions = maps.Clone(p.versionTargets())
@@ -1326,7 +1390,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		// have captured.
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageContent, Done: len(backfilled), Total: len(backfilled) + remaining})
 		p.recordIndexProfileStage(StageContent, contentProfileStart, len(backfilled), len(backfilled)+remaining)
-		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
+		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets(), p.runStoreScope())
 		if staleErr != nil {
 			slog.Warn("pipeline: list stale index sessions",
 				"error", staleErr,
@@ -1430,14 +1494,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				indexSessions = append(indexSessions, indexedMeta{session: *reconstructed, startMs: startMs, outputTranscriptPath: transcriptPath})
 			}
 		}
-		if selectionSkipped > 0 {
-			p.reportDiagnostic(DiagnosticEntry{
-				ErrorType:   "stale_index_outside_selection",
-				Location:    "stored index maintenance",
-				Message:     fmt.Sprintf("%d stored session(s) outside this run's session selection still need index maintenance (an older indexer revision or an unfinished repair) and were not processed by this run", selectionSkipped),
-				Remediation: "Run peasant harvest index to process every stored session that needs index maintenance, or include these sessions' projects in the kickstart selection and run again.",
-			})
-		}
+		// A scoped run's inventory is the cohort itself, so "outside this run's
+		// selection" describes nothing it could act on; the diagnostic is a
+		// full-run report and is not computed for a scoped run. The missing-input
+		// count below still names a cohort member whose own upkeep could not run.
+		p.reportStaleIndexOutsideSelection(selectionSkipped)
 		if missingInput > 0 {
 			p.reportDiagnostic(DiagnosticEntry{
 				ErrorType:   "stale_index_missing_input",
@@ -2682,6 +2743,22 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		if cache, ok := p.store.(ClaudeEvidenceCache); ok && !p.config.DryRun {
 			AttachClaudeEvidenceCache(adapter, cache)
 		}
+		// The full walk decides teammate links from the store's two indexed
+		// identity counts instead of an in-memory pass over the whole evidence
+		// table. It attaches only beside the evidence cache: a run that reads no
+		// cache (a dry run) mines its own view and links from that.
+		if _, caching := p.store.(ClaudeEvidenceCache); caching && !p.config.DryRun {
+			if derived, ok := p.store.(DerivedLookupReader); ok {
+				AttachClaudeDerivedLookup(adapter, derived)
+			}
+		}
+		// The full Codex walk keeps the derived rollout catalog current, so a
+		// later scoped run can answer the duplicate and parent questions
+		// without walking the sessions tree. A dry run writes nothing, and an
+		// adapter that keeps no catalog ignores the store.
+		if catalog, ok := p.store.(CodexRolloutCatalogStore); ok && !p.config.DryRun {
+			AttachCodexRolloutCatalog(adapter, catalog)
+		}
 		// The local store also answers where a session id already lives, so
 		// cross-run linking can confirm a candidate spawner is really
 		// persisted before trusting it.
@@ -2704,6 +2781,11 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		}
 		if err != nil {
 			providerErrors = append(providerErrors, fmt.Errorf("discover %s: %w", provider, err))
+			// A partial run must say which harness it could not read. The
+			// all-failed case returns the joined error below; a run with at least
+			// one healthy provider otherwise loses every session of this harness
+			// silently and exits 0.
+			p.discoveryDiagnostics = append(p.discoveryDiagnostics, failedProviderDiagnostic(provider, err))
 			continue
 		}
 		// Read the re-mine count immediately after the Discover it describes:
@@ -2740,7 +2822,7 @@ func (p *Pipeline) resolveStoredOrigins(ctx context.Context) (ResolveReport, err
 	if err != nil {
 		return ResolveReport{}, err
 	}
-	report, err := resolver.ResolveStoredOrigins(ctx, OriginRuleVersion)
+	report, err := resolver.ResolveStoredOrigins(ctx, OriginRuleVersion, p.runStoreScope())
 	if err != nil {
 		slog.Warn("ingest: resolve stored session origins",
 			"error", err,
@@ -4565,16 +4647,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	// Clean up orphan project rows (projects with no remaining sessions).
 	// Best-effort: non-fatal; projects from deleted/pruned sessions are removed
 	// so that daily_summary_by_project and the session viewer remain consistent.
-	if p.store != nil {
-		if err := p.store.CleanupOrphanProjects(ctx); err != nil {
-			slog.Warn(logPrefix+": cleanup orphan projects",
-				"error", err,
-				"what", "failed to remove project rows with zero sessions",
-				"why", "DB error during DELETE from projects or daily_summary_by_project",
-				"user_impact", "stale project names may appear in the session viewer filter list",
-				"how_to_fix", "re-run peasant ingest; if persistent, delete the DB at ~/.local/share/peasant/peasant.db and re-ingest")
-		}
-	}
+	p.cleanupOrphanProjects(ctx, logPrefix)
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageCleanup})
 	p.recordIndexProfileStage(StageCleanup, cleanupProfileStart, 1, 1)
 
@@ -4586,6 +4659,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 		Duration:             time.Since(start),
 		IndexLog:             indexLogEntries,
 		DiscoveryDiagnostics: p.discoveryDiagnostics,
+		ScopeReport:          p.scopeReport,
 	}
 	pipelineResult.Summary.StoreError = storeErr
 	pipelineResult.Summary.Indexed = indexed
@@ -5029,6 +5103,33 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 //  4. Write index_log entries, populate PipelineResult.IndexLog
 func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineResult, error) {
 	prog := p.config.Progress
+
+	// `--all` clears the session filters: it rebuilds every saved pair and is
+	// the rebuild entry point, so it is never scoped. A scope that reaches this
+	// path is refused rather than silently dropped, so a run that named
+	// sessions is never answered with a full rebuild.
+	if p.config.RebuildAll {
+		if p.config.Scope != nil {
+			return nil, fmt.Errorf("ingest: `harvest index --all` rebuilds every saved pair and cannot be combined with a session scope; where: ingest.Pipeline.runReindex in internal/ingest/pipeline.go; when: starting a rebuild that also named sessions; impact: no saved pair was read and no store row was written; fix: drop --all to process the named sessions, or drop --session to rebuild every saved pair")
+		}
+		p.config.AllowedSessionIDs = nil
+		p.config.Since = nil
+	}
+
+	// A session-scoped index run resolves its cohort before any stage, so the
+	// content pass and every store-wide pass below see the same upkeep set and a
+	// selection no saved pair can serve is refused with nothing recorded.
+	var scoped *scopedIndexScan
+	if p.config.Scope != nil {
+		found, err := p.scanScopedManagedSessions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		scoped = found
+		p.scopeReport = &found.report
+		p.applyScopeReport(found.report)
+	}
+
 	// harvest index runs the content pass to the end with no budget.
 	contentProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageContent})
@@ -5046,7 +5147,14 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
 	// Content recovery repairs the stored capture only. Every scanned target,
 	// recovered or not, still receives the adapter/indexer evaluation below.
-	scanned := p.scanPeasantSyncSessions(ctx)
+	// A session-scoped run already resolved its pairs from the recorded
+	// locations; the whole-tree reader never runs for it.
+	var scanned []reindexTarget
+	if scoped != nil {
+		scanned = scoped.targets
+	} else {
+		scanned = p.scanPeasantSyncSessions(ctx)
+	}
 	if err := ctx.Err(); err != nil {
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
 		return nil, fmt.Errorf("pipeline reindex discovery: %w", err)
@@ -5072,8 +5180,24 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Stored sessions whose saved pair is missing or damaged cannot be found by
 	// the tree scan: the metadata locator is what is gone. They are enumerated
 	// from the database and appended as native re-ingest targets, so
-	// `harvest index` repairs them instead of reporting a command to run.
-	scanned = append(scanned, p.pairRepairTargets(ctx, scanned)...)
+	// `harvest index` repairs them instead of reporting a command to run. The
+	// enumeration reads the stale-index and repair predicates, which the scoped
+	// run has already narrowed to its upkeep set.
+	repairs := p.pairRepairTargets(ctx, scanned)
+	if scoped != nil {
+		// A stored session whose saved pair is gone is unreadable for this run:
+		// its transcript is kept and its store-side upkeep runs, but the pair is
+		// not rebuilt from native input.
+		kept := repairs[:0]
+		for _, target := range repairs {
+			if scoped.unreadable[target.session.SessionID] {
+				continue
+			}
+			kept = append(kept, target)
+		}
+		repairs = kept
+	}
+	scanned = append(scanned, repairs...)
 	prepareProfileStart := time.Now()
 	p.recordIndexProfileStage(StagePrepare, prepareProfileStart, len(scanned), len(scanned))
 
@@ -5157,8 +5281,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 
 	if p.config.DryRun {
 		result := &PipelineResult{
-			Duration: time.Since(start),
-			Summary:  PipelineSummary{HarvesterVersions: maps.Clone(p.versionTargets()), MetadataVersion: int(CurrentSchemaVersion)},
+			Duration:    time.Since(start),
+			Summary:     PipelineSummary{HarvesterVersions: maps.Clone(p.versionTargets()), MetadataVersion: int(CurrentSchemaVersion)},
+			ScopeReport: p.scopeReport,
 		}
 		for _, t := range targeted {
 			result.Sessions = append(result.Sessions, SessionResult{
@@ -5192,18 +5317,60 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Reuse canonical discovery facts (notably Cursor workspace and SQLite
 	// source kind) instead of reconstructing them from a managed sidecar.
 	sourceSessions := make(map[SessionID]DiscoveredSession)
+	// A `harvest index --all` rebuild replaces the derived lookup tables, and
+	// the Codex rollout catalog can only be replaced from the enumeration the
+	// Codex walk reports: a discovered session list is not that set, because a
+	// rollout that never became a session is still a catalog row, and a walk
+	// that could not read part of the tree reports fewer paths than exist. A
+	// run with no Codex source — or with one whose roots all failed to resolve —
+	// reports NotWalked, which leaves the catalog as it is; a partial walk is
+	// refused by the rebuild.
+	rolloutEnumeration := RolloutEnumeration{Status: RolloutEnumerationNotWalked}
 	for harness, config := range p.config.Sources {
-		factory, ok := p.adapters[harness]
-		if !ok || !config.Enabled {
+		if !config.Enabled {
+			// A source this run leaves out is not part of the walk: nothing was
+			// enumerated and nothing may be replaced. That is not a refusal, even
+			// when an adapter for it is registered.
 			continue
 		}
-		sessions, err := factory(p.fs, p.git, p.salt).Discover(ctx, config)
+		factory, ok := p.adapters[harness]
+		if !ok {
+			if harness == HarnessCodex && p.config.RebuildAll {
+				// An enabled Codex source the run has no adapter for cannot be
+				// enumerated at all, so the catalog cannot be rebuilt from it.
+				rolloutEnumeration = RolloutEnumeration{Status: RolloutEnumerationPartial}
+			}
+			continue
+		}
+		adapter := factory(p.fs, p.git, p.salt)
+		// The full walk keeps the Codex rollout catalog current for every
+		// discovery it runs. A reindex scans the same sources for canonical
+		// facts, so it must attach the same writer: otherwise a database that
+		// is only ever maintained through `harvest index` never gains the
+		// catalog, and the stored-id duplicate lookup that reads it stays
+		// blind. A `--all` rebuild replaces the catalog from this walk's own
+		// enumeration below, so the walk does not write it first.
+		if catalog, ok := p.store.(CodexRolloutCatalogStore); ok && !p.config.DryRun && !p.config.RebuildAll {
+			AttachCodexRolloutCatalog(adapter, catalog)
+		}
+		sessions, err := adapter.Discover(ctx, config)
 		if err != nil {
 			slog.Warn("reindex: source discovery unavailable", "harness", harness, "error", err)
+			if harness == HarnessCodex && p.config.RebuildAll {
+				rolloutEnumeration = RolloutEnumeration{Status: RolloutEnumerationPartial}
+			}
 			continue
 		}
 		for _, session := range sessions {
 			sourceSessions[session.SessionID] = session
+		}
+		if harness == HarnessCodex && p.config.RebuildAll {
+			rolloutEnumeration = rolloutEnumerationOf(adapter)
+		}
+	}
+	if p.config.RebuildAll {
+		if err := p.rebuildIndexDerivedLookups(ctx, rolloutEnumeration); err != nil {
+			return nil, err
 		}
 	}
 

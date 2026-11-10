@@ -27,6 +27,12 @@ type StrikeAdapter struct {
 }
 
 var _ SourceAdapter = (*StrikeAdapter)(nil)
+var _ SessionLocator = (*StrikeAdapter)(nil)
+
+// strikeAncestorProbeKind is this adapter's one declared ancestor-probe kind:
+// one stat of the parent's exact file beside the child, derived from the child's
+// own sidecar and path, and never a directory read.
+const strikeAncestorProbeKind = ProbePath
 
 // NewStrikeAdapter creates a StrikeAdapter with injected filesystem, git, and salt dependencies.
 func NewStrikeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *StrikeAdapter {
@@ -524,105 +530,541 @@ type strikeTranscriptHints struct {
 	children []SessionID
 }
 
+// strikeSource is one enumerated Strike transcript before the shared build
+// reads it. info and loaded are filled by a caller that already observed the
+// file (a located source must read its own stream to learn the children it
+// names), so one transcript is never read twice.
+type strikeSource struct {
+	root     ResolvedPath
+	id       SessionID
+	path     string
+	resolved ResolvedPath
+	info     os.FileInfo
+	loaded   bool
+	modTime  time.Time
+	sidecar  strikeSidecar
+	hints    strikeTranscriptHints
+}
+
 // Discover finds Strike transcript files under configured roots. A transcript is
 // still discoverable when its sidecar is absent or malformed; ExtractMetadata
 // records that condition as a diagnostic rather than discarding valid JSONL.
+//
+// The walk only names files. Every root is enumerated first and the whole set is
+// handed to the same build DiscoverSessionAt uses, so a full walk and a located
+// source cannot describe one session two ways.
 func (a *StrikeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
 
-	var sessions []DiscoveredSession
-	// childParents maps a child to the session whose child.* events name it.
-	// The sidecar parentSessionId stays authoritative; the stream link only
-	// fills a sidecar that names no parent.
-	childParents := make(map[SessionID]SessionID)
+	var sources []strikeSource
 	for _, basePath := range cfg.Paths {
-		root := string(basePath)
-		walkErr := a.fs.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if walkErr != nil || d.IsDir() || d.Type()&os.ModeSymlink != 0 {
-				return nil
-			}
-			if !strings.HasSuffix(path, defaults.ExtJSONL.String()) {
-				return nil
-			}
+		enumerated, err := a.enumerateStrikeRoot(ctx, basePath)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, enumerated...)
+	}
+	return a.buildStrikeSessions(ctx, sources)
+}
 
-			rawID := strings.TrimSuffix(filepath.Base(path), defaults.ExtJSONL.String())
-			sid, err := NewSessionID(rawID)
-			if err != nil {
-				return nil
-			}
-			info, err := a.fs.Stat(path)
-			if err != nil {
-				return nil
-			}
-			modTime := info.ModTime()
-			if sidecarInfo, statErr := a.fs.Stat(strikeSidecarPath(path)); statErr == nil && sidecarInfo.ModTime().After(modTime) {
-				modTime = sidecarInfo.ModTime()
-			}
-			resolved, err := NewResolvedPath(path)
-			if err != nil {
-				return nil
-			}
-
-			sidecar, _ := a.readStrikeSidecar(path)
-			var parent *SessionID
-			if rawParent := sidecar.parentID(); rawParent != "" {
-				if parentID, parentErr := NewSessionID(rawParent); parentErr == nil {
-					parent = &parentID
-				}
-			}
-			hints := a.readStrikeTranscriptHints(path, sid)
-			title := sidecar.Title
-			if hints.title != "" {
-				title = hints.title
-			}
-			worktree := sidecar.worktreePath()
-			projectName := sidecar.projectName()
-			if projectName == "" && worktree != "" {
-				projectName = filepath.Base(worktree)
-			}
-
-			for _, child := range hints.children {
-				if _, claimed := childParents[child]; !claimed {
-					childParents[child] = sid
-				}
-			}
-			sessions = append(sessions, DiscoveredSession{
-				SessionID:     sid,
-				Harness:       HarnessStrike,
-				SourcePath:    resolved,
-				SourceFormat:  SourceFormatJSONL,
-				OriginalRoot:  basePath,
-				ParentUUID:    parent,
-				SubagentPaths: []ResolvedPath{},
-				DebugPaths:    []ResolvedPath{},
-				ModTime:       modTime,
-				ProjectName:   projectName,
-				Title:         title,
-				Branch:        sidecar.branchName(),
-				CWD:           worktree,
-				CreatedAt:     sidecar.createdTime(),
-			})
+// enumerateStrikeRoot walks one configured root and returns the transcript files
+// it holds. It reads names only: a file that disappears before the build reads
+// it is dropped by the build, exactly as the walk's own stat used to drop it.
+func (a *StrikeAdapter) enumerateStrikeRoot(ctx context.Context, basePath ResolvedPath) ([]strikeSource, error) {
+	var sources []strikeSource
+	root := string(basePath)
+	walkErr := a.fs.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if walkErr != nil || d.IsDir() || d.Type()&os.ModeSymlink != 0 {
 			return nil
-		})
-		if walkErr != nil {
-			return nil, fmt.Errorf("strike discover: walk %q: %w", root, walkErr)
+		}
+		if !strings.HasSuffix(path, defaults.ExtJSONL.String()) {
+			return nil
+		}
+		rawID := strings.TrimSuffix(filepath.Base(path), defaults.ExtJSONL.String())
+		sid, err := NewSessionID(rawID)
+		if err != nil {
+			return nil
+		}
+		sources = append(sources, strikeSource{root: basePath, id: sid, path: path})
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("strike discover: walk %q: %w", root, walkErr)
+	}
+	return sources, nil
+}
+
+// loadStrikeSource reads one enumerated transcript's stat, sidecar and stream
+// hints. A missing or malformed sidecar is tolerated here: ExtractMetadata
+// records it as a diagnostic, and the transcript still discovers with fallback
+// metadata.
+func (a *StrikeAdapter) loadStrikeSource(source strikeSource) (strikeSource, error) {
+	if source.loaded {
+		return source, nil
+	}
+	if source.info == nil {
+		info, err := a.fs.Stat(source.path)
+		if err != nil {
+			return source, err
+		}
+		source.info = info
+	}
+	resolved, err := NewResolvedPath(source.path)
+	if err != nil {
+		return source, err
+	}
+	source.resolved = resolved
+	source.modTime = source.info.ModTime()
+	if sidecarInfo, statErr := a.fs.Stat(strikeSidecarPath(source.path)); statErr == nil && sidecarInfo.ModTime().After(source.modTime) {
+		source.modTime = sidecarInfo.ModTime()
+	}
+	source.sidecar, _ = a.readStrikeSidecar(source.path)
+	source.hints = a.readStrikeTranscriptHints(source.path, source.id)
+	source.loaded = true
+	return source, nil
+}
+
+// buildStrikeSession turns one loaded source into a discovered session. It is
+// the one place the DiscoveredSession literal is written, so the full walk and
+// the located-source path cannot drift apart.
+func (a *StrikeAdapter) buildStrikeSession(source strikeSource) (DiscoveredSession, bool) {
+	if source.resolved == "" {
+		return DiscoveredSession{}, false
+	}
+	title := source.sidecar.Title
+	if source.hints.title != "" {
+		title = source.hints.title
+	}
+	worktree := source.sidecar.worktreePath()
+	projectName := source.sidecar.projectName()
+	if projectName == "" && worktree != "" {
+		projectName = filepath.Base(worktree)
+	}
+	return DiscoveredSession{
+		SessionID:     source.id,
+		Harness:       HarnessStrike,
+		SourcePath:    source.resolved,
+		SourceFormat:  SourceFormatJSONL,
+		OriginalRoot:  source.root,
+		ParentUUID:    strikeParent(source.sidecar),
+		SubagentPaths: []ResolvedPath{},
+		DebugPaths:    []ResolvedPath{},
+		ModTime:       source.modTime,
+		ProjectName:   projectName,
+		Title:         title,
+		Branch:        source.sidecar.branchName(),
+		CWD:           worktree,
+		CreatedAt:     source.sidecar.createdTime(),
+	}, true
+}
+
+// strikeParent is the parent the sidecar's own parent field names. forkedFrom
+// is deliberately absent: it records a context_from relationship, not a parent.
+func strikeParent(sidecar strikeSidecar) *SessionID {
+	rawParent := sidecar.parentID()
+	if rawParent == "" {
+		return nil
+	}
+	parent, err := NewSessionID(rawParent)
+	if err != nil {
+		return nil
+	}
+	return &parent
+}
+
+// buildStrikeSessions is the one construction path for Discover and
+// DiscoverSessionAt. The sidecar parent stays authoritative; a child whose own
+// sidecar names no parent takes the parent whose child.* events name it, so a
+// full walk and a located source link the same sessions.
+//
+// The build performs every stat and read discovery needs, so it checks the
+// caller's context itself: a cancel after enumeration must surface as
+// ctx.Err() instead of being swallowed through the rest of the tree.
+func (a *StrikeAdapter) buildStrikeSessions(ctx context.Context, sources []strikeSource) ([]DiscoveredSession, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// childParents maps a child to the session whose child.* events name it.
+	childParents := make(map[SessionID]SessionID)
+	loaded := make([]strikeSource, 0, len(sources))
+	sessions := make([]DiscoveredSession, 0, len(sources))
+	for _, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		filled, err := a.loadStrikeSource(source)
+		if err != nil {
+			continue
+		}
+		session, ok := a.buildStrikeSession(filled)
+		if !ok {
+			continue
+		}
+		loaded = append(loaded, filled)
+		sessions = append(sessions, session)
+	}
+	// A cancel during the last source's reads has no next iteration to catch
+	// it, so the loop's completion is checked as well.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for _, source := range loaded {
+		for _, child := range source.hints.children {
+			if _, claimed := childParents[child]; !claimed {
+				childParents[child] = source.id
+			}
 		}
 	}
-
 	for i := range sessions {
 		if sessions[i].ParentUUID != nil {
 			continue
 		}
 		if parent, ok := childParents[sessions[i].SessionID]; ok {
-			sessions[i].ParentUUID = &parent
+			parentCopy := parent
+			sessions[i].ParentUUID = &parentCopy
 		}
 	}
 	return normalizeStrikeSessions(sessions), nil
+}
+
+// LookupSessionSources finds the transcript that can hold id BY NAME. Strike's
+// writer places every session directly in its source root as <id>.jsonl, so the
+// lookup tries exactly {root}/{id}.jsonl under each configured root and nothing
+// else: one stat per root, never a directory read, never a walk.
+//
+// A failed search is recorded ONCE, by the core: on a returned error the core
+// appends the SearchFailed entry and carries the miss, so this method never
+// appends one itself. It returns the entries it gathered for the roots it
+// completed, so the miss still names where else the id was searched. Every
+// adapter's lookup obeys the same convention.
+func (a *StrikeAdapter) LookupSessionSources(ctx context.Context, cfg SourceConfig, id SessionID) (SourceLookup, error) {
+	if err := ctx.Err(); err != nil {
+		return SourceLookup{}, err
+	}
+	if _, err := NewSessionID(string(id)); err != nil {
+		return SourceLookup{}, fmt.Errorf("ingest: StrikeAdapter.LookupSessionSources was given %q, which is not a session id; no Strike source can be searched under a name no session can hold; where: ingest.StrikeAdapter.LookupSessionSources in internal/ingest/strike.go; when: locating a named session by name; impact: no Strike source is searched; fix: pass the session id the user named: %w", id, err)
+	}
+
+	var lookup SourceLookup
+	listed := make(map[ResolvedPath]struct{}, len(cfg.Paths))
+	for _, basePath := range cfg.Paths {
+		if _, duplicate := listed[basePath]; duplicate {
+			// One root named twice would claim the same transcript twice, read
+			// downstream as a duplicate session, and report the same search
+			// twice.
+			continue
+		}
+		listed[basePath] = struct{}{}
+		if err := ctx.Err(); err != nil {
+			return lookup, err
+		}
+		candidate := filepath.Join(string(basePath), string(id)+defaults.ExtJSONL.String())
+		hit, err := a.strikeSourceExists(candidate)
+		if err != nil {
+			return lookup, strikeLookupFailure(id, "stat", candidate, err)
+		}
+		if hit {
+			resolved, err := NewResolvedPath(candidate)
+			if err != nil {
+				return lookup, strikeLookupFailure(id, "resolve", candidate, err)
+			}
+			lookup.Sources = append(lookup.Sources, resolved)
+		}
+		lookup.Searched = append(lookup.Searched, SearchedSource{
+			Harness:  HarnessStrike,
+			Method:   SearchNamePattern,
+			Location: strikeSearchLocation(basePath, id),
+		})
+	}
+	return lookup, nil
+}
+
+// strikeSearchLocation is the pattern one configured root was searched with,
+// for the miss error's searched block: the exact file the writer lays a session
+// down as. The block composes one line per source from this value alone, so it
+// carries no resolved folder or file that happens to exist.
+func strikeSearchLocation(root ResolvedPath, id SessionID) string {
+	return filepath.Join(strikeDisplayPath(root), string(id)+defaults.ExtJSONL.String())
+}
+
+// strikeLookupFailure is the one statement of "the by-name lookup could not
+// cover this source". The core records the failure from the returned error, and
+// the detail says why the id cannot be reported absent from this source.
+func strikeLookupFailure(id SessionID, action, path string, err error) error {
+	return fmt.Errorf("ingest: the Strike lookup for session %s could not %s %q; the search stopped before this source was fully covered, so the id cannot be reported absent from it; where: ingest.StrikeAdapter.LookupSessionSources in internal/ingest/strike.go; when: locating the named session by name; impact: this source was not fully searched, and the miss text names the failure; fix: make the path readable and retry: %w", id, action, path, err)
+}
+
+// strikeSourceExists reports whether path is a readable file. A missing path is
+// not a failure: it is simply not a hit.
+func (a *StrikeAdapter) strikeSourceExists(path string) (bool, error) {
+	info, err := a.fs.Stat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return !info.IsDir(), nil
+}
+
+// DiscoverSessionAt builds the members for one located Strike source: the
+// source itself, the children its own stream names, and the stored children the
+// core passed in. It reads each transcript once (the located source's stream is
+// read to learn its children, and the build reuses that read) and writes
+// nothing, so a refused run has nothing to undo.
+//
+// Children are found by name beside the located transcript because the writer
+// places every session directly in its source root. A parent is never read
+// here: the sidecar names it, and the returned AncestorProbe is a pure value the
+// core executes. The role and the outcome of every member are the core's, so
+// the adapter leaves both at their zero value.
+func (a *StrikeAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig, at LocatedSource) (LocatedBuild, error) {
+	if err := ctx.Err(); err != nil {
+		return LocatedBuild{}, err
+	}
+	if at.ID == "" {
+		return LocatedBuild{}, fmt.Errorf("ingest: StrikeAdapter.DiscoverSessionAt was given a located source with no session id at %q; a located source must name the session it holds so the member can be matched to its store row; where: ingest.StrikeAdapter.DiscoverSessionAt in internal/ingest/strike.go; when: building a located source; impact: nothing was read and no member was built; fix: pass the id the store or the lookup resolved", at.Path)
+	}
+	if nameID, ok := strikeSessionIDFromPath(at.Path.String()); !ok || nameID != at.ID {
+		return LocatedBuild{}, strikeSourceGoneError(at.Path, at.ID, "the file name is not <session-id>.jsonl or names another session")
+	}
+	root, ok := strikeEnumeratedRoot(cfg, at.Path)
+	if !ok {
+		return LocatedBuild{}, fmt.Errorf("ingest: the located Strike path %q lies outside every configured Strike source root; a located source must be attributed to the root the full walk would have found it under, or the member would carry a different OriginalRoot than discovery gives it; where: ingest.StrikeAdapter.DiscoverSessionAt in internal/ingest/strike.go; when: resolving the source root of the located path; impact: nothing was read and no member was built; fix: restore the transcript under a configured Strike source path, or add the path's root to the configured source paths", at.Path)
+	}
+	info, err := a.fs.Stat(at.Path.String())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return LocatedBuild{}, strikeSourceGoneError(at.Path, at.ID, "the file no longer exists")
+		}
+		return LocatedBuild{}, fmt.Errorf("ingest: the Strike transcript %q for session %s could not be re-read; the path exists but its state cannot be observed, so the member cannot be built from it; where: ingest.StrikeAdapter.DiscoverSessionAt in internal/ingest/strike.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path, and the core records the read failure; fix: make the file readable and retry: %w", at.Path, at.ID, err)
+	}
+	if info.IsDir() {
+		return LocatedBuild{}, strikeSourceGoneError(at.Path, at.ID, "the path is a directory, not a transcript file")
+	}
+	if err := ctx.Err(); err != nil {
+		return LocatedBuild{}, err
+	}
+	located, err := a.loadStrikeSource(strikeSource{root: root, id: at.ID, path: at.Path.String(), info: info})
+	if err != nil {
+		return LocatedBuild{}, strikeSourceGoneError(at.Path, at.ID, "the transcript could not be read again")
+	}
+	sources := []strikeSource{located}
+	named, err := a.enumerateStrikeNamedChildren(ctx, located)
+	if err != nil {
+		return LocatedBuild{}, err
+	}
+	sources = append(sources, named...)
+	unreadable := a.appendStrikeStoredChildren(cfg, &sources, at)
+
+	sessions, err := a.buildStrikeSessions(ctx, sources)
+	if err != nil {
+		return LocatedBuild{}, err
+	}
+	byID := make(map[SessionID]int, len(sessions))
+	for index := range sessions {
+		if _, duplicate := byID[sessions[index].SessionID]; !duplicate {
+			byID[sessions[index].SessionID] = index
+		}
+	}
+	if _, ok := byID[at.ID]; !ok {
+		return LocatedBuild{}, strikeSourceGoneError(at.Path, at.ID, "the transcript could not be built from its own stream")
+	}
+
+	members := make([]LocatedMember, 0, len(sources)+len(unreadable))
+	emitted := make(map[SessionID]struct{}, len(sources))
+	for _, source := range sources {
+		if _, duplicate := emitted[source.id]; duplicate {
+			continue
+		}
+		index, built := byID[source.id]
+		if !built {
+			continue
+		}
+		emitted[source.id] = struct{}{}
+		member := LocatedMember{ID: source.id, Harness: HarnessStrike, Source: &sessions[index]}
+		if source.id == at.ID && at.Stored.Parent == nil {
+			member.ParentProbe = strikeAncestorProbe(located)
+		}
+		members = append(members, member)
+	}
+	members = append(members, unreadable...)
+	return LocatedBuild{Members: members, Deferred: NoDeferredWrites{}}, nil
+}
+
+// enumerateStrikeNamedChildren reads the child ids the located transcript's own
+// stream names (child.* events) and stats each child's transcript beside it. The
+// writer places every session directly in its source root, so a child's file is
+// <dir of the located transcript>/<child>.jsonl; a named child whose file is not
+// there is not a session yet. No directory is listed.
+func (a *StrikeAdapter) enumerateStrikeNamedChildren(ctx context.Context, located strikeSource) ([]strikeSource, error) {
+	if len(located.hints.children) == 0 {
+		return nil, nil
+	}
+	dir := filepath.Dir(located.path)
+	sources := make([]strikeSource, 0, len(located.hints.children))
+	for _, child := range located.hints.children {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		candidate := filepath.Join(dir, string(child)+defaults.ExtJSONL.String())
+		info, err := a.fs.Stat(candidate)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("ingest: the Strike child transcript %q named by session %s could not be observed; a child whose state cannot be read might exist, so the build cannot claim this session has none; where: ingest.StrikeAdapter.DiscoverSessionAt in internal/ingest/strike.go; when: enumerating a located source's named children; impact: nothing was built for this located source; fix: make the path readable and retry: %w", candidate, located.id, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		sources = append(sources, strikeSource{root: located.root, id: child, path: candidate, info: info})
+	}
+	return sources, nil
+}
+
+// appendStrikeStoredChildren adds the stored children the build must re-read. A
+// child whose file is gone, belongs to another harness, or cannot be observed
+// comes back as a member with no source and its reason, because the store still
+// records it and the run's upkeep set must see it.
+func (a *StrikeAdapter) appendStrikeStoredChildren(cfg SourceConfig, sources *[]strikeSource, at LocatedSource) []LocatedMember {
+	seen := make(map[SessionID]struct{}, len(*sources))
+	for _, source := range *sources {
+		seen[source.id] = struct{}{}
+	}
+	var unreadable []LocatedMember
+	for _, child := range at.Stored.Children {
+		if _, duplicate := seen[child.ID]; duplicate {
+			continue
+		}
+		seen[child.ID] = struct{}{}
+		member, source, ok := a.buildStrikeStoredChild(cfg, child)
+		if ok {
+			*sources = append(*sources, source)
+			continue
+		}
+		unreadable = append(unreadable, member)
+	}
+	return unreadable
+}
+
+// buildStrikeStoredChild resolves one stored child either to a source the shared
+// build reads or to an unreadable member that names why. A readable child is
+// built from its file, exactly as the full walk builds it, so its OriginalRoot,
+// title and parent come from the source and not from the store's link.
+func (a *StrikeAdapter) buildStrikeStoredChild(cfg SourceConfig, child StoredSessionSource) (LocatedMember, strikeSource, bool) {
+	member := LocatedMember{ID: child.ID, Harness: child.Harness}
+	if child.Harness != HarnessStrike {
+		// Another harness owns this source, or none was recorded. That is the
+		// cross-harness read failure UnreadableSourceFailed states; the source is
+		// not gone.
+		member.Unreadable = UnreadableSourceFailed
+		if child.Harness == "" {
+			member.Detail = "the store records no harness for this child, so the strike adapter cannot attribute its source"
+		} else {
+			member.Detail = "a " + string(child.Harness) + " source cannot be read by the strike adapter"
+		}
+		return member, strikeSource{}, false
+	}
+	nameID, ok := strikeSessionIDFromPath(child.Path.String())
+	if !ok || nameID != child.ID {
+		member.Unreadable = UnreadableSourceGone
+		return member, strikeSource{}, false
+	}
+	root, ok := strikeEnumeratedRoot(cfg, child.Path)
+	if !ok {
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = "the recorded path is outside every configured Strike source root"
+		return member, strikeSource{}, false
+	}
+	info, err := a.fs.Stat(child.Path.String())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			member.Unreadable = UnreadableSourceGone
+			return member, strikeSource{}, false
+		}
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = firstLine(err.Error())
+		return member, strikeSource{}, false
+	}
+	if info.IsDir() {
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = "the recorded path is a directory, not a Strike transcript file"
+		return member, strikeSource{}, false
+	}
+	return LocatedMember{}, strikeSource{root: root, id: child.ID, path: child.Path.String(), info: info}, true
+}
+
+// strikeAncestorProbe derives one unstored parent's exact source file from the
+// child's own sidecar and path. It is a pure value: no stat, no directory read.
+func strikeAncestorProbe(located strikeSource) *AncestorProbe {
+	parent := strikeParent(located.sidecar)
+	if parent == nil || *parent == located.id {
+		return nil
+	}
+	parentPath := filepath.Join(filepath.Dir(located.path), string(*parent)+defaults.ExtJSONL.String())
+	path, err := NewResolvedPath(parentPath)
+	if err != nil {
+		return nil
+	}
+	return &AncestorProbe{Kind: strikeAncestorProbeKind, Harness: HarnessStrike, Path: path}
+}
+
+// strikeSourceGoneError is the one statement of "this recorded path no longer
+// holds the session it was recorded for". It wraps ErrSourceGone, so the core
+// takes the by-name lookup path for the id.
+func strikeSourceGoneError(path ResolvedPath, id SessionID, because string) error {
+	return fmt.Errorf("ingest: the located Strike path %q no longer holds session %s because %s; a Strike transcript carries its session id in its file name, so this path is not that session's source; where: ingest.StrikeAdapter.DiscoverSessionAt in internal/ingest/strike.go; when: re-reading the path a previous discovery recorded; impact: no member was built from this path; fix: let the by-name lookup find the source the session is in now: %w", path, id, because, ErrSourceGone)
+}
+
+// strikeSessionIDFromPath reads the session id a transcript's file name holds.
+func strikeSessionIDFromPath(path string) (SessionID, bool) {
+	base := filepath.Base(path)
+	if !strings.HasSuffix(base, defaults.ExtJSONL.String()) {
+		return "", false
+	}
+	id, err := NewSessionID(strings.TrimSuffix(base, defaults.ExtJSONL.String()))
+	if err != nil {
+		return "", false
+	}
+	return id, true
+}
+
+// strikeEnumeratedRoot returns the configured source root a located path hangs
+// from. Strike's writer lays every session directly in its root, but Discover
+// still accepts a transcript at any depth, so the root is the configured one
+// that contains the path; that is the only OriginalRoot a full walk records.
+func strikeEnumeratedRoot(cfg SourceConfig, path ResolvedPath) (ResolvedPath, bool) {
+	for _, configured := range cfg.Paths {
+		if strikePathWithin(string(configured), string(path)) {
+			return configured, true
+		}
+	}
+	return "", false
+}
+
+// strikePathWithin reports whether path sits strictly below root.
+func strikePathWithin(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// strikeDisplayPath renders a source path with the home directory shortened, the
+// way the searched block shows every location.
+func strikeDisplayPath(path ResolvedPath) string {
+	raw := string(path)
+	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(raw, home+string(filepath.Separator)) {
+		return "~" + strings.TrimPrefix(raw, home)
+	}
+	return raw
 }
 
 // normalizeStrikeSessions validates parent edges, returns parents before their
