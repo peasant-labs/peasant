@@ -1,0 +1,8 @@
+requiredNames:
+  - offscreen-match-remains-searchable
+cases:
+  - name: offscreen-match-remains-searchable
+    total: 160
+    maximum: 100
+    matchIndex: 159
+    query: needle
