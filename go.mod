@@ -14,7 +14,7 @@ require (
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
 	github.com/chzyer/readline v1.5.0
 	github.com/coder/websocket v1.8.14
-	github.com/dayvidpham/bestiary v0.2.11
+	github.com/dayvidpham/bestiary v0.3.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0

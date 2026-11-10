@@ -1,10 +1,10 @@
 # Bestiary integration
 
-[`bestiary`](https://github.com/peasant-labs/bestiary) is the external Go module that owns
-the canonical registry of AI **coding tools / harnesses** (Claude Code, Gemini CLI, Codex,
-OpenCode, Cursor, Antigravity), model **providers** (Anthropic, OpenAI, Google), and model
-reference data. Peasant depends on it so that harness/provider/model identifiers have a
-single source of truth shared across tools, rather than peasant maintaining its own.
+[`bestiary`](https://github.com/dayvidpham/bestiary) (`github.com/dayvidpham/bestiary`) is the
+external Go module that owns the canonical registry of AI **coding tools / harnesses**
+(`bestiary.Harnesses()`), model **providers**, and model reference data. Peasant depends on it so
+that harness, provider, and model identifiers have a single source of truth shared across tools,
+rather than peasant maintaining its own.
 
 ## Harness — the central type
 
@@ -23,19 +23,37 @@ Because `schema.Harness` is an **alias**, not a defined type, it cannot carry it
 (this is the constraint behind the OpenAPI decision below) and there is no peasant-side
 `NewHarness` constructor.
 
-### Known harnesses vs. ingestion-supported (the 4/4/6 split)
+### Known harnesses, declared support, and this build
 
-There are intentionally three different harness counts across surfaces — document this when
-touching any of them:
+Three sets exist, and they are not the same set. Each has one owner. The block
+below is a pinned snapshot of those owners, and a test compares it to them:
 
-| Set | Value | Where |
-|-----|-------|-------|
-| `bestiary.Harnesses()` / `schema.Harnesses()` | **6** — claude-code, gemini-cli, codex, opencode, cursor, antigravity | all *known* harnesses; the OpenAPI enum + `HarnessJSONSchema()` |
-| `schema.AllHarnesses` / `defaults.AllHarnesses` | **4** — claude-code, gemini-cli, codex, opencode | the *ingestion-supported* subset (cursor/antigravity have no adapter yet) |
-| `validate/schema.json` `SchemaHarness` enum | **4** | the publish wire-format (ingestion subset) |
+<!-- harness-sets:begin -->
+known: claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike, pi, grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew
+declared: claude-code, gemini-cli, codex, opencode, cursor, strike, pi
+harvestable: claude-code, opencode, codex, cursor, strike, pi
+deprecated: gemini-cli
+<!-- harness-sets:end -->
 
-`cursor`/`antigravity` are recognized (so the CLI/config can give a useful message) but peasant
-has no ingester for them yet — see C7 below.
+Fourteen names are known, seven are declared ingestion-supported, and six are
+harvestable by this build. The owners are `bestiary.Harnesses()`, the
+`schema.AllHarnesses` export, and the adapter registry that
+`peasant harvest --help` prints. Do not restate this membership elsewhere.
+
+`gemini-cli` is declared and deprecated: it was replaced by the Antigravity
+products, so this build refuses it by name and no adapter is planned. It stays
+known and declared for wire compatibility with sessions that already carry it;
+stored rows are not rewritten, and retiring the value is a separate change.
+
+The single `antigravity` value is deliberate. It is not established whether its
+CLI and IDE products keep separate stores that update independently, so
+splitting it into separate identities is deferred until that evidence exists.
+
+A known harness with no adapter is either planned and not started (known minus
+declared) or deprecated (`gemini-cli`, no adapter planned). Those are not one
+status. Being known makes a value a legal wire value and lets the CLI refuse it
+by name; it does not make it harvestable, and it stores nothing.
+
 
 ## Models & providers
 
@@ -74,7 +92,7 @@ them.
 |---------|----------|
 | CLI `--source-harness` | Legacy `claude`/`gemini` → "renamed to X, rerun with X"; the `defaults.LegacyHarnessClaude`/`LegacyHarnessGemini` constants exist solely for this (`resolveHarnessFlag`, `cmd/peasant/cmd_harvest.go`). |
 | config YAML | Deprecated keys are **rejected with remediation, never silently mapped**: `sources.claude:` (→ `claude-code:`) and `selection.providers:` (→ `selection.harnesses:`). Implemented via `Deprecated*` capture fields + `validate()` in `internal/config/config.go`. |
-| CLI + adapters | `cursor`/`antigravity` are recognized but unsupported → "planned for a future release", with **no specific version commitment**. |
+| CLI + adapters | Every known harness is recognized; `cursor` is ingested. `antigravity` and the six layout-stack harnesses are planned and not started; `gemini-cli` is declared and deprecated. See the [roster](#known-harnesses-declared-support-and-this-build). |
 
 ## OpenAPI enum exposure
 

@@ -1,12 +1,23 @@
 # One canonical registry is mounted by both production presentations for every
 # row. The section contract and scenario counts prevent silent loss of a field,
-# conditional section, or parity behavior.
+# conditional section, or parity behavior. Option columns are the shared model's
+# wire tokens, labels, and descriptions.
 expectedSectionCount: 8
+requiredNames:
+  - selection
+  - auto-ingest
+  - publication
+  - auto-publish
+  - privacy
+  - license
+  - destination
+  - retention
 sections:
   - key: selection
     title: choose sessions to import
     fieldKey: transcripts
     fieldKind: tree
+    modelKind: tree
     fieldText: "search:"
     hasGuide: false
     conditional: false
@@ -14,6 +25,7 @@ sections:
     title: auto-ingest new branches
     fieldKey: auto-ingest-new-branches
     fieldKind: toggle
+    modelKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
     hasGuide: true
     fieldTextBeforeGuide: true
@@ -23,57 +35,117 @@ sections:
     title: publication
     fieldKey: publication-preference
     fieldKind: radio
+    modelKind: choice
     fieldText: publication preference
     hasGuide: true
     fieldTextBeforeGuide: true
     guideIntro: choose whether to keep transcripts local or plan to publish later.
     conditional: false
+    options:
+      - token: ""
+        label: keep local, do not publish
+        description: "keep every transcript on this machine. nothing is published until you explicitly run `peasant village push`."
+      - token: share-later
+        label: plan to publish later
+        description: "record that you intend to publish later. this still publishes nothing now; sharing remains a separate, explicit push."
   - key: auto-publish
     title: auto-publish
     fieldKey: publish-automatically
     fieldKind: radio
+    modelKind: choice
     fieldText: publish automatically?
     hasGuide: true
     fieldTextBeforeGuide: true
     guideIntro: you choose which folders go to which collectives in settings later.
     conditional: false
+    options:
+      - token: "true"
+        label: yes
+        description: ""
+      - token: "false"
+        label: not now
+        description: ""
   - key: privacy
     title: privacy
     fieldKey: redaction-level
     fieldKind: radio
+    modelKind: choice
     fieldText: redaction level
     hasGuide: true
     fieldTextBeforeGuide: true
     guideIntro: preview how standard redaction changes your text before you publish.
     hasExample: true
     conditional: false
+    options:
+      - token: standard
+        label: standard
+        description: removes secrets, file paths, personal data, and project identity. keeps git remote urls and branch names.
   - key: license
     title: content license
     fieldKey: content-license
     fieldKind: radio
+    modelKind: choice
     fieldText: default license attached to pushed transcripts
     hasGuide: true
     fieldTextBeforeGuide: true
     guideIntro: choose the default license for a later explicit publish.
     conditional: false
+    options:
+      - token: ""
+        label: none (do not attach a license)
+        description: attach no license. you keep all rights and others must ask to reuse the transcript.
+      - token: CC0-1.0
+        label: CC0-1.0
+        description: place the transcript in the public domain. anyone may reuse it without credit.
+      - token: CC-BY-4.0
+        label: CC-BY-4.0
+        description: allow anyone to reuse the transcript with credit to you.
+      - token: CC-BY-SA-4.0
+        label: CC-BY-SA-4.0
+        description: allow anyone to reuse the transcript with credit, under this same license.
   - key: destination
     title: sharing
     fieldKey: default-visibility
     fieldKind: radio
+    modelKind: choice
     fieldText: default visibility for pushed transcripts
     hasGuide: true
     fieldTextBeforeGuide: true
     guideIntro: choose who may see transcripts after a later explicit publish.
     conditional: true
+    options:
+      - token: private
+        label: private
+        description: only you can see the transcript.
+      - token: group
+        label: group
+        description: members of your group can see the transcript.
+      - token: public
+        label: public
+        description: anyone can see the transcript.
   - key: retention
     title: claude retention
     fieldKey: claude-retention-days
     fieldKind: radio
+    modelKind: choice
     fieldText: how long claude code keeps its transcripts
     hasGuide: true
     fieldTextBeforeGuide: true
     guideIntro: choose how long claude code keeps its source transcript files.
     conditional: true
+    options:
+      - token: "30"
+        label: 30 days
+        description: removes claude transcripts after 30 days. this is the claude code default.
+      - token: "90"
+        label: 90 days
+        description: removes claude transcripts after 90 days.
+      - token: "365"
+        label: 1 year
+        description: removes claude transcripts after 365 days.
+      - token: "99999"
+        label: never expire
+        description: keeps claude transcripts forever. recommended for peasant users.
 forbiddenRegistryOptions:
   expectedNameCount: 5
   names: [presentation, configmode, hide, replace, screen]

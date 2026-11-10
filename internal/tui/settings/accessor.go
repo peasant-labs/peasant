@@ -39,4 +39,6 @@ type Accessor[T any] struct {
 	Get func(cfg *config.Config) T
 	// Set writes value into cfg, overwriting only the field this accessor owns.
 	Set func(cfg *config.Config, value T)
+	// Restore copies a stored value, including one no longer offered.
+	Restore func(dst, src *config.Config)
 }

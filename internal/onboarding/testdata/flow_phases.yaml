@@ -1,0 +1,82 @@
+# Stop order, visibility, and the boundary connect offer. Names are the contract.
+requiredNames:
+  - skipped-at-start-then-re-offered-after-license
+  - accepted-never-offered-again
+  - skipped-twice-never-offered-again
+  - already-connected-never-offered
+  - village-stop-visible-when-disconnected
+  - village-stop-hidden-when-connected
+  - destination-hidden-when-disconnected
+  - retention-hidden-without-claude-sessions
+  - auto-ingest-hidden-when-mode-all
+  - selection-scope-returns-selection-review-ingest
+  - full-scope-orders-eight-sections
+  - hidden-answer-fixpoint-drops-dependent-answers
+cases:
+  - name: skipped-at-start-then-re-offered-after-license
+    scope: full
+    villageConnected: false
+    loginAvailable: true
+    connectAnswer: unanswered
+    afterStop: license
+    offer: true
+    prompt: "log in now to choose a default sharing visibility?"
+    skip: "no"
+  - name: accepted-never-offered-again
+    scope: full
+    villageConnected: true
+    loginAvailable: true
+    connectAnswer: connected
+    afterStop: license
+    offer: false
+  - name: skipped-twice-never-offered-again
+    scope: full
+    villageConnected: false
+    loginAvailable: true
+    connectAnswer: skipped
+    afterStop: license
+    offer: false
+  - name: already-connected-never-offered
+    scope: full
+    villageConnected: true
+    loginAvailable: true
+    connectAnswer: unanswered
+    afterStop: license
+    offer: false
+  - name: village-stop-visible-when-disconnected
+    scope: full
+    villageConnected: false
+    visibleStops: [village]
+  - name: village-stop-hidden-when-connected
+    scope: full
+    villageConnected: true
+    hiddenStops: [village]
+  - name: destination-hidden-when-disconnected
+    scope: full
+    villageConnected: false
+    hiddenStops: [destination]
+  - name: retention-hidden-without-claude-sessions
+    scope: full
+    claudeSessions: false
+    hiddenStops: [retention]
+  - name: auto-ingest-hidden-when-mode-all
+    scope: full
+    selectionMode: all
+    hiddenStops: [auto-ingest]
+  - name: selection-scope-returns-selection-review-ingest
+    scope: selection
+    stops: [selection, review, ingest]
+  - name: full-scope-orders-eight-sections
+    scope: full
+    sections: [selection, auto-ingest, publication, auto-publish, privacy, license, destination, retention]
+    stops: [village, selection, auto-ingest, publication, auto-publish, privacy, license, destination, retention, review, ingest]
+  - name: hidden-answer-fixpoint-drops-dependent-answers
+    scope: full
+    selectionMode: selected
+    dropAnswers:
+      transcripts:
+        mode: all
+      auto-ingest-new-branches: false
+    remaining: [transcripts]
+    absent: [auto-ingest-new-branches]
+    autoIngest: true

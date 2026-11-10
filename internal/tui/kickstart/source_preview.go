@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/transcript"
@@ -18,7 +18,7 @@ import (
 // The selection tree previews one row at a time, so a small number covers the
 // common move of stepping through a few rows and stepping back. The cache lives
 // in memory only, and it goes away with the kickstart process.
-const DefaultSourceTurnsCacheSize = 4
+const DefaultSourceTurnsCacheSize = discovery.DefaultSourceTurnsCacheSize
 
 // ListingSource records where a discovered session's transcript is, so the
 // selection step can read that transcript later without the discovery result.
@@ -26,22 +26,7 @@ const DefaultSourceTurnsCacheSize = 4
 // This function and sourceDiscoveredSession are the two halves of one mapping.
 // Keep them together: a new transcript origin must appear in both.
 func ListingSource(session ingest.DiscoveredSession) ftue.SessionSource {
-	return ftue.SessionSource{
-		Path:   string(session.SourcePath),
-		Root:   string(session.OriginalRoot),
-		Origin: listingSourceOrigin(session.TranscriptOrigin),
-	}
-}
-
-func listingSourceOrigin(origin ingest.TranscriptOrigin) ftue.SessionSourceOrigin {
-	switch origin {
-	case ingest.TranscriptOriginOpenCodeLegacySQLite:
-		return ftue.SessionSourceOriginOpenCodeLegacySQLite
-	case ingest.TranscriptOriginOpenCodeCurrentSQLite:
-		return ftue.SessionSourceOriginOpenCodeCurrentSQLite
-	default:
-		return ftue.SessionSourceOriginFile
-	}
+	return discovery.ListingSource(session)
 }
 
 func ingestTranscriptOrigin(origin ftue.SessionSourceOrigin) (ingest.TranscriptOrigin, error) {
@@ -217,9 +202,9 @@ func NewSourceTurns(fs ingest.FileSystem, sessions []ftue.SessionListing, opts .
 		git:       &ingest.ExecGitResolver{},
 		byID:      byID,
 		limit:     DefaultSourceTurnsCacheSize,
-		budget:    defaults.TranscriptContinuationReadBytes,
-		firstPage: defaults.TranscriptInitialReadBytes,
-		slice:     defaults.TranscriptContinuationReadBytes,
+		budget:    discovery.PreviewReadBudgetBytes,
+		firstPage: discovery.PreviewFirstPageBudgetBytes,
+		slice:     discovery.PreviewSliceBudgetBytes,
 		cached:    make(map[string]sourcePreview),
 	}
 	for _, opt := range opts {

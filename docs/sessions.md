@@ -37,7 +37,7 @@ Flags:
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--limit <n>` | `20` | Maximum sessions to show (`0` = no limit) |
-| `--harness <h>` | — | Filter by harness: `claude-code`, `gemini-cli`, `codex`, `opencode` |
+| `--harness <h>` | — | Filter by harness wire value (any known harness; see [`bestiary.md`](bestiary.md#known-harnesses-declared-support-and-this-build)) |
 | `--project <name>` | — | Filter by project name (matches git remote URL or directory basename) |
 | `--tag <tag>` | — | Filter by session tag (see [Tags](#peasant-sessions-tag)) |
 | `--since <when>` | — | Sessions starting after a date (`7d`, `24h`, `2026-01-01`) |

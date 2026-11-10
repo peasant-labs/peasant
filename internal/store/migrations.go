@@ -278,8 +278,9 @@ var migrationV24 = createSessionCommands + ";\n" +
 // page indexes, and the backfill. See schema_v70.go.
 // migrationV71 adds derived lookups for scoped harvest.
 // migrationV72 compacts Claude identity facts.
-// migrationV73 adds the conversation turn count.
-// migrationV74 adds image entries and session attachments.
+// migrationV73 widens stored harness checks.
+// migrationV74 adds the conversation turn count.
+// migrationV75 adds image entries and session attachments.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -358,6 +359,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV72,
 		migrationV73,
 		migrationV74,
+		migrationV75,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -424,7 +426,8 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V70: parent lane, store revision, page indexes, and backfill (additive, no FK)
 		nil,                        // V71: derived lookups
 		nil,                        // V72: compact Claude identity facts
-		nil,                        // V73: conversation turn count
-		{DisableForeignKeys: true}, // V74: image entries and session attachments
+		{DisableForeignKeys: true}, // V73: widen stored harness checks
+		nil,                        // V74: conversation turn count
+		{DisableForeignKeys: true}, // V75: image entries and session attachments
 	},
 }

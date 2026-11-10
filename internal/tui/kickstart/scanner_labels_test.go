@@ -2,7 +2,6 @@ package kickstart_test
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"os"
 	"path"
@@ -17,8 +16,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 )
 
-//go:embed testdata/scanner_labels.yaml
-var scannerLabelData []byte
+func scannerLabelData(t *testing.T) []byte {
+	t.Helper()
+	return readMovedDiscoveryFixture(t, "scanner_labels.yaml")
+}
 
 // scannerLabelProject is one discovered project row: its working directory
 // relative to the run's temporary root, its discovery project name, and its
@@ -56,7 +57,7 @@ type scannerLabelDocument struct {
 func loadScannerLabels(t *testing.T) scannerLabelDocument {
 	t.Helper()
 	var doc scannerLabelDocument
-	if err := decodeStrictFixture(scannerLabelData, &doc); err != nil {
+	if err := decodeStrictFixture(scannerLabelData(t), &doc); err != nil {
 		t.Fatalf("decode testdata/scanner_labels.yaml: %v", err)
 	}
 	present := make(map[string]bool, len(doc.Cases))

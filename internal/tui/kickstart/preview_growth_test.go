@@ -1,7 +1,6 @@
 package kickstart_test
 
 import (
-	_ "embed"
 	"fmt"
 	"strings"
 	"testing"
@@ -14,8 +13,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/transcriptview"
 )
 
-//go:embed testdata/preview_growth.yaml
-var previewGrowthData []byte
+func previewGrowthData(t *testing.T) []byte {
+	t.Helper()
+	return readMovedDiscoveryFixture(t, "preview_growth.yaml")
+}
 
 // previewGrowthCase is one preview scrolled a fixed number of times, and what
 // its RENDERED body must carry afterwards.
@@ -45,7 +46,7 @@ type previewGrowthDoc struct {
 func loadPreviewGrowthDoc(t *testing.T) previewGrowthDoc {
 	t.Helper()
 	var doc previewGrowthDoc
-	if err := testutil.DecodeFixtureYAML(previewGrowthData, &doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(previewGrowthData(t), &doc); err != nil {
 		t.Fatalf("decode testdata/preview_growth.yaml: %v", err)
 	}
 	if len(doc.RequiredCases) == 0 {

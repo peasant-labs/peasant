@@ -18,7 +18,7 @@ peasant prune [flags]
       --before string     Prune sessions started before this time (positive Go duration (e.g. 30m, 1h30m), integer d, w, mo (months), y, YYYY-MM-DD (UTC), or RFC3339)
       --confirm           Skip interactive confirmation (for scripts/CI)
       --dry-run           Show what would be deleted without deleting
-      --harness string    Prune sessions by harness (claude-code, gemini-cli, codex, opencode)
+      --harness string    Prune sessions by harness ({claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike, pi, grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew})
   -h, --help              help for prune
       --json              Output results as JSON
       --project string    Prune sessions of one project: its hash, path, directory name or git remote (owner/repo, host/owner/repo or a clone URL)

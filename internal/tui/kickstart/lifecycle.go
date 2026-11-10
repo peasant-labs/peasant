@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 )
 
@@ -98,12 +99,7 @@ type NextStepsFunc func(result *ftue.IngestResult) []NextStepKind
 // address: peasant web start is the component that can report the real address
 // after the server has successfully bound and become ready.
 func DefaultNextSteps(_ *ftue.IngestResult) []NextStepKind {
-	return []NextStepKind{
-		NextStepConfig,
-		NextStepWebStart,
-		NextStepVillageLogin,
-		NextStepVillagePush,
-	}
+	return adaptNextSteps(onboarding.NextStepsTUI())
 }
 
 func canonicalNextStep(kind NextStepKind) (nextStepDetails, bool) {

@@ -11,7 +11,7 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// ConversationTurnCountBackfillReport is the one-time V73 upgrade report. A
+// ConversationTurnCountBackfillReport is the one-time V74 upgrade report. A
 // session with no stored entries cannot be re-folded, so the backfill copies
 // its legacy count and names it here; re-indexing that session replaces the
 // copy with the conversation count.
@@ -21,14 +21,14 @@ type ConversationTurnCountBackfillReport struct {
 }
 
 // backfillConversationTurnCounts fills session_captured_stats.conversation_turn_count
-// for every session on a store that predates V73, including legacy sessions
+// for every session on a store that predates V74, including legacy sessions
 // that never had a captured stats row. It folds the stored entries through the
 // same ingest definition every reader uses, so the copied number is the
 // conversation count and not the retired raw record count. An entry-less
 // session has nothing to fold: it keeps its legacy value and is reported for
 // re-indexing.
 //
-// It runs once, from Open, immediately after the V73 migration. The caller
+// It runs once, from Open, immediately after the V74 migration. The caller
 // decides that from the database's pre-migration user_version, so a later open
 // at the head schema never re-folds.
 func backfillConversationTurnCounts(pool *sqlitex.Pool) (report ConversationTurnCountBackfillReport, err error) {
@@ -123,7 +123,7 @@ func nativeGenerationEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID
 	return partitions.main.Entries, nil
 }
 
-// legacySessionTurnCountOnConn reads the count a pre-V73 store already kept:
+// legacySessionTurnCountOnConn reads the count a pre-V74 store already kept:
 // the captured raw turn count for a managed session, falling back to the
 // legacy analysis column, and zero when neither exists. It is only used for a
 // session whose entries are gone, where no fold is possible.

@@ -2,7 +2,6 @@ package kickstart_test
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"strings"
 	"testing"
@@ -17,8 +16,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
-//go:embed testdata/preview_bodies.yaml
-var previewBodyData []byte
+func previewBodyData(t *testing.T) []byte {
+	t.Helper()
+	return readMovedDiscoveryFixture(t, "preview_bodies.yaml")
+}
 
 // previewBodyCase is one highlighted row and the lines its preview must and
 // must not carry.
@@ -44,7 +45,7 @@ type previewBodyDocument struct {
 func loadPreviewBodies(t *testing.T) previewBodyDocument {
 	t.Helper()
 	var doc previewBodyDocument
-	if err := testutil.DecodeFixtureYAML(previewBodyData, &doc); err != nil {
+	if err := testutil.DecodeFixtureYAML(previewBodyData(t), &doc); err != nil {
 		t.Fatalf("decode testdata/preview_bodies.yaml: %v", err)
 	}
 	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {

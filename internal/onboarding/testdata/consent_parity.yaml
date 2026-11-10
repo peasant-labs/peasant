@@ -1,0 +1,145 @@
+# Captured from the terminal review summary before the explanation moved.
+# A hidden choice is absent. The summary never prints "because".
+requiredNames:
+  - selection-scope-omits-unasked-fields
+  - first-run-disconnected-all
+  - first-run-connected-selected
+  - skipped-license-boundary
+  - auto-publish-on
+  - keep-local
+  - zero-effective-selection
+  - review-summary-never-prints-hidden-because
+cases:
+  - name: selection-scope-omits-unasked-fields
+    scope: selection
+    selectionMode: selected
+    villageConnected: true
+    claudeSessions: true
+    retentionDays: 30
+    autoPublishIntent: true
+    values:
+      - "selection: only the buffered projects, branches, and sessions"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  - name: first-run-disconnected-all
+    selectionMode: all
+    villageConnected: false
+    claudeSessions: false
+    values:
+      - "selection: all discovered sessions"
+      - "publication preference: keep local; nothing is published now or when kickstart finishes"
+      - "publish automatically: not now"
+      - "publication privacy: standard redaction; local imports remain original unless you run `peasant redact`"
+      - "later publish license: none; all rights remain and reuse requires permission"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  - name: first-run-connected-selected
+    selectionMode: selected
+    villageConnected: true
+    claudeSessions: true
+    retentionDays: 30
+    harnesses:
+      claude-code:
+        sessions: ["one"]
+    values:
+      - "selection: only the buffered projects, branches, and sessions"
+      - "auto-ingest future branches in fully-selected projects: on"
+      - "publication preference: keep local; nothing is published now or when kickstart finishes"
+      - "publish automatically: not now"
+      - "publication privacy: standard redaction; local imports remain original unless you run `peasant redact`"
+      - "later publish license: none; all rights remain and reuse requires permission"
+      - "default visibility after a later publish: private"
+      - "claude code source retention: 30 days"
+    effects:
+      - save the visible choices to peasant configuration
+      - apply claude code retention after config saves
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  - name: skipped-license-boundary
+    selectionMode: all
+    villageConnected: false
+    claudeSessions: false
+    license: ""
+    values:
+      - "selection: all discovered sessions"
+      - "publication preference: keep local; nothing is published now or when kickstart finishes"
+      - "publish automatically: not now"
+      - "publication privacy: standard redaction; local imports remain original unless you run `peasant redact`"
+      - "later publish license: none; all rights remain and reuse requires permission"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  - name: auto-publish-on
+    selectionMode: all
+    villageConnected: false
+    claudeSessions: false
+    sharePreference: share-later
+    autoPublishIntent: true
+    values:
+      - "selection: all discovered sessions"
+      - "publication preference: plan to publish later with an explicit `peasant village push`"
+      - "publish automatically: yes; you choose which folders go to which collectives in settings later"
+      - "publication privacy: standard redaction; local imports remain original unless you run `peasant redact`"
+      - "later publish license: none; all rights remain and reuse requires permission"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - install no git hook and save no auto-publish rule
+      - "publish nothing; sharing requires a later explicit push"
+  - name: keep-local
+    selectionMode: all
+    villageConnected: false
+    claudeSessions: false
+    sharePreference: ""
+    autoPublishIntent: false
+    values:
+      - "selection: all discovered sessions"
+      - "publication preference: keep local; nothing is published now or when kickstart finishes"
+      - "publish automatically: not now"
+      - "publication privacy: standard redaction; local imports remain original unless you run `peasant redact`"
+      - "later publish license: none; all rights remain and reuse requires permission"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  - name: zero-effective-selection
+    selectionMode: selected
+    villageConnected: false
+    claudeSessions: false
+    values:
+      - "selection: only the buffered projects, branches, and sessions"
+      - "auto-ingest future branches in fully-selected projects: on"
+      - "publication preference: keep local; nothing is published now or when kickstart finishes"
+      - "publish automatically: not now"
+      - "publication privacy: standard redaction; local imports remain original unless you run `peasant redact`"
+      - "later publish license: none; all rights remain and reuse requires permission"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  - name: review-summary-never-prints-hidden-because
+    selectionMode: all
+    villageConnected: false
+    claudeSessions: false
+    visibility: public
+    retentionDays: 90
+    forbidden:
+      - because
+      - default visibility
+      - claude code source retention
+      - "visibility: public"
+    values:
+      - "selection: all discovered sessions"
+      - "publication preference: keep local; nothing is published now or when kickstart finishes"
+      - "publish automatically: not now"
+      - "publication privacy: standard redaction; local imports remain original unless you run `peasant redact`"
+      - "later publish license: none; all rights remain and reuse requires permission"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"

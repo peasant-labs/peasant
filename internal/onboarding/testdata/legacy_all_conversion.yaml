@@ -1,6 +1,16 @@
 # Pure conversion cases use pre-resolved absolute path spellings. Real path
 # failure behavior uses the production resolver and temporary directories in the
 # focused conversion test.
+requiredNames:
+  - stored-worktree-selects-only-its-same-remote-clone
+  - canonical-cwd-selects-one-duplicate-name-project
+  - repeated-stored-sessions-count-as-one-physical-clone
+  - stored-clones-merge-under-one-remote-entry
+  - stored-harness-keeps-a-shared-path-separate
+  - changed-path-stays-unmatched-despite-id-remote-name-and-date
+  - empty-stored-path-stays-under-its-original-harness
+  - exact-path-can-select-a-project-without-remote-or-name
+  - empty-store-leaves-the-complete-current-scan-clear
 expectedCaseCount: 9
 cases:
   - name: stored-worktree-selects-only-its-same-remote-clone

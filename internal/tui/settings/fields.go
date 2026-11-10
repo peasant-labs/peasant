@@ -210,7 +210,13 @@ func (f *radioField[T]) initCmd() tea.Cmd      { return nil }
 func (f *radioField[T]) focus() tea.Cmd        { f.focused = true; return nil }
 func (f *radioField[T]) blur()                 { f.focused = false }
 func (f *radioField[T]) setSize(w, _ int)      { f.width = w }
-func (f *radioField[T]) reset(d *Draft)        { f.acc.Set(d.Working(), f.acc.Get(d.Baseline())) }
+func (f *radioField[T]) reset(d *Draft) {
+	if f.acc.Restore != nil {
+		f.acc.Restore(d.Working(), d.Baseline())
+		return
+	}
+	f.acc.Set(d.Working(), f.acc.Get(d.Baseline()))
+}
 func (f *radioField[T]) availableActions() []keymap.ActionID {
 	return []keymap.ActionID{keymap.ActionUp, keymap.ActionDown, keymap.ActionToggle, keymap.ActionConfirm}
 }

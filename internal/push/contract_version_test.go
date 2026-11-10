@@ -6,13 +6,14 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// wantVillageAPIVersion is the single-update-point expectation for the Village
-// API contract generation exposed by Peasant's schema module pin. Bump it here
-// only after reviewing both the current and retained compatibility surfaces.
-const wantVillageAPIVersion = "0.37.0"
+// These versions identify the contract generations exposed by Peasant's schema
+// module pin. Update them with the pin after reviewing compatibility surfaces.
+const wantVillageAPIVersion = "0.38.0"
+const wantPeasantLocalAPIVersion = "0.34.0"
+const wantTypesVersion = "0.46.0"
 
 // TestPinnedContractVersion_MatchesExpected fails if the schema module peasant
-// depends on reports a different Village API contract version than expected.
+// depends on reports a different contract version than expected.
 //
 // Why a consumer-side pin: schema.VillageAPIVersion is a version marker that
 // legitimately changes on every contract bump, so the schema module's own
@@ -32,9 +33,14 @@ func TestPinnedContractVersion_MatchesExpected(t *testing.T) {
 				"        moving version marker, so the consumer owns detecting drift.\n"+
 				"  means: the imported current and compatibility contract surfaces changed without\n"+
 				"        Peasant acknowledging their production and validation consequences.\n"+
-				"  fix:  confirm the bump is intended; review legacy publish acceptance and current\n"+
-				"        successor changes; re-check the SQLite license mirrors (V37/V38) and\n"+
-				"        downstream surfaces; then update this expectation with the module pin.",
+				"  fix:  review legacy publish acceptance and the SQLite license mirrors\n"+
+				"        (V37/V38), then update this expectation with the module pin.",
 			schema.VillageAPIVersion, wantVillageAPIVersion)
+	}
+	if schema.PeasantLocalAPIVersion != wantPeasantLocalAPIVersion {
+		t.Errorf("PeasantLocalAPIVersion = %q, want %q; review legacy publish acceptance and SQLite license mirrors before updating the module pin", schema.PeasantLocalAPIVersion, wantPeasantLocalAPIVersion)
+	}
+	if schema.TypesVersion != wantTypesVersion {
+		t.Errorf("TypesVersion = %q, want %q; review legacy publish acceptance and SQLite license mirrors before updating the module pin", schema.TypesVersion, wantTypesVersion)
 	}
 }

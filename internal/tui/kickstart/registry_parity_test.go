@@ -2,10 +2,10 @@ package kickstart_test
 
 import (
 	"bytes"
-	_ "embed"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -43,19 +43,27 @@ func (o parityOperation) valid() bool {
 	}
 }
 
+type parityOptionFixture struct {
+	Token       string `yaml:"token"`
+	Label       string `yaml:"label"`
+	Description string `yaml:"description"`
+}
+
 type paritySectionFixture struct {
 	Key        string `yaml:"key"`
 	Title      string `yaml:"title"`
 	FieldKey   string `yaml:"fieldKey"`
 	FieldKind  string `yaml:"fieldKind"`
+	ModelKind  string `yaml:"modelKind"`
 	FieldText  string `yaml:"fieldText"`
 	HasGuide   bool   `yaml:"hasGuide"`
 	GuideIntro string `yaml:"guideIntro"`
 	// FieldTextBeforeGuide distinguishes a field heading (true) from control
 	// output used only as a mounted-presence assertion (false).
-	FieldTextBeforeGuide bool `yaml:"fieldTextBeforeGuide"`
-	HasExample           bool `yaml:"hasExample"`
-	Conditional          bool `yaml:"conditional"`
+	FieldTextBeforeGuide bool                  `yaml:"fieldTextBeforeGuide"`
+	HasExample           bool                  `yaml:"hasExample"`
+	Conditional          bool                  `yaml:"conditional"`
+	Options              []parityOptionFixture `yaml:"options"`
 }
 
 type forbiddenRegistryOptionsFixture struct {
@@ -78,19 +86,29 @@ type parityRow struct {
 
 type parityDocument struct {
 	ExpectedSectionCount     int                             `yaml:"expectedSectionCount"`
+	RequiredNames            []string                        `yaml:"requiredNames"`
 	Sections                 []paritySectionFixture          `yaml:"sections"`
 	ForbiddenRegistryOptions forbiddenRegistryOptionsFixture `yaml:"forbiddenRegistryOptions"`
 	ExpectedRowCount         int                             `yaml:"expectedRowCount"`
 	Rows                     []parityRow                     `yaml:"rows"`
 }
 
-//go:embed testdata/guided/registry_parity.yaml
-var registryParityData []byte
+func registryParityPath() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(file), "..", "..", "onboarding", "testdata", "registry_parity.yaml")
+}
 
 func loadParityDocument(t *testing.T) parityDocument {
 	t.Helper()
+	data, err := os.ReadFile(registryParityPath())
+	if err != nil {
+		t.Fatalf("read shared registry parity fixture: %v", err)
+	}
 	var document parityDocument
-	decodeSingleKnownFieldsDocument(t, "testdata/guided/registry_parity.yaml", registryParityData, &document)
+	decodeSingleKnownFieldsDocument(t, "internal/onboarding/testdata/registry_parity.yaml", data, &document)
 	if document.ExpectedSectionCount != expectedParitySections || len(document.Sections) != expectedParitySections {
 		t.Fatalf("parity section count: declared=%d actual=%d required=%d",
 			document.ExpectedSectionCount, len(document.Sections), expectedParitySections)

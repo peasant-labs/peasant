@@ -1,7 +1,7 @@
 requiredNames:
   - v72-compact-identity-facts
-  - v74-image-attachments
-  - v73-conversation-turn-count
+  - v75-image-attachments
+  - v74-conversation-turn-count
   - v70-parent-state
   - v71-derived-lookups
   - v69-source-unavailability-cause
@@ -73,6 +73,7 @@ requiredNames:
   - v65-claude-identity-proof
   - v66-session-thinking-level
   - v67-latest-attempt-pointer
+  - v73-harness-check-widening
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle

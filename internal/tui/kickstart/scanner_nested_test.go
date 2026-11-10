@@ -2,7 +2,6 @@ package kickstart_test
 
 import (
 	"context"
-	_ "embed"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -24,13 +23,10 @@ type nestedListingsDoc struct {
 	Listings                []ftue.SessionListing `yaml:"listings"`
 }
 
-//go:embed testdata/nested_listings.yaml
-var nestedListingsData []byte
-
 func loadNestedListings(t *testing.T) nestedListingsDoc {
 	t.Helper()
 	var doc nestedListingsDoc
-	if err := decodeStrictFixture(nestedListingsData, &doc); err != nil {
+	if err := decodeStrictFixture(readMovedDiscoveryFixture(t, "nested_listings.yaml"), &doc); err != nil {
 		t.Fatalf("decode nested listings fixture: %v", err)
 	}
 	if doc.ExpectedListingCount != len(doc.Listings) || len(doc.Listings) == 0 {

@@ -1,0 +1,12 @@
+requiredNames:
+  - disconnected-full-model
+  - selection-scope-still-uses-full-catalog
+cases:
+  - name: disconnected-full-model
+    scope: full
+    wantModelPaths: [push.visibility, redaction.level]
+    wantCatalogPaths: [push.visibility, redaction.level]
+  - name: selection-scope-still-uses-full-catalog
+    scope: selection
+    absentModelPaths: [push.visibility, redaction.level]
+    wantCatalogPaths: [push.visibility, redaction.level]

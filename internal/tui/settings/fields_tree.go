@@ -491,8 +491,8 @@ func (f *treeField) handleMessage(d *Draft, msg tea.Msg, allowFacet bool) tea.Cm
 			// Its first real tree action converts the currently available physical
 			// forest to an exact selected baseline before later touched-scope edits.
 			f.applySelectionIntent(intent)
-			derived := FromTreeNodes(f.selectionRoots())
-			f.setWorkingSelection(d, derived, true)
+			f.writeCheckedSelection(d, true, UnmatchedBaseline{})
+			derived := f.acc.Get(d.Working())
 			f.unmatched = PrepopulateSelection(f.selectionRoots(), derived.ToSelectionConfig(d.Working().Selection.AutoIngestNewBranches))
 			f.baselineApplied = true
 			f.reconcileErr = nil
@@ -554,10 +554,9 @@ func (f *treeField) handleMessage(d *Draft, msg tea.Msg, allowFacet bool) tea.Cm
 	// would persist is always read from the whole forest - never left behind at
 	// whatever the last narrowed view happened to hold.
 	if restoreState {
-		derived := FromTreeNodes(f.selectionRoots())
-		f.setWorkingSelection(d, MergeSelection(derived, f.unmatched), intent.action != keymap.ActionUnknown)
+		f.writeCheckedSelection(d, intent.action != keymap.ActionUnknown, f.unmatched)
 	} else if f.forestReady && len(f.full) > 0 && (allowFacet || acceptedTreeLoad) && !(acceptedTreeLoad && f.initializeSelection) {
-		f.setWorkingSelection(d, FromTreeNodes(f.selectionRoots()), intent.action != keymap.ActionUnknown)
+		f.writeCheckedSelection(d, intent.action != keymap.ActionUnknown, UnmatchedBaseline{})
 	}
 	return cmd
 }
@@ -1514,6 +1513,28 @@ func (f *treeField) gutterLines(height int) []string {
 func (f *treeField) reset(d *Draft) {
 	f.acc.Set(d.Working(), f.acc.Get(d.Baseline()))
 	f.selectionActioned = false
+}
+
+// writeCheckedSelection stores the checked node ids through the neutral
+// selection field and mirrors the derived mapping into the presentation
+// accessor, so a caller that binds the tree to a typed selection sees the same
+// value. The selection field is the one derive call on this path.
+func (f *treeField) writeCheckedSelection(d *Draft, userAction bool, residual UnmatchedBaseline) bool {
+	if d == nil || d.Working() == nil {
+		return false
+	}
+	before := f.acc.Get(d.Working())
+	derived, err := writeSelectionIDs(d.Working(), f.selectionRoots(), residual)
+	if err != nil {
+		f.reconcileErr = err
+		return false
+	}
+	f.acc.Set(d.Working(), derived)
+	changed := !selectionsEqual(before, derived)
+	if changed && f.initializeSelection && userAction {
+		f.selectionActioned = true
+	}
+	return changed
 }
 
 func (f *treeField) setWorkingSelection(d *Draft, selection TreeSelection, userAction bool) bool {

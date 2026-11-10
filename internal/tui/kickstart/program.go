@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/peasant-labs/peasant/internal/animation"
-	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
@@ -171,11 +171,7 @@ type progressTickMsg struct {
 
 const progressPollInterval = time.Second / 24
 
-const (
-	oauthPrompt      = "connect to peasant online now?"
-	visibilityPrompt = "log in now to choose a default sharing visibility?"
-	connectingLabel  = "connecting to peasant online"
-)
+const connectingLabel = "connecting to peasant online"
 
 // errLoginCanceled is the note shown after the user cancels an in-flight login
 // with esc. It is informational, not a failure: local setup can still continue.
@@ -274,8 +270,8 @@ func NewProgram(deps ProgramDeps) Program {
 	p := Program{
 		deps:         deps,
 		phase:        PhaseOAuth,
-		oauth:        kit.NewConfirm(deps.Theme, oauthPrompt),
-		visibility:   kit.NewConfirm(deps.Theme, visibilityPrompt),
+		oauth:        kit.NewConfirm(deps.Theme, onboarding.VillageConnectPrompt()),
+		visibility:   kit.NewConfirm(deps.Theme, onboarding.BoundaryConnectPrompt()),
 		overlay:      kit.NewOverlay(deps.Theme),
 		spinner:      kit.NewSpinner(deps.Theme, "working"),
 		connection:   &villageConnectionState{connected: deps.AlreadyConnected},
@@ -579,9 +575,8 @@ func (p Program) buildFlow() Program {
 	return p
 }
 
-// consentSummary derives the final explanation from the Flow's canonical
-// read-only receipt context. Every conditional row is gated by a visible field
-// identity, so this presentation never duplicates Registry When predicates.
+// consentSummary asks the shared model for the review explanation. Visibility
+// comes from the same conditions the registry evaluates, not a second copy.
 func (p Program) consentSummary(ctx settings.ConsentContext) (settings.ConsentSummary, error) {
 	cfg, err := ctx.Config()
 	if err != nil {
@@ -594,68 +589,36 @@ func (p Program) consentSummary(ctx settings.ConsentContext) (settings.ConsentSu
 				"means: no consent summary was invented and no setting was saved.\n"+
 				"fix: leave without saving, correct the invalid configuration value, and rerun kickstart.", err)
 	}
-	values := make([]string, 0, 5)
-	if ctx.HasVisibleField(SectionSelection, FieldSelection) {
-		if cfg.Selection.Mode == config.SelectionModeSelected {
-			values = append(values, "selection: only the buffered projects, branches, and sessions")
-		} else {
-			values = append(values, "selection: all discovered sessions")
-		}
+	summary, err := onboarding.BuildConsentSummary(onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeFull}), onboarding.WriteContext{
+		Config:           &cfg,
+		VillageConnected: p.Connected(),
+		ClaudeSessions:   p.deps.ClaudeSessionsPresent,
+		LoginAvailable:   p.deps.Login != nil,
+		ConnectAnswer:    p.connectAnswer(),
+	})
+	if err != nil {
+		return settings.ConsentSummary{}, err
 	}
-	if ctx.HasVisibleField(SectionAutoIngest, FieldAutoIngest) {
-		state := "off"
-		if cfg.Selection.AutoIngestNewBranches {
-			state = "on"
-		}
-		values = append(values, "auto-ingest future branches in fully-selected projects: "+state)
-	}
-	if ctx.HasVisibleField(SectionPublication, FieldPublication) {
-		if cfg.Push.SharePreference == config.SharePreferenceShareLater {
-			values = append(values, "publication preference: plan to publish later with an explicit `peasant village push`")
-		} else {
-			values = append(values, "publication preference: keep local; nothing is published now or when kickstart finishes")
-		}
-	}
-	// The auto-publish answer is an intent only, so its effect row says what
-	// kickstart does not do with it.
-	autoPublish := ctx.HasVisibleField(SectionAutoPublish, FieldAutoPublish) && cfg.Push.AutoPublishIntended()
-	if ctx.HasVisibleField(SectionAutoPublish, FieldAutoPublish) {
-		if autoPublish {
-			values = append(values, "publish automatically: yes; you choose which folders go to which collectives in settings later")
-		} else {
-			values = append(values, "publish automatically: not now")
-		}
-	}
-	if ctx.HasVisibleField(SectionPrivacy, FieldPrivacy) {
-		values = append(values, "publication privacy: "+strings.ToLower(cfg.Redaction.Level.String())+
-			" redaction; local imports remain original unless you run `peasant redact`")
-	}
-	if ctx.HasVisibleField(SectionLicense, FieldLicense) {
-		if cfg.Push.License == "" {
-			values = append(values, "later publish license: none; all rights remain and reuse requires permission")
-		} else {
-			values = append(values, "later publish license: "+string(cfg.Push.License))
-		}
-	}
-	if ctx.HasVisibleField(SectionDestination, FieldVisibility) {
-		values = append(values, "default visibility after a later publish: "+string(cfg.Push.Visibility))
-	}
-	if ctx.HasVisibleField(SectionRetention, FieldRetention) && cfg.ClaudeRetentionDays > 0 {
-		values = append(values, fmt.Sprintf("claude code source retention: %d days", cfg.ClaudeRetentionDays))
-	}
+	return summary, nil
+}
 
-	effects := []string{"save the visible choices to peasant configuration"}
-	if ctx.HasVisibleField(SectionRetention, FieldRetention) && cfg.ClaudeRetentionDays > 0 {
-		effects = append(effects, "apply claude code retention after config saves")
+func (p Program) connectAnswer() onboarding.ConnectAnswer {
+	if !p.visibilityAsked {
+		return onboarding.ConnectUnanswered
 	}
-	if ctx.HasVisibleField(SectionSelection, FieldSelection) {
-		effects = append(effects, "import the selected transcripts into the local peasant store")
+	if p.Connected() {
+		return onboarding.ConnectConnected
 	}
-	if autoPublish {
-		effects = append(effects, "install no git hook and save no auto-publish rule")
-	}
-	effects = append(effects, "publish nothing; sharing requires a later explicit push")
-	return settings.ConsentSummary{Values: values, Effects: effects}, nil
+	return onboarding.ConnectSkipped
+}
+
+func (p Program) boundaryConnectOffer() (onboarding.ConnectOffer, bool) {
+	model := onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeFull})
+	return model.ConnectOfferAfter(onboarding.FlowLicense, onboarding.WriteContext{
+		VillageConnected: p.Connected(),
+		LoginAvailable:   p.deps.Login != nil,
+		ConnectAnswer:    p.connectAnswer(),
+	})
 }
 
 // updateFlow forwards to the settings.Flow. When the flow commits, ingest starts
@@ -663,15 +626,16 @@ func (p Program) consentSummary(ctx settings.ConsentContext) (settings.ConsentSu
 // nothing was written and the program is done.
 func (p Program) updateFlow(msg tea.Msg) (Program, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyPressMsg); ok &&
-		!p.Connected() && !p.visibilityAsked && p.deps.Login != nil &&
 		!p.flow.Confirming() && !p.flow.Helping() &&
 		p.flow.CurrentSectionKey() == SectionLicense {
 		if action, matched := keymap.Match(keymap.Default(), keyMsg,
 			programActionAvailability{keymap.ActionNextField}); matched && action == keymap.ActionNextField {
-			p.phase = PhaseVisibility
-			p.visibility = kit.NewConfirm(p.deps.Theme, visibilityPrompt)
-			p.visibility.SetSize(wrapPromptWidth(p.width), kit.ConfirmMinSize.Height)
-			return p, p.visibility.Focus()
+			if offer, shown := p.boundaryConnectOffer(); shown {
+				p.phase = PhaseVisibility
+				p.visibility = kit.NewConfirm(p.deps.Theme, offer.Prompt)
+				p.visibility.SetSize(wrapPromptWidth(p.width), kit.ConfirmMinSize.Height)
+				return p, p.visibility.Focus()
+			}
 		}
 	}
 	var cmd tea.Cmd
