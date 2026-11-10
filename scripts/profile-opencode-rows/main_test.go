@@ -74,9 +74,12 @@ func TestIgnoredOnlyCorpusKeepsTiming(t *testing.T) {
 // malformed row keeps the run invalid.
 func TestRefusedCorpusSuppressesTiming(t *testing.T) {
 	inputs := []input{profileInput("msg_bad_idle", "idle", `{"outcome":"succeeded"}`)}
-	_, err := runCorpus(t, inputs, "timing")
+	out, err := runCorpus(t, inputs, "timing")
 	if err == nil || !strings.Contains(err.Error(), "timing invalid") {
 		t.Fatalf("refused timing run error = %v, want the invalid-timing refusal", err)
+	}
+	if out.Refused != 1 || out.DecodeSeconds != 0 || out.AllocatedBytes != 0 || out.Allocations != 0 {
+		t.Fatalf("refused report = %+v, want the timing fields suppressed", out)
 	}
 }
 

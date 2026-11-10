@@ -370,7 +370,7 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		t.Helper()
 		// Reuse the exact same physical locator and file clock across runs:
 		// unattributed sessions derive project identity from this path.
-		if name == "" || strings.ContainsRune(name, os.PathSeparator) {
+		if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
 			t.Fatalf("native case name %q is not a single path element", name)
 		}
 		nativePath := filepath.Join(os.Getenv("PEASANT_GUARD_NATIVE"), name, "opencode.db")

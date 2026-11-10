@@ -34,9 +34,14 @@ func TestCompareRequiresAffectedVersion(t *testing.T) {
 }
 
 func TestEmbeddedProbeSharesTheObservedNamesContract(t *testing.T) {
-	read := []byte("os.Getenv(\"" + observedNativeEnv + "\")")
-	if !bytes.Contains(probe, read) || !bytes.Contains(probe, []byte("NativeObserved")) {
-		t.Fatalf("the embedded probe no longer reads os.Getenv(%q) and reports NativeObserved; the runner would hand it names it never sees", observedNativeEnv)
+	for _, name := range []string{corpusEnv, fallbackCorpusEnv, observedNativeEnv, outputEnv, nativeRootEnv} {
+		read := []byte("os.Getenv(\"" + name + "\")")
+		if !bytes.Contains(probe, read) {
+			t.Fatalf("the embedded probe no longer reads os.Getenv(%q); the runner and probe disagree about the contract", name)
+		}
+	}
+	if !bytes.Contains(probe, []byte("NativeObserved")) {
+		t.Fatal("the embedded probe no longer reports NativeObserved; the runner would hand it names it never sees")
 	}
 }
 

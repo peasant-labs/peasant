@@ -39,10 +39,10 @@ mistaken for parser changes. Each case directory is cleared before a capture, so
 a `-wal`/`-shm` sidecar left by the first capture of a pass cannot be read with
 the second capture's main file.
 
-The base corpus is read with the current strict loader: every base that declares
-`HarvesterVersionRegistry` loads under today's fields, but removing a case field
-would make older bases fail the guard rather than the comparison, so that change
-needs a guard-side migration. A newly registered harness without observations
+The base corpus is read with the current strict loader: any base whose corpus
+uses only today's case fields loads, but removing a field -- or adding a required
+one -- makes older bases fail the guard rather than the comparison, so that
+change needs a guard-side migration. A newly registered harness without observations
 fails; add it to the probe using an existing synthetic corpus.
 Historical revisions without Pi do not simulate a Pi parser. When a corpus
 predates Pi, registered Pi parsers use the candidate's first native corpus;
