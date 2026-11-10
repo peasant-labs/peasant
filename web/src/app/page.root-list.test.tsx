@@ -684,7 +684,7 @@ describe('root page list reads', () => {
     await screen.findByRole('region', { name: 'sessions' });
     fireEvent.change(screen.getByRole('searchbox', { name: 'search your sessions' }), { target: { value: 'flakes' } });
 
-    const results = await screen.findByText('search results');
+    const results = await screen.findByRole('heading', { name: 'search results' });
     const section = results.closest('[data-grouped-sessions-section]') as HTMLElement;
     expect(await within(section).findByText('the ingest test flakes on CI')).toBeInTheDocument();
     expect(within(section).getByText('you:', { exact: false })).toBeInTheDocument();

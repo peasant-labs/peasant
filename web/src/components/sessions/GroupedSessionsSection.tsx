@@ -1,18 +1,27 @@
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { FeedbackPanel, Pagination } from '@/lib/ft-ui';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { FeedbackPanel } from '@/lib/ft-ui';
 import { SkeletonList } from '@/lib/skeleton';
 import { PageSize } from '@peasant-labs/schema';
+import { closed } from '@peasant-labs/fairtrade/closed-value';
+import {
+  ColumnAlign,
+  groupKeysFor,
+  TranscriptLibraryTable,
+  type TranscriptLibraryColumn,
+} from '@peasant-labs/fairtrade/ui';
+import { displayProject } from '@/lib/quality/utils';
 import {
   assertGroupedProjectScope,
   fetchGroupedLocalSearch,
   fetchGroupedLocalSessions,
   isGroupedProjectScopeError,
   type LocalSessionListPayload,
+  type LocalSessionListItem,
   type LocalSessionRow,
 } from '@/lib/api/grouped';
-import { GroupedLocalSessions, type GroupedSelection } from './GroupedLocalSessions';
+import { GroupedItemCell, itemKey, itemProjectKeys, type GroupedSelection } from './GroupedSessionRows';
 
 export interface GroupedSessionsSectionProps {
   /** The originating route: the session list or the full-text search. */
@@ -57,8 +66,32 @@ export interface GroupedSessionsSectionProps {
  * their saved helpers collapsed underneath, and explicit context containers for
  * helper-only or owner-excluded results. An expired member scope refreshes THIS
  * list, never a broader one.
+ *
+ * The body is the shared table: this adapter keeps the fetch, the project-scope
+ * assertion, and the error path, then hands the rows, the bare project keys,
+ * and the server page to `TranscriptLibraryTable`.
  */
 const GROUPED_PAGE_SIZE = PageSize.P25;
+
+const GroupedColumn = Object.freeze({
+  Session: closed('session', 'session'),
+  Project: closed('project', 'project'),
+  Harness: closed('harness', 'harness'),
+  Turns: closed('turns', 'turns'),
+  Tokens: closed('tokens', 'tokens'),
+} as const);
+type GroupedColumn = (typeof GroupedColumn)[keyof typeof GroupedColumn];
+
+const GroupedGroupBy = Object.freeze({
+  Project: closed('project', 'project'),
+} as const);
+type GroupedGroupBy = (typeof GroupedGroupBy)[keyof typeof GroupedGroupBy];
+
+type GroupedRow = { id: string; item: LocalSessionListItem };
+
+function tokenLabel(value: number): string {
+  return value.toLocaleString('en-US');
+}
 
 export function GroupedSessionsSection({
   variant,
@@ -77,6 +110,10 @@ export function GroupedSessionsSection({
   const [scopeUnavailable, setScopeUnavailable] = useState(false);
   const [reload, setReload] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(GROUPED_PAGE_SIZE);
+  // The pages this tab already read, so a continuing group can name the keys
+  // that began on the previous page. A cold jump holds no previous page.
+  const pages = useRef(new Map<number, LocalSessionListPayload>());
 
   const refresh = useCallback(() => setReload((value) => value + 1), []);
 
@@ -91,14 +128,15 @@ export function GroupedSessionsSection({
     setError(null);
     const request =
       variant === 'search'
-        ? fetchGroupedLocalSearch(query ?? '', 20, { page, perPage: GROUPED_PAGE_SIZE })
-        : fetchGroupedLocalSessions({ projectHash }, { page, perPage: GROUPED_PAGE_SIZE });
+        ? fetchGroupedLocalSearch(query ?? '', 20, { page, perPage: pageSize })
+        : fetchGroupedLocalSessions({ projectHash }, { page, perPage: pageSize });
     request
       .then((next) => {
         if (cancelled) return;
         if (variant === 'sessions' && projectHash) {
           assertGroupedProjectScope(next, projectHash);
         }
+        pages.current.set(next.page, next);
         setPayload(next);
         setLoading(false);
       })
@@ -119,7 +157,79 @@ export function GroupedSessionsSection({
     return () => {
       cancelled = true;
     };
-  }, [variant, query, projectHash, invalidationKey, reload, page, onScopeUnavailable]);
+  }, [variant, query, projectHash, invalidationKey, reload, page, pageSize, onScopeUnavailable]);
+
+  // A new scope invalidates every page this section held.
+  useEffect(() => {
+    pages.current.clear();
+  }, [variant, query, projectHash]);
+
+  const rows = useMemo<GroupedRow[]>(
+    () => (payload?.items ?? []).map((item) => ({ id: itemKey(item), item })),
+    [payload],
+  );
+  const previous = payload === null ? null : pages.current.get(payload.page - 1) ?? null;
+
+  // The label map covers this page, its continuation, and the previous page so a
+  // continued group and a next-page group resolve the same project name.
+  const projectLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    const remember = (item: LocalSessionListItem) => {
+      const session = item.transcript?.session;
+      if (!session) return;
+      const key = `${GroupedGroupBy.Project.wire}:${session.projectHash ?? ''}`;
+      if (!labels.has(key)) labels.set(key, session.project ? displayProject(session.project) : '');
+    };
+    for (const row of payload?.items ?? []) remember(row);
+    for (const item of payload?.nextItems ?? []) remember(item);
+    for (const item of previous?.items ?? []) remember(item);
+    return labels;
+  }, [payload, previous]);
+
+  const columns = useMemo<TranscriptLibraryColumn<GroupedRow, GroupedColumn>[]>(() => [
+    {
+      id: GroupedColumn.Session,
+      label: 'session',
+      align: ColumnAlign.Start,
+      render: (row) => (
+        <GroupedItemCell
+          item={row.item}
+          selection={selection}
+          onRefreshList={refresh}
+          rowDetail={rowDetail}
+        />
+      ),
+    },
+    {
+      id: GroupedColumn.Project,
+      label: 'project',
+      align: ColumnAlign.Start,
+      render: (row) => {
+        const project = row.item.transcript?.session.project;
+        return <span className="home-project">{project ? displayProject(project) : '—'}</span>;
+      },
+    },
+    {
+      id: GroupedColumn.Harness,
+      label: 'harness',
+      align: ColumnAlign.Start,
+      render: (row) => row.item.transcript?.session.harness ?? '—',
+    },
+    {
+      id: GroupedColumn.Turns,
+      label: 'turns',
+      align: ColumnAlign.End,
+      numeric: true,
+      render: (row) => row.item.transcript ? tokenLabel(row.item.transcript.session.turnCount) : '—',
+    },
+    {
+      id: GroupedColumn.Tokens,
+      label: 'tokens',
+      align: ColumnAlign.End,
+      numeric: true,
+      render: (row) => row.item.transcript ? tokenLabel(row.item.transcript.session.totalTokens) : '—',
+    },
+  ], [selection, refresh, rowDetail]);
 
   if (scopeUnavailable) return null;
 
@@ -153,26 +263,23 @@ export function GroupedSessionsSection({
           </span>
         </div>
       )}
-      <GroupedLocalSessions
-        payload={payload}
-        onRefreshList={refresh}
-        selection={selection}
-        emptyState={emptyState}
-        rowDetail={rowDetail}
-      />
-      {payload.total > payload.perPage && (
-        <div className="flex items-center justify-between gap-3 pt-1" data-grouped-pager="true">
-          <span className="font-mono text-xs text-ink-4 tabular-nums" role="status">
-            page {payload.page} of {Math.max(1, Math.ceil(payload.total / payload.perPage))}
-            {payload.nextItems.length > 0 ? ' · more follow' : ''}
-          </span>
-          <Pagination
-            page={payload.page}
-            total={Math.max(1, Math.ceil(payload.total / payload.perPage))}
-            onChange={setPage}
-            label="grouped pages"
-          />
-        </div>
+      {rows.length === 0 ? emptyState ?? null : (
+        <TranscriptLibraryTable<GroupedRow, GroupedGroupBy, GroupedColumn>
+          caption={heading ?? 'grouped sessions'}
+          rows={rows}
+          rowKey={(row) => row.id}
+          columns={columns}
+          groupBy={GroupedGroupBy.Project}
+          groupByOptions={[GroupedGroupBy.Project]}
+          groupKeys={(row) => itemProjectKeys(row.item)}
+          groupLabel={(id) => projectLabels.get(id) ?? (id.slice(id.indexOf(':') + 1) || id)}
+          nextGroupKeys={payload.nextItems.length > 0 ? groupKeysFor(payload.nextItems, itemProjectKeys) : null}
+          continuedGroupKeys={previous ? groupKeysFor(previous.items, itemProjectKeys) : null}
+          page={{ index: payload.page, size: payload.perPage, total: payload.total }}
+          viewState={null}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        />
       )}
     </section>
   );

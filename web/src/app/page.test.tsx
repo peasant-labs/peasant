@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { DOCS } from '@/lib/docs';
-import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import HomePage from './page';
@@ -223,8 +223,8 @@ type FlatSessionCase = {
   harnesses: string[];
   filterQuery: string;
   expectedFilteredCount: number;
-  expectedTotalPages: number;
-  expectedFilteredPages: number;
+  expectedRenderedRows: number;
+  expectedFilteredRenderedRows: number;
 };
 
 const flatSessionsManifestSource = readFileSync(
@@ -274,7 +274,7 @@ function loadFlatSessionFixture(
     const label = `home flat sessions cases.cases[${index}]`;
     requireExactRequiredFields(
       row,
-      ['name', 'sessionCount', 'projects', 'harnesses', 'filterQuery', 'expectedFilteredCount', 'expectedTotalPages', 'expectedFilteredPages'],
+      ['name', 'sessionCount', 'projects', 'harnesses', 'filterQuery', 'expectedFilteredCount', 'expectedRenderedRows', 'expectedFilteredRenderedRows'],
       label,
     );
     if (!Number.isSafeInteger(row.sessionCount) || (row.sessionCount as number) < 1) {
@@ -289,7 +289,7 @@ function loadFlatSessionFixture(
     if (typeof row.filterQuery !== 'string' || row.filterQuery === '') {
       throw new Error(`${label}.filterQuery must be a non-empty string`);
     }
-    for (const field of ['expectedFilteredCount', 'expectedTotalPages', 'expectedFilteredPages'] as const) {
+    for (const field of ['expectedFilteredCount', 'expectedRenderedRows', 'expectedFilteredRenderedRows'] as const) {
       if (!Number.isSafeInteger(row[field]) || (row[field] as number) < 1) {
         throw new Error(`${label}.${field} must be a positive integer`);
       }
@@ -496,7 +496,7 @@ describe('HomePage — the changes-first picker', () => {
     render(<HomePage />);
     await openView(GROUPED_VIEW);
 
-    expect(await screen.findByText('all sessions')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'all sessions' })).toBeInTheDocument();
     expect(await screen.findByText('2 helper threads')).toBeInTheDocument();
     expect(screen.getByText('sg-owner')).toBeInTheDocument();
     expect(screen.getByText('2 sessions · 2 helper threads')).toBeInTheDocument();
@@ -550,10 +550,14 @@ describe('HomePage — the changes-first picker', () => {
       expect(await screen.findByText('2 helper threads')).toBeInTheDocument();
       expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalledTimes(1);
 
-      // ... and the flat filter + pager stay reachable from the same menu.
+      // ... and the flat filter stays reachable from the same menu. The list
+      // is complete, so it renders every matching row and shows no pager.
       await openView(FLAT_VIEW);
       expect(screen.getByText(`${testCase.sessionCount} sessions`)).toBeInTheDocument();
-      expect(screen.getByText(`page 1 of ${testCase.expectedTotalPages}`)).toBeInTheDocument();
+      const flat = () => document.querySelector('[data-tour="all-sessions"]') as HTMLElement;
+      expect(flat().querySelectorAll('tbody tr[data-row-kind="row"]')).toHaveLength(testCase.expectedRenderedRows);
+      expect(within(flat()).queryByRole('button', { name: 'next' })).not.toBeInTheDocument();
+      expect(within(flat()).queryByRole('button', { name: 'next page' })).not.toBeInTheDocument();
 
       // Filtering by the previous supported field narrows to the server-visible
       // set without touching the grouped helper membership.
@@ -563,14 +567,8 @@ describe('HomePage — the changes-first picker', () => {
       expect(
         screen.getByText(`${testCase.expectedFilteredCount} sessions of ${testCase.sessionCount}`),
       ).toBeInTheDocument();
-      expect(screen.getByText(`page 1 of ${testCase.expectedFilteredPages}`)).toBeInTheDocument();
+      expect(flat().querySelectorAll('tbody tr[data-row-kind="row"]')).toHaveLength(testCase.expectedFilteredRenderedRows);
       expect(groupedApi.fetchGroupedLocalSessions).toHaveBeenCalledTimes(1);
-
-      // The top-level pager navigates the filtered result.
-      fireEvent.click(screen.getByRole('button', { name: 'next' }));
-      expect(
-        screen.getByText(`page ${testCase.expectedFilteredPages} of ${testCase.expectedFilteredPages}`),
-      ).toBeInTheDocument();
     });
   }
 

@@ -103,8 +103,17 @@ try {
         reads.push(url);
         if (fail) return route.fulfill({ status: 503, json: { error: 'temporary local read failure; retry the session list' } });
         const source = url.searchParams.has('parentSessionId') ? children : roots;
-        const start = url.searchParams.get('pageToken') === 'after-first' ? 25 : url.searchParams.get('pageToken') === 'after-second' ? 50 : 0;
-        return route.fulfill({ json: { items: source.slice(start, start + 25), next: start + 25 < source.length ? start === 0 ? 'after-first' : 'after-second' : '' } });
+        const page = Number(url.searchParams.get('page') ?? '1');
+        const perPage = Number(url.searchParams.get('maxItems') ?? '25');
+        const start = (page - 1) * perPage;
+        return route.fulfill({ json: {
+          items: source.slice(start, start + perPage),
+          nextItems: source.slice(start + perPage, start + 2 * perPage),
+          page,
+          perPage,
+          total: source.length,
+          revision: '0',
+        } });
       }
       if (url.pathname === '/api/v1/sync/auth') return route.fulfill({ json: { authenticated: false } });
       if (url.pathname === '/api/v1/publications') return route.fulfill({ json: { publications: [] } });

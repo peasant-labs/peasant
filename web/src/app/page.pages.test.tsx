@@ -149,7 +149,7 @@ describe('mounted bounded Home', () => {
       const restoring = testCase.name === 'refresh-restores-view-and-page';
       const hiddenSession = testCase.visibleColumns !== undefined && !testCase.visibleColumns.includes('session');
       if (hiddenSession) {
-        await waitFor(() => expect(document.querySelector('[data-home-group]')).not.toBeNull());
+        await waitFor(() => expect(document.querySelector('[data-root-session-list] [data-row-kind="group"]')).not.toBeNull());
       } else {
         await screen.findByRole('link', { name: customRows ? `title ${testCase.rows![0].id}` : restoring ? 'title root-50' : 'title root-0' });
       }
@@ -250,9 +250,9 @@ describe('mounted bounded Home', () => {
         await screen.findByRole('link', { name: 'title root-50' });
         await waitFor(() => expect(screen.getByRole('button', { name: 'page 2' })).toHaveAttribute('aria-current', 'page'));
         expect(screen.queryByRole('link', { name: 'title root-0' })).not.toBeInTheDocument();
-        // groupBy=none comes from the URL, so the local list renders no project
+        // groupBy=none comes from the URL, so the table renders no project
         // group header even though the device holds an open set.
-        expect(document.querySelector('[data-home-group]')).toBeNull();
+        expect(document.querySelector('[data-row-kind="group"]')).toBeNull();
       }
       if (testCase.name === 'stale-filter-response') {
         delayed = deferred<Response>(); delayFilter = 'published';
@@ -484,37 +484,41 @@ describe('mounted bounded Home', () => {
       }
       if (testCase.name === 'interleaved-project-grouping') {
         expect(new URLSearchParams(window.location.search).get('groupBy')).toBe('project');
-        const groups = [...document.querySelectorAll('[data-home-group]')];
-        expect(groups.map(group => group.getAttribute('data-home-group'))).toEqual([
-          `project:${ALPHA_HASH}`,
-          `project:${BETA_HASH}`,
-        ]);
-        expect(groups.map(group => group.textContent?.trim())).toEqual(['fixture-project', 'beta-project']);
+        const groupRows = () => [...document.querySelectorAll<HTMLElement>('[data-root-session-list] [data-row-kind="group"], [data-root-session-list] [data-row-kind="continuation"]')];
+        const groupByLabel = (label: string) => {
+          const row = groupRows().find(candidate => (candidate.textContent ?? '').trim().replace(/, continued$/, '') === label);
+          if (!row) throw new Error(`no group ${label}; groups are ${groupRows().map(candidate => candidate.textContent?.trim()).join(', ')}`);
+          return row;
+        };
+        expect(groupRows().map(group => (group.textContent ?? '').trim())).toEqual(['fixture-project', 'beta-project']);
         // Stable partition: A1, B1, A2 renders A1, A2 under A, then B1 under B.
         expect([...document.querySelectorAll('[data-session-id]')].map(node => node.getAttribute('data-session-id'))).toEqual(['a1', 'a2', 'b1']);
         // Collapsing a project group hides exactly its rows and writes the
         // device open set; expanding it restores them.
-        const alphaGroup = () => document.querySelector(`[data-home-group="project:${ALPHA_HASH}"]`) as HTMLElement;
-        fireEvent.click(within(alphaGroup()).getByRole('button'));
+        fireEvent.click(within(groupByLabel('fixture-project')).getByRole('button'));
         await waitFor(() => expect(screen.queryByRole('link', { name: 'title a1' })).not.toBeInTheDocument());
         expect(screen.getByRole('link', { name: 'title b1' })).toBeInTheDocument();
         const stored = JSON.parse(window.localStorage.getItem('peasant.home') ?? '{}');
         expect(stored.collapsed).toEqual([`project:${ALPHA_HASH}`]);
-        fireEvent.click(within(alphaGroup()).getByRole('button'));
+        fireEvent.click(within(groupByLabel('fixture-project')).getByRole('button'));
         await screen.findByRole('link', { name: 'title a1' });
         return;
       }
       if (testCase.name === 'collapsed-group-does-not-hide-page-two') {
-        const alphaGroup = () => document.querySelector(`[data-home-group="project:${ALPHA_HASH}"]`) as HTMLElement;
-        fireEvent.click(within(alphaGroup()).getByRole('button'));
+        const groupRows = () => [...document.querySelectorAll<HTMLElement>('[data-root-session-list] [data-row-kind="group"], [data-root-session-list] [data-row-kind="continuation"]')];
+        const groupByLabel = (label: string) => {
+          const row = groupRows().find(candidate => (candidate.textContent ?? '').trim().replace(/, continued$/, '') === label);
+          if (!row) throw new Error(`no group ${label}; groups are ${groupRows().map(candidate => candidate.textContent?.trim()).join(', ')}`);
+          return row;
+        };
+        fireEvent.click(within(groupByLabel('fixture-project')).getByRole('button'));
         await waitFor(() => expect(screen.queryByRole('link', { name: 'title a01' })).not.toBeInTheDocument());
         fireEvent.click(screen.getByRole('button', { name: 'next page' }));
         await screen.findByRole('link', { name: 'title c01' });
         // Page 2's projects were never collapsed, so they are open.
-        for (const [id, hash] of [['c01', FIXTURE_PROJECTS.gamma.hash], ['d01', FIXTURE_PROJECTS.delta.hash]] as const) {
+        for (const [id, label] of [['c01', 'gamma-project'], ['d01', 'delta-project']] as const) {
           expect(await screen.findByRole('link', { name: `title ${id}` })).toBeInTheDocument();
-          const header = document.querySelector(`[data-home-group="project:${hash}"]`);
-          expect(header?.querySelector('button')).toHaveAttribute('aria-expanded', 'true');
+          expect(groupByLabel(label).querySelector('.libt-group-toggle')).toHaveAttribute('aria-expanded', 'true');
         }
         // Page 1 keeps its own collapsed project.
         fireEvent.click(screen.getByRole('button', { name: 'page 1' }));
@@ -523,9 +527,11 @@ describe('mounted bounded Home', () => {
         return;
       }
       if (testCase.name === 'hidden-session-column-grouping') {
-        const table = document.querySelector('.home-table') as HTMLElement;
-        expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent?.trim())).toEqual(['project', 'status']);
-        const group = document.querySelector('[data-home-group]');
+        const table = document.querySelector('[data-root-session-list] table') as HTMLElement;
+        // The shared table keeps the first declared column (the row identity)
+        // even when the stored set omits it, so the session column still shows.
+        expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent?.trim())).toEqual(['session', 'project', 'status']);
+        const group = document.querySelector('[data-row-kind="group"]');
         expect(group).not.toBeNull();
         expect(group).toHaveTextContent('fixture-project');
         expect(screen.getAllByText('fixture-project').length).toBeGreaterThan(0);

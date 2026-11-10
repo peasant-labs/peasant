@@ -1,0 +1,9 @@
+expectedCount: 3
+requiredNames:
+  - grouped body mounts the shared table
+  - flat body mounts the shared table
+  - no local home-table wrapper renders
+sources:
+  - src/components/home/RootSessionList.tsx
+  - src/components/sessions/AllSessions.tsx
+  - src/components/sessions/GroupedSessionsSection.tsx

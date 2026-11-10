@@ -1,14 +1,21 @@
-import { HOME_COLUMN_IDS, isHomeColumnId, type HomeColumnId } from '@/components/home/homeColumns';
+import {
+  ALL_HOME_COLUMNS,
+  isHomeColumnWire,
+  type HomeColumnWire,
+} from '@/components/home/homeColumns';
 
 /**
  * The device half of the saved view: the visible columns and the open groups.
  * It lives in `localStorage` under `peasant.home`, never in the URL. A copied
  * URL therefore reproduces the data view and the grouping, not the sender's
  * columns.
+ *
+ * The stored columns are the closed-set members' `wire` values, so the stored
+ * shape is plain strings; the table receives members composed in `page.tsx`.
  */
 export interface HomeDeviceView {
   /** The columns the reader can see, in table order. `null` means the default set. */
-  readonly visibleColumns: readonly HomeColumnId[] | null;
+  readonly visibleColumns: readonly HomeColumnWire[] | null;
   /**
    * The qualified group ids whose rows are collapsed. `null` or an empty array
    * means nothing is collapsed; a group renders open unless its qualified id is
@@ -41,8 +48,8 @@ export function readHomeDeviceView(storage: ReadableStorage | null = storageOrNu
   }
   if (typeof parsed !== 'object' || parsed === null) return DEFAULT_DEVICE_VIEW;
   const record = parsed as { visibleColumns?: unknown; collapsed?: unknown };
-  const columns = Array.isArray(record.visibleColumns) && record.visibleColumns.every(isHomeColumnId)
-    ? (record.visibleColumns as HomeColumnId[])
+  const columns = Array.isArray(record.visibleColumns) && record.visibleColumns.every(isHomeColumnWire)
+    ? (record.visibleColumns as HomeColumnWire[])
     : null;
   const collapsed = Array.isArray(record.collapsed) && record.collapsed.every((id) => typeof id === 'string')
     ? (record.collapsed as string[])
@@ -57,7 +64,10 @@ export function readHomeDeviceView(storage: ReadableStorage | null = storageOrNu
 export function writeHomeDeviceView(view: HomeDeviceView, storage: WritableStorage | null = storageOrNull()): void {
   if (storage === null) return;
   try {
-    storage.setItem(HOME_DEVICE_KEY, JSON.stringify({ visibleColumns: view.visibleColumns, collapsed: view.collapsed }));
+    storage.setItem(
+      HOME_DEVICE_KEY,
+      JSON.stringify({ visibleColumns: view.visibleColumns, collapsed: view.collapsed }),
+    );
   } catch {
     // Quota or private-mode failure: the view is a convenience, not a requirement.
   }
@@ -73,5 +83,5 @@ export function clearHomeCollapsedGroups(storage: WritableStorage | null = stora
   writeHomeDeviceView({ visibleColumns: view.visibleColumns, collapsed: [] }, storage);
 }
 
-/** The column ids in their default order, for the first render before a reader hides one. */
-export const DEFAULT_HOME_COLUMNS: readonly HomeColumnId[] = HOME_COLUMN_IDS;
+/** The column wires in their default order, for the first render before a reader hides one. */
+export const DEFAULT_HOME_COLUMNS: readonly HomeColumnWire[] = ALL_HOME_COLUMNS.map((column) => column.wire);

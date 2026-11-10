@@ -6,6 +6,8 @@ import { closed } from '@peasant-labs/fairtrade/closed-value';
  * device state under `peasant.home` (see `deviceView.ts`).
  *
  * `project` is the host default, so an absent or unknown URL value takes it.
+ * The members are closed values: the shared table keys grouping by `.wire` and
+ * compares members nominally, so the host never compares a raw string.
  */
 export const HomeGroupBy = Object.freeze({
   Project: closed('project', 'project'),
@@ -25,12 +27,41 @@ export function parseHomeGroupBy(raw: unknown): HomeGroupBy {
   return ALL_HOME_GROUP_BYS.find((member) => member.wire === raw) ?? HomeGroupBy.Project;
 }
 
-/** The table's column ids. Order is the column order. */
-export const HOME_COLUMN_IDS = ['session', 'project', 'turns', 'duration', 'when', 'state'] as const;
-export type HomeColumnId = (typeof HOME_COLUMN_IDS)[number];
+/**
+ * The table's column ids, in declaration order. The first column is the row
+ * identity: the shared table always shows it, and its picker disables it. The
+ * saved view stores these members; `deviceView.ts` persists only their wires.
+ */
+export const HomeColumn = Object.freeze({
+  Session: closed('session', 'session'),
+  Project: closed('project', 'project'),
+  Turns: closed('turns', 'turns'),
+  Duration: closed('duration', 'duration'),
+  When: closed('when', 'when'),
+  State: closed('state', 'status'),
+} as const);
+export type HomeColumn = (typeof HomeColumn)[keyof typeof HomeColumn];
 
-export function isHomeColumnId(value: unknown): value is HomeColumnId {
-  return typeof value === 'string' && (HOME_COLUMN_IDS as readonly string[]).includes(value);
+export const ALL_HOME_COLUMNS = Object.freeze([
+  HomeColumn.Session,
+  HomeColumn.Project,
+  HomeColumn.Turns,
+  HomeColumn.Duration,
+  HomeColumn.When,
+  HomeColumn.State,
+] as const);
+
+export type HomeColumnWire = HomeColumn['wire'];
+
+const HOME_COLUMN_WIRES: readonly HomeColumnWire[] = ALL_HOME_COLUMNS.map((column) => column.wire);
+
+export function isHomeColumnWire(value: unknown): value is HomeColumnWire {
+  return typeof value === 'string' && (HOME_COLUMN_WIRES as readonly string[]).includes(value);
+}
+
+/** Resolve a stored wire back to its closed-set member, or null when unknown. */
+export function parseHomeColumn(value: unknown): HomeColumn | null {
+  return ALL_HOME_COLUMNS.find((column) => column.wire === value) ?? null;
 }
 
 /**
@@ -40,7 +71,7 @@ export function isHomeColumnId(value: unknown): value is HomeColumnId {
  */
 export interface HomeSavedView {
   readonly groupBy: HomeGroupBy;
-  readonly visibleColumns: readonly HomeColumnId[];
-  /** Qualified collapsed group ids; `null` or empty means nothing is collapsed. */
-  readonly collapsed: readonly string[] | null;
+  readonly visibleColumns: readonly HomeColumn[];
+  /** Qualified collapsed group ids; an empty list means nothing is collapsed. */
+  readonly collapsed: readonly string[];
 }
