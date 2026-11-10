@@ -293,13 +293,6 @@ func capturedStatsFromRaw(raw json.RawMessage, harness schema.Harness) (Captured
 			delete(values, key)
 		}
 	}
-	if stats.TurnCount != nil {
-		// The current producer's document already carries the conversation
-		// count, so seed the conversation column from it here too. A document
-		// written before V71 carries the raw count instead; the V71 upgrade
-		// backfill folds the entries afterwards and replaces this seed.
-		stats.ConversationTurnCount = stats.TurnCount
-	}
 	if len(values) == 0 {
 		return stats, nil, nil
 	}

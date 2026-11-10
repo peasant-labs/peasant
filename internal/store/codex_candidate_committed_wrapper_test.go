@@ -143,10 +143,6 @@ func TestCodexCommittedWrapperDetailKeepsLiteralBodies(t *testing.T) {
 	// The committed readers serve the file-backed representation; the
 	// readers change wires the harmonized catalog rows to them.
 	seedFileBackedGeneration(t, s, filepath.Join(dir, "artifacts"), sessionID, candidate.V2, candidate.Content, false)
-	storedTurns := fixture.Expected.TurnCount
-	if _, err := s.UpsertCapturedStats(context.Background(), CapturedStats{SessionID: sessionID, ConversationTurnCount: &storedTurns, Source: StatsSourceHarness, UpdatedAtMs: 1}); err != nil {
-		t.Fatal(err)
-	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store before reopen: %v", err)
 	}
@@ -160,10 +156,10 @@ func TestCodexCommittedWrapperDetailKeepsLiteralBodies(t *testing.T) {
 	if snapshot.Detail == nil {
 		t.Fatal("committed detail row is absent")
 	}
-	// The committed row copies durable generation stats, not the served header.
-	// The system entry remains in that stored count.
-	if snapshot.Detail.TurnCount != fixture.Expected.TurnCount {
-		t.Errorf("committed detail turn count = %d, want %d", snapshot.Detail.TurnCount, fixture.Expected.TurnCount)
+	// The committed row copies the durable generation stats: conversation turns,
+	// with the system entry excluded.
+	if snapshot.Detail.TurnCount != fixture.Expected.ConversationTurnCount {
+		t.Errorf("committed detail turn count = %d, want %d", snapshot.Detail.TurnCount, fixture.Expected.ConversationTurnCount)
 	}
 	if snapshot.Detail.Title == nil || *snapshot.Detail.Title != fixture.Expected.Title {
 		t.Errorf("committed detail title = %v, want the literal %q", snapshot.Detail.Title, fixture.Expected.Title)
@@ -185,8 +181,8 @@ func TestCodexCommittedWrapperDetailKeepsLiteralBodies(t *testing.T) {
 	}
 
 	err = s.WithSessionSnapshot(ctx, sessionID, func(read indexformat.ReadSnapshot) error {
-		if read.Metadata.Stats.TurnCount != fixture.Expected.TurnCount {
-			return fmt.Errorf("durable snapshot turn count = %d, want %d", read.Metadata.Stats.TurnCount, fixture.Expected.TurnCount)
+		if read.Metadata.Stats.TurnCount != fixture.Expected.ConversationTurnCount {
+			return fmt.Errorf("durable snapshot turn count = %d, want %d", read.Metadata.Stats.TurnCount, fixture.Expected.ConversationTurnCount)
 		}
 		if fixture.Expected.InputSubmissionCount != nil {
 			got := read.Metadata.Stats.InputSubmissionCount

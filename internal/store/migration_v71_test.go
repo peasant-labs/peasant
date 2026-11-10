@@ -201,3 +201,68 @@ func TestBackfillConversationTurnCountsReportsEntryLessSessions(t *testing.T) {
 		t.Fatalf("sessions updated = %d, want %d", report.SessionsUpdated, len(fixture.Sessions))
 	}
 }
+
+func TestConversationTurnCountBackfillGate(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		version int64
+		want    bool
+	}{
+		{0, false}, {1, true}, {62, true}, {70, true}, {71, false}, {72, false},
+	} {
+		if got := shouldBackfillConversationTurnCounts(tc.version); got != tc.want {
+			t.Errorf("shouldBackfillConversationTurnCounts(%d) = %t, want %t", tc.version, got, tc.want)
+		}
+	}
+}
+
+// TestConversationTurnCountBackfillDoesNotReRunAtHead proves the gate is tied
+// to the V71 upgrade, not to every future head version: a store already at V71
+// reopens without re-folding, so a deliberately changed count survives.
+func TestConversationTurnCountBackfillDoesNotReRunAtHead(t *testing.T) {
+	t.Parallel()
+	fixture := loadConversationTurnCountMigrationFixture(t)
+	path := filepath.Join(t.TempDir(), "head.db")
+	s, err := Open(path, WithPoolSize(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := s.Pool().Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedConversationTurnCountSessions(t, conn, fixture)
+	s.Pool().Put(conn)
+	if _, err := backfillConversationTurnCounts(s.Pool()); err != nil {
+		t.Fatal(err)
+	}
+	conn, err = s.Pool().Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_captured_stats SET conversation_turn_count = 99 WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{fixture.Sessions[0].SessionID}}); err != nil {
+		t.Fatal(err)
+	}
+	s.Pool().Put(conn)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path, WithPoolSize(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	conn, err = reopened.Pool().Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Pool().Put(conn)
+	got := -1
+	if err := sqlitex.ExecuteTransient(conn, `SELECT conversation_turn_count FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{fixture.Sessions[0].SessionID}, ResultFunc: func(stmt *sqlite.Stmt) error { got = stmt.ColumnInt(0); return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if got != 99 {
+		t.Fatalf("reopened store re-ran the backfill: conversation_turn_count = %d, want the stored 99", got)
+	}
+}

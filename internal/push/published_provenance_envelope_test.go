@@ -749,6 +749,9 @@ func ppeAssertMirrors(t *testing.T, request schema.AuthoritativePublishRequest, 
 	if !optionalInt64Equal(request.Stats.InputSubmissionCount, detail.InputSubmissionCount) {
 		t.Fatalf("metadata inputSubmissionCount=%v, detail=%v", request.Stats.InputSubmissionCount, detail.InputSubmissionCount)
 	}
+	if request.Stats.TurnCount != detail.TurnCount {
+		t.Fatalf("metadata turnCount=%d, detail=%d; the published envelope and the served detail must report the same conversation count", request.Stats.TurnCount, detail.TurnCount)
+	}
 }
 
 func ppeAssertDetail(t *testing.T, expect ppeDetailExpect, built ppeBuilt, detail *schema.SessionDetailPayload) {

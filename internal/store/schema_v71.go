@@ -14,3 +14,14 @@ const migrationV71 = `
 ALTER TABLE session_captured_stats ADD COLUMN conversation_turn_count INTEGER NOT NULL DEFAULT 0
  CHECK(conversation_turn_count >= 0);
 `
+
+// conversationTurnCountBackfillSchemaVersion is the last schema version before
+// V71. Only a store upgraded from an earlier version runs the one-time fold; a
+// later head version must not re-run it on every future migration.
+const conversationTurnCountBackfillSchemaVersion int64 = 71
+
+// shouldBackfillConversationTurnCounts reports whether a pre-migration
+// user_version needs the one-time conversation count fold.
+func shouldBackfillConversationTurnCounts(version int64) bool {
+	return version > 0 && version < conversationTurnCountBackfillSchemaVersion
+}

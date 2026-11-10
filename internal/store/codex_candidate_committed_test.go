@@ -182,10 +182,6 @@ func TestCodexCandidateCommittedDetailExcludesInherited(t *testing.T) {
 	// writer's own round-trip test, and the readers change wires them to
 	// these same consumers.
 	seedFileBackedGeneration(t, s, filepath.Join(dir, "artifacts"), sessionID, candidate.V2, candidate.Content, false)
-	storedTurns := fixture.Expected.TurnCount
-	if _, err := s.UpsertCapturedStats(context.Background(), CapturedStats{SessionID: sessionID, ConversationTurnCount: &storedTurns, Source: StatsSourceHarness, UpdatedAtMs: 1}); err != nil {
-		t.Fatal(err)
-	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store before reopen: %v", err)
 	}

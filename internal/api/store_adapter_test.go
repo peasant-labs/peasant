@@ -175,6 +175,11 @@ func seedStore(t *testing.T, s *store.Store, entries []ingest.StoreEntry) *api.S
 		if err := testutil.WriteFullEntries(ctx, s, e.Session.SessionID, nil); err != nil {
 			t.Fatal(err)
 		}
+		// The count surfaces read the producer's stored conversation count.
+		turns := e.Metadata.Stats.TurnCount
+		if _, err := s.UpsertCapturedStats(ctx, store.CapturedStats{SessionID: schema.SessionID(e.Session.SessionID), ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); err != nil {
+			t.Fatalf("seed conversation turn count: %v", err)
+		}
 	}
 	// Compute daily summaries (decoupled from InsertSessions).
 	daySet := make(map[string]bool)
@@ -206,6 +211,11 @@ func seedStoreWithFS(t *testing.T, s *store.Store, entries []ingest.StoreEntry, 
 	for _, e := range entries {
 		if err := testutil.WriteFullEntries(ctx, s, e.Session.SessionID, nil); err != nil {
 			t.Fatal(err)
+		}
+		// The count surfaces read the producer's stored conversation count.
+		turns := e.Metadata.Stats.TurnCount
+		if _, err := s.UpsertCapturedStats(ctx, store.CapturedStats{SessionID: schema.SessionID(e.Session.SessionID), ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); err != nil {
+			t.Fatalf("seed conversation turn count: %v", err)
 		}
 	}
 	daySet := make(map[string]bool)

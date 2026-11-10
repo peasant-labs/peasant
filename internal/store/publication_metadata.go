@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -354,6 +355,13 @@ func (s *Store) loadPublicationInputOnConn(ctx context.Context, conn *sqlite.Con
 	if bundle.ContentCapture.SessionID != id || bundle.ContentCapture.PublicationCaptureRevision != bundle.CaptureRevision {
 		return bundle, publicationRepairError("full content identity or publication revision disagrees with eligible metadata")
 	}
+	// The published metadata part must agree with the served detail: both read
+	// the one stored conversation count, never the raw capture document.
+	if stats, statsErr := readCapturedStatsOnConn(conn, id); statsErr == nil {
+		bundle.Metadata.Stats.TurnCount = capturedStatsToWire(stats).TurnCount
+	} else if !errors.Is(statsErr, ErrNoCapturedStats) {
+		return bundle, statsErr
+	}
 	metrics, err := getMetricsOnConn(conn, id)
 	if err != nil {
 		return bundle, err
@@ -561,6 +569,13 @@ func (s *Store) LoadPublicationMetadata(ctx context.Context, ids []ingest.Sessio
 				return parseErr
 			}
 			bundle, scanErr := scanPublicationMetadata(stmt, id, false)
+			if scanErr == nil && bundle.Readiness == ingest.PublicationReady {
+				if stats, statsErr := readCapturedStatsOnConn(conn, id); statsErr == nil {
+					bundle.Metadata.Stats.TurnCount = capturedStatsToWire(stats).TurnCount
+				} else if !errors.Is(statsErr, ErrNoCapturedStats) {
+					return statsErr
+				}
+			}
 			result[id] = ingest.PublicationMetadata{Metadata: bundle.Metadata, Readiness: bundle.Readiness, CaptureRevision: bundle.CaptureRevision, Error: scanErr}
 			return nil
 		},

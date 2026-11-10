@@ -444,6 +444,15 @@ func canonicalMetricInt(metrics *ingest.SessionMetrics, field func(*ingest.Sessi
 // representation carries its entries.
 func assertCanonicalPersistenceMetrics(t testing.TB, database *store.Store, sessionID ingest.SessionID, expected canonicalPersistenceSession) {
 	t.Helper()
+	// A legacy representation has no captured stats row in a fresh store; model
+	// the one-time upgrade backfill so the count surface reads the producer's
+	// conversation count rather than the retired analysis column.
+	if _, err := database.ReadCapturedStats(t.Context(), schema.SessionID(sessionID)); errors.Is(err, store.ErrNoCapturedStats) {
+		turns := expected.ExpectedMetrics.TurnCount
+		if _, err := database.UpsertCapturedStats(t.Context(), store.CapturedStats{SessionID: schema.SessionID(sessionID), ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); err != nil {
+			t.Fatalf("seed canonical conversation count: %v", err)
+		}
+	}
 	metrics, err := database.GetMetrics(t.Context(), sessionID)
 	if err != nil || metrics == nil || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }) != expected.ExpectedMetrics.TurnCount || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }) != expected.ExpectedMetrics.ToolCalls || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }) != expected.ExpectedMetrics.ComputeVersion {
 		t.Fatalf("persisted canonical session %q metrics turns=%d tools=%d compute=%d error=%v, want %+v", expected.Name, canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }), err, expected.ExpectedMetrics)

@@ -116,10 +116,6 @@ func TestGenerationServesDetailBoundaryReads(t *testing.T) {
 	// writer's own round-trip test, and the readers change wires them to
 	// these same consumers.
 	seedFileBackedGeneration(t, s, root, sid, g1, g1Blobs, false)
-	turns := 5
-	if _, err := s.UpsertCapturedStats(context.Background(), CapturedStats{SessionID: sid, ConversationTurnCount: &turns, Source: StatsSourceHarness, UpdatedAtMs: 1}); err != nil {
-		t.Fatal(err)
-	}
 
 	wantRefs := []schema.SourceEntryRef{"e_u1", "e_ctx1", "e_media1", "e_a1", "e_reason1", "e_call1", "e_result1"}
 	err = s.WithSessionSnapshot(context.Background(), sid, func(snapshot indexformat.ReadSnapshot) error {

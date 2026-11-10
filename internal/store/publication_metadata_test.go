@@ -338,7 +338,13 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 				if bundle.Readiness != tc.Readiness {
 					t.Fatalf("readiness %s, want %s", bundle.Readiness, tc.Readiness)
 				}
-				if bundle.Metadata.SessionID != "" && !reflect.DeepEqual(bundle.Metadata, *e.Metadata) {
+				roundTrip := bundle.Metadata
+				if tc.Action == "metrics" {
+					// The published envelope carries the stored conversation
+					// count while the extracted seed keeps its raw record count.
+					roundTrip.Stats.TurnCount = e.Metadata.Stats.TurnCount
+				}
+				if bundle.Metadata.SessionID != "" && !reflect.DeepEqual(roundTrip, *e.Metadata) {
 					t.Fatalf("metadata did not round trip losslessly")
 				}
 				if bundle.SessionOrigin != sessionorigin.User || bundle.ReceiptProjectHash != e.Metadata.Project.Hash {
@@ -356,8 +362,16 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 						t.Fatal("unready state changed indexed entries or extension fields")
 					}
 				}
-				if tc.Action == "metrics" && (bundle.Quality == nil || bundle.Quality.TurnCount == nil || *bundle.Quality.TurnCount != 777 || bundle.Metadata.Stats.TurnCount == 777) {
-					t.Fatal("current metrics conflated with extracted stats")
+				if tc.Action == "metrics" {
+					if bundle.Quality == nil || bundle.Quality.TurnCount == nil || *bundle.Quality.TurnCount != 777 {
+						t.Fatal("current metrics did not report the stored conversation count")
+					}
+					if bundle.Metadata.Stats.TurnCount != 777 {
+						t.Fatal("the published metadata count must agree with the served detail")
+					}
+					if e.Metadata.Stats.TurnCount == 777 {
+						t.Fatal("the extracted seed must not be rewritten by current metrics")
+					}
 				}
 			}
 			locations, lookupErr := s.BulkLookupSessionLocations(readCtx, []ingest.SessionID{id})

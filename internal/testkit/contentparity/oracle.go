@@ -284,17 +284,7 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 	metadata.Project.FilePath = "/synthetic/parity"
 	metadata.HostSlug = "fixture-host"
 	conversationTurnCount := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
-	if harness == schema.HarnessPi {
-		// Pi raw rows carry their typed evidence only after hydration; count the
-		// conversational rows directly for the pre-hydration seed.
-		conversationTurnCount = 0
-		for _, entry := range entries {
-			if !ingest.IsPiCarrier(entry) && entry.Role != schema.RoleSystem {
-				conversationTurnCount++
-			}
-		}
-	}
-	metadata.Stats.TurnCount = len(entries)
+	metadata.Stats.TurnCount = conversationTurnCount
 	count := int64(1)
 	metadata.Stats.InputSubmissionCount = &count
 	if c.PreviewOnly {
@@ -314,7 +304,11 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 	}
 	metadata.ContentHash = strings.Repeat("b", 64)
 	metadata.MetadataHash = schema.ComputeMetadataHash(&metadata)
-	rawSeed, err := json.Marshal(metadata.Stats)
+	// The metric seed keeps the adapter's raw record count; the discovered
+	// stats carry the producer's conversation count.
+	rawStats := metadata.Stats
+	rawStats.TurnCount = len(entries)
+	rawSeed, err := json.Marshal(rawStats)
 	if err != nil {
 		return result, err
 	}
@@ -323,11 +317,6 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 	if err != nil {
 		return result, fmt.Errorf("seed %s: %w", c.Name, err)
 	}
-	// The generation carries the conversation count every served surface
-	// reports, while the stored metric seed keeps the adapter's raw document the
-	// frozen metricInput capture pins.
-	metadata.Stats.TurnCount = conversationTurnCount
-	metadata.MetadataHash = schema.ComputeMetadataHash(&metadata)
 	capture := ingest.SessionContentCaptureWrite{Status: ingest.ContentCaptureComplete, SourceAuthority: ingest.ContentSourceProviderSource, TranscriptOrigin: ingest.TranscriptOriginFile, CaptureFormat: ingest.ContentCaptureFormatFull, CapturedAtMs: 1700000006000}
 	capture = assessed
 	if c.PreviewOnly {
@@ -410,6 +399,25 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 			return result, fmt.Errorf("activate %s: %w", c.Name, err)
 		}
 	}
+	if !c.FileBacked {
+		if _, err := db.UpsertCapturedStats(ctx, store.CapturedStats{
+			SessionID: sid, ConversationTurnCount: &conversationTurnCount,
+			SeedJSON: &rawSeedString, Source: store.StatsSourceHarness, UpdatedAtMs: 1700000006000,
+		}); err != nil {
+			return result, err
+		}
+	}
+	if c.Harness == "pi" {
+		conn, takeErr := db.Pool().Take(ctx)
+		if takeErr != nil {
+			return result, takeErr
+		}
+		updateErr := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET metric_seed_json = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{rawSeedString, string(sid)}})
+		db.Pool().Put(conn)
+		if updateErr != nil {
+			return result, updateErr
+		}
+	}
 	detailBytes, detail, err := transcript.BuildSnapshotDetailBytes(ctx, db, db, sid)
 	result.Detail = outcome(detail, err)
 	if err == nil {
@@ -469,14 +477,6 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 	result.FirstUsers = outcome(users, e)
 	leading, e := db.LeadingUserMessagesBulk(ctx, []string{string(sid)}, 2)
 	result.LeadingUsers = outcome(leading, e)
-	if !c.FileBacked {
-		if _, err := db.UpsertCapturedStats(ctx, store.CapturedStats{
-			SessionID: sid, ConversationTurnCount: &conversationTurnCount,
-			SeedJSON: &rawSeedString, Source: store.StatsSourceHarness, UpdatedAtMs: 1700000006000,
-		}); err != nil {
-			return result, err
-		}
-	}
 	metric, e := db.ReadMetricInput(ctx, sid, false)
 	result.MetricInput = outcome(metric, e)
 	if e == nil {

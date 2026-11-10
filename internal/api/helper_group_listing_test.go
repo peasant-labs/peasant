@@ -748,12 +748,17 @@ func seedHelperGroupMetrics(t *testing.T, db *store.Store, spec helperGroupListi
 	if err := db.SaveMetrics(context.Background(), &ingest.SessionMetrics{
 		SessionID: ingest.SessionID(spec.ID),
 		QualityMetrics: schema.QualityMetrics{
-			TurnCount:       &turnCount,
 			DurationMinutes: &durationMinutes,
 			TotalTokens:     &totalTokens,
 		},
 	}); err != nil {
 		t.Fatalf("seed metrics for pushable session %q: %v", spec.ID, err)
+	}
+	if _, err := db.UpsertCapturedStats(context.Background(), store.CapturedStats{
+		SessionID: schema.SessionID(spec.ID), ConversationTurnCount: &turnCount,
+		Source: store.StatsSourceHarness, UpdatedAtMs: 1,
+	}); err != nil {
+		t.Fatalf("seed conversation count for pushable session %q: %v", spec.ID, err)
 	}
 }
 

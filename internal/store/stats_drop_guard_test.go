@@ -55,6 +55,9 @@ func TestDeprecatedStatsColumnsGuarded(t *testing.T) {
 		// The one-time V71 upgrade fallback reads the legacy value only for a
 		// session whose entries are gone and cannot be folded.
 		{file: "internal/store/conversation_turn_count_backfill.go", contains: "SELECT COALESCE(COALESCE(c.turn_count, m.turn_count), 0)", why: "V71 entry-less session legacy fallback"},
+		// The content-parity harness preserves the frozen raw metric seed for a
+		// non-native Pi capture; it never runs in production.
+		{file: "internal/testkit/contentparity/oracle.go", contains: "UPDATE sessions SET metric_seed_json", why: "parity harness raw seed for a legacy Pi capture"},
 	}
 	var violations []string
 	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {

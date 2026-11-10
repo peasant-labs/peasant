@@ -319,6 +319,15 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 		t.Fatalf("open updated WAL freshness store: %v", err)
 	}
 	updatedEntries, entriesErr := updatedStore.ListEntries(t.Context(), targetID)
+	if entriesErr == nil {
+		// The upgrade backfill supplies the conversation count for a legacy
+		// representation; model it so the count surface is asserted, not the
+		// retired analysis column.
+		turns := ingest.ConversationTurnCount(ingest.EntriesToTurns(updatedEntries))
+		if _, statsErr := updatedStore.UpsertCapturedStats(t.Context(), store.CapturedStats{SessionID: targetID, ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); statsErr != nil {
+			t.Fatalf("seed updated WAL conversation turn count: %v", statsErr)
+		}
+	}
 	updatedMetrics, metricsErr := updatedStore.GetMetrics(t.Context(), targetID)
 	closeErr = updatedStore.Close()
 	if entriesErr != nil || metricsErr != nil || closeErr != nil || updatedMetrics == nil {

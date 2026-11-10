@@ -552,11 +552,11 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 			return nil, fmt.Errorf("store: apply V23 data migration: %w", err)
 		}
 
-		// V71 Go-driven phase: a store upgraded from a pre-V70 version folds
+		// V71 Go-driven phase: a store upgraded from a pre-V71 version folds
 		// each managed session's stored entries once and records the
 		// conversation turn count. A fresh baseline and an already-upgraded
 		// store skip it, so a normal open never pays for the fold.
-		if versionBeforeMigration > 0 && versionBeforeMigration < int64(CurrentSchemaVersion()) {
+		if shouldBackfillConversationTurnCounts(versionBeforeMigration) {
 			report, err := backfillConversationTurnCounts(pool)
 			if err != nil {
 				_ = pool.Close()

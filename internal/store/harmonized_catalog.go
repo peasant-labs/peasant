@@ -186,7 +186,7 @@ type GenerationChildren struct {
 type CapturedStats struct {
 	SessionID schema.SessionID
 	// TurnCount is the retired raw harness record count. It stays readable so
-	// a pre-V70 store can be backfilled from its own legacy value, but no
+	// a pre-V71 store can be backfilled from its own legacy value, but no
 	// capture or compute lane writes it.
 	TurnCount *int
 	// ConversationTurnCount is the producer's conversation turn count: the
