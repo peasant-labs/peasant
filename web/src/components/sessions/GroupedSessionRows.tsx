@@ -11,7 +11,6 @@ import {
   fetchHelperGroupMembers,
   isGroupScopeExpired,
   type GroupedMemberRow,
-  type LocalSessionListPayload,
   type LocalSessionListItem,
   type LocalSessionRow,
 } from '@/lib/api/grouped';
@@ -36,42 +35,20 @@ export interface GroupedSelection {
   onSelect(id: string, selected: boolean): void;
 }
 
-export interface GroupedLocalSessionsProps {
-  payload: LocalSessionListPayload;
-  /**
-   * Refresh the originating grouped list. This is the ONLY recovery from an
-   * expired member scope; the component never falls back to all members.
-   */
-  onRefreshList: () => void;
-  /**
-   * sessionId -> generated title, from useSessionTitles(). Partial by design:
-   * a row without an entry falls back to the redaction-safe preview, then the
-   * short session id.
-   */
-  titles?: ReadonlyMap<string, string>;
-  /** Optional explicit per-member selection. */
-  selection?: GroupedSelection;
-  /** Shown when the payload carries no items. */
-  emptyState?: ReactNode;
-  /**
-   * Optional host content for one session row (such as its publish state or
-   * its search match), drawn inside the row under its facts.
-   */
-  rowDetail?: (row: LocalSessionRow) => ReactNode;
-}
-
 /** Short, stable handle for a session id when no title or preview exists. */
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
 }
 
-/** Display title for one session row: generated title, preview, then id. */
-export function groupedRowTitle(
-  row: LocalSessionRow,
-  titles?: ReadonlyMap<string, string>,
-): string {
-  const generated = titles?.get(row.session.id);
-  if (generated) return generated;
+/**
+ * Display title for one session row: the stored title the grouped page carries,
+ * the redaction-safe preview, then the short id. The grouped list and sync
+ * routes set the stored title; the search variant omits it because its match
+ * rows already carry the matched content.
+ */
+export function groupedRowTitle(row: LocalSessionRow): string {
+  const stored = row.title?.trim();
+  if (stored) return stored;
   const preview = row.session.preview?.trim();
   if (preview) return preview;
   return shortId(row.session.id);
@@ -83,22 +60,31 @@ function itemSessionId(item: LocalSessionListItem): string | null {
 }
 
 /** The stable key for one item's rendered row. */
-function itemKey(item: LocalSessionListItem): string {
+export function itemKey(item: LocalSessionListItem): string {
   return itemSessionId(item) ?? item.context?.groupId ?? JSON.stringify(item);
 }
 
+/**
+ * The bare project keys one grouped item belongs to. A context container has no
+ * transcript and so names no group: it renders in the table's ungrouped bucket
+ * rather than inventing a project key.
+ */
+export function itemProjectKeys(item: LocalSessionListItem): readonly string[] {
+  const hash = item.transcript?.session.projectHash;
+  return hash ? [hash] : [];
+}
+
 function rowPresentation(
-  session: LocalSessionRow['session'],
-  titles?: ReadonlyMap<string, string>,
+  row: LocalSessionRow,
 ): Pick<HelperThreadRowProps, 'id' | 'title' | 'provider' | 'inputSubmissionCount' | 'turnCount' | 'href'> {
-  const projectHash = parseProjectHash(session.projectHash);
+  const projectHash = parseProjectHash(row.session.projectHash);
   return {
-    id: session.id,
-    title: groupedRowTitle({ session }, titles),
-    provider: session.harness,
-    inputSubmissionCount: session.inputSubmissionCount,
-    turnCount: session.turnCount,
-    href: projectHash ? transcriptHref(projectHash, session.id) : undefined,
+    id: row.session.id,
+    title: groupedRowTitle(row),
+    provider: row.session.harness,
+    inputSubmissionCount: row.session.inputSubmissionCount,
+    turnCount: row.session.turnCount,
+    href: projectHash ? transcriptHref(projectHash, row.session.id) : undefined,
   };
 }
 
@@ -110,19 +96,17 @@ function rowPresentation(
 function SessionRow({
   row,
   groups,
-  titles,
   selection,
   onRefreshList,
   rowDetail,
 }: {
   row: LocalSessionRow;
   groups: NonNullable<LocalSessionListItem['helperGroups']>;
-  titles?: ReadonlyMap<string, string>;
   selection?: GroupedSelection;
   onRefreshList: () => void;
   rowDetail?: (row: LocalSessionRow) => ReactNode;
 }) {
-  const presentation = rowPresentation(row.session, titles);
+  const presentation = rowPresentation(row);
   const selected = selection?.selectedIds.has(row.session.id) ?? false;
   const ownerRow = (
     <HelperThreadRow
@@ -142,7 +126,6 @@ function SessionRow({
           groupId={group.groupId}
           memberScope={group.memberScope}
           helperThreadCount={group.helperThreadCount}
-          titles={titles}
           selection={selection}
           onRefreshList={onRefreshList}
           rowDetail={rowDetail}
@@ -164,7 +147,6 @@ function MountedHelperGroup({
   groupId,
   memberScope,
   helperThreadCount,
-  titles,
   selection,
   onRefreshList,
   rowDetail,
@@ -172,7 +154,6 @@ function MountedHelperGroup({
   groupId: string;
   memberScope: string;
   helperThreadCount: number;
-  titles?: ReadonlyMap<string, string>;
   selection?: GroupedSelection;
   onRefreshList: () => void;
   rowDetail?: (row: LocalSessionRow) => ReactNode;
@@ -281,7 +262,6 @@ function MountedHelperGroup({
             <SessionRow
               row={member}
               groups={(row as GroupedMemberRow).helperGroups ?? []}
-              titles={titles}
               selection={selection}
               onRefreshList={onRefreshList}
               rowDetail={rowDetail}
@@ -305,62 +285,45 @@ function MountedHelperGroup({
 }
 
 /**
- * The mounted grouped local list/search result. It renders exactly the items,
- * counts and scopes the route returned: ordinary transcripts keep their route
- * fields, saved helper threads collapse under their owner, and an owner outside
- * the result becomes an explicit context container rather than a fake row.
- *
- * Counts shown here (ordinary / saved helper threads) come from the same
- * server-side route set the list was built from, so the list and its counts
- * cannot disagree.
+ * One grouped item as one shared-table row's session cell. An ordinary
+ * transcript keeps its saved helpers collapsed underneath; an owner outside the
+ * result becomes an explicit context container rather than a fake row.
  */
-export function GroupedLocalSessions({
-  payload,
-  onRefreshList,
-  titles,
+export function GroupedItemCell({
+  item,
   selection,
-  emptyState,
+  onRefreshList,
   rowDetail,
-}: GroupedLocalSessionsProps) {
-  if (payload.items.length === 0) {
-    return <>{emptyState ?? null}</>;
+}: {
+  item: LocalSessionListItem;
+  selection?: GroupedSelection;
+  onRefreshList: () => void;
+  rowDetail?: (row: LocalSessionRow) => ReactNode;
+}) {
+  if (item.transcript) {
+    return (
+      <SessionRow
+        row={item.transcript}
+        groups={item.helperGroups ?? []}
+        selection={selection}
+        onRefreshList={onRefreshList}
+        rowDetail={rowDetail}
+      />
+    );
   }
   return (
-    <div className="flex flex-col" data-grouped-local-sessions="true">
-      {payload.items.map((item) => {
-        if (item.transcript) {
-          return (
-            <div key={itemKey(item)} className="border-b border-rule">
-              <SessionRow
-                row={item.transcript}
-                groups={item.helperGroups ?? []}
-                titles={titles}
-                selection={selection}
-                onRefreshList={onRefreshList}
-                rowDetail={rowDetail}
-              />
-            </div>
-          );
-        }
-        return (
-          <div key={itemKey(item)} className="border-b border-rule">
-            <HelperGroupListItem ownerStatus={item.context?.ownerStatus}>
-              {(item.helperGroups ?? []).map((group) => (
-                <MountedHelperGroup
-                  key={`${group.groupId}:${group.memberScope}`}
-                  groupId={group.groupId}
-                  memberScope={group.memberScope}
-                  helperThreadCount={group.helperThreadCount}
-                  titles={titles}
-                  selection={selection}
-                  onRefreshList={onRefreshList}
-                  rowDetail={rowDetail}
-                />
-              ))}
-            </HelperGroupListItem>
-          </div>
-        );
-      })}
-    </div>
+    <HelperGroupListItem ownerStatus={item.context?.ownerStatus}>
+      {(item.helperGroups ?? []).map((group) => (
+        <MountedHelperGroup
+          key={`${group.groupId}:${group.memberScope}`}
+          groupId={group.groupId}
+          memberScope={group.memberScope}
+          helperThreadCount={group.helperThreadCount}
+          selection={selection}
+          onRefreshList={onRefreshList}
+          rowDetail={rowDetail}
+        />
+      ))}
+    </HelperGroupListItem>
   );
 }

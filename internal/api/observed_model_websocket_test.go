@@ -180,11 +180,15 @@ func TestHubSessionDetailEmitsObservedModelEvidence(t *testing.T) {
 	if err := json.Unmarshal(data, &message); err != nil {
 		t.Fatalf("decode session detail: %v", err)
 	}
-	if message.Type != api.MsgSessionDetail || message.Data.Model != fixture.ExpectedSeed || len(message.Data.Turns) != len(fixture.ExpectedObservedModels) {
-		t.Fatalf("session detail mismatch: %+v", message)
+	if message.Type != api.MsgSessionDetail || message.Data.Model != fixture.ExpectedSeed || len(message.Data.Turns) != 0 {
+		t.Fatalf("session detail mismatch: model=%q turns=%d", message.Data.Model, len(message.Data.Turns))
+	}
+	segment := servedSegmentZero(t, db, fixture.SessionID)
+	if len(segment.Turns) != len(fixture.ExpectedObservedModels) {
+		t.Fatalf("segment turns = %d, want %d", len(segment.Turns), len(fixture.ExpectedObservedModels))
 	}
 	for index, expected := range fixture.ExpectedObservedModels {
-		if got := message.Data.Turns[index].ObservedModel.String(); got != expected {
+		if got := segment.Turns[index].ObservedModel.String(); got != expected {
 			t.Fatalf("turn %d observedModel=%q, want %q", index, got, expected)
 		}
 	}

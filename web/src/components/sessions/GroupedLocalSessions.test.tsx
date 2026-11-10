@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LocalSessionListPayload } from '@/lib/api/grouped';
-import { GroupedLocalSessions } from './GroupedLocalSessions';
+import { GroupedSessionsSection } from './GroupedSessionsSection';
 
 const PROJECT_HASH = 'a'.repeat(64);
 
@@ -84,11 +84,15 @@ function membersResponse(ids: string[], page: number, total: number, perPage = 2
   };
 }
 
-describe('GroupedLocalSessions', () => {
+describe('grouped rows through the shared table', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    fetchMock = vi.fn(() => okResponse(membersResponse([], 1, 0)));
+    fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') return okResponse(orderedPayload());
+      return okResponse(membersResponse([], 1, 0));
+    });
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -97,33 +101,42 @@ describe('GroupedLocalSessions', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders ordinary rows and keeps saved helpers collapsed with their counts', () => {
-    render(<GroupedLocalSessions payload={orderedPayload()} onRefreshList={() => {}} />);
-    expect(screen.getByText('agent-a1')).toBeInTheDocument();
+  it('renders ordinary rows and keeps saved helpers collapsed with their counts', async () => {
+    render(<GroupedSessionsSection variant="sessions" />);
+    expect(await screen.findByText('agent-a1')).toBeInTheDocument();
     expect(screen.getByText('agent-a2')).toBeInTheDocument();
     expect(screen.getByText('agent-a3')).toBeInTheDocument();
     expect(screen.getByText('2 helper threads')).toBeInTheDocument();
     expect(screen.getByText('1 helper thread')).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.filter((call) => String(call[0]).includes('view=grouped'))).toHaveLength(1);
   });
 
-  it('renders an owner context container without a fake ordinary title', () => {
-    render(<GroupedLocalSessions payload={contextPayload()} onRefreshList={() => {}} />);
-    expect(screen.getByText('owner is unavailable')).toBeInTheDocument();
+  it('renders an owner context container without a fake ordinary title', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') return okResponse(contextPayload());
+      return okResponse(membersResponse([], 1, 0));
+    });
+    render(<GroupedSessionsSection variant="sessions" />);
+    expect(await screen.findByText('owner is unavailable')).toBeInTheDocument();
     expect(screen.queryByText('agent-a1')).not.toBeInTheDocument();
     expect(screen.getByText('2 helper threads')).toBeInTheDocument();
   });
 
   it('expands a group with exactly the issued scope and page, and links each member', async () => {
-    fetchMock.mockReturnValueOnce(
-      okResponse(membersResponse(['agent-b1', 'agent-b2'], 1, 2)),
-    );
-    render(<GroupedLocalSessions payload={orderedPayload()} onRefreshList={() => {}} />);
-
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') return okResponse(orderedPayload());
+      return okResponse(membersResponse(['agent-b1', 'agent-b2'], 1, 2));
+    });
+    render(<GroupedSessionsSection variant="sessions" />);
+    await screen.findByText('agent-a1');
     await userEvent.click(screen.getByText('2 helper threads'));
 
     await waitFor(() => expect(screen.getByText('agent-b1')).toBeInTheDocument());
-    const call = new URL(String(fetchMock.mock.calls[0][0]));
+    const memberCalls = fetchMock.mock.calls.map((call) => new URL(String(call[0]))).filter((url) => url.pathname.includes('/members'));
+    expect(memberCalls).toHaveLength(1);
+    const call = memberCalls[0];
     expect(call.pathname).toBe('/api/v1/session-groups/hg_p1/members');
     expect(call.searchParams.get('scope')).toBe('scope-p1');
     expect(call.searchParams.get('page')).toBe('1');
@@ -136,11 +149,18 @@ describe('GroupedLocalSessions', () => {
   });
 
   it('keeps one independent paging state per expanded group', async () => {
-    fetchMock
-      .mockReturnValueOnce(okResponse(membersResponse(['agent-b1', 'agent-b2'], 1, 26)))
-      .mockReturnValueOnce(okResponse(membersResponse(['agent-c1'], 1, 1)))
-      .mockReturnValueOnce(okResponse(membersResponse(['agent-b3'], 2, 26)));
-    render(<GroupedLocalSessions payload={orderedPayload()} onRefreshList={() => {}} />);
+    const responses = [
+      membersResponse(['agent-b1', 'agent-b2'], 1, 26),
+      membersResponse(['agent-c1'], 1, 1),
+      membersResponse(['agent-b3'], 2, 26),
+    ];
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') return okResponse(orderedPayload());
+      return okResponse(responses.shift());
+    });
+    render(<GroupedSessionsSection variant="sessions" />);
+    await screen.findByText('agent-a1');
 
     await userEvent.click(screen.getByText('2 helper threads'));
     await waitFor(() => expect(screen.getByText('agent-b1')).toBeInTheDocument());
@@ -156,22 +176,26 @@ describe('GroupedLocalSessions', () => {
     await userEvent.click(within(p1Footer).getByRole('button', { name: 'next' }));
 
     await waitFor(() => expect(screen.getByText('agent-b3')).toBeInTheDocument());
-    const nextCall = new URL(String(fetchMock.mock.calls[2][0]));
-    expect(nextCall.searchParams.get('scope')).toBe('scope-p1');
-    expect(nextCall.searchParams.get('page')).toBe('2');
-    expect(fetchMock.mock.calls.filter((call) => String(call[0]).includes('scope-p2'))).toHaveLength(1);
+    const memberCalls = fetchMock.mock.calls.map((call) => new URL(String(call[0]))).filter((url) => url.pathname.includes('/members'));
+    expect(memberCalls[2].searchParams.get('scope')).toBe('scope-p1');
+    expect(memberCalls[2].searchParams.get('page')).toBe('2');
+    expect(memberCalls.filter((url) => url.searchParams.get('scope') === 'scope-p2')).toHaveLength(1);
   });
 
   it('selects exactly the chosen member and never the owner or a sibling', async () => {
     const onSelect = vi.fn();
-    fetchMock.mockReturnValueOnce(okResponse(membersResponse(['agent-b1', 'agent-b2'], 1, 2)));
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') return okResponse(orderedPayload());
+      return okResponse(membersResponse(['agent-b1', 'agent-b2'], 1, 2));
+    });
     render(
-      <GroupedLocalSessions
-        payload={orderedPayload()}
-        onRefreshList={() => {}}
+      <GroupedSessionsSection
+        variant="sessions"
         selection={{ selectedIds: new Set<string>(), onSelect }}
       />,
     );
+    await screen.findByText('agent-a1');
 
     await userEvent.click(screen.getByText('2 helper threads'));
     await waitFor(() => expect(screen.getByText('agent-b1')).toBeInTheDocument());
@@ -185,9 +209,15 @@ describe('GroupedLocalSessions', () => {
   });
 
   it('fails closed on an expired scope: hides members and refreshes the originating list only', async () => {
-    const onRefreshList = vi.fn();
-    fetchMock.mockReturnValueOnce(errorResponse(409, { error: 'expired', code: 'group_scope_expired' }));
-    render(<GroupedLocalSessions payload={orderedPayload()} onRefreshList={onRefreshList} />);
+    let memberRequests = 0;
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') return okResponse(orderedPayload());
+      memberRequests += 1;
+      return errorResponse(409, { error: 'expired', code: 'group_scope_expired' });
+    });
+    render(<GroupedSessionsSection variant="sessions" />);
+    await screen.findByText('agent-a1');
 
     await userEvent.click(screen.getByText('2 helper threads'));
 
@@ -199,17 +229,22 @@ describe('GroupedLocalSessions', () => {
 
     const refresh = screen.getByRole('button', { name: /refresh list/ });
     await userEvent.click(refresh);
-    expect(onRefreshList).toHaveBeenCalledTimes(1);
-
-    // The expired request was never widened: exactly one member request, for the issued scope.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const call = new URL(String(fetchMock.mock.calls[0][0]));
-    expect(call.searchParams.get('scope')).toBe('scope-p1');
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter((call) => String(call[0]).includes('view=grouped'))).toHaveLength(2),
+    );
+    expect(memberRequests).toBe(1);
+    const memberCall = fetchMock.mock.calls.map((call) => new URL(String(call[0]))).find((url) => url.pathname.includes('/members'))!;
+    expect(memberCall.searchParams.get('scope')).toBe('scope-p1');
   });
 
   it('shows the explicit empty notice when a group has no surviving members', async () => {
-    fetchMock.mockReturnValueOnce(okResponse(membersResponse([], 1, 0)));
-    render(<GroupedLocalSessions payload={orderedPayload()} onRefreshList={() => {}} />);
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') return okResponse(orderedPayload());
+      return okResponse(membersResponse([], 1, 0));
+    });
+    render(<GroupedSessionsSection variant="sessions" />);
+    await screen.findByText('agent-a1');
 
     await userEvent.click(screen.getByText('1 helper thread'));
     await waitFor(() =>

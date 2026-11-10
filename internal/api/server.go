@@ -59,6 +59,11 @@ type ServerConfig struct {
 	// Store is the SQLite analytics store, used to wire the annotation REST handlers.
 	// Nil disables annotation endpoints (returns 503).
 	Store *store.Store
+	// SegmentReader reads stored entries for the transcript segment producer.
+	// Nil falls back to Store; when both are nil the segment reads answer 503.
+	// It is an interface so a focused test can drive the cut, the short-page
+	// arm, and the single-flight guard without a real database.
+	SegmentReader SegmentReader
 	// Config is the loaded application config. Used by the sync handler for
 	// redaction settings and push configuration. Nil disables sync endpoints.
 	Config *config.Config
@@ -106,6 +111,11 @@ type Server struct {
 	// memberScopes is the bounded server-local TTL cache of opaque member scopes.
 	memberScopes *memberScopeCache
 
+	// segments computes and caches transcript segment directories for the
+	// transcript read path. It is nil when the server has no stored-session
+	// reader, and the three segment reads then answer 503.
+	segments *segmentProducer
+
 	// live is the configuration the handlers apply: Config plus every setting
 	// saved through the settings routes since the server started.
 	live *liveConfig
@@ -148,6 +158,13 @@ func NewServer(cfg ServerConfig) *Server {
 	if provider, ok := cfg.Provider.(groupedCandidateProvider); ok {
 		s.groupedRevision = provider.GroupedScopeRevision()
 	}
+	segmentReader := cfg.SegmentReader
+	if segmentReader == nil && cfg.Store != nil {
+		segmentReader = cfg.Store
+	}
+	if segmentReader != nil {
+		s.segments = newSegmentProducer(segmentReader)
+	}
 	return s
 }
 
@@ -189,6 +206,9 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteSessionSummaries.String(), s.handleSessionSummariesByID)
 	mux.HandleFunc("GET /api/v1/web/discovery", s.handleWebDiscovery)
 	mux.HandleFunc("GET "+defaults.RouteSessionTranscript.String(), s.handleSessionTranscript)
+	mux.HandleFunc("GET "+defaults.RouteSessionTranscriptSegments.String(), s.handleTranscriptSegments)
+	mux.HandleFunc("GET "+defaults.RouteSessionTranscriptSegment.String(), s.handleTranscriptSegment)
+	mux.HandleFunc("GET "+defaults.RouteSessionTranscriptWindow.String(), s.handleTranscriptWindow)
 	mux.HandleFunc("GET /api/v1/annotations/review-sessions", s.handleReviewSessions)
 	mux.HandleFunc("POST "+defaults.RouteLocalFeedback.String(), s.handleLocalFeedback)
 

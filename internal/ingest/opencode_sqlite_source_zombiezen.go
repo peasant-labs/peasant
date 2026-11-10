@@ -1441,11 +1441,13 @@ func decodeOpenCodeForkBoundary(raw string) (OpenCodeForkBoundaryType, string, b
 // projection of one session holds at least one substantive row. A substantive
 // row is any row whose type is not a control record; the two control record
 // types a model or agent switch carries render as inert system context, not a
-// user, assistant, or tool turn. The probe is a single bounded existence read
-// keyed on the indexed session_id column and stops at the first substantive
-// row, so it never scans the whole table. A session that holds only control
-// rows returns false, which lets canonical selection prefer a legacy sibling
-// that still carries the conversation.
+// user, assistant, or tool turn. An idle row is deliberately NOT excluded: a
+// failed settle carries failure text, and a type-only probe cannot tell that
+// row from a content-free settlement marker. The probe is a single bounded
+// existence read keyed on the indexed session_id column and stops at the first
+// substantive row, so it never scans the whole table. A session that holds only
+// control rows returns false, which lets canonical selection prefer a legacy
+// sibling that still carries the conversation.
 func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionHasSubstantive(ctx context.Context, sessionID OpenCodeCurrentSessionID) (bool, error) {
 	lease, err := s.beginSourceRead(ctx, "probe current session for a substantive row")
 	if err != nil {

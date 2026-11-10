@@ -1,0 +1,13 @@
+expectedCaseCount: 11
+requiredNames:
+  - mount-segment-zero
+  - jump-window
+  - load-more-appends
+  - load-more-prepends
+  - repeat-jump
+  - revision-refetch
+  - empty-directory
+  - indexed-empty-frame
+  - per-field-bound
+  - revision-refetch-segment-zero
+  - revision-directory-fails

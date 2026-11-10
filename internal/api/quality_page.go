@@ -173,6 +173,13 @@ func (p *StoreDataProvider) PersonalMedians(ctx context.Context) (schema.Persona
 	if err != nil {
 		return schema.PersonalMedians{}, fmt.Errorf("store adapter: personal medians revision: %w", err)
 	}
+	return p.personalMediansAt(ctx, revision)
+}
+
+// personalMediansAt returns the personal medians at one already-read revision.
+// A caller that also serves that revision (the detail read) uses this so the
+// payload and its medians can never name two different store states.
+func (p *StoreDataProvider) personalMediansAt(ctx context.Context, revision string) (schema.PersonalMedians, error) {
 	_, medians, err := p.qualityAnalysisAt(ctx, revision)
 	return medians, err
 }

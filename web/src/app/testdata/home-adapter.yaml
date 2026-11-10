@@ -1,0 +1,27 @@
+# The Home adapters must mount Fairtrade's shared table, never a local one.
+#
+# `RootSessionList` is the sessions adapter and `AllSessions` is the complete
+# flat list. Each renders `TranscriptLibraryTable`; neither keeps the retired
+# `home-table` wrapper, the local pager, or the local group header. The source
+# guard reads the adapter files for the removed markers, because a rendered
+# `home-table` class could be reintroduced behind a branch this mount misses.
+requiredNames:
+  - grouped body mounts the shared table
+  - flat body mounts the shared table
+  - no local home-table wrapper renders
+cases:
+  - name: grouped body mounts the shared table
+    surface: sessions
+    sharedTable: true
+    localTable: false
+    marks: []
+  - name: flat body mounts the shared table
+    surface: flat
+    sharedTable: true
+    localTable: false
+    marks: []
+  - name: no local home-table wrapper renders
+    surface: sessions
+    sharedTable: true
+    localTable: false
+    marks: [home-table, home-pager, home-group-head, home-group-toggle]

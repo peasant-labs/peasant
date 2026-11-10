@@ -499,11 +499,8 @@ func TestProgressiveProvider_E2E_WebSocket_SessionDetail(t *testing.T) {
 		t.Errorf("session ID = %v, want %v", dataMap["id"], "session-123")
 	}
 	turns, ok := dataMap["turns"].([]any)
-	if !ok || len(turns) != 1 {
-		t.Errorf("turn count = %v, want 1", turns)
-	}
-	if len(turns) == 1 && turns[0].(map[string]any)["timestamp"] != "2026-01-02T11:04:06Z" {
-		t.Fatal("session_detail turn timestamp changed its instant or retained a local offset")
+	if !ok || len(turns) != 0 {
+		t.Fatalf("frame turns = %v, want none; the session_detail frame no longer carries the transcript", turns)
 	}
 }
 
@@ -1488,38 +1485,25 @@ func TestHub_SessionDetail_ToolCallFields(t *testing.T) {
 		t.Errorf("session id = %v, want 99999999-...", dataMap["id"])
 	}
 
-	// 6. Assert turns and ToolCallDetail fields.
-	// After the depth=1 fold, the tool_use entry is merged into the depth=0
-	// parent. Only 1 turn: the assistant message with folded ToolCalls.
+	// The frame no longer carries turns. The folded tool call is on the
+	// segment read, which is the path the viewer mounts.
 	turnsRaw, ok := dataMap["turns"].([]any)
-	if !ok {
-		t.Fatalf("turns = %T, want []any", dataMap["turns"])
+	if !ok || len(turnsRaw) != 0 {
+		t.Fatalf("frame turns = %v, want none", turnsRaw)
 	}
-	if len(turnsRaw) != 1 {
-		t.Fatalf("turns count = %d, want 1 (tool_use folded into parent)", len(turnsRaw))
+	segment := servedSegmentZero(t, s, "99999999-9999-9999-9999-999999999999")
+	if len(segment.Turns) != 1 {
+		t.Fatalf("segment turns = %d, want 1 folded parent", len(segment.Turns))
 	}
-
-	// Turn 0: depth=0 assistant — has folded ToolCall from depth=1 child.
-	turn0 := turnsRaw[0].(map[string]any)
-	if turn0["content"] != preview {
-		t.Errorf("turns[0].content = %q, want %q", turn0["content"], preview)
+	if segment.Turns[0].Content != preview {
+		t.Errorf("segment turn content = %q, want %q", segment.Turns[0].Content, preview)
 	}
-	toolCallsRaw, ok := turn0["toolCalls"].([]any)
-	if !ok || len(toolCallsRaw) != 1 {
-		t.Fatalf("turns[0].toolCalls = %v, want 1 entry", turn0["toolCalls"])
+	if len(segment.Turns[0].ToolCalls) != 1 {
+		t.Fatalf("segment tool calls = %d, want 1", len(segment.Turns[0].ToolCalls))
 	}
-	tc := toolCallsRaw[0].(map[string]any)
-	if tc["id"] != toolID {
-		t.Errorf("toolCalls[0].id = %q, want %q", tc["id"], toolID)
-	}
-	if tc["name"] != "Read" {
-		t.Errorf("toolCalls[0].name = %q, want %q", tc["name"], "Read")
-	}
-	if tc["arguments"] != toolInput {
-		t.Errorf("toolCalls[0].arguments = %q, want %q", tc["arguments"], toolInput)
-	}
-	if tc["result"] != toolOutput {
-		t.Errorf("toolCalls[0].result = %q, want %q", tc["result"], toolOutput)
+	tc := segment.Turns[0].ToolCalls[0]
+	if tc.ID != toolID || tc.Name != "Read" || tc.Arguments != toolInput || tc.Result != toolOutput {
+		t.Errorf("folded tool call = %+v, want id %s name Read", tc, toolID)
 	}
 }
 

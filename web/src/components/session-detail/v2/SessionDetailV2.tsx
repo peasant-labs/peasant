@@ -16,7 +16,6 @@ import {
   annotateTranscript,
   cleanSessionTitle,
   computeAnalytics,
-  computePersonalMedians,
   type AdaptTranscriptOptions,
   type TranscriptInitialPosition,
   type TranscriptTab,
@@ -33,7 +32,6 @@ import type {
   SessionDetailPayload,
   SessionDetailReadPayload,
   SessionRelationshipNavigation,
-  QualityPayload,
 } from '@/types/messages';
 import { detectPhases } from '@/lib/insights';
 import { displayProject } from '@/lib/quality/utils';
@@ -54,9 +52,10 @@ import {
 } from './lib/scopeTurns';
 import { TurnLabelPopover } from './canvas/TurnLabelPopover';
 import { DetectedPullRequests } from './panels/DetectedPullRequests';
-import { adaptQualitySessions } from '@/lib/quality/types';
 import { useTranscriptPublish } from './publish/useTranscriptPublish';
 import { SessionNotIndexed } from './SessionNotIndexed';
+import { cookSegment, heldRefCoversTurn } from './lib/transcriptSegments';
+import { useTranscriptSegments } from './lib/useTranscriptSegments';
 
 /**
  * The heading shown for a session that has no generated title yet. The hero
@@ -74,12 +73,25 @@ interface SessionDetailV2Props {
 
 /**
  * The mounted `session_detail` payload: the durable validated detail with the
- * local read's additive relationship navigation at the JSON root. The generated
+ * local read's additive metadata at the JSON root: the stored title, the
+ * personal medians at the store revision, that revision, the authorized
+ * relationship navigation, and the recorded teammate identity. The generated
  * flat-read type marks its inherited durable fields optional, so the durable
  * contract is intersected back in here rather than weakening every consumer.
  */
 type SessionDetailWire = SessionDetailPayload &
-  Pick<SessionDetailReadPayload, 'relationshipNavigation' | 'teammate'>;
+  Pick<SessionDetailReadPayload, 'title' | 'medians' | 'revision' | 'relationshipNavigation' | 'teammate'>;
+
+/**
+ * The personal-medians baseline the scorecard compares one session against.
+ * The wire marks every field nullable; the scorecard's shape admits only an
+ * absent field, so the host narrows null to absent before passing it on.
+ */
+type ScorecardMedians = {
+  retryShare?: number;
+  specQualityScore?: number;
+  withinSessionReverts?: number;
+};
 
 /** The disclosed retained-history sections, keyed the way the viewer keys them. */
 type EarlierHistoryOpen = Record<string, boolean>;
@@ -87,9 +99,9 @@ type EarlierHistoryOpen = Record<string, boolean>;
 /**
  * Renders the demo's drop-in composite (`TranscriptViewer`) through the one
  * wire-to-view adapter (`adaptTranscript`). Peasant owns the *data layer* (the
- * WebSocket `session_detail` + `quality` subscriptions, phase detection, the
- * annotation REST client) and feeds it into the package via props/callbacks;
- * the package owns all rendering + view state.
+ * WebSocket `session_detail` read payload, phase detection, the annotation REST
+ * client) and feeds it into the package via props/callbacks; the package owns
+ * all rendering + view state.
  *
  * Peasant additionally owns the scoping layer: the viewer is the
  * destination of every "why" click from Map/Review, so it can open aimed —
@@ -186,50 +198,40 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     [pathname, router, searchParams],
   );
 
-  // The quality channel feeds the personal-median comparison line on the
-  // scorecard. The package never fetches it — peasant computes the medians and
-  // passes them in.
-  const { data: quality, refresh: refreshQuality } = useChannel<QualityPayload>(subscribe.quality());
-  // A re-index rewrites the session's detail and its stored title; both
-  // channels are sent once on subscribe, so the page reads both again.
+  // The read payload carries the session's stored title and the library-wide
+  // personal medians, both served by the server at one store revision. The
+  // transcript no longer subscribes to the full quality topic: the medians are a
+  // server-computed aggregate over the complete library, so a reader that never
+  // receives the full list can still render its scorecard comparison.
+  //
+  // A re-index rewrites the session's detail, its stored title, and the medians
+  // revision; the one channel is sent again on refresh, so the page reads it
+  // again.
   const readSessionAgain = useCallback(() => {
     refreshDetail();
-    refreshQuality();
-  }, [refreshDetail, refreshQuality]);
-  const medians = useMemo(
-    () =>
-      computePersonalMedians(
-        // computePersonalMedians (fairtrade/ui) takes the raw wire
-        // QualitySession from @peasant-labs/schema, where `outcome` is a
-        // required (possibly-empty) string. adaptQualitySessions narrows an
-        // absent/not-yet-computed outcome to `undefined` for THIS app's own
-        // analytics-safe QualitySession type (see web/src/lib/quality/types.ts);
-        // bridge back to an empty string here so a session whose quality
-        // metrics haven't resolved yet still contributes to the personal
-        // median comparison instead of failing the package's type contract.
-        adaptQualitySessions(quality?.sessions ?? []).map((session) => {
-          // Personal medians consume only scorecard inputs. Excluding the
-          // annotation list keeps this older viewer dependency independent of
-          // newly-valid annotation target kinds on the current wire contract.
-          const { effectiveAnnotations: _effectiveAnnotations, ...medianSession } = session;
-          return {
-            ...medianSession,
-            outcome: session.outcome ?? '',
-          };
-        }),
-      ),
-    [quality?.sessions],
-  );
+  }, [refreshDetail]);
+  // The revision is the cache key the server stamps on the medians. A read at a
+  // new revision must hand the scorecard the new baseline rather than a value
+  // memoized from an earlier payload. The wire marks each field nullable, so the
+  // host narrows null to absent before the scorecard sees a baseline.
+  const medians = useMemo<ScorecardMedians | undefined>(() => {
+    const read = detail?.medians;
+    if (!read) return undefined;
+    const normalized: ScorecardMedians = {};
+    if (typeof read.retryShare === 'number') normalized.retryShare = read.retryShare;
+    if (typeof read.specQualityScore === 'number') normalized.specQualityScore = read.specQualityScore;
+    if (typeof read.withinSessionReverts === 'number') normalized.withinSessionReverts = read.withinSessionReverts;
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+  }, [detail?.revision, detail?.medians]);
 
-  // The generated title for THIS session, reused from the quality subscription
-  // already mounted above for the medians. `SessionDetailPayload` carries no
-  // title, and the server only stores one for some sessions, so this stays
-  // optional and the breadcrumb falls back to the short id.
+  // The stored title for THIS session, read from the same payload. The durable
+  // `SessionDetailPayload` carries no title, and the server only stores one for
+  // some sessions, so this stays optional and the breadcrumb falls back to the
+  // short id.
   const sessionTitle = useMemo(() => {
-    const found = quality?.sessions?.find((s) => s.id === sessionId)?.title;
-    const clean = found ? cleanSessionTitle(found) : '';
+    const clean = detail?.title ? cleanSessionTitle(detail.title) : '';
     return clean ? clean : undefined;
-  }, [quality?.sessions, sessionId]);
+  }, [detail?.title]);
 
   // The viewer's tab, lifted so the host can react to it. The composite
   // renders its keyboard-hint strip on every tab; peasant shows it only on
@@ -251,13 +253,36 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     scope.scope === TranscriptScope.Task ||
     scope.scope === TranscriptScope.File ||
     scope.scope === TranscriptScope.Change;
-  const displayTurns = useMemo(() => {
-    if (!detail || !filteringScope) return undefined;
-    const list = scopeTurns(prefilterTurns(turns), scope.scope, scope.scopeVal);
-    return list;
-  }, [detail, filteringScope, scope.scope, scope.scopeVal, turns]);
 
   const requestedTurn = routeQuery.turn;
+  // The shipped session_detail frame carries metadata and an empty turn list.
+  // A frame that still includes turns is an older server or a test fixture;
+  // this page renders those turns and does not start a segment read.
+  const frameHasTurns = turns.length > 0;
+  const segmentRead = useTranscriptSegments({
+    sessionId,
+    enabled: detail != null && !frameHasTurns && detail.turnCount > 0,
+    frameRevision: detail?.revision ?? '',
+    jumpAnchor: requestedTurn,
+  });
+  const segmentMode = !frameHasTurns && segmentRead.directory != null;
+  const cookedSegments = useMemo(
+    () => (detail && segmentMode
+      ? segmentRead.segments.map((segment) => cookSegment(detail, segment, {
+        relationshipNavigation,
+      }))
+      : []),
+    [detail, relationshipNavigation, segmentMode, segmentRead.segments],
+  );
+  const loadedWireTurns = useMemo(
+    () => segmentRead.segments.flatMap((segment) => segment.turns),
+    [segmentRead.segments],
+  );
+  const transcriptTurns = segmentMode ? loadedWireTurns : turns;
+  const displayTurns = useMemo(() => {
+    if (!detail || !filteringScope) return undefined;
+    return scopeTurns(prefilterTurns(transcriptTurns), scope.scope, scope.scopeVal);
+  }, [detail, filteringScope, scope.scope, scope.scopeVal, transcriptTurns]);
   const [sourcePosition, setSourcePosition] = useState<(UnverifiedPullRequestSource & { requestKey: string }) | null>(null);
   const sourceSequence = useRef(0);
   useEffect(() => setSourcePosition(null), [requestedTurn]);
@@ -267,8 +292,14 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     sourceSequence.current += 1;
     setSourcePosition({ ...source, requestKey: `source:${sourceSequence.current}` });
   }, [filteringScope, router, pathname, searchParams]);
-  const requestedTurnExists = requestedTurn == null || turns.some((turn) => turn.index === requestedTurn);
-  const requestedTurnVisible = requestedTurn == null || (displayTurns ?? turns).some((turn) => turn.index === requestedTurn);
+  const directoryKnowsTurn = segmentRead.directory != null && requestedTurn != null
+    && heldRefCoversTurn(segmentRead.directory.segments, requestedTurn);
+  const requestedTurnExists = requestedTurn == null
+    || transcriptTurns.some((turn) => turn.index === requestedTurn)
+    || (segmentMode && (segmentRead.directory == null || directoryKnowsTurn));
+  const requestedTurnVisible = requestedTurn == null
+    || (displayTurns ?? transcriptTurns).some((turn) => turn.index === requestedTurn)
+    || (segmentMode && requestedTurn != null && !transcriptTurns.some((turn) => turn.index === requestedTurn) && directoryKnowsTurn);
   // A turn target this view cannot render right now gets NO one-time position
   // (explicitly `null`, not an absent contract): the reader stays put and the
   // stream prelude offers the reveal. An absent contract would let the composite
@@ -282,8 +313,11 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     if (requestedTurn == null) return { kind: 'top' };
     if (!requestedTurnExists) return { kind: 'top', requestKey: `missing-turn:${requestedTurn}` };
     if (!requestedTurnVisible) return null;
-    return { kind: 'turn', turnIndex: requestedTurn };
-  }, [sourcePosition, filteringScope, requestedTurn, requestedTurnExists, requestedTurnVisible]);
+    const landed = segmentRead.window && segmentRead.window.requestedAnchor !== segmentRead.window.anchorTurn
+      ? segmentRead.window.anchorTurn
+      : requestedTurn;
+    return { kind: 'turn', turnIndex: landed };
+  }, [sourcePosition, filteringScope, requestedTurn, requestedTurnExists, requestedTurnVisible, segmentRead.window]);
 
   const revealRequestedTurn = useCallback(() => {
     if (filteringScope) router.replace(`${pathname}${clearScopeQuery(searchParams)}`);
@@ -300,10 +334,10 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // respected), so it pastes cleanly into an issue/PR/doc. Announce only after
   // the browser confirms that the clipboard write succeeded.
   const copyMarkdown = useCallback(() => {
-    const md = turnsToMarkdown(displayTurns ?? turns);
+    const md = turnsToMarkdown(displayTurns ?? transcriptTurns);
     if (!navigator.clipboard) return;
     void navigator.clipboard.writeText(md).then(() => toast.ok('copied as markdown')).catch(() => undefined);
-  }, [toast, displayTurns, turns]);
+  }, [toast, displayTurns, transcriptTurns]);
   const copyLink = useCallback(() => {
     if (!navigator.clipboard) return;
     void navigator.clipboard.writeText(`${window.location.origin}${transcriptHref(projectHash, sessionId)}`)
@@ -331,10 +365,19 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     const query = next.toString();
     router.replace(`${pathname}${query ? `?${query}` : ''}`);
   }, [pathname, router, searchParams]);
+  const publishCoverage = frameHasTurns
+    ? { loadedSegments: 1, totalSegments: 1 }
+    : {
+      loadedSegments: segmentRead.segments.length,
+      totalSegments: segmentRead.directory?.totalSegments ?? 0,
+    };
   const publish = useTranscriptPublish({
     sessionId,
     title: sessionTitle ?? UNTITLED_SESSION_TITLE,
-    turns,
+    turns: transcriptTurns,
+    revision: detail?.revision ?? '',
+    turnCount: detail?.turnCount,
+    coverage: publishCoverage,
     loaded: detail != null,
     moreItems,
     openOnArrival: routeQuery.publish,
@@ -349,12 +392,12 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // the exact list handed to the package — the filtered list while any filter is
   // active — or phase dividers and error/retry markers land on wrong turns.
   const phases = useMemo(
-    () => (detail ? detectPhases(displayTurns ?? turns) : []),
-    [detail, displayTurns, turns],
+    () => (detail ? detectPhases(displayTurns ?? transcriptTurns) : []),
+    [detail, displayTurns, transcriptTurns],
   );
   const annotations = useMemo(
-    () => (detail ? annotateTranscript(displayTurns ?? turns) : []),
-    [detail, displayTurns, turns],
+    () => (detail ? annotateTranscript(displayTurns ?? transcriptTurns) : []),
+    [detail, displayTurns, transcriptTurns],
   );
 
   // The ONE wire→view projection (fairtrade's adapter): scope/focus filtering
@@ -363,19 +406,29 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // medians into the cooked scorecard bands.
   const vm = useMemo(() => {
     if (!detail) return null;
-    const visibleTurns = displayTurns ?? turns;
+    const visibleTurns = displayTurns ?? transcriptTurns;
     const analytics = computeAnalytics(visibleTurns, {
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
-    // The flat local read carries authorized navigation and the recorded
-    // teammate identity ALONGSIDE the durable detail. The durable payload
-    // boundary rejects both read-only fields, so the host separates them: only
-    // the durable detail reaches `adaptTranscript` as payload, and the
-    // navigation travels through the published adapter-options boundary, which
-    // cooks it into usable source/parent links. The teammate is host-owned: the
-    // stream prelude renders it and the durable payload never carries it.
-    const { relationshipNavigation, teammate: _teammate, ...durableDetail } = detail;
+    // The flat local read carries the stored title, medians, revision,
+    // authorized navigation, and the recorded teammate identity ALONGSIDE the
+    // durable detail. The durable payload boundary rejects every read-only
+    // field, so the host separates them: only the durable detail reaches
+    // `adaptTranscript` as payload, and the navigation travels through the
+    // published adapter-options boundary, which cooks it into usable
+    // source/parent links. The title, medians, and revision are host-owned: the
+    // hero heading and the scorecard consume them, and the durable payload never
+    // carries them. The teammate is host-owned too: the stream prelude renders
+    // it.
+    const {
+      relationshipNavigation,
+      teammate: _teammate,
+      title: _title,
+      medians: _medians,
+      revision: _revision,
+      ...durableDetail
+    } = detail;
     const adapterOptions: AdaptTranscriptOptions = { relationshipNavigation };
     // Commits ride in as the legacy-compatible `gitContext.commits` shape, which
     // the adapter cooks into `session.git.commits` — the session-level rows the
@@ -391,15 +444,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // derives one from the first prompt". Deriving is never right here: the
     // first prompt of a recorded session often opens with harness markup, so
     // the hero rendered that markup as the heading (the
-    // "<local-command-caveat>Caveat: ..." heading). Title is not a wire field,
-    // so the host has to supply one ALWAYS: the generated title when the
-    // quality channel has one, and a plain placeholder when it does not, which
-    // keeps the derived fallback from ever running.
+    // "<local-command-caveat>Caveat: ..." heading). The stored title is on the
+    // read payload, so the host supplies one ALWAYS: the stored title when there
+    // is one, and a plain placeholder when there is not, which keeps the derived
+    // fallback from ever running.
     return {
       ...adapted,
       session: { ...adapted.session, title: sessionTitle ?? UNTITLED_SESSION_TITLE },
     };
-  }, [detail, displayTurns, medians, turns, sessionTitle, relationshipNavigation, sessionCommits]);
+  }, [detail, displayTurns, medians, transcriptTurns, sessionTitle, relationshipNavigation, sessionCommits]);
 
   // Cooked tool calls by turn index, fed into the graph engine's tool nodes.
   const toolVMsByTurn = useMemo(
@@ -478,10 +531,37 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     );
   }
 
-  // Recorded turns with nothing indexed: say so and offer the re-index,
-  // rather than a turn count above an empty transcript.
-  if (turns.length === 0 && detail.turnCount > 0) {
-    return <SessionNotIndexed sessionId={sessionId} turnCount={detail.turnCount} crumbs={breadcrumb} onReindexed={readSessionAgain} />;
+  // An empty frame used to mean "recorded but not indexed". That is only true
+  // when the directory itself has no segments. A session with turns and an
+  // empty frame is the normal segmented read, so it must mount the viewer.
+  const directoryEmpty = segmentRead.directory != null && segmentRead.directory.totalSegments === 0;
+  if (!frameHasTurns && detail.turnCount > 0 && directoryEmpty && !segmentRead.loading) {
+    return (
+      <SessionNotIndexed
+        sessionId={sessionId}
+        turnCount={detail.turnCount}
+        crumbs={breadcrumb}
+        onReindexed={() => {
+          readSessionAgain();
+          segmentRead.reload();
+        }}
+      />
+    );
+  }
+  if (!frameHasTurns && detail.turnCount > 0 && segmentRead.error && cookedSegments.length === 0) {
+    return (
+      <div className="asb-page">
+        <FeedbackPanel variant="error" title="transcript unavailable">
+          {segmentRead.error}
+        </FeedbackPanel>
+        <div className="mt-3">
+          <Button variant="secondary" size="sm" onClick={segmentRead.reload}>try again</Button>
+        </div>
+      </div>
+    );
+  }
+  if (!frameHasTurns && detail.turnCount > 0 && cookedSegments.length === 0) {
+    return <SessionDetailSkeleton />;
   }
 
   // The callbacks the host wires into the composite. `onNavigateRelationship`
@@ -522,6 +602,13 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           label={scopeChipLabel(scope.scope, scope.scopeVal)}
           onClear={clearScope}
         />
+      )}
+      {segmentRead.window && segmentRead.window.requestedAnchor !== segmentRead.window.anchorTurn && (
+        <div role="status">
+          <FeedbackPanel variant="empty" title="opened the nearest user turn">
+            Turn {segmentRead.window.requestedAnchor} is not a user turn, so the viewer opened turn {segmentRead.window.anchorTurn}.
+          </FeedbackPanel>
+        </div>
       )}
       {requestedTurn != null && !requestedTurnExists && (
         <div role="alert">
@@ -595,6 +682,11 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
               canExport: false,
             }}
             callbacks={viewerCallbacks}
+            directory={segmentMode ? segmentRead.directory ?? undefined : undefined}
+            segments={segmentMode ? cookedSegments : undefined}
+            window={segmentMode ? segmentRead.window ?? undefined : undefined}
+            onLoadSegment={segmentMode ? segmentRead.loadSegment : undefined}
+            onLoadWindow={segmentMode ? segmentRead.loadWindow : undefined}
             // Host-owned reading state. The earlier-history disclosure is
             // controlled by the route, so Back, a reload, and a copied link all
             // restore exactly the sections the reader had open. The selected turn
@@ -645,9 +737,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             // owns graph topology, pan, and zoom while Fairtrade owns visuals.
             graphSlot={() => (
               <TrajectoryGraph
-                turns={displayTurns ?? turns}
+                turns={displayTurns ?? transcriptTurns}
                 toolVMsByTurn={toolVMsByTurn}
-                filteredTurns={displayTurns ?? turns}
+                filteredTurns={displayTurns ?? transcriptTurns}
                 phases={phases}
                 annotations={annotations}
                 searchMatches={[]}

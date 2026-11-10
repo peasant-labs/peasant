@@ -136,31 +136,11 @@ func TestHub_SessionDetail_BoundsAnOversizedToolResult(t *testing.T) {
 	}
 
 	turnsRaw, ok := dataMap["turns"].([]any)
-	if !ok || len(turnsRaw) != 1 {
-		t.Fatalf("turns = %v, want 1 turn", dataMap["turns"])
+	if !ok || len(turnsRaw) != 0 {
+		t.Fatalf("frame turns = %v, want none; an oversized tool result must not ride the session_detail frame", turnsRaw)
 	}
-	toolCallsRaw, ok := turnsRaw[0].(map[string]any)["toolCalls"].([]any)
-	if !ok || len(toolCallsRaw) != 1 {
-		t.Fatalf("toolCalls = %v, want 1 entry", turnsRaw[0])
-	}
-	result, ok := toolCallsRaw[0].(map[string]any)["result"].(string)
-	if !ok {
-		t.Fatalf("toolCalls[0].result = %v, want a string", toolCallsRaw[0])
-	}
-	note := strings.Index(result, "\n[")
-	if note < 0 {
-		t.Fatalf("served tool result carries no bound note")
-	}
-	if note != defaults.ServedTextFieldBudgetBytes {
-		t.Errorf("served tool result shows %d bytes, want the per-field budget %d", note, defaults.ServedTextFieldBudgetBytes)
-	}
-	if !strings.HasPrefix(toolOutput, result[:note]) {
-		t.Errorf("served tool result is not the leading bytes of the stored record")
-	}
-	for _, want := range []string{"tool result bounded for display", "showing 1 MiB of 9 MiB", "kept by the peasant store that recorded this session"} {
-		if !strings.Contains(result[note:], want) {
-			t.Errorf("bound note %q does not contain %q", result[note:], want)
-		}
+	if strings.Contains(string(data), toolOutput[:64]) {
+		t.Fatal("the session_detail frame still carries the oversized tool result")
 	}
 
 	// The store still holds every byte: the bound is a read-path projection.

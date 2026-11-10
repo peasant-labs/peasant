@@ -416,7 +416,6 @@ describe('root page publish filters', () => {
          }, helperGroups: [] }], page: 1, perPage: 25, total: 1, nextItems: [], revision: '0', ordinarySessionTotal: 1, helperThreadTotal: 0,
        } : undefined;
        const requests = serve(specs, { search });
-       topics.quality = { sessions: specs.filter((spec) => spec.title).map((spec) => ({ id: spec.id, title: spec.title })) };
        if (specs.some((spec) => spec.preview)) topics.sessions = { sessions: specs.filter((spec) => spec.preview).map((spec) => makeSession({ id: spec.id, preview: spec.preview })) };
        const view = render(<HomePage />);
       // Under full-suite parallel load the mounted region can take longer than the
@@ -497,8 +496,8 @@ describe('root page publish filters', () => {
         for (const child of children) {
           const spec = specs.find((row) => row.id === child.getAttribute('data-session-group-child'))!;
           expect(child).not.toHaveAttribute('data-session-id');
-          // The state has its own column; only the phone summary repeats it in the title cell.
-          expect([...child.querySelectorAll('.pub-state')].filter((state) => !state.closest('.home-session-phone'))).toEqual([]);
+          // The state has its own column, so the title cell carries no state.
+          expect(child.querySelector('.pub-state')).toBeNull();
           const link = within(child as HTMLElement).getByRole('link');
           expect(link).toHaveAttribute('href', `/projects/${PROJECTS[spec.project].hash}/${spec.id}`);
           expect(link.textContent?.trim()).not.toBe('');
@@ -584,6 +583,14 @@ describe('root page list reads', () => {
     expect(within(row).getByRole('link', { name: 's-pub' })).toHaveAttribute('href', `/projects/${BETA_HASH}/s-pub`);
     expect(within(row).getAllByRole('link')).toHaveLength(1);
     expect(within(row).getByText('beta-project')).toBeInTheDocument();
+  });
+
+  it('renders the stored sync row title instead of the session id', async () => {
+    serve([{ id: 's-titled', project: 'alpha', syncStatus: 'new', state: 'unpublished', title: 'refactor the ingest pipeline' }]);
+    render(<HomePage />);
+    const list = await screen.findByRole('region', { name: 'sessions' });
+    expect(await screen.findByText('refactor the ingest pipeline')).toBeInTheDocument();
+    expect(list.textContent).not.toContain('s-titled');
   });
 
   it('ignores session broadcasts and refreshes the loaded list on focus', async () => {
@@ -677,7 +684,7 @@ describe('root page list reads', () => {
     await screen.findByRole('region', { name: 'sessions' });
     fireEvent.change(screen.getByRole('searchbox', { name: 'search your sessions' }), { target: { value: 'flakes' } });
 
-    const results = await screen.findByText('search results');
+    const results = await screen.findByRole('heading', { name: 'search results' });
     const section = results.closest('[data-grouped-sessions-section]') as HTMLElement;
     expect(await within(section).findByText('the ingest test flakes on CI')).toBeInTheDocument();
     expect(within(section).getByText('you:', { exact: false })).toBeInTheDocument();

@@ -246,6 +246,57 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	slog.Info("ws: client disconnected", "remote", r.RemoteAddr)
 }
 
+// sessionDetailFrame serves the session_detail frame without turn content.
+// The released viewer reads the directory and segments, so this frame keeps
+// the session metadata, title, medians, revision, and navigation, and sends
+// turns as an empty list. The durable read is not mutated: push and export
+// still carry the transcript. Earlier-history turns stay on that durable read
+// and are omitted here, because a metadata frame cannot vouch for content it
+// does not carry. Earlier-history sections are omitted with those turns: an
+// emptied section would render as "earlier history 0". Attachment-bearing
+// native metadata is omitted for the same reason: the contract resolves those
+// records against the frame's turns, and a frame with no turns cannot name
+// the turn they attach to. A session-level record, whose attachment is
+// absent, stays.
+func sessionDetailFrame(sub ChannelSubscription, detail *schema.SessionDetailReadPayload) ServerMessage {
+	if detail == nil {
+		return ServerMessage{Type: MsgSessionDetail}
+	}
+	if header := SessionDetailHeaderPayloadFromRead(detail); header != nil {
+		if err := header.Validate(); err != nil {
+			slog.Error("session detail header projection is invalid; serving metadata with empty turns", "session_id", sub.ID, "err", err)
+		}
+	}
+	served := *detail
+	served.Turns = []schema.TurnDetail{}
+	served.NativeMetadata = sessionLevelNativeMetadata(detail.NativeMetadata)
+	// A section whose turns were removed cannot be shown. An empty section
+	// renders as "earlier history 0". Omit it. The durable read keeps the
+	// sections and their turns.
+	served.EarlierHistory = nil
+	return ServerMessage{Type: MsgSessionDetail, Data: &served}
+}
+
+// sessionLevelNativeMetadata keeps records that do not name a turn. An empty
+// result is nil so the frame omits the field instead of sending an empty array
+// the decoder would still have to explain.
+func sessionLevelNativeMetadata(records []schema.NativeMetadataRecord) []schema.NativeMetadataRecord {
+	if len(records) == 0 {
+		return nil
+	}
+	kept := make([]schema.NativeMetadataRecord, 0, len(records))
+	for _, record := range records {
+		if record.Attachment != nil {
+			continue
+		}
+		kept = append(kept, record)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
+}
+
 // sendSnapshots pushes current data for each subscription.
 // Each ChannelSubscription carries the topic and any topic-specific fields (ID, Axis).
 func (h *Hub) sendSnapshots(ctx context.Context, conn *Conn, subs []ChannelSubscription) {
@@ -292,7 +343,11 @@ func (h *Hub) sendSnapshots(ctx context.Context, conn *Conn, subs []ChannelSubsc
 			} else if len(refs) > 0 {
 				detail.ChildSessions = refs
 			}
-			msg = ServerMessage{Type: MsgSessionDetail, Data: detail}
+			// The frame that ships is metadata only: an empty turn list, no
+			// earlier-history sections, and session-level native metadata.
+			// Turn content is the directory and segment reads. A header
+			// projection fault is logged and does not drop this frame.
+			msg = sessionDetailFrame(sub, detail)
 		case TopicProjectFamiliarity:
 			projectHash, hashErr := schema.NewProjectHash(sub.ID)
 			if hashErr != nil {

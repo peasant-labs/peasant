@@ -20,6 +20,7 @@
     "journey:collective-observations": "node scripts/journey/run-collective-observations.mjs",
     "test:journey:mutations": "OBSERVATIONS_MUTANTS=1 node scripts/journey/run-collective-observations.mjs",
     "test:transcript-position:mutations": "node scripts/transcript-position.mutations.mjs",
+    "test:transcript-segments:mutations": "node scripts/transcript-segments.mutations.mjs",
     "test:contract-boundary:mutations": "node scripts/contract-boundary.mutations.mjs",
     "test:provider-build-provenance": "node scripts/provider-build-provenance-guidance.test.mjs && node scripts/provider-build-provenance.mjs",
     "test:watch": "vitest",
@@ -40,10 +41,11 @@
     "sxs:changes": "SURFACE_SET=changes REF_DIR=changes APP_DIR=peasant node scripts/visual/stitch-sxs.mjs",
     "sxs:smoke": "SURFACE_SET=smoke REF_DIR=smoke-baseline APP_DIR=smoke node scripts/visual/stitch-sxs.mjs scripts/visual",
     "shell:gate": "pnpm boot:shell && pnpm shell:offline",
-    "visual:publish-states": "node scripts/visual/publish-states-shoot.mjs"
+    "visual:publish-states": "node scripts/visual/publish-states-shoot.mjs",
+    "visual:transcript-segments": "node scripts/visual/transcript-segments-shoot.mjs"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.0.61",
+    "@peasant-labs/fairtrade": "0.0.63",
     "@peasant-labs/schema": "0.43.0",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",

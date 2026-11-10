@@ -21,7 +21,7 @@ requiredNames:
   - no-claude-teammate-line
   - refresh-restores-view-and-page
   - interleaved-project-grouping
-  - hidden-session-column-grouping
+  - stored-columns-keep-the-identity-column
   - collapsed-group-does-not-hide-page-two
 publish:
   request: { sessionIds: [root-0], redactionLevel: standard }
@@ -134,10 +134,11 @@ cases:
       - {id: a1, project: alpha}
       - {id: b1, project: beta}
       - {id: a2, project: alpha}
-  - name: hidden-session-column-grouping
-    # The URL carries the grouping and the device carries the columns. With the
-    # session column hidden, the project header still renders in the first
-    # remaining column.
+  - name: stored-columns-keep-the-identity-column
+    # The URL carries the grouping and the device carries the columns. The
+    # shared table always shows its first declared column (the row identity),
+    # so a stored set that omits the session column still renders it and the
+    # project header still renders above its rows.
     search: 'groupBy=project'
     visibleColumns: [project, state]
     rows:

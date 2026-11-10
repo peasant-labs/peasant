@@ -1222,6 +1222,47 @@ WHERE role = 'user' AND depth = 0
 	return result, nil
 }
 
+// SessionTitlesBulk returns the stored display title for each named session
+// that has one, keyed by session id. A session with no stored title is absent
+// from the map so a caller falls back to its preview or identifier. It is one
+// bounded statement per batch, so a grouped page carries titles without a
+// per-row read.
+func (s *Store) SessionTitlesBulk(ctx context.Context, sessionIDs []string) (map[string]string, error) {
+	if len(sessionIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: SessionTitlesBulk take connection: %w; no stored titles were read; restore database access and retry", err)
+	}
+	defer s.pool.Put(conn)
+
+	result := make(map[string]string, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		selected := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+		placeholders := make([]string, len(selected))
+		args := make([]any, len(selected))
+		for i, id := range selected {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		query := `SELECT session_id, title FROM session_metrics
+WHERE title IS NOT NULL AND session_id IN (` + strings.Join(placeholders, ", ") + `)`
+		if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				if stmt.ColumnType(1) != sqlite.TypeNull {
+					result[stmt.ColumnText(0)] = stmt.ColumnText(1)
+				}
+				return nil
+			},
+		}); err != nil {
+			return nil, fmt.Errorf("store: SessionTitlesBulk query: %w; no stored titles were read; inspect the store and retry", err)
+		}
+	}
+	return result, nil
+}
+
 // LeadingUserMessagesBulk returns at most perSession leading depth-zero user
 // previews per session, in entry_index order. Sessions without user entries are
 // omitted; NULL previews are empty elements, not missing records. Each element

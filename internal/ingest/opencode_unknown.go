@@ -30,6 +30,7 @@ func knownOpenCodeCurrentRowKinds() []string {
 		"compaction",
 		"agent-switched",
 		"model-switched",
+		"idle",
 	}
 }
 

@@ -6,7 +6,6 @@ import { useChannel } from '@/contexts/WebSocketContext';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { AllSessions } from '@/components/sessions/AllSessions';
 import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
-import { useSessionTitles } from '@/hooks/useSessionTitles';
 import { SkeletonList } from '@/lib/skeleton';
 import { Button } from '@/lib/ft-ui';
 import { isRetryableConnectionFault } from '@/lib/faults';
@@ -68,7 +67,6 @@ export function SessionsRouter() {
   const [groupedScopeUnavailable, setGroupedScopeUnavailable] = useState(false);
   const handleScopeUnavailable = useCallback(() => setGroupedScopeUnavailable(true), []);
   const { data, channelFault, connectionFault, refresh } = useChannel<SessionsPayload>(CHANNELS);
-  const sessionTitles = useSessionTitles();
 
   useEffect(() => {
     setMounted(true);
@@ -156,7 +154,6 @@ export function SessionsRouter() {
           variant="sessions"
           projectHash={projectHash}
           invalidationKey={data}
-          titles={sessionTitles}
           heading="sessions"
           onScopeUnavailable={handleScopeUnavailable}
           emptyState={<IngestTeach headline="no sessions recorded for this project yet" />}
@@ -170,7 +167,6 @@ export function SessionsRouter() {
         scoped.length > 0 ? (
           <AllSessions
             sessions={scoped}
-            titles={sessionTitles}
             title="sessions"
           />
         ) : (
