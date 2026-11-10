@@ -6,10 +6,34 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
-	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 )
+
+// knownLookup adapts the store-backed index to the discovery scan interface.
+// Discovery never imports the database type.
+type knownLookup struct {
+	index knownSessionIndex
+}
+
+var _ discovery.KnownSessionIndex = knownLookup{}
+
+func (k knownLookup) Reusable(session ingest.DiscoveredSession, staleness time.Duration) (discovery.KnownSession, bool) {
+	record, ok := k.index.reusable(session, staleness)
+	if !ok {
+		return discovery.KnownSession{}, false
+	}
+	return discovery.KnownSession{
+		GitRemote:     record.GitRemote,
+		Branch:        record.Branch,
+		GitWorktree:   record.GitWorktree,
+		CanonicalCwd:  record.CanonicalCwd,
+		Title:         record.Title,
+		IngestedMs:    record.IngestedMs,
+		SchemaVersion: record.SchemaVersion,
+	}, true
+}
 
 // knownSession is what the local store already recorded for one ingested
 // session: the values a re-scan reuses instead of walking git for them again,
@@ -131,9 +155,5 @@ func loadKnownSessionsFrom(ctx context.Context, db *store.Store) knownSessionInd
 // and the re-scan read it the same way so they agree on which sessions are
 // active.
 func configStaleness(cfg *config.Config) time.Duration {
-	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
-	if staleness == 0 {
-		staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-	}
-	return staleness
+	return discovery.ConfigStaleness(cfg)
 }
