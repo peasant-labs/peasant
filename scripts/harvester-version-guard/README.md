@@ -36,8 +36,10 @@ and OpenCode native fixture families.
 Existing required-name manifests remain enforced. The OpenCode SQLite builder
 is copied identically into both temporary trees so builder changes cannot be
 mistaken for parser changes. Each case directory is cleared before a capture, so
-a `-wal`/`-shm` sidecar from one pass cannot be read with the next. The base
-corpus is read with the current strict loader: every base that declares
+a `-wal`/`-shm` sidecar left by the first capture of a pass cannot be read with
+the second capture's main file.
+
+The base corpus is read with the current strict loader: every base that declares
 `HarvesterVersionRegistry` loads under today's fields, but removing a case field
 would make older bases fail the guard rather than the comparison, so that change
 needs a guard-side migration. A newly registered harness without observations
