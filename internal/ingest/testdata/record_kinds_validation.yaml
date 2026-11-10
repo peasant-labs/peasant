@@ -21,7 +21,7 @@ required_names:
   - native reasoning mirror is ignored
   - status mutation fails production witness
   - preview mutation fails production witness
-  - tracked control production witness
+  - represented attachment control production witness
   - represented control production witness
   - arbitrary unseen record retains
   - arbitrary unseen block retains
@@ -50,9 +50,9 @@ cases:
   - {name: native user mirror is ignored, operation: native-event-behavior, kind: user_message}
   - {name: native agent mirror is ignored, operation: native-event-behavior, kind: agent_message}
   - {name: native reasoning mirror is ignored, operation: native-event-behavior, kind: agent_reasoning}
-  - {name: status mutation fails production witness, operation: mutate-status, harness: claude-code, context: retained-format-1, namespace: record, kind: attachment, status: represented, error: control behavior differs}
+  - {name: status mutation fails production witness, operation: mutate-status, harness: claude-code, context: retained-format-1, namespace: record, kind: attachment, status: tracked-only, error: control behavior differs}
   - {name: preview mutation fails production witness, operation: mutate-preview, harness: claude-code, context: retained-format-1, namespace: record, kind: mode, preview: no, error: control behavior differs}
-  - {name: tracked control production witness, operation: behavior, harness: claude-code, context: retained-format-1, namespace: record, kind: attachment}
+  - {name: represented attachment control production witness, operation: behavior, harness: claude-code, context: retained-format-1, namespace: record, kind: attachment}
   - {name: represented control production witness, operation: behavior, harness: claude-code, context: retained-format-1, namespace: system_subtype, kind: compact_boundary}
   - {name: arbitrary unseen record retains, operation: lookup, harness: pi, context: retained-format-1, namespace: entry, kind: novel_unlisted_kind, status: retained-unknown, preview: no}
   - {name: arbitrary unseen block retains, operation: lookup, harness: pi, context: retained-format-1, namespace: content_block, kind: novel_unlisted_kind, status: retained-unknown, preview: no}

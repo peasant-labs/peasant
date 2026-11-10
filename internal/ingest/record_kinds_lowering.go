@@ -165,14 +165,6 @@ func recordKindProfileFor(rule recordKindRule) recordKindProfile {
 	base := recordKindOutcomeProfiles[rule.Outcome]
 	key := RecordKindKey{Context: rule.Context, Namespace: rule.Namespace, Kind: rule.Kind, Match: rule.Match}
 	switch {
-	case key.Namespace == "record" && key.Kind == "attachment" && key.Match == RecordKindLiteral:
-		// Claude's attachment control keeps no reader preview in either
-		// context: the retained validator and the managed classifier project
-		// the same bounded payload.
-		base.Status = RecordKindTrackedOnly
-		base.Preview = RecordKindPreviewNo
-		base.Payload = "bounded control extra"
-		base.Anchor = ""
 	case key.Namespace == "system_subtype" && key.Kind == "compact_boundary" && key.Match == RecordKindLiteral:
 		base.Payload = "compactMetadata"
 	case rule.Namespace == "entry" && rule.Kind == "session":

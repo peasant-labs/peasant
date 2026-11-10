@@ -39,7 +39,7 @@ harnesses:
           - {<<: *control, kind: agent-name}
           - {<<: *control, kind: ai-title}
           - {<<: *control, kind: atis-latch}
-          - {kind: attachment, status: tracked-only, preview: no, payload: bounded control extra}
+          - {<<: *control, kind: attachment}
           - {<<: *control, kind: bridge-session}
           - {<<: *control, kind: started}
           - {<<: *control, kind: cost-state}
@@ -96,7 +96,7 @@ harnesses:
           - {<<: *control, kind: agent-name}
           - {<<: *control, kind: ai-title}
           - {<<: *control, kind: atis-latch}
-          - {kind: attachment, status: tracked-only, preview: no, payload: bounded control extra}
+          - {<<: *control, kind: attachment}
           - {<<: *control, kind: bridge-session}
           - {<<: *control, kind: started}
           - {<<: *control, kind: cost-state}

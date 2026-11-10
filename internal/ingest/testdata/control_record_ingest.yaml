@@ -13,7 +13,8 @@
 # publishes.
 required_names:
   - control-records-certify
-  - managed-attachment-null-preview-certifies
+  - managed-attachment-kind-only-preview
+  - managed-codex-world-state-preview-absent
   - codex-control-records-certify
   - codex-managed-controls-certify
   - unknown-record-refused
@@ -73,7 +74,7 @@ cases:
     export_accepted: true
     publication_ready: true
     preflight_accepts: true
-  - name: managed-attachment-null-preview-certifies
+  - name: managed-attachment-kind-only-preview
     managed: true
     transcript: |
       {"sessionId":"SESSION_ID","type":"user","uuid":"entry-first","timestamp":"2026-01-01T00:00:00Z","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"inspect the fixture"}}
@@ -83,6 +84,20 @@ cases:
     capture_format: full
     failure_code: ""
     control_part_type: attachment
+    control_preview: "attachment"
+    control_preview_absent: false
+    export_accepted: true
+    publication_ready: true
+    preflight_accepts: true
+  - name: managed-codex-world-state-preview-absent
+    harness: codex
+    managed: true
+    transcript: *codex-control-transcript
+    capture_status: complete
+    capture_format: full
+    failure_code: ""
+    control_part_type: world_state
+    control_entry_type: system
     control_preview_absent: true
     export_accepted: true
     publication_ready: true

@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -57,8 +58,14 @@ var claudeControlRecordEnvelopeKeys = map[string]bool{
 }
 
 // claudeControlPayloadLimit caps the retained payload. A larger payload keeps
-// only an identity object so one oversized record cannot bloat the index.
-const claudeControlPayloadLimit = 8192
+// only an identity object so one oversized record cannot bloat the index. The
+// limit is generous enough to retain a whole attachment record minus its image
+// bytes; embedded image data is stripped before this cap applies.
+const claudeControlPayloadLimit = 256 * 1024
+
+// claudeAttachmentTextLimit bounds a free-text attachment value (an output
+// style) in the preview.
+const claudeAttachmentTextLimit = 120
 
 // claudeOwnerRotationRecordTypes are the record kinds that prove a file with no
 // session records is still a Claude owner file. Membership is NOT the
@@ -177,6 +184,7 @@ func stripClaudeControlEnvelope(payload map[string]json.RawMessage) map[string]j
 // one record would fail every complete-content read of the session, the share
 // scan among them. rawBytes records the stripped payload size.
 func claudeControlRetainedPayload(kind string, payload map[string]json.RawMessage) *string {
+	payload = claudeControlPayloadWithoutImageBytes(payload)
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil
@@ -229,9 +237,221 @@ func claudeAttachmentType(payload map[string]json.RawMessage) string {
 	return ""
 }
 
+// claudeControlPayloadWithoutImageBytes returns the payload with an embedded
+// image's base64 source data replaced by its decoded byte size. The retained
+// control payload keeps the image's identity (media type and size) and never
+// its bytes, so a stored or published Extra cannot carry a screenshot. The
+// caller's payload map is not modified.
+func claudeControlPayloadWithoutImageBytes(payload map[string]json.RawMessage) map[string]json.RawMessage {
+	rawAttachment, ok := payload["attachment"]
+	if !ok {
+		return payload
+	}
+	var attachment map[string]json.RawMessage
+	if json.Unmarshal(rawAttachment, &attachment) != nil {
+		return payload
+	}
+	rawSource, ok := attachment["source"]
+	if !ok {
+		return payload
+	}
+	var source map[string]json.RawMessage
+	if json.Unmarshal(rawSource, &source) != nil {
+		return payload
+	}
+	rawData, ok := source["data"]
+	if !ok {
+		return payload
+	}
+	var data string
+	if json.Unmarshal(rawData, &data) != nil {
+		return payload
+	}
+	mediaType := claudeControlValue(source, "media_type", "mediaType")
+	if !strings.HasPrefix(mediaType, "image/") {
+		return payload
+	}
+	delete(source, "data")
+	source["byteSize"] = json.RawMessage(strconv.Itoa(claudeBase64ByteSize(data)))
+	encodedSource, err := json.Marshal(source)
+	if err != nil {
+		return payload
+	}
+	strippedAttachment := make(map[string]json.RawMessage, len(attachment))
+	for key, value := range attachment {
+		strippedAttachment[key] = value
+	}
+	strippedAttachment["source"] = encodedSource
+	encodedAttachment, err := json.Marshal(strippedAttachment)
+	if err != nil {
+		return payload
+	}
+	strippedPayload := make(map[string]json.RawMessage, len(payload))
+	for key, value := range payload {
+		strippedPayload[key] = value
+	}
+	strippedPayload["attachment"] = encodedAttachment
+	return strippedPayload
+}
+
+// claudeBase64ByteSize returns the decoded byte size of base64 data, falling
+// back to the padded-length estimate when the data is not strict base64.
+func claudeBase64ByteSize(data string) int {
+	cleaned := strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', ' ', '\t':
+			return -1
+		}
+		return r
+	}, data)
+	if decoded, err := base64.StdEncoding.DecodeString(cleaned); err == nil {
+		return len(decoded)
+	}
+	return len(cleaned) * 3 / 4
+}
+
+// claudeAttachmentPayload returns the nested attachment object a record carries,
+// or the payload itself for the flat fallback shape. The returned map is never
+// mutated.
+func claudeAttachmentPayload(payload map[string]json.RawMessage) map[string]json.RawMessage {
+	if raw, ok := payload["attachment"]; ok {
+		var attachment map[string]json.RawMessage
+		if json.Unmarshal(raw, &attachment) == nil {
+			return attachment
+		}
+	}
+	return payload
+}
+
+// claudeAttachmentPreview builds the shape-only preview for one attachment
+// sub-kind. It reads only whitelisted shape fields (hook event, exit code,
+// duration, counts, style, date); a command, stdout, stderr, path, prompt,
+// address, instruction or file text never enters it. An empty, absent or
+// unlisted sub-kind renders the kind alone.
+func claudeAttachmentPreview(payload map[string]json.RawMessage) string {
+	fields := claudeAttachmentPayload(payload)
+	switch claudeAttachmentType(payload) {
+	case "hook_success":
+		return claudeHookSuccessPreview(fields)
+	case "skill_listing":
+		if count, ok := claudeAttachmentCount(fields, "skillCount", "count", "skills"); ok {
+			return strconv.Itoa(count) + " skills listed"
+		}
+		return "attachment"
+	case "deferred_tools_delta":
+		return claudeDeferredToolsPreview(fields)
+	case "output_style":
+		if style := claudeSingleLine(claudeControlValue(fields, "style", "outputStyle", "value")); style != "" {
+			return "style: " + truncateString(style, claudeAttachmentTextLimit)
+		}
+		return "attachment"
+	case "total_tokens_reminder":
+		if count, ok := claudeAttachmentCount(fields, "tokensLeft", "tokensRemaining", "remainingTokens", "totalTokens", "tokens"); ok {
+			return strconv.Itoa(count) + " tokens left"
+		}
+		return "attachment"
+	case "environment":
+		return "environment snapshot"
+	case "date", "date_change":
+		if value := claudeSingleLine(claudeControlValue(fields, "date", "newDate", "currentDate", "value")); value != "" {
+			return value
+		}
+		return "attachment"
+	case "diagnostics":
+		if count, ok := claudeAttachmentCount(fields, "fileCount", "count", "files", "diagnostics"); ok {
+			return strconv.Itoa(count) + " files with diagnostics"
+		}
+		return "attachment"
+	default:
+		return "attachment"
+	}
+}
+
+// claudeHookSuccessPreview joins the safe hook shape parts with a middle dot.
+// Only the hook name/event, exit code and duration are safe; the hook's
+// command and output are not.
+func claudeHookSuccessPreview(fields map[string]json.RawMessage) string {
+	parts := make([]string, 0, 3)
+	if value := claudeControlValue(fields, "hookName", "hookEvent"); value != "" {
+		parts = append(parts, value)
+	}
+	if value := claudeControlValue(fields, "exitCode"); value != "" {
+		parts = append(parts, "exit "+value)
+	}
+	if value := claudeControlValue(fields, "durationMs"); value != "" {
+		parts = append(parts, value+"ms")
+	}
+	if len(parts) == 0 {
+		return "attachment"
+	}
+	return strings.Join(parts, " · ")
+}
+
+// claudeDeferredToolsPreview summarizes a deferred-tool delta by count. A
+// present delta with no added or removed items is an update.
+func claudeDeferredToolsPreview(fields map[string]json.RawMessage) string {
+	added, addedPresent := claudeAttachmentCount(fields, "addedTools", "toolsAdded", "added")
+	removed, removedPresent := claudeAttachmentCount(fields, "removedTools", "toolsRemoved", "removed")
+	switch {
+	case added > 0:
+		return strconv.Itoa(added) + " tools added"
+	case removed > 0:
+		return strconv.Itoa(removed) + " tools removed"
+	}
+	if addedPresent || removedPresent {
+		return "tools updated"
+	}
+	if _, updated := claudeAttachmentCount(fields, "updatedTools", "toolsUpdated", "updated"); updated {
+		return "tools updated"
+	}
+	return "attachment"
+}
+
+// claudeAttachmentCount reads a count from a numeric field or from the length
+// of a field holding a list. present reports that the field existed, even when
+// its count is zero.
+func claudeAttachmentCount(fields map[string]json.RawMessage, keys ...string) (int, bool) {
+	for _, key := range keys {
+		raw, ok := fields[key]
+		if !ok {
+			continue
+		}
+		if count, ok := claudeScalarCount(raw); ok {
+			return count, true
+		}
+		var items []json.RawMessage
+		if json.Unmarshal(raw, &items) == nil {
+			return len(items), true
+		}
+	}
+	return 0, false
+}
+
+// claudeScalarCount decodes a JSON number or numeric string.
+func claudeScalarCount(raw json.RawMessage) (int, bool) {
+	var number json.Number
+	if json.Unmarshal(raw, &number) == nil {
+		if value, err := number.Int64(); err == nil {
+			return int(value), true
+		}
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		if value, err := strconv.Atoi(strings.TrimSpace(text)); err == nil {
+			return value, true
+		}
+	}
+	return 0, false
+}
+
+// claudeSingleLine collapses embedded line breaks so a free-text value cannot
+// spread a control preview across lines.
+func claudeSingleLine(value string) string {
+	return strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(value))
+}
+
 // claudeControlPreview builds the short, factual preview for a control kind. An
-// empty result means the kind keeps no preview (attachment) or carries no
-// readable value.
+// empty result means the kind carries no readable value.
 func claudeControlPreview(kind string, payload map[string]json.RawMessage) string {
 	switch kind {
 	case "permission-mode":
@@ -281,8 +501,7 @@ func claudeControlPreview(kind string, payload map[string]json.RawMessage) strin
 		}
 		return "started"
 	case "attachment":
-		// Attachments are tracked through the retained payload only.
-		return ""
+		return claudeAttachmentPreview(payload)
 	default:
 		if value := claudeControlFirstValue(payload); value != "" {
 			return kind + ": " + value

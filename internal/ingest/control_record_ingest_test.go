@@ -35,6 +35,7 @@ type controlRecordIngestCase struct {
 	FailureCode          string            `yaml:"failure_code"`
 	ControlPartType      string            `yaml:"control_part_type"`
 	ControlPartTypes     []string          `yaml:"control_part_types"`
+	ControlEntryType     ingest.EntryType  `yaml:"control_entry_type"`
 	ControlPreview       string            `yaml:"control_preview"`
 	ControlPreviewAbsent bool              `yaml:"control_preview_absent"`
 	ControlExtraMembers  map[string]string `yaml:"control_extra_members"`
@@ -250,8 +251,12 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 					if fixture.ControlPreviewAbsent {
 						// The production shape the projection rule removes: a
 						// stored control record whose writer produced no preview.
-						if entry.Role != ingest.RoleSystem || entry.EntryType != ingest.EntryTypeText || entry.Depth != 0 {
-							t.Fatalf("preview-less control record has shape role=%s entry_type=%s depth=%d, want system/text/0", entry.Role, entry.EntryType, entry.Depth)
+						wantEntryType := fixture.ControlEntryType
+						if wantEntryType == "" {
+							wantEntryType = ingest.EntryTypeText
+						}
+						if entry.Role != ingest.RoleSystem || entry.EntryType != wantEntryType || entry.Depth != 0 {
+							t.Fatalf("preview-less control record has shape role=%s entry_type=%s depth=%d, want system/%s/0", entry.Role, entry.EntryType, entry.Depth, wantEntryType)
 						}
 						if entry.PartType == nil || *entry.PartType != fixture.ControlPartType {
 							t.Fatalf("preview-less control record part type = %v, want %q", entry.PartType, fixture.ControlPartType)

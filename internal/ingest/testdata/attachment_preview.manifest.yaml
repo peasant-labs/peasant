@@ -1,0 +1,36 @@
+# Required-name manifest for testdata/attachment_preview.yaml. Every name is a
+# protected shape case; add a new case here when adding one, and never remove a
+# name without deleting its case deliberately.
+requiredNames:
+  - hook-success-full-shape
+  - hook-success-name-only
+  - hook-success-event-only
+  - hook-success-safe-fields-ignore-sensitive-text
+  - hook-success-without-safe-parts
+  - hook-success-empty
+  - skill-listing-count
+  - skill-listing-list-count
+  - skill-listing-absent-count
+  - deferred-tools-added
+  - deferred-tools-removed
+  - deferred-tools-updated
+  - deferred-tools-absent-counts
+  - output-style
+  - output-style-multiline
+  - output-style-length-bounded
+  - output-style-absent
+  - total-tokens-reminder
+  - total-tokens-reminder-absent
+  - environment-snapshot
+  - date
+  - date-change
+  - diagnostics-files
+  - diagnostics-absent-count
+  - unlisted-kind-is-kind-only
+  - attachment-without-sub-kind
+  - flat-attachment-type-fallback
+  - image-source-data-stripped
+  - image-jpeg-source-data-stripped
+  - image-source-data-oversized-stripped
+  - image-source-without-data
+  - non-image-source-data-retained

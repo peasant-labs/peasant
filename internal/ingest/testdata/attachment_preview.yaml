@@ -1,0 +1,127 @@
+# Shape-only attachment previews. Every case runs the real Claude Code capture
+# path, so the preview and the retained payload are the ones the detail, export
+# and publication readers receive. A preview may name only a hook event, exit
+# code, duration, count, style or date; command, stdout, stderr, paths, prompts,
+# addresses, instructions and file text never appear in it. An image attachment
+# keeps its media type and decoded byte size and never its base64 source data.
+cases:
+  - name: hook-success-full-shape
+    source: '{"type":"attachment","attachment":{"type":"hook_success","hookName":"post-tool","exitCode":0,"durationMs":12},"uuid":"at-hook-full"}'
+    want_preview: "post-tool · exit 0 · 12ms"
+    want_extra_keys: [attachment]
+    want_extra_members:
+      attachment: '{"type":"hook_success","hookName":"post-tool","exitCode":0,"durationMs":12}'
+  - name: hook-success-name-only
+    source: '{"type":"attachment","attachment":{"type":"hook_success","hookName":"post-tool"},"uuid":"at-hook-name"}'
+    want_preview: "post-tool"
+  - name: hook-success-event-only
+    source: '{"type":"attachment","attachment":{"type":"hook_success","hookEvent":"PostToolUse"},"uuid":"at-hook-event"}'
+    want_preview: "PostToolUse"
+  - name: hook-success-safe-fields-ignore-sensitive-text
+    source: '{"type":"attachment","attachment":{"type":"hook_success","hookName":"post-tool","command":"deploy --token secret","stdout":"private output","stderr":"private error","filePath":"/home/person/notes.txt","email":"person@example.com","prompt":"an instruction"},"uuid":"at-hook-negative"}'
+    want_preview: "post-tool"
+  - name: hook-success-without-safe-parts
+    source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"private output"},"uuid":"at-hook-empty"}'
+    want_preview: "attachment"
+  - name: hook-success-empty
+    source: '{"type":"attachment","attachment":{"type":"hook_success"},"uuid":"at-hook-none"}'
+    want_preview: "attachment"
+  - name: skill-listing-count
+    source: '{"type":"attachment","attachment":{"type":"skill_listing","skillCount":61},"uuid":"at-skill-count"}'
+    want_preview: "61 skills listed"
+  - name: skill-listing-list-count
+    source: '{"type":"attachment","attachment":{"type":"skill_listing","skills":[{"name":"alpha"},{"name":"beta"}]},"uuid":"at-skill-list"}'
+    want_preview: "2 skills listed"
+  - name: skill-listing-absent-count
+    source: '{"type":"attachment","attachment":{"type":"skill_listing"},"uuid":"at-skill-none"}'
+    want_preview: "attachment"
+  - name: deferred-tools-added
+    source: '{"type":"attachment","attachment":{"type":"deferred_tools_delta","addedTools":["alpha","beta","gamma"]},"uuid":"at-tools-added"}'
+    want_preview: "3 tools added"
+  - name: deferred-tools-removed
+    source: '{"type":"attachment","attachment":{"type":"deferred_tools_delta","removedTools":["alpha"]},"uuid":"at-tools-removed"}'
+    want_preview: "1 tools removed"
+  - name: deferred-tools-updated
+    source: '{"type":"attachment","attachment":{"type":"deferred_tools_delta","updatedTools":["alpha"]},"uuid":"at-tools-updated"}'
+    want_preview: "tools updated"
+  - name: deferred-tools-absent-counts
+    source: '{"type":"attachment","attachment":{"type":"deferred_tools_delta"},"uuid":"at-tools-none"}'
+    want_preview: "attachment"
+  - name: output-style
+    source: '{"type":"attachment","attachment":{"type":"output_style","style":"Concise"},"uuid":"at-style"}'
+    want_preview: "style: Concise"
+  - name: output-style-multiline
+    source: '{"type":"attachment","attachment":{"type":"output_style","style":"Line\nOne"},"uuid":"at-style-multiline"}'
+    want_preview: "style: Line One"
+  - name: output-style-length-bounded
+    source: '{"type":"attachment","attachment":{"type":"output_style","style":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"uuid":"at-style-long"}'
+    want_preview_prefix: "style: x"
+    want_preview_max_len: 127
+  - name: output-style-absent
+    source: '{"type":"attachment","attachment":{"type":"output_style"},"uuid":"at-style-none"}'
+    want_preview: "attachment"
+  - name: total-tokens-reminder
+    source: '{"type":"attachment","attachment":{"type":"total_tokens_reminder","tokensLeft":1234},"uuid":"at-tokens"}'
+    want_preview: "1234 tokens left"
+  - name: total-tokens-reminder-absent
+    source: '{"type":"attachment","attachment":{"type":"total_tokens_reminder"},"uuid":"at-tokens-none"}'
+    want_preview: "attachment"
+  - name: environment-snapshot
+    source: '{"type":"attachment","attachment":{"type":"environment","environment":{"os":"linux","shell":"/bin/zsh"}},"uuid":"at-environment"}'
+    want_preview: "environment snapshot"
+  - name: date
+    source: '{"type":"attachment","attachment":{"type":"date","date":"2026-01-01"},"uuid":"at-date"}'
+    want_preview: "2026-01-01"
+  - name: date-change
+    source: '{"type":"attachment","attachment":{"type":"date_change","newDate":"2026-01-02"},"uuid":"at-date-change"}'
+    want_preview: "2026-01-02"
+  - name: diagnostics-files
+    source: '{"type":"attachment","attachment":{"type":"diagnostics","files":["alpha.go","beta.go"]},"uuid":"at-diagnostics"}'
+    want_preview: "2 files with diagnostics"
+  - name: diagnostics-absent-count
+    source: '{"type":"attachment","attachment":{"type":"diagnostics"},"uuid":"at-diagnostics-none"}'
+    want_preview: "attachment"
+  - name: unlisted-kind-is-kind-only
+    source: '{"type":"attachment","attachment":{"type":"mystery_attachment","note":"private note"},"uuid":"at-mystery"}'
+    want_preview: "attachment"
+  - name: attachment-without-sub-kind
+    source: '{"type":"attachment","uuid":"at-no-subkind"}'
+    want_preview: "attachment"
+  - name: flat-attachment-type-fallback
+    source: '{"type":"attachment","attachmentType":"hook_success","hookName":"flat-hook","uuid":"at-flat"}'
+    want_preview: "flat-hook"
+    want_extra_keys: [attachmentType, hookName]
+  - name: image-source-data-stripped
+    source: '{"type":"attachment","attachment":{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},"uuid":"at-image"}'
+    want_preview: "attachment"
+    want_extra_keys: [attachment]
+    want_extra_members:
+      attachment: '{"type":"image","source":{"type":"base64","media_type":"image/png","byteSize":8}}'
+    want_absent_text: "iVBORw0KGgo="
+  - name: image-jpeg-source-data-stripped
+    source: '{"type":"attachment","attachment":{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"/9j/4AAQSkZJRg=="}},"uuid":"at-image-jpeg"}'
+    want_preview: "attachment"
+    want_extra_keys: [attachment]
+    want_extra_members:
+      attachment: '{"type":"image","source":{"type":"base64","media_type":"image/jpeg","byteSize":10}}'
+    want_absent_text: "/9j/4AAQSkZJRg=="
+  - name: image-source-data-oversized-stripped
+    source: '{"type":"attachment","attachment":{"type":"image","source":{"type":"base64","media_type":"image/png","data":"IMAGE_BYTES"}},"uuid":"at-image-big"}'
+    image_data_bytes: 400000
+    want_preview: "attachment"
+    want_extra_keys: [attachment]
+    want_extra_members:
+      attachment: '{"type":"image","source":{"type":"base64","media_type":"image/png","byteSize":300000}}'
+    want_absent_text: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  - name: image-source-without-data
+    source: '{"type":"attachment","attachment":{"type":"image","source":{"type":"base64","media_type":"image/png"}},"uuid":"at-image-nodata"}'
+    want_preview: "attachment"
+    want_extra_keys: [attachment]
+    want_extra_members:
+      attachment: '{"type":"image","source":{"type":"base64","media_type":"image/png"}}'
+  - name: non-image-source-data-retained
+    source: '{"type":"attachment","attachment":{"type":"file","source":{"type":"text","media_type":"text/plain","data":"keep-me"}},"uuid":"at-file"}'
+    want_preview: "attachment"
+    want_extra_keys: [attachment]
+    want_extra_members:
+      attachment: '{"type":"file","source":{"type":"text","media_type":"text/plain","data":"keep-me"}}'
