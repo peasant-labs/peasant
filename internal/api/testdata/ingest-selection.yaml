@@ -1,0 +1,75 @@
+# POST /api/v1/sync/ingest applies a saved selected policy. An explicit
+# one-session re-index keeps its allowlist and does not apply that policy.
+# requiredNames is the deletion guard. A count is not the contract.
+requiredNames:
+  - selected-policy-imports-exactly-the-selected-set
+  - selected-policy-excludes-unselected-parent
+  - selected-policy-imports-subagent-child
+  - all-policy-imports-every-session
+  - explicit-session-scope-ignores-selection
+  - selected-policy-empty-allowlist-imports-nothing
+  - conflict-recorder-lines-appear-in-diagnostics
+  - session-exclusion-removes-branch
+ids:
+  selected: 11111111-1111-4111-8111-111111111111
+  other: 22222222-2222-4222-8222-222222222222
+  child: agent-a1b2c3d4
+cases:
+  - name: selected-policy-imports-exactly-the-selected-set
+    throughRoute: true
+    mode: selected
+    allow:
+      - 11111111-1111-4111-8111-111111111111
+    expectImported:
+      - 11111111-1111-4111-8111-111111111111
+    expectExcluded:
+      - 22222222-2222-4222-8222-222222222222
+  - name: selected-policy-excludes-unselected-parent
+    mode: selected
+    withChild: true
+    allow:
+      - 22222222-2222-4222-8222-222222222222
+    expectImported:
+      - 22222222-2222-4222-8222-222222222222
+    expectExcluded:
+      - 11111111-1111-4111-8111-111111111111
+      - agent-a1b2c3d4
+  - name: selected-policy-imports-subagent-child
+    mode: selected
+    withChild: true
+    allow:
+      - 11111111-1111-4111-8111-111111111111
+    expectImported:
+      - 11111111-1111-4111-8111-111111111111
+      - agent-a1b2c3d4
+    expectExcluded:
+      - 22222222-2222-4222-8222-222222222222
+  - name: all-policy-imports-every-session
+    mode: all
+    allow:
+      - 11111111-1111-4111-8111-111111111111
+    expectImported:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+  - name: explicit-session-scope-ignores-selection
+    route: session-scope
+    scopeSession: 22222222-2222-4222-8222-222222222222
+  - name: selected-policy-empty-allowlist-imports-nothing
+    mode: selected
+    emptyHarnesses: true
+    expectExcluded:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+  - name: conflict-recorder-lines-appear-in-diagnostics
+    mode: selected
+    conflict: true
+    expectExcluded:
+      - 11111111-1111-4111-8111-111111111111
+    expectDiagnostic: true
+  - name: session-exclusion-removes-branch
+    mode: selected
+    branchExclusion: true
+    expectImported:
+      - 22222222-2222-4222-8222-222222222222
+    expectExcluded:
+      - 11111111-1111-4111-8111-111111111111
