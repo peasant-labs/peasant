@@ -115,7 +115,7 @@ func TestProjectAnalyticsFieldSetMatchesManifest(t *testing.T) {
 		if !ok {
 			t.Fatalf("manifest type %s has no Go type in the analytics bundle", declared.Name)
 		}
-		assertAnalyticsFieldSet(t, declared.Name, analyticsJSONFields(valueType), declared.Fields)
+		assertAnalyticsFieldSet(t, declared.Name, analyticsJSONFields(t, valueType), declared.Fields)
 	}
 	for name := range analyticsTypes {
 		if _, ok := seen[name]; !ok {
@@ -438,27 +438,21 @@ func assertOptionalFloat(t *testing.T, label string, got, want *float64) {
 	}
 }
 
-// analyticsJSONFields returns the JSON property names a value type emits,
-// including promoted fields of an embedded struct.
-func analyticsJSONFields(valueType reflect.Type) []string {
-	var fields []string
-	for index := 0; index < valueType.NumField(); index++ {
-		field := valueType.Field(index)
-		if !field.IsExported() {
-			continue
-		}
-		if field.Anonymous {
-			fields = append(fields, analyticsJSONFields(field.Type)...)
-			continue
-		}
-		parts := strings.Split(field.Tag.Get("json"), ",")
-		name := parts[0]
-		if name == "-" {
-			continue
-		}
-		if name == "" {
-			name = field.Name
-		}
+// analyticsJSONFields returns the wire property names a value type emits. It
+// marshals a zero value through encoding/json instead of reading struct tags,
+// so the parity assertion checks the names a client actually receives.
+func analyticsJSONFields(t *testing.T, valueType reflect.Type) []string {
+	t.Helper()
+	raw, err := json.Marshal(reflect.New(valueType).Interface())
+	if err != nil {
+		t.Fatalf("marshal %s: %v", valueType, err)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatalf("decode %s wire object: %v", valueType, err)
+	}
+	fields := make([]string, 0, len(object))
+	for name := range object {
 		fields = append(fields, name)
 	}
 	return fields
