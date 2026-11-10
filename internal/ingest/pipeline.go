@@ -626,9 +626,10 @@ func WithIndexLogger(l IndexLogger) PipelineOption {
 }
 
 // WithGitDiffAnalyzer injects a GitDiffAnalyzer for commit detection.
-// When set, each processed session runs timestamp-based commit detection
-// to populate GitContext.Commits in metadata and the session_commits table.
-// Detection errors are non-fatal: warnings are appended to metadata.Diagnostics.Warnings.
+// When set, extraction runs timestamp-based commit detection, and a scoped
+// run also refreshes detection for an unchanged session without extracting
+// or indexing it. Detection errors are non-fatal: warnings are recorded and
+// the run continues.
 func WithGitDiffAnalyzer(a GitDiffAnalyzer) PipelineOption {
 	return func(p *Pipeline) { p.gitAnalyzer = a }
 }
@@ -992,6 +993,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// Track which root sessions passed the selection filter so subagents
 	// can inherit their parent's fate (rejected parent → rejected children).
 	filterPassedParents := make(map[SessionID]bool)
+	// Unchanged sessions a scoped run may refresh commits for. Collected here
+	// and applied after repair selection, so a session that will be extracted
+	// is not detected twice.
+	var unchangedCommitRefresh []DiffEntry
 
 	for _, entry := range diffResult.Sessions {
 		advanceFilter := func() {
@@ -1098,6 +1103,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				ParentUUID: entry.Session.ParentUUID,
 				Status:     DiffUnchanged,
 			})
+			if p.refreshesUnchangedCommits() {
+				unchangedCommitRefresh = append(unchangedCommitRefresh, entry)
+			}
 		case DiffActive:
 			recordDryRun(entry, DiffActive)
 			// Activity is diagnostic only; capture a finite source view by default.
@@ -1127,6 +1135,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		}
 	}
 	sessionResults = keptResults
+	// A scoped run refreshes commit detection for sessions that stay
+	// unchanged. A full harvest and a dry run do not. The refresh writes
+	// commit rows only: no extraction, no index rewrite, no transcript write.
+	p.refreshUnchangedCommits(ctx, unchangedCommitRefresh, maintenanceQueued)
 	keptDryRun := dryRunSessions[:0]
 	for _, result := range dryRunSessions {
 		if !maintenanceQueued[result.SessionID] {
@@ -3549,6 +3561,14 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		if result.Status == DiffUnchanged {
 			// Drain commits the parent and acknowledges the empty arena slot,
 			// without inserting, rewriting metadata, or scheduling indexing.
+			// A scoped run still refreshes commit detection from the capture
+			// already in hand. The write is serialized with the other store
+			// writes; the capture itself is not written out.
+			if p.refreshesUnchangedCommits() {
+				// Detect outside the write lane. Only the projection write,
+				// if the commits changed, needs the lane.
+				p.refreshCapturedUnchangedCommit(ctx, session, captured.Data, writeLane)
+			}
 			return workerResult{result: result}
 		}
 	}

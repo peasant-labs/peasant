@@ -413,20 +413,27 @@ transcript.
 | Target | Result |
 | --- | --- |
 | `harvest --session X` median under 1 s | **Met**: 676.0 ms median, 699.5 ms max, unchanged verdict in all five runs; 663.6 and 664.6 ms medians in the two earlier samples. |
-| `open --session X` every run under 2 s | **Missed**: 6.6 s median on the 12.1 MB session. Recorded finding below. |
+| `open --session X` every run under 2 s | **Missed** by the forced re-index in this table (6.6 s). **Met** after `open` stopped passing `--force`: finding 1. |
 | Time independent of store size | **Met** for both commands: +12.7% for harvest, +4.8% for open between a 1-session and a 3,002-session store, against 10.6× for the pre-change binary. |
 
 ## Recorded findings
 
-1. **`open --session X` misses the 2 s target on a large X, and the miss is the
-   session's own size, not the store.** `open` runs `harvest --force`, which
-   re-extracts and re-indexes X's 12,138,400-byte transcript: the forced
-   harvest alone is ≈6.6 s, essentially the whole of `open`'s 6.6 s. The same X
-   on a 1-session store takes 6.3 s, so the gate is store-independent and
-   session-size-bound. This is the measured-and-deferred `--force` finding:
-   removing `--force` from `open` becomes a follow-up that must solve commit
-   detection in both modes. The first measurement with the children still
-   linked (16.1 MB, nine sessions) took 13.6 s, which is the same cost curve.
+1. **`open --session X` missed the 2 s target on a large X because it forced a
+   re-index.** At the time of this table, `open` ran `harvest --force`, which
+   re-extracted and re-indexed X's 12,138,400-byte transcript: the forced
+   harvest alone was ≈6.6 s, essentially the whole of `open`'s 6.6 s. The same X
+   on a 1-session store took 6.3 s, so the miss was store-independent and
+   session-size-bound. The first measurement with the children still linked
+   (16.1 MB, nine sessions) took 13.6 s, which is the same cost curve.
+
+   That force is no longer how `open` records an unchanged session. `open`
+   harvests the named session with commit detection and does not pass
+   `--force`. An unchanged named session refreshes only its commit rows.
+   Measured 2026-11-09 on the large sandbox at `/tmp/opencode/slice17-timing/large`,
+   session `9aec3ccd-622c-46ee-b346-92d6e20fd2a5`, port 8799, five runs after
+   one warmup, binary built from this change: median 789.5 ms, max 856.2 ms
+   (725.8, 779.0, 789.5, 807.6, 856.2). Every timed run exited 0 and opened
+   the session. The 7,210 ms median in the issue is the before number.
 2. **The unchanged scoped harvest sits at about 0.68 s on this host**, and the
    settled `--dry-run` is 51 ms, so the source read plus the evidence/audit
    write path is about 0.6 s. It meets the 1 s target with about 0.32 s of

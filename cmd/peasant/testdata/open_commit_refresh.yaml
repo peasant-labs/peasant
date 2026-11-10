@@ -1,0 +1,72 @@
+# Cases for refreshing commit detection on an unchanged named session.
+# requiredNames is the deletion guard: removing a named case without updating
+# this list fails the loader.
+requiredNames:
+  - scoped-refresh
+  - second-open-idle
+  - full-harvest-skips
+  - force-reprocesses
+  - dry-run-skips
+  - detection-failure-keeps-commits
+
+cases:
+  # A new commit in the session window is stored. Entries, the index, and the
+  # saved pair identity stay byte-identical.
+  - name: scoped-refresh
+    afterRecord: add-commit
+    command: open
+    want:
+      succeeded: true
+      commits: grew
+      stored: identical
+
+  # Opening the same unchanged session again does no extraction and no index
+  # work, and does not rewrite an identical commit projection. Removing the
+  # identical-projection skip changes commit row ids and fails this case.
+  - name: second-open-idle
+    afterRecord: none
+    command: open
+    want:
+      succeeded: true
+      commits: same-rows
+      stored: identical
+
+  # A full harvest leaves an unchanged session's commits alone. Removing the
+  # named-session restriction records the new commit and fails this case.
+  - name: full-harvest-skips
+    afterRecord: add-commit
+    command: harvest
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: identical
+
+  # --force still re-extracts and re-indexes an unchanged session.
+  - name: force-reprocesses
+    afterRecord: none
+    command: harvest-force
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: extracted
+
+  # A dry run writes nothing. Removing the dry-run restriction records the
+  # new commit and fails this case.
+  - name: dry-run-skips
+    afterRecord: add-commit
+    command: harvest-dry-run
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: identical
+
+  # A git failure stays a diagnostic. The run succeeds and the commits already
+  # stored are kept. Replacing the projection on an incomplete detection, or
+  # failing the run, fails this case.
+  - name: detection-failure-keeps-commits
+    afterRecord: hide-git
+    command: open
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: identical
