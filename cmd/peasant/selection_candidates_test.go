@@ -12,6 +12,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/selectionfilter"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -321,7 +322,7 @@ func TestHarvestSelectionPreparesClonePathsBeforeLookup(t *testing.T) {
 		},
 	}
 	git := &stubBranchGitResolver{remote: fixture.Rows[0].GitRemote, branch: fixture.Rows[0].Branch}
-	filter, _ := buildSelectionFilterWithResolver(cfg, git, resolver)
+	filter, _ := selectionfilter.New(cfg, git, resolver)
 	if filter.Match(sessions[0]) {
 		t.Fatal("harvest selection matched before the complete cohort was prepared")
 	}
