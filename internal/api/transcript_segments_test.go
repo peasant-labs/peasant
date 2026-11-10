@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -140,6 +141,14 @@ func loadWindowFixture(t *testing.T) transcriptWindowFixture {
 	return fixture
 }
 
+func turnMeta(turns []ingest.Turn) []segmentTurnMeta {
+	meta := make([]segmentTurnMeta, len(turns))
+	for i := range turns {
+		meta[i] = segmentTurnMeta{index: turns[i].Index, role: turns[i].Role}
+	}
+	return meta
+}
+
 func sparseTurns(t *testing.T, fixture sparseSessionFixture) []ingest.Turn {
 	t.Helper()
 	turns := make([]ingest.Turn, len(fixture.Turns))
@@ -200,7 +209,7 @@ func (f *fakeSegmentReader) Revision(context.Context) (string, error) {
 	return f.revision, nil
 }
 
-func (f *fakeSegmentReader) ListEntries(context.Context, ingest.SessionID) ([]schema.SessionEntry, error) {
+func (f *fakeSegmentReader) LoadAvailableSessionEntries(context.Context, ingest.SessionID) ([]schema.SessionEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listCalls++
@@ -333,9 +342,37 @@ func alternatingTurns(count, contentBytes, toolCalls int) []testTurnSpec {
 	return turns
 }
 
+func isTurnIdentity(turns []ingest.Turn, identity int) bool {
+	for i := range turns {
+		if turns[i].Index == identity {
+			return true
+		}
+	}
+	return false
+}
+
 func newTestServerForSegments(t *testing.T, reader SegmentReader) *Server {
 	t.Helper()
 	return NewServer(ServerConfig{Port: 0, SegmentReader: reader})
+}
+
+func startTranscriptServer(t *testing.T, reader SegmentReader) string {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := newTestServerForSegments(t, reader)
+	if err := srv.Listen(ctx); err != nil {
+		cancel()
+		t.Fatalf("Listen: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("shutdown: %v", err)
+		}
+	})
+	return "http://" + srv.Addr().String()
 }
 
 // ---------------------------------------------------------------------------
@@ -358,15 +395,31 @@ func TestTranscriptDirectorySparseSession(t *testing.T) {
 			t.Fatalf("segment %d declares an inverted range [%d, %d]", ref.Index, ref.FirstTurn, ref.LastTurn)
 		}
 	}
-	// Every user turn is whole: no user identity straddles a boundary.
+	// Every user turn is whole: it belongs to exactly one segment range, and no
+	// boundary splits it. A turn is the cut unit, so a boundary that lands on a
+	// turn identity is the only outcome that keeps the prompt intact.
+	userTurns := 0
 	for _, turn := range turns {
 		if turn.Role != schema.RoleUser {
 			continue
 		}
+		userTurns++
+		containing := 0
 		for _, ref := range refs {
 			if ref.FirstTurn <= turn.Index && turn.Index <= ref.LastTurn {
-				break
+				containing++
 			}
+		}
+		if containing != 1 {
+			t.Fatalf("user turn %d is contained by %d segment ranges, want exactly one", turn.Index, containing)
+		}
+	}
+	if userTurns != 10 {
+		t.Fatalf("sparse fixture holds %d user turns, want the measured 10", userTurns)
+	}
+	for _, ref := range refs {
+		if !isTurnIdentity(turns, ref.FirstTurn) || !isTurnIdentity(turns, ref.LastTurn) {
+			t.Fatalf("segment %d boundary [%d, %d] is not a turn identity; a boundary must not split an entry", ref.Index, ref.FirstTurn, ref.LastTurn)
 		}
 	}
 	payload := transcriptDirectoryPayload(ingest.SessionID(transcriptTestSessionID), segmentDirectory{
@@ -457,13 +510,14 @@ type segmentTurnFixture struct {
 }
 
 type segmentCaseExpectation struct {
-	TotalTurns        int  `yaml:"totalTurns,omitempty"`
-	TotalSegments     int  `yaml:"totalSegments,omitempty"`
-	Turns             int  `yaml:"turns,omitempty"`
-	Truncated         bool `yaml:"truncated,omitempty"`
-	TurnByteLength    int  `yaml:"turnByteLength,omitempty"`
-	SegmentByteLength int  `yaml:"segmentByteLength,omitempty"`
-	Status            int  `yaml:"status,omitempty"`
+	TotalTurns        int      `yaml:"totalTurns,omitempty"`
+	TotalSegments     int      `yaml:"totalSegments,omitempty"`
+	Turns             int      `yaml:"turns,omitempty"`
+	Truncated         bool     `yaml:"truncated,omitempty"`
+	TurnByteLength    int      `yaml:"turnByteLength,omitempty"`
+	SegmentByteLength int      `yaml:"segmentByteLength,omitempty"`
+	Status            int      `yaml:"status,omitempty"`
+	Contains          []string `yaml:"contains,omitempty"`
 }
 
 type segmentReadCase struct {
@@ -631,7 +685,7 @@ func TestTranscriptSegmentFixtureCases(t *testing.T) {
 					t.Fatalf("segment status = %d, want %d; body %s", recorder.Code, fixtureCase.Expected.Status, body)
 				}
 				text := string(body)
-				for _, want := range []string{transcriptTestSessionID, "segment 0", "declared turns", "revision 4213", "peasant harvest --force --session " + transcriptTestSessionID} {
+				for _, want := range append([]string{transcriptTestSessionID, "segment 0", "revision 4213", "peasant harvest --force --session " + transcriptTestSessionID}, fixtureCase.Expected.Contains...) {
 					if !strings.Contains(text, want) {
 						t.Fatalf("conflict body does not name %q: %s", want, text)
 					}
@@ -677,7 +731,7 @@ func TestTranscriptWindowDescriptors(t *testing.T) {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
 			t.Parallel()
-			window, err := buildTranscriptWindow(schema.SessionID(transcriptTestSessionID), sparse.Revision, fixtureCase.Anchor, fixtureCase.Span, turns, refs)
+			window, err := buildTranscriptWindow(schema.SessionID(transcriptTestSessionID), sparse.Revision, fixtureCase.Anchor, fixtureCase.Span, turnMeta(turns), refs)
 			if err != nil {
 				t.Fatalf("build window: %v", err)
 			}
@@ -734,7 +788,7 @@ func TestTranscriptWindowHasNoUserTurn(t *testing.T) {
 		{Index: 7, Role: schema.RoleSystem, Content: "s"},
 	}
 	refs, _ := transcript.CutSegments(turns, defaults.TranscriptSegmentBudgetBytes)
-	_, err := buildTranscriptWindow(schema.SessionID(transcriptTestSessionID), "4213", 4, 10, turns, refs)
+	_, err := buildTranscriptWindow(schema.SessionID(transcriptTestSessionID), "4213", 4, 10, turnMeta(turns), refs)
 	var missing *noUserTurnError
 	if !errors.As(err, &missing) {
 		t.Fatalf("window error = %v, want noUserTurnError", err)
@@ -815,64 +869,77 @@ func TestTranscriptProducerColdBuild32MiB(t *testing.T) {
 	}
 }
 
-// TestTranscriptJumpLoadsOnlyCoveringSegments drives the design case: a jump
-// into the middle of the 32 MiB fixture resolves a descriptor and reads only
-// the covering segments.
+// TestTranscriptJumpLoadsOnlyCoveringSegments drives the design case through
+// the HTTP handlers: a jump into the middle of the 32 MiB fixture resolves a
+// descriptor, then reads only its covering segments.
 func TestTranscriptJumpLoadsOnlyCoveringSegments(t *testing.T) {
 	t.Parallel()
 	const turns = 1312
 	const contentBytes = 24 << 10
 	entries := transcriptEntries(t, alternatingTurns(turns, contentBytes, 0))
 	reader := newFakeSegmentReader(entries)
-	server := newTestServerForSegments(t, reader)
+	base := startTranscriptServer(t, reader)
 
-	directory, err := server.segments.directoryFor(context.Background(), ingest.SessionID(transcriptTestSessionID), "4213")
+	response, err := http.Get(base + "/api/v1/sessions/" + transcriptTestSessionID + "/transcript/segments")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(directory.refs) < 6 {
-		t.Fatalf("fixture cut to %d segments, need a middle segment", len(directory.refs))
+	directoryBody, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("directory status = %d, body %s", response.StatusCode, directoryBody)
 	}
-	mid := directory.refs[4]
+	var directory schema.TranscriptSegmentDirectory
+	if err := json.Unmarshal(directoryBody, &directory); err != nil {
+		t.Fatalf("decode directory: %v", err)
+	}
+	if len(directory.Segments) < 6 {
+		t.Fatalf("fixture cut to %d segments, need a middle segment", len(directory.Segments))
+	}
+	mid := directory.Segments[4]
 	anchor := mid.FirstTurn
 	if anchor%2 != 0 {
 		anchor++ // alternatingTurns puts users on even identities
 	}
-	allTurns, err := server.segments.turns(context.Background(), ingest.SessionID(transcriptTestSessionID), "4213")
+
+	response, err = http.Get(fmt.Sprintf("%s/api/v1/sessions/%s/transcript/window?anchor=%d&span=%d", base, transcriptTestSessionID, anchor, defaults.TranscriptWindowSpanDefault))
 	if err != nil {
 		t.Fatal(err)
 	}
-	window, err := buildTranscriptWindow(schema.SessionID(transcriptTestSessionID), "4213", anchor, 10, allTurns, directory.refs)
-	if err != nil {
-		t.Fatal(err)
+	windowBody, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("window status = %d, body %s", response.StatusCode, windowBody)
 	}
-	if len(window.Segments) >= len(directory.refs) {
-		t.Fatalf("window names %d of %d segments; a jump must not load the session", len(window.Segments), len(directory.refs))
+	var window schema.TranscriptWindow
+	if err := json.Unmarshal(windowBody, &window); err != nil {
+		t.Fatalf("decode window: %v", err)
+	}
+	if len(window.Segments) >= len(directory.Segments) {
+		t.Fatalf("window names %d of %d segments; a jump must not load the session", len(window.Segments), len(directory.Segments))
 	}
 
-	_, before := reader.counts()
+	listsBefore, readsBefore := reader.counts()
 	for _, index := range window.Segments {
-		if index >= len(directory.refs) {
-			t.Fatalf("window names segment %d outside the %d-segment directory", index, len(directory.refs))
+		if index >= len(directory.Segments) {
+			t.Fatalf("window names segment %d outside the %d-segment directory", index, len(directory.Segments))
 		}
-		ref := directory.refs[index]
-		page, readErr := reader.ReadSessionEntries(context.Background(), ingest.SessionID(transcriptTestSessionID), ingest.SessionEntryReadOptions{
-			Mode:         ingest.SessionEntryReadAvailable,
-			FromIndex:    ref.FirstTurn,
-			Limit:        defaults.TranscriptSegmentEntryReadLimit,
-			SoftMaxBytes: defaults.TranscriptContinuationReadBytes,
-		})
-		if readErr != nil {
-			t.Fatal(readErr)
+		response, err = http.Get(fmt.Sprintf("%s/api/v1/sessions/%s/transcript/segments/%d", base, transcriptTestSessionID, index))
+		if err != nil {
+			t.Fatal(err)
 		}
-		readTurns := transcript.EntriesToTurns(page.Entries)
-		if len(readTurns) == 0 || readTurns[0].Index != ref.FirstTurn {
-			t.Fatalf("segment %d read from turn %d did not start there", index, ref.FirstTurn)
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("covering segment %d status = %d, body %s", index, response.StatusCode, body)
 		}
 	}
-	_, after := reader.counts()
-	if after-before != len(window.Segments) {
-		t.Fatalf("jump caused %d segment reads, want its %d covering segments", after-before, len(window.Segments))
+	listsAfter, readsAfter := reader.counts()
+	if readsAfter-readsBefore != len(window.Segments) {
+		t.Fatalf("jump caused %d segment reads, want its %d covering segments", readsAfter-readsBefore, len(window.Segments))
+	}
+	if listsAfter != listsBefore {
+		t.Fatalf("the window read folded the session again: %d extra whole-session passes", listsAfter-listsBefore)
 	}
 }
 
@@ -883,21 +950,7 @@ func TestTranscriptJumpLoadsOnlyCoveringSegments(t *testing.T) {
 func TestTranscriptRoutesServeDirectoryAndRevisionConflict(t *testing.T) {
 	t.Parallel()
 	entries := transcriptEntries(t, alternatingTurns(4, 64, 0))
-	ctx, cancel := context.WithCancel(context.Background())
-	srv := NewServer(ServerConfig{Port: 0, SegmentReader: newFakeSegmentReader(entries)})
-	if err := srv.Listen(ctx); err != nil {
-		cancel()
-		t.Fatalf("Listen: %v", err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- srv.Serve(ctx) }()
-	t.Cleanup(func() {
-		cancel()
-		if err := <-done; err != nil {
-			t.Errorf("shutdown: %v", err)
-		}
-	})
-	base := "http://" + srv.Addr().String()
+	base := startTranscriptServer(t, newFakeSegmentReader(entries))
 
 	response, err := http.Get(base + "/api/v1/sessions/" + transcriptTestSessionID + "/transcript/segments")
 	if err != nil {
@@ -1005,17 +1058,6 @@ func TestTranscriptRoutesServeDirectoryAndRevisionConflict(t *testing.T) {
 // Metadata-only header projection
 // ---------------------------------------------------------------------------
 
-// headerStubProvider serves one canned local read payload through the
-// production provider contract.
-type headerStubProvider struct {
-	DataProvider
-	payload *schema.SessionDetailReadPayload
-}
-
-func (p headerStubProvider) DetailReadPayload(context.Context, string) (*schema.SessionDetailReadPayload, error) {
-	return p.payload, nil
-}
-
 func TestSessionDetailHeaderProjectionIsMetadataOnly(t *testing.T) {
 	t.Parallel()
 	read := &schema.SessionDetailReadPayload{
@@ -1066,23 +1108,6 @@ func TestSessionDetailHeaderProjectionIsMetadataOnly(t *testing.T) {
 	}
 }
 
-func TestSessionDetailHeaderForProvider(t *testing.T) {
-	t.Parallel()
-	read := &schema.SessionDetailReadPayload{SessionDetailPayload: schema.SessionDetailPayload{
-		ID:        transcriptTestSessionID,
-		Harness:   schema.HarnessCodex,
-		TurnCount: 1,
-		Turns:     []schema.TurnDetail{{Index: 1, Role: schema.RoleUser, Content: "hello"}},
-	}}
-	header, err := SessionDetailHeaderForProvider(context.Background(), headerStubProvider{payload: read}, transcriptTestSessionID)
-	if err != nil {
-		t.Fatalf("header for provider: %v", err)
-	}
-	if header.ID != transcriptTestSessionID || header.Harness != schema.HarnessCodex {
-		t.Fatalf("header = %+v, want the read's metadata", header)
-	}
-}
-
 func TestTranscriptProducerRevisionKeyedLRU(t *testing.T) {
 	t.Parallel()
 	entries := transcriptEntries(t, alternatingTurns(4, 64, 0))
@@ -1117,5 +1142,130 @@ func TestTranscriptProducerRevisionKeyedLRU(t *testing.T) {
 	}
 	if producer.capacity != 2 {
 		t.Fatalf("capacity changed to %d", producer.capacity)
+	}
+}
+
+// TestSessionDetailHeaderCoversEveryField guards the header projection with
+// reflection: every field of schema.SessionDetailHeader (33 today) must carry
+// the durable payload's value. A field added to the header but not mapped here
+// fails without anyone having to remember the count.
+func TestSessionDetailHeaderCoversEveryField(t *testing.T) {
+	t.Parallel()
+	const headerFieldCount = 33
+	headerType := reflect.TypeOf(schema.SessionDetailHeader{})
+	if headerType.NumField() != headerFieldCount {
+		t.Fatalf("header type has %d fields, want %d; update the projection and this guard together", headerType.NumField(), headerFieldCount)
+	}
+
+	var payload schema.SessionDetailPayload
+	populateNonZero(reflect.ValueOf(&payload).Elem())
+	read := &schema.SessionDetailReadPayload{SessionDetailPayload: payload}
+	header := SessionDetailHeaderPayloadFromRead(read)
+	headerValue := reflect.ValueOf(header.SessionDetailHeader)
+	payloadValue := reflect.ValueOf(payload)
+
+	for i := 0; i < headerType.NumField(); i++ {
+		field := headerType.Field(i)
+		if field.Name == "EarlierHistory" {
+			got, ok := headerValue.Field(i).Interface().([]schema.EarlierHistoryState)
+			if !ok {
+				t.Fatalf("header earlierHistory = %T, want states", headerValue.Field(i).Interface())
+			}
+			if len(got) != len(payload.EarlierHistory) || got[0] != payload.EarlierHistory[0].State {
+				t.Fatalf("header earlierHistory = %v, want the payload's section states", got)
+			}
+			continue
+		}
+		source := payloadValue.FieldByName(field.Name)
+		if !source.IsValid() {
+			t.Fatalf("header field %s has no durable source field of the same name; map it explicitly or remove it", field.Name)
+		}
+		got := headerValue.Field(i).Interface()
+		want := source.Interface()
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("header field %s = %#v, want the durable payload's %#v", field.Name, got, want)
+		}
+		if headerValue.Field(i).IsZero() {
+			t.Fatalf("header field %s stayed zero; the completeness case must populate every source field", field.Name)
+		}
+	}
+}
+
+// populateNonZero fills a value with a non-zero sentinel so a field the
+// projection forgets is visible as a mismatch rather than as two zero values.
+func populateNonZero(v reflect.Value) {
+	if !v.CanSet() {
+		return
+	}
+	switch v.Kind() {
+	case reflect.String:
+		v.SetString("x")
+	case reflect.Bool:
+		v.SetBool(true)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v.SetInt(1)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		v.SetUint(1)
+	case reflect.Float32, reflect.Float64:
+		v.SetFloat(1)
+	case reflect.Ptr:
+		v.Set(reflect.New(v.Type().Elem()))
+		populateNonZero(v.Elem())
+	case reflect.Slice:
+		element := reflect.New(v.Type().Elem()).Elem()
+		populateNonZero(element)
+		v.Set(reflect.MakeSlice(v.Type(), 1, 1))
+		v.Index(0).Set(element)
+	case reflect.Struct:
+		if v.Type() == reflect.TypeOf(time.Time{}) {
+			v.Set(reflect.ValueOf(time.Unix(1, 0).UTC()))
+			return
+		}
+		for i := 0; i < v.NumField(); i++ {
+			populateNonZero(v.Field(i))
+		}
+	}
+}
+
+// TestSessionDetailFrameSurvivesInvalidHeader proves the durable frame is
+// served even when the metadata-only projection cannot validate: the current
+// viewer must keep reading turns until the released viewer consumes segments.
+func TestSessionDetailFrameSurvivesInvalidHeader(t *testing.T) {
+	t.Parallel()
+	read := &schema.SessionDetailReadPayload{SessionDetailPayload: schema.SessionDetailPayload{
+		ID: transcriptTestSessionID,
+		EarlierHistory: []schema.EarlierHistorySection{{
+			State: schema.EarlierHistoryState("not-a-published-state"),
+			Turns: []schema.TurnDetail{{Index: 1, Role: schema.RoleUser, Content: "kept"}},
+		}},
+	}}
+	header := SessionDetailHeaderPayloadFromRead(read)
+	if header.Validate() == nil {
+		t.Fatal("the invalid earlier-history state did not fail header validation; this test cannot prove the frame survives a header fault")
+	}
+	message := sessionDetailFrame(ChannelSubscription{Topic: TopicSessionDetail, ID: transcriptTestSessionID}, read)
+	if message.Type != MsgSessionDetail {
+		t.Fatalf("message type = %q, want %q", message.Type, MsgSessionDetail)
+	}
+	if message.Data != read {
+		t.Fatal("the durable read was not served after a header fault")
+	}
+}
+
+// TestTranscriptWindowNoUserTurnHTTP pins the mounted 404: a session with no
+// user turn cannot centre a window and must answer at the route boundary.
+func TestTranscriptWindowNoUserTurnHTTP(t *testing.T) {
+	t.Parallel()
+	entries := transcriptEntries(t, []testTurnSpec{{Index: 4, Role: "assistant", ContentBytes: 64}})
+	server := newTestServerForSegments(t, newFakeSegmentReader(entries))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+transcriptTestSessionID+"/transcript/window?anchor=4", nil)
+	request.SetPathValue("id", transcriptTestSessionID)
+	recorder := httptest.NewRecorder()
+	server.handleTranscriptWindow(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("no-user-turn window status = %d, want 404; body %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "no user turn") {
+		t.Fatalf("404 body does not explain the missing user turn: %s", recorder.Body.String())
 	}
 }

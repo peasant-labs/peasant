@@ -327,3 +327,41 @@ func TestTurnIdentityIsTheSourceEntryIndex(t *testing.T) {
 func strPtrForSegmentTest(value string) *string { return &value }
 
 func intPtrForSegmentTest(value int) *int { return &value }
+
+// TestSegmentEntryCountsIncludeChildEntries pins the count a segment read uses
+// as its limit: a turn owns its depth-0 entry and every child entry before the
+// next turn's identity, so the count reaches past lastTurn's own children.
+func TestSegmentEntryCountsIncludeChildEntries(t *testing.T) {
+	t.Parallel()
+	entries := []schema.SessionEntry{
+		{EntryIndex: 4, Depth: 0},
+		{EntryIndex: 5, Depth: 1},
+		{EntryIndex: 6, Depth: 1},
+		{EntryIndex: 7, Depth: 0},
+		{EntryIndex: 8, Depth: 1},
+	}
+	refs := []schema.TranscriptSegmentRef{
+		{Index: 0, FirstTurn: 4, LastTurn: 4},
+		{Index: 1, FirstTurn: 7, LastTurn: 7},
+	}
+	counts := SegmentEntryCounts(entries, refs)
+	if len(counts) != 2 || counts[0] != 3 || counts[1] != 2 {
+		t.Fatalf("entry counts = %v, want [3 2]", counts)
+	}
+}
+
+func TestFoldedTurnByteLengthMatchesTurnByteLength(t *testing.T) {
+	t.Parallel()
+	folded := ingest.Turn{
+		Index:   4,
+		Role:    schema.RoleAssistant,
+		Content: "c",
+		ToolCalls: []ingest.ToolCall{
+			{Arguments: "aa", Result: "rrr"},
+		},
+	}
+	rows := SegmentTurnRows([]ingest.Turn{folded}, DefaultServedDocumentBudget())
+	if FoldedTurnByteLength(folded) != rows[0].ByteLength {
+		t.Fatalf("folded byte length = %d, row byte length = %d", FoldedTurnByteLength(folded), rows[0].ByteLength)
+	}
+}

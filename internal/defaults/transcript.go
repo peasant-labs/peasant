@@ -24,15 +24,21 @@ const TranscriptSegmentDirectoryCapacity = 8
 // per-turn index build would be.
 const TranscriptSegmentColdBuildBudget = 400 * time.Millisecond
 
+// TranscriptWindowSpanDefault is the design number of assistant turns a window
+// collects on each side of its anchor.
+const TranscriptWindowSpanDefault = 10
+
+// TranscriptWindowSpanMaximum is the widest span a caller may request. The
+// parameter exists to narrow a window for a smaller context; it cannot widen the
+// design value.
+const TranscriptWindowSpanMaximum = 10
+
+// TranscriptWindowSpanMinimum is the narrowest span a caller may request.
+const TranscriptWindowSpanMinimum = 1
+
 // TranscriptContinuationReadBytes is the soft body and continuation read budget.
 // Each boundary measures its own payload bytes; oversized entries remain whole.
 const TranscriptContinuationReadBytes int64 = 8 << 20
-
-// TranscriptSegmentEntryReadLimit bounds how many stored entries one segment
-// read asks for. A segment is at most one segment budget of pre-bound turn
-// text, so the limit exists only so a very small-turn segment cannot be cut
-// short by the store's default page size.
-const TranscriptSegmentEntryReadLimit = 1 << 20
 
 // SessionDetailDocumentCapBytes mirrors the wire contract's session_detail and
 // transcript document policy (schema sessionDetailRawPolicy and

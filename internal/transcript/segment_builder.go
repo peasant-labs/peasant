@@ -109,6 +109,42 @@ func SegmentTurnRows(folded []ingest.Turn, budget ServedDocumentBudget) []schema
 	return rows
 }
 
+// FoldedTurnByteLength returns the pre-bound JSON size of one folded turn. It is
+// the measure the directory's refs carry and the measure a segment read must
+// reproduce exactly, so a soft store-budget stop inside a turn is detectable.
+func FoldedTurnByteLength(turn ingest.Turn) int {
+	return TurnByteLength(turnsToDetail([]ingest.Turn{turn})[0])
+}
+
+// SegmentEntryCounts returns, per segment ref, the number of stored entries
+// that belong to the segment's whole turns. Entries are ordered by entry index,
+// and a turn owns the entries from its depth-0 identity up to the next turn's
+// depth-0 identity, so counting the span to the next segment's first turn gives
+// the exact number a segment read may request. The count lets the read stop at
+// lastTurn instead of overreading the continuation budget.
+func SegmentEntryCounts(entries []schema.SessionEntry, refs []schema.TranscriptSegmentRef) []int {
+	counts := make([]int, len(refs))
+	if len(entries) == 0 || len(refs) == 0 {
+		return counts
+	}
+	cursor := 0
+	for i := range refs {
+		for cursor < len(entries) && entries[cursor].EntryIndex < refs[i].FirstTurn {
+			cursor++
+		}
+		start := cursor
+		stop := int(^uint(0) >> 1)
+		if i+1 < len(refs) {
+			stop = refs[i+1].FirstTurn
+		}
+		for cursor < len(entries) && entries[cursor].EntryIndex < stop {
+			cursor++
+		}
+		counts[i] = cursor - start
+	}
+	return counts
+}
+
 // CutSegments fills segments with whole turns up to budget bytes and returns
 // one ref per segment plus the number of turns it cut. A turn is appended whole
 // or deferred; a turn larger than the budget is alone in its segment. The

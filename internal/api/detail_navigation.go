@@ -213,19 +213,6 @@ func SessionDetailReadForProvider(ctx context.Context, provider DataProvider, id
 	return DecorateDetailReadPayload(ctx, detail, resolver.ResolveStoredTargets)
 }
 
-// SessionDetailHeaderForProvider loads the metadata-only session_detail frame
-// projection for one stored session. It is the bounded counterpart of
-// SessionDetailReadForProvider: the durable read keeps its turns and earlier
-// history, while this projection carries only the session's metadata, the
-// section states, and the local navigation and teammate evidence.
-func SessionDetailHeaderForProvider(ctx context.Context, provider DataProvider, id string) (*schema.SessionDetailHeaderPayload, error) {
-	read, err := SessionDetailReadForProvider(ctx, provider, id)
-	if err != nil {
-		return nil, err
-	}
-	return SessionDetailHeaderPayloadFromRead(read), nil
-}
-
 // SessionDetailHeaderPayloadFromRead projects a local read payload onto the
 // metadata-only frame body. Turn content, earlier-history turns, and native
 // metadata stay on the durable payload: the section's native metadata is

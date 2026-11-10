@@ -37,6 +37,13 @@ segment_cases:
     turns:
       - {index: 4, role: assistant, contentBytes: 10, toolArgumentsBytes: [64], toolResultBytes: [2097152]}
     expected: {turns: 1, truncated: true, turnByteLength: 2097232, segmentByteLength: 2097232}
+  # A soft store-budget stop inside one turn is a short turn, not a short range.
+  # The declared byte length reveals it: the read refuses with 409 instead of
+  # serving part of the turn as if it were whole.
+  - name: oversized-multi-entry-turn
+    turns:
+      - {index: 4, role: assistant, contentBytes: 10, toolArgumentsBytes: [64, 64, 64, 64, 64], toolResultBytes: [2097152, 2097152, 2097152, 2097152, 2097152]}
+    expected: {status: 409, contains: ["declared 10486112 bytes", "soft store-budget"]}
   # The directory declares a longer range than a damaged store read returns:
   # the read refuses with 409 instead of serving a short segment.
   - name: short-store-page
@@ -45,4 +52,4 @@ segment_cases:
       - {index: 4, role: assistant, contentBytes: 64}
       - {index: 8, role: user, contentBytes: 64}
     shortAfter: 1
-    expected: {status: 409}
+    expected: {status: 409, contains: ["declared turns 0-8"]}
