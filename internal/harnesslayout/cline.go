@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/peasant-labs/schema"
 	"io/fs"
 	"path"
 	"regexp"
@@ -133,6 +134,7 @@ func clineRoot(product string) Root {
 func init() {
 	Register(Layout{
 		Tool:        ToolCline,
+		Harness:     schema.HarnessCline,
 		DisplayName: "Cline",
 		Sessions:    "One legacy task directory (tasks/<taskId>/) or one SDK session directory (sessions/<sessionId>/) per session.",
 		Roots: []Root{
