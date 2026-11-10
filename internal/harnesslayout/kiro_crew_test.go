@@ -11,15 +11,31 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/harnesslayout"
+	"github.com/peasant-labs/schema"
 )
 
-const kiroCrewFixture = "testdata/kirocrew"
+const kiroCrewFixture = "testdata/kiro-crew"
+
+func TestKiroRegisteredHarnesses(t *testing.T) {
+	kiro, ok := harnesslayout.Lookup(harnesslayout.Tool("kiro"))
+	if !ok || kiro.Harness != schema.HarnessKiro {
+		t.Fatalf("kiro layout = %+v, registered = %t", kiro, ok)
+	}
+	cli, ok := harnesslayout.Lookup(harnesslayout.Tool("kiro-cli"))
+	if !ok || cli.Harness != schema.HarnessKiroCLI {
+		t.Fatalf("kiro-cli layout = %+v, registered = %t", cli, ok)
+	}
+	crew, ok := harnesslayout.Lookup(harnesslayout.Tool("kiro-crew"))
+	if !ok || crew.Harness != schema.HarnessKiroCrew {
+		t.Fatalf("kiro-crew layout = %+v, registered = %t", crew, ok)
+	}
+}
 
 func runKiroCrew(t *testing.T, roots ...string) harnesslayout.Report {
 	t.Helper()
 	layout, ok := harnesslayout.Lookup(harnesslayout.ToolKiroCrew)
 	if !ok {
-		t.Fatal("kirocrew layout is not registered")
+		t.Fatal("kiro-crew layout is not registered")
 	}
 	report, err := harnesslayout.Run(context.Background(), layout, roots, harnesslayout.OSSource, 0)
 	if err != nil {

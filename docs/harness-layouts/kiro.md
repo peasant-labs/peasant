@@ -8,7 +8,7 @@ Developer CLI. Peasant does not ingest either. Two layouts describe their sessio
 - `kiro-cli`: the CLI 2.x file sessions and the SQLite conversation store.
 
 Kiro Crew drives `kiro-cli`, so its sessions also appear in the `kiro-cli` store. Its own
-transcripts and event log are the `kirocrew` layout in [`kirocrew.md`](kirocrew.md).
+transcripts and event log are the `kiro-crew` layout in [`kiro-crew.md`](kiro-crew.md).
 
 ```console
 peasant layout capture kiro

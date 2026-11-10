@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/peasant-labs/schema"
 	"io/fs"
 	"path"
 	"strings"
@@ -85,6 +86,7 @@ var _ Probe = kiroIDEProbe{}
 func init() {
 	Register(Layout{
 		Tool:        ToolKiro,
+		Harness:     schema.HarnessKiro,
 		DisplayName: "Kiro",
 		Sessions: "Kiro 1.0 and CLI 3.0 write one directory per session under ~/.kiro/sessions; " +
 			"older IDE builds keep one JSON file per workspace session, legacy .chat file, or execution log in globalStorage.",

@@ -14,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 const ToolKiroCLI Tool = "kiro-cli"
@@ -63,6 +64,7 @@ var _ Probe = kiroCLIProbe{}
 func init() {
 	Register(Layout{
 		Tool:        ToolKiroCLI,
+		Harness:     schema.HarnessKiroCLI,
 		DisplayName: "Kiro CLI",
 		Sessions: "CLI 2.x writes a <uuid>.json header and a <uuid>.jsonl transcript per session under ~/.kiro/sessions/cli; " +
 			"the older chat store is one row per conversation in data.sqlite3. CLI 3.0 sessions are captured by the kiro layout.",

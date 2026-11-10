@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/peasant-labs/schema"
 	"io"
 	"io/fs"
 	"path"
@@ -16,7 +17,7 @@ import (
 	"unicode"
 )
 
-const ToolKiroCrew Tool = "kirocrew"
+const ToolKiroCrew Tool = "kiro-crew"
 
 var (
 	kiroCrewTranscript = Artifact{
@@ -473,6 +474,7 @@ func kiroCrewSafeKey(key string) string {
 func init() {
 	Register(Layout{
 		Tool:        ToolKiroCrew,
+		Harness:     schema.HarnessKiroCrew,
 		DisplayName: "Kiro Crew",
 		Sessions:    "One JSONL transcript per session key under sessions/, joined by crew-log units whose header slot names it.",
 		Roots: []Root{

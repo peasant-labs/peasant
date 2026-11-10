@@ -1,5 +1,7 @@
 # Kiro Crew
 
+The harness value and layout id are `kiro-crew`; `kirocrew` is the installed binary.
+
 [Kiro Crew](https://kiro.dev/crew/) (`kirocrew`) is an open-source (Apache-2.0) persistent
 development workspace from the Kiro team at AWS, published at
 [kirodotdev/KiroCrew](https://github.com/kirodotdev/KiroCrew). A long-running Python process, the
