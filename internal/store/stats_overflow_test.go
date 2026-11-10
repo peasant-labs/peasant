@@ -72,8 +72,17 @@ func LoadStatsOverflowFixtures(t *testing.T) []statsOverflowCase {
 
 func assertStatsPresence(t *testing.T, got CapturedStats, want v62ExpectedStats) {
 	t.Helper()
-	expected := CapturedStats{TurnCount: want.TurnCount, InputSubmissionCount: want.InputSubmissionCount,
-		ToolCallCount: want.ToolCallCount, SubagentCount: want.SubagentCount, DurationMs: want.DurationMs,
+	// The current producer's document carries the conversation count, so the
+	// first conversion seeds the conversation column from it. A document with
+	// no turn count leaves the column at its NOT NULL default zero.
+	conversation := want.TurnCount
+	if conversation == nil {
+		zero := 0
+		conversation = &zero
+	}
+	expected := CapturedStats{TurnCount: want.TurnCount, ConversationTurnCount: conversation,
+		InputSubmissionCount: want.InputSubmissionCount,
+		ToolCallCount:        want.ToolCallCount, SubagentCount: want.SubagentCount, DurationMs: want.DurationMs,
 		TokensIn: want.TokensIn, TokensOut: want.TokensOut, ThoughtTokens: want.ThoughtTokens,
 		CachedReadTokens: want.CachedReadTokens, CachedWriteTokens: want.CachedWriteTokens}
 	got.SessionID, got.Source, got.UpdatedAtMs, got.SeedJSON, got.Overflow = "", "", 0, nil, nil

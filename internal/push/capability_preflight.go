@@ -62,7 +62,7 @@ func ScanPublication(content schema.TranscriptContent) (PublicationScan, error) 
 	if content.SessionDetail == nil {
 		return PublicationScan{}, fmt.Errorf("publication scan failed at push.ScanPublication during local capability derivation: the transcript envelope carries no sessionDetail, so the payload cannot be validated or attributed; nothing was scanned, no receiver was contacted, and no bytes were uploaded; rebuild the durable payload from its capture and retry")
 	}
-	if err := schema.ValidateSessionDetailPayload(*content.SessionDetail); err != nil {
+	if err := validatePublicationDetail(*content.SessionDetail); err != nil {
 		return PublicationScan{}, fmt.Errorf("publication scan failed at push.ScanPublication during local durable validation: %w; nothing was scanned and no receiver was contacted; repair the local capture and retry", err)
 	}
 	return PublicationScan{Required: requiredContentCapabilities(content)}, nil
@@ -71,6 +71,15 @@ func ScanPublication(content schema.TranscriptContent) (PublicationScan, error) 
 // requiredContentCapabilities derives the receiver capability inventory a
 // durable payload requires. The payload must already have passed the producer
 // trust boundary; this is the pure derivation half of the scan.
+func validatePublicationDetail(detail schema.SessionDetailPayload) error {
+	// Publication never infers a local mode. A local ref, media type, size, or
+	// dimension is a local field and is refused here, before any upload.
+	if err := schema.ValidatePublishedSessionDetailPayload(detail); err != nil {
+		return fmt.Errorf("publication scan failed at push.validatePublicationDetail: %w; a local image field is not a published transcript; strip every image to not_published before scanning", err)
+	}
+	return nil
+}
+
 func requiredContentCapabilities(content schema.TranscriptContent) []schema.ContentCapability {
 	if content.SessionDetail == nil {
 		return nil

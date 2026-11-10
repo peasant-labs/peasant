@@ -219,7 +219,7 @@ func TestControlRecordProjection(t *testing.T) {
 					StartTime: time.UnixMilli(0).UTC(),
 					EndTime:   time.UnixMilli(0).UTC(),
 					Turns:     folded,
-					Metadata:  ingest.SessionMetadata{TurnCount: 999},
+					Metadata:  ingest.SessionMetadata{TurnCount: ingest.ConversationTurnCount(folded)},
 				}
 				for _, section := range fixture.EarlierHistory {
 					sectionTurns := EntriesToTurns(controlRecordProjectionEntries(t, harness, section.Entries))
@@ -237,7 +237,7 @@ func TestControlRecordProjection(t *testing.T) {
 					assertControlRecordDetailTurns(t, detail.EarlierHistory[0].Turns, fixture.Expected.EarlierHistoryTurns)
 				}
 				if fixture.Expected.TurnCount != nil && detail.TurnCount != *fixture.Expected.TurnCount {
-					t.Fatalf("detail turnCount = %d, want %d (conversation turns only, never stored metadata and never len(turns))", detail.TurnCount, *fixture.Expected.TurnCount)
+					t.Fatalf("detail turnCount = %d, want %d (the stored conversation count, never len(turns))", detail.TurnCount, *fixture.Expected.TurnCount)
 				}
 			default:
 				t.Fatalf("unreachable level %q", fixture.Level)
@@ -260,11 +260,12 @@ func TestSessionDetail_TurnCountExcludesSystemEntries(t *testing.T) {
 		{Index: 2, Role: "system", EntryType: "system", Content: strPtr("Build finished in 12s")},
 		{Index: 3, Role: "assistant", EntryType: "text", Content: strPtr("checks are running")},
 	})
+	turns := EntriesToTurns(entries)
 	session := &ingest.Session{
 		ID:       controlRecordProjectionSessionID(),
 		Harness:  schema.HarnessClaudeCode,
-		Turns:    EntriesToTurns(entries),
-		Metadata: ingest.SessionMetadata{TurnCount: 4},
+		Turns:    turns,
+		Metadata: ingest.SessionMetadata{TurnCount: ingest.ConversationTurnCount(turns)},
 	}
 	detail := sessionToDetail(session)
 	if len(detail.Turns) != 4 {
@@ -282,8 +283,8 @@ func TestSessionDetail_TurnCountExcludesSystemEntries(t *testing.T) {
 	if detail.TurnCount != 2 {
 		t.Fatalf("turnCount = %d, want 2: the header counts conversation turns, not system entries", detail.TurnCount)
 	}
-	if got := ConversationTurnCount(detail.Turns); got != detail.TurnCount {
-		t.Fatalf("ConversationTurnCount = %d but the detail reports %d; the count has one definition", got, detail.TurnCount)
+	if got := ingest.ConversationTurnCount(turns); got != detail.TurnCount {
+		t.Fatalf("ingest.ConversationTurnCount = %d but the detail reports %d; the count has one definition", got, detail.TurnCount)
 	}
 	if err := schema.ValidateSessionDetailPayload(*detail); err != nil {
 		t.Fatalf("served detail is invalid: %v", err)

@@ -54,7 +54,7 @@ func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []sch
 	if err != nil {
 		return schema.TranscriptContent{}, err
 	}
-	payload.TurnCount = transcript.ConversationTurnCount(payload.Turns)
+	publishDetailImages(payload)
 	payload.SchemaVersion = emit
 	// Peasant ALWAYS declares, for all three stored values, and never refuses a
 	// session on account of its origin. The stored menu and the wire menu are
@@ -95,7 +95,8 @@ func BuildPublishTranscriptContent(
 		}
 		return content, err
 	}
-	detail := *committedDetail
+	detail := cloneSessionDetail(committedDetail)
+	publishDetailImages(&detail)
 	applyPublishConsentOverlay(&detail, meta, fields)
 	mirrorInterpretationDiagnostics(meta, &detail)
 	return BuildTranscriptContentFromDetail(&detail, emit, origin), nil

@@ -1,0 +1,38 @@
+# The abandoned classifier counts conversation turns through the ingest fold,
+# never the retired metrics turn count. The divergent metricsTurnCount values
+# prove the stored/raw number cannot flip the verdict.
+expectedCaseCount: 4
+requiredNames:
+  - zero_tools_and_one_conversation_turn_is_abandoned
+  - zero_tools_and_three_conversation_turns_is_not_abandoned
+  - system_rows_do_not_make_a_second_conversation_turn
+  - one_tool_call_is_not_abandoned
+cases:
+  - name: zero_tools_and_one_conversation_turn_is_abandoned
+    toolCalls: 0
+    metricsTurnCount: 9
+    entries:
+      - {index: 0, role: user, content: "quick question"}
+    wantAbandoned: true
+  - name: zero_tools_and_three_conversation_turns_is_not_abandoned
+    toolCalls: 0
+    metricsTurnCount: 1
+    entries:
+      - {index: 0, role: user, content: "fix the bug"}
+      - {index: 1, role: assistant, content: "looking now"}
+      - {index: 2, role: user, content: "thanks"}
+    wantAbandoned: false
+  - name: system_rows_do_not_make_a_second_conversation_turn
+    toolCalls: 0
+    metricsTurnCount: 3
+    entries:
+      - {index: 0, role: user, content: "run it"}
+      - {index: 1, role: system, content: "mode: normal"}
+      - {index: 2, role: system, content: "Build finished in 12s"}
+    wantAbandoned: true
+  - name: one_tool_call_is_not_abandoned
+    toolCalls: 1
+    metricsTurnCount: 0
+    entries:
+      - {index: 0, role: user, content: "find the parser"}
+    wantAbandoned: false

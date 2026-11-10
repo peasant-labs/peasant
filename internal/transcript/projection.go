@@ -32,6 +32,9 @@ type ProjectionOptions struct {
 	// BoundedPreview preserves existing local viewing of older private captures.
 	// Never set this for export or publication: missing coordinates remain a refusal.
 	BoundedPreview bool
+	// ImageFacts is the session_attachments join, keyed by the content-addressed
+	// source ref in the entry extra. Nil leaves image media unset.
+	ImageFacts map[string]ingest.ImageFacts
 }
 
 // EntriesToProjectionValidated reconstructs evidence after SQLite reopen.
@@ -112,7 +115,7 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 			"role", warning.Role,
 			"fix", warning.Fix)
 	}
-	p.Turns = foldEntries(entries, evidence)
+	p.Turns = ingest.FoldEntriesWithImages(entries, evidence, opts.ImageFacts)
 	tools := make(map[string]*ingest.ToolCall)
 	toolTargets := make(map[string]int)
 	for i := range p.Turns {

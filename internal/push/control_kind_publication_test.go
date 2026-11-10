@@ -48,6 +48,7 @@ func TestBuildPublishTranscriptContent_CarriesControlKind(t *testing.T) {
 	sessionID := schema.SessionID("45454545-4545-4545-4545-45454545454f")
 	entries := controlKindPublicationEntries(sessionID)
 	meta := &ingest.UnifiedMetadata{SessionID: sessionID, ModelHarness: defaults.HarnessClaudeCode}
+	meta.Stats.TurnCount = ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
 
 	content, err := push.BuildPublishTranscriptContent(
 		nil, meta, entries,

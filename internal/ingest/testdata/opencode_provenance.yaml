@@ -210,7 +210,7 @@ cases:
         data: '{"id":"msg_o_compact","type":"compaction","reason":"auto","summary":"summary text","recent":"recent tail","time":{"created":1005}}'
     want:
       own: 1
-      turnCount: 6
+      turnCount: 2
       titleRefs: []
       main:
         - ref: e_osyn
@@ -512,7 +512,7 @@ historicalCases:
             data: '{"id":"prt_hist_b_syn","messageID":"hist_msg_b_synth","type":"text","synthetic":true,"text":"injected harness note","time":{"created":1001}}'
     want:
       own: 0
-      turnCount: 2
+      turnCount: 1
       titleRefs: []
       main:
         - ref: e_hist

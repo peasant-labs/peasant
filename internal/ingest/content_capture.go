@@ -64,7 +64,7 @@ func captureContentBlockKinds(harness Harness) []string {
 		"tool_result",
 	}
 	if harness == HarnessClaudeCode {
-		kinds = append(kinds, "tool_reference")
+		kinds = append(kinds, "tool_reference", "image")
 	}
 	return kinds
 }
@@ -358,6 +358,10 @@ func validateCaptureContent(harness Harness, raw json.RawMessage, requireToolID 
 			if fields[i]["text"] == nil {
 				return fmt.Errorf("text block requires text")
 			}
+		case "image":
+			if !imageSourceFromFields(fields[i]).OK {
+				return fmt.Errorf("image block requires an image source")
+			}
 		case "thinking":
 			if fields[i]["thinking"] == nil && fields[i]["text"] == nil {
 				return fmt.Errorf("thinking block requires thinking or text")
@@ -417,7 +421,7 @@ func (idx *ClaudeIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s 
 	copy.fullContent = true
 	copy.fullDepth = true
 	copy.retainUnknown = true
-	entries, err := copy.parseJSONL(s.SessionID, data)
+	entries, err := copy.parseJSONL(ctx, s.SessionID, data)
 	if err != nil {
 		return TranscriptCaptureResult{}, captureFailure(s, 0, err)
 	}

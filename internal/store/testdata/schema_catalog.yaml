@@ -59,6 +59,7 @@ tables:
   - push_log
   - scale_kinds
   - session_commands
+  - session_attachments
   - session_commit_associations
   - session_commits
   - session_captured_stats
@@ -155,6 +156,7 @@ indexes:
   - idx_pulled_annotations_transcript
   - idx_relationship_evidence_started_by_target
   - idx_session_commands_name
+  - idx_session_attachments_sha
   - idx_session_commit_associations_session
   - idx_session_commits_author
   - idx_session_commits_time

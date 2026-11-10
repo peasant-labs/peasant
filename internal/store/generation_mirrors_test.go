@@ -383,7 +383,7 @@ func assertMirrorRow(t *testing.T, s *Store, sid schema.SessionID, wantStart, wa
 	var gotAdapter *int
 	var gotTurns, gotTools int
 	var gotTitle *string
-	if err := sqlitex.ExecuteTransient(conn, `SELECT s.start_ms, s.end_ms, s.parent_id, s.input_submission_count, s.adapter_version, COALESCE(m.turn_count, -1), COALESCE(m.tool_calls, -1), m.title FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id WHERE s.session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, `SELECT s.start_ms, s.end_ms, s.parent_id, s.input_submission_count, s.adapter_version, COALESCE(c.conversation_turn_count, -1), COALESCE(m.tool_calls, -1), m.title FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id LEFT JOIN session_captured_stats c ON c.session_id = s.session_id WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			gotStart = stmt.ColumnInt64(0)
@@ -449,7 +449,7 @@ func assertSnapshotMirrors(t *testing.T, s *Store, sid schema.SessionID, wantGen
 	var turns, tools int
 	var input *int64
 	found := false
-	if err := sqlitex.ExecuteTransient(conn, `SELECT g.ts_start, g.ts_end, c.turn_count, c.tool_call_count, c.input_submission_count FROM session_generations g LEFT JOIN session_captured_stats c ON c.session_id = g.session_id WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, `SELECT g.ts_start, g.ts_end, c.conversation_turn_count, c.tool_call_count, c.input_submission_count FROM session_generations g LEFT JOIN session_captured_stats c ON c.session_id = g.session_id WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sid), wantGen},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true

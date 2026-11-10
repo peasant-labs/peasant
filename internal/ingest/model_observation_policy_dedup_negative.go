@@ -1,6 +1,6 @@
-//go:build evidence_negative_dedup
+//go:build evidence_negative_dedup && !evidence_negative_suppression
 
-package transcript
+package ingest
 
 func shouldSuppressEmptyTurn(hasContent, hasTools, hasObservation bool) bool {
 	return !hasContent && !hasTools && !hasObservation

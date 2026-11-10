@@ -13,9 +13,9 @@ cases:
     adapter: 1
     adapterOverrides: {claude-code: 4, codex: 2, pi: 3, opencode: 4, strike: 2}
     indexer: 15
-    indexerOverrides: {claude-code: 22, codex: 19, cursor: 18, strike: 18, opencode: 18, pi: 18}
+    indexerOverrides: {claude-code: 24, codex: 19, cursor: 18, strike: 18, opencode: 18, pi: 18}
     nativeTargets:
-      claude-code: {adapter_version: 4, indexer_version: 23, index_version: 2}
+      claude-code: {adapter_version: 4, indexer_version: 25, index_version: 2}
       codex: {adapter_version: 3, indexer_version: 21, index_version: 2}
       opencode: {adapter_version: 5, indexer_version: 19, index_version: 2}
     index: 1

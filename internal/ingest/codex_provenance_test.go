@@ -907,8 +907,11 @@ func TestCodexInheritedPrefixConversionKeepsChildMain(t *testing.T) {
 	}
 	generation := candidate.V2.Generation
 	turns := transcript.EntriesToTurns(generation.Main.Entries)
-	if len(turns) != testCase.Expected.TurnCount {
-		t.Fatalf("converted turns = %d, want %d", len(turns), testCase.Expected.TurnCount)
+	if len(turns) != len(testCase.Expected.Main) {
+		t.Fatalf("converted turns = %d, want %d served entries", len(turns), len(testCase.Expected.Main))
+	}
+	if got := ingest.ConversationTurnCount(turns); got != testCase.Expected.TurnCount {
+		t.Fatalf("conversation turn count = %d, want %d", got, testCase.Expected.TurnCount)
 	}
 	for _, turn := range turns {
 		for _, inherited := range testCase.Expected.Inherited {
@@ -928,8 +931,8 @@ func TestCodexInheritedPrefixConversionKeepsChildMain(t *testing.T) {
 	if detail == nil {
 		t.Fatal("converted detail payload is nil")
 	}
-	if len(detail.Turns) != testCase.Expected.TurnCount {
-		t.Errorf("detail turns = %d, want %d", len(detail.Turns), testCase.Expected.TurnCount)
+	if len(detail.Turns) != len(testCase.Expected.Main) {
+		t.Errorf("detail turns = %d, want %d served entries", len(detail.Turns), len(testCase.Expected.Main))
 	}
 	for _, turn := range detail.Turns {
 		for _, inherited := range testCase.Expected.Inherited {
@@ -967,8 +970,11 @@ func TestCodexExactPastedWrapperConversionKeepsLiteralBodies(t *testing.T) {
 	}
 	generation := candidate.V2.Generation
 	turns := transcript.EntriesToTurns(generation.Main.Entries)
-	if len(turns) != testCase.Expected.TurnCount {
-		t.Fatalf("converted turns = %d, want %d", len(turns), testCase.Expected.TurnCount)
+	if len(turns) != len(testCase.Expected.Main) {
+		t.Fatalf("converted turns = %d, want %d served entries", len(turns), len(testCase.Expected.Main))
+	}
+	if got := ingest.ConversationTurnCount(turns); got != testCase.Expected.TurnCount {
+		t.Fatalf("conversation turn count = %d, want %d", got, testCase.Expected.TurnCount)
 	}
 	for i, want := range testCase.Expected.Main {
 		if string(turns[i].Role) != want.Role {
@@ -986,8 +992,8 @@ func TestCodexExactPastedWrapperConversionKeepsLiteralBodies(t *testing.T) {
 	if detail == nil {
 		t.Fatal("converted detail payload is nil")
 	}
-	if len(detail.Turns) != testCase.Expected.TurnCount {
-		t.Fatalf("detail turns = %d, want %d", len(detail.Turns), testCase.Expected.TurnCount)
+	if len(detail.Turns) != len(testCase.Expected.Main) {
+		t.Fatalf("detail turns = %d, want %d served entries", len(detail.Turns), len(testCase.Expected.Main))
 	}
 	for i, want := range testCase.Expected.Main {
 		if string(detail.Turns[i].Role) != want.Role {
@@ -1102,8 +1108,8 @@ func TestCodexProvenanceIndexerAdmitsV2Candidate(t *testing.T) {
 		t.Fatalf("BuildGeneration: %v", err)
 	}
 	v2 := candidate.Result
-	if v2.Generation.Metadata.Stats.TurnCount != 2 {
-		t.Errorf("turnCount = %d, want 2", v2.Generation.Metadata.Stats.TurnCount)
+	if v2.Generation.Metadata.Stats.TurnCount != 1 {
+		t.Errorf("turnCount = %d, want 1", v2.Generation.Metadata.Stats.TurnCount)
 	}
 	if v2.Generation.Metadata.Stats.InputSubmissionCount == nil || *v2.Generation.Metadata.Stats.InputSubmissionCount != 1 {
 		t.Errorf("inputSubmissionCount = %v, want 1", v2.Generation.Metadata.Stats.InputSubmissionCount)

@@ -1,6 +1,8 @@
 package transcript
 
 import (
+	"encoding/json"
+
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 )
@@ -23,19 +25,26 @@ type ServedTurnBound struct {
 	// Truncated reports that at least one of the turn's own text fields was
 	// shortened by the served-text bound.
 	Truncated bool
-	// ByteLength is the pre-bound JSON size of the turn's own content plus
-	// every toolCalls[].arguments and toolCalls[].result. A segment's
+	// ByteLength is the pre-bound encoded text and image metadata size. A segment's
 	// ByteLength is the sum of its turns' ByteLength values.
 	ByteLength int
 }
 
-// TurnByteLength returns the pre-bound JSON byte length of a turn's own text:
-// its content plus every tool call's arguments and result. It is measured with
+// TurnByteLength returns the pre-bound JSON byte length of a turn's content,
+// text parts, image metadata, and every tool call's arguments and result. It is measured with
 // the JSON encoder, so escaping is counted exactly as the wire will carry it.
 // It is intentionally the size BEFORE the served-text bound, so an oversized
 // turn stays detectable in the cut after its text has been shortened.
 func TurnByteLength(turn schema.TurnDetail) int {
 	total := jsonEncodedStringLen(turn.Content)
+	for _, part := range turn.ContentParts {
+		if part.Type == schema.TurnPartTypeText {
+			total += jsonEncodedStringLen(part.Text)
+		} else if part.Type == schema.TurnPartTypeImage && part.Image != nil {
+			encoded, _ := json.Marshal(part.Image)
+			total += len(encoded)
+		}
+	}
 	for i := range turn.ToolCalls {
 		total += jsonEncodedStringLen(turn.ToolCalls[i].Arguments)
 		total += jsonEncodedStringLen(turn.ToolCalls[i].Result)
@@ -48,23 +57,27 @@ func TurnByteLength(turn schema.TurnDetail) int {
 // bound. The caller passes the same ServedDocumentBudget the session detail
 // path uses, so a segment and a session_detail row share one truncation story.
 //
-// The document budget's per-field bound is the one that applies here. A segment
-// is at most the segment budget by construction (or one oversized turn alone),
-// and the response's own total is bounded by the segment cut rather than by the
-// session document budget.
+// An oversized turn can sit alone in a segment, so both the per-field and
+// whole-document bounds apply just as they do for full detail.
 func BoundServedTurns(turns []schema.TurnDetail, budget ServedDocumentBudget) []ServedTurnBound {
 	bounds := make([]ServedTurnBound, len(turns))
+	original := make([][]string, len(turns))
 	for i := range turns {
-		turn := &turns[i]
-		bound := ServedTurnBound{ByteLength: TurnByteLength(*turn)}
-		for _, field := range turnTextFields(turn) {
-			bounded := boundServedText(field.kind, *field.target, budget.perField)
-			if bounded != *field.target {
-				bound.Truncated = true
-				*field.target = bounded
+		bounds[i].ByteLength = TurnByteLength(turns[i])
+		for _, field := range turnTextFields(&turns[i]) {
+			original[i] = append(original[i], *field.target)
+		}
+	}
+	// Apply the same whole-document and per-field policy as detail, including
+	// text parts and immutable image metadata, even for a single oversized turn.
+	detail := schema.SessionDetailPayload{Turns: turns}
+	BoundServedDetail(&detail, budget)
+	for i := range turns {
+		for j, field := range turnTextFields(&turns[i]) {
+			if *field.target != original[i][j] {
+				bounds[i].Truncated = true
 			}
 		}
-		bounds[i] = bound
 	}
 	return bounds
 }
@@ -81,6 +94,12 @@ type turnTextField struct {
 func turnTextFields(turn *schema.TurnDetail) []turnTextField {
 	fields := make([]turnTextField, 0, 1+2*len(turn.ToolCalls))
 	fields = append(fields, turnTextField{target: &turn.Content, kind: ServedTextTurnContent})
+	for i := range turn.ContentParts {
+		part := &turn.ContentParts[i]
+		if part.Type == schema.TurnPartTypeText {
+			fields = append(fields, turnTextField{target: &part.Text, kind: ServedTextTurnContent})
+		}
+	}
 	for i := range turn.ToolCalls {
 		call := &turn.ToolCalls[i]
 		fields = append(fields,

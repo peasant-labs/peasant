@@ -164,10 +164,11 @@ type SessionListFilter struct {
 
 const (
 	// sqlSessionTurnCount is the one turn count a session list reports, sorts
-	// by and bounds: the captured row for native sessions, the legacy metrics
-	// columns otherwise. It needs the sessions s, session_metrics m and
-	// session_captured_stats c joins.
-	sqlSessionTurnCount = `CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END`
+	// by and bounds: the producer's stored conversation turn count. It needs
+	// the session_captured_stats c join. Every count surface splices this one
+	// expression, so no query can report a different definition of a turn;
+	// the retired raw turn_count column is never a fallback here.
+	sqlSessionTurnCount = `COALESCE(c.conversation_turn_count, 0)`
 
 	// sqlDashboardAggregates is the dashboard aggregate query.
 	sqlDashboardAggregates = `SELECT
@@ -290,7 +291,7 @@ func sqlSessionDetailByIDQuery(latestAttemptCounts bool) string {
 	// The authority expressions are the dual-path CASE the stats drop guard
 	// recognizes: a managed active generation reads the captured stats row, and
 	// every other session reads the legacy analysis record.
-	turnAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END"
+	turnAuthority := sqlSessionTurnCount
 	toolAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END"
 	outAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END"
 	durationAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END"

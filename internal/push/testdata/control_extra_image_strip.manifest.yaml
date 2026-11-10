@@ -1,0 +1,5 @@
+# Required-name manifest for testdata/control_extra_image_strip.yaml.
+requiredNames:
+  - image-source-data-absent-from-publication
+  - image-source-data-oversized-absent-from-publication
+  - flat-image-source-data-absent-from-publication

@@ -58,6 +58,7 @@ required_names:
   - claude-control-atis-latch
   - claude-control-attachment
   - claude-control-attachment-oversized
+  - claude-control-attachment-oversized-shape-preview
   - claude-control-bridge-session
   - claude-control-started
   - claude-control-cost-state
@@ -474,7 +475,7 @@ cases:
     want_extra_members:
       kind: ai-title
     want_extra_absent: [aiTitle, uuid, sessionId]
-    want_raw_bytes_min: 8192
+    want_raw_bytes_min: 262144
   - name: claude-control-atis-latch
     harness: claude-code
     control: true
@@ -491,7 +492,7 @@ cases:
     source: '{"type":"attachment","attachment":{"type":"hook_success","hookName":"post-tool"},"agentId":"agent-7","agentName":"scout","isSidechain":true,"sessionId":"session-1","session_id":"session-2","uuid":"at-1","parentUuid":"parent-1","logicalParentUuid":"logical-1","timestamp":"2026-01-01T00:00:00Z","cwd":"/synthetic","gitBranch":"synthetic-branch","entrypoint":"cli","userType":"external","version":"1.0.0","slug":"synthetic"}'
     want_part_type: attachment
     want_role: system
-    want_preview_absent: true
+    want_preview: "post-tool"
     want_extra_keys: [agentId, agentName, attachment, isSidechain]
     want_extra_members:
       agentId: agent-7
@@ -506,20 +507,36 @@ cases:
     source: '{"type":"attachment","attachment":{"type":"hook_success","hookData":TEXT},"uuid":"at-big"}'
     want_part_type: attachment
     want_role: system
-    want_preview_absent: true
+    want_preview: "attachment"
     want_extra_keys: [attachmentType, kind, rawBytes]
     want_extra_members:
       kind: attachment
       attachmentType: hook_success
     want_extra_absent: [attachment, hookData, uuid]
-    want_raw_bytes_min: 8192
+    want_raw_bytes_min: 262144
+  - name: claude-control-attachment-oversized-shape-preview
+    # The preview is computed from the stripped payload before the cap, so an
+    # oversized record still renders its safe shape instead of only the kind.
+    harness: claude-code
+    control: true
+    oversized: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","hookName":"post-tool","hookData":TEXT},"uuid":"at-big-hook"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview: "post-tool"
+    want_extra_keys: [attachmentType, kind, rawBytes]
+    want_extra_members:
+      kind: attachment
+      attachmentType: hook_success
+    want_extra_absent: [attachment, hookData, uuid]
+    want_raw_bytes_min: 262144
   - name: claude-control-attachment-lone-surrogate
     harness: claude-code
     control: true
     source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"build ok \ud83d"},"uuid":"at-surrogate"}'
     want_part_type: attachment
     want_role: system
-    want_preview_absent: true
+    want_preview: "attachment"
     want_extra_keys: [attachmentType, kind, rawBytes]
     want_extra_members:
       kind: attachment
@@ -531,7 +548,7 @@ cases:
     source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"first","stdout":"second"},"uuid":"at-duplicate"}'
     want_part_type: attachment
     want_role: system
-    want_preview_absent: true
+    want_preview: "attachment"
     want_extra_keys: [attachmentType, kind, rawBytes]
     want_extra_members:
       kind: attachment
@@ -544,7 +561,7 @@ cases:
     source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"build ok INVALIDBYTE"},"uuid":"at-invalid"}'
     want_part_type: attachment
     want_role: system
-    want_preview_absent: true
+    want_preview: "attachment"
     want_extra_keys: [attachmentType, kind, rawBytes]
     want_extra_members:
       kind: attachment
@@ -558,7 +575,7 @@ cases:
     source: '{"type":"attachment","attachment":{"type":"hook_success","stdout":"build ok \ud83d\ude00"},"uuid":"at-pair"}'
     want_part_type: attachment
     want_role: system
-    want_preview_absent: true
+    want_preview: "attachment"
     want_extra_keys: [attachment]
     want_extra_members:
       attachment: '{"type":"hook_success","stdout":"build ok \ud83d\ude00"}'

@@ -71,9 +71,11 @@ func computeTokens(_ context.Context, _ ingest.SessionID, entries []schema.Sessi
 	}}
 }
 
-// computeTurns counts user+assistant depth=0 turns, tool calls, and subagent entries.
+// computeTurns counts tool calls and subagent entries. It deliberately reports
+// no turn count: the conversation turn count is producer state computed once
+// during indexing (ingest.ConversationTurnCount), never a derived metric.
 func computeTurns(_ context.Context, _ ingest.SessionID, entries []schema.SessionEntry, _ *ingest.SessionMetrics) *ingest.SessionMetrics {
-	var turnCount, toolCalls, subagents int
+	var toolCalls, subagents int
 	// Claude's full-depth carrier summarizes its tool blocks. Count the
 	// blocks, not that summary again; flat legacy calls have no such children.
 	claudeToolParents := make(map[int]bool)
@@ -87,10 +89,6 @@ func computeTurns(_ context.Context, _ ingest.SessionID, entries []schema.Sessio
 	}
 
 	for i := range entries {
-		// Count depth=0 user and assistant entries as turns.
-		if entries[i].Depth == 0 && (entries[i].Role == ingest.RoleUser || entries[i].Role == ingest.RoleAssistant) {
-			turnCount++
-		}
 		if entries[i].Harness == schema.HarnessClaudeCode && entries[i].Depth == 0 &&
 			entries[i].ToolCallID == nil && claudeToolParents[entries[i].EntryIndex] {
 			continue
@@ -111,7 +109,6 @@ func computeTurns(_ context.Context, _ ingest.SessionID, entries []schema.Sessio
 	}
 
 	return &ingest.SessionMetrics{QualityMetrics: schema.QualityMetrics{
-		TurnCount:     &turnCount,
 		SubagentCount: &subagents,
 		ToolCalls:     &toolCalls,
 	}}

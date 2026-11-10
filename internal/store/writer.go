@@ -151,7 +151,7 @@ SELECT
     COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END), 0) AS tokens_out,
     COALESCE(SUM(m.input_tokens), 0) + COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END), 0) AS tokens_total,
     COALESCE(AVG(CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END) * 60000.0, 0) AS avg_duration_ms,
-    COALESCE(AVG(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END), 0) AS avg_turns,
+    COALESCE(AVG(` + sqlSessionTurnCount + `), 0) AS avg_turns,
     COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END), 0) AS tool_call_count,
     SUM(m.cost_total_usd)                AS total_cost_usd,
     SUM(m.cost_total_usd) / NULLIF(COUNT(*), 0) AS avg_cost_per_session_usd,
@@ -177,7 +177,7 @@ SELECT
     COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END), 0),
     COALESCE(SUM(m.input_tokens), 0) + COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END), 0),
     COALESCE(AVG(CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END) * 60000.0, 0),
-    COALESCE(AVG(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END), 0),
+    COALESCE(AVG(` + sqlSessionTurnCount + `), 0),
     COALESCE(SUM(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END), 0)
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
@@ -528,8 +528,12 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		// 5. Insert session metrics.
 		metricArgs := []any{string(m.SessionID), nil, nil, nil, nil, nil, nil}
 		if retainStats && !native {
+			// The retired turn count is never seeded: the conversation count is
+			// written to session_captured_stats by the activation lane (managed
+			// generations) or the V1 entry write (legacy sessions), and every
+			// count surface reads it from there.
 			metricArgs = []any{string(m.SessionID),
-				m.Stats.TurnCount,
+				nil,
 				m.Stats.SubagentCount,
 				m.Stats.TokensIn,
 				m.Stats.TokensOut,

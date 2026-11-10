@@ -192,6 +192,9 @@ func (s *Server) Listen(ctx context.Context) error {
 
 	// API routes
 	mux.HandleFunc("GET "+defaults.RouteHealth.String(), s.handleHealth)
+	if s.cfg.Store != nil {
+		mux.Handle("GET "+defaults.RouteAttachment.String(), s.handleAttachment())
+	}
 	mux.HandleFunc("POST "+defaults.RouteShutdown.String(), s.handleShutdown(ctx))
 	mux.HandleFunc(defaults.RouteWS.String(), s.handleWebSocket)
 	mux.HandleFunc("GET "+defaults.RouteConfigMock.String(), s.handleMockConfig)
@@ -652,16 +655,9 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pool := s.cfg.Store.Pool()
-	conn, err := pool.Take(r.Context())
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "db connection failed")
-		return
-	}
-	defer pool.Put(conn)
-
 	// Query sessions that have agent (llm-judge) friction annotations,
-	// with counts of agent and human episodes.
+	// with counts of agent and human episodes. The store owns the read so the
+	// queue shares the session turn count definition instead of re-deriving it.
 	type reviewRow struct {
 		ID            string `json:"id"`
 		TurnCount     int    `json:"turnCount"`
@@ -671,58 +667,27 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 		Status        string `json:"status"`
 	}
 
-	query := `SELECT
-		COALESCE(ats.session_id, ate.session_id) as sid,
-		COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0),
-		COALESCE(p.canonical_cwd, p.project_hash, ''),
-		SUM(CASE WHEN ak.name = 'agent' THEN 1 ELSE 0 END) as agent_count,
-		SUM(CASE WHEN ak.name = 'human' THEN 1 ELSE 0 END) as human_count
-	FROM annotations a
-	JOIN annotation_types t ON t.id = a.annotation_type_id
-	JOIN annotators ann ON ann.id = a.annotator_id
-	JOIN annotator_kinds ak ON ak.id = ann.kind_id
-	LEFT JOIN annotation_target_sessions ats ON ats.annotation_id = a.id
-	LEFT JOIN annotation_target_entries ate ON ate.annotation_id = a.id
-	LEFT JOIN sessions s ON s.session_id = COALESCE(ats.session_id, ate.session_id)
-	LEFT JOIN session_metrics m ON m.session_id = s.session_id
-	LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
-	LEFT JOIN projects p ON s.project_hash = p.project_hash
-	WHERE t.type_id = 'research.friction_episode'
-	AND a.superseded_by IS NULL
-	GROUP BY sid
-	HAVING agent_count > 0
-	ORDER BY sid`
-
-	var rows []reviewRow
-	stmt, _, stmtErr := conn.PrepareTransient(query)
-	if stmtErr != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("query failed: %s", stmtErr))
+	stored, err := s.cfg.Store.ListFrictionReviewSessions(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("query failed: %s", err))
 		return
 	}
-	defer stmt.Finalize()
-
-	for {
-		hasRow, stepErr := stmt.Step()
-		if stepErr != nil {
-			break
-		}
-		if !hasRow {
-			break
-		}
-		project := stmt.ColumnText(2)
+	rows := make([]reviewRow, 0, len(stored))
+	for _, row := range stored {
+		project := row.Project
 		if idx := strings.LastIndex(project, "/"); idx >= 0 {
 			project = project[idx+1:]
 		}
 		status := "pending"
-		if stmt.ColumnInt(4) > 0 {
+		if row.HumanEpisodes > 0 {
 			status = "done"
 		}
 		rows = append(rows, reviewRow{
-			ID:            stmt.ColumnText(0),
-			TurnCount:     stmt.ColumnInt(1),
+			ID:            row.SessionID,
+			TurnCount:     row.TurnCount,
 			Project:       project,
-			AgentEpisodes: stmt.ColumnInt(3),
-			HumanEpisodes: stmt.ColumnInt(4),
+			AgentEpisodes: row.AgentEpisodes,
+			HumanEpisodes: row.HumanEpisodes,
 			Status:        status,
 		})
 	}

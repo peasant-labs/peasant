@@ -1,5 +1,7 @@
 requiredNames:
   - v72-compact-identity-facts
+  - v75-image-attachments
+  - v74-conversation-turn-count
   - v70-parent-state
   - v71-derived-lookups
   - v69-source-unavailability-cause

@@ -242,6 +242,7 @@ func seedMemFSIdentity(t *testing.T, fs *testutil.MemFS, hostSlug, sessionID str
 		Format:   ingest.SourceFormatJSONL,
 		FilePath: "/source/file.jsonl",
 	}
+	meta.Stats.TurnCount = 1
 
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {
@@ -319,6 +320,7 @@ func seedSubagentMemFS(t *testing.T, fs *testutil.MemFS, hostSlug, sessionID, pa
 		Format:   ingest.SourceFormatJSONL,
 		FilePath: "/source/file.jsonl",
 	}
+	meta.Stats.TurnCount = 1
 
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {

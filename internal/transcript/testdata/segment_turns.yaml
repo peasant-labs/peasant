@@ -1,4 +1,11 @@
 cases:
+  - name: image-and-text-parts-counted-and-bounded
+    perFieldBytes: 1024
+    documentBytes: 1024
+    turns:
+      - {index: 4, role: user, contentBytes: 1, textPartBytes: 2048, imageRef: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+    expected:
+      - {truncated: true, byteLength: 2164}
   # A page of ordinary turns is served whole, and each row carries the pre-bound
   # JSON size of its own text so the truncation notice can stay silent.
   - name: twelve-small-turns-served-whole

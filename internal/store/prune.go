@@ -24,7 +24,7 @@ const (
 	sqlQueryPrunableSessions = `SELECT
     s.session_id, s.model_harness,
     COALESCE(p.canonical_cwd, p.project_hash, ''), COALESCE(h.git_remote, ''),
-    s.start_ms, COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0), h.host_slug,
+    s.start_ms, COALESCE(` + sqlSessionTurnCount + `, 0), h.host_slug,
     s.project_hash, ` + sqlRecordedDirectory + `,
     COALESCE(s.git_branch, '')
 FROM sessions s
@@ -125,10 +125,19 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 	if err != nil {
 		return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: take connection: %w", err)
 	}
-	defer s.pool.Put(conn)
+	defer func() {
+		if conn != nil {
+			s.pool.Put(conn)
+		}
+	}()
 
 	endFn := sqlitex.Transaction(conn)
-	defer endFn(&err)
+	ended := false
+	defer func() {
+		if !ended {
+			endFn(&err)
+		}
+	}()
 
 	// Index-health gate before the first delete: when a prior untrusted
 	// delete set the flag, rebuild the whole index first so prune never
@@ -228,6 +237,7 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 		table string
 		sql   string
 	}{
+		{"session_attachments", fmt.Sprintf("DELETE FROM session_attachments WHERE session_id IN (%s)", inClause)},
 		{"session_entries_ext", fmt.Sprintf("DELETE FROM session_entries_ext WHERE session_id IN (%s)", inClause)},
 		{"session_entries", fmt.Sprintf("DELETE FROM session_entries WHERE session_id IN (%s)", inClause)},
 		{"session_metrics", fmt.Sprintf("DELETE FROM session_metrics WHERE session_id IN (%s)", inClause)},
@@ -258,6 +268,20 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 		}
 	}
 
+	endFn(&err)
+	ended = true
+	if err != nil {
+		return ingest.PruneResult{}, err
+	}
+	// GC acquires its own connection. Release the committed transaction's
+	// connection first so a single-connection pool cannot deadlock.
+	s.pool.Put(conn)
+	conn = nil
+	if s.attachmentDir != "" {
+		if _, gcErr := s.AttachmentStore().GC(ctx); gcErr != nil {
+			return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: garbage-collect unreferenced images after the session rows were deleted: %w; the sessions are gone and an unreferenced image file may remain until the next prune; retry the prune", gcErr)
+		}
+	}
 	return ingest.PruneResult{Deleted: deleted}, nil
 }
 

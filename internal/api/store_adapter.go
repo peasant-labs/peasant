@@ -389,7 +389,11 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		full := snapshot.Metrics.QualityMetrics
 		s.Metadata.Quality = &full
 	}
-	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness, BoundedPreview: !store.PublishableWithOmissions(snapshot.Capture)})
+	imageFacts, factErr := p.store.ImageFacts(ctx, sessionID)
+	if factErr != nil {
+		return nil, fmt.Errorf("store adapter: session %q image rows could not be joined before session-detail emission: %w", id, factErr)
+	}
+	projection, validationErr := transcript.EntriesToProjectionValidated(snapshot.Entries, transcript.ProjectionOptions{Harness: s.Harness, BoundedPreview: !store.PublishableWithOmissions(snapshot.Capture), ImageFacts: imageFacts})
 	if validationErr != nil {
 		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid before session-detail emission: %w", id, validationErr)
 	}
@@ -788,14 +792,22 @@ func sessionRowToSession(row *store.SessionRow) ingest.Session {
 	return s
 }
 
+// hasQuality reports whether a session row carries any computed quality
+// signal. The conversation turn count is deliberately not one: it is producer
+// state carried on every indexed session, so treating it as a quality signal
+// would report "quality computed" for a session whose metrics never ran. When
+// quality does exist, rowToQualityMetrics still carries the count alongside it.
+func hasQuality(row *store.SessionRow) bool {
+	return row.TokensTotal != 0 || row.FilesTouched != 0 ||
+		row.LinesChanged != 0 || row.RetryLoops != 0 ||
+		row.SignalDensity != 0 || row.SpecQualityScore != 0 ||
+		row.Outcome != nil || row.Title != nil
+}
+
 // rowToQualityMetrics converts quality columns from a SessionRow to a schema.QualityMetrics.
-// Returns nil when all quality fields are zero/nil (i.e. not yet computed).
+// Returns nil when no computed quality signal is present (i.e. not yet computed).
 func rowToQualityMetrics(row *store.SessionRow) *schema.QualityMetrics {
-	hasQuality := row.TurnCount != 0 || row.TokensTotal != 0 ||
-		row.FilesTouched != 0 || row.LinesChanged != 0 ||
-		row.RetryLoops != 0 || row.SignalDensity != 0 ||
-		row.SpecQualityScore != 0 || row.Outcome != nil || row.Title != nil
-	if !hasQuality {
+	if !hasQuality(row) {
 		return nil
 	}
 	q := &schema.QualityMetrics{

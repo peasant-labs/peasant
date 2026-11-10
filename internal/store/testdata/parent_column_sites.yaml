@@ -329,7 +329,7 @@ routed:
     reason: Reverse filter embedding the same rendering.
   - name: store-snapshot-session-row
     file: internal/store/generation_snapshot.go
-    declaration: readSnapshotSessionRowOnConn
+    declaration: sqlSnapshotSessionRow
     class: routed
     reason: Legacy and certificate snapshot parent answer, rendered.
   - name: store-harmonized-metadata

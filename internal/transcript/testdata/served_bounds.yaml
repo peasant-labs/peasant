@@ -74,6 +74,14 @@ cases:
     expected:
       - bounded: true
       - bounded: false
+  - name: content_text_part_and_image_base_are_counted
+    kind: content_parts
+    fill: "x"
+    fieldBytes: [8]
+    textPart: look
+    image: true
+    expected:
+      - bounded: false
   - name: oversized_turn_content_is_bounded_with_a_note
     kind: turn_content
     fill: "x"

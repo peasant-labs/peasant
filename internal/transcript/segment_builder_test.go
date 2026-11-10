@@ -3,6 +3,7 @@ package transcript
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -34,6 +35,8 @@ type segmentTurnSpec struct {
 	ContentBytes   int    `yaml:"contentBytes"`
 	ArgumentsBytes []int  `yaml:"argumentsBytes,omitempty"`
 	ResultBytes    []int  `yaml:"resultBytes,omitempty"`
+	TextPartBytes  int    `yaml:"textPartBytes,omitempty"`
+	ImageRef       string `yaml:"imageRef,omitempty"`
 }
 
 func (s segmentTurnSpec) role() (schema.Role, error) {
@@ -99,6 +102,7 @@ type segmentTurnExpectation struct {
 type segmentTurnsCase struct {
 	Name          string                   `yaml:"name"`
 	PerFieldBytes int                      `yaml:"perFieldBytes"`
+	DocumentBytes int                      `yaml:"documentBytes,omitempty"`
 	Turns         []segmentTurnSpec        `yaml:"turns"`
 	Expected      []segmentTurnExpectation `yaml:"expected"`
 }
@@ -237,7 +241,11 @@ func TestSegmentTurnBoundFixtureCases(t *testing.T) {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
 			t.Parallel()
-			budget, err := NewServedDocumentBudget(fixtureCase.PerFieldBytes, fixtureCase.PerFieldBytes)
+			documentBytes := fixtureCase.DocumentBytes
+			if documentBytes == 0 {
+				documentBytes = 16 * fixtureCase.PerFieldBytes
+			}
+			budget, err := NewServedDocumentBudget(fixtureCase.PerFieldBytes, documentBytes)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -252,6 +260,12 @@ func TestSegmentTurnBoundFixtureCases(t *testing.T) {
 					Role:    role,
 					Content: strings.Repeat("x", spec.ContentBytes),
 				}
+				if spec.TextPartBytes > 0 {
+					turns[i].ContentParts = append(turns[i].ContentParts, schema.TurnContentPart{Type: schema.TurnPartTypeText, Text: strings.Repeat("x", spec.TextPartBytes)})
+				}
+				if spec.ImageRef != "" {
+					turns[i].ContentParts = append(turns[i].ContentParts, schema.TurnContentPart{Type: schema.TurnPartTypeImage, Image: &schema.ImagePart{Ref: spec.ImageRef, MediaType: schema.ImageMediaType("image/png"), ByteSize: 8}})
+				}
 				for call := range spec.ArgumentsBytes {
 					turns[i].ToolCalls = append(turns[i].ToolCalls, schema.ToolCallDetail{
 						ID:        fmt.Sprintf("call-%d-%d", spec.Index, call),
@@ -265,6 +279,12 @@ func TestSegmentTurnBoundFixtureCases(t *testing.T) {
 				before[i] = TurnByteLength(turns[i])
 			}
 			bounds := BoundServedTurns(turns, budget)
+			if fixtureCase.DocumentBytes > 0 {
+				encoded, err := json.Marshal(schema.SessionDetailPayload{Turns: turns})
+				if err != nil || len(encoded) > documentBytes {
+					t.Fatalf("bounded document size = %d, budget = %d, error = %v", len(encoded), documentBytes, err)
+				}
+			}
 			for i, want := range fixtureCase.Expected {
 				if bounds[i].Truncated != want.Truncated {
 					t.Fatalf("turn %d truncated = %v, want %v", turns[i].Index, bounds[i].Truncated, want.Truncated)
@@ -274,6 +294,9 @@ func TestSegmentTurnBoundFixtureCases(t *testing.T) {
 				}
 				if bounds[i].ByteLength != before[i] {
 					t.Fatalf("turn %d byteLength changed after the bound: %d then %d", turns[i].Index, before[i], bounds[i].ByteLength)
+				}
+				if fixtureCase.Turns[i].TextPartBytes > fixtureCase.PerFieldBytes && len(turns[i].ContentParts[0].Text) >= fixtureCase.Turns[i].TextPartBytes {
+					t.Fatal("oversized text part was not bounded")
 				}
 			}
 		})

@@ -54,7 +54,15 @@ func LoadSessionDetail(ctx context.Context, r ingest.FullSessionEntryReader, ses
 		return nil, err
 	}
 	copy := *session
-	projection, err := EntriesToProjectionValidated(entries, ProjectionOptions{Harness: session.Harness})
+	projectionOpts := ProjectionOptions{Harness: session.Harness}
+	if facts, ok := r.(ingest.ImageFactReader); ok {
+		loaded, factErr := facts.ImageFacts(ctx, session.ID)
+		if factErr != nil {
+			return nil, fmt.Errorf("transcript full-content load for session %q failed while joining image rows: %w; the detail was not emitted; retry the read", session.ID, factErr)
+		}
+		projectionOpts.ImageFacts = loaded
+	}
+	projection, err := EntriesToProjectionValidated(entries, projectionOpts)
 	if err != nil {
 		return nil, err
 	}

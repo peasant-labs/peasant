@@ -2,9 +2,8 @@ requiredNames: [current-version-recomputed, future-producer-preserved, failed-sa
 sessionID: 11111111-1111-4111-8111-111111111111
 projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 hostSlug: github.com-metrics-fixture
-priorTurns: 9
 startedAt: 1700000000000
 cases:
-  - {name: current-version-recomputed, versionDelta: 0, wantTurns: 1, wantComputed: 1}
-  - {name: future-producer-preserved, versionDelta: 1, wantTurns: 9, wantComputed: 0, wantError: true}
-  - {name: failed-save-preserves-last-good, versionDelta: 0, failSave: true, wantTurns: 9, wantComputed: 0, wantError: true}
+  - {name: current-version-recomputed, versionDelta: 0, wantComputed: 1}
+  - {name: future-producer-preserved, versionDelta: 1, wantComputed: 0, wantError: true}
+  - {name: failed-save-preserves-last-good, versionDelta: 0, failSave: true, wantComputed: 0, wantError: true}
