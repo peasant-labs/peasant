@@ -69,7 +69,7 @@ func buildSessionsSearchCommand() *cobra.Command {
 	cmd.Flags().StringVar(&f.limit, "limit", strconv.Itoa(codemap.SearchDefaultLimit), "Maximum ranked rows per page (integer >= 1; values above "+strconv.Itoa(codemap.SearchMaxLimit)+" are clamped; 0 is refused)")
 	cmd.Flags().StringVar(&f.offset, "offset", "0", "Ranked rows to skip (integer 0.."+strconv.Itoa(codemap.SearchMaxOffset)+")")
 	cmd.Flags().StringVar(&f.project, "project", "", "Filter by project using the sessions list match (git remote URL or directory basename)")
-	cmd.Flags().StringVar(&f.harness, "harness", "", "Filter by harness ("+joinHarnesses(defaults.AllHarnesses)+")")
+	cmd.Flags().StringVar(&f.harness, "harness", "", "Filter by harness ("+joinHarnesses(defaults.Harnesses())+")")
 	cmd.Flags().StringVar(&f.tag, "tag", "", "Filter by session tag (matches any tag in the session's tag array)")
 	cmd.Flags().StringVar(&f.since, "since", "", "Only sessions starting after this time ("+timeFilterHelp+")")
 	cmd.Flags().StringVar(&f.until, "until", "", "Only sessions starting before this time; a date includes that whole day ("+timeFilterHelp+")")

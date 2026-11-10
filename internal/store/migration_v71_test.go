@@ -629,7 +629,7 @@ func TestMigrationV71FreshSchema(t *testing.T) {
 	}
 	defer db.pool.Put(conn)
 
-	if got, want := CurrentSchemaVersion(), 72; got != want {
+	if got, want := CurrentSchemaVersion(), 73; got != want {
 		t.Fatalf("CurrentSchemaVersion() = %d, want %d", got, want)
 	}
 	var version int
@@ -638,8 +638,8 @@ func TestMigrationV71FreshSchema(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("read the fresh store's user_version: %v", err)
 	}
-	if version != 72 {
-		t.Fatalf("fresh user_version = %d, want 72", version)
+	if version != 73 {
+		t.Fatalf("fresh user_version = %d, want 73", version)
 	}
 
 	for _, name := range []string{"claude_teammate_spawns", "codex_rollout_catalog"} {

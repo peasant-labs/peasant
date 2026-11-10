@@ -112,8 +112,8 @@ func TestMigrationV72CompactIdentityFacts(t *testing.T) {
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if got := CurrentSchemaVersion(); got != 72 {
-		t.Fatalf("CurrentSchemaVersion() = %d, want 72", got)
+	if got := CurrentSchemaVersion(); got != 73 {
+		t.Fatalf("CurrentSchemaVersion() = %d, want 73", got)
 	}
 	store, err := Open(dbPath, WithPoolSize(1))
 	if err != nil {

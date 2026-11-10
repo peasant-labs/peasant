@@ -24,7 +24,7 @@ peasant sessions search <query> [flags]
 ### Options
 
 ```
-      --harness string         Filter by harness ({claude-code, gemini-cli, codex, opencode, cursor, strike, pi})
+      --harness string         Filter by harness ({claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike, pi, grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew})
   -h, --help                   help for search
       --json                   Output one JSON document, with score and CLI metadata
       --limit string           Maximum ranked rows per page (integer >= 1; values above 500 are clamped; 0 is refused) (default "20")

@@ -357,6 +357,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV70,
 		migrationV71,
 		migrationV72,
+		migrationV73,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -423,5 +424,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V70: parent lane, store revision, page indexes, and backfill (additive, no FK)
 		nil,                        // V71: derived lookup tables (create-only, additive, no data rewrite beyond the spawns backfill)
 		nil,                        // V72: compact Claude identity facts
+		{DisableForeignKeys: true}, // V73: widen stored harness checks
 	},
 }

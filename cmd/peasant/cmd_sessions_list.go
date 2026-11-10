@@ -88,7 +88,7 @@ func buildSessionsListCommand() *cobra.Command {
 	cmd.Flags().StringVar(&session, "session", "", "Filter to one exact session id")
 	cmd.Flags().StringVar(&since, "since", "", "Show sessions starting after this time ("+timeFilterHelp+")")
 	cmd.Flags().StringVar(&until, "until", "", "Show sessions starting before this time ("+timeFilterHelp+")")
-	cmd.Flags().StringVar(&harness, "harness", "", "Filter by harness (claude-code, gemini-cli, codex, opencode)")
+	cmd.Flags().StringVar(&harness, "harness", "", "Filter by harness ("+joinHarnesses(defaults.Harnesses())+")")
 	cmd.Flags().StringVar(&tag, "tag", "", "Filter by session tag")
 	cmd.Flags().StringVar(&sort, "sort", string(defaults.SessionSortDate), "Sort by field (date, turns, tokens, project)")
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order (ascending instead of descending)")
@@ -265,7 +265,7 @@ func buildSessionListFilter(project, session, since, until, harness, tag, sort s
 		h := defaults.Harness(harness)
 		if !h.IsKnown() {
 			return f, fmt.Errorf("invalid --harness value %q: must be one of %s",
-				harness, joinHarnesses(defaults.AllHarnesses))
+				harness, joinHarnesses(defaults.Harnesses()))
 		}
 		hStr := string(h)
 		f.ModelHarness = &hStr

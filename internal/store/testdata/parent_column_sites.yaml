@@ -277,6 +277,14 @@ residual:
     literals: 2
     class: ddl
     reason: Immutable historical migration text for the parent lane, page indexes, and store revision.
+  - name: store-migration-v73
+    file: internal/store/schema_v73.go
+    declaration: migrationV73
+    literals: 1
+    class: ddl
+    reason: >-
+      Frozen migration DDL copied from slot-70 sqlite_master at authoring time, not a live raw-column
+      read path; it must not be rewritten to LogicalParentSQL.
   - name: store-offset-page-child-filter
     file: internal/store/offset_page_reader.go
     declaration: offsetPageWhere
