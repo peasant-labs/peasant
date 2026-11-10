@@ -1,5 +1,4 @@
 import {
-  ALL_HOME_COLUMNS,
   isHomeColumnWire,
   type HomeColumnWire,
 } from '@/components/home/homeColumns';
@@ -82,6 +81,3 @@ export function clearHomeCollapsedGroups(storage: WritableStorage | null = stora
   const view = readHomeDeviceView(storage);
   writeHomeDeviceView({ visibleColumns: view.visibleColumns, collapsed: [] }, storage);
 }
-
-/** The column wires in their default order, for the first render before a reader hides one. */
-export const DEFAULT_HOME_COLUMNS: readonly HomeColumnWire[] = ALL_HOME_COLUMNS.map((column) => column.wire);

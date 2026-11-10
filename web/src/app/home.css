@@ -154,7 +154,6 @@
    surrounding meta line's mono type, with no badge, radius, or new color. */
 .home-session-teammate { font-family: var(--font-mono); font-size: var(--fs-label); line-height: var(--lh-mono); color: var(--ink-2); overflow-wrap: anywhere; }
 .home-session-agent { display: inline-flex; vertical-align: -0.125em; }
-.home-session-phone { display: none; }
 .home-project { display: block; min-width: 0; overflow-wrap: anywhere; }
 @media (hover: hover) and (pointer: fine) {
   a.home-session-title:hover { color: var(--amber); text-decoration: underline; text-underline-offset: 3px; }

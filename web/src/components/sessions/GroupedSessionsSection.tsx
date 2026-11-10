@@ -12,6 +12,7 @@ import {
   type TranscriptLibraryColumn,
 } from '@peasant-labs/fairtrade/ui';
 import { displayProject } from '@/lib/quality/utils';
+import { groupLabelOf, qualifiedGroupId } from '@/lib/table/groupIds';
 import {
   assertGroupedProjectScope,
   fetchGroupedLocalSearch,
@@ -177,7 +178,7 @@ export function GroupedSessionsSection({
     const remember = (item: LocalSessionListItem) => {
       const session = item.transcript?.session;
       if (!session) return;
-      const key = `${GroupedGroupBy.Project.wire}:${session.projectHash ?? ''}`;
+      const key = qualifiedGroupId(GroupedGroupBy.Project, session.projectHash ?? '');
       if (!labels.has(key)) labels.set(key, session.project ? displayProject(session.project) : '');
     };
     for (const row of payload?.items ?? []) remember(row);
@@ -272,7 +273,7 @@ export function GroupedSessionsSection({
           groupBy={GroupedGroupBy.Project}
           groupByOptions={[GroupedGroupBy.Project]}
           groupKeys={(row) => itemProjectKeys(row.item)}
-          groupLabel={(id) => projectLabels.get(id) ?? (id.slice(id.indexOf(':') + 1) || id)}
+          groupLabel={(id) => groupLabelOf(id, GroupedGroupBy.Project, projectLabels)}
           nextGroupKeys={payload.nextItems.length > 0 ? groupKeysFor(payload.nextItems, itemProjectKeys) : null}
           continuedGroupKeys={previous ? groupKeysFor(previous.items, itemProjectKeys) : null}
           page={{ index: payload.page, size: payload.perPage, total: payload.total }}

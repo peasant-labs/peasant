@@ -31,7 +31,7 @@ interface Fixture {
   expectView?: { browse: string; publication: string; project: string | null; perPage: number; page: number; groupBy: string };
 }
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/app/testdata/home-pages.yaml'), 'utf8')) as { requiredNames: string[]; cases: Fixture[]; publish: { request: unknown; response: unknown; loadedPages: { parent: string | null; page: number }[]; failedRefreshPages: { parent: string | null; page: number }[] } };
-const required = ['numbered-pages-from-the-url', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-error-keeps-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-error-retry-failure-keeps-loaded-content', 'selection-error-account-change-refreshes-loaded-content', 'claude-teammate-line', 'no-claude-teammate-line', 'refresh-restores-view-and-page', 'interleaved-project-grouping', 'hidden-session-column-grouping', 'collapsed-group-does-not-hide-page-two'];
+const required = ['numbered-pages-from-the-url', 'loaded-refresh-keeps-content-on-failure', 'stale-filter-response', 'lazy-children-and-child-more', 'account-change-clears-old-rows', 'collapsed-late-child-is-ignored', 'selection-error-keeps-loaded-content', 'overlapping-refresh-does-not-race', 'collapse-cancels-expanded-refresh', 'collapsed-ancestor-skips-descendant-refresh', 'successful-refresh-invalidates-collapsed-family', 'successful-refresh-invalidates-collapsed-descendant', 'canonical-missing-parent-commits-refreshed-roots', 'generic-child404-retains-visible-content', 'publish-settlement-refreshes-loaded-window', 'publish-during-refresh-queues-one-loaded-window', 'selection-error-retry-failure-keeps-loaded-content', 'selection-error-account-change-refreshes-loaded-content', 'claude-teammate-line', 'no-claude-teammate-line', 'refresh-restores-view-and-page', 'interleaved-project-grouping', 'stored-columns-keep-the-identity-column', 'collapsed-group-does-not-hide-page-two'];
 expect([...fixture.requiredNames].sort()).toEqual([...required].sort());
 expect(fixture.cases.map(row => row.name).sort()).toEqual([...required].sort());
 
@@ -179,12 +179,6 @@ describe('mounted bounded Home', () => {
           expect(line).toHaveTextContent(`teammate ${testCase.teammate.name} · ${testCase.teammate.team}`);
           expect(childCell.querySelector('.home-session-title')).toHaveTextContent('title child-0');
           expect(childCell.querySelector('.home-session-meta')).toHaveTextContent('tokens');
-          // The identity is its own line in the session cell, never folded into
-          // the phone block that carries the other columns' facts.
-          const phone = childCell.querySelector('.home-session-phone');
-          expect(phone).not.toBeNull();
-          expect(phone?.querySelector('.home-session-teammate')).toBeNull();
-          expect(line?.closest('.home-session-phone')).toBeNull();
         } else {
           expect(document.querySelector('.home-session-teammate')).toBeNull();
         }
@@ -526,7 +520,7 @@ describe('mounted bounded Home', () => {
         expect(screen.queryByRole('link', { name: 'title a01' })).not.toBeInTheDocument();
         return;
       }
-      if (testCase.name === 'hidden-session-column-grouping') {
+      if (testCase.name === 'stored-columns-keep-the-identity-column') {
         const table = document.querySelector('[data-root-session-list] table') as HTMLElement;
         // The shared table keeps the first declared column (the row identity)
         // even when the stored set omits it, so the session column still shows.

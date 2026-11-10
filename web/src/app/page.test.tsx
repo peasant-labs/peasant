@@ -212,7 +212,7 @@ function loadSelectionScopeFixture(): { cases: SelectionScopeCase[] } {
 }
 
 const requiredFlatSessionCaseNames = [
-  'cross-project-filter-and-top-level-paging',
+  'cross-project-filter-and-complete-list',
   'harness-filter-narrows-the-same-set',
 ] as const;
 

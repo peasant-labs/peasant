@@ -34,6 +34,7 @@ import {
 import { formatMinutes } from '@/lib/home/rootStats';
 import { parseProjectHash, transcriptHref } from '@/lib/navigation/projectRoutes';
 import { displayProject } from '@/lib/quality/utils';
+import { groupLabelOf, qualifiedGroupId } from '@/lib/table/groupIds';
 import { cleanSessionTitle } from '@peasant-labs/fairtrade/ui';
 import { formatRelative } from '@/app/review/[[...segments]]/format';
 
@@ -164,7 +165,6 @@ export function RootSessionList({
   const last = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(Math.max(1, page), last);
   const visible = rows;
-  const start = (current - 1) * pageSize;
   // A new page starts at the table's top.
   const top = useRef<HTMLElement>(null);
   const turned = useRef(current);
@@ -218,7 +218,7 @@ export function RootSessionList({
   const projectLabels = useMemo(() => {
     const labels = new Map<string, string>();
     const remember = (row: RootSessionRow) => {
-      const key = `${HomeGroupBy.Project.wire}:${projectKeyOf(row)}`;
+      const key = qualifiedGroupId(HomeGroupBy.Project, projectKeyOf(row));
       if (!labels.has(key)) labels.set(key, displayProject(row.sync.projectName));
     };
     for (const row of visible) remember(row);
@@ -262,24 +262,12 @@ export function RootSessionList({
             </div>
           </>
         ) : null;
-        const when = whenOf(row);
         const meta = (
           // The agent's mark leads the line, so a child row's mark sits under its parent's chevron.
           <span className="home-session-meta">
             <ProviderName harness={row.sync.harness} className="home-session-agent" />,{' '}
             <span className="tabular-nums">{tokenFormat.format(row.sync.totalTokens).toLowerCase()}</span> tokens
             {title.untitled ? ', untitled' : ''}
-          </span>
-        );
-        // A phone shows the session column only, so the other columns' facts
-        // follow the title there, above the subagents disclosure.
-        const phone = (
-          <span className="home-session-phone">
-            <span className="home-session-phone-facts">
-              {displayProject(row.sync.projectName)}, <span className="tabular-nums">{row.sync.turnCount.toLocaleString('en-US')}</span> turns,{' '}
-              <span className="tabular-nums">{formatMinutes(Number(row.sync.durationMs) / 60_000)}</span>{when ? `, ${when}` : ''}
-            </span>
-            {stateOf(row)}
           </span>
         );
         const link = hash ? (
@@ -304,7 +292,6 @@ export function RootSessionList({
                 {link}
                 {teammate}
                 {meta}
-                {phone}
               </span>
               {group}
             </div>
@@ -316,7 +303,6 @@ export function RootSessionList({
               {link}
               {teammate}
               {meta}
-              {phone}
             </span>
             {group}
           </div>
@@ -384,7 +370,7 @@ export function RootSessionList({
           groupBy={viewState.groupBy}
           groupByOptions={ALL_HOME_GROUP_BYS}
           groupKeys={groupKeys}
-          groupLabel={(id) => projectLabels.get(id) ?? (id.slice(id.indexOf(':') + 1) || id)}
+          groupLabel={(id) => groupLabelOf(id, viewState.groupBy, projectLabels)}
           nextGroupKeys={nextGroupKeys}
           continuedGroupKeys={continuedGroupKeys}
           page={{ index: home.rootPage?.page ?? current, size: home.rootPage?.perPage ?? pageSize, total: home.rootPage?.total ?? total }}

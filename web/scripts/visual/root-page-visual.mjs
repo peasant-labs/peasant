@@ -501,13 +501,15 @@ async function probeGroupAttachment(page, where) {
       sameCell: group.closest('td') === cell && cell.parentElement.firstElementChild === cell,
       order: parent.nextElementSibling === group && group.parentElement === family && !parent.contains(group),
       rootLeak: !!group.querySelector('[data-session-id]'),
-      // Every list row is either one root row (exactly one session id) or one
-      // child row (no session id, but a child marker); anything else is stray.
-      // The shared table owns its own group, continuation, and continues rows;
-      // every remaining body row is either one root row (exactly one session id)
-      // or one child row (no session id, but a child marker).
+      // The shared table owns its structural rows (group, continuation,
+      // continues, empty). Every remaining body row is either one root row
+      // (exactly one session id) or one child row (no session id, but a child
+      // marker); anything else is stray.
       extraRows: [...document.querySelectorAll('[data-root-session-list] tbody tr')]
-        .filter((row) => !row.hasAttribute('data-row-kind'))
+        .filter((row) => {
+          const kind = row.getAttribute('data-row-kind')
+          return kind === null || kind === 'row'
+        })
         .some((row) => {
           const sessions = row.querySelectorAll('[data-session-id]').length
           return sessions > 1 || (sessions === 0 && !row.querySelector('[data-session-group-child]'))
