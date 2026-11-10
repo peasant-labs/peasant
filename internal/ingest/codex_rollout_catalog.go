@@ -129,30 +129,12 @@ func (a *CodexAdapter) maintainCodexRolloutCatalog(ctx context.Context, roots []
 		return
 	}
 	enumerated := a.enumeration.Files
-	seen := make(map[ResolvedPath]struct{}, len(enumerated))
-	for _, file := range enumerated {
-		seen[file.Path] = struct{}{}
-	}
-
 	existing, err := a.rolloutCatalog.LoadCodexRolloutCatalog(ctx)
 	if err != nil {
 		a.noteCodexRolloutCatalogFailure(err)
 		return
 	}
-
-	var deletes []ResolvedPath
-	for _, row := range existing {
-		if _, walked := seen[row.Path]; walked {
-			continue
-		}
-		if !pathUnderAnyRoot(row.Path, roots) {
-			continue
-		}
-		if _, statErr := a.fs.Stat(row.Path.String()); statErr == nil || !errors.Is(statErr, fs.ErrNotExist) {
-			continue
-		}
-		deletes = append(deletes, row.Path)
-	}
+	deletes := codexCatalogDeletes(a.fs, existing, enumerated, roots)
 
 	if len(enumerated) == 0 && len(deletes) == 0 {
 		return
@@ -160,6 +142,25 @@ func (a *CodexAdapter) maintainCodexRolloutCatalog(ctx context.Context, roots []
 	if err := a.rolloutCatalog.SaveCodexRolloutCatalog(ctx, enumerated, deletes); err != nil {
 		a.noteCodexRolloutCatalogFailure(err)
 	}
+}
+
+// codexCatalogDeletes keeps paths outside the eligible roots and paths whose
+// absence cannot be confirmed.
+func codexCatalogDeletes(filesystem FileSystem, existing, enumerated []RolloutFile, roots []ResolvedPath) []ResolvedPath {
+	seen := make(map[ResolvedPath]struct{}, len(enumerated))
+	for _, file := range enumerated {
+		seen[file.Path] = struct{}{}
+	}
+	var deletes []ResolvedPath
+	for _, row := range existing {
+		if _, ok := seen[row.Path]; ok || !pathUnderAnyRoot(row.Path, roots) {
+			continue
+		}
+		if _, err := filesystem.Stat(row.Path.String()); errors.Is(err, fs.ErrNotExist) {
+			deletes = append(deletes, row.Path)
+		}
+	}
+	return deletes
 }
 
 // noteCodexRolloutCatalogFailure records a failed catalog write on the run's

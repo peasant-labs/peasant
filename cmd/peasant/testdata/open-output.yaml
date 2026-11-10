@@ -195,7 +195,7 @@ cases:
     want:
       failed: true
       lines:
-        - 'peasant: harvest failed: peasant open refused to run: the maximum redaction level is not supported in this version; fix: run `{peasant} harvest --session {session_id} --force --detect-commits` to see the full report'
+        - 'peasant: harvest failed: peasant open refused to run: the maximum redaction level is not supported in this version; fix: run `{peasant} harvest --session {session_id} --detect-commits --refresh-commits` to see the full report'
 
   - name: malformed-transcript
     session: known
@@ -207,7 +207,7 @@ cases:
     want:
       failed: true
       lines:
-        - 'peasant: harvest failed: record session {session_id}: capture transcript source for {session_id}: capture JSONL record 2: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest; prior stored state remains unchanged; restore source readability and retry; fix: run `{peasant} harvest --session {session_id} --force --detect-commits` to see the full report'
+        - 'peasant: harvest failed: record session {session_id}: capture transcript source for {session_id}: capture JSONL record 2: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest; prior stored state remains unchanged; restore source readability and retry; fix: run `{peasant} harvest --session {session_id} --detect-commits --refresh-commits` to see the full report'
 
   - name: server-start-failure
     session: known

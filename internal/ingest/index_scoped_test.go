@@ -29,10 +29,13 @@ type indexScopedFixture struct {
 }
 
 type indexScopedCase struct {
-	Name         string             `yaml:"name"`
-	Pairs        []indexPairSeed    `yaml:"pairs"`
-	Stored       []indexStoredSeed  `yaml:"stored"`
-	CodexSources []indexCodexSource `yaml:"codexSources"`
+	Name           string             `yaml:"name"`
+	Pairs          []indexPairSeed    `yaml:"pairs"`
+	Stored         []indexStoredSeed  `yaml:"stored"`
+	CodexSources   []indexCodexSource `yaml:"codexSources"`
+	RealCodex      bool               `yaml:"realCodex"`
+	CodexRoots     []string           `yaml:"codexRoots"`
+	UnreadableDirs []string           `yaml:"unreadableDirs"`
 	// CodexEnumeration is the coverage the codex adapter reports for the walk
 	// it ran: empty (or "complete") is the whole tree; "partial" is a walk
 	// that swallowed a directory-read failure.
@@ -50,7 +53,7 @@ type indexScopedCase struct {
 	// failed to walk.
 	CodexDisabled bool `yaml:"codexDisabled"`
 	// CodexWithoutAdapter enables the source without registering an adapter for
-	// it, which a `--all` run cannot enumerate and must refuse.
+	// it, which a `--all` run cannot enumerate.
 	CodexWithoutAdapter bool `yaml:"codexWithoutAdapter"`
 	// WantRunErrorContains is the refusal a case expects; it replaces the
 	// post-run assertions.
@@ -215,7 +218,7 @@ func loadIndexScopedFixture(t *testing.T) indexScopedFixture {
 		t.Fatalf("decode the session-scoped index fixture: %v", err)
 	}
 	for _, testCase := range fixture.Cases {
-		noCatalog := testCase.WantRunErrorContains != "" || testCase.CodexEnumeration == "none"
+		noCatalog := testCase.WantRunErrorContains != "" || testCase.CodexEnumeration == "none" || testCase.CodexWithoutAdapter
 		if testCase.RebuildAll && len(testCase.WantRebuildCatalog) == 0 && !noCatalog {
 			t.Fatalf("case %q rebuilds the derived lookups but names no expected catalog", testCase.Name)
 		}
@@ -242,6 +245,11 @@ func runIndexScopedCase(t *testing.T, testCase indexScopedCase) {
 	t.Helper()
 	ctx := context.Background()
 	mfs := testutil.NewMemFS()
+	faults := map[string]struct{}{}
+	for _, dir := range testCase.UnreadableDirs {
+		faults[dir] = struct{}{}
+	}
+	walkFS := &codexCatalogWalkFS{MemFS: mfs, unreadable: faults}
 	counting := testutil.NewCountingFS(mfs)
 	db := storetest.Open(t)
 	if len(testCase.SeedCatalog) > 0 {
@@ -282,6 +290,12 @@ func runIndexScopedCase(t *testing.T, testCase indexScopedCase) {
 		session := makeDiscoveredSession(t, source.Session, source.Path, time.UnixMilli(1708300800000))
 		session.Harness = ingest.HarnessCodex
 		codexSessions = append(codexSessions, session)
+		if testCase.RealCodex {
+			body := `{"type":"session_meta","payload":{"id":"` + source.Session + `","cwd":"/work/project"}}` + "\n"
+			if err := mfs.WriteFile(source.Path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	// The rollout enumeration a real Codex walk reports: what it enumerated,
 	// which is NOT the discovered session list (a rollout no harvest stores is
@@ -328,6 +342,16 @@ func runIndexScopedCase(t *testing.T, testCase indexScopedCase) {
 				Enabled: true,
 			}
 			adapters[ingest.HarnessCodex] = makeIndexScopedCodexAdapter(codexSessions, codexEnumeration)
+		}
+		if testCase.RealCodex {
+			var roots []ingest.ResolvedPath
+			for _, root := range testCase.CodexRoots {
+				roots = append(roots, ingest.ResolvedPath(root))
+			}
+			cfg.Sources[ingest.HarnessCodex] = ingest.SourceConfig{Paths: roots, Enabled: true}
+			adapters[ingest.HarnessCodex] = func(fsys ingest.FileSystem, git ingest.GitResolver, sal salt.Salt) ingest.SourceAdapter {
+				return ingest.NewCodexAdapter(walkFS, git, sal)
+			}
 		}
 		if testCase.CodexWithoutAdapter {
 			cfg.Sources[ingest.HarnessCodex] = ingest.SourceConfig{
@@ -508,8 +532,8 @@ func assertIndexScopedRebuild(t *testing.T, testCase indexScopedCase, ctx contex
 	if result.ScopeReport != nil {
 		t.Errorf("case %q: `--all` is never scoped; ScopeReport = %+v", testCase.Name, result.ScopeReport)
 	}
-	if result.Summary.RebuiltFromFiles != 1 {
-		t.Errorf("case %q: `--all` must clear the session filters and record the saved pair; RebuiltFromFiles = %d, want 1", testCase.Name, result.Summary.RebuiltFromFiles)
+	if result.Summary.RebuiltFromFiles != len(testCase.Pairs) {
+		t.Errorf("case %q: `--all` must record every saved pair; RebuiltFromFiles = %d, want %d", testCase.Name, result.Summary.RebuiltFromFiles, len(testCase.Pairs))
 	}
 	enumerations := recording.rebuildCatalogs()
 	if len(enumerations) != 1 {
@@ -518,6 +542,8 @@ func assertIndexScopedRebuild(t *testing.T, testCase indexScopedCase, ctx contex
 	wantStatus := ingest.RolloutEnumerationComplete
 	if testCase.CodexEnumeration == "none" {
 		wantStatus = ingest.RolloutEnumerationNotWalked
+	} else if testCase.CodexEnumeration == "partial" || testCase.CodexWithoutAdapter {
+		wantStatus = ingest.RolloutEnumerationPartial
 	}
 	if enumerations[0].Status != wantStatus {
 		t.Fatalf("case %q: rebuild input status = %v, want %v", testCase.Name, enumerations[0].Status, wantStatus)
@@ -532,7 +558,7 @@ func assertIndexScopedRebuild(t *testing.T, testCase indexScopedCase, ctx contex
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("case %q: rebuild input catalog = %v, want %v", testCase.Name, got, want)
 	}
-	// The table the rebuild wrote holds exactly the enumerated set.
+	// The catalog reflects the expected reconciliation.
 	assertIndexScopedCatalog(t, testCase, ctx, db, testCase.WantCatalogAfter)
 }
 

@@ -263,16 +263,17 @@ func TestClaudeAdapter_IncompleteEvidenceCacheStillLinks(t *testing.T) {
 	}
 	assertClaudeTeammateDiscovery(t, first, want)
 
-	// `null` is valid JSON but carries no identity records, so the whole-table
-	// scan rejects this row as unreadable while its identity columns (and so the
-	// store's indexed count) remain valid. That is exactly the state in which
+	// `null` is valid JSON but not a session-id set, so the whole-table scan
+	// rejects this row as unreadable while its identity columns (and so the
+	// store's indexed count) remain valid. identity_records_json is a tombstone
+	// and is not what makes a row unreadable. That is exactly the state in which
 	// "the cache is attached" and "the cache is complete" disagree.
 	conn, err := database.Pool().Take(ctx)
 	if err != nil {
 		t.Fatalf("take a connection to make one stored evidence row unreadable: %v", err)
 	}
 	if err := sqlitex.ExecuteTransient(conn,
-		`UPDATE claude_transcript_evidence SET identity_records_json = 'null' WHERE source_path = ?`,
+		`UPDATE claude_transcript_evidence SET identity_session_ids_json = 'null' WHERE source_path = ?`,
 		&sqlitex.ExecOptions{Args: []any{childPath}}); err != nil {
 		database.Pool().Put(conn)
 		t.Fatalf("make the declarer's stored evidence row unreadable: %v", err)

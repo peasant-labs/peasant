@@ -48,11 +48,27 @@ func (s ClaudeEvidenceScope) IsValid() bool {
 // and a JSON parse of every line, so the result is cached against the size and
 // the modification time of the file that produced it.
 type ClaudeTranscriptEvidence struct {
-	ProofVersion          int
-	Records               []ClaudeIdentityRecord
-	NativeAgentID         string
-	NativeAgentValid      bool
-	ContentDigest         string
+	ProofVersion     int
+	Records          []ClaudeIdentityRecord
+	NativeAgentID    string
+	NativeAgentValid bool
+	ContentDigest    string
+	// SessionIDs is the sorted set of session ids the transcript names.
+	SessionIDs []string
+	// SpawnAgentIDs is the sorted set of non-empty correlated spawn agent ids.
+	SpawnAgentIDs []string
+	// LegacyAgentProof is true when every record names NativeAgentID and none
+	// carries an explicit sidechain flag. It is meaningful only together with
+	// that recorded agent id.
+	LegacyAgentProof bool
+	// ContradictorySidechain is true when any record explicitly says it is not
+	// a sidechain.
+	ContradictorySidechain bool
+	// Chain is the deduplicated structural coordinate list a lineage proof
+	// reads. It is empty for a subagent row: that row is the child, never the
+	// owner snapshot or the layout-parent artifact. Nil means the chain was
+	// not loaded; an empty slice means it was loaded and holds no links.
+	Chain                 []ClaudeIdentityChainLink
 	SourcePath            ResolvedPath
 	Scope                 ClaudeEvidenceScope
 	ModTimeUnixNano       int64
@@ -109,8 +125,10 @@ func (e ClaudeTranscriptEvidence) Fresh(scope ClaudeEvidenceScope, info os.FileI
 // its own version. Unchanged rows at the current version need no transcript
 // read. Version 3 re-mines rows whose cached Title came from an isMeta record.
 // Version 4 re-mines cached rows whose NativeAgentValid was computed before
-// unmarked request-accounting records were admitted.
-const ClaudeIdentityProofVersion = 4
+// unmarked request-accounting records were admitted. Version 5 re-mines rows
+// whose structural proof was still a per-line record list, so discovery
+// rewrites them as the compact facts this build reads.
+const ClaudeIdentityProofVersion = 5
 
 // ClaudeIdentityRecord retains only native structural coordinates, never message
 // text. Repeated session IDs describe the distribution and chain, not ownership.
@@ -140,6 +158,16 @@ type ClaudeEvidenceCache interface {
 	// best-effort contract as LoadClaudeEvidence: a cache that fails makes
 	// discovery do the full work, which is always correct.
 	LoadClaudeEvidenceFor(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath]ClaudeTranscriptEvidence, error)
+}
+
+// ClaudeIdentityChainReader loads the structural coordinate list for the named
+// transcripts. The whole-table evidence read omits that list: only a lineage
+// proof reads it, and only for the owner and layout parent of a child whose
+// recorded parent is not its record owner. The second result names paths whose
+// stored list this build cannot parse; the caller mines those transcripts
+// again instead of trusting an empty chain.
+type ClaudeIdentityChainReader interface {
+	LoadClaudeIdentityChains(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath][]ClaudeIdentityChainLink, []ResolvedPath, error)
 }
 
 // ClaudeEvidenceCompleteness is the optional capability a cache implements to

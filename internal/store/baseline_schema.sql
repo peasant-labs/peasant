@@ -174,7 +174,7 @@ CREATE TABLE claude_transcript_evidence (
   title TEXT NOT NULL,
   branch TEXT NOT NULL,
   cwd TEXT NOT NULL, origin TEXT NOT NULL DEFAULT ''
-  CHECK (origin IN ('', 'user', 'agent', 'unknown')), proof_version INTEGER NOT NULL DEFAULT 0 CHECK(proof_version >= 0), native_agent_id TEXT NOT NULL DEFAULT '', native_agent_valid INTEGER NOT NULL DEFAULT 0 CHECK(native_agent_valid IN (0, 1)), content_digest TEXT NOT NULL DEFAULT '', identity_records_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_records_json)),
+  CHECK (origin IN ('', 'user', 'agent', 'unknown')), proof_version INTEGER NOT NULL DEFAULT 0 CHECK(proof_version >= 0), native_agent_id TEXT NOT NULL DEFAULT '', native_agent_valid INTEGER NOT NULL DEFAULT 0 CHECK(native_agent_valid IN (0, 1)), content_digest TEXT NOT NULL DEFAULT '', identity_records_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_records_json)), identity_session_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_session_ids_json)), identity_spawn_agent_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_spawn_agent_ids_json)), identity_legacy_agent_proof INTEGER NOT NULL DEFAULT 0 CHECK(identity_legacy_agent_proof IN (0, 1)), identity_contradictory_sidechain INTEGER NOT NULL DEFAULT 0 CHECK(identity_contradictory_sidechain IN (0, 1)), identity_chain_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_chain_json)),
   CHECK((identity_team IS NULL) = (identity_name IS NULL))
 ) STRICT;
 
@@ -2190,4 +2190,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 71;
+PRAGMA user_version = 72;

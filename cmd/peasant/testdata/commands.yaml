@@ -28,6 +28,7 @@ commands:
       - { name: json, type: bool, default: "false" }
       - { name: detect-commits, type: bool, default: "true" }
       - { name: profile-index, type: bool, default: "false" }
+      - { name: refresh-commits, type: bool, default: "false" }
       - { name: session, type: stringSlice, default: "[]" }
       - { name: no-related, type: bool, default: "false" }
       - { name: since, type: string, default: "" }

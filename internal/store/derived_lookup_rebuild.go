@@ -38,67 +38,33 @@ WHERE e.scope = 'root'
   AND json_extract(spawn.value, '$.team') IS NOT NULL
   AND json_extract(spawn.value, '$.name') IS NOT NULL`
 
-	sqlClearCodexRolloutCatalog = `DELETE FROM codex_rollout_catalog`
-
 	// One row per enumerated rollout PATH. A rollout the duplicate stage
 	// refuses, or one that was never stored, still has a row, so the
 	// session_id index can answer both the duplicate count and the parent
 	// lookup. The path is the primary key, so a duplicate path in the
 	// caller's walk collapses instead of aborting the rebuild.
-	sqlRebuildCodexRolloutCatalog = `INSERT OR IGNORE INTO codex_rollout_catalog (source_path, session_id) VALUES (?, ?)`
+	sqlRebuildCodexRolloutCatalog = `INSERT OR REPLACE INTO codex_rollout_catalog (source_path, session_id) VALUES (?, ?)`
 )
 
-// RebuildDerivedLookups replaces the derived lookup tables from their sources:
-// the teammate spawns from claude_transcript_evidence, and the Codex rollout
-// catalog from the enumeration `harvest index --all` walked. Both replacements
-// happen in one transaction, so a failure leaves the previous tables intact
-// rather than a half-rebuilt store. The tables are replaced rather than merged
-// so a corrupted row that no source still produces is removed instead of
-// surviving.
-//
-// The catalog records paths that were never stored, so the database cannot
-// derive it; the caller supplies the enumeration its walk produced. That
-// enumeration is REPLACED into the table, which makes its completeness part of
-// the input:
-//
-//   - Complete replaces the catalog, after the caller's set has been validated.
-//   - NotWalked means this run configured no Codex source. There is nothing to
-//     derive the catalog from, so it is left exactly as it is and only the
-//     spawns are rebuilt; a run that never read a Codex tree must not be read as
-//     "the tree is empty".
-//   - Partial and the unset zero value are REFUSED before anything is written.
-//     A walk that swallowed a directory-read or file-stat failure may have
-//     missed rollouts that are still on disk, and clearing the table would
-//     delete the rows that answer the duplicate question for them.
+// RebuildDerivedLookups rebuilds spawns and reconciles catalog rows in one transaction.
+// The caller determines safe deletions from filesystem walk coverage.
 func (s *Store) RebuildDerivedLookups(ctx context.Context, enumeration ingest.RolloutEnumeration) (err error) {
 	switch enumeration.Status {
-	case ingest.RolloutEnumerationNotWalked, ingest.RolloutEnumerationComplete:
-	case ingest.RolloutEnumerationPartial:
-		return fmt.Errorf(
-			"store.RebuildDerivedLookups: the Codex rollout enumeration is incomplete, so the rollout catalog cannot be replaced: %w; "+
-				"what: a directory-read or file-stat failure during the discovery walk means the enumerated set may be missing rollouts that still exist; "+
-				"why: replacing the catalog with a short set would delete the rows that answer the duplicate and parent questions for those rollouts; "+
-				"where: store.RebuildDerivedLookups in internal/store/derived_lookup_rebuild.go, called by `harvest index --all`; "+
-				"when: before any derived row was read or written; "+
-				"impact: the derived lookup tables were left as they were and no saved pair was indexed; "+
-				"fix: check every configured Codex source path and its read access (an unreadable directory is named in the run's discovery diagnostics), then rerun `harvest index --all`",
-			ingest.ErrIncompleteRolloutEnumeration)
+	case ingest.RolloutEnumerationNotWalked, ingest.RolloutEnumerationComplete, ingest.RolloutEnumerationPartial:
 	default:
 		return fmt.Errorf(
 			"store.RebuildDerivedLookups: the Codex rollout enumeration carries no status, so nothing is known about its coverage: %w; "+
 				"what: the caller passed a zero RolloutEnumeration; "+
-				"why: a rebuild from a set whose coverage is unknown could clear rows no source produced; "+
+				"why: reconciliation needs an explicit account of walk coverage; "+
 				"where: store.RebuildDerivedLookups in internal/store/derived_lookup_rebuild.go, called by `harvest index --all`; "+
 				"when: before any derived row was read or written; "+
 				"impact: the derived lookup tables were left as they were and no saved pair was indexed; "+
-				"fix: report RolloutEnumerationNotWalked when the run configured no Codex source, or the complete enumeration its walk produced",
+				"fix: report RolloutEnumerationNotWalked when no Codex source was walked, or the status of the walk that ran",
 			ingest.ErrIncompleteRolloutEnumeration)
 	}
 
-	// Validate the caller's set before anything is cleared. An empty path or id
-	// is a caller error, and it must not be discovered after the rows it would
-	// replace are already gone.
-	if enumeration.Status == ingest.RolloutEnumerationComplete {
+	// Validate the caller's files before either projection is changed.
+	if enumeration.Status != ingest.RolloutEnumerationNotWalked {
 		for index := range enumeration.Files {
 			file := &enumeration.Files[index]
 			if file.Path == "" {
@@ -132,9 +98,12 @@ func (s *Store) RebuildDerivedLookups(ctx context.Context, enumeration ingest.Ro
 		return nil
 	}
 
-	if err = sqlitex.ExecuteTransient(conn, sqlClearCodexRolloutCatalog, nil); err != nil {
-		return fmt.Errorf("store.RebuildDerivedLookups: clear the Codex rollout catalog: %w; the transaction rolled back and the previous catalog is intact", err)
+	for _, path := range enumeration.Deletes {
+		if err = sqlitex.Execute(conn, sqlDeleteCodexRolloutCatalog, &sqlitex.ExecOptions{Args: []any{path.String()}}); err != nil {
+			return fmt.Errorf("store.RebuildDerivedLookups: delete rollout %q: %w; the transaction rolled back", path, err)
+		}
 	}
+
 	for index := range enumeration.Files {
 		file := &enumeration.Files[index]
 		if err = sqlitex.Execute(conn, sqlRebuildCodexRolloutCatalog, &sqlitex.ExecOptions{

@@ -50,6 +50,10 @@ Release, which holds the signed artifacts and checksums.
   and 1 only when it sent one and something failed.
 
 ### Changed
+- `open --session` no longer passes `--force`. An unchanged session is not
+  re-extracted or re-indexed; opening it still refreshes that session's commits.
+  `harvest` gains `--refresh-commits`, off by default, for the same refresh
+  without opening the dashboard.
 - `harvest --session <unknown>` now exits non-zero and prints the reason it
   could not use the session. It used to exit 0 and report the session as
   unchanged.

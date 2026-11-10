@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -719,9 +720,13 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 		// An unreadable file fails open, exactly as the conversation check does,
 		// so discovery can surface it instead of discarding it silently. It
 		// carries no evidence, so the rule declares it unknown, which is the
-		// visible answer.
+		// visible answer. Empty slices, not nil, are the marker that this read
+		// failed: a nil chain is "not loaded" and would be refilled from the
+		// store, which would relink a child the full walk refuses.
 		evidence.HasConversationRecord = true
 		evidence.Origin, evidence.Signal = sessionorigin.Classify(sessionorigin.Evidence{})
+		evidence.Records = []ClaudeIdentityRecord{}
+		evidence.Chain = []ClaudeIdentityChainLink{}
 		return evidence, false
 	}
 	beginClaudeIdentity(data, &evidence)
@@ -824,6 +829,7 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	evidence.Origin, evidence.Signal = sessionorigin.Classify(
 		ClaudeOriginEvidence(evidence.Identity, entrypoint, promptSource, firstUserText, false),
 	)
+	SealClaudeIdentity(&evidence)
 	return evidence, true
 }
 
@@ -1643,6 +1649,11 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 		linking = append(linking, sessions...)
 		linking = append(linking, contextSessions...)
 	}
+	reminedChains, err := a.attachClaudeIdentityChains(ctx, linking, state.mined)
+	if err != nil {
+		return nil, nil, err
+	}
+	state.remined = append(state.remined, reminedChains...)
 	linking = a.linkClaudeNativeAgents(linking, state.mined)
 	if len(contextPaths) > 0 {
 		linking = claudeWithoutContextSessions(linking, contextPaths)
@@ -1905,6 +1916,100 @@ func (a *ClaudeAdapter) loadClaudeLocatedContext(
 		sessions = append(sessions, claudeContextSession(id, path, record, info))
 	}
 	return sessions, complete, nil
+}
+
+// attachClaudeIdentityChains fills the coordinate list on cached root rows
+// that a lineage proof will read. A fresh mine already carries the list. A
+// whole-table cache load does not, because that list is the large column the
+// load exists to avoid. A cache that cannot parse a list is mined again and
+// the replacement is returned so the caller can write it back.
+func (a *ClaudeAdapter) attachClaudeIdentityChains(ctx context.Context, sessions []DiscoveredSession, evidence map[ResolvedPath]ClaudeTranscriptEvidence) ([]ClaudeTranscriptEvidence, error) {
+	paths := claudeHistoryLinkChainPaths(sessions, evidence)
+	if len(paths) == 0 || a.evidence == nil {
+		return nil, nil
+	}
+	reader, ok := a.evidence.(ClaudeIdentityChainReader)
+	if !ok {
+		return nil, nil
+	}
+	loaded, unreadable, err := reader.LoadClaudeIdentityChains(ctx, paths)
+	if err != nil {
+		return nil, fmt.Errorf("ingest: the Claude build could not read the structural coordinate lists for %d transcript(s); a lineage decision without them would disagree with a full discovery; where: ingest.ClaudeAdapter.attachClaudeIdentityChains in internal/ingest/claude.go; when: reading cached identity chains before native-agent linking; impact: no member was built and nothing was written; fix: restore the evidence cache and retry: %w", len(paths), err)
+	}
+	var remined []ClaudeTranscriptEvidence
+	for _, path := range unreadable {
+		info, statErr := a.fs.Stat(path.String())
+		if statErr != nil {
+			return nil, fmt.Errorf("ingest: the structural coordinate list for %s cannot be parsed and the transcript cannot be read again (%v); where: ingest.ClaudeAdapter.attachClaudeIdentityChains in internal/ingest/claude.go; when: recovering an unreadable identity chain; impact: no member was built and nothing was written; fix: restore the transcript or delete the cached evidence row and retry: %w", path, statErr, statErr)
+		}
+		record, cacheable := a.mineClaudeRootTranscript(path, info)
+		if !cacheable {
+			return nil, fmt.Errorf("ingest: the structural coordinate list for %s cannot be parsed and the transcript produced no replacement; where: ingest.ClaudeAdapter.attachClaudeIdentityChains in internal/ingest/claude.go; when: recovering an unreadable identity chain; impact: no member was built and nothing was written; fix: restore the transcript and retry", path)
+		}
+		evidence[path] = record
+		remined = append(remined, record)
+	}
+	for path, chain := range loaded {
+		record := evidence[path]
+		record.Chain = chain
+		evidence[path] = record
+	}
+	for _, path := range paths {
+		record := evidence[path]
+		if record.Chain == nil && record.Records == nil {
+			record.Chain = []ClaudeIdentityChainLink{}
+			evidence[path] = record
+		}
+	}
+	return remined, nil
+}
+
+// claudeHistoryLinkChainPaths names the owner and layout-parent transcripts a
+// lineage proof will read and whose coordinate list is not already in memory.
+func claudeHistoryLinkChainPaths(sessions []DiscoveredSession, evidence map[ResolvedPath]ClaudeTranscriptEvidence) []ResolvedPath {
+	byID := make(map[SessionID]int, len(sessions))
+	for i := range sessions {
+		byID[sessions[i].SessionID] = i
+	}
+	needed := make(map[ResolvedPath]struct{})
+	for i := range sessions {
+		child := sessions[i]
+		proof := evidence[child.SourcePath]
+		if !proof.NativeAgentValid || child.SessionID.String() != defaults.ClaudeSubagentPrefix+proof.NativeAgentID {
+			continue
+		}
+		owner, ok := claudeRecordOwner(proof)
+		ownerIndex, exists := byID[owner]
+		if !ok || !exists || owner == child.SessionID {
+			continue
+		}
+		if sessions[ownerIndex].SourcePath != claudeSourcePath(child.SourcePath, owner) {
+			continue
+		}
+		if child.ParentUUID == nil || *child.ParentUUID == owner {
+			continue
+		}
+		ownerEvidence := evidence[sessions[ownerIndex].SourcePath]
+		if claudeNativeSpawn(ownerEvidence.identitySpawnAgentIDs(), proof.NativeAgentID) {
+			continue
+		}
+		layoutIndex, known := byID[*child.ParentUUID]
+		if !known {
+			continue
+		}
+		for _, path := range []ResolvedPath{sessions[layoutIndex].SourcePath, sessions[ownerIndex].SourcePath} {
+			record := evidence[path]
+			if record.Chain == nil && record.Records == nil {
+				needed[path] = struct{}{}
+			}
+		}
+	}
+	paths := make([]ResolvedPath, 0, len(needed))
+	for path := range needed {
+		paths = append(paths, path)
+	}
+	sort.Slice(paths, func(i, j int) bool { return paths[i] < paths[j] })
+	return paths
 }
 
 // claudeContextSession is the in-memory session a context source contributes to

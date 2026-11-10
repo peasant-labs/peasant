@@ -1,0 +1,56 @@
+# Compact identity facts derived from a stored per-line skeleton. The migration
+# must match the mine-time derivation, mark a skeleton it cannot parse for
+# re-mining, and leave a subagent chain empty.
+requiredNames:
+  - root-with-repeated-link
+  - subagent-keeps-no-chain
+  - legacy-agent-proof
+  - contradictory-sidechain
+  - unparseable-skeleton
+  - null-skeleton
+
+rows:
+  - name: root-with-repeated-link
+    scope: root
+    proofVersion: 4
+    nativeAgentId: ""
+    records:
+      - {sessionId: "22222222-2222-4222-8222-222222222222", uuid: o1, parentUuid: f1, type: user, subtype: ""}
+      - {sessionId: "11111111-1111-4111-8111-111111111111", uuid: f1, parentUuid: "", type: user, subtype: ""}
+      - {sessionId: "22222222-2222-4222-8222-222222222222", uuid: o1, parentUuid: f1, type: user, subtype: ""}
+      - {sessionId: "11111111-1111-4111-8111-111111111111", uuid: spawn, parentUuid: f1, type: user, subtype: "", spawnAgentId: abc123}
+    wantChain: true
+  - name: subagent-keeps-no-chain
+    scope: subagent
+    proofVersion: 4
+    nativeAgentId: abc123
+    nativeAgentValid: true
+    records:
+      - {sessionId: "11111111-1111-4111-8111-111111111111", uuid: agent-record, parentUuid: "", type: assistant, subtype: "", agentId: abc123, isSidechain: true}
+    wantChain: false
+  - name: legacy-agent-proof
+    scope: subagent
+    proofVersion: 4
+    nativeAgentId: abc123
+    records:
+      - {sessionId: "11111111-1111-4111-8111-111111111111", uuid: legacy, parentUuid: "", type: assistant, subtype: "", agentId: abc123}
+    wantChain: false
+    wantLegacy: true
+  - name: contradictory-sidechain
+    scope: subagent
+    proofVersion: 4
+    nativeAgentId: abc123
+    records:
+      - {sessionId: "11111111-1111-4111-8111-111111111111", uuid: main, parentUuid: "", type: assistant, subtype: "", agentId: abc123, isSidechain: false}
+    wantChain: false
+    wantContradictory: true
+  - name: unparseable-skeleton
+    scope: root
+    proofVersion: 4
+    recordsJSON: '[{"uuid":"missing-session"}]'
+    wantProofVersion: 0
+  - name: null-skeleton
+    scope: root
+    proofVersion: 4
+    recordsJSON: 'null'
+    wantProofVersion: 0

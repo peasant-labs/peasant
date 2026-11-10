@@ -11,6 +11,8 @@
 # cohort report; `wantProcessed` is the set DIFF through INDEX may work on;
 # `wantMisses` is the exact refusal.
 requiredNames:
+  - all-reconciles-real-partial-walk
+  - all-prunes-deleted-rollout
   - stored-pair-reconstructs-without-walking
   - stored-child-pair-reconstructs-without-walking
   - unstored-pair-found-by-host-probe
@@ -22,10 +24,10 @@ requiredNames:
   - related-exclude-keeps-only-the-selected
   - session-outside-since-is-a-miss
   - all-rebuilds-derived-lookups
-  - all-refuses-a-partial-codex-walk
+  - all-reconciles-a-partial-codex-walk
   - all-without-a-codex-source-keeps-the-catalog
   - all-with-a-disabled-codex-entry-keeps-the-catalog
-  - all-refuses-when-codex-is-enabled-without-an-adapter
+  - all-keeps-catalog-when-codex-has-no-adapter
 cases:
   - name: stored-pair-reconstructs-without-walking
     pairs:
@@ -279,9 +281,8 @@ cases:
       - "/codex/2024/02/20/rollout-2024-02-20T01-00-00-77777777-7777-4777-8777-777777777777.jsonl=77777777-7777-4777-8777-777777777777"
 
   # A walk that could not read part of the tree reports a partial enumeration.
-  # Replacing the catalog with it would delete the row for every rollout it did
-  # not see, so the run refuses and the table keeps exactly what it held.
-  - name: all-refuses-a-partial-codex-walk
+  # The rebuild keeps the rows the walk did not see.
+  - name: all-reconciles-a-partial-codex-walk
     pairs:
       - session: "11111111-1111-4111-8111-111111111111"
         host: "github.com--testuser--testrepo"
@@ -296,6 +297,8 @@ cases:
       - session: "55555555-5555-4555-8555-555555555555"
         path: "/codex/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl"
     codexEnumeration: partial
+    wantRebuildCatalog:
+      - "/codex/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl=55555555-5555-4555-8555-555555555555"
     seedCatalog:
       - session: "55555555-5555-4555-8555-555555555555"
         path: "/codex/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl"
@@ -303,7 +306,6 @@ cases:
       # on disk, so its duplicate answer must survive the refused rebuild.
       - session: "66666666-6666-4666-8666-666666666666"
         path: "/codex/2024/02/20/rollout-2024-02-20T00-00-00-66666666-6666-4666-8666-666666666666.jsonl"
-    wantRunErrorContains: "did not enumerate every Codex rollout completely"
     wantCatalogAfter:
       - "/codex/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl=55555555-5555-4555-8555-555555555555"
       - "/codex/2024/02/20/rollout-2024-02-20T00-00-00-66666666-6666-4666-8666-666666666666.jsonl=66666666-6666-4666-8666-666666666666"
@@ -352,8 +354,8 @@ cases:
       - "/codex/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl=88888888-8888-4888-8888-888888888888"
 
   # An enabled Codex source the run has no adapter for cannot be enumerated at
-  # all, so `--all` cannot rebuild the catalog from it and refuses.
-  - name: all-refuses-when-codex-is-enabled-without-an-adapter
+  # all, so `--all` retains the catalog.
+  - name: all-keeps-catalog-when-codex-has-no-adapter
     pairs:
       - session: "11111111-1111-4111-8111-111111111111"
         host: "github.com--testuser--testrepo"
@@ -368,6 +370,69 @@ cases:
     seedCatalog:
       - session: "88888888-8888-4888-8888-888888888888"
         path: "/codex/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl"
-    wantRunErrorContains: "did not enumerate every Codex rollout completely"
     wantCatalogAfter:
       - "/codex/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl=88888888-8888-4888-8888-888888888888"
+
+  - name: all-reconciles-real-partial-walk
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+      - session: "22222222-2222-4222-8222-222222222222"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    force: true
+    rebuildAll: true
+    realCodex: true
+    codexRoots: ["/good", "/bad"]
+    unreadableDirs: ["/bad"]
+    codexEnumeration: partial
+    codexSources:
+      - session: "55555555-5555-4555-8555-555555555555"
+        path: "/good/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl"
+      - session: "66666666-6666-4666-8666-666666666666"
+        path: "/bad/2024/02/19/rollout-2024-02-19T00-00-00-66666666-6666-4666-8666-666666666666.jsonl"
+    seedCatalog:
+      - session: "99999999-9999-4999-8999-999999999999"
+        path: "/good/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl"
+      - session: "77777777-7777-4777-8777-777777777777"
+        path: "/bad/2024/02/19/rollout-2024-02-19T00-00-00-77777777-7777-4777-8777-777777777777.jsonl"
+      - session: "88888888-8888-4888-8888-888888888888"
+        path: "/outside/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl"
+    wantRebuildCatalog:
+      - "/good/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl=55555555-5555-4555-8555-555555555555"
+    wantCatalogAfter:
+      - "/good/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl=55555555-5555-4555-8555-555555555555"
+      - "/bad/2024/02/19/rollout-2024-02-19T00-00-00-77777777-7777-4777-8777-777777777777.jsonl=77777777-7777-4777-8777-777777777777"
+      - "/outside/2024/02/19/rollout-2024-02-19T00-00-00-88888888-8888-4888-8888-888888888888.jsonl=88888888-8888-4888-8888-888888888888"
+
+  - name: all-prunes-deleted-rollout
+    pairs:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    stored:
+      - session: "11111111-1111-4111-8111-111111111111"
+        host: "github.com--testuser--testrepo"
+        parent: ""
+    force: true
+    rebuildAll: true
+    realCodex: true
+    codexRoots: ["/good"]
+    codexSources:
+      - session: "55555555-5555-4555-8555-555555555555"
+        path: "/good/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl"
+    seedCatalog:
+      - session: "77777777-7777-4777-8777-777777777777"
+        path: "/good/2024/02/19/rollout-2024-02-19T00-00-00-77777777-7777-4777-8777-777777777777.jsonl"
+    wantRebuildCatalog:
+      - "/good/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl=55555555-5555-4555-8555-555555555555"
+    wantCatalogAfter:
+      - "/good/2024/02/19/rollout-2024-02-19T00-00-00-55555555-5555-4555-8555-555555555555.jsonl=55555555-5555-4555-8555-555555555555"

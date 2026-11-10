@@ -75,6 +75,7 @@ slots:
   - {name: v69-source-unavailability-cause, slot: 69, needle: "original-source-present-record-unusable"}
   - {name: v70-parent-state, slot: 70, needle: "parent_state TEXT NOT NULL DEFAULT 'root'"}
   - {name: v71-derived-lookups, slot: 71, needle: "CREATE TABLE claude_teammate_spawns ("}
+  - {name: v72-compact-identity-facts, slot: 72, needle: "ADD COLUMN identity_session_ids_json TEXT"}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot

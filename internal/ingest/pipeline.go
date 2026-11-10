@@ -242,6 +242,11 @@ type PipelineConfig struct {
 	// means the full run. Build it with NewSessionScope; a scope with no ids or
 	// an unset policy is refused at the start of Run.
 	Scope *SessionScope
+	// RefreshCommits asks a scoped run to detect commits for an unchanged
+	// named session and write only those rows. It does not re-extract or
+	// re-index. Off by default, so a plain scoped harvest leaves an unchanged
+	// session untouched, including emitting no detector warning.
+	RefreshCommits bool
 	// Command is the words the user typed that entered this run: "harvest",
 	// "harvest index", or "harvest logs". `open` sets "harvest", because it
 	// re-enters harvest. It exists only to render a scope miss in the words the
@@ -626,9 +631,10 @@ func WithIndexLogger(l IndexLogger) PipelineOption {
 }
 
 // WithGitDiffAnalyzer injects a GitDiffAnalyzer for commit detection.
-// When set, each processed session runs timestamp-based commit detection
-// to populate GitContext.Commits in metadata and the session_commits table.
-// Detection errors are non-fatal: warnings are appended to metadata.Diagnostics.Warnings.
+// When set, extraction runs timestamp-based commit detection. A scoped run
+// refreshes detection for an unchanged session only when RefreshCommits is
+// set, and then without extracting or indexing it. Detection errors are
+// non-fatal: warnings are recorded and the run continues.
 func WithGitDiffAnalyzer(a GitDiffAnalyzer) PipelineOption {
 	return func(p *Pipeline) { p.gitAnalyzer = a }
 }
@@ -992,6 +998,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// Track which root sessions passed the selection filter so subagents
 	// can inherit their parent's fate (rejected parent → rejected children).
 	filterPassedParents := make(map[SessionID]bool)
+	// Unchanged sessions a scoped run may refresh commits for. Collected here
+	// and applied after repair selection, so a session that will be extracted
+	// is not detected twice.
+	var unchangedCommitRefresh []DiffEntry
 
 	for _, entry := range diffResult.Sessions {
 		advanceFilter := func() {
@@ -1098,6 +1108,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				ParentUUID: entry.Session.ParentUUID,
 				Status:     DiffUnchanged,
 			})
+			if p.refreshesUnchangedCommits() {
+				unchangedCommitRefresh = append(unchangedCommitRefresh, entry)
+			}
 		case DiffActive:
 			recordDryRun(entry, DiffActive)
 			// Activity is diagnostic only; capture a finite source view by default.
@@ -1127,6 +1140,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		}
 	}
 	sessionResults = keptResults
+	// A scoped run asked to refresh commits does so for sessions that stay
+	// unchanged. A plain scoped harvest, a full harvest, and a dry run do
+	// not. The refresh writes commit rows only: no extraction, no index
+	// rewrite, no transcript write.
+	p.refreshUnchangedCommits(ctx, unchangedCommitRefresh, maintenanceQueued)
 	keptDryRun := dryRunSessions[:0]
 	for _, result := range dryRunSessions {
 		if !maintenanceQueued[result.SessionID] {
@@ -3555,6 +3573,14 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		if result.Status == DiffUnchanged {
 			// Drain commits the parent and acknowledges the empty arena slot,
 			// without inserting, rewriting metadata, or scheduling indexing.
+			// A scoped run still refreshes commit detection from the capture
+			// already in hand. The write is serialized with the other store
+			// writes; the capture itself is not written out.
+			if p.refreshesUnchangedCommits() {
+				// Detect outside the write lane. Only the projection write,
+				// if the commits changed, needs the lane.
+				p.refreshCapturedUnchangedCommit(ctx, session, captured.Data, writeLane)
+			}
 			return workerResult{result: result}
 		}
 	}
@@ -5317,14 +5343,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Reuse canonical discovery facts (notably Cursor workspace and SQLite
 	// source kind) instead of reconstructing them from a managed sidecar.
 	sourceSessions := make(map[SessionID]DiscoveredSession)
-	// A `harvest index --all` rebuild replaces the derived lookup tables, and
-	// the Codex rollout catalog can only be replaced from the enumeration the
-	// Codex walk reports: a discovered session list is not that set, because a
-	// rollout that never became a session is still a catalog row, and a walk
-	// that could not read part of the tree reports fewer paths than exist. A
-	// run with no Codex source — or with one whose roots all failed to resolve —
-	// reports NotWalked, which leaves the catalog as it is; a partial walk is
-	// refused by the rebuild.
+	// The rebuild reconciles the rollout catalog from discovery while retaining
+	// rows that no complete root walk can establish as absent.
 	rolloutEnumeration := RolloutEnumeration{Status: RolloutEnumerationNotWalked}
 	for harness, config := range p.config.Sources {
 		if !config.Enabled {
@@ -5348,8 +5368,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		// facts, so it must attach the same writer: otherwise a database that
 		// is only ever maintained through `harvest index` never gains the
 		// catalog, and the stored-id duplicate lookup that reads it stays
-		// blind. A `--all` rebuild replaces the catalog from this walk's own
-		// enumeration below, so the walk does not write it first.
+		// blind. The rebuild reconciles the catalog itself, so it does not
+		// attach the maintenance writer.
 		if catalog, ok := p.store.(CodexRolloutCatalogStore); ok && !p.config.DryRun && !p.config.RebuildAll {
 			AttachCodexRolloutCatalog(adapter, catalog)
 		}

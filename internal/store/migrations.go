@@ -280,6 +280,7 @@ var migrationV24 = createSessionCommands + ";\n" +
 // partial teammate-identity index, the claude_teammate_spawns projection with
 // its backfill, and the codex_rollout_catalog file catalog. Create-only and
 // additive; no table is rebuilt. See schema_v71.go.
+// migrationV72 compacts Claude identity facts. See schema_v72.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -355,6 +356,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV69,
 		migrationV70,
 		migrationV71,
+		migrationV72,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -420,5 +422,6 @@ var dbSchema = sqlitemigration.Schema{
 		{DisableForeignKeys: true}, // V69: rebuild session_source_unavailability for the widened reason CHECK
 		nil,                        // V70: parent lane, store revision, page indexes, and backfill (additive, no FK)
 		nil,                        // V71: derived lookup tables (create-only, additive, no data rewrite beyond the spawns backfill)
+		nil,                        // V72: compact Claude identity facts
 	},
 }
