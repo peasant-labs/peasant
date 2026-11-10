@@ -1,0 +1,52 @@
+# Every field and option writes, reads back, and lands at its document path.
+# Selection is one mapping. Empty license is not the sentinel label. Retention
+# never enters config.yaml.
+requiredNames:
+  - transcripts
+  - auto-ingest-new-branches
+  - publication-preference
+  - publish-automatically
+  - redaction-level
+  - content-license
+  - default-visibility
+  - claude-retention-days
+  - selection-as-one-mapping
+  - license-none
+  - retention-never-transient
+fields:
+  - key: transcripts
+    path: [selection]
+    destination: config
+    selection: true
+  - key: auto-ingest-new-branches
+    path: [selection, autoIngestNewBranches]
+    destination: config
+    bools: [true, false]
+  - key: publication-preference
+    path: [push, sharePreference]
+    destination: config
+    options: ["", share-later]
+  - key: publish-automatically
+    path: [push, autoPublishIntent]
+    destination: config
+    options: ["true", "false"]
+  - key: redaction-level
+    path: [redaction, level]
+    destination: config
+    options: [standard]
+  - key: content-license
+    path: [push, license]
+    destination: config
+    options: ["", CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0]
+  - key: default-visibility
+    path: [push, visibility]
+    destination: config
+    options: [private, group, public]
+  - key: claude-retention-days
+    destination: claude-settings
+    options: ["30", "90", "365", "99999"]
+    neverInDocument: true
+cases:
+  - name: selection-as-one-mapping
+  - name: license-none
+  - name: retention-never-transient
