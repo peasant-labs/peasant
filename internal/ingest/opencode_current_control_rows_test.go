@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -27,6 +28,8 @@ type currentControlRowsCase struct {
 	ExpectedObservedModel       string                      `yaml:"expected_observed_model"`
 	ExpectedToolName            string                      `yaml:"expected_tool_name"`
 	ExpectedKnownMarkers        []string                    `yaml:"expected_known_markers"`
+	ExpectedIgnoredControlTypes []string                    `yaml:"expected_ignored_control_types"`
+	ExpectedContentOmitted      bool                        `yaml:"expected_content_omitted"`
 	ExpectedSkippedControlTypes []skippedControlExpectation `yaml:"expected_skipped_control_types"`
 }
 
@@ -57,7 +60,7 @@ func loadCurrentControlRowsDocument(data []byte) (currentControlRowsDocument, er
 	}
 	seen := make(map[string]struct{}, len(document.Cases))
 	for _, testCase := range document.Cases {
-		if testCase.Name == "" || testCase.SourceFixture == "" || testCase.SessionID == "" || testCase.ExpectedObservedModel == "" {
+		if testCase.Name == "" || testCase.SourceFixture == "" || testCase.SessionID == "" {
 			return document, errors.New("current control rows fixture has an incomplete required row")
 		}
 		if _, duplicate := seen[testCase.Name]; duplicate {
@@ -68,23 +71,32 @@ func loadCurrentControlRowsDocument(data []byte) (currentControlRowsDocument, er
 	return document, nil
 }
 
-// TestOpenCodeCurrentControlRowsTolerated proves that a current session whose
-// session_message rows include control records no longer fails with "upstream
-// message id is required". The user, assistant, and tool rows materialize; the
-// model switch lands as a model observation on the following assistant turn,
-// which had no model of its own; and an id-less unknown control row is skipped
-// and named by one diagnostic per type.
+// TestOpenCodeCurrentControlRowsTolerated proves that every control row this
+// build interprets is accounted for without failing the session: a model switch
+// lands as a model observation on the following assistant turn, an agent switch
+// renders as inert context, a clean or interrupted idle marker is skipped with
+// no diagnostic, a failed idle marker keeps its failure text, an id-less
+// unknown control row is skipped and named once per type, and the user,
+// assistant and tool rows still materialize.
 //
-// Mutation proof: restoring the upstream-id requirement for control rows
-// (requiring the "id" field) makes
-// MaterializeTranscript fail with "upstream message id is required", so this
-// case can no longer materialize and it goes red.
+// Mutation proof: removing an arm from the current-row dispatch sends that kind
+// down the unknown-control path, so its case goes red by name. Dropping the
+// failed-idle arm into the skip path removes the failure text, and the case that
+// requires it goes red.
 func TestOpenCodeCurrentControlRowsTolerated(t *testing.T) {
 	document, err := loadCurrentControlRowsDocument(currentControlRowsYAML)
 	if err != nil {
 		t.Fatalf("load current control rows expectations: %v", err)
 	}
-	testCase := document.Cases[0]
+	for _, testCase := range document.Cases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			runCurrentControlRowsCase(t, testCase)
+		})
+	}
+}
+
+func runCurrentControlRowsCase(t *testing.T, testCase currentControlRowsCase) {
+	t.Helper()
 	materialized := testfixture.MaterializeByName(t, testCase.SourceFixture)
 	root, err := ingest.NewResolvedPath(filepath.Dir(materialized.Path))
 	if err != nil {
@@ -117,6 +129,16 @@ func TestOpenCodeCurrentControlRowsTolerated(t *testing.T) {
 		t.Fatalf("materialize current session with control rows: %v", err)
 	}
 
+	var projection struct {
+		ContentOmitted bool `json:"content_omitted"`
+	}
+	if err := json.Unmarshal(data, &projection); err != nil {
+		t.Fatalf("decode materialized projection: %v", err)
+	}
+	if projection.ContentOmitted != testCase.ExpectedContentOmitted {
+		t.Errorf("projection content_omitted = %v, want %v", projection.ContentOmitted, testCase.ExpectedContentOmitted)
+	}
+
 	byType := make(map[string]int)
 	for _, warning := range metadata.Diagnostics.Warnings {
 		if warning.ErrorType != string(ingest.ContentCaptureUnknownDataRetained) {
@@ -134,6 +156,19 @@ func TestOpenCodeCurrentControlRowsTolerated(t *testing.T) {
 	for _, expected := range testCase.ExpectedSkippedControlTypes {
 		if byType[expected.Type] != 1 {
 			t.Errorf("expected exactly one diagnostic naming skipped control type %q, got %d", expected.Type, byType[expected.Type])
+		}
+	}
+	ignoredNamed := make(map[string]int)
+	for _, warning := range metadata.Diagnostics.Warnings {
+		for _, ignored := range testCase.ExpectedIgnoredControlTypes {
+			if strings.Contains(warning.Message, "\""+ignored+"\"") {
+				ignoredNamed[ignored]++
+			}
+		}
+	}
+	for _, ignored := range testCase.ExpectedIgnoredControlTypes {
+		if ignoredNamed[ignored] != 0 {
+			t.Errorf("interpreted control type %q was reported as uninterpreted retained evidence", ignored)
 		}
 	}
 
@@ -167,10 +202,32 @@ func TestOpenCodeCurrentControlRowsTolerated(t *testing.T) {
 			t.Errorf("rendered turns omit known marker %q", marker)
 		}
 	}
-	if !toolSeen {
+	if testCase.ExpectedToolName != "" && !toolSeen {
 		t.Errorf("rendered turns omit the assistant tool call %q", testCase.ExpectedToolName)
 	}
-	if !observedOnAssistant {
+	if testCase.ExpectedObservedModel != "" && !observedOnAssistant {
 		t.Errorf("model switch did not land as observation %q on the following assistant turn", testCase.ExpectedObservedModel)
 	}
+}
+
+// TestOpenCodeCurrentIdleMarkerTolerated proves that an interpreted idle
+// marker is skipped without being reported as uninterpreted retained evidence,
+// while the surrounding conversation still materializes.
+//
+// Mutation proof: removing the "idle" arm from the current-row dispatch sends
+// the marker down the unknown-control path, which reports it as retained
+// evidence and makes this case go red by name.
+func TestOpenCodeCurrentIdleMarkerTolerated(t *testing.T) {
+	document, err := loadCurrentControlRowsDocument(currentControlRowsYAML)
+	if err != nil {
+		t.Fatalf("load current control rows expectations: %v", err)
+	}
+	for _, testCase := range document.Cases {
+		if testCase.Name != "idle-marker-tolerated-without-omission" {
+			continue
+		}
+		runCurrentControlRowsCase(t, testCase)
+		return
+	}
+	t.Fatal("fixture has no idle-marker case")
 }

@@ -62,7 +62,7 @@ current_variants:
 expected_current_identities: [reason_variant, pending_tool, running_tool, completed_tool, error_tool, shell_call]
 expected_current_projection_identities: [text_variant]
 
-declared_negative_cases: 11
+declared_negative_cases: 14
 negative_cases:
   - {name: reject-unknown-row-type, rows: [{id: msg_unknown, row_type: unknown, data: '{}'}], retained_unknown: 1}
   - {name: reject-conflicting-pairing-spellings, rows: [{id: msg_pairing, row_type: user, data: '{"messageID":"msg_pairing","message_id":"msg_other","text":"request","time":{"created":3000}}'}], error_contains: messageID}
@@ -74,6 +74,9 @@ negative_cases:
   - {name: reject-tool-content-cross-kind-collision, rows: [{id: msg_tool_collision, row_type: assistant, data: '{"id":"msg_tool_collision","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"reasoning","id":"collision_part","text":"reason"},{"type":"tool","id":"collision_part","name":"read","state":{"status":"pending","input":"value"},"time":{"created":3001}}],"time":{"created":3000}}'}], error_contains: already registered}
   - {name: reject-unknown-assistant-content, rows: [{id: msg_unknown_content, row_type: assistant, data: '{"id":"msg_unknown_content","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"unknown","id":"unknown_part"}],"time":{"created":3000}}'}], retained_unknown: 1}
   - {name: reject-unknown-tool-state, rows: [{id: msg_unknown_state, row_type: assistant, data: '{"id":"msg_unknown_state","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"unknown_state_tool","name":"read","state":{"status":"future","input":{}},"time":{"created":3001}}],"time":{"created":3000}}'}], error_contains: status}
+  - {name: reject-failed-idle-without-error, rows: [{id: msg_idle_no_error, row_type: idle, data: '{"time":{"created":3000},"outcome":"failed"}'}], error_contains: without its structured error}
+  - {name: reject-failed-idle-with-empty-error, rows: [{id: msg_idle_empty_error, row_type: idle, data: '{"time":{"created":3000},"outcome":"failed","error":{"type":"","message":""}}'}], error_contains: neither a message nor a type}
+  - {name: reject-idle-unknown-outcome, rows: [{id: msg_idle_unknown_outcome, row_type: idle, data: '{"time":{"created":3000},"outcome":"abandoned"}'}], error_contains: outside the pinned}
   - {name: reject-malformed-tool-state-input, rows: [{id: msg_bad_state, row_type: assistant, data: '{"id":"msg_bad_state","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"bad_state_tool","name":"read","state":{"status":"completed","input":"not-object","content":[],"structured":{}},"time":{"created":3001}}],"time":{"created":3000}}'}], error_contains: requires object input}
 
 declared_loader_mutations: 4

@@ -50,6 +50,7 @@ var openCodeVocabulary = recordKindAdapterVocabulary{
 				recordKindLiteral("compaction", indexformat.OutcomeText),
 				recordKindLiteral("agent-switched", indexformat.OutcomeText),
 				recordKindLiteral("model-switched", indexformat.OutcomeText),
+				recordKindLiteral("idle", indexformat.OutcomeText),
 			},
 			Production: func() recordKindProductionSet {
 				return recordKindProductionLiterals(knownOpenCodeCurrentRowKinds())
@@ -88,6 +89,7 @@ var openCodeVocabulary = recordKindAdapterVocabulary{
 				recordKindLiteral("compaction", indexformat.OutcomeText),
 				recordKindLiteral("agent-switched", indexformat.OutcomeText),
 				recordKindLiteral("model-switched", indexformat.OutcomeText),
+				recordKindLiteral("idle", indexformat.OutcomeText),
 			},
 			Production: func() recordKindProductionSet {
 				return recordKindProductionLiterals(knownOpenCodeCurrentRowKinds())

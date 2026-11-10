@@ -550,10 +550,10 @@ harnesses:
           - {<<: *text, kind: network_proxy.rule_saved}
           - {<<: *text, kind: user_verification.notice}
   opencode:
-    adapter_version: 3
+    adapter_version: 4
     indexer_version: 18
     index_version: 1
-    native_versions: {adapter_version: 4, indexer_version: 19, index_version: 2}
+    native_versions: {adapter_version: 5, indexer_version: 19, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no
@@ -594,6 +594,7 @@ harnesses:
           - {<<: *text, kind: compaction}
           - {<<: *text, kind: agent-switched}
           - {<<: *text, kind: model-switched}
+          - {<<: *text, kind: idle}
       - context: retained-format-1
         namespace: assistant_content
         sources:
@@ -618,6 +619,7 @@ harnesses:
           - {<<: *text, kind: compaction}
           - {<<: *text, kind: agent-switched}
           - {<<: *text, kind: model-switched}
+          - {<<: *text, kind: idle}
       - context: native-generation
         namespace: assistant_content
         sources:

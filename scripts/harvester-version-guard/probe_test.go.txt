@@ -338,7 +338,12 @@ func TestHarvesterGuardCapture(t *testing.T) {
 	}
 	// Reuse native SQLite shapes from the existing materialization corpus.
 	// The runner installs the same test-only builder and YAML for both revisions.
-	nativeNames := map[string]bool{"legacy-message-part": true, "current-session-message": true}
+	nativeNames := map[string]bool{
+		"legacy-message-part": true, "current-session-message": true,
+		// A failed idle marker is the one settle that carries transcript text,
+		// so the old parser must be shown that shape too.
+		"current-idle-failure-tolerated": true, "current-idle-type-only-failure": true,
+	}
 	var native struct {
 		Cases []struct {
 			SourceFixture string `yaml:"source_fixture"`

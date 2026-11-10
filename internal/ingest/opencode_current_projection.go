@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -29,6 +30,9 @@ type openCodeCurrentProjection struct {
 // The historical shapes follow upstream 4643e65ad6334de3e4e68dedc201d5fbb828c9fe.
 // Native identity and assistant timing compatibility follows the V2 schema at
 // 52685d451777fbccc99736ab31ffc37de8475a45 (packages/schema/src/session-message.ts).
+// The idle marker shape (outcome plus an optional structured error) follows
+// 2816d1c849, where packages/schema/src/session-message.ts defines
+// Session.Message.Idle; the earlier V2 pin has no idle variant.
 // The projector stores type and id in columns and the remaining fields in data.
 // Redundant payload identities are accepted only when they agree with the columns.
 type openCodeCurrentBase struct {
@@ -220,6 +224,20 @@ type openCodeCurrentModelSwitched struct {
 	Previous *openCodeCurrentModel `json:"previous,omitempty"`
 }
 
+type openCodeCurrentIdle struct {
+	openCodeCurrentBase
+	Outcome string                  `json:"outcome"`
+	Error   *openCodeCurrentFailure `json:"error,omitempty"`
+}
+
+// openCodeCurrentFailure is the pinned structured error an idle row carries when
+// a turn fails.
+type openCodeCurrentFailure struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+	Status  int    `json:"status,omitempty"`
+}
+
 type openCodeCurrentIdentityRegistry struct {
 	kinds map[string]string
 }
@@ -239,6 +257,12 @@ func (registry *openCodeCurrentIdentityRegistry) add(id, kind string) error {
 // upstream id and a type outside the known set, so it is a newer control record
 // the caller skips and counts rather than a fatal decode failure.
 var errOpenCodeSkipControlRow = errors.New("skip newer OpenCode control row")
+
+// errOpenCodeIgnoredControlRow signals an entryless control row of a kind this
+// build interprets. It contributes no transcript content, so the caller skips
+// it without marking the projection partial: an interpreted marker is accounted
+// for, not omitted.
+var errOpenCodeIgnoredControlRow = errors.New("ignore interpreted OpenCode control row")
 
 // Native objects may add fields; managed projection envelopes use their separate
 // strict whitelist decoder. Known field types and variant invariants stay checked.
@@ -472,6 +496,10 @@ rowLoop:
 				// A newer id-less control record: keep the session, drop the row,
 				// and count its type for one diagnostic per type.
 				unknownControlTypes[row.Type.String()]++
+				continue
+			}
+			if errors.Is(err, errOpenCodeIgnoredControlRow) {
+				// An interpreted entryless marker: nothing to show, nothing lost.
 				continue
 			}
 			if err != nil {
@@ -829,6 +857,28 @@ func normalizeOpenCodeCurrentRowWithTraversal(row OpenCodeCurrentMessageRow, reg
 		if err := appendPart("", value.Time.Created, map[string]any{"type": "subtask", "name": value.Model.ID, "text": value.Model.ID}); err != nil {
 			return message, err
 		}
+	case "idle":
+		// An idle row records how a turn settled. A clean or interrupted settle is
+		// an entryless marker. A failed settle carries the failure text, which is
+		// often the only durable record of it, so it becomes a system entry
+		// instead of being dropped.
+		var value openCodeCurrentIdle
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return message, err
+		}
+		if err := requireOpenCodeCurrentFields(data, "time", "outcome"); err != nil {
+			return message, err
+		}
+		idleText, ignored, err := openCodeIdleDisposition(value.Outcome, value.Error)
+		if err != nil {
+			return message, err
+		}
+		if ignored {
+			return message, errOpenCodeIgnoredControlRow
+		}
+		if err := messageData(RoleSystem.String(), idleText, "", "", "", value.Metadata, value.Time, nil); err != nil {
+			return message, err
+		}
 	default:
 		// A well-formed row that carries no upstream id but is control-shaped (it
 		// has a time) is a newer control record: skip it and let the caller count
@@ -993,4 +1043,30 @@ func validateOpenCodeCurrentContentIdentity(raw json.RawMessage, id string) erro
 		return errors.New("assistant content explicit id is empty")
 	}
 	return nil
+}
+
+// openCodeIdleDisposition decides what an idle row contributes. A settled or
+// interrupted turn contributes nothing, because its own marker carries no
+// conversation text. A failed turn contributes its failure text: the structured
+// error is the only durable record when the assistant row did not keep one.
+// An outcome outside the pinned set is malformed known data, so it fails.
+func openCodeIdleDisposition(outcome string, failure *openCodeCurrentFailure) (text string, ignored bool, err error) {
+	switch outcome {
+	case "succeeded", "interrupted":
+		return "", true, nil
+	case "failed":
+		if failure == nil {
+			return "", false, fmt.Errorf("idle row reports a failed outcome without its structured error; restore the source row and retry")
+		}
+		text = strings.TrimSpace(failure.Message)
+		if text == "" {
+			text = strings.TrimSpace(failure.Type)
+		}
+		if text == "" {
+			return "", false, fmt.Errorf("idle row reports a failed outcome whose structured error names neither a message nor a type; restore the source row and retry")
+		}
+		return text, false, nil
+	default:
+		return "", false, fmt.Errorf("idle outcome %q is outside the pinned succeeded, failed or interrupted set; verify the source row and retry", outcome)
+	}
 }
