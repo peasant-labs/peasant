@@ -160,6 +160,7 @@ func collectServedTextFields(detail *schema.SessionDetailPayload) []servedTextFi
 	for turnIndex := range detail.Turns {
 		turn := &detail.Turns[turnIndex]
 		fields = append(fields, servedTextField{target: &turn.Content, original: turn.Content, kind: ServedTextTurnContent})
+		fields = append(fields, textPartFields(turn)...)
 		for callIndex := range turn.ToolCalls {
 			call := &turn.ToolCalls[callIndex]
 			fields = append(fields, servedTextField{target: &call.Arguments, original: call.Arguments, kind: ServedTextToolArguments})
@@ -171,6 +172,7 @@ func collectServedTextFields(detail *schema.SessionDetailPayload) []servedTextFi
 		for turnIndex := range section.Turns {
 			turn := &section.Turns[turnIndex]
 			fields = append(fields, servedTextField{target: &turn.Content, original: turn.Content, kind: ServedTextTurnContent})
+			fields = append(fields, textPartFields(turn)...)
 			for callIndex := range turn.ToolCalls {
 				call := &turn.ToolCalls[callIndex]
 				fields = append(fields, servedTextField{target: &call.Arguments, original: call.Arguments, kind: ServedTextToolArguments})
@@ -182,6 +184,46 @@ func collectServedTextFields(detail *schema.SessionDetailPayload) []servedTextFi
 		fields[index].encoded = jsonEncodedStringLen(fields[index].original)
 	}
 	return fields
+}
+
+func textPartFields(turn *schema.TurnDetail) []servedTextField {
+	fields := make([]servedTextField, 0, len(turn.ContentParts))
+	for i := range turn.ContentParts {
+		part := &turn.ContentParts[i]
+		if part.Type != schema.TurnPartTypeText {
+			continue
+		}
+		fields = append(fields, servedTextField{target: &part.Text, original: part.Text, kind: ServedTextTurnContent})
+	}
+	return fields
+}
+
+// ImagePartBaseBytes is the encoded size of the image parts in detail. BoundServedDetail
+// counts this base in the document size and does not treat image bytes as served text.
+func ImagePartBaseBytes(detail *schema.SessionDetailPayload) int {
+	if detail == nil {
+		return 0
+	}
+	total := 0
+	count := func(turns []schema.TurnDetail) {
+		for _, turn := range turns {
+			for _, part := range turn.ContentParts {
+				if part.Type != schema.TurnPartTypeImage || part.Image == nil {
+					continue
+				}
+				encoded, err := json.Marshal(part.Image)
+				if err != nil {
+					continue
+				}
+				total += len(encoded)
+			}
+		}
+	}
+	count(detail.Turns)
+	for _, section := range detail.EarlierHistory {
+		count(section.Turns)
+	}
+	return total
 }
 
 // servedDocumentBaseSize is the encoded size of the document with every bounded

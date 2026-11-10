@@ -1,0 +1,5 @@
+requiredNames:
+  - folds_text_and_image_in_order
+  - image_only_carrier_is_retained_and_counts_once
+  - text_only_prompt_has_no_parts
+  - omitted_image_keeps_reason

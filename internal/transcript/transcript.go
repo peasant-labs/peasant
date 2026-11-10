@@ -167,6 +167,30 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	return detail
 }
 
+func contentPartsFromTurn(turn ingest.Turn) []schema.TurnContentPart {
+	if len(turn.Parts) == 0 {
+		return nil
+	}
+	parts := make([]schema.TurnContentPart, 0, len(turn.Parts))
+	for _, part := range turn.Parts {
+		switch part.Kind {
+		case ingest.TurnPartText:
+			parts = append(parts, schema.TurnContentPart{Type: schema.TurnPartTypeText, Text: part.Text})
+		case ingest.TurnPartImage:
+			image := part.Image
+			if image == nil {
+				image = &schema.ImagePart{Ref: part.ImageRef}
+			}
+			copied := *image
+			parts = append(parts, schema.TurnContentPart{Type: schema.TurnPartTypeImage, Image: &copied})
+		}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return parts
+}
+
 // turnsToDetail converts folded turns to wire turns. It is the single
 // turn-projection site for main turns and every earlier-history partition, so
 // the two cannot drift in what a turn carries.
@@ -194,6 +218,7 @@ func turnsToDetail(folded []ingest.Turn) []schema.TurnDetail {
 			}
 		}
 		turns[i] = schema.TurnDetail{
+			ContentParts:     contentPartsFromTurn(t),
 			ControlKind:      t.ControlKind,
 			SourceEntryRef:   schema.SourceEntryRef(t.SourceEntryRef),
 			Provenance:       t.Provenance,

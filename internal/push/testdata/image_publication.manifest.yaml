@@ -1,0 +1,3 @@
+requiredNames:
+  - published_parts_omit_local_fields
+  - receiver_with_capability_is_not_refused

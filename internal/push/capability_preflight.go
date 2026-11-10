@@ -62,7 +62,7 @@ func ScanPublication(content schema.TranscriptContent) (PublicationScan, error) 
 	if content.SessionDetail == nil {
 		return PublicationScan{}, fmt.Errorf("publication scan failed at push.ScanPublication during local capability derivation: the transcript envelope carries no sessionDetail, so the payload cannot be validated or attributed; nothing was scanned, no receiver was contacted, and no bytes were uploaded; rebuild the durable payload from its capture and retry")
 	}
-	if err := schema.ValidateSessionDetailPayload(*content.SessionDetail); err != nil {
+	if err := validatePublicationDetail(*content.SessionDetail); err != nil {
 		return PublicationScan{}, fmt.Errorf("publication scan failed at push.ScanPublication during local durable validation: %w; nothing was scanned and no receiver was contacted; repair the local capture and retry", err)
 	}
 	return PublicationScan{Required: requiredContentCapabilities(content)}, nil
@@ -71,6 +71,38 @@ func ScanPublication(content schema.TranscriptContent) (PublicationScan, error) 
 // requiredContentCapabilities derives the receiver capability inventory a
 // durable payload requires. The payload must already have passed the producer
 // trust boundary; this is the pure derivation half of the scan.
+func validatePublicationDetail(detail schema.SessionDetailPayload) error {
+	published, local := publicationImageModes(detail)
+	if published && local {
+		return fmt.Errorf("publication scan failed at push.validatePublicationDetail: the detail mixes a local image part with a not_published image part, so the accepted shape is undefined; strip every image to not_published before scanning")
+	}
+	if published {
+		return schema.ValidatePublishedSessionDetailPayload(detail)
+	}
+	return schema.ValidateSessionDetailPayload(detail)
+}
+
+func publicationImageModes(detail schema.SessionDetailPayload) (published, local bool) {
+	var turns []schema.TurnDetail
+	turns = append(turns, detail.Turns...)
+	for _, section := range detail.EarlierHistory {
+		turns = append(turns, section.Turns...)
+	}
+	for _, turn := range turns {
+		for _, part := range turn.ContentParts {
+			if part.Type != schema.TurnPartTypeImage || part.Image == nil {
+				continue
+			}
+			if part.Image.OmittedReason == schema.OmittedReasonNotPublished {
+				published = true
+			} else {
+				local = true
+			}
+		}
+	}
+	return published, local
+}
+
 func requiredContentCapabilities(content schema.TranscriptContent) []schema.ContentCapability {
 	if content.SessionDetail == nil {
 		return nil
