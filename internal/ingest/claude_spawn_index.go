@@ -28,33 +28,40 @@ func (d claudeIdentityCountDelta) spawner(id ClaudeTeammateIdentity) int { retur
 // evidence rows and this build's current view.
 //
 // Only the paths this build holds current evidence for can differ from the
-// stored table. For each of them, the stored row loses its contribution (when
-// it matched) and the current row adds its own, so an unchanged row cancels
-// out and a changed row is replaced rather than counted twice. A stored row
-// this build did not touch — a transcript it did not walk, or one whose file
-// is gone — keeps its stored contribution, exactly as the full run's
-// whole-table view counted it before the prune.
-func claudeIdentityDeltas(cached, current map[ResolvedPath]ClaudeTranscriptEvidence) claudeIdentityCountDelta {
+// stored table. For each of them, the stored row loses its contribution and the
+// current row adds its own, so an unchanged row cancels out and a changed row is
+// replaced rather than counted twice. A stored row this build did not touch — a
+// transcript it did not walk, or one whose file is gone — keeps its stored
+// contribution.
+//
+// The stored spawn side comes from storedSpawns, the store's claude_teammate
+// projection read by path, not from the loaded evidence cache. That keeps the
+// subtraction exact when a transcript's spawns_json cannot be parsed (the row
+// would otherwise contribute zero and the link would be dropped) and when the
+// cache did not hold the row at all.
+func claudeIdentityDeltas(
+	cached, current map[ResolvedPath]ClaudeTranscriptEvidence,
+	storedSpawns map[ResolvedPath][]ClaudeTeammateIdentity,
+) claudeIdentityCountDelta {
 	delta := claudeIdentityCountDelta{
 		declarers: make(map[ClaudeTeammateIdentity]int),
 		spawners:  make(map[ClaudeTeammateIdentity]int),
 	}
 	for path, record := range current {
 		if stored, ok := cached[path]; ok {
-			if stored.Scope == ClaudeEvidenceScopeRoot {
-				if stored.Identity != nil {
-					delta.declarers[*stored.Identity]--
-				}
-				// A repeated spawn in one transcript is one derived row.
-				seen := make(map[ClaudeTeammateIdentity]struct{}, len(stored.Spawns))
-				for _, spawn := range stored.Spawns {
-					if _, duplicate := seen[spawn]; duplicate {
-						continue
-					}
-					seen[spawn] = struct{}{}
-					delta.spawners[spawn]--
-				}
+			if stored.Scope == ClaudeEvidenceScopeRoot && stored.Identity != nil {
+				delta.declarers[*stored.Identity]--
 			}
+		}
+		// The stored spawn side is the derived projection, independent of
+		// whether the evidence row's spawns_json parsed.
+		seenStored := make(map[ClaudeTeammateIdentity]struct{}, len(storedSpawns[path]))
+		for _, spawn := range storedSpawns[path] {
+			if _, duplicate := seenStored[spawn]; duplicate {
+				continue
+			}
+			seenStored[spawn] = struct{}{}
+			delta.spawners[spawn]--
 		}
 		if record.Scope != ClaudeEvidenceScopeRoot {
 			continue

@@ -50,12 +50,14 @@ type failingClaudeDerivedLookup struct {
 	declarers    int
 	spawners     int
 	spawnerPaths []string
+	spawnsByPath map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity
 	declarerErr  error
 	spawnerErr   error
 	pathErr      error
 }
 
 var _ ingest.DerivedLookupReader = (*failingClaudeDerivedLookup)(nil)
+var _ ingest.ClaudeSpawnContributionReader = (*failingClaudeDerivedLookup)(nil)
 
 func (f *failingClaudeDerivedLookup) CountClaudeIdentityDeclarers(context.Context, ingest.ClaudeTeammateIdentity) (int, error) {
 	if f.declarerErr != nil {
@@ -76,6 +78,17 @@ func (f *failingClaudeDerivedLookup) ClaudeIdentitySpawnerPaths(context.Context,
 		return nil, f.pathErr
 	}
 	return f.spawnerPaths, nil
+}
+
+// ClaudeTeammateSpawnsForPaths supplies the stored spawn side of the delta.
+func (f *failingClaudeDerivedLookup) ClaudeTeammateSpawnsForPaths(_ context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity, error) {
+	spawns := make(map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity, len(paths))
+	for _, path := range paths {
+		if stored, ok := f.spawnsByPath[path]; ok {
+			spawns[path] = stored
+		}
+	}
+	return spawns, nil
 }
 
 func (*failingClaudeDerivedLookup) CountCodexRolloutsBySession(context.Context, ingest.SessionID) (int, error) {

@@ -36,6 +36,10 @@ type ClaudeAdapter struct {
 	// derivedLookup is the store's indexed identity reader. A scoped build uses
 	// it to decide a teammate link without reading the whole evidence table.
 	derivedLookup DerivedLookupReader
+	// spawnContributions is the store's stored spawn projection by transcript
+	// path. The count delta reads the stored spawn side from it, so a transcript
+	// whose spawns_json cannot be parsed still subtracts what the store counts.
+	spawnContributions ClaudeSpawnContributionReader
 	// reminedCount is how many evidence records the most recent Discover had
 	// to mine again. It describes that one call and is overwritten by the next.
 	reminedCount int
@@ -79,9 +83,14 @@ func (a *ClaudeAdapter) SetLogicalParentLookup(lookup LogicalParentReader) {
 // SetClaudeDerivedLookup gives a scoped Claude build the store's indexed
 // identity reader. The adapter factory signature carries only the filesystem,
 // the git resolver, and the salt, so a caller attaches this capability after it
-// builds the adapter, the same optional shape the evidence cache uses.
+// builds the adapter, the same optional shape the evidence cache uses. A reader
+// that also implements ClaudeSpawnContributionReader supplies the stored spawn
+// side of the count delta; the production store implements both.
 func (a *ClaudeAdapter) SetClaudeDerivedLookup(lookup DerivedLookupReader) {
 	a.derivedLookup = lookup
+	if spawns, ok := lookup.(ClaudeSpawnContributionReader); ok {
+		a.spawnContributions = spawns
+	}
 }
 
 // ClaudeDerivedLookupCapable is implemented by an adapter that can decide a
@@ -531,8 +540,21 @@ func (a *ClaudeAdapter) linkClaudeTeammates(
 		if a.derivedLookup == nil {
 			return fmt.Errorf("ingest: the Claude build was asked to decide teammate links from the stored identity counts, but no indexed identity reader is attached; reading the whole evidence table instead is the pass this rewrite removes, and guessing would re-home a session under the wrong parent; where: ingest.ClaudeAdapter.linkClaudeTeammates in internal/ingest/claude.go; when: building discovered sessions; impact: no session was built and nothing was written; fix: attach the store's derived lookup reader to the adapter before the run (ingest.AttachClaudeDerivedLookup)")
 		}
+		if a.spawnContributions == nil {
+			return fmt.Errorf("ingest: the Claude build was asked to decide teammate links from the stored identity counts, but the store cannot read its stored spawn projection by path; without that read the count delta would subtract no stored spawn for a transcript whose spawns list this build could not parse, and a correct link would be dropped; where: ingest.ClaudeAdapter.linkClaudeTeammates in internal/ingest/claude.go; when: building discovered sessions; impact: no session was built and nothing was written; fix: attach a store that implements ClaudeTeammateSpawnsForPaths (the production store does), or rebuild the derived lookups and retry")
+		}
 		reader = a.derivedLookup
-		delta = claudeIdentityDeltas(cached, current)
+		spawnPaths := make([]ResolvedPath, 0, len(current))
+		for path, record := range current {
+			if record.Scope == ClaudeEvidenceScopeRoot {
+				spawnPaths = append(spawnPaths, path)
+			}
+		}
+		storedSpawns, err := a.spawnContributions.ClaudeTeammateSpawnsForPaths(ctx, spawnPaths)
+		if err != nil {
+			return fmt.Errorf("ingest: the Claude build could not read the stored spawn projection for the %d transcript path(s) it re-mined; the teammate-link count delta cannot be exact without it, and guessing would re-home a session under the wrong parent; where: ingest.ClaudeAdapter.linkClaudeTeammates in internal/ingest/claude.go; when: building discovered sessions; impact: no session was built and nothing was written; fix: restore database access (or rebuild the derived lookups with `peasant harvest index --all`) and retry: %w", len(spawnPaths), err)
+		}
+		delta = claudeIdentityDeltas(cached, current, storedSpawns)
 	} else {
 		reader = newClaudeEvidenceIdentityReader(evidence)
 	}

@@ -212,7 +212,7 @@ func runClaudeDiscoverAtParity(t *testing.T, rootText string, cfg ingest.SourceC
 	locatedCase := testCase.Located
 	counting := newClaudeLocatorCountingFS(t, rootText, testCase)
 	cache := newClaudeLocatorEvidenceCache()
-	derived := &claudeLocatorDerivedLookup{}
+	derived := &claudeLocatorDerivedLookup{cache: cache}
 	if locatedCase.Derived != nil {
 		derived.declarers = locatedCase.Derived.Declarers
 		derived.spawners = locatedCase.Derived.Spawners
@@ -580,6 +580,9 @@ type claudeLocatorDerivedLookup struct {
 	declarers    int
 	spawners     int
 	spawnerPaths []string
+	// cache supplies the stored spawn projection by path, the way the store's
+	// claude_teammate_spawns table does.
+	cache *claudeLocatorEvidenceCache
 }
 
 func (d *claudeLocatorDerivedLookup) CountClaudeIdentityDeclarers(context.Context, ingest.ClaudeTeammateIdentity) (int, error) {
@@ -604,7 +607,24 @@ func (d *claudeLocatorDerivedLookup) CodexRolloutPaths(context.Context, ingest.S
 	return nil, nil
 }
 
+// ClaudeTeammateSpawnsForPaths answers the stored spawn side of the count
+// delta from the evidence the full walk saved, which is the cache's stored
+// state.
+func (d *claudeLocatorDerivedLookup) ClaudeTeammateSpawnsForPaths(_ context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity, error) {
+	spawns := make(map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity, len(paths))
+	if d.cache == nil {
+		return spawns, nil
+	}
+	for _, path := range paths {
+		if record, ok := d.cache.evidence[path]; ok {
+			spawns[path] = append(spawns[path], record.Spawns...)
+		}
+	}
+	return spawns, nil
+}
+
 var _ ingest.DerivedLookupReader = (*claudeLocatorDerivedLookup)(nil)
+var _ ingest.ClaudeSpawnContributionReader = (*claudeLocatorDerivedLookup)(nil)
 
 // claudeLocatorStoredLookup answers whether a session id is already stored, the
 // one question the teammate step asks of the store before pointing at a
