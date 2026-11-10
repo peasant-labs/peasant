@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +38,7 @@ type ingestSelectionIDs struct {
 
 type ingestSelectionCase struct {
 	Name             string   `yaml:"name"`
+	PreludeAll       bool     `yaml:"preludeAll"`
 	ThroughRoute     bool     `yaml:"throughRoute"`
 	Mode             string   `yaml:"mode"`
 	Allow            []string `yaml:"allow"`
@@ -152,8 +154,32 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	hs := newTestXDGHomes(t)
 	handler := hs.handler(nil, cfg)
 	handler.configPath = filepath.Join(root, "custom-config", "settings.yaml")
+	if item.PreludeAll {
+		prelude := hs.handler(nil, webIngestConfig(t, source, output, ingestSelectionCase{Mode: "all"}, "", ""))
+		first := runWebIngest(t, prelude, false)
+		assertIngestMembership(t, first, []string{ids.Selected, ids.Other}, nil)
+	}
 	result := runWebIngest(t, handler, item.ThroughRoute)
 	assertIngestMembership(t, result, item.ExpectImported, item.ExpectExcluded)
+	if item.PreludeAll {
+		opts, err := store.ManagedGenerationOptions(output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db, err := store.Open(hs.dbPath(), append(opts, store.WithWriteConfig(cfg.Write), store.WithSkipMigrations())...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		row, err := db.SessionByID(context.Background(), ids.Other)
+		if err != nil || row == nil {
+			t.Fatalf("excluded stored session missing: row=%v err=%v", row, err)
+		}
+		rows, err := db.ListSessionsFiltered(context.Background(), store.SessionListFilter{SessionID: &ids.Other})
+		if err != nil || len(rows) != 1 || rows[0].SessionID != ids.Other {
+			t.Fatalf("excluded session not listable: rows=%v err=%v", rows, err)
+		}
+	}
 	if item.ExpectDiagnostic {
 		configPath := handler.configPath
 		found := false
@@ -187,7 +213,7 @@ func runScopedIngestIgnoresSelection(t *testing.T, ids ingestSelectionIDs, item 
 	writeClaudeSession(t, filepath.Join(project, ids.Selected+".jsonl"), ids.Selected, cwd, "main")
 	writeClaudeSession(t, filepath.Join(project, ids.Other+".jsonl"), ids.Other, cwd, "main")
 
-	cfg := webIngestConfig(t, source, output, ingestSelectionCase{Mode: "all"}, "", "")
+	cfg := webIngestConfig(t, source, output, ingestSelectionCase{Mode: "selected", Allow: []string{ids.Selected}}, "", "")
 	hs := newTestXDGHomes(t)
 	if err := os.MkdirAll(filepath.Dir(hs.dbPath()), 0o700); err != nil {
 		t.Fatal(err)
@@ -195,7 +221,7 @@ func runScopedIngestIgnoresSelection(t *testing.T, ids ingestSelectionIDs, item 
 	storetest.CopyGoldenTo(t, hs.dbPath())
 	handler := hs.handler(nil, cfg)
 	first := runWebIngest(t, handler, false)
-	assertIngestMembership(t, first, []string{ids.Selected, ids.Other}, nil)
+	assertIngestMembership(t, first, []string{ids.Selected}, []string{ids.Other})
 
 	storeOptions, err := store.ManagedGenerationOptions(output)
 	if err != nil {
@@ -206,8 +232,28 @@ func runScopedIngestIgnoresSelection(t *testing.T, ids ingestSelectionIDs, item 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	row, err := db.SessionByID(context.Background(), ids.Other)
+	if err != nil || row != nil {
+		t.Fatalf("excluded session unexpectedly stored: row=%v err=%v", row, err)
+	}
+	// The re-index endpoint accepts only stored sessions. Import the excluded
+	// recording explicitly before re-indexing it, then change the source so a
+	// successful HTTP response without a fresh index cannot pass this test.
+	prelude := hs.handler(nil, webIngestConfig(t, source, output, ingestSelectionCase{Mode: "all"}, "", ""))
+	runWebIngest(t, prelude, false)
+	before := userTurns(t, db, ids.Other)
+	if before == 0 {
+		t.Fatal("prelude failed to index the target")
+	}
+	file, err := os.OpenFile(filepath.Join(project, ids.Other+".jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString(`{"sessionId":"` + ids.Other + `","type":"user","uuid":"new-user-turn","timestamp":"2026-01-01T00:00:02Z","cwd":"` + cwd + `","message":{"role":"user","content":"new turn"}}` + "\n")
+	if closeErr := file.Close(); err != nil || closeErr != nil {
+		t.Fatalf("append reindex turn: write=%v close=%v", err, closeErr)
+	}
 	handler.store = db
-	cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected}
 
 	response := httptest.NewRecorder()
 	handler.handleSyncIngestSession(response, httptest.NewRequest(http.MethodPost, "/api/v1/sync/ingest/session?session_id="+item.ScopeSession, nil))
@@ -216,6 +262,9 @@ func runScopedIngestIgnoresSelection(t *testing.T, ids ingestSelectionIDs, item 
 	}
 	if !strings.Contains(response.Body.String(), `"status":"done"`) {
 		t.Fatalf("explicit session re-index body = %s, want done", response.Body.String())
+	}
+	if got := userTurns(t, db, ids.Other); got != before+1 {
+		t.Fatalf("scoped re-index stored %d user turns; want %d", got, before+1)
 	}
 }
 

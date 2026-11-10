@@ -33,6 +33,7 @@ type harvestDelegationCase struct {
 	Name                   string   `yaml:"name"`
 	All                    bool     `yaml:"all"`
 	IndexOnly              bool     `yaml:"indexOnly"`
+	Conflict               bool     `yaml:"conflict"`
 	PreludeAll             bool     `yaml:"preludeAll"`
 	Session                string   `yaml:"session"`
 	ExpectFilter           bool     `yaml:"expectFilter"`
@@ -83,6 +84,11 @@ func runHarvestDelegationCase(t *testing.T, ids harvestDelegationIDs, item harve
 	}
 	writeDelegationSession(t, filepath.Join(project, ids.Selected+".jsonl"), ids.Selected)
 	writeDelegationSession(t, filepath.Join(project, ids.Other+".jsonl"), ids.Other)
+	var conflict mountedConflictFixture
+	if item.Conflict {
+		conflict = loadSelectionFilterFixtures(t).MountedConflict
+		source = initConflictedSourceRepo(t, conflict)
+	}
 
 	cfg := config.BaseConfig()
 	cfg.Output.BasePath = output
@@ -98,6 +104,14 @@ func runHarvestDelegationCase(t *testing.T, ids harvestDelegationIDs, item harve
 		Harnesses: map[string]config.SelectionHarnessConfig{
 			defaults.HarnessClaudeCode.String(): {Sessions: []string{ids.Selected}},
 		},
+	}
+	if item.Conflict {
+		cfg.Sources.ClaudeCode.Enabled = true
+		cfg.Sources.ClaudeCode.Paths = []string{source}
+		cfg.Selection.Harnesses[defaults.HarnessClaudeCode.String()] = config.SelectionHarnessConfig{Projects: []config.ProjectSelection{
+			{GitRemote: conflict.GitRemote, Branches: []string{conflict.AdmittedBranch}},
+			{GitRemote: conflict.GitRemote, Branches: []string{conflict.RejectedBranch}},
+		}}
 	}
 	configPath := filepath.Join(dir, string(defaults.Config.FileName))
 	if err := config.SaveAtomic(configPath, cfg); err != nil {
@@ -124,6 +138,12 @@ func runHarvestDelegationCase(t *testing.T, ids harvestDelegationIDs, item harve
 		out, err := runDelegationHarvest(t, dir, configPath, []string{"--all", "--include-active", "--output", output, "--source-harness", "claude-code", "--source-path", source})
 		if err != nil {
 			t.Fatalf("prelude harvest --all: %v\n%s", err, out)
+		}
+	}
+	if item.Conflict {
+		control, err := runDelegationHarvest(t, dir, configPath, []string{"--include-active", "--output", output, "--source-harness", "claude-code", "--source-path", source})
+		if err != nil || !strings.Contains(control, "was withheld during ingest") {
+			t.Fatalf("conflict control did not produce a withhold notice: %v\n%s", err, control)
 		}
 	}
 	args := []string{"--output", output}
