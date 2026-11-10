@@ -370,7 +370,16 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		t.Helper()
 		// Reuse the exact same physical locator and file clock across runs:
 		// unattributed sessions derive project identity from this path.
+		if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
+			t.Fatalf("native case name %q is not a single path element", name)
+		}
 		nativePath := filepath.Join(os.Getenv("PEASANT_GUARD_NATIVE"), name, "opencode.db")
+		// The native root is shared by the two compared captures of one pass,
+		// but each case directory must be clean: a stale -wal/-shm sidecar must
+		// never be read with the second capture's main file.
+		if err := os.RemoveAll(filepath.Dir(nativePath)); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.MkdirAll(filepath.Dir(nativePath), 0700); err != nil {
 			t.Fatal(err)
 		}

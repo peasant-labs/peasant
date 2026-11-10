@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"strconv"
 	"testing"
 )
 
@@ -33,10 +35,60 @@ func TestCompareRequiresAffectedVersion(t *testing.T) {
 	}
 }
 
-func TestEmbeddedProbeSharesTheObservedNamesContract(t *testing.T) {
-	if !bytes.Contains(probe, []byte("PEASANT_GUARD_OBSERVED_NATIVE")) || !bytes.Contains(probe, []byte("NativeObserved")) {
-		t.Fatal("the embedded probe no longer reads PEASANT_GUARD_OBSERVED_NATIVE and reports NativeObserved; the runner would hand it names it never sees")
+func TestEmbeddedProbePinsTheRunnerContract(t *testing.T) {
+	reads := probeGetenvNames(t)
+	for _, name := range []string{corpusEnv, fallbackCorpusEnv, observedNativeEnv, outputEnv, nativeRootEnv} {
+		if !reads[name] {
+			t.Fatalf("the embedded probe no longer reads os.Getenv(%q); the runner and probe disagree about the contract", name)
+		}
 	}
+	if !bytes.Contains(probe, []byte("NativeObserved")) {
+		t.Fatal("the embedded probe no longer reports NativeObserved; the runner would hand it names it never sees")
+	}
+}
+
+func TestEmbeddedProbeClearsBeforeWriting(t *testing.T) {
+	clear := bytes.Index(probe, []byte("os.RemoveAll(filepath.Dir(nativePath))"))
+	write := bytes.Index(probe, []byte("os.WriteFile(nativePath"))
+	if clear < 0 || write < 0 || clear > write {
+		t.Fatal("the probe no longer clears the case directory before writing the capture's main file")
+	}
+}
+
+// probeGetenvNames finds the string literal of every os.Getenv call in the
+// embedded probe, so a comment or a dead string cannot satisfy the contract.
+// A refactor to os.LookupEnv or a helper would fail this check even though the
+// contract still holds; update the walk with that refactor.
+func probeGetenvNames(t *testing.T) map[string]bool {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "probe_test.go", probe, 0)
+	if err != nil {
+		t.Fatalf("parse embedded probe: %v", err)
+	}
+	names := make(map[string]bool)
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "Getenv" {
+			return true
+		}
+		pkg, ok := selector.X.(*ast.Ident)
+		if !ok || pkg.Name != "os" || len(call.Args) != 1 {
+			return true
+		}
+		literal, ok := call.Args[0].(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		if value, err := strconv.Unquote(literal.Value); err == nil {
+			names[value] = true
+		}
+		return true
+	})
+	return names
 }
 
 func TestNewHarnessNeedsNoInventedHistoricalOutput(t *testing.T) {
