@@ -240,8 +240,20 @@ func TestPipelineRetainsNonfatalMetricRefreshDiagnostics(t *testing.T) {
 					t.Fatalf("suppressed-log caller lost metric refusal: %+v", result.Diagnostics)
 				}
 				after, err := db.GetMetrics(t.Context(), sid)
-				if err != nil || !reflect.DeepEqual(before, after) {
-					t.Fatalf("failed/refused computation changed last-good metrics: %+v %v", after, err)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// The turn count is the producer's captured conversation count,
+				// not a computed metric: indexing the session records it, so it
+				// may differ while every computed field must survive untouched.
+				if before == nil || after == nil {
+					t.Fatalf("missing metrics around a failed computation: before=%+v after=%+v", before, after)
+				}
+				beforeQ, afterQ := before.QualityMetrics, after.QualityMetrics
+				beforeQ.TurnCount, afterQ.TurnCount = nil, nil
+				before.QualityMetrics, after.QualityMetrics = beforeQ, afterQ
+				if !reflect.DeepEqual(before, after) {
+					t.Fatalf("failed/refused computation changed last-good metrics: %+v", after)
 				}
 			}
 		})

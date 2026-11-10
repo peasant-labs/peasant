@@ -245,9 +245,12 @@ func TestStoredMetadataSeedSource(t *testing.T) {
 	seedStatsListSuite(t, s)
 	nativeID := ingest.SessionID("0a999aaa-36bc-424c-a789-8be54d9702e1")
 	legacyID := ingest.SessionID("0a999aaa-36bc-424c-a789-8be54d9702e2")
+	// The retired raw count deliberately differs from the seeded conversation
+	// count (10) so the read cannot pass by echoing the seed document or the
+	// old column: only the conversation column may supply the served count.
 	if _, err := s.UpsertCapturedStats(ctx, store.CapturedStats{
-		SessionID: schema.SessionID(nativeID), TurnCount: statsInt(10),
-		SeedJSON: statsString(`{"turnCount":10,"toolCallCount":20}`),
+		SessionID: schema.SessionID(nativeID), TurnCount: statsInt(999),
+		SeedJSON: statsString(`{"turnCount":999,"toolCallCount":20}`),
 		Source:   store.StatsSourceHarness, UpdatedAtMs: 200,
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -263,7 +266,7 @@ func TestStoredMetadataSeedSource(t *testing.T) {
 		t.Fatalf("decode stored metadata: %v", err)
 	}
 	if doc.Stats == nil || doc.Stats.TurnCount != 10 || doc.Stats.ToolCallCount != 20 {
-		t.Fatalf("native embedded stats = %+v, want {10 20}", doc.Stats)
+		t.Fatalf("native embedded stats = %+v, want the conversation count 10 and the seed's 20 tool calls", doc.Stats)
 	}
 	legacyData, err := s.ReadStoredMetadata(ctx, legacyID)
 	if err != nil {

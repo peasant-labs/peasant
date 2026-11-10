@@ -338,14 +338,25 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 				if bundle.Readiness != tc.Readiness {
 					t.Fatalf("readiness %s, want %s", bundle.Readiness, tc.Readiness)
 				}
+				// Every other field round trips; the count does not, because
+				// the published envelope carries the store's conversation count
+				// while the extracted document keeps the adapter's raw record
+				// count.
 				roundTrip := bundle.Metadata
-				if tc.Action == "metrics" {
-					// The published envelope carries the stored conversation
-					// count while the extracted seed keeps its raw record count.
-					roundTrip.Stats.TurnCount = e.Metadata.Stats.TurnCount
-				}
+				roundTrip.Stats.TurnCount = e.Metadata.Stats.TurnCount
+				roundTrip.MetadataHash = e.Metadata.MetadataHash
 				if bundle.Metadata.SessionID != "" && !reflect.DeepEqual(roundTrip, *e.Metadata) {
 					t.Fatalf("metadata did not round trip losslessly")
+				}
+				if bundle.Metadata.SessionID != "" && bundle.Metadata.MetadataHash != schema.ComputeMetadataHash(&bundle.Metadata) {
+					t.Fatal("served metadata digest does not sign the served document")
+				}
+				if bundle.Readiness == ingest.PublicationReady {
+					if stats, statsErr := s.ReadCapturedStats(readCtx, id); statsErr != nil || stats.ConversationTurnCount == nil {
+						t.Fatal("a ready publication has no stored conversation count")
+					} else if bundle.Metadata.Stats.TurnCount != *stats.ConversationTurnCount {
+						t.Fatalf("published metadata turnCount = %d, want the stored conversation count %d", bundle.Metadata.Stats.TurnCount, *stats.ConversationTurnCount)
+					}
 				}
 				if bundle.SessionOrigin != sessionorigin.User || bundle.ReceiptProjectHash != e.Metadata.Project.Hash {
 					t.Fatal("stored attribution lost")

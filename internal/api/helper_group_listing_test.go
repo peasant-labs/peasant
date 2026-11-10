@@ -754,6 +754,8 @@ func seedHelperGroupMetrics(t *testing.T, db *store.Store, spec helperGroupListi
 	}); err != nil {
 		t.Fatalf("seed metrics for pushable session %q: %v", spec.ID, err)
 	}
+	// A pushable fixture is listed before it carries entries, so the count is
+	// seeded directly; a real V1 ingest derives it in the entry write.
 	if _, err := db.UpsertCapturedStats(context.Background(), store.CapturedStats{
 		SessionID: schema.SessionID(spec.ID), ConversationTurnCount: &turnCount,
 		Source: store.StatsSourceHarness, UpdatedAtMs: 1,

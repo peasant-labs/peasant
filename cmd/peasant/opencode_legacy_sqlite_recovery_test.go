@@ -319,15 +319,6 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 		t.Fatalf("open updated WAL freshness store: %v", err)
 	}
 	updatedEntries, entriesErr := updatedStore.ListEntries(t.Context(), targetID)
-	if entriesErr == nil {
-		// The upgrade backfill supplies the conversation count for a legacy
-		// representation; model it so the count surface is asserted, not the
-		// retired analysis column.
-		turns := ingest.ConversationTurnCount(ingest.EntriesToTurns(updatedEntries))
-		if _, statsErr := updatedStore.UpsertCapturedStats(t.Context(), store.CapturedStats{SessionID: targetID, ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); statsErr != nil {
-			t.Fatalf("seed updated WAL conversation turn count: %v", statsErr)
-		}
-	}
 	updatedMetrics, metricsErr := updatedStore.GetMetrics(t.Context(), targetID)
 	closeErr = updatedStore.Close()
 	if entriesErr != nil || metricsErr != nil || closeErr != nil || updatedMetrics == nil {
@@ -479,14 +470,6 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 				t.Fatalf("open recovered store: %v", err)
 			}
 			entries, entriesErr := localStore.ListEntries(t.Context(), targetID)
-			// Model the one-time upgrade backfill: the recovered legacy entries
-			// supply the conversation count the count surfaces read.
-			if entriesErr == nil {
-				turns := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
-				if _, statsErr := localStore.UpsertCapturedStats(t.Context(), store.CapturedStats{SessionID: targetID, ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); statsErr != nil {
-					t.Fatalf("seed recovered conversation turn count: %v", statsErr)
-				}
-			}
 			metrics, metricsErr := localStore.GetMetrics(t.Context(), targetID)
 			closeErr := localStore.Close()
 			if entriesErr != nil || metricsErr != nil || closeErr != nil {

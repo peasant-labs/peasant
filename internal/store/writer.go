@@ -529,8 +529,9 @@ func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEn
 		metricArgs := []any{string(m.SessionID), nil, nil, nil, nil, nil, nil}
 		if retainStats && !native {
 			// The retired turn count is never seeded: the conversation count is
-			// written to session_captured_stats by the activation lane and read
-			// from there by every count surface.
+			// written to session_captured_stats by the activation lane (managed
+			// generations) or the V1 entry write (legacy sessions), and every
+			// count surface reads it from there.
 			metricArgs = []any{string(m.SessionID),
 				nil,
 				m.Stats.SubagentCount,

@@ -284,7 +284,10 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 	metadata.Project.FilePath = "/synthetic/parity"
 	metadata.HostSlug = "fixture-host"
 	conversationTurnCount := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
-	metadata.Stats.TurnCount = conversationTurnCount
+	// The adapter's document carries the raw record count, exactly as a real
+	// capture does. The production write lane derives the conversation count
+	// from the entries; the harness sets no count the producer would not.
+	metadata.Stats.TurnCount = len(entries)
 	count := int64(1)
 	metadata.Stats.InputSubmissionCount = &count
 	if c.PreviewOnly {
@@ -304,11 +307,9 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 	}
 	metadata.ContentHash = strings.Repeat("b", 64)
 	metadata.MetadataHash = schema.ComputeMetadataHash(&metadata)
-	// The metric seed keeps the adapter's raw record count; the discovered
-	// stats carry the producer's conversation count.
-	rawStats := metadata.Stats
-	rawStats.TurnCount = len(entries)
-	rawSeed, err := json.Marshal(rawStats)
+	// The metric seed is the adapter's raw document; the producer's store
+	// derives the conversation count from the written entries.
+	rawSeed, err := json.Marshal(metadata.Stats)
 	if err != nil {
 		return result, err
 	}
@@ -330,6 +331,11 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 			return result, fmt.Errorf("index %s: %v", c.Name, writes)
 		}
 	} else {
+		// The producer's projection writes the conversation count into the
+		// generation metadata (applyStrictCounts); the harness activates a
+		// prebuilt generation, so it applies that one step itself.
+		metadata.Stats.TurnCount = conversationTurnCount
+		metadata.MetadataHash = schema.ComputeMetadataHash(&metadata)
 		generation := indexformat.Generation{ID: "g_" + strings.ReplaceAll(c.Name, "-", "_"), Metadata: metadata, Completeness: indexformat.GenerationCompletenessComplete, Main: indexformat.Partition{Entries: entries}, SourceEvidenceDigest: strings.Repeat("c", 64)}
 		if c.PreviewOnly {
 			generation.Completeness = indexformat.GenerationCompletenessIncompleteNew
@@ -399,23 +405,15 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 			return result, fmt.Errorf("activate %s: %w", c.Name, err)
 		}
 	}
-	if !c.FileBacked {
+	// A managed generation reads its seed from the captured stats row; a V1
+	// capture keeps the adapter document InsertSessions already wrote to the
+	// legacy seed home, so neither lane needs a harness-written count.
+	if !c.FileBacked && c.Harness != "pi" {
 		if _, err := db.UpsertCapturedStats(ctx, store.CapturedStats{
-			SessionID: sid, ConversationTurnCount: &conversationTurnCount,
-			SeedJSON: &rawSeedString, Source: store.StatsSourceHarness, UpdatedAtMs: 1700000006000,
+			SessionID: sid, SeedJSON: &rawSeedString,
+			Source: store.StatsSourceHarness, UpdatedAtMs: 1700000006000,
 		}); err != nil {
 			return result, err
-		}
-	}
-	if c.Harness == "pi" {
-		conn, takeErr := db.Pool().Take(ctx)
-		if takeErr != nil {
-			return result, takeErr
-		}
-		updateErr := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET metric_seed_json = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{rawSeedString, string(sid)}})
-		db.Pool().Put(conn)
-		if updateErr != nil {
-			return result, updateErr
 		}
 	}
 	detailBytes, detail, err := transcript.BuildSnapshotDetailBytes(ctx, db, db, sid)
@@ -572,6 +570,23 @@ func sortedRefs(blobs map[schema.SourceEntryRef][]byte) []schema.SourceEntryRef 
 // seedFileBacked is deliberately limited to the dual-read case. It models
 // old persisted rows, not a second implementation of the harmonized writer.
 func seedFileBacked(ctx context.Context, db *store.Store, path, root string, g indexformat.Generation, blobs map[schema.SourceEntryRef][]byte, capture ingest.SessionContentCaptureWrite, revision int64) error {
+	// The file-backed generation is installed by raw SQL below, not by the
+	// activation lane, so seed the complete captured stats the activation would
+	// have written before the V1 mirror index runs.
+	inputCount := int64(1)
+	conversationTurnCount := ingest.ConversationTurnCount(ingest.EntriesToTurns(g.Main.Entries))
+	seed, err := json.Marshal(g.Metadata.Stats)
+	if err != nil {
+		return err
+	}
+	seedText := string(seed)
+	if _, err := db.UpsertCapturedStats(ctx, store.CapturedStats{
+		SessionID: g.Metadata.SessionID, ConversationTurnCount: &conversationTurnCount,
+		InputSubmissionCount: &inputCount, SeedJSON: &seedText,
+		Source: store.StatsSourceHarness, UpdatedAtMs: 1,
+	}); err != nil {
+		return err
+	}
 	writes := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: g.Metadata.SessionID, Result: indexformat.V1{Entries: g.Main.Entries}, IndexVersion: 1, IndexerVersion: 1, IndexedAtMs: 1700000006000, RequireFullContent: true, ContentCapture: capture, CaptureRevision: revision}})
 	if len(writes) != 1 || writes[0].Err != nil {
 		return fmt.Errorf("seed file-backed mirror: %v", writes)

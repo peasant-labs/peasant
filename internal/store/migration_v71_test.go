@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -102,6 +104,12 @@ VALUES(?, 'claude-code', 'fixture-model', 'conversation-turns-host', 'conversati
 		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_captured_stats(session_id, turn_count, source, updated_at_ms) VALUES(?, ?, 'harness', 1)`, &sqlitex.ExecOptions{Args: statsArgs}); err != nil {
 			t.Fatal(err)
 		}
+		if session.ActiveGeneration && len(session.Entries) > 0 {
+			seedConversationTurnCountGeneration(t, conn, session)
+			continue
+		}
+		// A legacy representation has no generation; its mirror rows are the
+		// only stored entries.
 		for _, entry := range session.Entries {
 			if err := sqlitex.ExecuteTransient(conn, `
 INSERT INTO session_entries(session_id, entry_index, provider, entry_type, role, depth, content_preview)
@@ -113,12 +121,71 @@ VALUES(?, ?, 'claude-code', ?, ?, ?, ?)`,
 	}
 }
 
+// seedConversationTurnCountGeneration installs a managed generation the way the
+// native activation lane does: catalog rows with source refs plus body rows,
+// and no session_entries mirror. A native mirror clears the refs and drops
+// previews, so folding it undercounts the turns a reader serves; the backfill
+// must read these rows instead.
+func seedConversationTurnCountGeneration(t *testing.T, conn *sqlite.Conn, session conversationTurnCountMigrationSession) {
+	t.Helper()
+	generationID := "generation-" + session.SessionID
+	digest := strings.Repeat("a", 64)
+	if err := sqlitex.ExecuteTransient(conn, `
+INSERT INTO session_generations(session_id, generation_id, schema_version, harness, model, version, ts_start, ts_end, ts_ingested,
+  source_file_path, source_format, project_hash, project_name, host_slug, content_hash, metadata_hash,
+  redaction_applied, completeness, source_evidence_digest, index_format_version, candidate_digest, installed_at_ms)
+VALUES(?, ?, 12, 'claude-code', 'fixture-model', '', 1, 2, 3,
+  '/synthetic/conversation.jsonl', 'jsonl', 'conversation-turns-project', 'conversation-turns', 'conversation-turns-host', ?, ?,
+  0, 'complete', ?, 2, ?, 1)`,
+		&sqlitex.ExecOptions{Args: []any{session.SessionID, generationID, digest, digest, digest, digest}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `
+INSERT INTO session_projection_sections(session_id, generation_id, partition_id) VALUES(?, ?, 0)`,
+		&sqlitex.ExecOptions{Args: []any{session.SessionID, generationID}}); err != nil {
+		t.Fatal(err)
+	}
+	sessionPrefix, err := strconv.ParseInt(session.SessionID[:8], 16, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range session.Entries {
+		// The body identity is global, so it must not collide across fixture
+		// sessions. The digest is derived from it as well.
+		bodyID := int64(1125899906842624) + sessionPrefix<<4 + int64(entry.Index)
+		bodyDigest := fmt.Sprintf("%064x", bodyID)
+		sourceRef := fmt.Sprintf("e_%s_%d", session.SessionID[:8], entry.Index)
+		var preview any
+		if entry.Content != "" {
+			preview = entry.Content
+		}
+		if err := sqlitex.ExecuteTransient(conn, `
+INSERT INTO session_entry_bodies(body_id, session_id, body_digest, entry_index, harness, entry_type, role, depth,
+  content_preview, has_tool_use, has_thinking, is_error, source_entry_ref)
+VALUES(?, ?, ?, ?, 'claude-code', ?, ?, ?, ?, 0, 0, 0, ?)`,
+			&sqlitex.ExecOptions{Args: []any{
+				bodyID, session.SessionID, bodyDigest, entry.Index,
+				entry.EntryType, entry.Role, entry.Depth, preview, sourceRef,
+			}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := sqlitex.ExecuteTransient(conn, `
+INSERT INTO session_generation_entries(session_id, generation_id, partition_id, entry_index, source_entry_ref, body_digest)
+VALUES(?, ?, 0, ?, ?, ?)`,
+			&sqlitex.ExecOptions{Args: []any{session.SessionID, generationID, entry.Index, sourceRef, bodyDigest}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // TestMigrationV71BackfillsConversationTurnCounts proves the upgrade path: a
 // V70 store is folded once at open, an entry-less session copies its legacy
 // value, and a NULL legacy value stays unknown (the column's zero) rather than
 // becoming a measured conversation. It also proves a legacy session with no
 // active generation is backfilled, because every count surface now reads the
-// conversation column.
+// conversation column. The managed fixture has no session_entries mirror, so a
+// fold over mirror rows would copy the legacy 9 instead of the served 2; the
+// expected values are the served detail turn counts.
 func TestMigrationV71BackfillsConversationTurnCounts(t *testing.T) {
 	t.Parallel()
 	fixture := loadConversationTurnCountMigrationFixture(t)
