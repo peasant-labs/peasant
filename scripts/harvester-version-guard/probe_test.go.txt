@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -365,7 +366,7 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			}
 		}
 	}
-	observeNative := func(name string, source testfixture.MaterializedSource) {
+	observeNative := func(t *testing.T, name string, source testfixture.MaterializedSource) {
 		t.Helper()
 		// Reuse the exact same physical locator and file clock across runs:
 		// unattributed sessions derive project identity from this path.
@@ -407,32 +408,44 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		}
 		guardRecord(t, &result, "opencode/AdapterVersion/native/"+name, outputs, discoverErr)
 	}
+	// Each case is independent and builds its own database, so run them in
+	// parallel: the full corpus is too slow serially for the job budget.
 	for name := range nativeNames {
-		// Every name here must exist: the anchors and the candidate's declared
-		// cases are all part of the candidate-derived builder. A typo or a
-		// dropped case is a guard error, not an absent historical shape.
-		observeNative(name, testfixture.MaterializeByName(t, name))
-		result.NativeObserved = append(result.NativeObserved, name)
+		name := name
+		t.Run("native/"+name, func(t *testing.T) {
+			t.Parallel()
+			// Every name here must exist: the anchors and the candidate's
+			// declared cases are all part of the candidate-derived builder. A
+			// typo or a dropped case is a guard error, not a historical shape.
+			observeNative(t, name, testfixture.MaterializeByName(t, name))
+			guardMu.Lock()
+			result.NativeObserved = append(result.NativeObserved, name)
+			guardMu.Unlock()
+		})
 	}
-	sort.Strings(result.NativeObserved)
-	for harness := range result.Versions {
-		for _, stage := range []string{"AdapterVersion", "IndexerVersion"} {
-			found := false
-			for name := range result.Outputs {
-				found = found || strings.HasPrefix(name, harness+"/"+stage+"/")
-			}
-			if !found {
-				t.Fatalf("registered harness %s has no %s corpus; add native fixture coverage", harness, stage)
+	// Parallel subtests finish after the parent body, so the aggregate check
+	// and the snapshot write belong to cleanup, which runs after them.
+	t.Cleanup(func() {
+		sort.Strings(result.NativeObserved)
+		for harness := range result.Versions {
+			for _, stage := range []string{"AdapterVersion", "IndexerVersion"} {
+				found := false
+				for name := range result.Outputs {
+					found = found || strings.HasPrefix(name, harness+"/"+stage+"/")
+				}
+				if !found {
+					t.Fatalf("registered harness %s has no %s corpus; add native fixture coverage", harness, stage)
+				}
 			}
 		}
-	}
-	data, err := json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(os.Getenv("PEASANT_GUARD_OUTPUT"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
+		data, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(os.Getenv("PEASANT_GUARD_OUTPUT"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 // Both historical APIs execute the real adapter. Only their return envelope
@@ -594,8 +607,12 @@ type guardEnvironment map[string]string
 
 func (e guardEnvironment) LookupEnv(key string) (string, bool) { value, ok := e[key]; return value, ok }
 
+var guardMu sync.Mutex
+
 func guardRecord(t *testing.T, result *guardSnapshot, name string, value any, err error) {
 	t.Helper()
+	guardMu.Lock()
+	defer guardMu.Unlock()
 	if _, exists := result.Outputs[name]; exists {
 		t.Fatalf("duplicate observation %s", name)
 	}
