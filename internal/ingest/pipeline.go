@@ -3090,7 +3090,9 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// The harness-wide target applies even to a legacy OpenCode origin
 			// that keeps the baseline target for indexing: ListStaleAdapterSessions
 			// selects by harness, so a narrower classifier rule would leave those
-			// rows selected forever instead of republishing them once.
+			// rows selected forever instead of republishing them once. This is
+			// deliberately not sessionVersionTarget, which narrows only the index
+			// lane.
 			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || metadataNeedsNativeRefresh(loc.SchemaVersion) ||
 				(loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled) ||
 				adapterRevisionBehind(loc.AdapterVersion, p.versionTargets()[session.Harness]) {

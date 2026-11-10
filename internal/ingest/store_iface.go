@@ -210,11 +210,14 @@ type CurrentCommitAssociation struct {
 // before the DIFF stage so classifySession can use DB state without reading metadata.json.
 type SessionLocation struct {
 	// Readiness is a bulk repair hint, not a substitute for the bundle read.
-	ProjectHash             schema.ProjectHash
-	OpaqueHostID            string
-	GitRemote               *string
-	PublicationReadiness    PublicationReadiness
-	CaptureRevision         int64
+	ProjectHash          schema.ProjectHash
+	OpaqueHostID         string
+	GitRemote            *string
+	PublicationReadiness PublicationReadiness
+	CaptureRevision      int64
+	// AdapterVersion is sessions.adapter_version: the newest adapter revision
+	// this row's stored work has been parsed at. A retained latest attempt
+	// advances it without replacing the active generation.
 	AdapterVersion          *int
 	HostSlug                string
 	ParentID                string // empty string if the session has no parent
