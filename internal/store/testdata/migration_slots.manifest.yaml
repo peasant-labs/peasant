@@ -69,7 +69,7 @@ requiredNames:
   - v65-claude-identity-proof
   - v66-session-thinking-level
   - v67-latest-attempt-pointer
-  - v71-harness-menu
+  - v73-harness-check-widening
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle

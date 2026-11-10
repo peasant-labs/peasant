@@ -250,9 +250,9 @@ residual:
     literals: 2
     class: ddl
     reason: Immutable historical migration text for the parent lane, page indexes, and store revision.
-  - name: store-migration-v71
-    file: internal/store/schema_v71.go
-    declaration: migrationV71
+  - name: store-migration-v73
+    file: internal/store/schema_v73.go
+    declaration: migrationV73
     literals: 1
     class: ddl
     reason: >-

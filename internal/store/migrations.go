@@ -350,7 +350,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV68,
 		migrationV69,
 		migrationV70,
-		migrationV71,
+		migrationV73,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -415,6 +415,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V68: scoped collective observations (additive, no backfill)
 		{DisableForeignKeys: true}, // V69: rebuild session_source_unavailability for the widened reason CHECK
 		nil,                        // V70: parent lane, store revision, page indexes, and backfill (additive, no FK)
-		{DisableForeignKeys: true}, // V71: widen stored harness checks
+		{DisableForeignKeys: true}, // V73: widen stored harness checks
 	},
 }

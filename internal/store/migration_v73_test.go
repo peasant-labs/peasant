@@ -14,23 +14,23 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-//go:embed testdata/migrations/v71_harness_check_widening.yaml
-var v71Fixture []byte
+//go:embed testdata/migrations/v73_harness_check_widening.yaml
+var v73Fixture []byte
 
-//go:embed testdata/migrations/v71_harness_check_widening.manifest.yaml
-var v71Manifest []byte
+//go:embed testdata/migrations/v73_harness_check_widening.manifest.yaml
+var v73Manifest []byte
 
-func TestMigrationV71WidensHarnessChecks(t *testing.T) {
+func TestMigrationV73WidensHarnessChecks(t *testing.T) {
 	var f struct {
 		RequiredObjects []string `yaml:"requiredObjects"`
 	}
 	var m struct {
 		RequiredNames []string `yaml:"requiredNames"`
 	}
-	if err := decodeMigrationSlotYAML(v71Fixture, &f, "v71_harness_check_widening.yaml"); err != nil {
+	if err := decodeMigrationSlotYAML(v73Fixture, &f, "v73_harness_check_widening.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	if err := decodeMigrationSlotYAML(v71Manifest, &m, "v71_harness_check_widening.manifest.yaml"); err != nil {
+	if err := decodeMigrationSlotYAML(v73Manifest, &m, "v73_harness_check_widening.manifest.yaml"); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateMigrationNames(m.RequiredNames, f.RequiredObjects, "V71 schema objects"); err != nil {
@@ -42,7 +42,7 @@ func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if err = migrateFrozenSchema(t, c, 70); err != nil {
+	if err = migrateFrozenSchema(t, c, 72); err != nil {
 		t.Fatal(err)
 	}
 	run := func(sql string) {
@@ -95,7 +95,7 @@ func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 	}
 	sessionsBefore := dumpRows("sessions", "session_id")
 	summaryBefore := dumpRows("daily_summary_harness", "date_utc || ':' || model_harness")
-	if err = sqlitemigration.Migrate(context.Background(), c, frozenSchema(71)); err != nil {
+	if err = sqlitemigration.Migrate(context.Background(), c, frozenSchema(73)); err != nil {
 		t.Fatal(err)
 	}
 	if got := query(stateSQL); !reflect.DeepEqual(got, state) {
@@ -132,7 +132,7 @@ func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 	}
 	for name := range before {
 		if strings.HasPrefix(name, "session_relationship_evidence_parent_state_") || strings.HasPrefix(name, "session_publication_metadata_parent_state_") {
-			if strings.Contains(migrationV71, "CREATE TRIGGER "+name) {
+			if strings.Contains(migrationV73, "CREATE TRIGGER "+name) {
 				t.Fatalf("off-table trigger %s recreated", name)
 			}
 		}
@@ -143,7 +143,7 @@ func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer freshConn.Close()
-	if err := sqlitemigration.Migrate(context.Background(), freshConn, frozenSchema(71)); err != nil {
+	if err := sqlitemigration.Migrate(context.Background(), freshConn, frozenSchema(73)); err != nil {
 		t.Fatal(err)
 	}
 	freshObjects := map[string]string{}
