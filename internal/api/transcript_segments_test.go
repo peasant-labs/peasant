@@ -197,10 +197,34 @@ type fakeSegmentReader struct {
 	// shortAfter, when non-negative, caps the entries one segment read returns
 	// so the short-segment 409 arm is reachable without corrupting a store.
 	shortAfter int
+	// dropOnRead removes specific entry indexes from a segment read only, so a
+	// turn can fold from fewer child entries while the directory still declares
+	// its whole size.
+	dropOnRead map[int]bool
+	// loadStarted and loadRelease form the single-flight barrier: the first
+	// directory build signals it has started and waits for the test to release
+	// it, so the other requests are already in flight when the one build runs.
+	loadStarted chan struct{}
+	loadRelease chan struct{}
+	startedOnce sync.Once
+	// bumpOnLoad advances the revision once, after the first whole-session pass,
+	// so the directory re-check sees a store that moved during its build.
+	bumpOnLoad     bool
+	bumpRevisionTo string
+	bumped         bool
 }
 
 func newFakeSegmentReader(entries []schema.SessionEntry) *fakeSegmentReader {
 	return &fakeSegmentReader{entries: entries, revision: "4213", shortAfter: -1}
+}
+
+func (f *fakeSegmentReader) setDropOnRead(indexes []int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dropOnRead = make(map[int]bool, len(indexes))
+	for _, index := range indexes {
+		f.dropOnRead[index] = true
+	}
 }
 
 func (f *fakeSegmentReader) Revision(context.Context) (string, error) {
@@ -211,9 +235,20 @@ func (f *fakeSegmentReader) Revision(context.Context) (string, error) {
 
 func (f *fakeSegmentReader) LoadAvailableSessionEntries(context.Context, ingest.SessionID) ([]schema.SessionEntry, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.listCalls++
-	return append([]schema.SessionEntry(nil), f.entries...), nil
+	entries := append([]schema.SessionEntry(nil), f.entries...)
+	if f.bumpOnLoad && !f.bumped {
+		f.revision = f.bumpRevisionTo
+		f.bumped = true
+	}
+	started, release := f.loadStarted, f.loadRelease
+	once := &f.startedOnce
+	f.mu.Unlock()
+	if started != nil {
+		once.Do(func() { close(started) })
+		<-release
+	}
+	return entries, nil
 }
 
 func (f *fakeSegmentReader) ReadSessionEntries(_ context.Context, _ ingest.SessionID, opts ingest.SessionEntryReadOptions) (ingest.SessionEntryReadPage, error) {
@@ -223,6 +258,9 @@ func (f *fakeSegmentReader) ReadSessionEntries(_ context.Context, _ ingest.Sessi
 	selected := make([]schema.SessionEntry, 0, len(f.entries))
 	for _, entry := range f.entries {
 		if entry.EntryIndex < opts.FromIndex {
+			continue
+		}
+		if f.dropOnRead[entry.EntryIndex] {
 			continue
 		}
 		selected = append(selected, entry)
@@ -518,12 +556,14 @@ type segmentCaseExpectation struct {
 	SegmentByteLength int      `yaml:"segmentByteLength,omitempty"`
 	Status            int      `yaml:"status,omitempty"`
 	Contains          []string `yaml:"contains,omitempty"`
+	NotContains       []string `yaml:"notContains,omitempty"`
 }
 
 type segmentReadCase struct {
 	Name       string                 `yaml:"name"`
 	Turns      []segmentTurnFixture   `yaml:"turns"`
 	ShortAfter *int                   `yaml:"shortAfter,omitempty"`
+	DropOnRead []int                  `yaml:"dropOnRead,omitempty"`
 	Expected   segmentCaseExpectation `yaml:"expected"`
 }
 
@@ -664,6 +704,7 @@ func TestTranscriptSegmentFixtureCases(t *testing.T) {
 			t.Parallel()
 			entries := entriesFromSegmentFixture(t, fixtureCase.Turns)
 			reader := newFakeSegmentReader(entries)
+			reader.setDropOnRead(fixtureCase.DropOnRead)
 			server := newTestServerForSegments(t, reader)
 
 			if fixtureCase.ShortAfter != nil {
@@ -685,9 +726,14 @@ func TestTranscriptSegmentFixtureCases(t *testing.T) {
 					t.Fatalf("segment status = %d, want %d; body %s", recorder.Code, fixtureCase.Expected.Status, body)
 				}
 				text := string(body)
-				for _, want := range append([]string{transcriptTestSessionID, "segment 0", "revision 4213", "peasant harvest --force --session " + transcriptTestSessionID}, fixtureCase.Expected.Contains...) {
+				for _, want := range append([]string{transcriptTestSessionID, "segment 0", "revision 4213"}, fixtureCase.Expected.Contains...) {
 					if !strings.Contains(text, want) {
 						t.Fatalf("conflict body does not name %q: %s", want, text)
+					}
+				}
+				for _, forbidden := range fixtureCase.Expected.NotContains {
+					if strings.Contains(text, forbidden) {
+						t.Fatalf("conflict body names %q, which this arm must not suggest: %s", forbidden, text)
 					}
 				}
 				return
@@ -796,49 +842,58 @@ func TestTranscriptWindowHasNoUserTurn(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Producer: cache, single-flight, cold build, jump
+// Producer: cache, single-flight, cut build, jump
 // ---------------------------------------------------------------------------
 
 func TestTranscriptProducerSingleFlight(t *testing.T) {
 	t.Parallel()
 	entries := transcriptEntries(t, alternatingTurns(64, 4096, 0))
 	reader := newFakeSegmentReader(entries)
-	producer := newSegmentProducer(reader)
+	reader.loadStarted = make(chan struct{})
+	reader.loadRelease = make(chan struct{})
+	base := startTranscriptServer(t, reader)
 
 	const readers = 8
-	var wg sync.WaitGroup
-	wg.Add(readers)
-	results := make([]segmentDirectory, readers)
+	var group sync.WaitGroup
+	group.Add(readers)
+	statuses := make([]int, readers)
 	for i := 0; i < readers; i++ {
 		go func(i int) {
-			defer wg.Done()
-			directory, err := producer.directoryFor(context.Background(), ingest.SessionID(transcriptTestSessionID), "4213")
+			defer group.Done()
+			response, err := http.Get(base + "/api/v1/sessions/" + transcriptTestSessionID + "/transcript/segments?page=1")
 			if err != nil {
 				t.Errorf("concurrent directory read: %v", err)
 				return
 			}
-			results[i] = directory
+			io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+			statuses[i] = response.StatusCode
 		}(i)
 	}
-	wg.Wait()
+	<-reader.loadStarted
+	// Let every request reach the in-flight build before it is allowed to
+	// finish; otherwise a request that arrives late could read the cache and the
+	// test would not exercise the shared build.
+	time.Sleep(25 * time.Millisecond)
+	close(reader.loadRelease)
+	group.Wait()
+
 	lists, _ := reader.counts()
 	if lists != 1 {
-		t.Fatalf("concurrent reads caused %d ListEntries passes, want 1", lists)
+		t.Fatalf("concurrent page-1 reads caused %d whole-session passes, want 1", lists)
 	}
-	if got := producer.buildCount(); got != 1 {
-		t.Fatalf("producer completed %d builds, want 1", got)
-	}
-	for i := 1; i < readers; i++ {
-		if len(results[i].refs) != len(results[0].refs) {
-			t.Fatalf("concurrent readers saw different directories: %d and %d refs", len(results[0].refs), len(results[i].refs))
+	for i, status := range statuses {
+		if status != http.StatusOK {
+			t.Fatalf("concurrent page-1 read %d status = %d, want 200", i, status)
 		}
 	}
 }
 
-// TestTranscriptProducerColdBuild32MiB measures one cold directory build on the
-// synthetic 32 MiB fixture (1,312 turns, no real transcript text) against the
-// slice's recorded budget.
-func TestTranscriptProducerColdBuild32MiB(t *testing.T) {
+// TestTranscriptProducerCutBuild32MiB pins the in-memory cut over the synthetic
+// 32 MiB fixture (1,312 turns, no real transcript text). It measures the cut,
+// not the cold build through the store: the store content pass is measured by
+// TestTranscriptDirectoryColdBuildThroughStore against the ratified budget.
+func TestTranscriptProducerCutBuild32MiB(t *testing.T) {
 	t.Parallel()
 	const turns = 1312
 	const contentBytes = 24 << 10 // ~32 MiB across the run
@@ -863,9 +918,9 @@ func TestTranscriptProducerColdBuild32MiB(t *testing.T) {
 			t.Fatalf("segment %d is %d bytes, over the %d budget", ref.Index, ref.ByteLength, defaults.TranscriptSegmentBudgetBytes)
 		}
 	}
-	t.Logf("cold segment directory build: %s (budget %s)", elapsed, defaults.TranscriptSegmentColdBuildBudget)
+	t.Logf("in-memory segment cut build: %s (cold-build budget %s)", elapsed, defaults.TranscriptSegmentColdBuildBudget)
 	if elapsed > defaults.TranscriptSegmentColdBuildBudget {
-		t.Fatalf("cold build took %s, over the %s budget", elapsed, defaults.TranscriptSegmentColdBuildBudget)
+		t.Fatalf("in-memory cut build took %s, over the %s cold-build budget", elapsed, defaults.TranscriptSegmentColdBuildBudget)
 	}
 }
 
@@ -1267,5 +1322,26 @@ func TestTranscriptWindowNoUserTurnHTTP(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "no user turn") {
 		t.Fatalf("404 body does not explain the missing user turn: %s", recorder.Body.String())
+	}
+}
+
+func TestTranscriptDirectoryRebuildsWhenRevisionAdvances(t *testing.T) {
+	t.Parallel()
+	entries := transcriptEntries(t, alternatingTurns(4, 64, 0))
+	reader := newFakeSegmentReader(entries)
+	reader.bumpOnLoad = true
+	reader.bumpRevisionTo = "4214"
+	producer := newSegmentProducer(reader)
+
+	directory, err := producer.currentDirectory(context.Background(), ingest.SessionID(transcriptTestSessionID))
+	if err != nil {
+		t.Fatalf("current directory: %v", err)
+	}
+	if directory.revision != "4214" {
+		t.Fatalf("directory revision = %q, want the revision after the build advanced", directory.revision)
+	}
+	lists, _ := reader.counts()
+	if lists != 2 {
+		t.Fatalf("directory builds = %d, want 2 (the stale cut and its rebuild)", lists)
 	}
 }

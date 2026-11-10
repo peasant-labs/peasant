@@ -37,13 +37,22 @@ segment_cases:
     turns:
       - {index: 4, role: assistant, contentBytes: 10, toolArgumentsBytes: [64], toolResultBytes: [2097152]}
     expected: {turns: 1, truncated: true, turnByteLength: 2097232, segmentByteLength: 2097232}
-  # A soft store-budget stop inside one turn is a short turn, not a short range.
-  # The declared byte length reveals it: the read refuses with 409 instead of
-  # serving part of the turn as if it were whole.
+  # A turn larger than the 8 MiB continuation budget is served whole: the soft
+  # byte budget rises to the directory's declared segment size, so the Limit that
+  # already bounds the read is the only stop. Each field is still bounded for
+  # display and the row reports its pre-bound size.
   - name: oversized-multi-entry-turn
     turns:
       - {index: 4, role: assistant, contentBytes: 10, toolArgumentsBytes: [64, 64, 64, 64, 64], toolResultBytes: [2097152, 2097152, 2097152, 2097152, 2097152]}
-    expected: {status: 409, contains: ["declared 10486112 bytes", "soft store-budget"]}
+    expected: {turns: 1, truncated: true, turnByteLength: 10486112, segmentByteLength: 10486112}
+  # A store that returns the declared turn range but folds one turn from fewer
+  # entries is caught by the byte-length check; it is a genuine partial fold, not
+  # a budget stop.
+  - name: partial-turn-fold
+    turns:
+      - {index: 4, role: assistant, contentBytes: 10, toolArgumentsBytes: [64, 64], toolResultBytes: [1024, 2048]}
+    dropOnRead: [5]
+    expected: {status: 409, contains: ["declared 3220 bytes", "returned 2128 bytes"], notContains: ["peasant harvest --force"]}
   # The directory declares a longer range than a damaged store read returns:
   # the read refuses with 409 instead of serving a short segment.
   - name: short-store-page

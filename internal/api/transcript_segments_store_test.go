@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -163,7 +164,9 @@ func TestTranscriptDirectoryColdBuildThroughStore(t *testing.T) {
 	if testing.Short() {
 		t.Skip("32 MiB store fixture is skipped in -short")
 	}
-	t.Parallel()
+	// This test measures one cold build and must not run beside the package's
+	// other heavy transcript tests; the full-suite harness runs packages
+	// concurrently, but this package's own load is avoidable.
 	s := openTestStore(t)
 	sessionID := "99999999-9999-4999-8999-999999999999"
 	const turnCount = 1312
@@ -194,6 +197,7 @@ func TestTranscriptDirectoryColdBuildThroughStore(t *testing.T) {
 	})
 	base := "http://" + srv.Addr().String()
 
+	runtime.GC()
 	started := time.Now()
 	response, err := http.Get(base + "/api/v1/sessions/" + sessionID + "/transcript/segments")
 	if err != nil {
@@ -220,8 +224,8 @@ func TestTranscriptDirectoryColdBuildThroughStore(t *testing.T) {
 	// its capture verification, so it is recorded beside that target rather than
 	// compared as if it were the in-memory build. A pathological regression still
 	// fails here.
-	t.Logf("cold directory build through the store: %s (build target %s), %d segments", elapsed, defaults.TranscriptSegmentColdBuildBudget, len(directory.Segments))
-	if elapsed > 2*defaults.TranscriptSegmentColdBuildBudget {
-		t.Fatalf("cold build through the store took %s, far over the %s build target plus its store pass", elapsed, defaults.TranscriptSegmentColdBuildBudget)
+	t.Logf("cold directory build through the store: %s (budget %s), %d segments", elapsed, defaults.TranscriptSegmentColdBuildBudget, len(directory.Segments))
+	if elapsed > defaults.TranscriptSegmentColdBuildBudget {
+		t.Fatalf("cold build through the store took %s, over the ratified %s budget", elapsed, defaults.TranscriptSegmentColdBuildBudget)
 	}
 }

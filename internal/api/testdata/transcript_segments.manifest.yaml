@@ -5,4 +5,5 @@ requiredNames:
   - one-oversized-turn
   - oversized-tool-result-turn
   - oversized-multi-entry-turn
+  - partial-turn-fold
   - short-store-page

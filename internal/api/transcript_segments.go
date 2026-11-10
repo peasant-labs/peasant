@@ -48,8 +48,10 @@ type segmentTurnMeta struct {
 
 // segmentDirectory is the producer's retained artifact: refs, scalars, one
 // entry count per segment, and each turn's identity and role. Turn content is
-// never retained, so a cached directory costs kilobytes even for a session
-// whose transcript is tens of megabytes.
+// never retained. Retained memory is O(turns) for the identity/role list — two
+// machine words per turn, not text — plus O(segments) for the refs and entry
+// counts. The eight-entry LRU caps the whole cache, so even a 10,000-turn
+// session holds tens of kilobytes per directory entry.
 type segmentDirectory struct {
 	revision    string
 	totalTurns  int
@@ -104,6 +106,31 @@ func (p *segmentProducer) directory(ctx context.Context, id ingest.SessionID) (s
 		return segmentDirectory{}, fmt.Errorf("api.transcriptSegments: read the store revision for session %s: %w; no segment directory was served; restore store access and retry", id, err)
 	}
 	return p.directoryFor(ctx, id, revision)
+}
+
+// currentDirectory returns a directory whose revision is still current after
+// its build. A build is one whole-session pass, and a write during it advances
+// store_state.revision; serving that cut as the current one would mix a
+// directory with a newer store. One retry absorbs ordinary churn; a second
+// advance is reported rather than guessed.
+func (p *segmentProducer) currentDirectory(ctx context.Context, id ingest.SessionID) (segmentDirectory, error) {
+	const attempts = 2
+	var last string
+	for attempt := 0; attempt < attempts; attempt++ {
+		directory, err := p.directory(ctx, id)
+		if err != nil {
+			return segmentDirectory{}, err
+		}
+		current, err := p.reader.Revision(ctx)
+		if err != nil {
+			return segmentDirectory{}, fmt.Errorf("api.transcriptSegments: re-read the store revision after building the directory for session %s: %w; no directory was served; restore store access and retry", id, err)
+		}
+		if current == directory.revision {
+			return directory, nil
+		}
+		last = fmt.Sprintf("%s became %s", directory.revision, current)
+	}
+	return segmentDirectory{}, fmt.Errorf("api.transcriptSegments: the store revision for session %s advanced twice while building its segment directory (%s); no directory was served; retry when the store is quiet", id, last)
 }
 
 // directoryFor returns the cut for a revision the caller already read, so the
@@ -212,7 +239,7 @@ func (s *Server) handleTranscriptSegments(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	directory, err := s.segments.directory(r.Context(), id)
+	directory, err := s.segments.currentDirectory(r.Context(), id)
 	if err != nil {
 		writeTranscriptReadError(w, "load the transcript segment directory", err)
 		return
@@ -258,7 +285,7 @@ func (s *Server) handleTranscriptSegment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	directory, err := s.segments.directory(r.Context(), id)
+	directory, err := s.segments.currentDirectory(r.Context(), id)
 	if err != nil {
 		writeTranscriptReadError(w, "load the transcript segment directory", err)
 		return
@@ -279,11 +306,18 @@ func (s *Server) handleTranscriptSegment(w http.ResponseWriter, r *http.Request)
 	// instead of consuming the continuation budget past it.
 	limit := directory.entryCounts[index]
 
+	// Limit already bounds this read to the segment's own entries, so raising
+	// the soft byte budget for one oversized turn cannot overread past lastTurn.
+	// It only lets a turn larger than the continuation budget be served whole.
+	softMax := defaults.TranscriptContinuationReadBytes
+	if int64(ref.ByteLength)+1 > softMax {
+		softMax = int64(ref.ByteLength) + 1
+	}
 	page, err := s.segments.reader.ReadSessionEntries(r.Context(), id, ingest.SessionEntryReadOptions{
 		Mode:         ingest.SessionEntryReadAvailable,
 		FromIndex:    ref.FirstTurn,
 		Limit:        limit,
-		SoftMaxBytes: defaults.TranscriptContinuationReadBytes,
+		SoftMaxBytes: softMax,
 	})
 	if err != nil {
 		writeTranscriptReadError(w, "read the stored entries for transcript segment", err)
@@ -316,8 +350,8 @@ func (s *Server) handleTranscriptSegment(w http.ResponseWriter, r *http.Request)
 	}
 	if servedBytes != ref.ByteLength {
 		writeJSONError(w, http.StatusConflict, fmt.Sprintf(
-			"the transcript segment read for session %s segment %d declared %d bytes for turns %d-%d under revision %s but the store returned %d bytes; no short segment was served, because a soft store-budget stop inside a turn would silently move every boundary after it; run peasant harvest --force --session %s to re-index the session",
-			id, index, ref.ByteLength, ref.FirstTurn, ref.LastTurn, directory.revision, servedBytes, id))
+			"the transcript segment read for session %s segment %d declared %d bytes for turns %d-%d under revision %s but the store returned %d bytes; no partial segment was served, because a turn folded from fewer entries would silently move every boundary after it; read the directory again and retry, and if it repeats the stored transcript is incomplete at this revision",
+			id, index, ref.ByteLength, ref.FirstTurn, ref.LastTurn, directory.revision, servedBytes))
 		return
 	}
 
@@ -376,7 +410,7 @@ func (s *Server) handleTranscriptWindow(w http.ResponseWriter, r *http.Request) 
 		span = parsed
 	}
 
-	directory, err := s.segments.directory(r.Context(), id)
+	directory, err := s.segments.currentDirectory(r.Context(), id)
 	if err != nil {
 		writeTranscriptReadError(w, "load the transcript segment directory", err)
 		return

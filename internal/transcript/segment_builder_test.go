@@ -365,3 +365,27 @@ func TestFoldedTurnByteLengthMatchesTurnByteLength(t *testing.T) {
 		t.Fatalf("folded byte length = %d, row byte length = %d", FoldedTurnByteLength(folded), rows[0].ByteLength)
 	}
 }
+
+// TestCutTurnRowsDirect pins the cut over already-projected wire turns, the
+// entry point the directory build uses.
+func TestCutTurnRowsDirect(t *testing.T) {
+	t.Parallel()
+	turns := []schema.TurnDetail{
+		{Index: 4, Role: schema.RoleUser, Content: strings.Repeat("a", 1024)},
+		{Index: 7, Role: schema.RoleAssistant, Content: strings.Repeat("b", 1024)},
+		{Index: 11, Role: schema.RoleUser, Content: strings.Repeat("c", 1024)},
+	}
+	refs, total := CutTurnRows(turns, 3*1024)
+	if total != 3 {
+		t.Fatalf("total = %d, want 3", total)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("segments = %d, want 2 (two 1026-byte turns fit the 3072-byte budget; the third is deferred)", len(refs))
+	}
+	if refs[0] != (schema.TranscriptSegmentRef{Index: 0, FirstTurn: 4, LastTurn: 7, ByteLength: 2052}) {
+		t.Fatalf("ref 0 = %+v, want turns 4-7 with 2052 bytes", refs[0])
+	}
+	if refs[1] != (schema.TranscriptSegmentRef{Index: 1, FirstTurn: 11, LastTurn: 11, ByteLength: 1026}) {
+		t.Fatalf("ref 1 = %+v, want turn 11 alone with 1026 bytes", refs[1])
+	}
+}

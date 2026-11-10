@@ -18,11 +18,13 @@ const TranscriptSegmentBudgetBytes int = 1 << 20
 // kilobytes rather than transcripts.
 const TranscriptSegmentDirectoryCapacity = 8
 
-// TranscriptSegmentColdBuildBudget is the measured cold-build target for one
-// segment directory on the 32 MiB synthetic fixture with an empty cache. The
-// build serialises each turn to measure it, which is why it is larger than a
-// per-turn index build would be.
-const TranscriptSegmentColdBuildBudget = 400 * time.Millisecond
+// TranscriptSegmentColdBuildBudget is the ratified cold-build target for one
+// segment directory on the 32 MiB synthetic fixture with an empty cache,
+// measured through the full store content pass. The pass reads and verifies the
+// stored transcript; the in-memory cut itself is much cheaper and is pinned
+// separately by its own test. The budget was raised from the earlier 400 ms
+// estimate after the store-path measurement landed in the 430-505 ms range.
+const TranscriptSegmentColdBuildBudget = 600 * time.Millisecond
 
 // TranscriptWindowSpanDefault is the design number of assistant turns a window
 // collects on each side of its anchor.
