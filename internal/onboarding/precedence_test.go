@@ -61,7 +61,7 @@ func TestPrecedence(t *testing.T) {
 				return
 			}
 			if row.IDAnswer {
-				assertIDAnswerRefused(t)
+				assertIDAnswerWritten(t)
 				return
 			}
 			model := onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeFull})
@@ -122,10 +122,8 @@ func precedenceValue(answer precedenceAnswer) (schema.LocalSettingValue, error) 
 	}
 }
 
-func assertIDAnswerRefused(t *testing.T) {
+func assertIDAnswerWritten(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() { onboarding.InstallSelectionDeriver() })
-	onboarding.UseSelectionDeriver(nil)
 	model := onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeFull})
 	field, ok := model.Field(onboarding.FieldSelection)
 	if !ok {
@@ -137,11 +135,11 @@ func assertIDAnswerRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = field.Write(cfg, onboarding.WriteContext{Config: cfg}, raw)
-	if err == nil || !strings.Contains(err.Error(), "selection deriver is not installed") {
-		t.Fatalf("id answer error = %v", err)
+	if err != nil {
+		t.Fatalf("id answer write: %v", err)
 	}
-	if cfg.Selection.Mode != config.BaseConfig().Selection.Mode {
-		t.Fatalf("failed id write changed mode to %s", cfg.Selection.Mode)
+	if cfg.Selection.Mode != config.SelectionModeSelected {
+		t.Fatalf("id answer mode = %s, want selected", cfg.Selection.Mode)
 	}
 }
 

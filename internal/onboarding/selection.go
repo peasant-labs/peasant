@@ -13,24 +13,6 @@ const (
 	legacyBranchlessPlaceholder = "(unknown branch)"
 )
 
-// selectionModel is the installed deriver. Field.Write is the only production
-// caller of the package DeriveSelection, which dispatches here.
-type selectionModel struct{}
-
-func (selectionModel) DeriveSelection(forest Forest, ids []string, autoIngest bool, residual Residual) (config.SelectionConfig, error) {
-	return deriveSelection(forest, SelectedForest{IDs: ids}, autoIngest, residual)
-}
-
-func init() {
-	UseSelectionDeriver(selectionModel{})
-}
-
-// InstallSelectionDeriver registers the selection model. Tests that uninstall
-// it restore this value so later derives do not fail closed.
-func InstallSelectionDeriver() {
-	UseSelectionDeriver(selectionModel{})
-}
-
 // RestoreSelection applies a saved selected-mode configuration to a forest.
 // It sanitizes display-only branch placeholders, records explicit branch and
 // session provenance, marks each row's tri-state, and returns the saved choices

@@ -5,7 +5,7 @@ requiredNames:
   - keep-local-clears-auto-publish-intent
   - auto-publish-on-sets-share-later
   - duplicate-yaml-path-refused-by-build-model
-  - id-answer-refused-until-selection-deriver-installed
+  - id-answer-uses-selection-model
 cases:
   - name: selection-mode-all-sets-auto-ingest-true
     startMode: selected
@@ -45,5 +45,5 @@ cases:
     wantAutoPublish: true
   - name: duplicate-yaml-path-refused-by-build-model
     duplicatePath: true
-  - name: id-answer-refused-until-selection-deriver-installed
+  - name: id-answer-uses-selection-model
     idAnswer: true

@@ -573,7 +573,7 @@ func Notice(key FieldKey, label, body string) Field {
 
 // SelectionTree builds the selection field. A mapping answer writes mode and
 // harnesses, and sets auto-ingest when mode is all. An id answer calls
-// DeriveSelection, which fails closed until the selection model is installed.
+// the shared selection derivation directly.
 func SelectionTree(key FieldKey, label string) Field {
 	return &field{
 		key:         key,
@@ -611,7 +611,7 @@ func writeSelection(cfg *config.Config, w WriteContext, value schema.LocalSettin
 		return writeValueError(FieldSelection, err)
 	}
 	if selectionAnswerHasIDs(value) {
-		derived, err := DeriveSelection(w.Forest, answer.IDs, cfg.Selection.AutoIngestNewBranches, w.Residual)
+		derived, err := deriveSelection(w.Forest, SelectedForest{IDs: answer.IDs}, cfg.Selection.AutoIngestNewBranches, w.Residual)
 		if err != nil {
 			return err
 		}
@@ -658,7 +658,7 @@ func validateSelection(w WriteContext) error {
 	}
 	if ids := answeredIDs(w); len(ids) > 0 {
 		auto := sel.AutoIngestNewBranches
-		derived, err := DeriveSelection(w.Forest, ids, auto, w.Residual)
+		derived, err := deriveSelection(w.Forest, SelectedForest{IDs: ids}, auto, w.Residual)
 		if err != nil {
 			return err
 		}
