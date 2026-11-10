@@ -30,9 +30,10 @@ type openCodeCurrentProjection struct {
 // The historical shapes follow upstream 4643e65ad6334de3e4e68dedc201d5fbb828c9fe.
 // Native identity and assistant timing compatibility follows the V2 schema at
 // 52685d451777fbccc99736ab31ffc37de8475a45 (packages/schema/src/session-message.ts).
-// The idle marker shape (outcome plus an optional structured error) follows
-// 2816d1c849, where packages/schema/src/session-message.ts defines
-// Session.Message.Idle; the earlier V2 pin has no idle variant.
+// The idle marker follows packages/schema/src/session-message.ts in two steps:
+// 2816d1c849 added Session.Message.Idle with its outcome literals, and
+// 40cc0f377b added the optional structured error. The earlier V2 pin has no
+// idle variant at all.
 // The projector stores type and id in columns and the remaining fields in data.
 // Redundant payload identities are accepted only when they agree with the columns.
 type openCodeCurrentBase struct {
