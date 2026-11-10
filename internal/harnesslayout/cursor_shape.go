@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // Cursor keeps its stores in SQLite files that a running Cursor may hold
@@ -36,14 +37,29 @@ func cursorFieldKey(key string) string {
 	return key
 }
 
+// cursorFieldPath renders an object key in the saved-report grammar: an
+// identifier key stays a dotted segment, and a collapsed key is a quoted
+// bracket segment, never a dotted "*".
+func cursorFieldPath(path, key string) string {
+	if field := cursorFieldKey(key); field != "*" {
+		return path + "." + field
+	}
+	return path + `["*"]`
+}
+
 // cursorWalk records a decoded JSON value like ShapeRecorder.AddRecord does,
 // but under path and with data-valued object keys collapsed to "*".
 func cursorWalk(rec *ShapeRecorder, path string, value any) {
 	switch v := value.(type) {
 	case map[string]any:
 		rec.observe(path, JSONObject)
-		for key, child := range v {
-			cursorWalk(rec, path+"."+cursorFieldKey(key), child)
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			cursorWalk(rec, cursorFieldPath(path, key), v[key])
 		}
 	case []any:
 		rec.observe(path, JSONArray)

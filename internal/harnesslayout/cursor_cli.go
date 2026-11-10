@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 // ToolCursorCLI is the chat store of the Cursor CLI agent (cursor-agent). The

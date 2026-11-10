@@ -51,11 +51,16 @@ func TestLayoutHarnessPairs(t *testing.T) {
 	}
 
 	seen := map[string]bool{}
+	covered := map[string]bool{}
 	for _, tc := range fixture.Cases {
 		if tc.Name == "" || seen[tc.Name] {
 			t.Fatalf("invalid or duplicate case name %q", tc.Name)
 		}
+		if tc.Name != tc.Tool {
+			t.Errorf("case %q: name must equal the tool id %q", tc.Name, tc.Tool)
+		}
 		seen[tc.Name] = true
+		covered[tc.Tool] = true
 		layout, ok := harnesslayout.Lookup(harnesslayout.Tool(tc.Tool))
 		if !ok {
 			t.Errorf("case %q: tool %q is not registered", tc.Name, tc.Tool)
@@ -76,6 +81,18 @@ func TestLayoutHarnessPairs(t *testing.T) {
 	}
 	for name := range seen {
 		t.Errorf("unexpected case %q; update the required-name manifest together", name)
+	}
+	// Every registered production layout must have a row. Test-only synthetic
+	// registrations are excluded by their known ids; a new real registration
+	// fails here until the fixture and manifest grow with it.
+	synthetic := map[harnesslayout.Tool]bool{"example-tool": true, "scripted": true, "fixture-tool": true}
+	for _, layout := range harnesslayout.Layouts() {
+		if synthetic[layout.Tool] {
+			continue
+		}
+		if !covered[string(layout.Tool)] {
+			t.Errorf("registered layout %q has no fixture row; add it to layout_harness.yaml and the required-name manifest", layout.Tool)
+		}
 	}
 
 	for _, tc := range fixture.Cases {

@@ -108,7 +108,7 @@ func TestCursorIDEStateCapturesComposersAndBubbles(t *testing.T) {
 	for _, path := range []string{
 		"$.cursorDiskKV.key", "$.cursorDiskKV.value", "$.composerHeaders.workspaceId", "$.composerHeaders.createdAt",
 		"$.cursorDiskKV.composerData.unifiedMode", "$.cursorDiskKV.composerData.fullConversationHeadersOnly[].bubbleId",
-		"$.cursorDiskKV.composerData.codeBlockData.*.invented", "$.cursorDiskKV.bubbleId.toolFormerData.name",
+		"$.cursorDiskKV.composerData.codeBlockData[\"*\"].invented", "$.cursorDiskKV.bubbleId.toolFormerData.name",
 		"$.cursorDiskKV.bubbleId.tokenCount.inputTokens", "$.composerHeaders.value.workspaceIdentifier.uri.fsPath",
 	} {
 		if _, ok := fields[path]; !ok {

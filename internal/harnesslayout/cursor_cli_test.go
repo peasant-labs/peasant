@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/harnesslayout"
-	"zombiezen.com/go/sqlite"
-	"zombiezen.com/go/sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 const (
@@ -186,7 +186,7 @@ func TestCursorCLICapturesChatStoreShapeAndMetadata(t *testing.T) {
 	for _, path := range []string{
 		"$.meta.key", "$.meta.value", "$.blobs.id", "$.blobs.data",
 		"$.meta.value.agentId", "$.meta.value.blobEncryptionKey", "$.meta.value.latestRootBlobId",
-		"$.blobs.data.content[].type", "$.blobs.data.content[].args.path", "$.blobs.data.content[].args.*",
+		"$.blobs.data.content[].type", "$.blobs.data.content[].args.path", "$.blobs.data.content[].args[\"*\"]",
 		"$.blobs.data.providerOptions.cursor.modelName",
 	} {
 		if _, ok := fields[path]; !ok {
