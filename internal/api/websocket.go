@@ -252,7 +252,10 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 // turns as an empty list. The durable read is not mutated: push and export
 // still carry the transcript. Earlier-history turns stay on that durable read
 // and are omitted here, because a metadata frame cannot vouch for content it
-// does not carry.
+// does not carry. Attachment-bearing native metadata is omitted for the same
+// reason: the contract resolves those records against the frame's turns, and
+// a frame with no turns cannot name the turn they attach to. A session-level
+// record, whose attachment is absent, stays.
 func sessionDetailFrame(sub ChannelSubscription, detail *schema.SessionDetailReadPayload) ServerMessage {
 	if detail == nil {
 		return ServerMessage{Type: MsgSessionDetail}
@@ -264,6 +267,7 @@ func sessionDetailFrame(sub ChannelSubscription, detail *schema.SessionDetailRea
 	}
 	served := *detail
 	served.Turns = []schema.TurnDetail{}
+	served.NativeMetadata = sessionLevelNativeMetadata(detail.NativeMetadata)
 	if len(detail.EarlierHistory) > 0 {
 		sections := make([]schema.EarlierHistorySection, len(detail.EarlierHistory))
 		for i, section := range detail.EarlierHistory {
@@ -274,6 +278,26 @@ func sessionDetailFrame(sub ChannelSubscription, detail *schema.SessionDetailRea
 		served.EarlierHistory = sections
 	}
 	return ServerMessage{Type: MsgSessionDetail, Data: &served}
+}
+
+// sessionLevelNativeMetadata keeps records that do not name a turn. An empty
+// result is nil so the frame omits the field instead of sending an empty array
+// the decoder would still have to explain.
+func sessionLevelNativeMetadata(records []schema.NativeMetadataRecord) []schema.NativeMetadataRecord {
+	if len(records) == 0 {
+		return nil
+	}
+	kept := make([]schema.NativeMetadataRecord, 0, len(records))
+	for _, record := range records {
+		if record.Attachment != nil {
+			continue
+		}
+		kept = append(kept, record)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 // sendSnapshots pushes current data for each subscription.

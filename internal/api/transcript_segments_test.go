@@ -1314,6 +1314,77 @@ func TestSessionDetailFrameSurvivesInvalidHeader(t *testing.T) {
 	}
 }
 
+// TestSessionDetailFrameDropsTurnAttachments proves a metadata-only frame still
+// decodes. An attachment-bearing record names a turn the frame no longer
+// carries, so it is absent; a session-level record has no attachment and stays.
+func TestSessionDetailFrameDropsTurnAttachments(t *testing.T) {
+	t.Parallel()
+	turnIndex := 0
+	sessionLevel := schema.NativeMetadataRecord{
+		ID:         "session-level",
+		Kind:       schema.NativeMetadataPiCustomData,
+		Source:     schema.NativeSourceRef{EntryRef: "custom-entry", SourceType: schema.NativeSourcePiCustom},
+		CustomType: "extension",
+		Data:       json.RawMessage(`{"kept":true}`),
+	}
+	attached := schema.NativeMetadataRecord{
+		ID:   "turn-attachment",
+		Kind: schema.NativeMetadataPiToolResultDetails,
+		Source: schema.NativeSourceRef{
+			EntryRef:    "result-entry",
+			SourceType:  schema.NativeSourcePiMessage,
+			MessageRole: schema.NativePiMessageRoleToolResult,
+		},
+		Attachment: &schema.NativeAttachmentRef{TurnIndex: &turnIndex, ToolCallID: "call-1"},
+		Data:       json.RawMessage(`{"dropped":true}`),
+	}
+	read := &schema.SessionDetailReadPayload{SessionDetailPayload: schema.SessionDetailPayload{
+		ID:      "45454545-4545-4545-4545-454545454545",
+		Harness: schema.HarnessPi,
+		Turns: []schema.TurnDetail{{
+			Index: 0,
+			Role:  schema.RoleAssistant,
+			ToolCalls: []schema.ToolCallDetail{{
+				ID:             "call-1",
+				Name:           "read",
+				ResultEntryRef: "result-entry",
+			}},
+		}},
+		NativeMetadata: []schema.NativeMetadataRecord{sessionLevel, attached},
+		EarlierHistory: []schema.EarlierHistorySection{{
+			State:          schema.EarlierHistoryUncertainMigrated,
+			Turns:          []schema.TurnDetail{{Index: 1, Role: schema.RoleUser, Content: "kept"}},
+			NativeMetadata: []schema.NativeMetadataRecord{attached},
+		}},
+	}}
+	message := sessionDetailFrame(ChannelSubscription{Topic: TopicSessionDetail, ID: read.ID}, read)
+	raw, err := json.Marshal(message.Data)
+	if err != nil {
+		t.Fatalf("marshal frame: %v", err)
+	}
+	decoded, err := schema.DecodeSessionDetailPayloadRaw(raw)
+	if err != nil {
+		t.Fatalf("metadata-only frame did not decode: %v", err)
+	}
+	if len(decoded.Turns) != 0 {
+		t.Fatalf("frame turns = %d, want none", len(decoded.Turns))
+	}
+	if len(decoded.NativeMetadata) != 1 || decoded.NativeMetadata[0].ID != sessionLevel.ID || decoded.NativeMetadata[0].Attachment != nil {
+		t.Fatalf("frame native metadata = %+v, want only the session-level record", decoded.NativeMetadata)
+	}
+	for _, record := range decoded.NativeMetadata {
+		if record.ID == attached.ID {
+			t.Fatal("the attachment-bearing record survived on a frame with no turns")
+		}
+	}
+	if len(decoded.EarlierHistory) != 1 || len(decoded.EarlierHistory[0].Turns) != 0 || len(decoded.EarlierHistory[0].NativeMetadata) != 0 {
+		t.Fatalf("earlier history = %+v, want empty turns and no native metadata", decoded.EarlierHistory)
+	}
+	if len(read.Turns) != 1 || len(read.NativeMetadata) != 2 || len(read.EarlierHistory[0].Turns) != 1 || len(read.EarlierHistory[0].NativeMetadata) != 1 {
+		t.Fatal("building the frame mutated the durable read")
+	}
+}
+
 // TestTranscriptWindowNoUserTurnHTTP pins the mounted 404: a session with no
 // user turn cannot centre a window and must answer at the route boundary.
 func TestTranscriptWindowNoUserTurnHTTP(t *testing.T) {

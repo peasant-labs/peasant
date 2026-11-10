@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -380,12 +381,62 @@ func assertFullPiWebSocket(t *testing.T, provider *StoreDataProvider, expected *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(detail.Turns, expected.Turns) || !reflect.DeepEqual(detail.NativeMetadata, expected.NativeMetadata) || !detail.StartTime.Equal(expected.StartTime) || !detail.EndTime.Equal(expected.EndTime) {
-		t.Fatal("full native WebSocket/export projection diverged after source removal")
+	if len(detail.Turns) != 0 {
+		t.Fatalf("frame turns = %d, want none; the transcript is served by the segment read", len(detail.Turns))
 	}
-	for _, turn := range detail.Turns {
-		if turn.Timestamp.Location() != time.UTC {
-			t.Fatal("native WebSocket turn timestamp is not canonical UTC")
+	if !reflect.DeepEqual(detail.NativeMetadata, sessionLevelNativeMetadata(expected.NativeMetadata)) {
+		t.Fatalf("frame native metadata = %+v, want the attachment-free subset of %+v", detail.NativeMetadata, expected.NativeMetadata)
+	}
+	if detail.ID != expected.ID || !detail.StartTime.Equal(expected.StartTime) || !detail.EndTime.Equal(expected.EndTime) || detail.Model != expected.Model || detail.TurnCount != expected.TurnCount || detail.ToolCallCount != expected.ToolCallCount || detail.TotalTokens != expected.TotalTokens || detail.TokensIn != expected.TokensIn || detail.TokensOut != expected.TokensOut {
+		t.Fatalf("frame metadata diverged from the export: id=%s model=%s counts=%d/%d/%d", detail.ID, detail.Model, detail.TurnCount, detail.ToolCallCount, detail.TotalTokens)
+	}
+	assertConversationOnSegmentReads(t, provider.store, expected)
+}
+
+// assertConversationOnSegmentReads proves the export's conversation is still
+// reachable after the frame stops carrying turns. It uses the directory and
+// segment handlers, not a second copy of the turn list.
+func assertConversationOnSegmentReads(t *testing.T, db *store.Store, expected *schema.SessionDetailPayload) {
+	t.Helper()
+	srv := NewServer(ServerConfig{Store: db})
+	directoryReq := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/"+expected.ID+"/transcript/segments", nil)
+	directoryReq.SetPathValue("id", expected.ID)
+	directoryRec := httptest.NewRecorder()
+	srv.handleTranscriptSegments(directoryRec, directoryReq)
+	if directoryRec.Code != http.StatusOK {
+		t.Fatalf("directory status = %d, body %s", directoryRec.Code, directoryRec.Body.String())
+	}
+	var directory schema.TranscriptSegmentDirectory
+	if err := json.Unmarshal(directoryRec.Body.Bytes(), &directory); err != nil {
+		t.Fatalf("decode directory: %v", err)
+	}
+	var got []schema.TurnDetail
+	for _, ref := range directory.Segments {
+		segmentReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/sessions/%s/transcript/segments/%d", expected.ID, ref.Index), nil)
+		segmentReq.SetPathValue("id", expected.ID)
+		segmentReq.SetPathValue("index", fmt.Sprintf("%d", ref.Index))
+		segmentRec := httptest.NewRecorder()
+		srv.handleTranscriptSegment(segmentRec, segmentReq)
+		if segmentRec.Code != http.StatusOK {
+			t.Fatalf("segment %d status = %d, body %s", ref.Index, segmentRec.Code, segmentRec.Body.String())
+		}
+		var segment schema.TranscriptSegment
+		if err := json.Unmarshal(segmentRec.Body.Bytes(), &segment); err != nil {
+			t.Fatalf("decode segment %d: %v", ref.Index, err)
+		}
+		for _, turn := range segment.Turns {
+			if !turn.Timestamp.IsZero() && turn.Timestamp.Location() != time.UTC {
+				t.Fatalf("segment turn %d timestamp is not canonical UTC", turn.Index)
+			}
+			got = append(got, turn.TurnDetail)
+		}
+	}
+	if len(got) != len(expected.Turns) {
+		t.Fatalf("segment reads returned %d turns, want the export's %d", len(got), len(expected.Turns))
+	}
+	for i := range expected.Turns {
+		if got[i].Index != expected.Turns[i].Index || got[i].Role != expected.Turns[i].Role || got[i].Content != expected.Turns[i].Content {
+			t.Fatalf("segment turn %d = index %d role %s content %q, want index %d role %s content %q", i, got[i].Index, got[i].Role, got[i].Content, expected.Turns[i].Index, expected.Turns[i].Role, expected.Turns[i].Content)
 		}
 	}
 }
