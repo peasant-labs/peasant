@@ -319,11 +319,12 @@ func retainLatestAttemptOnConn(conn *sqlite.Conn, prepared *preparedHarmonized, 
 	// though the active authority stays untouched. Advance the session stamp in
 	// the same transaction: the selector already treats a settled attempt as
 	// consumed, so a classifier reading the active authority's older stamp would
-	// republish the same attempt on every harvest. The immutable generation row
-	// keeps its own revision, exactly as the skip path does.
+	// republish the same attempt on every harvest. Only a NULL or behind row is
+	// written, so an identical retry changes nothing. The immutable generation
+	// row keeps its own revision, exactly as the skip path does.
 	if candidateAdapter != nil {
-		if err := sqlitex.Execute(conn, `UPDATE sessions SET adapter_version = MAX(COALESCE(adapter_version, 0), ?) WHERE session_id = ?`, &sqlitex.ExecOptions{
-			Args: []any{*candidateAdapter, string(sessionID)},
+		if err := sqlitex.Execute(conn, `UPDATE sessions SET adapter_version = ? WHERE session_id = ? AND (adapter_version IS NULL OR adapter_version < ?)`, &sqlitex.ExecOptions{
+			Args: []any{*candidateAdapter, string(sessionID), *candidateAdapter},
 		}); err != nil {
 			return fmt.Errorf("store: advance the adapter revision for retained session %s: %w; the latest-attempt transaction rolled back and the prior state is unchanged", sessionID, err)
 		}
