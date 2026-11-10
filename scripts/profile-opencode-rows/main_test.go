@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,25 +73,30 @@ func TestIgnoredOnlyCorpusKeepsTiming(t *testing.T) {
 	// The bracket must enclose the repeated decode loop. Compare the reported
 	// time against the same decodes measured independently: a bracket moved
 	// outside the loop reports nanoseconds against microseconds of real work.
+	// Only the lower bound matters; extra work inside the bracket (the per-row
+	// switch, a scheduling spike) is not a defect. Take the best of several
+	// measurements because a spike can only inflate a sample, so the minimum is
+	// the closest estimate of the real cost.
 	const baselineReps = 256
 	ignored := ignoredOnlyInputs()[0]
-	benchStart := time.Now()
-	for range baselineReps {
-		if _, _, err := ingest.DecodeOpenCodeProvenanceRow(ignored.Row, ignored.Scope); err != nil && !ingest.OpenCodeControlRowIgnored(err) {
-			t.Fatal(err)
+	best := time.Duration(math.MaxInt64)
+	for range 3 {
+		sampleStart := time.Now()
+		for range baselineReps {
+			if _, _, err := ingest.DecodeOpenCodeProvenanceRow(ignored.Row, ignored.Scope); err != nil && !ingest.OpenCodeControlRowIgnored(err) {
+				t.Fatal(err)
+			}
 		}
+		best = min(best, time.Since(sampleStart))
 	}
-	independent := time.Since(benchStart)
 	slow, err := runCorpus(t, ignoredOnlyInputs(), "timing", baselineReps)
 	if err != nil {
 		t.Fatalf("ignored-only timing at %d repetitions: %v", baselineReps, err)
 	}
-	// Only the lower bound matters: a bracket moved outside the loop reports
-	// nanoseconds against real work, while extra work inside the bracket (the
-	// per-row switch, a scheduling spike) is not a defect. A factor of ten still
-	// catches the mutation by four orders of magnitude.
-	if slow.DecodeSeconds < independent.Seconds()/10 {
-		t.Fatalf("reported %v s for %d rows, but the same decodes take %v s here: the timing bracket no longer encloses the decode loop", slow.DecodeSeconds, baselineReps, independent)
+	// A ten-times lower bound still catches the mutation: the mutated report
+	// lands about four orders below the real decode time, three below this bound.
+	if slow.DecodeSeconds < best.Seconds()/10 {
+		t.Fatalf("reported %v for %d rows, but the same decodes take %v here: the timing bracket no longer encloses the decode loop", slow.DecodeSeconds, baselineReps, best)
 	}
 }
 
