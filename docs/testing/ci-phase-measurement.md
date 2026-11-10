@@ -109,11 +109,13 @@ to the pool numbers.
 
 | job | timeout | basis |
 |---|---|---|
-| `check` | **20 min** | measured ~9m30s amd64 pool gate + ~2x headroom; a wedging cap, not the budget check |
+| `check` | **30 min** | measured ~9m30s amd64 pool gate + headroom; raised from 20 when `internal/ingest` pushed the suite past the old cap (#941). Still a wedging cap, not the budget check |
 | `check-arm64` | **20 min** | measured 9m54s–10m31s + ~2x headroom; cap is wedging protection (lane is not budget-gated) |
 | harvester guard, `cgo0`, notices, web, post-merge | unchanged | no measured value in this change; pending a real run |
 
-The committed budget fixture (not the job timeout) is what fails a slow suite.
+The committed budget fixture (not the job timeout) reports a slow suite as a non-blocking warning;
+the job timeout is a wedging cap. #941 tracks bringing the `internal/ingest` suite back under the
+cap.
 
 ## Aggregate definition
 
