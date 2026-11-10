@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useMemo, useState, useEffect } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Layers, Search, SlidersHorizontal, X } from 'lucide-react';
 import { Button, FeedbackPanel, PublishStateLabel } from '@/lib/ft-ui';
 import { SkeletonList } from '@/lib/skeleton';
@@ -13,25 +13,33 @@ import { useHomeSessions } from '@/hooks/useHomeSessions';
 import { usePublishState } from '@/contexts/PublishContext';
 import { fetchPublications } from '@/lib/api/publications';
 import type { LocalSessionRow } from '@/lib/api/grouped';
-import { PUBLISH_FILTERS, PUBLISH_FILTER_LABELS, isPublishFilter, type PublishFilter } from '@/lib/home/publishState';
+import type { LocalSyncProjectOption } from '@/lib/api/home';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { displayProject } from '@/lib/quality/utils';
-import type { LocalSyncProjectOption } from '@/lib/api/home';
+import { newProjectHash, type ProjectHash } from '@peasant-labs/schema';
+import { clearHomeCollapsedGroups, readHomeDeviceView, writeHomeDeviceView, type HomeDeviceView } from '@/lib/home/deviceView';
+import {
+  ALL_HOME_COLUMNS,
+  HomeColumn,
+  parseHomeColumn,
+  type HomeGroupBy,
+  type HomeSavedView,
+} from '@/components/home/homeColumns';
+import type { SavedView } from '@peasant-labs/fairtrade/ui';
+import {
+  ALL_BROWSE_VIEWS,
+  BrowseView,
+  decodeHomeViewState,
+  encodeHomeViewState,
+  isPublishFilter,
+  PUBLISH_FILTERS,
+  PUBLISH_FILTER_LABELS,
+  type HomeViewState,
+} from '@/lib/home/viewState';
 import './home.css';
 
 const LegacyHomeBrowse = lazy(() => import('@/components/home/LegacyHomeBrowse'));
 
-/**
- * What Home lists. `sessions` is the session table; the others are the
- * retained browse flows (the project picker, sessions with their helper
- * threads, the flat filterable list), reached from the same `browse by` menu.
- */
-type BrowseView = 'sessions' | 'projects' | 'grouped' | 'flat';
-const BROWSE_VIEWS: readonly BrowseView[] = ['sessions', 'projects', 'grouped', 'flat'];
-const BROWSE_LABELS: Record<BrowseView, string> = {
-  sessions: 'sessions', projects: 'project', grouped: 'helper threads', flat: 'every session',
-};
-const isBrowseView = (value: string): value is BrowseView => (BROWSE_VIEWS as readonly string[]).includes(value);
 const ALL_PROJECTS = '';
 
 /** Search rows can be off-page. Enrich only the mounted results, not the library. */
@@ -69,6 +77,20 @@ function projectChoice(value: string, projectName: string): ChoiceItem {
   };
 }
 
+function readInitialView(): HomeViewState {
+  return decodeHomeViewState(typeof window === 'undefined' ? '' : window.location.search);
+}
+
+function sameView(a: HomeViewState, b: HomeViewState): boolean {
+  return a.browse === b.browse
+    && a.publication === b.publication
+    && a.project === b.project
+    && a.query === b.query
+    && a.pageSize === b.pageSize
+    && a.page === b.page
+    && a.groupBy === b.groupBy;
+}
+
 export default function HomePage() {
   const [address, setAddress] = useState<'unread' | 'home' | 'unknown'>('unread');
   useEffect(() => {
@@ -80,54 +102,148 @@ export default function HomePage() {
 }
 
 function HomeView() {
-  const [filter, setFilter] = useState<PublishFilter>('all');
-  const [project, setProject] = useState<LocalSyncProjectOption | null>(null);
-  const [query, setQuery] = useState('');
-  const [search, setSearch] = useState('');
-  const [browse, setBrowse] = useState<BrowseView>('sessions');
+  const [view, setView] = useState<HomeViewState>(readInitialView);
+  // The device half is read once, outside the URL memo: a device change is not
+  // a URL change, and a static export must not hydrate a different value.
+  const [deviceView, setDeviceView] = useState<HomeDeviceView>(() => readHomeDeviceView());
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const [queryInput, setQueryInput] = useState(view.query);
   const { settled } = usePublishState();
-  const home = useHomeSessions({ publication: filter, projectHash: project?.projectHash }, settled);
+
+  // The URL owns the data view, the page, the size, and the grouping. A scope,
+  // size, or grouping change starts at page one; a page change keeps the scope.
+  const commit = useCallback((patch: Partial<HomeViewState>, mode: 'push' | 'replace' = 'push') => {
+    const current = viewRef.current;
+    let next: HomeViewState = { ...current, ...patch };
+    const scopeChanged = (patch.browse !== undefined && patch.browse !== current.browse)
+      || (patch.publication !== undefined && patch.publication !== current.publication)
+      || (patch.project !== undefined && patch.project !== current.project)
+      || (patch.query !== undefined && patch.query !== current.query)
+      || (patch.pageSize !== undefined && patch.pageSize !== current.pageSize);
+    const groupingChanged = patch.groupBy !== undefined && patch.groupBy !== current.groupBy;
+    if ((scopeChanged || groupingChanged) && patch.page === undefined) next = { ...next, page: 1 };
+    if (sameView(next, current)) return;
+    if (groupingChanged) {
+      // The grouping is URL-owned; the open groups are device-owned. A new
+      // grouping names different groups, so its collapsed set returns to the
+      // default (all open).
+      clearHomeCollapsedGroups();
+      setDeviceView(readHomeDeviceView());
+    }
+    viewRef.current = next;
+    setView(next);
+    if (typeof window === 'undefined') return;
+    const search = encodeHomeViewState(next);
+    const url = `${window.location.pathname}${search ? `?${search}` : ''}`;
+    window.history[mode === 'push' ? 'pushState' : 'replaceState']({}, '', url);
+  }, []);
+
+  // Back and forward restore the prior view and page from the URL.
   useEffect(() => {
-    if (project && home.projects !== null && !home.projects.some(option => option.projectHash === project.projectHash)) setProject(null);
-  }, [home.projects, project]);
+    const onPop = () => {
+      const next = decodeHomeViewState(window.location.search);
+      viewRef.current = next;
+      setView(next);
+      setQueryInput(next.query);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // The settled search query lives in the URL. Typing is local until it settles.
   useEffect(() => {
-    const timer = setTimeout(() => setSearch(query.trim()), query ? 250 : 0);
+    const settledQuery = queryInput.trim();
+    if (settledQuery === viewRef.current.query) return;
+    const timer = setTimeout(() => { commit({ query: settledQuery }, 'replace'); }, settledQuery ? 250 : 0);
     return () => clearTimeout(timer);
-  }, [query]);
-  const roots = home.groups.get('');
-  const discoveryError = roots?.error;
-  const discoveryFault = roots?.fault ?? null;
-  const rootPages = roots?.pages;
-  const rows = useMemo(() => [...new Map((rootPages ?? []).flatMap(page => page.items).map(row => [row.sync.id, row])).values()], [rootPages]);
-  const children = new Map([...home.groups].filter(([id]) => id !== '').map(([id, group]) => [id, [...new Map(group.pages.flatMap(page => page.items).map(row => [row.sync.id, row])).values()]]));
+  }, [queryInput, commit]);
+  useEffect(() => { setQueryInput(view.query); }, [view.query]);
+
+  const onServedPage = useCallback((page: number) => { commit({ page }, 'replace'); }, [commit]);
+  const home = useHomeSessions({
+    publication: view.publication,
+    projectHash: view.project,
+    browse: view.browse,
+    query: view.query,
+    page: view.page,
+    pageSize: view.pageSize,
+    onServedPage,
+  }, settled);
+
+  const projectOptions = home.projects ?? [];
+  const currentProject = view.project === null
+    ? null
+    : projectOptions.find(option => option.projectHash === view.project)
+      ?? ({ projectHash: view.project, projectName: view.project } satisfies LocalSyncProjectOption);
+  useEffect(() => {
+    const project = view.project;
+    if (project === null || home.projects === null) return;
+    if (!home.projects.some(option => option.projectHash === project)) commit({ project: null }, 'replace');
+  }, [home.projects, view.project, commit]);
+
+  // The table receives ONE saved view: the URL-owned grouping composed with
+  // the device-owned columns and open groups. The table owns the pickers and
+  // reports one change; the host writes the URL half and the device half.
+  const tableState = useMemo<HomeSavedView>(() => ({
+    groupBy: view.groupBy,
+    visibleColumns: deviceView.visibleColumns === null
+      ? ALL_HOME_COLUMNS
+      : deviceView.visibleColumns
+        .map((wire) => parseHomeColumn(wire))
+        .filter((column): column is HomeColumn => column !== null),
+    collapsed: deviceView.collapsed ?? [],
+  }), [view.groupBy, deviceView]);
+  const onTableViewChange = useCallback((next: SavedView<HomeGroupBy, HomeColumn>) => {
+    const visibleColumns = next.visibleColumns.map((column) => column.wire);
+    if (next.groupBy !== viewRef.current.groupBy) {
+      // A new grouping names different groups, so the device open set resets;
+      // the URL keeps the grouping, the device keeps the columns.
+      commit({ groupBy: next.groupBy });
+      writeHomeDeviceView({ visibleColumns, collapsed: [] });
+      setDeviceView(readHomeDeviceView());
+      return;
+    }
+    writeHomeDeviceView({ visibleColumns, collapsed: next.collapsed });
+    setDeviceView(readHomeDeviceView());
+  }, [commit]);
+
+  const rows = useMemo(() => {
+    const seen = new Set<string>();
+    return (home.rootPage?.items ?? []).filter(row => {
+      if (seen.has(row.sync.id)) return false;
+      seen.add(row.sync.id);
+      return true;
+    });
+  }, [home.rootPage]);
+  const children = useMemo(() => new Map([...home.children].map(([id, group]) => [id, [...new Map(group.pages.flatMap(page => page.items).map(row => [row.sync.id, row])).values()]])), [home.children]);
   const allRows = [...rows, ...[...children.values()].flat()];
   const titles = new Map(allRows.map(row => [row.sync.id, row.title]));
   const previews = new Map(allRows.map(row => [row.sync.id, row.preview]));
 
   // The filters: the server-owned publish-state filter and the project the
   // list is scoped to. Each set filter counts once on the trigger.
-  const filterCount = (filter !== 'all' ? 1 : 0) + (project ? 1 : 0);
-  const projectOptions = [
-    ...(project && !home.projects?.some(option => option.projectHash === project.projectHash) ? [project] : []),
-    ...(home.projects ?? []),
-  ];
+  const filterCount = (view.publication !== 'all' ? 1 : 0) + (view.project ? 1 : 0);
+  const projectChoices = currentProject && !projectOptions.some(option => option.projectHash === currentProject.projectHash)
+    ? [currentProject, ...projectOptions]
+    : projectOptions;
   const filterGroups: ChoiceGroup[] = [
     {
       id: 'status',
       caption: 'status',
-      value: filter,
+      value: view.publication,
       items: PUBLISH_FILTERS.map(option => ({ value: option, label: PUBLISH_FILTER_LABELS[option] })),
-      onChoose: next => { if (isPublishFilter(next)) setFilter(next); },
+      onChoose: next => { if (isPublishFilter(next)) commit({ publication: next }); },
     },
     {
       id: 'project',
       caption: 'project',
-      value: project?.projectHash ?? ALL_PROJECTS,
+      value: view.project ?? ALL_PROJECTS,
       items: [
         { value: ALL_PROJECTS, label: 'all projects' },
-        ...projectOptions.map(option => projectChoice(option.projectHash, option.projectName)),
+        ...projectChoices.map(option => projectChoice(option.projectHash, option.projectName)),
       ],
-      onChoose: hash => setProject(hash === ALL_PROJECTS ? null : projectOptions.find(option => option.projectHash === hash) ?? null),
+      onChoose: hash => commit({ project: hash === ALL_PROJECTS ? null : newProjectHash(hash) }),
       note: home.projectsLoading ? 'loading project choices…' : home.projectError != null ? (home.projectFault?.message ?? discoveryErrorMessage(home.projectError)) : undefined,
       retry: home.projectError != null ? { label: 'retry project choices', onSelect: () => { void home.loadProjects(); } } : undefined,
     },
@@ -138,33 +254,40 @@ function HomeView() {
   const browseMenu = <ChoiceMenu
     ariaLabel="browse by"
     align="end"
-    trigger={<><Layers aria-hidden="true" />browse by: {BROWSE_LABELS[browse]}</>}
+    trigger={<><Layers aria-hidden="true" />browse by: {view.browse.label}</>}
     groups={[{
       id: 'browse',
-      value: browse,
-      items: BROWSE_VIEWS.map(view => ({ value: view, label: BROWSE_LABELS[view] })),
-      onChoose: next => { if (isBrowseView(next)) setBrowse(next); },
+      value: view.browse.wire,
+      items: ALL_BROWSE_VIEWS.map(member => ({ value: member.wire, label: member.label })),
+      onChoose: next => {
+        const chosen = ALL_BROWSE_VIEWS.find(member => member.wire === next);
+        if (chosen) commit({ browse: chosen });
+      },
     }]}
   />;
 
+  // The grouping is URL state; the open groups are device state. The shared
+  // table owns the group-by and column pickers and reports one composed view.
+  const sessionsView = view.browse === BrowseView.Sessions;
+  const searching = sessionsView && view.query !== '';
   return <div className="asb-page home-page" data-home-bounded="true">
     <header className="home-head" data-tour="home">
       <h1 className="iu-page-title page-title">sessions</h1>
     </header>
     <AutoPublishTip />
-    {discoveryError != null && <div className="flex flex-col items-start gap-3">
-      <FeedbackPanel variant="error">{discoveryFault ? discoveryFault.message : discoveryErrorMessage(discoveryError)}</FeedbackPanel>
+    {home.error != null && <div className="flex flex-col items-start gap-3">
+      <FeedbackPanel variant="error">{home.fault ? home.fault.message : discoveryErrorMessage(home.error)}</FeedbackPanel>
       <Button variant="secondary" size="sm" onClick={() => home.retry()}>retry the session list</Button>
     </div>}
     <div className="home-board">
       <div className="home-toolbar" data-home-toolbar="true">
-        {browse === 'sessions' && <label className="home-search">
+        {sessionsView && <label className="home-search">
           <Search className="home-search-icon" aria-hidden="true" />
-          <input type="search" aria-label="search your sessions" placeholder="search titles, prompts, tool output" value={query} onChange={event => setQuery(event.target.value)} />
-          {query && <button type="button" className="btn btn-ghost btn-sm btn-icon home-search-clear" aria-label="clear search" onClick={() => setQuery('')}><X aria-hidden="true" /></button>}
+          <input type="search" aria-label="search your sessions" placeholder="search titles, prompts, tool output" value={queryInput} onChange={event => setQueryInput(event.target.value)} />
+          {queryInput && <button type="button" className="btn btn-ghost btn-sm btn-icon home-search-clear" aria-label="clear search" onClick={() => { setQueryInput(''); commit({ query: '' }, 'replace'); }}><X aria-hidden="true" /></button>}
         </label>}
         <div className="home-toolbar-menus">
-          {browse === 'sessions' && !search && <ChoiceMenu
+          {sessionsView && !searching && <ChoiceMenu
             ariaLabel="filters"
             className="home-filters-menu"
             align="end"
@@ -172,17 +295,32 @@ function HomeView() {
             onOpen={() => { if (home.projectError == null) void home.loadProjects(); }}
             trigger={<><SlidersHorizontal aria-hidden="true" />filters{filterCount > 0 && <><span className="home-filter-count" aria-hidden="true">{filterCount}</span><span className="sr-only">, {filterCount} set</span></>}</>}
             groups={filterGroups}
-            actions={[{ label: 'clear filters', disabled: filterCount === 0, onSelect: () => { setFilter('all'); setProject(null); } }]}
+            actions={[{ label: 'clear filters', disabled: filterCount === 0, onSelect: () => commit({ publication: 'all', project: null }) }]}
           />}
           {browseMenu}
         </div>
       </div>
-      {browse === 'sessions' ? <>
-        {search ? <GroupedSessionsSection key={`${search}-${home.revision}`} variant="search" query={search} heading="search results" rowDetail={row => <SearchDetail row={row} />} />
-          : !roots?.pages.length && roots?.error != null ? null
-          : <RootSessionList rows={rows} childGroups={children} titles={titles} previews={previews} home={home} filter={filter} scope={`${filter}:${project?.projectHash ?? ''}`} loading={!roots?.pages.length && roots?.error == null} />}
-      </> : <section aria-label={`browse by ${BROWSE_LABELS[browse]}`} id={`home-browse-${browse}`} className="home-browse">
-        <Suspense fallback={<SkeletonList rows={4} />}><LegacyHomeBrowse view={browse} /></Suspense>
+      {sessionsView ? <>
+        {searching ? <GroupedSessionsSection key={`${view.query}-${home.revision ?? ''}`} variant="search" query={view.query} heading="search results" rowDetail={row => <SearchDetail row={row} />} />
+          : home.error != null && home.rootPage === null ? null
+          : <RootSessionList
+            rows={rows}
+            childGroups={children}
+            titles={titles}
+            previews={previews}
+            home={home}
+            filter={view.publication}
+            page={view.page}
+            pageSize={view.pageSize}
+            total={home.total}
+            viewState={tableState}
+            onViewStateChange={onTableViewChange}
+            onPageChange={next => commit({ page: next })}
+            onPageSizeChange={size => commit({ pageSize: size, page: 1 })}
+            loading={home.loading && home.rootPage === null}
+          />}
+      </> : <section aria-label={`browse by ${view.browse.label}`} id={`home-browse-${view.browse.wire}`} className="home-browse">
+        <Suspense fallback={<SkeletonList rows={4} />}><LegacyHomeBrowse view={view.browse.wire as 'projects' | 'grouped' | 'flat'} /></Suspense>
       </section>}
     </div>
   </div>;

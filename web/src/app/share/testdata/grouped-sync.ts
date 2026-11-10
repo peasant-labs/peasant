@@ -127,25 +127,39 @@ function transcriptItem(session: GroupedSyncSessionSpec) {
   };
 }
 
+function contextItem(context: GroupedSyncContextSpec) {
+  return {
+    kind: 'context_container' as const,
+    context: { groupId: context.groupId, ownerStatus: context.ownerStatus },
+    helperGroups: helperGroupItems(context.helperGroups),
+  };
+}
+
+export interface GroupedSyncPageOptions {
+  page?: number;
+  perPage?: number;
+  total?: number;
+  /** The next page's sessions, so the chooser's pager drain can be exercised. */
+  nextSessions?: GroupedSyncSessionSpec[];
+  nextContexts?: GroupedSyncContextSpec[];
+}
+
 export function buildGroupedSyncResponse(
   sessions: GroupedSyncSessionSpec[],
   contexts: GroupedSyncContextSpec[] = [],
+  options: GroupedSyncPageOptions = {},
 ) {
-  const items = [
-    ...sessions.map(transcriptItem),
-    ...contexts.map((context) => ({
-      kind: 'context_container' as const,
-      context: { groupId: context.groupId, ownerStatus: context.ownerStatus },
-      helperGroups: helperGroupItems(context.helperGroups),
-    })),
-  ];
+  const items = [...sessions.map(transcriptItem), ...contexts.map(contextItem)];
+  const nextItems = [...(options.nextSessions ?? []).map(transcriptItem), ...(options.nextContexts ?? []).map(contextItem)];
   return {
     items,
-    page: 1,
-    limit: items.length || 1,
-    totalItems: items.length,
-    ordinarySessionTotal: sessions.length,
-    helperThreadTotal: sessions.reduce((total, session) => total + (session.helperGroups?.reduce((count, group) => count + group.helperThreadCount, 0) ?? 0), 0),
+    nextItems,
+    page: options.page ?? 1,
+    perPage: options.perPage ?? 25,
+    total: options.total ?? items.length + nextItems.length,
+    revision: '0',
+    ordinarySessionTotal: sessions.length + (options.nextSessions?.length ?? 0),
+    helperThreadTotal: [...sessions, ...(options.nextSessions ?? [])].reduce((total, session) => total + (session.helperGroups?.reduce((count, group) => count + group.helperThreadCount, 0) ?? 0), 0),
   };
 }
 
@@ -155,13 +169,15 @@ export function buildGroupedSyncResponse(
  */
 export function buildGroupedMembersResponse(
   members: GroupedSyncSessionSpec[],
-  options: { page?: number; limit?: number; total?: number } = {},
+  options: { page?: number; perPage?: number; total?: number } = {},
 ) {
   const items = members.map(transcriptItem);
   return {
     members: items,
+    nextItems: [],
     page: options.page ?? 1,
-    limit: options.limit ?? (items.length || 1),
+    perPage: options.perPage ?? 25,
     total: options.total ?? items.length,
+    revision: '0',
   };
 }

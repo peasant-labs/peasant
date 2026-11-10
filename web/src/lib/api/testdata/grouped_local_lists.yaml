@@ -11,8 +11,10 @@ cases:
     kind: list
     payload:
       page: 1
-      limit: 20
-      totalItems: 3
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 3
       ordinarySessionTotal: 3
       helperThreadTotal: 3
       items:
@@ -55,7 +57,7 @@ cases:
       valid: true
       itemKinds: [transcript, transcript, transcript]
       groupIds: [hg_p1, hg_p2]
-      totalItems: 3
+      total: 3
       ordinarySessionTotal: 3
       helperThreadTotal: 3
 
@@ -63,8 +65,10 @@ cases:
     kind: list
     payload:
       page: 1
-      limit: 20
-      totalItems: 1
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 2
       items:
@@ -76,7 +80,7 @@ cases:
       valid: true
       itemKinds: [context_container]
       groupIds: [hg_p1]
-      totalItems: 1
+      total: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 2
 
@@ -84,8 +88,10 @@ cases:
     kind: list
     payload:
       page: 1
-      limit: 20
-      totalItems: 2
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 2
       ordinarySessionTotal: 0
       helperThreadTotal: 2
       items:
@@ -101,7 +107,7 @@ cases:
       valid: true
       itemKinds: [context_container, context_container]
       groupIds: [hg_u1, hg_u2]
-      totalItems: 2
+      total: 2
       ordinarySessionTotal: 0
       helperThreadTotal: 2
 
@@ -109,7 +115,9 @@ cases:
     kind: members
     payload:
       page: 1
-      limit: 1
+      perPage: 25
+      nextItems: []
+      revision: '0'
       total: 2
       members:
         - kind: transcript
@@ -131,8 +139,10 @@ cases:
     kind: list
     payload:
       page: 1
-      limit: 20
-      totalItems: 1
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 0
       items:
@@ -144,8 +154,10 @@ cases:
     kind: list
     payload:
       page: 1
-      limit: 20
-      totalItems: 1
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 1
       ordinarySessionTotal: 0
       helperThreadTotal: 1
       items:
@@ -160,8 +172,10 @@ cases:
     kind: list
     payload:
       page: 1
-      limit: 20
-      totalItems: 1
+      perPage: 25
+      nextItems: []
+      revision: '0'
+      total: 1
       ordinarySessionTotal: 1
       helperThreadTotal: 1
       items:
@@ -184,7 +198,9 @@ cases:
     kind: members
     payload:
       page: 1
-      limit: 20
+      perPage: 25
+      nextItems: []
+      revision: '0'
       total: 1
       members:
         - kind: transcript

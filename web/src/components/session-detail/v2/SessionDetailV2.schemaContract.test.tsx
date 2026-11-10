@@ -49,7 +49,6 @@ const captures = vi.hoisted(() => ({
   adapted: [] as Array<Record<string, unknown>>,
   analytics: [] as Array<{ turns: unknown[]; options: Record<string, unknown> | undefined }>,
   annotated: [] as unknown[][],
-  medians: [] as unknown[][],
   graphs: [] as Array<Record<string, unknown>>,
   viewerProps: [] as Array<Record<string, unknown>>,
 }));
@@ -112,10 +111,6 @@ vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => ({
     annotateTranscript: (turns: unknown[]) => {
       captures.annotated.push(turns);
       return [];
-    },
-    computePersonalMedians: (sessions: unknown[]) => {
-      captures.medians.push(sessions);
-      return undefined;
     },
     prefilterTurns: (turns: unknown[]) => turns,
     computeTasks: () => [],
@@ -259,7 +254,6 @@ beforeEach(() => {
   captures.adapted.length = 0;
   captures.analytics.length = 0;
   captures.annotated.length = 0;
-  captures.medians.length = 0;
   captures.graphs.length = 0;
   captures.viewerProps.length = 0;
   window.localStorage.clear();
@@ -287,7 +281,7 @@ describe('mounted canonical schema contract', () => {
       const viewer = screen.getByTestId('contract-viewer');
       expect(viewer).toHaveAttribute('data-provider', fixture.harness);
       expect(viewer).toHaveAttribute('data-turn-count', String(fixture.expectedTurnCount));
-      expect(captures.medians.at(-1)).toEqual([]);
+      expect(captures.analytics.at(-1)?.options?.medians).toBeUndefined();
       expect(captures.annotated.at(-1)).toHaveLength(fixture.expectedTurnCount);
       expect(captures.graphs.at(-1)?.provider).toBe(fixture.harness);
       // No per-turn files-read panel: the adapter passes no turn panel slot, so

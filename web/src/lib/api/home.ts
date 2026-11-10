@@ -3,7 +3,7 @@ import type { paths } from '@peasant-labs/schema/local-api';
 import { getApiBaseUrl } from './base';
 import { parseDiscoveryError } from './errors';
 
-export type { LocalSyncSessionRow, LocalSyncSessionPage, LocalSyncProjectOption, PageToken } from '@peasant-labs/schema';
+export type { LocalSyncSessionRow, LocalSyncSessionPage, LocalSyncProjectOption } from '@peasant-labs/schema';
 export type SyncSessionsQuery = NonNullable<paths['/api/v1/sync/sessions']['get']['parameters']['query']>;
 export const SYNC_HOME_PATH = '/api/v1/sync/sessions';
 

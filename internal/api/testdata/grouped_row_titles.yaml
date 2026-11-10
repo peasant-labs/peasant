@@ -1,0 +1,23 @@
+# A grouped or sync row carries the stored session title so a client renders
+# titles from the bounded page instead of the retired full sessions channel.
+# The search variant omits it because its match rows already carry the matched
+# content.
+requiredNames:
+  - a grouped sessions row carries its stored title
+  - a grouped search row omits the stored title
+  - a grouped helper member carries its stored title
+cases:
+  - name: a grouped sessions row carries its stored title
+    variant: sessions
+    title: refactor the ingest pipeline
+    expectedTitle: refactor the ingest pipeline
+  - name: a grouped search row omits the stored title
+    variant: search
+    title: refactor the ingest pipeline
+    expectedTitle: ""
+  - name: a grouped helper member carries its stored title
+    variant: sessions
+    title: owner stored title
+    helperTitle: helper stored title
+    expectedTitle: owner stored title
+    expectedHelperTitle: helper stored title

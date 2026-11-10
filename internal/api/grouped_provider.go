@@ -174,6 +174,7 @@ func (p *StoreDataProvider) groupedCandidatesFromRows(ctx context.Context, rows 
 
 		candidate := GroupedCandidate{
 			Summary:    summary,
+			Title:      storedTitle(row.Title),
 			StartMs:    row.StartMs,
 			StableID:   row.SessionID,
 			HostSlug:   row.HostSlug,

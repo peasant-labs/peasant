@@ -3,6 +3,7 @@
 # comparison. Tables exclude sqlite_% internals; the FTS5 shadow tables are
 # listed because they are real schema objects in this catalog.
 tables:
+  - store_state
   - collective_observation_scopes
   - collective_attempt_sources
   - remote_contribution_attempts
@@ -110,6 +111,8 @@ indexes:
   - idx_claude_evidence_identity_root
   - idx_claude_teammate_spawns_identity
   - idx_codex_rollout_catalog_session
+  - idx_sessions_root_page
+  - idx_sessions_child_page
   - idx_collective_observation_versions_current
   - idx_transcript_collective_evidence_current
   - idx_local_contribution_receipts_order

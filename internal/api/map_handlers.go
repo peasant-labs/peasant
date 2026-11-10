@@ -271,7 +271,7 @@ func (s *Server) handleReviewDiff(w http.ResponseWriter, r *http.Request) {
 // integer. The provider applies the documented maximum clamp to valid oversized
 // values. There is no codemap sentinel for search, so any provider error → 500.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	request, ok := s.exactRequestGuard(w, r, exactRequestSpec{operation: "search", provider: true, query: map[string]bool{"q": true, "limit": false, "view": false}})
+	request, ok := s.exactRequestGuard(w, r, exactRequestSpec{operation: "search", provider: true, query: map[string]bool{"q": true, "limit": false, "view": false, "page": false, "perPage": false}})
 	if !ok {
 		return
 	}

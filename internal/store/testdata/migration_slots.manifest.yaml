@@ -1,5 +1,6 @@
 requiredNames:
-  - v70-derived-lookups
+  - v70-parent-state
+  - v71-derived-lookups
   - v69-source-unavailability-cause
   - v68-collective-observations
   - v01-initial-schema

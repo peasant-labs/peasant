@@ -187,7 +187,7 @@ func TestScopedStatementsQueryPlans(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			plan := explainQueryPlan(t, conn, testCase.sql, testCase.args)
+			plan := scopedExplainQueryPlan(t, conn, testCase.sql, testCase.args)
 			assertNoForbiddenScan(t, testCase.name, plan)
 			if testCase.wantIndex != "" {
 				assertPlanUsesIndex(t, testCase.name, plan, testCase.wantIndex)
@@ -209,7 +209,7 @@ var forbiddenScanTargets = map[string]string{
 	"codex_rollout_catalog":         "codex_rollout_catalog",
 }
 
-func explainQueryPlan(t *testing.T, conn *sqlite.Conn, sql string, args []any) []string {
+func scopedExplainQueryPlan(t *testing.T, conn *sqlite.Conn, sql string, args []any) []string {
 	t.Helper()
 	var plan []string
 	if err := sqlitex.ExecuteTransient(conn, "EXPLAIN QUERY PLAN "+sql, &sqlitex.ExecOptions{

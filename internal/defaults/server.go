@@ -66,13 +66,25 @@ const (
 	RouteAnnotationsBatch  Route = "/api/v1/annotations/batch"
 	RouteAnnotationTypes   Route = "/api/v1/annotation-types"
 	RouteSessionTranscript Route = "/api/v1/sessions/{id}/transcript"
-	RouteLocalFeedback     Route = "/api/v1/local/feedback"
-	RouteSyncSessions      Route = "/api/v1/sync/sessions"
-	RouteSyncAuth          Route = "/api/v1/sync/auth"
-	RouteSyncRedactions    Route = "/api/v1/sync/redactions"
-	RouteSyncPush          Route = "/api/v1/sync/push"
-	RouteSyncLogin         Route = "/api/v1/sync/login"
-	RouteSyncLogout        Route = "/api/v1/sync/logout"
+	// RouteSessionTranscriptSegments is the transcript's only global index: one
+	// bounded read of segment refs plus the cut's scalars, capped at
+	// schema.MaxTranscriptDirectoryRefs rows and paged above it.
+	RouteSessionTranscriptSegments Route = "/api/v1/sessions/{id}/transcript/segments"
+	// RouteSessionTranscriptSegment reads one segment's whole turns, cut on a
+	// complete entry boundary and at most one segment budget (or one oversized
+	// turn alone).
+	RouteSessionTranscriptSegment Route = "/api/v1/sessions/{id}/transcript/segments/{index}"
+	// RouteSessionTranscriptWindow resolves an anchor turn to a contiguous
+	// window extent and answers with a descriptor only; turn content stays in
+	// the segment read.
+	RouteSessionTranscriptWindow Route = "/api/v1/sessions/{id}/transcript/window"
+	RouteLocalFeedback           Route = "/api/v1/local/feedback"
+	RouteSyncSessions            Route = "/api/v1/sync/sessions"
+	RouteSyncAuth                Route = "/api/v1/sync/auth"
+	RouteSyncRedactions          Route = "/api/v1/sync/redactions"
+	RouteSyncPush                Route = "/api/v1/sync/push"
+	RouteSyncLogin               Route = "/api/v1/sync/login"
+	RouteSyncLogout              Route = "/api/v1/sync/logout"
 	// RoutePublications reads the publication state of named sessions for the
 	// signed-in Village account, whatever the saved selection lists.
 	RoutePublications Route = "/api/v1/publications"
@@ -105,6 +117,11 @@ const (
 	// RouteSearch is global full-text transcript search (Cmd-K). Query in ?q=,
 	// optional ?limit=; no path param (search spans all projects).
 	RouteSearch Route = "/api/v1/search"
+
+	// RouteQuality reads one offset page of quality rows plus the library-wide
+	// analytics summary at the page revision. Query: ?page= and ?maxItems=.
+	// The full-library quality WebSocket topic is retired for this surface.
+	RouteQuality Route = "/api/v1/quality"
 
 	// RouteSettings reads every configuration key (GET) and changes one editable
 	// key in config.yaml (PATCH).

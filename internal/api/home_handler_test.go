@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	_ "embed"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -74,12 +72,14 @@ func (r *boundedHomeReader) SyncParentIdentities(ctx context.Context, rows []ing
 	r.parentRows += len(rows)
 	return r.Store.SyncParentIdentities(ctx, rows)
 }
-func (r *boundedHomeReader) SyncHomeWindow(ctx context.Context, b *store.SyncPageBoundary, n int, f store.SyncWindowFilter) (store.SyncCandidateWindow, error) {
-	w, err := r.Store.SyncHomeWindow(ctx, b, n, f)
-	if len(w.Candidates) > n {
-		return w, fmt.Errorf("candidate window exceeded %d", n)
-	}
-	r.windows = append(r.windows, len(w.Candidates))
+func (r *boundedHomeReader) RootPageWindow(ctx context.Context, page, perPage int, f store.SyncWindowFilter) (store.OffsetPageRead, error) {
+	w, err := r.Store.RootPageWindow(ctx, page, perPage, f)
+	r.windows = append(r.windows, len(w.IDs))
+	return w, err
+}
+func (r *boundedHomeReader) ChildPageWindow(ctx context.Context, parentID string, page, perPage int) (store.OffsetPageRead, error) {
+	w, err := r.Store.ChildPageWindow(ctx, parentID, page, perPage)
+	r.windows = append(r.windows, len(w.IDs))
 	return w, err
 }
 func (r *boundedHomeReader) HomePageRows(ctx context.Context, ids []string) ([]store.HomePageRow, error) {
@@ -162,8 +162,15 @@ func syncPageRequest(t *testing.T, h http.Handler, query string, status int) sch
 		if err := json.Unmarshal(response.Body.Bytes(), &keys); err != nil {
 			t.Fatal(err)
 		}
-		if len(keys) != 2 || keys["items"] == nil || keys["next"] == nil {
+		// Six offset fields are required; totals is optional, so a page
+		// answers with six or seven keys.
+		if len(keys) < 6 || len(keys) > 7 {
 			t.Fatalf("unexpected page wire keys: %v", keys)
+		}
+		for _, name := range []string{"items", "nextItems", "page", "perPage", "total", "revision"} {
+			if keys[name] == nil {
+				t.Fatalf("page wire keys missing %q: %v", name, keys)
+			}
 		}
 		if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
 			t.Fatal(err)
@@ -198,21 +205,16 @@ func assertHydrated(t *testing.T, reader *boundedHomeReader, want []string) {
 }
 
 type syncTraversalCase struct {
-	Name                  string
-	Roots                 int
-	Parent                string
-	Selected              []string
-	Maxima, Counts, First []int
-	Next                  []bool
-	DeleteBoundary        bool `yaml:"deleteBoundary"`
-}
-type syncScopeCase struct {
-	Name, Query, Origin, Code string
-	Selection, Owner, Missing bool
-	OK                        bool `yaml:"ok"`
-	Version                   int
-	InvalidID                 bool `yaml:"invalidID"`
-	Duplicate                 bool
+	Name           string
+	Roots          int
+	Parent         string
+	Selected       []string
+	Pages, Maxima  []int
+	Counts, First  []int
+	Next           []bool
+	Total          int
+	Sessions       int
+	DeleteBoundary bool `yaml:"deleteBoundary"`
 }
 type syncPagesFixture struct {
 	RequiredNames []string `yaml:"requiredNames"`
@@ -225,9 +227,7 @@ type syncPagesFixture struct {
 		HugeToken     bool `yaml:"hugeToken"`
 	}
 	Traversals         []syncTraversalCase
-	RequiredTraversals []string        `yaml:"requiredTraversals"`
-	ScopeCases         []syncScopeCase `yaml:"scopeCases"`
-	RequiredScopes     []string        `yaml:"requiredScopes"`
+	RequiredTraversals []string `yaml:"requiredTraversals"`
 }
 
 func loadSyncPages(t *testing.T) syncPagesFixture {
@@ -241,13 +241,6 @@ func loadSyncPages(t *testing.T) syncPagesFixture {
 		names[c.Name] = true
 	}
 	if err := testutil.RequireFixtureNames("sync traversal", "name", f.RequiredTraversals, names); err != nil {
-		t.Fatal(err)
-	}
-	names = map[string]bool{}
-	for _, c := range f.ScopeCases {
-		names[c.Name] = true
-	}
-	if err := testutil.RequireFixtureNames("sync scopes", "name", f.RequiredScopes, names); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -266,7 +259,11 @@ func TestSyncHomePageBounds(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			allowed := map[string]bool{}
 			want := ids[:tc.Count]
-			for _, id := range want {
+			end := 2 * tc.Count
+			if end > len(ids) {
+				end = len(ids)
+			}
+			for _, id := range ids[:end] {
 				allowed[id] = true
 			}
 			r := &boundedHomeReader{Store: db, allowed: allowed, reads: map[string][]string{}}
@@ -288,12 +285,31 @@ func TestSyncHomePageBounds(t *testing.T) {
 					t.Fatal(row)
 				}
 			}
-			if !reflect.DeepEqual(got, want) || (p.Next != "") != tc.Next {
-				t.Fatalf("got %v next=%q want %v next=%v", got, p.Next, want, tc.Next)
+			if !reflect.DeepEqual(got, want) || (len(p.NextItems) > 0) != tc.Next {
+				t.Fatalf("got %v next=%d want %v next=%v", got, len(p.NextItems), want, tc.Next)
 			}
-			assertHydrated(t, r, want)
-			if r.cohortRows != f.Roots || r.parentRows != f.Roots {
-				t.Fatalf("cohort work must be explicit: identity=%d ancestry=%d", r.cohortRows, r.parentRows)
+			if p.Total != f.Roots {
+				t.Fatalf("root total = %d, want the %d stored roots", p.Total, f.Roots)
+			}
+			if p.Totals == nil || p.Totals.Sessions != f.Roots {
+				t.Fatalf("totals.sessions = %+v, want the %d stored sessions", p.Totals, f.Roots)
+			}
+			if p.Revision == "" {
+				t.Fatal("page carries no revision")
+			}
+			hydrated := append([]string(nil), want...)
+			for _, row := range p.NextItems {
+				hydrated = append(hydrated, row.Sync.ID)
+			}
+			assertHydrated(t, r, hydrated)
+			if r.cohortRows != 0 {
+				t.Fatalf("a plain root page built an identity cohort: %d rows", r.cohortRows)
+			}
+			if r.parentRows != len(hydrated) {
+				t.Fatalf("parent markers read %d rows, want the page's %d", r.parentRows, len(hydrated))
+			}
+			if len(r.windows) != 1 || r.windows[0] > 2*tc.Count+1 {
+				t.Fatalf("window: %v maximum=%d", r.windows, tc.Count)
 			}
 		})
 	}
@@ -312,6 +328,58 @@ func TestSyncHomePageBounds(t *testing.T) {
 	}
 }
 
+func TestSyncHomeEmptyStoreReturnsPageOne(t *testing.T) {
+	db := storetest.Open(t)
+	p := syncPageRequest(t, homeTestHandler(t, db, db, config.BaseConfig()), "view=home", 200)
+	if p.Page != 1 || p.PerPage != schema.PageSize25 || p.Total != 0 {
+		t.Fatalf("empty Home page = page %d perPage %d total %d, want page 1 perPage 25 total 0", p.Page, p.PerPage, p.Total)
+	}
+	if len(p.Items) != 0 || len(p.NextItems) != 0 {
+		t.Fatalf("empty Home page = items %v nextItems %v, want both empty", p.Items, p.NextItems)
+	}
+	if p.Totals == nil || p.Totals.Sessions != 0 {
+		t.Fatalf("empty Home totals = %+v, want sessions 0", p.Totals)
+	}
+	if p.Revision == "" {
+		t.Fatal("empty Home page carries no revision")
+	}
+}
+
+// TestSyncHomeChildTotalsUseTheRequestFilter holds the child branch's
+// totals.sessions to the request filter. The HTTP validator refuses root
+// filters on a child request, so this drives the reader directly: a published
+// filter with no receipts counts zero while the child page still has rows. A
+// revert to CountPushableSessions(All) reports the whole 61-session store.
+func TestSyncHomeChildTotalsUseTheRequestFilter(t *testing.T) {
+	db := storetest.Open(t)
+	ids := rootIDs(60)
+	seedHomeSessions(t, db, ids)
+	seedHomeSessions(t, db, []string{"sess_parent"})
+	homeExec(t, db, `UPDATE sessions SET parent_id=? WHERE session_id<>?`, "sess_parent", "sess_parent")
+
+	sh := &syncHandler{config: newLiveConfig(config.BaseConfig())}
+	h := &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: t.TempDir()}, resolver: fixtureRepositoryResolver{}}
+	parent := "sess_parent"
+	publication := schema.LocalSyncPublicationPublished
+	page, err := h.newReader(schema.LocalSyncSessionsQuery{
+		View:            "home",
+		ParentSessionID: &parent,
+		Publication:     &publication,
+	}).ReadPage(context.Background())
+	if err != nil {
+		t.Fatalf("read the filtered child page: %v", err)
+	}
+	if page.Total != 60 {
+		t.Fatalf("child total = %d, want 60", page.Total)
+	}
+	if len(page.Items) == 0 {
+		t.Fatal("the filtered child page returned no rows; the totals assertion needs a visible child page")
+	}
+	if page.Totals == nil || page.Totals.Sessions != 0 {
+		t.Fatalf("totals.sessions = %+v, want 0 for publication=published with no receipts; the store total is 61", page.Totals)
+	}
+}
+
 func TestSyncHomeKeysetTraversal(t *testing.T) {
 	for _, tc := range loadSyncPages(t).Traversals {
 		t.Run(tc.Name, func(t *testing.T) {
@@ -327,17 +395,22 @@ func TestSyncHomeKeysetTraversal(t *testing.T) {
 			if tc.Selected != nil {
 				cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{defaults.HarnessOpenCode.String(): {Sessions: tc.Selected}}}
 			}
-			var next schema.PageToken
 			for i, max := range tc.Maxima {
+				pageNum := tc.Pages[i]
 				want := make([]string, 0, tc.Counts[i])
+				end := tc.First[i] + 2*tc.Counts[i]
+				if end > len(ids) {
+					end = len(ids)
+				}
 				allowed := map[string]bool{}
-				for j := 0; j < tc.Counts[i]; j++ {
-					id := ids[tc.First[i]+j]
-					want = append(want, id)
+				for _, id := range ids[tc.First[i]:end] {
 					allowed[id] = true
 				}
+				for j := 0; j < tc.Counts[i]; j++ {
+					want = append(want, ids[tc.First[i]+j])
+				}
 				r := &boundedHomeReader{Store: db, allowed: allowed, reads: map[string][]string{}}
-				q := url.Values{"view": {"home"}, "maxItems": {fmt.Sprint(max)}, "pageToken": {string(next)}}
+				q := url.Values{"view": {"home"}, "maxItems": {fmt.Sprint(max)}, "page": {fmt.Sprint(pageNum)}}
 				if tc.Parent != "" {
 					q.Set("parentSessionId", tc.Parent)
 				}
@@ -346,92 +419,44 @@ func TestSyncHomeKeysetTraversal(t *testing.T) {
 				for _, row := range p.Items {
 					got = append(got, row.Sync.ID)
 				}
-				if !reflect.DeepEqual(got, want) || (p.Next != "") != tc.Next[i] {
-					t.Fatalf("page%d got=%v next=%q want=%v next=%v", i, got, p.Next, want, tc.Next[i])
+				if p.Page != pageNum {
+					t.Fatalf("page%d echoed %d", i, p.Page)
 				}
-				assertHydrated(t, r, want)
-				if len(r.windows) != 1 || r.windows[0] > 4*max {
-					t.Fatalf("window: %v maximum=%d", r.windows, 4*max)
+				if !reflect.DeepEqual(got, want) || (len(p.NextItems) > 0) != tc.Next[i] {
+					t.Fatalf("page%d got=%v next=%d want=%v next=%v", i, got, len(p.NextItems), want, tc.Next[i])
 				}
-				if p.Next != "" && p.Next == next {
-					t.Fatal("continuation did not advance")
+				if tc.Total != 0 && p.Total != tc.Total {
+					t.Fatalf("page%d total = %d, want %d", i, p.Total, tc.Total)
 				}
-				next = p.Next
+				if tc.Sessions != 0 && (p.Totals == nil || p.Totals.Sessions != tc.Sessions) {
+					t.Fatalf("page%d totals.sessions = %+v, want %d (the same request filter as the root branch)", i, p.Totals, tc.Sessions)
+				}
+				// nextItems is the FOLLOWING rows, not a repeat of the page.
+				nextWant := []string{}
+				nextEnd := tc.First[i] + 2*tc.Counts[i]
+				if nextEnd > len(ids) {
+					nextEnd = len(ids)
+				}
+				nextWant = append(nextWant, ids[tc.First[i]+tc.Counts[i]:nextEnd]...)
+				nextGot := make([]string, 0, len(p.NextItems))
+				for _, row := range p.NextItems {
+					nextGot = append(nextGot, row.Sync.ID)
+				}
+				if !reflect.DeepEqual(nextGot, nextWant) {
+					t.Fatalf("page%d nextItems = %v, want the following %v", i, nextGot, nextWant)
+				}
+				hydrated := append([]string(nil), want...)
+				for _, row := range p.NextItems {
+					hydrated = append(hydrated, row.Sync.ID)
+				}
+				assertHydrated(t, r, hydrated)
+				if len(r.windows) != 1 || r.windows[0] > 2*max+1 {
+					t.Fatalf("window: %v maximum=%d", r.windows, max)
+				}
 				if i == 0 && tc.DeleteBoundary {
 					homeExec(t, db, `DELETE FROM session_metrics WHERE session_id=?`, got[len(got)-1])
 					homeExec(t, db, `DELETE FROM sessions WHERE session_id=?`, got[len(got)-1])
 				}
-			}
-		})
-	}
-}
-
-func TestSyncHomeTokenScope(t *testing.T) {
-	for _, tc := range loadSyncPages(t).ScopeCases {
-		t.Run(tc.Name, func(t *testing.T) {
-			db := storetest.Open(t)
-			seedHomeSessions(t, db, rootIDs(5))
-			cfg := config.BaseConfig()
-			hs := newTestXDGHomes(t)
-			sh := &syncHandler{store: db, config: newLiveConfig(cfg)}
-			h := &homeHandler{reader: db, sync: sh, publishing: &publishingHandler{store: db, configHome: hs.Config}, resolver: fixtureRepositoryResolver{}}
-			sh.home = h
-			if tc.Owner {
-				writeSyncDoorCredentials(t, hs.Config, "https://owner.example")
-			}
-			p := syncPageRequest(t, http.HandlerFunc(sh.handleSyncSessions), "view=home&maxItems=1", 200)
-			if tc.Selection {
-				cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected}
-			}
-			if tc.Origin != "" {
-				writeSyncDoorCredentials(t, hs.Config, tc.Origin)
-			}
-			if tc.Owner {
-				raw, err := auth.LoadCredentialsFrom(hs.Config)
-				if err != nil {
-					t.Fatal(err)
-				}
-				raw.UserID = "user-2"
-				if err := auth.SaveCredentialsFrom(raw, hs.Config); err != nil {
-					t.Fatal(err)
-				}
-			}
-			token := p.Next
-			if tc.Version != 0 || tc.InvalidID {
-				raw, _ := base64.RawURLEncoding.DecodeString(string(token))
-				var v syncPageToken
-				_ = json.Unmarshal(raw, &v)
-				if tc.Version != 0 {
-					v.Version = tc.Version
-				}
-				if tc.InvalidID {
-					v.ID = "\ninvalid"
-				}
-				raw, _ = json.Marshal(v)
-				token = schema.PageToken(base64.RawURLEncoding.EncodeToString(raw))
-			}
-			if tc.Missing {
-				token = schema.PageToken(base64.RawURLEncoding.EncodeToString([]byte(`{"v":1}`)))
-			}
-			if tc.Duplicate {
-				raw, _ := base64.RawURLEncoding.DecodeString(string(token))
-				raw = []byte(strings.Replace(string(raw), `{"v":1,`, `{"v":1,"v":1,`, 1))
-				token = schema.PageToken(base64.RawURLEncoding.EncodeToString(raw))
-			}
-			response := httptest.NewRecorder()
-			sh.handleSyncSessions(response, httptest.NewRequest(http.MethodGet, defaults.RouteSyncSessions.String()+"?view=home&pageToken="+url.QueryEscape(string(token))+"&"+tc.Query, nil))
-			if tc.OK {
-				// Changing the saved ingest selection must not invalidate an
-				// unrelated browsing continuation.
-				if response.Code != http.StatusOK {
-					t.Fatalf("unchanged-scope replay status = %d, want 200; body=%s", response.Code, response.Body.String())
-				}
-				return
-			}
-			var refusal errorEnvelope
-			_ = json.Unmarshal(response.Body.Bytes(), &refusal)
-			if response.Code != 400 || refusal.Code != tc.Code || !strings.Contains(refusal.Error, "restart") {
-				t.Fatalf("scope refusal: %d %+v", response.Code, refusal)
 			}
 		})
 	}
@@ -456,6 +481,10 @@ type homeAncestryCase struct {
 	Selected         []string
 	Status           int
 	InvalidSelection bool `yaml:"invalidSelection"`
+	ParentMarkers    map[string]struct {
+		ParentSessionID  *string `yaml:"parentSessionId"`
+		ParentUnresolved *bool   `yaml:"parentUnresolved"`
+	} `yaml:"parentMarkers"`
 }
 
 type homeAncestryDocument struct {
@@ -531,6 +560,25 @@ func TestSyncHomeAncestryIgnoresSavedSelection(t *testing.T) {
 			}
 			if !reflect.DeepEqual(ids, tc.IDs) || !reflect.DeepEqual(counts, tc.Children) {
 				t.Fatalf("ids=%v children=%v; want %v/%v", ids, counts, tc.IDs, tc.Children)
+			}
+			// The page membership and the row's own parent markers are the same
+			// answer: a root must not name a parent, and a resolved child must
+			// name the parent that put it on the child page.
+			byID := make(map[string]schema.LocalSyncSessionRow, len(p.Items))
+			for _, row := range p.Items {
+				byID[row.Sync.ID] = row
+			}
+			for id, want := range tc.ParentMarkers {
+				row, ok := byID[id]
+				if !ok {
+					t.Fatalf("parent marker %q names a row that is not on the page %v", id, ids)
+				}
+				if !reflect.DeepEqual(row.Sync.ParentSessionID, want.ParentSessionID) {
+					t.Fatalf("%s parentSessionId = %v, want %v", id, row.Sync.ParentSessionID, want.ParentSessionID)
+				}
+				if !reflect.DeepEqual(row.Sync.ParentUnresolved, want.ParentUnresolved) {
+					t.Fatalf("%s parentUnresolved = %v, want %v", id, row.Sync.ParentUnresolved, want.ParentUnresolved)
+				}
 			}
 		})
 	}
@@ -821,8 +869,11 @@ func assertHomePublicationParity(t *testing.T, world *publishingWorld, items []s
 func TestSyncHomeAccountPublications(t *testing.T) {
 	var f struct {
 		RequiredNames []string `yaml:"requiredNames"`
-		Sessions      []string
-		Receipts      []struct {
+		Sessions      []struct {
+			ID      string
+			Project string
+		}
+		Receipts []struct {
 			Session, Origin, Owner, Project, Transcript string
 			Updated                                     int64
 			Poison                                      bool
@@ -830,7 +881,6 @@ func TestSyncHomeAccountPublications(t *testing.T) {
 		Cases []struct {
 			Name, Origin, Query, Transcript string
 			IDs, States                     []string
-			Next, Second                    bool
 			Status                          int
 		}
 	}
@@ -838,7 +888,16 @@ func TestSyncHomeAccountPublications(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := storetest.Open(t)
-	seedHomeSessions(t, db, f.Sessions)
+	ids := make([]string, len(f.Sessions))
+	for i, session := range f.Sessions {
+		ids[i] = session.ID
+	}
+	seedHomeSessions(t, db, ids)
+	for _, session := range f.Sessions {
+		hash := strings.Repeat(session.Project, 64)
+		homeExec(t, db, `INSERT INTO projects(project_hash,canonical_cwd) VALUES(?,?) ON CONFLICT(project_hash) DO UPDATE SET canonical_cwd=excluded.canonical_cwd`, hash, "/fixture/"+session.Project)
+		homeExec(t, db, `UPDATE sessions SET project_hash=? WHERE session_id=?`, hash, session.ID)
+	}
 	homeExec(t, db, `UPDATE sessions SET parent_id='sess_a' WHERE session_id='sess_child'`)
 	homeExec(t, db, `UPDATE sessions SET pushed_at=1000`)
 	for _, receipt := range f.Receipts {
@@ -886,10 +945,6 @@ func TestSyncHomeAccountPublications(t *testing.T) {
 				}
 				return p
 			}
-			if tc.Second {
-				first := read(query, 200)
-				query += "&pageToken=" + url.QueryEscape(string(first.Next))
-			}
 			status := tc.Status
 			if status == 0 {
 				status = 200
@@ -906,8 +961,8 @@ func TestSyncHomeAccountPublications(t *testing.T) {
 					t.Fatal(row.Publication)
 				}
 			}
-			if !reflect.DeepEqual(ids, tc.IDs) || !reflect.DeepEqual(states, tc.States) || (p.Next != "") != tc.Next {
-				t.Fatalf("got ids=%v states=%v next=%q; want ids=%v states=%v next=%v", ids, states, p.Next, tc.IDs, tc.States, tc.Next)
+			if !reflect.DeepEqual(ids, tc.IDs) || !reflect.DeepEqual(states, tc.States) {
+				t.Fatalf("got ids=%v states=%v; want ids=%v states=%v", ids, states, tc.IDs, tc.States)
 			}
 		})
 	}
@@ -984,8 +1039,8 @@ func TestSyncHomeProjectOptions(t *testing.T) {
 			if len(r.reads) != 0 || len(r.windows) != 0 {
 				t.Fatalf("project options performed page enrichment/window reads: %+v", r)
 			}
-			if r.cohortRows != len(f.Sessions) {
-				t.Fatalf("incomplete identity cohort: %d", r.cohortRows)
+			if r.cohortRows != 0 {
+				t.Fatalf("project options built the identity cohort: %d rows", r.cohortRows)
 			}
 		})
 	}

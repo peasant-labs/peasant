@@ -1,30 +1,21 @@
-# SessionDetailV2's bridge from the adapter's optional `outcome` back to
-# computePersonalMedians' required (possibly-empty) wire string had zero
-# coverage — every existing test mocks
-# computePersonalMedians and ignores its arguments, so a session with an
-# undefined outcome silently reaching the package as `outcome: undefined`
-# would pass every prior test. These cases render the real component with a
-# real quality-channel payload and assert the argument shape that
-# reaches computePersonalMedians (a real capturing mock, not one that ignores
-# its args).
+# The transcript reads its display metadata from the local
+# SessionDetailReadPayload after the full quality topic is retired: the stored
+# title becomes the hero heading, the personal medians reach the scorecard, and
+# a new read revision carries the new baseline. The durable push payload stays
+# unchanged, so none of these read-only fields ever reaches adaptTranscript.
 cases:
-  - name: a resolved outcome reaches computePersonalMedians unchanged
-    outcome: resolved
-    expectedBridgedOutcome: resolved
-  - name: an empty (not-yet-computed) outcome bridges to an empty string, never undefined
-    outcome: ''
-    expectedBridgedOutcome: ''
-  - name: an association-target annotation stays out of computePersonalMedians
-    outcome: resolved
-    expectedBridgedOutcome: resolved
-    effectiveAnnotations:
-      - id: ann-median-association-0001
-        targetKind: association
-        targetAssociationId: assoc-session-median:commit-1
-        isPrimary: true
-        annotatorKind: rule
-        annotatorName: association-review
-        typeId: quality.association_evidence
-        typeName: Association Evidence
-        value: confirmed
-        createdAt: 1700000020000
+  - name: the read payload medians reach the scorecard unchanged
+    revision: '7'
+    medians: { retryShare: 0.03, specQualityScore: 61, withinSessionReverts: 0 }
+    expectedMedians: { retryShare: 0.03, specQualityScore: 61, withinSessionReverts: 0 }
+  - name: an absent medians baseline stays absent
+    revision: '7'
+    medians: null
+    expectedMedians: null
+  - name: a new read revision carries the new medians
+    revision: '7'
+    medians: { retryShare: 0.03, specQualityScore: 61 }
+    expectedMedians: { retryShare: 0.03, specQualityScore: 61 }
+    nextRevision: '8'
+    nextMedians: { retryShare: 0.09, specQualityScore: 70 }
+    expectedNextMedians: { retryShare: 0.09, specQualityScore: 70 }

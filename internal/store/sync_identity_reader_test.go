@@ -9,6 +9,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
@@ -126,6 +127,33 @@ func TestSyncParentIdentities(t *testing.T) {
 			row := rows[0]
 			if row.SessionID != "sess_child" || row.ParentIdentity != tc.ExpectParent || row.ParentUnresolved != tc.ExpectUnresolved {
 				t.Fatalf("identity = %+v; want parent %q unresolved %t", row, tc.ExpectParent, tc.ExpectUnresolved)
+			}
+			// The page's membership column and the row's parent markers are one
+			// answer: the projection cannot name a different parent than the
+			// reader that renders the same row.
+			check := takeConn(t, s.PoolForTest())
+			defer s.PoolForTest().Put(check)
+			var state string
+			var resolved *string
+			if err := sqlitex.ExecuteTransient(check, `SELECT parent_state, resolved_parent_id FROM sessions WHERE session_id='sess_child'`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+				state = stmt.ColumnText(0)
+				if stmt.ColumnType(1) != sqlite.TypeNull {
+					value := stmt.ColumnText(1)
+					resolved = &value
+				}
+				return nil
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			projectedParent := ""
+			if resolved != nil {
+				projectedParent = *resolved
+			}
+			if row.ParentIdentity != projectedParent {
+				t.Fatalf("row parent = %q, projection resolved_parent_id = %q; the page and the row disagree", row.ParentIdentity, projectedParent)
+			}
+			if row.ParentUnresolved != (state == "unresolved") {
+				t.Fatalf("row parentUnresolved = %t, projection parent_state = %q; the page and the row disagree", row.ParentUnresolved, state)
 			}
 		})
 	}

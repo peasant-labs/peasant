@@ -67,8 +67,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/contexts/WebSocketContext', () => ({
   useChannel: (sub: { id?: string; topic?: string }) => {
     if (sub?.id) return { data: sub.id === SESSION_ID ? sessionDetail : undefined, connected: true, error: null, refresh: () => undefined };
-    // The quality channel names the session's generated title.
-    return { data: { sessions: [QUALITY_SESSION] }, connected: true, error: null, refresh: () => undefined };
+    return { data: undefined, connected: true, error: null, refresh: () => undefined };
   },
 }));
 vi.mock('@/lib/api/map', () => ({
@@ -85,31 +84,6 @@ vi.mock('@/app/share/ShareWizardClient', () => ({
   ShareWizardClient: () => <p>the multi-session wizard</p>,
 }));
 
-/** The quality row that carries the session's generated title. */
-const QUALITY_SESSION = {
-  id: SESSION_ID,
-  title: TITLE,
-  project: 'ingest-api',
-  date: '2026-09-29',
-  durationMinutes: 12,
-  totalTokens: 1200,
-  inputTokens: 700,
-  outputTokens: 500,
-  turnCount: 12,
-  toolCalls: 0,
-  filesTouched: 0,
-  linesChanged: 0,
-  retryLoops: 0,
-  retryTokensWasted: 0,
-  withinSessionReverts: 0,
-  explorationRatio: 0,
-  discoveryTurns: 0,
-  scope: 'focused',
-  scopeBreadth: 0,
-  signalDensity: 0,
-  specQualityScore: 0,
-  outcome: 'resolved',
-};
 
 /** Twelve turns, one a minute: the publication fixture places publishedAt among them. */
 const detail: SessionDetailPayload = (() => {
@@ -135,7 +109,8 @@ const detail: SessionDetailPayload = (() => {
     })),
   };
   parseSessionDetailPayloadValue(durable);
-  return durable;
+  // The stored title rides the local read payload, never the durable push body.
+  return { ...durable, title: TITLE };
 })();
 
 let sessionDetail: SessionDetailPayload | undefined = detail;

@@ -13,7 +13,6 @@ import { isRetryableConnectionFault } from '@/lib/faults';
 import { FolderOpen, MessageSquare, Sparkles, GitBranch } from 'lucide-react';
 import { AllSessions } from '@/components/sessions/AllSessions';
 import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
-import { useSessionTitles } from '@/hooks/useSessionTitles';
 
 const CHANNELS: ['sessions'] = ['sessions'];
 
@@ -27,7 +26,6 @@ const CHANNELS: ['sessions'] = ['sessions'];
  */
 export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped' | 'flat' }) {
   const { data, connected, channelFault, connectionFault, refresh } = useChannel<SessionsPayload>(CHANNELS);
-  const titles = useSessionTitles();
   const sessions = useMemo(() => data?.sessions ?? [], [data]);
   const [summaries, setSummaries] = useState<DecodedProjectSummariesPayload | null>(() => cachedProjectSummaries());
   const [settled, setSettled] = useState(false);
@@ -86,8 +84,8 @@ export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped
         {failure != null && rows.length > 0 && <p className="text-sm text-ink-3">Per-project stats couldn’t load, so coverage and unmerged-branch counts show “—”. Session counts and last-work are still accurate.</p>}
         <ProjectPicker rows={rows} destination="sessions" statsPending={!settled} />
       </>}
-      {view === 'grouped' && <GroupedSessionsSection variant="sessions" invalidationKey={data} titles={titles} heading="all sessions" />}
-      {view === 'flat' && <AllSessions sessions={sessions} titles={titles} title="every session" />}
+      {view === 'grouped' && <GroupedSessionsSection variant="sessions" invalidationKey={data} heading="all sessions" />}
+      {view === 'flat' && <AllSessions sessions={sessions} title="every session" />}
     </DataState>}
   </div>;
 }

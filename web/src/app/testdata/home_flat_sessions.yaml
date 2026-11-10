@@ -1,21 +1,23 @@
-# Home flat-session filter and paging cases.
+# Home flat-session filter cases.
 #
 # The grouped list took over Home's session body, and with it the cross-project
-# filter over session identity fields (short id, harness, project) and the
-# 25-row top-level pager. Those flows are retained as a reachable production
-# option beside the grouped list. This fixture names a session set large enough
-# to page, the field value the previous filter supported, and the exact rendered
-# page counts, so the retained flow is asserted on the mounted Home rather than
-# on the table component alone.
+# filter over session identity fields (short id, harness, project). That flow is
+# retained as a reachable production option beside the grouped list, rendered by
+# the shared table as a complete list: it holds no server total, so it passes
+# `page={null}` and draws every matching row without a pager. This fixture names
+# a session set large enough that the old local pager would have split it, the
+# field value the retained filter supports, and the exact rendered row counts,
+# so the retained flow is asserted on the mounted Home rather than on the table
+# component alone.
 cases:
-  - name: cross-project-filter-and-top-level-paging
+  - name: cross-project-filter-and-complete-list
     sessionCount: 60
     projects: [alpha-project, beta-project]
     harnesses: [codex]
     filterQuery: alpha-project
     expectedFilteredCount: 30
-    expectedTotalPages: 3
-    expectedFilteredPages: 2
+    expectedRenderedRows: 60
+    expectedFilteredRenderedRows: 30
 
   - name: harness-filter-narrows-the-same-set
     sessionCount: 80
@@ -23,5 +25,5 @@ cases:
     harnesses: [codex, claude-code]
     filterQuery: codex
     expectedFilteredCount: 40
-    expectedTotalPages: 4
-    expectedFilteredPages: 2
+    expectedRenderedRows: 80
+    expectedFilteredRenderedRows: 40

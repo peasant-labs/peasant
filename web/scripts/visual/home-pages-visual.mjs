@@ -42,7 +42,6 @@ const readTeammateLine = page => page.evaluate(() => {
     width: Math.round(box.width * 100) / 100,
     clientWidth: line.clientWidth,
     scrollWidth: line.scrollWidth,
-    insidePhone: line.closest('.home-session-phone') !== null,
   };
 });
 
@@ -103,8 +102,17 @@ try {
         reads.push(url);
         if (fail) return route.fulfill({ status: 503, json: { error: 'temporary local read failure; retry the session list' } });
         const source = url.searchParams.has('parentSessionId') ? children : roots;
-        const start = url.searchParams.get('pageToken') === 'after-first' ? 25 : url.searchParams.get('pageToken') === 'after-second' ? 50 : 0;
-        return route.fulfill({ json: { items: source.slice(start, start + 25), next: start + 25 < source.length ? start === 0 ? 'after-first' : 'after-second' : '' } });
+        const page = Number(url.searchParams.get('page') ?? '1');
+        const perPage = Number(url.searchParams.get('maxItems') ?? '25');
+        const start = (page - 1) * perPage;
+        return route.fulfill({ json: {
+          items: source.slice(start, start + perPage),
+          nextItems: source.slice(start + perPage, start + 2 * perPage),
+          page,
+          perPage,
+          total: source.length,
+          revision: '0',
+        } });
       }
       if (url.pathname === '/api/v1/sync/auth') return route.fulfill({ json: { authenticated: false } });
       if (url.pathname === '/api/v1/publications') return route.fulfill({ json: { publications: [] } });
@@ -124,15 +132,31 @@ try {
     assert.ok(!subscriptions.some(frame => /"(?:sessions|quality|trends)"/.test(frame)), `Eager subscription: ${subscriptions}`);
     assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
     assert.equal(await page.locator('[data-root-session-list] [data-session-id]').count(), 25);
+    if (viewport.width < 768) {
+      // The shared table owns its own horizontal scroll; the page must not.
+      const scroll = await page.evaluate(() => {
+        const box = document.querySelector('[data-root-session-list] .tbl-scroll');
+        if (!box) return null;
+        const table = box.querySelector('table');
+        return {
+          overflowX: getComputedStyle(box).overflowX,
+          scrollWidth: box.scrollWidth,
+          clientWidth: box.clientWidth,
+          tableWidth: table ? table.getBoundingClientRect().width : 0,
+        };
+      });
+      assert.ok(scroll, 'The shared table scroll container must mount at phone width');
+      assert.equal(scroll.overflowX, 'auto', 'The shared table must own its horizontal scroll');
+      assert.ok(scroll.tableWidth > scroll.clientWidth, `The shared table must scroll horizontally at ${viewport.width}px: ${JSON.stringify(scroll)}`);
+    }
     await page.locator('[data-session-group="root-0"] button').click();
     await page.getByRole('link', { name: 'session child-0', exact: true }).waitFor();
     // The recorded teammate identity rides under the child's title as one mono
-    // line: present in full, readable, and never folded into the phone block
+    // line: present in full and readable
     // that carries the other columns' facts.
     const teammateLine = await readTeammateLine(page);
     assert.ok(teammateLine.present, 'The expanded child row must render the recorded teammate identity line');
     assert.equal(teammateLine.text, `teammate ${teammate.name} · ${teammate.team}`);
-    assert.equal(teammateLine.insidePhone, false, 'The identity line is its own line in the session cell, never inside the phone block');
     assert.ok(
       /mono/i.test(teammateLine.fontFamily) || teammateLine.fontFamily === teammateLine.metaFontFamily,
       `The identity line must use the shared mono family; computed ${JSON.stringify({ line: teammateLine.fontFamily, meta: teammateLine.metaFontFamily })}`,
