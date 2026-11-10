@@ -138,6 +138,12 @@ Release, which holds the signed artifacts and checksums.
   24 hours incorrectly added.
 
 ### Fixed
+- A harvest that finds a stored transcript written by an older adapter revision
+  now re-reads and republishes it once, then settles. This includes
+  `harvest logs`, which has no database and used to keep the old projection
+  forever, and rows that recorded no adapter revision at all. A retained latest
+  attempt parsed at the current revision also advances the stored stamp, so the
+  row is not re-read on every harvest.
 - Only one writing harvest runs at a time per data directory. Two harvests
   started together on one data dir used to race each other's index
   replacement. Now `peasant harvest`, `harvest logs`, `harvest index` and
