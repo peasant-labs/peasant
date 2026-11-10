@@ -501,8 +501,11 @@ func TestLatestAttemptSettleGatesSelection(t *testing.T) {
 	zeroAdapter := map[ingest.Harness]ingest.HarvesterVersions{
 		ingest.Harness("claude-code"): {IndexerVersion: 18, AdapterVersion: 0},
 	}
+	// The adapter arm must still match the row: retention advances the session
+	// stamp to the attempt's revision, so a target at that same revision is
+	// current regardless of a settle clause.
 	zeroIndexer := map[ingest.Harness]ingest.HarvesterVersions{
-		ingest.Harness("claude-code"): {IndexerVersion: 0, AdapterVersion: 2},
+		ingest.Harness("claude-code"): {IndexerVersion: 0, AdapterVersion: 3},
 	}
 	ids, err = s.ListStaleIndexSessions(ctx, zeroAdapter, ingest.AllStoredSessions())
 	if err != nil {
