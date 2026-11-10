@@ -1,7 +1,6 @@
 package onboarding
 
 import (
-	"context"
 	"errors"
 	"sort"
 	"strconv"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/selectionprojection"
 	"github.com/peasant-labs/peasant/internal/store"
 )
 
@@ -62,7 +60,7 @@ func ConvertLegacyAll(
 	selectedIdentities := make(map[string]struct{}, len(scannerProjects))
 	selectedGroups := map[string]map[legacySelectionGroupKey]*legacySelectionGroup{}
 	for _, project := range scannerProjects {
-		representative := projectRepresentative(project.rows)
+		representative := ProjectRepresentative(project.rows)
 		candidate := representative.Candidate
 		// Conversion is a project-level decision. Clear descendant-only fields so
 		// a future explicit-session rule cannot silently change this boundary.
@@ -179,7 +177,7 @@ func buildLegacySelectedCohorts(
 ) map[string]*legacySelectedCohort {
 	cohorts := map[string]*legacySelectedCohort{}
 	for _, storedEvidence := range evidence {
-		if !storedEvidence.identity.available() || len(pathless[storedEvidence.row.Harness]) == 0 {
+		if !storedEvidence.identity.Available() || len(pathless[storedEvidence.row.Harness]) == 0 {
 			continue
 		}
 		key := storedEvidence.identity.String()
@@ -381,7 +379,7 @@ func buildLegacySelectedUnresolvedSessions(
 ) map[string][]string {
 	unresolved := map[string]*legacySelectedUnresolved{}
 	for _, storedEvidence := range evidence {
-		if storedEvidence.identity.available() {
+		if storedEvidence.identity.Available() {
 			continue
 		}
 		rules := pathless[storedEvidence.row.Harness]
@@ -631,7 +629,7 @@ func prepareLegacyStoredEvidence(
 			clonePath, err := resolver.Resolve(rawPath)
 			if err == nil && clonePath != "" {
 				identity := ProjectIdentity{Harness: ingest.Harness(row.Harness), ClonePath: clonePath}
-				if row.SessionID != "" && identity.available() {
+				if row.SessionID != "" && identity.Available() {
 					resolved.identity = identity
 					harness := harnesses[row.Harness]
 					harness.Projects = appendLegacyPathRule(harness.Projects, clonePath)
@@ -667,7 +665,7 @@ func appendLegacyPathRule(projects []config.ProjectSelection, clonePath ingest.C
 
 type legacyScannerProject struct {
 	identity ProjectIdentity
-	rows     []preparedListing
+	rows     []PreparedSessionListing
 }
 
 // prepareLegacyScannerProjects resolves and annotates the complete scanner
@@ -678,8 +676,8 @@ func prepareLegacyScannerProjects(
 	resolver ingest.PathIdentityResolver,
 ) []legacyScannerProject {
 	byIdentity := map[string]*legacyScannerProject{}
-	for _, row := range prepareLegacySessionListings(scan, resolver) {
-		if !row.ProjectIdentity.available() {
+	for _, row := range PrepareSessionListings(scan, resolver) {
+		if !row.ProjectIdentity.Available() {
 			continue
 		}
 		key := row.ProjectIdentity.String()
@@ -724,7 +722,7 @@ type legacySelectionGroup struct {
 func addLegacySelectedProject(
 	groups map[string]map[legacySelectionGroupKey]*legacySelectionGroup,
 	identity ProjectIdentity,
-	representative preparedListing,
+	representative PreparedSessionListing,
 ) {
 	harness := identity.Harness.String()
 	if groups[harness] == nil {
@@ -747,7 +745,7 @@ func addLegacySelectedProject(
 }
 
 func legacySelectionIdentity(
-	representative preparedListing,
+	representative PreparedSessionListing,
 	clonePath ingest.ClonePath,
 ) (legacySelectionGroupKey, config.ProjectSelection) {
 	if remote := ingest.NormalizeRemoteForMatch(representative.Listing.GitRemote); remote != "" {
@@ -806,7 +804,7 @@ func buildLegacyUnmatchedBaseline(
 		if evidence.row.SessionID == "" {
 			continue
 		}
-		if evidence.identity.available() {
+		if evidence.identity.Available() {
 			if _, selected := selectedIdentities[evidence.identity.String()]; selected {
 				continue
 			}
@@ -833,140 +831,3 @@ func appendLegacyUniqueString(values []string, value string) []string {
 	}
 	return append(values, value)
 }
-
-// ProjectIdentity is the exact harness plus physical clone path conversion trusts.
-type ProjectIdentity struct {
-	Harness   ingest.Harness
-	ClonePath ingest.ClonePath
-}
-
-// String returns an unambiguous key. The harness is length-prefixed so a path
-// cannot collide with a different harness/path pair.
-func (i ProjectIdentity) String() string {
-	if !i.available() {
-		return ""
-	}
-	harness := i.Harness.String()
-	return strconv.Itoa(len(harness)) + ":" + harness + i.ClonePath.String()
-}
-
-func (i ProjectIdentity) available() bool {
-	return i.Harness != "" && i.ClonePath != ""
-}
-
-type preparedListing struct {
-	Listing            SessionListing
-	ProjectIdentity    ProjectIdentity
-	RepositoryIdentity ingest.RepositoryIdentity
-	Candidate          ingest.DiscoveryCandidate
-}
-
-func prepareLegacySessionListings(sessions []SessionListing, resolver ingest.PathIdentityResolver) []preparedListing {
-	return prepareLegacyCohort(context.Background(), sessions, resolver, ingest.NewGitRepositoryIdentityResolver())
-}
-
-func prepareLegacyCohort(
-	ctx context.Context,
-	sessions []SessionListing,
-	resolver ingest.PathIdentityResolver,
-	repositoryResolver ingest.RepositoryIdentityResolver,
-) []preparedListing {
-	cohort := make([]preparedListing, len(sessions))
-	remoteEvidence := make([]selectionprojection.CohortEvidence, len(sessions))
-	nameEvidence := make([]selectionprojection.CohortEvidence, len(sessions))
-	repositoryIdentities := map[ingest.ClonePath]ingest.RepositoryIdentity{}
-
-	for index, listing := range sessions {
-		harness := ingest.Harness(listing.Harness)
-		row := preparedListing{
-			Listing: listing,
-			Candidate: ingest.DiscoveryCandidate{
-				Harness:     harness,
-				GitRemote:   listing.GitRemote,
-				ProjectName: listing.ProjectName,
-				Branch:      listing.Branch,
-				SessionID:   ingest.SessionID(listing.SessionID),
-			},
-		}
-		if listing.WorkingDir != "" && resolver != nil {
-			if clonePath, err := resolver.Resolve(listing.WorkingDir); err == nil && clonePath != "" {
-				row.ProjectIdentity = ProjectIdentity{Harness: harness, ClonePath: clonePath}
-				row.Candidate.ClonePath = clonePath
-				repositoryIdentity, resolved := repositoryIdentities[clonePath]
-				if !resolved {
-					repositoryIdentity = fallbackRepositoryIdentity(clonePath)
-					if repositoryResolver != nil {
-						if resolvedIdentity, identityErr := repositoryResolver.ResolveRepositoryIdentity(ctx, clonePath); identityErr == nil && repositoryIdentityAvailable(resolvedIdentity) {
-							repositoryIdentity = resolvedIdentity
-						} else if resolvedIdentity.GitDirectory != "" {
-							repositoryIdentity = fallbackRepositoryIdentityFromGitDirectory(resolvedIdentity.GitDirectory)
-						}
-					}
-					repositoryIdentities[clonePath] = repositoryIdentity
-				}
-				row.RepositoryIdentity = repositoryIdentity
-			}
-		}
-		cohort[index] = row
-		remoteEvidence[index] = selectionprojection.CohortEvidence{Harness: harness, Text: ingest.NormalizeRemoteForMatch(listing.GitRemote), CohortKey: row.RepositoryIdentity.CohortKey}
-		nameEvidence[index] = selectionprojection.CohortEvidence{Harness: harness, Text: ingest.NormalizeProjectNameForMatch(listing.ProjectName), CohortKey: row.RepositoryIdentity.CohortKey}
-	}
-
-	remoteMultiplicities := selectionprojection.CohortMultiplicities(remoteEvidence)
-	nameMultiplicities := selectionprojection.CohortMultiplicities(nameEvidence)
-	for index := range cohort {
-		row := &cohort[index]
-		row.Candidate.RemoteMultiplicity = remoteMultiplicities[index]
-		row.Candidate.NameMultiplicity = nameMultiplicities[index]
-	}
-	return cohort
-}
-
-func projectRepresentative(rows []preparedListing) preparedListing {
-	if len(rows) == 0 {
-		return preparedListing{}
-	}
-	ordered := append([]preparedListing(nil), rows...)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		left, right := ordered[i].Listing, ordered[j].Listing
-		if (left.GitRemote == "") != (right.GitRemote == "") {
-			return left.GitRemote != ""
-		}
-		if left.GitRemote != right.GitRemote {
-			return left.GitRemote < right.GitRemote
-		}
-		if (left.ProjectName == "") != (right.ProjectName == "") {
-			return left.ProjectName != ""
-		}
-		if left.ProjectName != right.ProjectName {
-			return left.ProjectName < right.ProjectName
-		}
-		return left.SessionID < right.SessionID
-	})
-	return ordered[0]
-}
-
-func fallbackRepositoryIdentity(clonePath ingest.ClonePath) ingest.RepositoryIdentity {
-	return ingest.RepositoryIdentity{
-		CohortKey:    ingest.RepositoryCohortKey(clonePath.String()),
-		GitDirectory: ingest.RepositoryPath(clonePath.String()),
-	}
-}
-
-func fallbackRepositoryIdentityFromGitDirectory(gitDirectory ingest.RepositoryPath) ingest.RepositoryIdentity {
-	return ingest.RepositoryIdentity{
-		CohortKey:    ingest.RepositoryCohortKey(gitDirectory.String()),
-		GitDirectory: gitDirectory,
-	}
-}
-
-func repositoryIdentityAvailable(identity ingest.RepositoryIdentity) bool {
-	return identity.CohortKey != "" && identity.GitDirectory != ""
-}
-
-// subagentCountIndex is the index countSubagents walks: session id to the
-// subagent ids that session spawned, over every session DISCOVERY surfaced.
-// The discovered relation comes first because it is the fuller truth - on the
-// production path the cohort is roots-only and holds no child at all - and the
-// cohort's own listings then fill in any id the relation does not carry, which
-// keeps a caller that supplies no relation behaving exactly as before.
