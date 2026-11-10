@@ -1,0 +1,10 @@
+requiredNames:
+  - empty-privacy-restored
+  - retained-privacy-restored
+  - empty-visibility-restored
+  - retained-visibility-restored
+cases:
+  - {name: empty-privacy-restored, key: redaction-level, baseline: '', working: 'redaction: {level: standard}', want: ''}
+  - {name: retained-privacy-restored, key: redaction-level, baseline: 'redaction: {level: minimal}', working: 'redaction: {level: standard}', want: minimal}
+  - {name: empty-visibility-restored, key: default-visibility, baseline: '', working: 'push: {visibility: private}', want: ''}
+  - {name: retained-visibility-restored, key: default-visibility, baseline: 'push: {visibility: group}', working: 'push: {visibility: private}', want: group}

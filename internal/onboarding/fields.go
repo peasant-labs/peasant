@@ -320,6 +320,7 @@ type Field interface {
 	Conditions() []Condition
 	Read(*config.Config) (schema.LocalSettingValue, error)
 	Write(*config.Config, WriteContext, schema.LocalSettingValue) error
+	Restore(*config.Config, *config.Config) error
 	Validate(WriteContext) error
 	Example(WriteContext) ([]ExampleLine, error)
 }
@@ -333,6 +334,7 @@ type field struct {
 	path        []string
 	options     []Option
 	conditions  []Condition
+	restore     func(*config.Config, *config.Config) error
 	read        func(*config.Config) (schema.LocalSettingValue, error)
 	write       func(*config.Config, WriteContext, schema.LocalSettingValue) error
 	validate    func(WriteContext) error
@@ -361,6 +363,15 @@ func (f *field) Write(cfg *config.Config, w WriteContext, value schema.LocalSett
 	}
 	w.Config = cfg
 	return f.write(cfg, w, value)
+}
+
+// Restore copies an already stored choice without treating it as a new answer.
+// Stored values can be unset or no longer offered; dropping an edit must keep them.
+func (f *field) Restore(dst, src *config.Config) error {
+	if dst == nil || src == nil || f.restore == nil {
+		return writeRefused(f, "the field cannot restore its stored value")
+	}
+	return f.restore(dst, src)
 }
 
 func (f *field) Validate(w WriteContext) error {
@@ -444,6 +455,13 @@ func newChoice[T ~string](key FieldKey, label, desc string, l Lens[T], opts []En
 		path:        append([]string(nil), l.Path...),
 		destination: destinationFor(l.Path),
 		options:     options,
+		restore: func(dst, src *config.Config) error {
+			if l.Get == nil || l.Set == nil {
+				return writeRefused(keyField(key), "the choice has no accessor")
+			}
+			l.Set(dst, l.Get(src))
+			return nil
+		},
 		read: func(cfg *config.Config) (schema.LocalSettingValue, error) {
 			if l.Get == nil || cfg == nil {
 				return StringValue(""), nil
@@ -488,6 +506,13 @@ func IntChoice(key FieldKey, label, desc string, l Lens[int], opts []EnumOption[
 		path:        append([]string(nil), l.Path...),
 		destination: destinationFor(l.Path),
 		options:     options,
+		restore: func(dst, src *config.Config) error {
+			if l.Get == nil || l.Set == nil {
+				return writeRefused(keyField(key), "the choice has no accessor")
+			}
+			l.Set(dst, l.Get(src))
+			return nil
+		},
 		read: func(cfg *config.Config) (schema.LocalSettingValue, error) {
 			if l.Get == nil || cfg == nil {
 				return IntValue(0), nil

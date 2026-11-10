@@ -9,13 +9,11 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/push"
-	"github.com/peasant-labs/peasant/internal/tui/kickstart"
-	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -33,6 +31,8 @@ type settingSpec struct {
 	// readOnly says how the key changes instead of PATCH /api/v1/settings. An
 	// empty readOnly means the key is editable.
 	readOnly string
+	// retired keys are legacy inputs, not writable descendants of a model path.
+	retired bool
 	// inPeasantConfig reports that the `peasant config` registry writes the key.
 	inPeasantConfig bool
 }
@@ -54,16 +54,19 @@ var settingChoices = map[string]func() []string{
 // settingReadOnly names the keys, or the key prefixes ending in a dot, that
 // PATCH refuses, with how each changes instead. The first match wins, so a
 // narrower entry comes before a wider one.
-var settingReadOnly = []struct{ key, reason string }{
-	{"version", "the configuration format version; peasant sets it"},
-	{"write.", "write budgets are read when harvest starts; edit config.yaml before the next harvest"},
-	{"village.connected", "changes when you sign in to village or sign out"},
-	{"sources.claude.", "retired: renamed to sources.claude-code; a configuration that turns it on is refused"},
-	{"push.fields.projectHash", "retired: the project hash is always sent, so this key changes nothing"},
-	{"selection.providers", "retired: renamed to selection.harnesses; a configuration that sets it is refused"},
-	{"selection.", "the saved selection; change it with peasant kickstart or peasant config"},
-	{"sources.mock.", "a development setting the dashboard reads when it starts; edit config.yaml and restart the dashboard"},
-	{"output.basePath", "the dashboard reads it when it starts; edit config.yaml and restart the dashboard"},
+var settingReadOnly = []struct {
+	key, reason string
+	retired     bool
+}{
+	{"version", "the configuration format version; peasant sets it", false},
+	{"write.", "write budgets are read when harvest starts; edit config.yaml before the next harvest", false},
+	{"village.connected", "changes when you sign in to village or sign out", false},
+	{"sources.claude.", "retired: renamed to sources.claude-code; a configuration that turns it on is refused", true},
+	{"push.fields.projectHash", "retired: the project hash is always sent, so this key changes nothing", true},
+	{"selection.providers", "retired: renamed to selection.harnesses; a configuration that sets it is refused", true},
+	{"selection.", "the saved selection; change it with peasant kickstart or peasant config", false},
+	{"sources.mock.", "a development setting the dashboard reads when it starts; edit config.yaml and restart the dashboard", false},
+	{"output.basePath", "the dashboard reads it when it starts; edit config.yaml and restart the dashboard", false},
 }
 
 // settingEffective resolves the value that applies for the keys whose stored
@@ -123,6 +126,7 @@ func buildSettingCatalog() ([]settingSpec, error) {
 		for _, entry := range settingReadOnly {
 			if key == entry.key || (strings.HasSuffix(entry.key, ".") && strings.HasPrefix(key, entry.key)) {
 				spec.readOnly = entry.reason
+				spec.retired = entry.retired
 				break
 			}
 		}
@@ -217,69 +221,21 @@ func settingKindOf(typ reflect.Type) (schema.LocalSettingKind, error) {
 	return "", fmt.Errorf("Go type %s has no settings kind; map it in settingKindOf", typ)
 }
 
-// peasantConfigKeys returns the keys the `peasant config` registry writes. It
-// asks the registry: each field copies its value from an empty configuration
-// onto one where every key holds something else, and the keys that change are
-// the field's.
+// peasantConfigKeys derives the configuration registry's paths from the shared model.
 func peasantConfigKeys(catalog []settingSpec) map[string]bool {
 	edited := make(map[string]bool)
-	registry := kickstart.BuildRegistry(kickstart.Options{})
-	registry.FieldWrites(func() config.Config { return config.Config{} }, filledConfig, func(_ settings.Field, written *config.Config) {
-		untouched := filledConfig()
+	for _, field := range onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeFull}).FieldPaths() {
+		if field.Destination != onboarding.DestConfig || len(field.Path) == 0 {
+			continue
+		}
+		path := strings.Join(field.Path, ".")
 		for _, spec := range catalog {
-			before := reflect.ValueOf(&untouched).Elem().FieldByIndex(spec.index).Interface()
-			after := reflect.ValueOf(written).Elem().FieldByIndex(spec.index).Interface()
-			if !reflect.DeepEqual(before, after) {
+			if (spec.key == path || strings.HasPrefix(spec.key, path+".")) && !spec.retired {
 				edited[spec.key] = true
 			}
 		}
-	})
-	return edited
-}
-
-// filledConfig returns a configuration whose every field holds a value that
-// differs from its zero value.
-func filledConfig() config.Config {
-	var cfg config.Config
-	fill(reflect.ValueOf(&cfg).Elem())
-	// The registry probe must use durations representable in config.yaml;
-	// nanoseconds would round to zero during a field's config copy.
-	cfg.Write.HoldTarget = time.Millisecond
-	cfg.Write.HarvestTarget = time.Minute
-	return cfg
-}
-
-func fill(v reflect.Value) {
-	switch v.Kind() {
-	case reflect.Struct:
-		for i := range v.NumField() {
-			if v.Field(i).CanSet() {
-				fill(v.Field(i))
-			}
-		}
-	case reflect.Bool:
-		v.SetBool(true)
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		v.SetInt(1)
-	case reflect.String:
-		v.SetString("filled")
-	case reflect.Pointer:
-		target := reflect.New(v.Type().Elem())
-		fill(target.Elem())
-		v.Set(target)
-	case reflect.Slice:
-		items := reflect.MakeSlice(v.Type(), 1, 1)
-		fill(items.Index(0))
-		v.Set(items)
-	case reflect.Map:
-		key := reflect.New(v.Type().Key()).Elem()
-		value := reflect.New(v.Type().Elem()).Elem()
-		fill(key)
-		fill(value)
-		entries := reflect.MakeMap(v.Type())
-		entries.SetMapIndex(key, value)
-		v.Set(entries)
 	}
+	return edited
 }
 
 // row builds the setting as the file names it and as cfg applies it.

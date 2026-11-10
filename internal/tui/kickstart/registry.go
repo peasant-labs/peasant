@@ -186,6 +186,7 @@ func boolAccessor(field onboarding.Field) settings.Accessor[bool] {
 
 func stringAccessor(field onboarding.Field) settings.Accessor[string] {
 	return settings.Accessor[string]{
+		Restore: func(dst, src *config.Config) { _ = field.Restore(dst, src) },
 		Get: func(cfg *config.Config) string {
 			value, err := field.Read(cfg)
 			if err != nil {
