@@ -55,10 +55,12 @@ func loadAdapterStampFixture(t *testing.T) adapterStampFixture {
 		}
 	}
 	overlays := 0
+	seenSets := make(map[string]bool, len(fixture.TargetSets))
 	for _, set := range fixture.TargetSets {
-		if set.Name == "" {
-			t.Fatal("adapter stamp target set has no name")
+		if set.Name == "" || seenSets[set.Name] {
+			t.Fatalf("invalid adapter stamp target set %q", set.Name)
 		}
+		seenSets[set.Name] = true
 		if set.GenerationOverlay {
 			overlays++
 		}
