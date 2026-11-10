@@ -42,6 +42,10 @@
 !testdata/shell-chrome.yaml
 !testdata/shell-offline-cases.yaml
 !testdata/root-page.yaml
+!testdata/transcript-segments.yaml
+!testdata/transcript-segments.manifest.yaml
+!transcript-segments-shoot.mjs
+!seed-transcript-store.go
 # baseline/ holds the committed golden references (not ephemeral captures) so the
 # gates are self-contained — no /tmp dependency.
 !baseline/

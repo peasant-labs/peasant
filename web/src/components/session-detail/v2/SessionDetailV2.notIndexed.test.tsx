@@ -78,18 +78,32 @@ function TestDetail() {
 beforeEach(() => {
   refreshDetail.mockReset();
   reindexSession.mockReset();
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/transcript/segments') && !/\/transcript\/segments\/\d+/.test(url)) {
+      return Response.json({
+        sessionId: SESSION_ID,
+        revision: '1',
+        totalTurns: 0,
+        totalSegments: 0,
+        segments: [],
+      });
+    }
+    return new Response(JSON.stringify({ error: 'not this test' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  }));
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   sessionDetailData = undefined;
 });
 
 describe('SessionDetailV2 — a recorded session with nothing indexed', () => {
-  it('says the transcript is not indexed instead of a turn count over an empty viewer', () => {
+  it('says the transcript is not indexed instead of a turn count over an empty viewer', async () => {
     sessionDetailData = detail(940);
     render(<TestDetail />);
-    const state = screen.getByTestId('session-not-indexed');
+    const state = await screen.findByTestId('session-not-indexed');
     expect(screen.getByRole('heading', { level: 1, name: 'transcript not indexed yet' })).toBeInTheDocument();
     expect(state).toHaveTextContent('940 recorded turns');
     expect(state).not.toHaveTextContent('no turns to display');
@@ -100,7 +114,7 @@ describe('SessionDetailV2 — a recorded session with nothing indexed', () => {
     sessionDetailData = detail(940);
     reindexSession.mockResolvedValue({ notes: [] });
     render(<TestDetail />);
-    fireEvent.click(screen.getByRole('button', { name: 're-index this session' }));
+    fireEvent.click(await screen.findByRole('button', { name: 're-index this session' }));
     expect(reindexSession).toHaveBeenCalledWith(SESSION_ID, expect.anything());
     await waitFor(() => expect(refreshDetail).toHaveBeenCalledTimes(1));
   });
