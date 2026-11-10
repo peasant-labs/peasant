@@ -13,6 +13,7 @@ import (
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 const ToolDevinDesktop Tool = "devin-desktop"
@@ -303,6 +304,7 @@ func sqliteJSONType(t string) JSONType {
 func init() {
 	Register(Layout{
 		Tool:        ToolDevinDesktop,
+		Harness:     schema.HarnessDevinDesktop,
 		DisplayName: "Devin Desktop",
 		Sessions:    "One ACP event stream per agent session, and one opaque Cascade trajectory file per legacy Cascade conversation; the shared global state database is captured once as its own entry.",
 		Roots: []Root{
