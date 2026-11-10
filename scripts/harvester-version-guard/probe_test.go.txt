@@ -32,6 +32,8 @@ var guardCorpusDirs = []string{
 	"internal/ingest/testdata",
 	"cmd/peasant/testdata",
 	"internal/e2e/testdata",
+	// The synthetic OpenCode source builder owns its corpus here.
+	"internal/ingest/testfixture/testdata",
 }
 
 // guardCorpusPath resolves one named corpus in a revision's checkout. name is a
@@ -349,8 +351,27 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			nativeNames[row.SourceFixture] = true
 		}
 	}
+	// Enumerate the source builder's own cases from this pass's corpus, so a
+	// shape introduced by the candidate is parsed by the base revision instead
+	// of being invisible to the comparison. A name the shared builder does not
+	// declare is skipped by the tolerant materializer.
+	var sqliteCases struct {
+		Cases []struct {
+			Name string `yaml:"name"`
+		} `yaml:"cases"`
+	}
+	if read("opencode_sqlite.yaml", &sqliteCases) {
+		for _, row := range sqliteCases.Cases {
+			if row.Name != "" {
+				nativeNames[row.Name] = true
+			}
+		}
+	}
 	for name := range nativeNames {
-		source := testfixture.MaterializeByName(t, name)
+		source, present := testfixture.TryMaterializeByName(t, name)
+		if !present {
+			continue
+		}
 		// Reuse the exact same physical locator and file clock across runs:
 		// unattributed sessions derive project identity from this path.
 		nativePath := filepath.Join(os.Getenv("PEASANT_GUARD_NATIVE"), name, "opencode.db")

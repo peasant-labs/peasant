@@ -239,16 +239,27 @@ type historyRow struct {
 }
 
 func caseByName(name string) (caseSpec, error) {
-	fixtures, err := loadCorpus(fixtureYAML)
+	fixtureCase, ok, err := caseByNameIfPresent(name)
 	if err != nil {
 		return caseSpec{}, err
 	}
+	if !ok {
+		return caseSpec{}, fmt.Errorf("load synthetic OpenCode source fixture %q: no such case; choose a name declared in testdata/opencode_sqlite.yaml", name)
+	}
+	return fixtureCase, nil
+}
+
+func caseByNameIfPresent(name string) (caseSpec, bool, error) {
+	fixtures, err := loadCorpus(fixtureYAML)
+	if err != nil {
+		return caseSpec{}, false, err
+	}
 	for _, fixtureCase := range fixtures.Cases {
 		if fixtureCase.Name == name {
-			return fixtureCase, nil
+			return fixtureCase, true, nil
 		}
 	}
-	return caseSpec{}, fmt.Errorf("load synthetic OpenCode source fixture %q: no such case; choose a name declared in testdata/opencode_sqlite.yaml", name)
+	return caseSpec{}, false, nil
 }
 
 func loadCorpus(data []byte) (corpus, error) {
