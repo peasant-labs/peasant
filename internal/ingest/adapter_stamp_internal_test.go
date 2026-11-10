@@ -46,6 +46,9 @@ func loadAdapterStampFixture(t *testing.T) adapterStampFixture {
 			t.Fatalf("adapter stamp case %q has unknown want %q", testCase.Name, testCase.Want)
 		}
 	}
+	if len(fixture.RequiredNames) == 0 {
+		t.Fatal("adapter stamp cases declare no required names; list every case the fixture must retain")
+	}
 	for _, name := range fixture.RequiredNames {
 		if !seen[name] {
 			t.Fatalf("missing adapter stamp case %q", name)
