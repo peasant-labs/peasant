@@ -294,31 +294,64 @@ func (s *Store) ReplaceSession(ctx context.Context, sessionID string, pending []
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows := make([]Row, 0, len(pending))
+	// Identical images share img-<sha256>. The table key is that ref, not the
+	// entry index or partition, so two staged rows for one digest would fail
+	// the insert and roll the attachment write back after the generation is
+	// already committed. Keep one row per ref. A different digest stays.
+	indexByRef := make(map[string]int, len(pending))
 	for _, item := range pending {
-		row := item.Row
-		row.SessionID = sessionID
-		if row.SourceEntryRef == "" {
-			return fmt.Errorf("attachment replace failed at attachments.Store.ReplaceSession for session %q: one image has no source ref, so it cannot be keyed; stage a content-addressed ref before activation", sessionID)
+		row, err := s.prepareReplacementRow(sessionID, item)
+		if err != nil {
+			return err
 		}
-		if row.OmittedReason == "" {
-			if len(item.Bytes) == 0 {
-				return fmt.Errorf("attachment replace failed at attachments.Store.ReplaceSession for session %q ref %q: an accepted image has no bytes, so there is nothing to address; set an omission reason or pass the decoded bytes", sessionID, row.SourceEntryRef)
-			}
-			sum := sha256.Sum256(item.Bytes)
-			row.SHA256 = hex.EncodeToString(sum[:])
-			row.ByteSize = len(item.Bytes)
-			if err := s.writeBlobLocked(row.SHA256, item.Bytes); err != nil {
-				return err
-			}
-		} else {
-			row.SHA256 = ""
+		if i, seen := indexByRef[row.SourceEntryRef]; seen {
+			rows[i] = preferAttachmentRow(rows[i], row)
+			continue
 		}
+		indexByRef[row.SourceEntryRef] = len(rows)
 		rows = append(rows, row)
 	}
 	if err := s.rows.ReplaceSessionAttachments(ctx, sessionID, rows); err != nil {
 		return fmt.Errorf("attachment replace failed at attachments.Store.ReplaceSession for session %q: %w; the previous rows were kept if the replace rolled back, and a newly written file with no row is collected by the next GC; retry activation", sessionID, err)
 	}
 	return nil
+}
+
+// prepareReplacementRow addresses one staged image and writes its blob. The
+// caller collapses rows that share a source ref before the insert.
+func (s *Store) prepareReplacementRow(sessionID string, item Pending) (Row, error) {
+	row := item.Row
+	row.SessionID = sessionID
+	if row.SourceEntryRef == "" {
+		return Row{}, fmt.Errorf("attachment replace failed at attachments.Store.ReplaceSession for session %q: one image has no source ref, so it cannot be keyed; stage a content-addressed ref before activation", sessionID)
+	}
+	if row.OmittedReason == "" {
+		if len(item.Bytes) == 0 {
+			return Row{}, fmt.Errorf("attachment replace failed at attachments.Store.ReplaceSession for session %q ref %q: an accepted image has no bytes, so there is nothing to address; set an omission reason or pass the decoded bytes", sessionID, row.SourceEntryRef)
+		}
+		sum := sha256.Sum256(item.Bytes)
+		row.SHA256 = hex.EncodeToString(sum[:])
+		row.ByteSize = len(item.Bytes)
+		if err := s.writeBlobLocked(row.SHA256, item.Bytes); err != nil {
+			return Row{}, err
+		}
+		return row, nil
+	}
+	row.SHA256 = ""
+	return row, nil
+}
+
+// preferAttachmentRow keeps one row for a repeated digest. A stored image
+// wins over an omission, and a later partition fills a blank one. The join
+// is by source ref, so either partition still serves every entry that names it.
+func preferAttachmentRow(kept, next Row) Row {
+	if kept.OmittedReason != "" && next.OmittedReason == "" {
+		kept = next
+	}
+	if kept.PartitionID == "" {
+		kept.PartitionID = next.PartitionID
+	}
+	return kept
 }
 
 // SessionRows returns one session's attachment rows for the projection join.

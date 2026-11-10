@@ -5,9 +5,11 @@ import (
 	"context"
 	"image"
 	"image/png"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/attachments"
@@ -72,7 +74,23 @@ func TestAttachmentRouteUsesTheServerMux(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer missing.Body.Close()
-	if missing.StatusCode != http.StatusNotFound {
-		t.Fatalf("row with a missing file status = %d, want 404", missing.StatusCode)
+	missingBody, err := io.ReadAll(missing.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing.StatusCode != http.StatusNotFound || !strings.Contains(string(missingBody), attachments.CodeNotFound) {
+		t.Fatalf("row with a missing file status = %d body = %s, want 404 %s", missing.StatusCode, missingBody, attachments.CodeNotFound)
+	}
+	malformed, err := http.Get(base + "/api/v1/attachments/" + strings.ToUpper(row.SHA256))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer malformed.Body.Close()
+	malformedBody, err := io.ReadAll(malformed.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if malformed.StatusCode != http.StatusBadRequest || !strings.Contains(string(malformedBody), attachments.CodeRefMalformed) || strings.Contains(string(malformedBody), strings.ToUpper(row.SHA256)) {
+		t.Fatalf("malformed ref status = %d body = %s, want 400 %s without the rejected ref", malformed.StatusCode, malformedBody, attachments.CodeRefMalformed)
 	}
 }

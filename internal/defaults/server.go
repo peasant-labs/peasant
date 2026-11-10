@@ -37,7 +37,8 @@ func (r Route) String() string { return string(r) }
 const (
 	RouteHealth Route = "/api/v1/health"
 	// RouteAttachment serves one content-addressed image. The path value is a
-	// lowercase 64-hex digest. Anything else, and a digest with no file, is 404.
+	// lowercase 64-hex digest. A malformed ref is 400. A digest with no row
+	// or no file is 404.
 	//
 	// This path is not in the pinned Local API (schema v0.45.0). The handler is
 	// mounted so a local reader can fetch a stored image, but the route is not

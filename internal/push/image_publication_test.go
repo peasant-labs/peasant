@@ -30,6 +30,7 @@ type imagePublicationCase struct {
 	WantOmitted    string   `yaml:"want_omitted"`
 	WantCapability string   `yaml:"want_capability"`
 	Refused        bool     `yaml:"refused"`
+	Earlier        bool     `yaml:"earlier"`
 }
 
 func TestImagePublication(t *testing.T) {
@@ -166,7 +167,56 @@ func TestImagePublication(t *testing.T) {
 			if content.SessionDetail.Turns[0].ContentParts[0].Image != before || (before != nil && before.OmittedReason != schema.OmittedReasonNotPublished) {
 				t.Fatal("publication rewrote the caller's detail")
 			}
+			if fixture.Earlier {
+				assertEarlierHistoryImageOmitted(t, meta, entries)
+			}
 		})
+	}
+}
+
+func assertEarlierHistoryImageOmitted(t *testing.T, meta *ingest.UnifiedMetadata, entries []schema.SessionEntry) {
+	t.Helper()
+	localRef := strings.Repeat("c", 64)
+	local := &schema.ImagePart{Ref: localRef, MediaType: schema.ImageMediaTypePNG, ByteSize: 9, Width: 2, Height: 3}
+	detail := &schema.SessionDetailPayload{
+		Turns: []schema.TurnDetail{{Role: schema.RoleUser, Content: "look"}},
+		EarlierHistory: []schema.EarlierHistorySection{{
+			State: schema.EarlierHistoryUncertainMigrated,
+			Turns: []schema.TurnDetail{{
+				Role: schema.RoleUser,
+				ContentParts: []schema.TurnContentPart{{
+					Type:  schema.TurnPartTypeImage,
+					Image: local,
+				}},
+			}},
+		}},
+	}
+	published, err := push.BuildPublishTranscriptContent(detail, meta, entries, defaults.PublishSchemaVersion, config.PushFieldVisibility{}, sessionorigin.Unknown)
+	if err != nil {
+		t.Fatalf("publish earlier-history image: %v", err)
+	}
+	if local.Ref != localRef || local.MediaType != schema.ImageMediaTypePNG || local.ByteSize != 9 {
+		t.Fatal("publication rewrote the caller's earlier-history image")
+	}
+	if published.SessionDetail == nil || len(published.SessionDetail.EarlierHistory) != 1 || len(published.SessionDetail.EarlierHistory[0].Turns) != 1 {
+		t.Fatal("published detail lost the earlier-history image part")
+	}
+	part := published.SessionDetail.EarlierHistory[0].Turns[0].ContentParts
+	if len(part) != 1 || part[0].Type != schema.TurnPartTypeImage || part[0].Image == nil {
+		t.Fatalf("earlier-history part = %+v, want one image part", part)
+	}
+	image := part[0].Image
+	if image.OmittedReason != schema.OmittedReasonNotPublished || image.Ref != "" || image.MediaType != "" || image.ByteSize != 0 || image.Width != 0 || image.Height != 0 {
+		t.Fatalf("earlier-history image = %+v, want not_published with no local fields", image)
+	}
+	encoded, err := json.Marshal(part[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{localRef, `"mediaType"`, `"byteSize"`, `"width"`, `"height"`, `"data"`, `"ref"`} {
+		if strings.Contains(string(encoded), token) {
+			t.Fatalf("earlier-history image JSON still carries %s: %s", token, encoded)
+		}
 	}
 }
 

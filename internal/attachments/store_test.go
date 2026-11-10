@@ -260,12 +260,18 @@ func testAttachmentRoute(t *testing.T) {
 	if ok.Code != http.StatusOK || ok.Header().Get("Cache-Control") != attachments.CacheControl || ok.Header().Get("Content-Type") != "image/png" {
 		t.Fatalf("route status=%d cache=%q type=%q", ok.Code, ok.Header().Get("Cache-Control"), ok.Header().Get("Content-Type"))
 	}
-	for _, path := range []string{"/api/v1/attachments/" + strings.ToUpper(row.SHA256), "/api/v1/attachments/abcd", "/api/v1/attachments/" + strings.Repeat("e", 64)} {
+	for _, path := range []string{"/api/v1/attachments/" + strings.ToUpper(row.SHA256), "/api/v1/attachments/abcd"} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s status = %d, want 404", path, rec.Code)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), attachments.CodeRefMalformed) || strings.Contains(rec.Body.String(), strings.TrimPrefix(path, "/api/v1/attachments/")) {
+			t.Fatalf("%s status = %d body = %s, want 400 %s without the rejected ref", path, rec.Code, rec.Body.String(), attachments.CodeRefMalformed)
 		}
+	}
+	missing := httptest.NewRecorder()
+	missingPath := "/api/v1/attachments/" + strings.Repeat("e", 64)
+	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, missingPath, nil))
+	if missing.Code != http.StatusNotFound || !strings.Contains(missing.Body.String(), attachments.CodeNotFound) {
+		t.Fatalf("%s status = %d body = %s, want 404 %s", missingPath, missing.Code, missing.Body.String(), attachments.CodeNotFound)
 	}
 }
 

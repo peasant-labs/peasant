@@ -16,6 +16,12 @@ cases:
     payload: '{ "type" : "custom-secret", "n":9007199254740993 }'
     expected: '{ "type" : "[CUSTOM]", "n":9007199254740993 }'
     advertised: true
+  - name: image_source_strips_local_fields_keeps_number
+    payload: '{"type":"future","n":9007199254740993,"mediaType":"image/png","ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source":{"type":"base64","media_type":"image/png","data":"IMAGEBYTES"}}'
+    expected: '{"n":9007199254740993,"source":{"type":"base64"},"type":"future"}'
+    advertised: true
+    imageStrip: true
+    numberText: "9007199254740993"
   - name: managed_partition_preserves_unknown
     payload: '{"type":"future","number":9007199254740993}'
     expected: '{"type":"future","number":9007199254740993}'

@@ -11,3 +11,10 @@ cases:
     want_omitted: not_published
     want_capability: content_parts_v1
     refused: false
+  - name: earlier_history_image_part_omits_local_fields
+    images: 1
+    earlier: true
+    advertisement: [content_parts_v1]
+    want_omitted: not_published
+    want_capability: content_parts_v1
+    refused: false

@@ -160,7 +160,12 @@ func stripImageValue(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		if imageSource(typed) {
+			// A base64 image source is local bytes plus the type that named them.
+			// Publication keeps the surrounding record and drops the source fields.
 			delete(typed, "data")
+			delete(typed, "ref")
+			delete(typed, "mediaType")
+			delete(typed, "media_type")
 		}
 		if imageDescriptorMap(typed) {
 			for _, key := range []string{"ref", "mediaType", "media_type", "byteSize", "width", "height", "recordedSize", "data"} {
