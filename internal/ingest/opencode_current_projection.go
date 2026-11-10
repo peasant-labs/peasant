@@ -265,6 +265,14 @@ var errOpenCodeSkipControlRow = errors.New("skip newer OpenCode control row")
 // for, not omitted.
 var errOpenCodeIgnoredControlRow = errors.New("ignore interpreted OpenCode control row")
 
+// OpenCodeControlRowInterpreted reports whether err is the sentinel an
+// interpreted control row returns from the provenance decode boundary. Such a
+// row was read successfully and carried no transcript message, so a caller that
+// counts decode refusals must not count it as one.
+func OpenCodeControlRowInterpreted(err error) bool {
+	return errors.Is(err, errOpenCodeIgnoredControlRow) || errors.Is(err, errOpenCodeSkipControlRow)
+}
+
 // Native objects may add fields; managed projection envelopes use their separate
 // strict whitelist decoder. Known field types and variant invariants stay checked.
 func decodeOpenCodeCurrentJSON(raw []byte, target any) error {

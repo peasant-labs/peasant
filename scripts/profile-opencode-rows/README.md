@@ -28,7 +28,9 @@ Run timing separately, only after parity, without concurrent builds/benchmarks:
 
 Timing brackets the whole repeated decode loop, including status counting; loading,
 hashing, JSON output, and memory-stat sampling are outside it. Counts cover all
-repetitions. Any refusal suppresses timing/allocation metrics and exits nonzero.
+repetitions. An interpreted control row (an entryless marker that returns no
+transcript message) is counted separately and is not a refusal. Any refusal
+suppresses timing/allocation metrics and exits nonzero.
 Filter a corpus by successful parity ordinals if needed, then establish parity
 again on that exact filtered file before measuring. Repeated tiny fixtures measure
 the warmed row decoder, not acquisition, full generation building, or harvest.

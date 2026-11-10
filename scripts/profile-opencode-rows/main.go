@@ -21,15 +21,17 @@ type input struct {
 }
 
 type decoded struct {
-	Message ingest.OpenCodeProvenanceMessage
-	Settled bool
-	Refused bool
+	Message     ingest.OpenCodeProvenanceMessage
+	Settled     bool
+	Interpreted bool
+	Refused     bool
 }
 
 type caseResult struct {
-	Case    int    `json:"case"`
-	Digest  string `json:"digest"`
-	Refused bool   `json:"refused"`
+	Case        int    `json:"case"`
+	Digest      string `json:"digest"`
+	Interpreted bool   `json:"interpreted,omitempty"`
+	Refused     bool   `json:"refused"`
 }
 
 type report struct {
@@ -38,6 +40,7 @@ type report struct {
 	Cases          int          `json:"cases"`
 	Repetitions    int          `json:"repetitions"`
 	Success        int          `json:"success"`
+	Interpreted    int          `json:"interpreted,omitempty"`
 	Refused        int          `json:"refused"`
 	Rows           []caseResult `json:"rows,omitempty"`
 	DecodeSeconds  float64      `json:"decodeSeconds,omitempty"`
@@ -86,19 +89,24 @@ func run(corpus, phase string, repetitions int) error {
 		for i, in := range inputs {
 			message, settled, decodeErr := ingest.DecodeOpenCodeProvenanceRow(in.Row, in.Scope)
 			last = message
-			if decodeErr == nil {
+			interpreted := decodeErr != nil && ingest.OpenCodeControlRowInterpreted(decodeErr)
+			switch {
+			case decodeErr == nil:
 				out.Success++
-			} else {
+			case interpreted:
+				out.Interpreted++
+			default:
 				out.Refused++
 			}
 			if phase == "parity" {
 				// Maps encode deterministically; raw payload bytes, settled state,
-				// and partial returned messages on refusal all participate.
+				// interpretation, and partial returned messages on refusal all
+				// participate.
 				h := sha256.New()
-				if json.NewEncoder(h).Encode(decoded{Message: message, Settled: settled, Refused: decodeErr != nil}) != nil {
+				if json.NewEncoder(h).Encode(decoded{Message: message, Settled: settled, Interpreted: interpreted, Refused: decodeErr != nil && !interpreted}) != nil {
 					return fmt.Errorf("case %d: output encoding failed; inspect the decoder return types", i)
 				}
-				out.Rows = append(out.Rows, caseResult{Case: i, Digest: fmt.Sprintf("%x", h.Sum(nil)), Refused: decodeErr != nil})
+				out.Rows = append(out.Rows, caseResult{Case: i, Digest: fmt.Sprintf("%x", h.Sum(nil)), Interpreted: interpreted, Refused: decodeErr != nil && !interpreted})
 			}
 		}
 	}
