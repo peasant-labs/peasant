@@ -379,3 +379,14 @@ func TestSearchWindowClampsToTheDocumentedCap(t *testing.T) {
 		t.Fatal("searchWindow(0) was accepted; sessions search refuses a zero page")
 	}
 }
+
+func TestSessionsSearchHarnessHelpUsesKnownHarnesses(t *testing.T) {
+	cmd := buildSessionsSearchCommand()
+	flag := cmd.Flags().Lookup("harness")
+	if flag == nil {
+		t.Fatal("missing harness flag")
+	}
+	if want := joinHarnesses(defaults.Harnesses()); !strings.Contains(flag.Usage, want) {
+		t.Errorf("harness help %q does not contain %q", flag.Usage, want)
+	}
+}

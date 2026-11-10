@@ -192,7 +192,7 @@ func BuildPruneCommand() *cobra.Command {
 
 	cmd.Flags().StringSliceVar(&sessionIDs, "session", nil, "Session IDs to prune (repeatable)")
 	cmd.Flags().StringVar(&project, "project", "", "Prune sessions of one project: its hash, path, directory name or git remote (owner/repo, host/owner/repo or a clone URL)")
-	cmd.Flags().StringVar(&harness, "harness", "", "Prune sessions by harness (claude-code, gemini-cli, codex, opencode)")
+	cmd.Flags().StringVar(&harness, "harness", "", "Prune sessions by harness ("+joinHarnesses(defaults.Harnesses())+")")
 	cmd.Flags().StringVar(&before, "before", "", "Prune sessions started before this time ("+timeFilterHelp+")")
 	cmd.Flags().StringVar(&after, "after", "", "Prune sessions started after this time ("+timeFilterHelp+")")
 	cmd.Flags().BoolVar(&all, "all", false, "Prune all sessions")
@@ -261,7 +261,7 @@ func buildPruneFilter(sessionIDStrs []string, project, harness, before, after st
 	if harness != "" {
 		p := ingest.Harness(harness)
 		if !p.IsKnown() {
-			return filter, fmt.Errorf("invalid --harness value %q: must be one of %s", harness, joinHarnesses(defaults.AllHarnesses))
+			return filter, fmt.Errorf("invalid --harness value %q: must be one of %s", harness, joinHarnesses(defaults.Harnesses()))
 		}
 		filter.Harness = &p
 	}
