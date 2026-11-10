@@ -100,10 +100,7 @@ vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => {
     }}>request window</button>}
     {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => { void props.onLoadSegment?.(2); }}>request unrelated segment</button>}
     {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => { void props.onLoadWindow?.(windowFailureFixture.unrelatedAnchor, windowFailureFixture.span); }}>request unrelated window</button>}
-    {/* The published viewer predates its covering-read rejection handler. */}
-    <actual.TranscriptViewer {...props} onLoadSegment={activeCase?.name === 'window-cover-failure' ? (index) => {
-      void Promise.resolve(props.onLoadSegment?.(index)).catch(() => {});
-    } : props.onLoadSegment} />
+    <actual.TranscriptViewer {...props} />
   </> };
 });
 
@@ -434,7 +431,7 @@ describe('failed covering window on the mounted transcript', () => {
     await waitFor(() => expect(releaseFailure).not.toBeNull());
     await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).toBeNull());
     await act(async () => { releaseFailure?.(); });
-    await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent(windowFailureFixture.copy));
+    await waitFor(() => expect(view.getAllByRole('alert').filter((node) => node.textContent?.includes(windowFailureFixture.copy))).toHaveLength(1));
     expect(windowRejected).toBe(true);
     const fault = observedSegments?.windowFaults[0];
     expect(fault).toBeInstanceOf(WebFault);
@@ -451,12 +448,12 @@ describe('failed covering window on the mounted transcript', () => {
     // Segment 2 is not part of the failed window.
     fireEvent.click(view.getByRole('button', { name: 'request unrelated segment' }));
     await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.unrelatedTurn}"]`)).not.toBeNull());
-    expect(view.getByRole('alert')).toHaveTextContent(windowFailureFixture.copy);
+    expect(view.getAllByRole('alert').filter((node) => node.textContent?.includes(windowFailureFixture.copy))).toHaveLength(1);
     fireEvent.click(view.getByRole('button', { name: 'request unrelated window' }));
     await waitFor(() => expect(reads.filter((read) => read === 'window')).toHaveLength(2));
     expect(observedSegments?.window?.requestedAnchor).toBe(windowFailureFixture.unrelatedAnchor);
     expect(observedSegments?.windowFaults[0]).toBe(fault);
-    expect(view.getByRole('alert')).toHaveTextContent(windowFailureFixture.copy);
+    expect(view.getAllByRole('alert').filter((node) => node.textContent?.includes(windowFailureFixture.copy))).toHaveLength(1);
     fireEvent.click(view.getByRole('button', { name: 'try again' }));
     await waitFor(() => expect(view.queryByText(windowFailureFixture.copy, { exact: false })).toBeNull());
     expect(observedSegments?.windowFaults).toHaveLength(0);

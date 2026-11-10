@@ -42,5 +42,5 @@ cases:
     reads: 0
 history:
   content: synthetic earlier history content
-  label: uncertain ownership
-  explanation: ownership of this earlier history is uncertain.
+  label: ownership unresolved
+  explanation: ownership of this earlier history could not be resolved. it is retained separately from current turns and input submissions.

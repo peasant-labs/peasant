@@ -45,8 +45,8 @@
     "visual:transcript-segments": "node scripts/visual/transcript-segments-shoot.mjs"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.0.63",
-    "@peasant-labs/schema": "0.43.0",
+    "@peasant-labs/fairtrade": "0.0.64",
+    "@peasant-labs/schema": "0.49.0",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
