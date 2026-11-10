@@ -14,6 +14,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed probe_test.go.txt
@@ -112,15 +114,54 @@ func run(base, candidate string) error {
 			return err
 		}
 	}
+	baseNames, err := nativeCaseNames(nativeCorpora[baseTree])
+	if err != nil {
+		return err
+	}
+	candidateNames, err := nativeCaseNames(nativeCorpora[candidateTree])
+	if err != nil {
+		return err
+	}
+	var added []string
+	for name := range candidateNames {
+		if !baseNames[name] {
+			added = append(added, name)
+		}
+	}
+	sort.Strings(added)
+	addedJSON, err := json.Marshal(added)
+	if err != nil {
+		return err
+	}
 	var failures []string
 	for _, corpus := range []string{baseTree, candidateTree} {
-		old, err := capture(baseTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus])
+		// A fixture the candidate adds exists only in its own corpus. Observing
+		// it in the base-corpus pass would only repeat the candidate pass, so it
+		// is handed to both parsers only when the candidate corpus is compared.
+		addedNames := ""
+		if corpus == candidateTree {
+			addedNames = string(addedJSON)
+		}
+		old, err := capture(baseTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus], addedNames)
 		if err != nil {
 			return err
 		}
-		current, err := capture(candidateTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus])
+		current, err := capture(candidateTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus], addedNames)
 		if err != nil {
 			return err
+		}
+		if corpus == candidateTree {
+			// Fail closed when the candidate-only plumbing stops working: an
+			// unobserved new fixture is exactly the blind spot this closes.
+			var unobserved []string
+			for _, name := range added {
+				if _, ok := old.Outputs["opencode/AdapterVersion/native/"+name]; !ok {
+					unobserved = append(unobserved, name)
+				}
+			}
+			if len(unobserved) > 0 {
+				return fmt.Errorf("candidate-only native fixtures were not observed by the base parser: %v", unobserved)
+			}
 		}
 		failures = append(failures, compare(old, current)...)
 	}
@@ -210,7 +251,27 @@ func supplyFixtureDriver(tree, candidateTree string) error {
 	return nil
 }
 
-func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []byte) (snapshot, error) {
+// nativeCaseNames lists the synthetic source cases a corpus declares, so the
+// runner can identify the shapes only the candidate introduces.
+func nativeCaseNames(data []byte) (map[string]bool, error) {
+	var corpus struct {
+		Cases []struct {
+			Name string `yaml:"name"`
+		} `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(data, &corpus); err != nil {
+		return nil, fmt.Errorf("read synthetic source case names: %w", err)
+	}
+	names := make(map[string]bool, len(corpus.Cases))
+	for _, row := range corpus.Cases {
+		if row.Name != "" {
+			names[row.Name] = true
+		}
+	}
+	return names, nil
+}
+
+func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []byte, addedNames string) (snapshot, error) {
 	var result snapshot
 	err := filepath.WalkDir(builder, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -268,7 +329,7 @@ func parserVersions() map[string]versions {
 	output := filepath.Join(temp, "snapshot.json")
 	cmd := exec.Command("go", "test", "-race", "-count=1", "-run", "^TestHarvesterGuardCapture$", "./internal/ingest")
 	cmd.Dir = tree
-	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_FALLBACK_CORPUS="+fallbackCorpus, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+filepath.Join(temp, "native"))
+	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_FALLBACK_CORPUS="+fallbackCorpus, "PEASANT_GUARD_ADDED_NATIVE="+addedNames, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+filepath.Join(temp, "native"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return result, fmt.Errorf("cannot compare %s against corpus %s; restore compatible probe APIs/fixtures before claiming a guard result: %w\n%s", filepath.Base(tree), filepath.Base(corpus), err, out)
 	}
