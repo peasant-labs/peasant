@@ -68,6 +68,11 @@ type GroupedFilters struct {
 type GroupedCandidate struct {
 	// Summary is the ordinary session row projection for the transcript item.
 	Summary schema.SessionSummary
+	// Title is the stored display title of the session. A grouped or sync row
+	// carries it so the client renders titles without the retired full sessions
+	// channel; the search variant omits it because its match rows already carry
+	// the matched content.
+	Title string
 	// StartMs orders the item. It is the stored session start, never a page or
 	// query artifact.
 	StartMs int64
@@ -364,6 +369,27 @@ func candidateIndex(candidates []GroupedCandidate) map[string]bool {
 	return index
 }
 
+// storedTitle reads the nullable stored session title into a wire row. An
+// absent stored title stays an empty string so the row's omitempty field is
+// absent and the client falls back to the preview or id.
+func storedTitle(title *string) string {
+	if title == nil {
+		return ""
+	}
+	return *title
+}
+
+// groupedRowTitle is the stored title one grouped row carries. The search
+// variant omits it because its match rows already carry the matched content;
+// every list and sync row sets it so a client can render titles from the
+// bounded page instead of the retired full sessions channel.
+func groupedRowTitle(candidate GroupedCandidate, variant GroupedRouteVariant) string {
+	if variant == GroupedRouteSearch {
+		return ""
+	}
+	return candidate.Title
+}
+
 // buildGroupedListPayload assembles the opt-in grouped list response. It orders
 // and counts exactly the route candidates, attaches each rendered group's opaque
 // member scope, and pages the TOP-LEVEL units only. Helper expansion pages
@@ -394,7 +420,7 @@ func buildGroupedListPayload(filters GroupedFilters, candidates []GroupedCandida
 			stable:  candidate.StableID,
 			item: schema.LocalSessionListItem{
 				Kind:         schema.SessionListItemTranscript,
-				Transcript:   &schema.LocalSessionRow{Session: candidate.Summary, Sync: candidate.Sync, Matches: candidate.Matches},
+				Transcript:   &schema.LocalSessionRow{Session: candidate.Summary, Sync: candidate.Sync, Matches: candidate.Matches, Title: groupedRowTitle(candidate, filters.Variant)},
 				HelperGroups: groups,
 			},
 		})
@@ -555,7 +581,7 @@ func buildGroupedMembersPayload(groupID string, filters GroupedFilters, candidat
 		}
 		members = append(members, schema.LocalSessionListItem{
 			Kind:         schema.SessionListItemTranscript,
-			Transcript:   &schema.LocalSessionRow{Session: member.Summary, Sync: member.Sync, Matches: member.Matches},
+			Transcript:   &schema.LocalSessionRow{Session: member.Summary, Sync: member.Sync, Matches: member.Matches, Title: groupedRowTitle(member, filters.Variant)},
 			HelperGroups: groups,
 		})
 	}
@@ -567,7 +593,7 @@ func buildGroupedMembersPayload(groupID string, filters GroupedFilters, candidat
 		}
 		nextItems = append(nextItems, schema.LocalSessionListItem{
 			Kind:         schema.SessionListItemTranscript,
-			Transcript:   &schema.LocalSessionRow{Session: member.Summary, Sync: member.Sync, Matches: member.Matches},
+			Transcript:   &schema.LocalSessionRow{Session: member.Summary, Sync: member.Sync, Matches: member.Matches, Title: groupedRowTitle(member, filters.Variant)},
 			HelperGroups: groups,
 		})
 	}

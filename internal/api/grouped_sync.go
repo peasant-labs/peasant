@@ -71,6 +71,7 @@ type syncGroupedReader interface {
 	syncSessionReader
 	GroupingEvidenceForSessions(ctx context.Context, sessionIDs []string) (map[string]store.GroupingEvidenceRow, error)
 	FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (map[string]string, error)
+	SessionTitlesBulk(ctx context.Context, sessionIDs []string) (map[string]string, error)
 	// ClaudeTeammates reads the recorded Claude Code teammate identity for the
 	// same page. A missing key means the session carries no recorded spawn edge.
 	ClaudeTeammates(ctx context.Context, sessionIDs []string) (map[string]schema.SessionTeammate, error)
@@ -119,6 +120,10 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 	if err != nil {
 		return nil, fmt.Errorf("api.syncHandler.gatherGroupedSyncCandidates: read session previews for the sync chooser: %w; no grouped rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
 	}
+	titles, err := reader.SessionTitlesBulk(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("api.syncHandler.gatherGroupedSyncCandidates: read stored session titles for the sync chooser: %w; no grouped rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
+	}
 	teammates, err := reader.ClaudeTeammates(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("api.syncHandler.gatherGroupedSyncCandidates: read recorded teammate evidence for the sync chooser: %w; no grouped rows were returned; retry, and if the failure repeats inspect the Peasant store", err)
@@ -134,6 +139,7 @@ func (h *syncHandler) gatherGroupedSyncCandidates(ctx context.Context, filters G
 		}
 		candidate := GroupedCandidate{
 			Summary:    summary,
+			Title:      titles[row.SessionID],
 			StartMs:    row.StartMs,
 			StableID:   row.SessionID,
 			HostSlug:   row.HostSlug,

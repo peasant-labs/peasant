@@ -86,7 +86,7 @@ export default function LegacyHomeBrowse({ view }: { view: 'projects' | 'grouped
         {failure != null && rows.length > 0 && <p className="text-sm text-ink-3">Per-project stats couldn’t load, so coverage and unmerged-branch counts show “—”. Session counts and last-work are still accurate.</p>}
         <ProjectPicker rows={rows} destination="sessions" statsPending={!settled} />
       </>}
-      {view === 'grouped' && <GroupedSessionsSection variant="sessions" invalidationKey={data} titles={titles} heading="all sessions" />}
+      {view === 'grouped' && <GroupedSessionsSection variant="sessions" invalidationKey={data} heading="all sessions" />}
       {view === 'flat' && <AllSessions sessions={sessions} titles={titles} title="every session" />}
     </DataState>}
   </div>;

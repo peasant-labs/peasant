@@ -416,7 +416,6 @@ describe('root page publish filters', () => {
          }, helperGroups: [] }], page: 1, perPage: 25, total: 1, nextItems: [], revision: '0', ordinarySessionTotal: 1, helperThreadTotal: 0,
        } : undefined;
        const requests = serve(specs, { search });
-       topics.quality = { sessions: specs.filter((spec) => spec.title).map((spec) => ({ id: spec.id, title: spec.title })) };
        if (specs.some((spec) => spec.preview)) topics.sessions = { sessions: specs.filter((spec) => spec.preview).map((spec) => makeSession({ id: spec.id, preview: spec.preview })) };
        const view = render(<HomePage />);
       // Under full-suite parallel load the mounted region can take longer than the
@@ -584,6 +583,14 @@ describe('root page list reads', () => {
     expect(within(row).getByRole('link', { name: 's-pub' })).toHaveAttribute('href', `/projects/${BETA_HASH}/s-pub`);
     expect(within(row).getAllByRole('link')).toHaveLength(1);
     expect(within(row).getByText('beta-project')).toBeInTheDocument();
+  });
+
+  it('renders the stored sync row title instead of the session id', async () => {
+    serve([{ id: 's-titled', project: 'alpha', syncStatus: 'new', state: 'unpublished', title: 'refactor the ingest pipeline' }]);
+    render(<HomePage />);
+    const list = await screen.findByRole('region', { name: 'sessions' });
+    expect(await screen.findByText('refactor the ingest pipeline')).toBeInTheDocument();
+    expect(list.textContent).not.toContain('s-titled');
   });
 
   it('ignores session broadcasts and refreshes the loaded list on focus', async () => {

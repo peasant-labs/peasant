@@ -16,7 +16,6 @@ import {
   annotateTranscript,
   cleanSessionTitle,
   computeAnalytics,
-  computePersonalMedians,
   type AdaptTranscriptOptions,
   type TranscriptInitialPosition,
   type TranscriptTab,
@@ -33,7 +32,6 @@ import type {
   SessionDetailPayload,
   SessionDetailReadPayload,
   SessionRelationshipNavigation,
-  QualityPayload,
 } from '@/types/messages';
 import { detectPhases } from '@/lib/insights';
 import { displayProject } from '@/lib/quality/utils';
@@ -54,7 +52,6 @@ import {
 } from './lib/scopeTurns';
 import { TurnLabelPopover } from './canvas/TurnLabelPopover';
 import { DetectedPullRequests } from './panels/DetectedPullRequests';
-import { adaptQualitySessions } from '@/lib/quality/types';
 import { useTranscriptPublish } from './publish/useTranscriptPublish';
 import { SessionNotIndexed } from './SessionNotIndexed';
 
@@ -74,12 +71,25 @@ interface SessionDetailV2Props {
 
 /**
  * The mounted `session_detail` payload: the durable validated detail with the
- * local read's additive relationship navigation at the JSON root. The generated
+ * local read's additive metadata at the JSON root: the stored title, the
+ * personal medians at the store revision, that revision, the authorized
+ * relationship navigation, and the recorded teammate identity. The generated
  * flat-read type marks its inherited durable fields optional, so the durable
  * contract is intersected back in here rather than weakening every consumer.
  */
 type SessionDetailWire = SessionDetailPayload &
-  Pick<SessionDetailReadPayload, 'relationshipNavigation' | 'teammate'>;
+  Pick<SessionDetailReadPayload, 'title' | 'medians' | 'revision' | 'relationshipNavigation' | 'teammate'>;
+
+/**
+ * The personal-medians baseline the scorecard compares one session against.
+ * The wire marks every field nullable; the scorecard's shape admits only an
+ * absent field, so the host narrows null to absent before passing it on.
+ */
+type ScorecardMedians = {
+  retryShare?: number;
+  specQualityScore?: number;
+  withinSessionReverts?: number;
+};
 
 /** The disclosed retained-history sections, keyed the way the viewer keys them. */
 type EarlierHistoryOpen = Record<string, boolean>;
@@ -87,9 +97,9 @@ type EarlierHistoryOpen = Record<string, boolean>;
 /**
  * Renders the demo's drop-in composite (`TranscriptViewer`) through the one
  * wire-to-view adapter (`adaptTranscript`). Peasant owns the *data layer* (the
- * WebSocket `session_detail` + `quality` subscriptions, phase detection, the
- * annotation REST client) and feeds it into the package via props/callbacks;
- * the package owns all rendering + view state.
+ * WebSocket `session_detail` read payload, phase detection, the annotation REST
+ * client) and feeds it into the package via props/callbacks; the package owns
+ * all rendering + view state.
  *
  * Peasant additionally owns the scoping layer: the viewer is the
  * destination of every "why" click from Map/Review, so it can open aimed —
@@ -186,50 +196,40 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     [pathname, router, searchParams],
   );
 
-  // The quality channel feeds the personal-median comparison line on the
-  // scorecard. The package never fetches it — peasant computes the medians and
-  // passes them in.
-  const { data: quality, refresh: refreshQuality } = useChannel<QualityPayload>(subscribe.quality());
-  // A re-index rewrites the session's detail and its stored title; both
-  // channels are sent once on subscribe, so the page reads both again.
+  // The read payload carries the session's stored title and the library-wide
+  // personal medians, both served by the server at one store revision. The
+  // transcript no longer subscribes to the full quality topic: the medians are a
+  // server-computed aggregate over the complete library, so a reader that never
+  // receives the full list can still render its scorecard comparison.
+  //
+  // A re-index rewrites the session's detail, its stored title, and the medians
+  // revision; the one channel is sent again on refresh, so the page reads it
+  // again.
   const readSessionAgain = useCallback(() => {
     refreshDetail();
-    refreshQuality();
-  }, [refreshDetail, refreshQuality]);
-  const medians = useMemo(
-    () =>
-      computePersonalMedians(
-        // computePersonalMedians (fairtrade/ui) takes the raw wire
-        // QualitySession from @peasant-labs/schema, where `outcome` is a
-        // required (possibly-empty) string. adaptQualitySessions narrows an
-        // absent/not-yet-computed outcome to `undefined` for THIS app's own
-        // analytics-safe QualitySession type (see web/src/lib/quality/types.ts);
-        // bridge back to an empty string here so a session whose quality
-        // metrics haven't resolved yet still contributes to the personal
-        // median comparison instead of failing the package's type contract.
-        adaptQualitySessions(quality?.sessions ?? []).map((session) => {
-          // Personal medians consume only scorecard inputs. Excluding the
-          // annotation list keeps this older viewer dependency independent of
-          // newly-valid annotation target kinds on the current wire contract.
-          const { effectiveAnnotations: _effectiveAnnotations, ...medianSession } = session;
-          return {
-            ...medianSession,
-            outcome: session.outcome ?? '',
-          };
-        }),
-      ),
-    [quality?.sessions],
-  );
+  }, [refreshDetail]);
+  // The revision is the cache key the server stamps on the medians. A read at a
+  // new revision must hand the scorecard the new baseline rather than a value
+  // memoized from an earlier payload. The wire marks each field nullable, so the
+  // host narrows null to absent before the scorecard sees a baseline.
+  const medians = useMemo<ScorecardMedians | undefined>(() => {
+    const read = detail?.medians;
+    if (!read) return undefined;
+    const normalized: ScorecardMedians = {};
+    if (typeof read.retryShare === 'number') normalized.retryShare = read.retryShare;
+    if (typeof read.specQualityScore === 'number') normalized.specQualityScore = read.specQualityScore;
+    if (typeof read.withinSessionReverts === 'number') normalized.withinSessionReverts = read.withinSessionReverts;
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+  }, [detail?.revision, detail?.medians]);
 
-  // The generated title for THIS session, reused from the quality subscription
-  // already mounted above for the medians. `SessionDetailPayload` carries no
-  // title, and the server only stores one for some sessions, so this stays
-  // optional and the breadcrumb falls back to the short id.
+  // The stored title for THIS session, read from the same payload. The durable
+  // `SessionDetailPayload` carries no title, and the server only stores one for
+  // some sessions, so this stays optional and the breadcrumb falls back to the
+  // short id.
   const sessionTitle = useMemo(() => {
-    const found = quality?.sessions?.find((s) => s.id === sessionId)?.title;
-    const clean = found ? cleanSessionTitle(found) : '';
+    const clean = detail?.title ? cleanSessionTitle(detail.title) : '';
     return clean ? clean : undefined;
-  }, [quality?.sessions, sessionId]);
+  }, [detail?.title]);
 
   // The viewer's tab, lifted so the host can react to it. The composite
   // renders its keyboard-hint strip on every tab; peasant shows it only on
@@ -368,14 +368,24 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
-    // The flat local read carries authorized navigation and the recorded
-    // teammate identity ALONGSIDE the durable detail. The durable payload
-    // boundary rejects both read-only fields, so the host separates them: only
-    // the durable detail reaches `adaptTranscript` as payload, and the
-    // navigation travels through the published adapter-options boundary, which
-    // cooks it into usable source/parent links. The teammate is host-owned: the
-    // stream prelude renders it and the durable payload never carries it.
-    const { relationshipNavigation, teammate: _teammate, ...durableDetail } = detail;
+    // The flat local read carries the stored title, medians, revision,
+    // authorized navigation, and the recorded teammate identity ALONGSIDE the
+    // durable detail. The durable payload boundary rejects every read-only
+    // field, so the host separates them: only the durable detail reaches
+    // `adaptTranscript` as payload, and the navigation travels through the
+    // published adapter-options boundary, which cooks it into usable
+    // source/parent links. The title, medians, and revision are host-owned: the
+    // hero heading and the scorecard consume them, and the durable payload never
+    // carries them. The teammate is host-owned too: the stream prelude renders
+    // it.
+    const {
+      relationshipNavigation,
+      teammate: _teammate,
+      title: _title,
+      medians: _medians,
+      revision: _revision,
+      ...durableDetail
+    } = detail;
     const adapterOptions: AdaptTranscriptOptions = { relationshipNavigation };
     // Commits ride in as the legacy-compatible `gitContext.commits` shape, which
     // the adapter cooks into `session.git.commits` — the session-level rows the
@@ -391,10 +401,10 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // derives one from the first prompt". Deriving is never right here: the
     // first prompt of a recorded session often opens with harness markup, so
     // the hero rendered that markup as the heading (the
-    // "<local-command-caveat>Caveat: ..." heading). Title is not a wire field,
-    // so the host has to supply one ALWAYS: the generated title when the
-    // quality channel has one, and a plain placeholder when it does not, which
-    // keeps the derived fallback from ever running.
+    // "<local-command-caveat>Caveat: ..." heading). The stored title is on the
+    // read payload, so the host supplies one ALWAYS: the stored title when there
+    // is one, and a plain placeholder when there is not, which keeps the derived
+    // fallback from ever running.
     return {
       ...adapted,
       session: { ...adapted.session, title: sessionTitle ?? UNTITLED_SESSION_TITLE },

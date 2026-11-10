@@ -166,6 +166,31 @@ describe('SessionsRouter', () => {
     expect(screen.queryByText('agent-other')).not.toBeInTheDocument();
   });
 
+  it('renders the stored grouped row title without the full sessions channel', async () => {
+    const storedTitle = 'refactor the ingest pipeline';
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/sessions') {
+        return okResponse(
+          groupedPayload({
+            items: [
+              {
+                kind: 'transcript',
+                transcript: { session: makeSession({ id: 'agent-titled' }), title: storedTitle },
+                helperGroups: [],
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve({ ok: false, status: 404, text: async () => 'not found' } as Response);
+    });
+    render(<SessionsRouter />);
+
+    expect(await screen.findByText(storedTitle)).toBeInTheDocument();
+    expect(screen.queryByText('agent-titled')).not.toBeInTheDocument();
+  });
+
   it('redirects Home for a malformed project identity without a sessions request', async () => {
     pathname = '/sessions/%';
     render(<SessionsRouter />);

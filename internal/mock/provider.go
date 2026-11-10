@@ -112,6 +112,14 @@ func (p *Provider) DetailReadPayload(ctx context.Context, id string) (*schema.Se
 	if teammate, ok := p.teammates[id]; ok {
 		read.Teammate = &teammate
 	}
+	// The local read carries the stored title and the personal-medians baseline
+	// the transcript now renders directly. The mock has no stored rows, so the
+	// values come from the same quality rows the retired full-library topic
+	// served; they keep the mounted harness faithful to the real read path.
+	read.Title = p.qualityTitle(id)
+	read.Revision = mockReadRevision
+	medians := p.personalMedians()
+	read.Medians = mockReadPayloadMedians(medians)
 	// Only the local addition is checked here; the durable detail already passed
 	// its own validation when it was built.
 	if err := read.Teammate.Validate(); err != nil {
@@ -126,6 +134,47 @@ func (p *Provider) DetailReadPayload(ctx context.Context, id string) (*schema.Se
 var _ interface {
 	DetailReadPayload(ctx context.Context, id string) (*schema.SessionDetailReadPayload, error)
 } = (*Provider)(nil)
+
+// mockReadRevision is the single store-state revision the mock read serves.
+// The mock has no writes, so one revision describes every mock response.
+const mockReadRevision = "0"
+
+// qualityTitle returns the stored display title the mock's quality rows carry
+// for one session, or an empty string when the session has no quality row.
+func (p *Provider) qualityTitle(id string) string {
+	for i := range p.qualitySessions {
+		if p.qualitySessions[i].ID == id {
+			return p.qualitySessions[i].Title
+		}
+	}
+	return ""
+}
+
+// personalMedians folds the mock quality rows through the same rules the store
+// aggregate applies, so the mounted transcript compares against a baseline that
+// matches its scorecard inputs.
+func (p *Provider) personalMedians() schema.PersonalMedians {
+	inputs := make([]store.MedianInput, 0, len(p.qualitySessions))
+	for i := range p.qualitySessions {
+		session := p.qualitySessions[i]
+		inputs = append(inputs, store.MedianInput{
+			TotalTokens:          session.TotalTokens,
+			RetryTokensWasted:    session.RetryTokensWasted,
+			SpecQualityScore:     session.SpecQualityScore,
+			WithinSessionReverts: session.WithinSessionReverts,
+		})
+	}
+	return store.ComputePersonalMedians(inputs)
+}
+
+// mockReadPayloadMedians keeps an empty baseline absent from the wire instead
+// of serving a fabricated zero, matching the store-backed read.
+func mockReadPayloadMedians(medians schema.PersonalMedians) *schema.PersonalMedians {
+	if medians.RetryShare == nil && medians.SpecQualityScore == nil && medians.WithinSessionReverts == nil {
+		return nil
+	}
+	return &medians
+}
 
 func (p *Provider) DashboardMetrics(_ context.Context) (*api.DashboardPayload, error) {
 	total := len(p.sessions)

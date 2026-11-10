@@ -33,8 +33,6 @@ export interface GroupedSessionsSectionProps {
    * it and refetches, so the list never drifts from the live session set.
    */
   invalidationKey?: unknown;
-  /** sessionId -> generated title, from useSessionTitles(). */
-  titles?: ReadonlyMap<string, string>;
   /** Optional explicit per-member selection. */
   selection?: GroupedSelection;
   /** Heading above the list. */
@@ -67,7 +65,6 @@ export function GroupedSessionsSection({
   query,
   projectHash,
   invalidationKey,
-  titles,
   selection,
   heading,
   emptyState,
@@ -159,7 +156,6 @@ export function GroupedSessionsSection({
       <GroupedLocalSessions
         payload={payload}
         onRefreshList={refresh}
-        titles={titles}
         selection={selection}
         emptyState={emptyState}
         rowDetail={rowDetail}

@@ -18,13 +18,13 @@ const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const SESSION_ID = 'sess-hero-title';
 const PATHNAME = `/projects/alpha-project/${SESSION_ID}`;
 
-const caseFields = ['name', 'qualitySessionPresent', 'generatedTitle', 'firstTurnContent', 'expectedTitle'] as const;
+const caseFields = ['name', 'titlePresent', 'storedTitle', 'firstTurnContent', 'expectedTitle'] as const;
 const loaderMutationFields = ['name', 'target', 'find', 'replace', 'expectedError'] as const;
 
 type HeroTitleCase = {
   name: string;
-  qualitySessionPresent: boolean;
-  generatedTitle: string;
+  titlePresent: boolean;
+  storedTitle: string;
   firstTurnContent: string;
   expectedTitle: string;
 };
@@ -67,7 +67,7 @@ function loadFixture(manifestText = manifestSource, casesText = casesSource): He
   requireUniqueNames(rows, 'hero title cases');
   rows.forEach((row, index) => {
     requireExactRequiredFields(row, caseFields, `hero title cases[${index}]`);
-    if (typeof row.qualitySessionPresent !== 'boolean' || typeof row.generatedTitle !== 'string' || typeof row.firstTurnContent !== 'string' || typeof row.expectedTitle !== 'string' || (row.expectedTitle as string).length === 0) {
+    if (typeof row.titlePresent !== 'boolean' || typeof row.storedTitle !== 'string' || typeof row.firstTurnContent !== 'string' || typeof row.expectedTitle !== 'string' || (row.expectedTitle as string).length === 0) {
       throw new Error(`hero title cases[${index}] has invalid field types`);
     }
   });
@@ -81,7 +81,6 @@ function loadFixture(manifestText = manifestSource, casesText = casesSource): He
 const fixture = loadFixture();
 
 let sessionDetailData: unknown;
-let qualityData: unknown;
 
 // The publish flow is not this suite's subject; its Local API calls stay
 // pending so no real server is reached.
@@ -96,8 +95,8 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
 }));
 vi.mock('@/contexts/WebSocketContext', () => ({
-  useChannel: (subscription: { topic: string }) => ({
-    data: subscription.topic === 'session_detail' ? sessionDetailData : qualityData,
+  useChannel: () => ({
+    data: sessionDetailData,
     connected: true,
     error: null,
   }),
@@ -114,32 +113,8 @@ vi.mock('@peasant-labs/fairtrade/graph', async (importOriginal) => {
 });
 vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@peasant-labs/fairtrade/ui')>();
-  return { ...actual, annotateTranscript: () => [], computePersonalMedians: () => undefined };
+  return { ...actual, annotateTranscript: () => [] };
 });
-
-const BASE_QUALITY_SESSION = {
-  id: SESSION_ID,
-  project: 'alpha-project',
-  date: '2026-07-16',
-  durationMinutes: 1,
-  totalTokens: 1,
-  inputTokens: 1,
-  outputTokens: 0,
-  turnCount: 1,
-  toolCalls: 0,
-  filesTouched: 0,
-  linesChanged: 0,
-  retryLoops: 0,
-  retryTokensWasted: 0,
-  withinSessionReverts: 0,
-  explorationRatio: 0,
-  discoveryTurns: 0,
-  scope: 'focused',
-  scopeBreadth: 0,
-  signalDensity: 0,
-  specQualityScore: 0,
-  outcome: 'resolved',
-};
 
 function TestDetail() {
   const routeQuery = parseTranscriptRouteQuery(new URLSearchParams());
@@ -161,7 +136,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   sessionDetailData = undefined;
-  qualityData = undefined;
 });
 
 describe('SessionDetailV2 — the mounted hero heading', () => {
@@ -183,6 +157,7 @@ describe('SessionDetailV2 — the mounted hero heading', () => {
         id: SESSION_ID,
         project: 'alpha-project',
         harness: 'claude-code',
+        ...(row.titlePresent ? { title: row.storedTitle } : {}),
         startTime: '2026-07-16T08:00:00Z',
         endTime: '2026-07-16T08:01:00Z',
         durationMins: 1,
@@ -196,10 +171,6 @@ describe('SessionDetailV2 — the mounted hero heading', () => {
           { index: 1, role: 'assistant', depth: 0, content: 'the branch has no staged changes', timestamp: '2026-07-16T08:00:30Z', toolCalls: [] },
         ],
       };
-      qualityData = row.qualitySessionPresent
-        ? { sessions: [{ ...BASE_QUALITY_SESSION, title: row.generatedTitle }] }
-        : { sessions: [] };
-
       const view = render(<TestDetail />);
       await waitFor(() => expect(view.container.querySelector('.txn-title')).toBeInTheDocument());
       const heading = view.container.querySelector('.txn-title');

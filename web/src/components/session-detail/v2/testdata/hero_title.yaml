@@ -2,25 +2,27 @@
 # recorded prompt. A recorded prompt often opens with harness markup, so the
 # derived heading rendered that markup. Every case below carries raw
 # local-command markup in the first user turn, so a regression that stops
-# supplying a title shows the markup in the heading and fails here.
+# supplying a title shows the markup in the heading and fails here. The title is
+# read from the local read payload, the only place the transcript can get it
+# after the full quality topic is retired.
 cases:
-  - name: a generated title is the hero heading
-    qualitySessionPresent: true
-    generatedTitle: refactor the ingest pipeline
+  - name: a stored read-payload title is the hero heading
+    titlePresent: true
+    storedTitle: refactor the ingest pipeline
     firstTurnContent: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
     expectedTitle: refactor the ingest pipeline
-  - name: a blank generated title falls back to the placeholder heading
-    qualitySessionPresent: true
-    generatedTitle: '   '
+  - name: a blank stored title falls back to the placeholder heading
+    titlePresent: true
+    storedTitle: '   '
     firstTurnContent: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
     expectedTitle: Untitled session
-  - name: an empty generated title falls back to the placeholder heading
-    qualitySessionPresent: true
-    generatedTitle: ''
+  - name: an empty stored title falls back to the placeholder heading
+    titlePresent: true
+    storedTitle: ''
     firstTurnContent: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
     expectedTitle: Untitled session
-  - name: a session with no quality row falls back to the placeholder heading
-    qualitySessionPresent: false
-    generatedTitle: ''
+  - name: a session with no stored title falls back to the placeholder heading
+    titlePresent: false
+    storedTitle: ''
     firstTurnContent: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
     expectedTitle: Untitled session
