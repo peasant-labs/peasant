@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -25,16 +24,61 @@ const (
 // cursorIdentifierKey matches an object key that names a field. Any other key
 // (a file URI, a UUID, a content hash) is data, and the shape records it as
 // "*" so that no path, identifier, or content reaches a field path.
-var (
-	cursorIdentifierKey = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]{0,63}$`)
-	cursorHexRun        = regexp.MustCompile(`[0-9a-fA-F]{12,}|[0-9]{6,}`)
-)
-
 func cursorFieldKey(key string) string {
-	if !cursorIdentifierKey.MatchString(key) || cursorHexRun.MatchString(key) {
+	if !cursorIdentifierKey(key) || cursorHasHexRun(key) {
 		return "*"
 	}
 	return key
+}
+
+// cursorIdentifierKey reports whether key is a short identifier segment. It is
+// the hand-written form of ^[A-Za-z_$][A-Za-z0-9_$]{0,63}$; the owned-code
+// guard forbids stdlib regexp.
+func cursorIdentifierKey(key string) bool {
+	if len(key) == 0 || len(key) > 64 || !cursorIdentifierStart(key[0]) {
+		return false
+	}
+	for i := 1; i < len(key); i++ {
+		if !cursorIdentifierPart(key[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func cursorIdentifierStart(c byte) bool {
+	return c == '_' || c == '$' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+}
+
+func cursorIdentifierPart(c byte) bool {
+	return cursorIdentifierStart(c) || (c >= '0' && c <= '9')
+}
+
+// cursorHasHexRun reports whether key contains a long hex or digit run, the
+// hand-written form of [0-9a-fA-F]{12,}|[0-9]{6,}.
+func cursorHasHexRun(key string) bool {
+	hexRun, digitRun := 0, 0
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		if cursorHex(c) {
+			hexRun++
+		} else {
+			hexRun = 0
+		}
+		if c >= '0' && c <= '9' {
+			digitRun++
+		} else {
+			digitRun = 0
+		}
+		if hexRun >= 12 || digitRun >= 6 {
+			return true
+		}
+	}
+	return false
+}
+
+func cursorHex(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
 // cursorFieldPath renders an object key in the saved-report grammar: an
