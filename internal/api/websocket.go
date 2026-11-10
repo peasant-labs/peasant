@@ -292,6 +292,17 @@ func (h *Hub) sendSnapshots(ctx context.Context, conn *Conn, subs []ChannelSubsc
 			} else if len(refs) > 0 {
 				detail.ChildSessions = refs
 			}
+			// The metadata-only header is the frame body the segment viewer
+			// adopts. Build and validate it from the same read now, while the
+			// current frame still carries the durable turns: the frame switch
+			// lands only after the released viewer consumes segments, and a
+			// session whose metadata cannot form that header is caught here,
+			// not in the release that adopts it.
+			header := SessionDetailHeaderPayloadFromRead(detail)
+			if headerErr := header.Validate(); headerErr != nil {
+				conn.Send(topicError(sub, "failed to load session detail header", headerErr))
+				continue
+			}
 			msg = ServerMessage{Type: MsgSessionDetail, Data: detail}
 		case TopicProjectFamiliarity:
 			projectHash, hashErr := schema.NewProjectHash(sub.ID)

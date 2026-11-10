@@ -1,0 +1,77 @@
+# The measured 55-turn session: identities are sparse because depth-1 tool rows
+# share the identity space and empty turns are suppressed. Segments are addressed
+# by their own ordinal; turns by their identity. No position is recorded because
+# the contract has none.
+session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+revision: "4213"
+total_turns: 55
+tool_call_count: 91
+group_identities: [4, 72, 131]
+turns:
+  - {index: 4, role: user, toolCalls: 0}
+  - {index: 7, role: assistant, toolCalls: 2}
+  - {index: 11, role: assistant, toolCalls: 2}
+  - {index: 14, role: assistant, toolCalls: 2}
+  - {index: 17, role: assistant, toolCalls: 2}
+  - {index: 18, role: assistant, toolCalls: 2}
+  - {index: 20, role: assistant, toolCalls: 2}
+  - {index: 21, role: user, toolCalls: 0}
+  - {index: 25, role: assistant, toolCalls: 2}
+  - {index: 29, role: assistant, toolCalls: 2}
+  - {index: 33, role: assistant, toolCalls: 2}
+  - {index: 37, role: assistant, toolCalls: 2}
+  - {index: 39, role: assistant, toolCalls: 2}
+  - {index: 40, role: user, toolCalls: 0}
+  - {index: 44, role: assistant, toolCalls: 2}
+  - {index: 48, role: assistant, toolCalls: 2}
+  - {index: 52, role: assistant, toolCalls: 2}
+  - {index: 54, role: assistant, toolCalls: 2}
+  - {index: 55, role: user, toolCalls: 0}
+  - {index: 59, role: assistant, toolCalls: 2}
+  - {index: 63, role: assistant, toolCalls: 2}
+  - {index: 67, role: assistant, toolCalls: 2}
+  - {index: 70, role: assistant, toolCalls: 2}
+  - {index: 71, role: assistant, toolCalls: 2}
+  - {index: 72, role: user, toolCalls: 0}
+  - {index: 76, role: assistant, toolCalls: 2}
+  - {index: 80, role: assistant, toolCalls: 2}
+  - {index: 84, role: assistant, toolCalls: 3}
+  - {index: 86, role: assistant, toolCalls: 2}
+  - {index: 88, role: assistant, toolCalls: 2}
+  - {index: 89, role: user, toolCalls: 0}
+  - {index: 93, role: assistant, toolCalls: 2}
+  - {index: 97, role: assistant, toolCalls: 2}
+  - {index: 101, role: assistant, toolCalls: 2}
+  - {index: 102, role: assistant, toolCalls: 2}
+  - {index: 103, role: assistant, toolCalls: 2}
+  - {index: 104, role: user, toolCalls: 0}
+  - {index: 108, role: assistant, toolCalls: 2}
+  - {index: 112, role: assistant, toolCalls: 2}
+  - {index: 116, role: assistant, toolCalls: 2}
+  - {index: 117, role: assistant, toolCalls: 2}
+  - {index: 118, role: user, toolCalls: 0}
+  - {index: 122, role: assistant, toolCalls: 2}
+  - {index: 126, role: assistant, toolCalls: 2}
+  - {index: 129, role: assistant, toolCalls: 2}
+  - {index: 130, role: assistant, toolCalls: 2}
+  - {index: 131, role: user, toolCalls: 0}
+  - {index: 133, role: assistant, toolCalls: 2}
+  - {index: 135, role: assistant, toolCalls: 2}
+  - {index: 139, role: assistant, toolCalls: 2}
+  - {index: 140, role: user, toolCalls: 0}
+  - {index: 143, role: assistant, toolCalls: 2}
+  - {index: 145, role: assistant, toolCalls: 2}
+  - {index: 147, role: assistant, toolCalls: 2}
+  - {index: 149, role: assistant, toolCalls: 2}
+segments:
+  - {index: 0, firstTurn: 4, lastTurn: 40, byteLength: 900000}
+  - {index: 1, firstTurn: 44, lastTurn: 84, byteLength: 980000}
+  - {index: 2, firstTurn: 86, lastTurn: 118, byteLength: 850000}
+  - {index: 3, firstTurn: 122, lastTurn: 149, byteLength: 640000}
+window:
+  requestedAnchor: 72
+  anchorTurn: 72
+  span: 10
+  firstTurn: 39
+  lastTurn: 103
+  segments: [0, 1, 2]

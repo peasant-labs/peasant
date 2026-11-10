@@ -1,0 +1,48 @@
+# Segment read and directory cases over synthetic turns. No real transcript
+# text, session id or personal path is recorded here.
+directory_cases:
+  - name: empty-session
+    turns: []
+    expected: {totalTurns: 0, totalSegments: 0}
+  - name: single-segment-session
+    turns:
+      - {index: 4, role: user, contentBytes: 64}
+      - {index: 8, role: assistant, contentBytes: 64}
+    expected: {totalTurns: 2, totalSegments: 1}
+segment_cases:
+  # A page of ordinary rows is served whole; none is truncated.
+  - name: twelve-small-rows
+    turns:
+      - {index: 0, role: user, contentBytes: 1024}
+      - {index: 4, role: assistant, contentBytes: 1024}
+      - {index: 8, role: user, contentBytes: 1024}
+      - {index: 12, role: assistant, contentBytes: 1024}
+      - {index: 16, role: user, contentBytes: 1024}
+      - {index: 20, role: assistant, contentBytes: 1024}
+      - {index: 24, role: user, contentBytes: 1024}
+      - {index: 28, role: assistant, contentBytes: 1024}
+      - {index: 32, role: user, contentBytes: 1024}
+      - {index: 36, role: assistant, contentBytes: 1024}
+      - {index: 40, role: user, contentBytes: 1024}
+      - {index: 44, role: assistant, contentBytes: 1024}
+    expected: {turns: 12, truncated: false, turnByteLength: 1026, segmentByteLength: 12312}
+  # A single turn larger than the segment budget is alone in its segment,
+  # bounded per field, and reports its pre-bound size.
+  - name: one-oversized-turn
+    turns:
+      - {index: 4, role: assistant, contentBytes: 4194304}
+    expected: {turns: 1, truncated: true, turnByteLength: 4194306, segmentByteLength: 4194306}
+  # A turn with an oversized tool result reports the pre-bound sum.
+  - name: oversized-tool-result-turn
+    turns:
+      - {index: 4, role: assistant, contentBytes: 10, toolArgumentsBytes: [64], toolResultBytes: [2097152]}
+    expected: {turns: 1, truncated: true, turnByteLength: 2097232, segmentByteLength: 2097232}
+  # The directory declares a longer range than a damaged store read returns:
+  # the read refuses with 409 instead of serving a short segment.
+  - name: short-store-page
+    turns:
+      - {index: 0, role: user, contentBytes: 64}
+      - {index: 4, role: assistant, contentBytes: 64}
+      - {index: 8, role: user, contentBytes: 64}
+    shortAfter: 1
+    expected: {status: 409}

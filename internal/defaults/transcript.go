@@ -1,11 +1,38 @@
 package defaults
 
+import "time"
+
 // TranscriptInitialReadBytes is the soft initial transcript read budget.
 const TranscriptInitialReadBytes int64 = 256 << 10
+
+// TranscriptSegmentBudgetBytes is the target byte size of one transcript
+// segment. A segment fills with whole turns until the next turn would push it
+// past this size; that turn starts the next segment, so a segment ends on a
+// complete entry and turn boundary. The one exception is a single turn larger
+// than the budget, which is alone in its segment and bounded per field.
+const TranscriptSegmentBudgetBytes int = 1 << 20
+
+// TranscriptSegmentDirectoryCapacity is the number of segment directories one
+// producer keeps, keyed by session and store revision, in LRU order. The
+// directory holds refs only, never turn content, so eight entries are tens of
+// kilobytes rather than transcripts.
+const TranscriptSegmentDirectoryCapacity = 8
+
+// TranscriptSegmentColdBuildBudget is the measured cold-build target for one
+// segment directory on the 32 MiB synthetic fixture with an empty cache. The
+// build serialises each turn to measure it, which is why it is larger than a
+// per-turn index build would be.
+const TranscriptSegmentColdBuildBudget = 400 * time.Millisecond
 
 // TranscriptContinuationReadBytes is the soft body and continuation read budget.
 // Each boundary measures its own payload bytes; oversized entries remain whole.
 const TranscriptContinuationReadBytes int64 = 8 << 20
+
+// TranscriptSegmentEntryReadLimit bounds how many stored entries one segment
+// read asks for. A segment is at most one segment budget of pre-bound turn
+// text, so the limit exists only so a very small-turn segment cannot be cut
+// short by the store's default page size.
+const TranscriptSegmentEntryReadLimit = 1 << 20
 
 // SessionDetailDocumentCapBytes mirrors the wire contract's session_detail and
 // transcript document policy (schema sessionDetailRawPolicy and

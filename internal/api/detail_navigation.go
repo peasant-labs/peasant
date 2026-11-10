@@ -212,3 +212,83 @@ func SessionDetailReadForProvider(ctx context.Context, provider DataProvider, id
 	}
 	return DecorateDetailReadPayload(ctx, detail, resolver.ResolveStoredTargets)
 }
+
+// SessionDetailHeaderForProvider loads the metadata-only session_detail frame
+// projection for one stored session. It is the bounded counterpart of
+// SessionDetailReadForProvider: the durable read keeps its turns and earlier
+// history, while this projection carries only the session's metadata, the
+// section states, and the local navigation and teammate evidence.
+func SessionDetailHeaderForProvider(ctx context.Context, provider DataProvider, id string) (*schema.SessionDetailHeaderPayload, error) {
+	read, err := SessionDetailReadForProvider(ctx, provider, id)
+	if err != nil {
+		return nil, err
+	}
+	return SessionDetailHeaderPayloadFromRead(read), nil
+}
+
+// SessionDetailHeaderPayloadFromRead projects a local read payload onto the
+// metadata-only frame body. Turn content, earlier-history turns, and native
+// metadata stay on the durable payload: the section's native metadata is
+// validated against the turns it annotates, so it does not belong on a
+// projection that carries no turns. What remains is the session's metadata,
+// the earlier-history section states, and the local navigation and teammate
+// evidence the push payload never carries.
+func SessionDetailHeaderPayloadFromRead(read *schema.SessionDetailReadPayload) *schema.SessionDetailHeaderPayload {
+	if read == nil {
+		return nil
+	}
+	detail := read.SessionDetailPayload
+	header := schema.SessionDetailHeaderPayload{
+		SessionDetailHeader: schema.SessionDetailHeader{
+			SchemaVersion:        detail.SchemaVersion,
+			ID:                   detail.ID,
+			Harness:              detail.Harness,
+			StartTime:            detail.StartTime,
+			EndTime:              detail.EndTime,
+			DurationMins:         detail.DurationMins,
+			TotalTokens:          detail.TotalTokens,
+			TokensIn:             detail.TokensIn,
+			TokensOut:            detail.TokensOut,
+			TurnCount:            detail.TurnCount,
+			InputSubmissionCount: detail.InputSubmissionCount,
+			ToolCallCount:        detail.ToolCallCount,
+			Source:               detail.Source,
+			Status:               detail.Status,
+			Project:              detail.Project,
+			Model:                detail.Model,
+			ThinkingLevel:        detail.ThinkingLevel,
+			ThinkingLevelRaw:     detail.ThinkingLevelRaw,
+			ThinkingLevelHistory: detail.ThinkingLevelHistory,
+			WorkingDirectory:     detail.WorkingDirectory,
+			GitBranch:            detail.GitBranch,
+			GitRemote:            detail.GitRemote,
+			ChildSessions:        detail.ChildSessions,
+			ParentSessionID:      detail.ParentSessionID,
+			RootSessionID:        detail.RootSessionID,
+			Purpose:              detail.Purpose,
+			Relationships:        detail.Relationships,
+			EarlierHistory:       earlierHistoryStates(detail.EarlierHistory),
+			Outcome:              detail.Outcome,
+			SessionOrigin:        detail.SessionOrigin,
+			Scorecard:            detail.Scorecard,
+			RetainedUnknown:      detail.RetainedUnknown,
+			Diagnostics:          detail.Diagnostics,
+		},
+		RelationshipNavigation: read.RelationshipNavigation,
+		Teammate:               read.Teammate,
+	}
+	return &header
+}
+
+// earlierHistoryStates keeps only the section states, which is all the header
+// can vouch for without the turns they annotate.
+func earlierHistoryStates(sections []schema.EarlierHistorySection) []schema.EarlierHistoryState {
+	if sections == nil {
+		return nil
+	}
+	states := make([]schema.EarlierHistoryState, len(sections))
+	for i := range sections {
+		states[i] = sections[i].State
+	}
+	return states
+}

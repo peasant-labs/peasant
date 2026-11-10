@@ -1,0 +1,7 @@
+requiredNames:
+  - empty-session
+  - single-segment-session
+  - twelve-small-rows
+  - one-oversized-turn
+  - oversized-tool-result-turn
+  - short-store-page
