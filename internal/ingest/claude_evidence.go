@@ -160,6 +160,16 @@ type ClaudeEvidenceCompleteness interface {
 	LoadClaudeEvidenceForCompletely(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath]ClaudeTranscriptEvidence, bool, error)
 }
 
+// ClaudeSpawnContributionReader is the store capability the teammate-link
+// count delta uses for the STORED spawn side. It reads claude_teammate_spawns
+// by transcript path, so the delta stays exact even when a transcript's
+// spawns_json cannot be parsed: the derived projection, not the evidence
+// column, is the stored answer. Absent, the delta cannot be exact and the link
+// step refuses instead of guessing.
+type ClaudeSpawnContributionReader interface {
+	ClaudeTeammateSpawnsForPaths(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath][]ClaudeTeammateIdentity, error)
+}
+
 // ClaudeEvidenceCaching is implemented by an adapter that can reuse mined
 // transcript evidence. The adapter factory signature carries only the
 // filesystem, the git resolver, and the salt, so a caller attaches the cache

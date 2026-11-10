@@ -194,11 +194,12 @@ func sqlSelectClaudeEvidenceFor(pathCount int) string {
 // that is not cached is absent from the map. An empty input returns an empty
 // map without reading anything.
 //
-// A row whose identity-record list cannot be parsed is still returned with its
-// readable scope, identity and spawn fields, and with a proof version that
-// forces discovery to mine it again. The by-path read does that so a malformed
-// record list cannot hide a row's identity contribution from the count delta;
-// its Records field is nil and no caller may treat it as fresh.
+// A row whose spawn list or identity-record list cannot be parsed is still
+// returned with its readable scope and identity fields, and with a proof
+// version that forces discovery to mine it again. Its spawn side is filled from
+// claude_teammate_spawns, and a malformed record list leaves Records nil; no
+// caller may treat such a row as fresh. The by-path read does that so a broken
+// projection column cannot hide a row's contribution from the count delta.
 //
 // The named paths are read in batches of indexFormatReadBatchSize, in the order
 // the caller supplied them, so one unbounded IN list can neither hit SQLite's
@@ -256,6 +257,7 @@ func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 	defer s.pool.Put(conn)
 
 	skipped := 0
+	unreadableProjections := make([]ingest.ResolvedPath, 0)
 	for start := 0; start < len(unique); start += indexFormatReadBatchSize {
 		end := min(start+indexFormatReadBatchSize, len(unique))
 		batch := unique[start:end]
@@ -266,12 +268,15 @@ func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 		err = sqlitex.Execute(conn, sqlSelectClaudeEvidenceFor(len(batch)), &sqlitex.ExecOptions{
 			Args: args,
 			ResultFunc: func(stmt *sqlite.Stmt) error {
-				record, ok := scanClaudeEvidenceWithRecords(stmt, true)
+				record, ok, projectionUnreadable := scanClaudeEvidenceWithProjections(stmt, true)
 				if !ok {
 					skipped++
 					return nil
 				}
 				records[record.SourcePath] = record
+				if projectionUnreadable {
+					unreadableProjections = append(unreadableProjections, record.SourcePath)
+				}
 				return nil
 			},
 		})
@@ -287,53 +292,80 @@ func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 				start, end, len(unique), err, start, end, len(unique))
 		}
 	}
+	if len(unreadableProjections) > 0 {
+		// The unparsed column may be the spawn list, so fill it from the derived
+		// projection: tolerating the row with no spawns would under-subtract a
+		// stored spawner that this path recorded before the column broke.
+		spawns, spawnErr := s.claudeTeammateSpawnsForPathsOnConn(ctx, conn, unreadableProjections)
+		if spawnErr != nil {
+			return nil, false, spawnErr
+		}
+		for _, path := range unreadableProjections {
+			record, ok := records[path]
+			if !ok {
+				continue
+			}
+			record.Spawns = spawns[path]
+			records[path] = record
+		}
+	}
 	return records, skipped == 0, nil
 }
 
 // scanClaudeEvidence reads one row. It reports false for a row whose scope this
 // build does not know or whose spawn or identity record list does not parse.
 func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, bool) {
-	return scanClaudeEvidenceWithRecords(stmt, false)
+	record, ok, _ := scanClaudeEvidenceWithProjections(stmt, false)
+	return record, ok
 }
 
-// scanClaudeEvidenceWithRecords reads one row. With tolerateUnreadableRecords,
-// a row whose identity-record list cannot be parsed is still returned with the
-// fields the identity-count decision reads (scope, identity, spawns) and a
-// proof version that forces discovery to re-mine it. The by-path read uses that
-// so a single malformed record list cannot hide the row's identity from the
-// count delta; the struct's Records stay nil and no reader trusts it as fresh.
-func scanClaudeEvidenceWithRecords(stmt *sqlite.Stmt, tolerateUnreadableRecords bool) (ingest.ClaudeTranscriptEvidence, bool) {
+// scanClaudeEvidenceWithProjections reads one row. With
+// tolerateUnreadableProjections, a row whose spawn list or identity-record list
+// cannot be parsed is still returned with the fields the identity-count
+// decision reads (scope and identity) and a proof version that forces
+// discovery to re-mine it. The third result says the row was returned that
+// way, so a by-path caller can fill its spawn side from the derived spawn
+// projection instead of trusting the unparsed column. The by-path read uses
+// that; the whole-table read keeps skipping such a row.
+func scanClaudeEvidenceWithProjections(stmt *sqlite.Stmt, tolerateUnreadableProjections bool) (ingest.ClaudeTranscriptEvidence, bool, bool) {
 	scope := ingest.ClaudeEvidenceScope(stmt.ColumnText(1))
 	if !scope.IsValid() {
-		return ingest.ClaudeTranscriptEvidence{}, false
+		return ingest.ClaudeTranscriptEvidence{}, false, false
 	}
+	projectionUnreadable := false
 	var spawnRows []claudeSpawnRow
 	if err := json.Unmarshal([]byte(stmt.ColumnText(7)), &spawnRows); err != nil {
-		return ingest.ClaudeTranscriptEvidence{}, false
+		if !tolerateUnreadableProjections {
+			return ingest.ClaudeTranscriptEvidence{}, false, false
+		}
+		projectionUnreadable = true
+		spawnRows = nil
 	}
 	var identityRows []*claudeIdentityRecordRow
-	recordsUnreadable := false
 	if err := json.Unmarshal([]byte(stmt.ColumnText(16)), &identityRows); err != nil || identityRows == nil {
-		if !tolerateUnreadableRecords {
-			return ingest.ClaudeTranscriptEvidence{}, false
+		if !tolerateUnreadableProjections {
+			return ingest.ClaudeTranscriptEvidence{}, false, false
 		}
-		recordsUnreadable = true
+		projectionUnreadable = true
+		identityRows = nil
 	}
-	if !recordsUnreadable {
+	if identityRows != nil {
 		for _, row := range identityRows {
 			if row == nil {
-				if !tolerateUnreadableRecords {
-					return ingest.ClaudeTranscriptEvidence{}, false
+				if !tolerateUnreadableProjections {
+					return ingest.ClaudeTranscriptEvidence{}, false, false
 				}
-				recordsUnreadable = true
+				projectionUnreadable = true
+				identityRows = nil
 				break
 			}
 			id, err := ingest.NewSessionID(row.SessionID)
 			if err != nil {
-				if !tolerateUnreadableRecords {
-					return ingest.ClaudeTranscriptEvidence{}, false
+				if !tolerateUnreadableProjections {
+					return ingest.ClaudeTranscriptEvidence{}, false, false
 				}
-				recordsUnreadable = true
+				projectionUnreadable = true
+				identityRows = nil
 				break
 			}
 			row.SessionID = id.String()
@@ -370,11 +402,11 @@ func scanClaudeEvidenceWithRecords(stmt *sqlite.Stmt, tolerateUnreadableRecords 
 	for _, row := range spawnRows {
 		record.Spawns = append(record.Spawns, ingest.ClaudeTeammateIdentity{Team: row.Team, Name: row.Name})
 	}
-	if recordsUnreadable {
+	if projectionUnreadable {
 		// A proof version no Fresh check accepts forces discovery to mine this
-		// transcript again before any reader trusts its records.
+		// transcript again before any reader trusts its records or spawn list.
 		record.ProofVersion = 0
-		return record, true
+		return record, true, true
 	}
 	for _, row := range identityRows {
 		record.Records = append(record.Records, ingest.ClaudeIdentityRecord{
@@ -382,7 +414,7 @@ func scanClaudeEvidenceWithRecords(stmt *sqlite.Stmt, tolerateUnreadableRecords 
 			Type: row.Type, Subtype: row.Subtype, SpawnAgentID: row.SpawnAgentID, AgentID: row.AgentID, Sidechain: row.Sidechain,
 		})
 	}
-	return record, true
+	return record, true, false
 }
 
 // SaveClaudeEvidence writes the records one discovery mined and removes the

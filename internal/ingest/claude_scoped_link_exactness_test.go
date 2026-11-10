@@ -27,15 +27,16 @@ type claudeScopedLinkExactnessFixtures struct {
 }
 
 type claudeScopedLinkExactnessCase struct {
-	Name         string               `yaml:"name"`
-	DryRun       bool                 `yaml:"dry_run"`
-	SeedExcludes []string             `yaml:"seed_excludes"`
-	Touch        string               `yaml:"touch"`
-	Corrupt      string               `yaml:"corrupt"`
-	Child        string               `yaml:"child"`
-	Selected     []string             `yaml:"selected"`
-	WantParent   string               `yaml:"want_parent"`
-	Files        []claudeTeammateFile `yaml:"files"`
+	Name          string               `yaml:"name"`
+	DryRun        bool                 `yaml:"dry_run"`
+	SeedExcludes  []string             `yaml:"seed_excludes"`
+	Touch         string               `yaml:"touch"`
+	Corrupt       string               `yaml:"corrupt"`
+	CorruptSpawns string               `yaml:"corrupt_spawns"`
+	Child         string               `yaml:"child"`
+	Selected      []string             `yaml:"selected"`
+	WantParent    string               `yaml:"want_parent"`
+	Files         []claudeTeammateFile `yaml:"files"`
 }
 
 func loadClaudeScopedLinkExactnessFixtures(t *testing.T) claudeScopedLinkExactnessFixtures {
@@ -92,6 +93,9 @@ func TestClaudeScopedLinkExactness(t *testing.T) {
 
 			if testCase.Corrupt != "" {
 				makeStoredEvidenceUnreadable(t, ctx, database, "/claude/"+testCase.Corrupt)
+			}
+			if testCase.CorruptSpawns != "" {
+				makeStoredSpawnsUnreadable(t, ctx, database, "/claude/"+testCase.CorruptSpawns)
 			}
 			evidencePath := "/claude/" + testCase.Child
 			if testCase.Touch != "" {
@@ -237,6 +241,20 @@ func makeStoredEvidenceUnreadable(t *testing.T, ctx context.Context, database *s
 		`UPDATE claude_transcript_evidence SET identity_records_json = 'null' WHERE source_path = ?`,
 		&sqlitex.ExecOptions{Args: []any{path}}); err != nil {
 		t.Fatalf("make the stored evidence row %q unreadable: %v", path, err)
+	}
+}
+
+func makeStoredSpawnsUnreadable(t *testing.T, ctx context.Context, database *store.Store, path string) {
+	t.Helper()
+	conn, err := database.Pool().Take(ctx)
+	if err != nil {
+		t.Fatalf("take a connection to corrupt the stored spawns list: %v", err)
+	}
+	defer database.Pool().Put(conn)
+	if err := sqlitex.ExecuteTransient(conn,
+		`UPDATE claude_transcript_evidence SET spawns_json = '{}' WHERE source_path = ?`,
+		&sqlitex.ExecOptions{Args: []any{path}}); err != nil {
+		t.Fatalf("make the stored spawns list of %q unreadable: %v", path, err)
 	}
 }
 

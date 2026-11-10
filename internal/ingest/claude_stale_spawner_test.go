@@ -96,6 +96,9 @@ func TestClaudeAdapter_StaleStoredSpawnerKeepsTheCorrectLink(t *testing.T) {
 			derived := &failingClaudeDerivedLookup{
 				spawners:     2,
 				spawnerPaths: []string{string(stalePath), string(storedPath)},
+				spawnsByPath: map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity{
+					stalePath: {identity},
+				},
 			}
 			location := newFakeSessionLocationLookup()
 			location.markStored(ingest.SessionID(testCase.WantParent), "")
