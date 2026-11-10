@@ -371,6 +371,12 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		// Reuse the exact same physical locator and file clock across runs:
 		// unattributed sessions derive project identity from this path.
 		nativePath := filepath.Join(os.Getenv("PEASANT_GUARD_NATIVE"), name, "opencode.db")
+		// The native root is shared by the two compared captures, but each case
+		// directory must be clean: a stale -wal/-shm sidecar must never be read
+		// with the next capture's main file.
+		if err := os.RemoveAll(filepath.Dir(nativePath)); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.MkdirAll(filepath.Dir(nativePath), 0700); err != nil {
 			t.Fatal(err)
 		}

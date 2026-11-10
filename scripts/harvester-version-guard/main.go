@@ -178,7 +178,10 @@ func run(base, candidate string) error {
 	return nil
 }
 
-const fixtureDriverPath = "third_party/zombiezen-sqlite"
+const (
+	fixtureDriverPath = "third_party/zombiezen-sqlite"
+	observedNativeEnv = "PEASANT_GUARD_OBSERVED_NATIVE"
+)
 
 func fixtureDriverFiles(root string) (map[string][]byte, error) {
 	files := make(map[string][]byte)
@@ -327,7 +330,7 @@ func parserVersions() map[string]versions {
 	// not execute this injected probe.
 	cmd := exec.Command("go", "test", "-race", "-count=1", "-parallel=8", "-run", "^TestHarvesterGuardCapture$", "./internal/ingest")
 	cmd.Dir = tree
-	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_FALLBACK_CORPUS="+fallbackCorpus, "PEASANT_GUARD_OBSERVED_NATIVE="+observedNames, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+nativeRoot)
+	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_FALLBACK_CORPUS="+fallbackCorpus, observedNativeEnv+"="+observedNames, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+nativeRoot)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return result, fmt.Errorf("cannot compare %s against corpus %s; restore compatible probe APIs/fixtures before claiming a guard result: %w\n%s", filepath.Base(tree), filepath.Base(corpus), err, out)
 	}
