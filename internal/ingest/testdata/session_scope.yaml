@@ -50,6 +50,12 @@ volatileColumns:
     - metadata_json
     - metadata_hash
     - captured_at
+  store_state:
+    # A monotonic write counter: one row, incremented by a trigger on every
+    # write. Two runs that write different numbers of rows legitimately end at
+    # different revisions, and nothing reads it as state a scoped run must
+    # reproduce.
+    - revision
 
 exemptTables:
   ingest_log: >-
