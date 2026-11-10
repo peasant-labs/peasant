@@ -20,9 +20,8 @@ import type { SessionSummary } from '@/types/messages';
  * on `/`, restoring the pre-release archive's Projects page shape (a projects
  * list, then every ingested session beneath it).
  *
- * The list is a thin host adapter over the shared table: it renders a complete
- * list with `page={null}` (the table hides its pager and draws every row), so a
- * caller that holds no server total never invents one.
+ * The caller supplies the complete scope for search. The table mounts at most
+ * 100 matching rows; the search affordance reaches rows beyond that limit.
  *
  * Columns are session · project · harness · turns · tokens. The session column
  * is the row identity, so the shared table always shows it.
@@ -56,6 +55,9 @@ const AllSessionGroupBy = Object.freeze({
   None: closed('none', 'none'),
 } as const);
 type AllSessionGroupBy = (typeof AllSessionGroupBy)[keyof typeof AllSessionGroupBy];
+
+/** Bound DOM work without truncating the input searched by this adapter. */
+const MAX_RENDERED_SESSIONS = 100;
 
 function sessionDate(iso: string): string {
   const ms = Date.parse(iso);
@@ -244,6 +246,12 @@ export function AllSessions({
         </span>
       </div>
 
+      {visible.length > MAX_RENDERED_SESSIONS && (
+        <p role="status" className="text-xs text-ink-3">
+          showing the newest {MAX_RENDERED_SESSIONS} of {visible.length.toLocaleString()} matching sessions; search to narrow the list.
+        </p>
+      )}
+
       {visible.length === 0 ? (
         <p className="border border-rule bg-surface px-5 py-6 text-center text-[13px] text-ink-3">
           no sessions match &ldquo;{query.trim()}&rdquo;.
@@ -251,7 +259,7 @@ export function AllSessions({
       ) : (
         <TranscriptLibraryTable<SessionSummary, AllSessionGroupBy, AllSessionColumn>
           caption={title}
-          rows={visible}
+          rows={visible.slice(0, MAX_RENDERED_SESSIONS)}
           rowKey={(session) => session.id}
           columns={columns}
           groupBy={AllSessionGroupBy.None}
