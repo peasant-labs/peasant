@@ -1,0 +1,66 @@
+{
+  "origin": "http://127.0.0.1:8873",
+  "provenance": {
+    "chunks": [
+      "/_next/static/chunks/1053-cc022a48542d5f77.js",
+      "/_next/static/chunks/1581e093-df44a9a2e7ddb4bb.js",
+      "/_next/static/chunks/1908-a2c8152cd3f551a5.js",
+      "/_next/static/chunks/2158-6abf09f3a5b05d48.js",
+      "/_next/static/chunks/2595-d6d68c9716f152cb.js",
+      "/_next/static/chunks/3647fc0f-9f6825d5f4bfda93.js",
+      "/_next/static/chunks/39f83cb4-a5fb376b1974658b.js",
+      "/_next/static/chunks/4922-08f632071d7ad065.js",
+      "/_next/static/chunks/5941-1bc5866d13b535b5.js",
+      "/_next/static/chunks/8472-eee70339bd78377a.js",
+      "/_next/static/chunks/8b2cf50b-d437914f0fb28ac6.js",
+      "/_next/static/chunks/9059-103c8a52684b3072.js",
+      "/_next/static/chunks/917-a4da0bd1fc2cebfc.js",
+      "/_next/static/chunks/9291-30674ee4be7de90a.js",
+      "/_next/static/chunks/9603-09247044cc893a42.js",
+      "/_next/static/chunks/app/layout-6dd7ec798467c791.js",
+      "/_next/static/chunks/app/not-found-90b6a3cd5121c1d6.js",
+      "/_next/static/chunks/app/page-d0b49a9545bd67c5.js",
+      "/_next/static/chunks/main-app-9662a69e8f3f1d1b.js",
+      "/_next/static/chunks/polyfills-42372ed130431b0a.js",
+      "/_next/static/chunks/webpack-c3b2298199a47a87.js"
+    ],
+    "markerChunks": {
+      "data-segment-mode": [
+        "/_next/static/chunks/3647fc0f-9f6825d5f4bfda93.js"
+      ],
+      "data-segment-boundaries": [
+        "/_next/static/chunks/3647fc0f-9f6825d5f4bfda93.js"
+      ],
+      "data-mounted-turn-bound": [
+        "/_next/static/chunks/3647fc0f-9f6825d5f4bfda93.js"
+      ]
+    },
+    "binChecked": true
+  },
+  "seeded": {
+    "sessionId": "11111111-1111-4111-8111-111111111111",
+    "projectHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "captures": [
+    {
+      "theme": "dark",
+      "path": "/home/minttea/dev/peasant-labs/peasant/peasant-8--feat-transcript-segments--host/review-capture/transcript-segments/transcript-segments-dark.png",
+      "boundaries": [
+        "older",
+        "newer"
+      ],
+      "turn": 41,
+      "segments": 20
+    },
+    {
+      "theme": "light",
+      "path": "/home/minttea/dev/peasant-labs/peasant/peasant-8--feat-transcript-segments--host/review-capture/transcript-segments/transcript-segments-light.png",
+      "boundaries": [
+        "older",
+        "newer"
+      ],
+      "turn": 41,
+      "segments": 20
+    }
+  ]
+}
