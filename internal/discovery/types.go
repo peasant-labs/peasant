@@ -1,7 +1,6 @@
 package discovery
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -55,41 +54,11 @@ type ProviderInventory map[defaults.Harness]ProviderDiscovery
 // surfaced that session, so a bare identifier cannot invent a child.
 type SubagentRelation map[string][]string
 
-// ProjectIdentity is the stable exact-selection identity of one discovered
-// harness/worktree pair. Display labels, remotes, and project names are
-// excluded: two harnesses or two physical worktrees remain distinct persisted
-// scopes even when one repository row presents them together.
-type ProjectIdentity struct {
-	Harness   ingest.Harness
-	ClonePath ingest.ClonePath
-}
+// ProjectIdentity is owned by onboarding.
+type ProjectIdentity = onboarding.ProjectIdentity
 
-// String returns an unambiguous tree key. The harness is length-prefixed so a
-// path cannot collide with a different harness/path pair. This value is identity
-// data and is never rendered as row text.
-func (i ProjectIdentity) String() string {
-	if !i.Available() {
-		return ""
-	}
-	harness := i.Harness.String()
-	return fmt.Sprintf("%d:%s%s", len(harness), harness, i.ClonePath.String())
-}
-
-// Available reports that both the harness and the physical clone path are set.
-func (i ProjectIdentity) Available() bool {
-	return i.Harness != "" && i.ClonePath != ""
-}
-
-// PreparedSessionListing carries one discovered session together with the
-// physical project identity and complete-cohort multiplicity evidence. The
-// forest and the post-save ingest callback consume this same value so they
-// cannot disagree about clone identity.
-type PreparedSessionListing struct {
-	Listing            SessionListing
-	ProjectIdentity    ProjectIdentity
-	RepositoryIdentity ingest.RepositoryIdentity
-	Candidate          ingest.DiscoveryCandidate
-}
+// PreparedSessionListing is owned by onboarding.
+type PreparedSessionListing = onboarding.PreparedSessionListing
 
 // KnownSession is what a previous ingest recorded for one session. A scan
 // reuses it instead of walking git again when the source has not changed.

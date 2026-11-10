@@ -14,14 +14,14 @@ import (
 
 // ProjectIdentity is the stable exact-selection identity of one discovered
 // harness/worktree pair. Display labels are not part of the identity.
-type ProjectIdentity = discovery.ProjectIdentity
+type ProjectIdentity = onboarding.ProjectIdentity
 
 // RepositoryIdentity is the immutable Git topology result used by kickstart.
 type RepositoryIdentity = ingest.RepositoryIdentity
 
 // PreparedSessionListing carries one discovered session together with the
 // physical project identity and complete-cohort multiplicity evidence.
-type PreparedSessionListing = discovery.PreparedSessionListing
+type PreparedSessionListing = onboarding.PreparedSessionListing
 
 // SubagentRelation is the parent-to-subagent relation over the full discovered
 // set. It resolves child counts and never widens the picker listing.

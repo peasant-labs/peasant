@@ -132,7 +132,7 @@ func walkGoFiles(t *testing.T, dir string, visit func(string, *ast.File)) {
 func checkNeutralDeclarations(t *testing.T, root string, f neutralFixture) {
 	t.Helper()
 	// These lists are the protected contract, not a count that can silently shrink.
-	types := map[string]bool{"SessionListing": false, "SessionSource": false, "SessionSourceOrigin": false, "Forest": false, "Node": false, "Stop": false, "Field": false, "Draft": false, "Residual": false, "StopKind": false, "FieldKind": false, "ModelScope": false, "FlowKey": false}
+	types := map[string]bool{"ProjectIdentity": false, "PreparedSessionListing": false, "SessionListing": false, "SessionSource": false, "SessionSourceOrigin": false, "Forest": false, "Node": false, "Stop": false, "Field": false, "Draft": false, "Residual": false, "StopKind": false, "FieldKind": false, "ModelScope": false, "FlowKey": false}
 	dirs := map[string]bool{"internal/tui/settings": false, "internal/tui/kickstart": false, "internal/tui/ftue": false, "internal/discovery": false}
 	for _, name := range f.NeutralTypes {
 		if seen, ok := types[name]; !ok || seen {
