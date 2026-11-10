@@ -2981,8 +2981,14 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		}
 		if captured != nil && loc.SourceEvidenceSupported {
 			status = DiffUnchanged
+			// A stored adapter revision behind this build is change evidence of
+			// its own: the artifact the row holds was produced by an older parser,
+			// and only a published capture advances the stamp. Without this a
+			// session whose bytes happen to project identically is selected on
+			// every harvest, opened every time, and never settles.
 			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || metadataNeedsNativeRefresh(loc.SchemaVersion) ||
-				(loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled) {
+				(loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled) ||
+				loc.adapterStampBehind(session.Harness, p.versionTargets()) {
 				status = DiffUpdated
 			}
 		}
