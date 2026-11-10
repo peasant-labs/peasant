@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -51,8 +52,9 @@ func guardCorpusPath(corpus, name string) (string, bool) {
 
 type versions struct{ AdapterVersion, IndexerVersion int }
 type guardSnapshot struct {
-	Versions map[string]versions
-	Outputs  map[string]json.RawMessage
+	Versions       map[string]versions
+	Outputs        map[string]json.RawMessage
+	NativeObserved []string
 }
 
 // Only the runner injects this test into temporary archived revisions.
@@ -405,17 +407,14 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		}
 		guardRecord(t, &result, "opencode/AdapterVersion/native/"+name, outputs, discoverErr)
 	}
-	observed := 0
 	for name := range nativeNames {
 		// Every name here must exist: the anchors and the candidate's declared
 		// cases are all part of the candidate-derived builder. A typo or a
 		// dropped case is a guard error, not an absent historical shape.
 		observeNative(name, testfixture.MaterializeByName(t, name))
-		observed++
+		result.NativeObserved = append(result.NativeObserved, name)
 	}
-	if observed == 0 {
-		t.Fatal("no native SQLite case was observed; the guard cannot compare native parser behavior")
-	}
+	sort.Strings(result.NativeObserved)
 	for harness := range result.Versions {
 		for _, stage := range []string{"AdapterVersion", "IndexerVersion"} {
 			found := false

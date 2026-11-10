@@ -54,23 +54,21 @@ func TestEmbeddedProbeIsValidGo(t *testing.T) {
 	}
 }
 
-func TestUnobservedNativeRequiresANonEmptyObservation(t *testing.T) {
-	name := "current-idle-failure-tolerated"
-	key := "opencode/AdapterVersion/native/" + name
-	for _, testCase := range []struct {
-		name    string
-		outputs map[string]json.RawMessage
-		missing bool
-	}{
-		{name: "absent", outputs: map[string]json.RawMessage{}, missing: true},
-		{name: "empty discovery", outputs: map[string]json.RawMessage{key: json.RawMessage(`{"Failed":false,"Output":{}}`)}, missing: true},
-		{name: "observed", outputs: map[string]json.RawMessage{key: json.RawMessage(`{"Failed":false,"Output":{"ses_x":{"Failed":false}}}`)}, missing: false},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			missing := unobservedNative([]string{name}, testCase.outputs)
-			if got := len(missing) == 1; got != testCase.missing {
-				t.Fatalf("missing = %v, want %v", missing, testCase.missing)
-			}
-		})
+func TestUnobservedNativeUsesProcessedNames(t *testing.T) {
+	name := "empty-valid"
+	if missing := unobservedNative([]string{name}, nil); len(missing) != 1 {
+		t.Fatalf("an unprocessed name was not reported missing: %v", missing)
+	}
+	// An empty database is a legitimate observation; the probe records the
+	// name it processed, not the number of sessions it found.
+	if missing := unobservedNative([]string{name}, []string{name}); len(missing) != 0 {
+		t.Fatalf("a processed empty case was reported missing: %v", missing)
+	}
+}
+
+func TestSharedNativeNamesKeepsCasesBothRevisionsDeclare(t *testing.T) {
+	shared := sharedNativeNames([]string{"legacy-message-part", "removed-by-candidate"}, []string{"legacy-message-part", "added-by-candidate"})
+	if len(shared) != 1 || shared[0] != "legacy-message-part" {
+		t.Fatalf("shared names = %v, want only the case both revisions declare", shared)
 	}
 }

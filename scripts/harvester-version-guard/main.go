@@ -23,8 +23,9 @@ var probe []byte
 
 type versions struct{ AdapterVersion, IndexerVersion int }
 type snapshot struct {
-	Versions map[string]versions
-	Outputs  map[string]json.RawMessage
+	Versions       map[string]versions
+	Outputs        map[string]json.RawMessage
+	NativeObserved []string
 }
 
 func main() {
@@ -114,38 +115,48 @@ func run(base, candidate string) error {
 			return err
 		}
 	}
+	baseNames, err := testfixture.CaseNames(nativeCorpora[baseTree])
+	if err != nil {
+		return err
+	}
 	candidateNames, err := testfixture.CaseNames(nativeCorpora[candidateTree])
 	if err != nil {
 		return err
 	}
+	sort.Strings(baseNames)
 	sort.Strings(candidateNames)
-	observedJSON, err := json.Marshal(candidateNames)
-	if err != nil {
-		return err
-	}
+	// The candidate corpus is compared in full. The base pass replays every
+	// case both revisions declare, so an edit that weakens a fixture is judged
+	// against the old bytes; a case the candidate removed has no builder shape
+	// and is guarded by required_cases instead.
+	sharedNames := sharedNativeNames(baseNames, candidateNames)
 	var failures []string
 	for _, corpus := range []string{baseTree, candidateTree} {
-		// Every case the candidate corpus declares is handed to both parsers:
-		// the fixed anchor set cannot cover a fixture a later change relies on.
-		// The base-corpus pass keeps only those anchors, because the shared
-		// builder is candidate-derived and cannot build a shape the candidate
-		// removed.
-		observedNames := ""
+		names := sharedNames
 		if corpus == candidateTree {
-			observedNames = string(observedJSON)
+			names = candidateNames
 		}
-		old, err := capture(baseTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus], observedNames)
+		namesJSON, err := json.Marshal(names)
 		if err != nil {
 			return err
 		}
-		current, err := capture(candidateTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus], observedNames)
+		// One native root per corpus pass: the two parsers must see the same
+		// absolute locator, because unattributed sessions derive project
+		// identity from it.
+		nativeRoot, err := os.MkdirTemp(temp, "native-")
 		if err != nil {
 			return err
 		}
-		if corpus == candidateTree {
-			if unobserved := unobservedNative(candidateNames, old.Outputs); len(unobserved) > 0 {
-				return fmt.Errorf("candidate-declared native fixtures were not observed by the base parser: %v", unobserved)
-			}
+		old, err := capture(baseTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus], string(namesJSON), nativeRoot)
+		if err != nil {
+			return err
+		}
+		current, err := capture(candidateTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus], string(namesJSON), nativeRoot)
+		if err != nil {
+			return err
+		}
+		if unobserved := unobservedNative(names, old.NativeObserved); len(unobserved) > 0 {
+			return fmt.Errorf("native fixtures were not observed by the base parser: %v", unobserved)
 		}
 		failures = append(failures, compare(old, current)...)
 	}
@@ -235,28 +246,41 @@ func supplyFixtureDriver(tree, candidateTree string) error {
 	return nil
 }
 
-// unobservedNative lists the candidate-declared cases the base parser did not
-// actually observe. A recorded name with an empty output map means discovery
-// saw no session: that is no evidence, not an observation.
-func unobservedNative(names []string, outputs map[string]json.RawMessage) []string {
+// sharedNativeNames lists the cases both corpora declare, sorted. The shared
+// builder is candidate-derived, so a base-only case cannot be rebuilt.
+func sharedNativeNames(base, candidate []string) []string {
+	inBase := make(map[string]bool, len(base))
+	for _, name := range base {
+		inBase[name] = true
+	}
+	var shared []string
+	for _, name := range candidate {
+		if inBase[name] {
+			shared = append(shared, name)
+		}
+	}
+	sort.Strings(shared)
+	return shared
+}
+
+// unobservedNative lists the passed cases the probe did not process. A name is
+// observed because the probe recorded it, not because its output is non-empty:
+// an empty database is a legitimate observation.
+func unobservedNative(names, observed []string) []string {
+	seen := make(map[string]bool, len(observed))
+	for _, name := range observed {
+		seen[name] = true
+	}
 	var missing []string
 	for _, name := range names {
-		raw, ok := outputs["opencode/AdapterVersion/native/"+name]
-		if !ok || len(raw) == 0 {
-			missing = append(missing, name)
-			continue
-		}
-		var probe struct {
-			Output map[string]json.RawMessage
-		}
-		if err := json.Unmarshal(raw, &probe); err != nil || len(probe.Output) == 0 {
+		if !seen[name] {
 			missing = append(missing, name)
 		}
 	}
 	return missing
 }
 
-func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []byte, observedNames string) (snapshot, error) {
+func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []byte, observedNames string, nativeRoot string) (snapshot, error) {
 	var result snapshot
 	err := filepath.WalkDir(builder, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -314,10 +338,6 @@ func parserVersions() map[string]versions {
 	output := filepath.Join(temp, "snapshot.json")
 	cmd := exec.Command("go", "test", "-race", "-count=1", "-run", "^TestHarvesterGuardCapture$", "./internal/ingest")
 	cmd.Dir = tree
-	nativeRoot, err := os.MkdirTemp(temp, "native-")
-	if err != nil {
-		return result, err
-	}
 	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_FALLBACK_CORPUS="+fallbackCorpus, "PEASANT_GUARD_OBSERVED_NATIVE="+observedNames, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+nativeRoot)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return result, fmt.Errorf("cannot compare %s against corpus %s; restore compatible probe APIs/fixtures before claiming a guard result: %w\n%s", filepath.Base(tree), filepath.Base(corpus), err, out)
