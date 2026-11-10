@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
@@ -346,6 +346,114 @@ describe('SessionDetailV2 segmented transcript', () => {
         expect(view.getByText(/this turn's text is truncated/), 'per-field bound').toBeTruthy();
       }
       assertReads(plan);
+    });
+  }
+});
+
+type HistoryCase = { name: string; segmentCase: string; actions: string[]; reads: number };
+const historyFixture = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/earlier_history.yaml'), 'utf8'), 'earlier history') as {
+  requiredNames: string[]; cases: HistoryCase[]; history: { state: string; content: string };
+};
+const historyManifest = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/earlier_history.manifest.yaml'), 'utf8'), 'earlier history manifest') as { requiredNames: string[] };
+
+describe('explicit earlier history on the mounted transcript', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); reads.length = 0; activeCase = null; });
+
+  it('keeps every required scenario', () => {
+    expect(historyFixture.requiredNames).toEqual(historyManifest.requiredNames);
+    expect(historyFixture.cases.map((row) => row.name)).toEqual(historyManifest.requiredNames);
+  });
+
+  for (const testCase of historyFixture.cases) {
+    it(testCase.name, async () => {
+      const plan = loadCases().find((candidate) => candidate.name === testCase.segmentCase);
+      if (!plan) throw new Error(`missing segment case ${testCase.segmentCase}`);
+      activeCase = plan;
+      revision = plan.revision;
+      channelData = detail(plan);
+      let durableReads = 0;
+      let fail = false;
+      let releaseRead: (() => void) | undefined;
+      let oldSignal: AbortSignal | null | undefined;
+      let search = plan.turn == null ? '' : `turn=${plan.turn}`;
+      const component = () => {
+        currentSearch = new URLSearchParams(search);
+        const routeQuery = parseTranscriptRouteQuery(currentSearch);
+        if (!routeQuery) throw new Error('invalid history route');
+        return <PublishProvider><SessionDetailV2 sessionId={SESSION_ID} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} /></PublishProvider>;
+      };
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith(`/api/v1/sessions/${SESSION_ID}`)) {
+          durableReads += 1;
+          if (fail) { fail = false; return Response.json({ error: 'fixture read refused' }, { status: 503 }); }
+          if (testCase.name === 'history-disclosure' || (testCase.name === 'stale-response-after-revision' && durableReads === 1)) {
+            oldSignal = init?.signal;
+            await new Promise<void>((resolve) => { releaseRead = resolve; });
+          }
+          return Response.json({
+            ...detail(plan),
+            turns: [turnWire(0, plan)],
+            earlierHistory: [{ state: historyFixture.history.state, turns: [{ ...turnWire(40, plan), content: historyFixture.history.content, truncated: undefined, byteLength: undefined }] }],
+          });
+        }
+        return answer(input);
+      }));
+      const view = render(component());
+      await waitFor(() => expect(view.container.querySelector('[data-segment-mode="true"]')).not.toBeNull());
+      expect(durableReads).toBe(0);
+      for (const action of testCase.actions) {
+        if (action === 'fail') fail = true;
+        if (action === 'load-pending') {
+          fireEvent.click(view.getByRole('button', { name: 'show earlier history' }));
+          expect(view.getByText(/loading the session to read earlier history/)).toBeVisible();
+        } else if (action === 'finish-stale') {
+          expect(oldSignal?.aborted).toBe(true);
+          if (!releaseRead) throw new Error('history read did not start');
+          await act(async () => { releaseRead?.(); });
+          expect(view.container.querySelector('[data-earlier-section]')).toBeNull();
+        } else if (action === 'load' || action === 'fail' || action === 'retry') {
+          fireEvent.click(view.getByRole('button', { name: action === 'retry' ? 'try loading earlier history again' : 'show earlier history' }));
+          if (testCase.name === 'history-disclosure') {
+            expect(view.getByText(/loading the session to read earlier history/)).toBeVisible();
+            const loadingButton = view.getByRole('button', { name: 'loading earlier history…' });
+            expect(loadingButton).toBeDisabled();
+            fireEvent.click(loadingButton);
+            expect(durableReads).toBe(1);
+            if (!releaseRead) throw new Error('history read did not start');
+            releaseRead();
+          }
+          if (action === 'fail') await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent('fixture read refused'));
+          else await waitFor(() => expect(view.container.querySelector('[data-earlier-section="earlier-0"]')).not.toBeNull());
+        } else if (action === 'unrelated-segment') {
+          const button = view.container.querySelector('[data-segment-boundary="newer"] button');
+          if (!(button instanceof HTMLButtonElement)) throw new Error('missing load-more control');
+          fireEvent.click(button);
+          await waitFor(() => expect(reads).toContain('segment:1'));
+          expect(view.getByRole('alert')).toHaveTextContent('fixture read refused');
+        } else if (action === 'revision') {
+          revision = '8'; channelData = detail(plan); view.rerender(component());
+          await waitFor(() => expect(view.getByRole('button', { name: 'show earlier history' })).toBeInTheDocument());
+        } else if (action === 'disclose' || action === 'disclose-again') {
+          search = action === 'disclose' ? 'earlier=earlier-0' : '';
+          view.rerender(component());
+          if (action === 'disclose') {
+            expect(view.getByText(historyFixture.history.content)).toBeVisible();
+            expect(view.getByText(/state: uncertain_unresolved/)).toBeVisible();
+            const stream = view.container.querySelector('.txn-stream');
+            const history = stream?.querySelector('[data-earlier-section]');
+            const turn = stream?.querySelector('[data-turn="0"]');
+            expect(history && turn && (history.compareDocumentPosition(turn) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+          }
+        } else if (action === 'missing') {
+          search = 'earlier=earlier-1'; view.rerender(component());
+          expect(view.getByText(/section earlier-1 was not returned/)).toBeVisible();
+        } else if (action === 'limitation') {
+          expect(view.getByText(/transcript page cannot load more of a truncated turn/)).toBeVisible();
+          expect(view.getByText('the transcript page cannot load more of this turn.')).toBeVisible();
+          expect(view.queryByRole('button', { name: 'load this turn in full' })).toBeNull();
+        }
+      }
+      expect(durableReads).toBe(testCase.reads);
     });
   }
 });

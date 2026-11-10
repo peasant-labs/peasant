@@ -1,0 +1,9 @@
+requiredNames:
+  - mount-does-not-read
+  - jump-does-not-read
+  - history-disclosure
+  - revision-refetch
+  - failure-persists-until-retry
+  - stale-response-after-revision
+  - missing-section
+  - truncated-turn-limitation

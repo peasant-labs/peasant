@@ -83,7 +83,8 @@ vi.mock('./publish/useTranscriptPublish', () => ({
   useTranscriptPublish: () => ({ bar: null, dialog: null }),
 }));
 
-vi.mock('@/lib/ft-ui', () => ({
+vi.mock('@/lib/ft-ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ft-ui')>()),
   Skeleton: ({ label }: { label?: string }) => <div aria-label={label} />,
   FeedbackPanel: ({ title, children }: { title?: ReactNode; children?: ReactNode }) => <div><p>{title}</p>{children}</div>,
 }));
