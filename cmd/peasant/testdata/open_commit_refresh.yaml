@@ -1,0 +1,149 @@
+# Cases for refreshing commit detection on an unchanged named session.
+# requiredNames is the deletion guard: removing a named case without updating
+# this list fails the loader.
+requiredNames:
+  - scoped-refresh
+  - scoped-with-flag
+  - scoped-without-flag
+  - second-open-idle
+  - full-harvest-skips
+  - full-harvest-with-flag
+  - force-reprocesses
+  - dry-run-skips
+  - detection-failure-keeps-commits
+  - changed-transcript-extracts
+  - replaced-fingerprint-extracts
+  - stale-index-reindexes
+
+cases:
+  # A new commit in the session window is stored. Entries, the index, and the
+  # saved pair identity stay byte-identical.
+  - name: scoped-refresh
+    afterRecord: add-commit
+    command: open
+    want:
+      succeeded: true
+      commits: grew
+      stored: identical
+
+  # The same unchanged session with the flag refreshes commits and leaves the
+  # stored transcript and index byte-identical.
+  - name: scoped-with-flag
+    afterRecord: add-commit
+    command: harvest-refresh
+    want:
+      succeeded: true
+      commits: grew
+      stored: identical
+
+  # Without the flag, a scoped harvest is byte-identical to before, including
+  # the commit rows, and emits no detector warning. Removing the flag
+  # requirement records the new commit and fails this case.
+  - name: scoped-without-flag
+    afterRecord: add-commit
+    command: harvest-session
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: identical
+      stderrAbsent:
+        - commit_detector
+        - User email is not configured
+
+  # Opening the same unchanged session again does no extraction and no index
+  # work, and does not rewrite an identical commit projection. Removing the
+  # identical-projection skip changes commit row ids and fails this case.
+  - name: second-open-idle
+    afterRecord: none
+    command: open
+    want:
+      succeeded: true
+      commits: same-rows
+      stored: identical
+
+  # A full harvest that was not asked to refresh commits leaves the commit
+  # rows and the stored transcript and index byte-identical to before.
+  - name: full-harvest-skips
+    afterRecord: add-commit
+    command: harvest
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: identical
+
+  # The flag does not widen a full harvest. Removing the named-session
+  # restriction while the flag is set records the new commit and fails this case.
+  - name: full-harvest-with-flag
+    afterRecord: add-commit
+    command: harvest-refresh-all
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: identical
+
+  # --force still re-extracts and re-indexes an unchanged session.
+  - name: force-reprocesses
+    afterRecord: none
+    command: harvest-force
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: extracted
+
+  # A dry run writes nothing even when the flag is set. The store is opened
+  # read-only, so a commit write cannot be the witness. Removing the dry-run
+  # restriction makes the detector or the refresh diagnostic appear on stderr,
+  # which this case rejects.
+  - name: dry-run-skips
+    afterRecord: add-commit
+    command: harvest-dry-run
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: identical
+      stderrAbsent:
+        - commit refresh
+        - commit_detector
+
+  # A git failure stays a diagnostic. The run succeeds and the commits already
+  # stored are kept. Replacing the projection on an incomplete detection, or
+  # failing the run, fails this case.
+  - name: detection-failure-keeps-commits
+    afterRecord: hide-git
+    command: open
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: identical
+
+  # Appending a source record must extract, not refresh. Ignoring a fingerprint
+  # mismatch and refreshing instead leaves the saved pair untouched and fails
+  # this case.
+  - name: changed-transcript-extracts
+    afterRecord: append-record
+    command: open
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: extracted
+
+  # A stored fingerprint that no longer matches the source must extract, not
+  # refresh. The same ignored-mismatch mutation fails this case.
+  - name: replaced-fingerprint-extracts
+    afterRecord: replace-fingerprint
+    command: open
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: extracted
+
+  # sessions.index_version is put behind the producer. The next open must
+  # re-index, not leave the session as a commit-only refresh. Skipping that
+  # re-index leaves the index log unchanged and fails this case.
+  - name: stale-index-reindexes
+    afterRecord: stale-index
+    command: open
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: reindexed

@@ -242,6 +242,7 @@ func (s *Server) Listen(ctx context.Context) error {
 		config:      s.live,
 		scopeIssuer: s,
 		configHome:  s.cfg.ConfigHome,
+		configPath:  s.cfg.ConfigPath,
 		dataHome:    s.cfg.DataHome,
 		stateHome:   s.cfg.StateHome,
 	}

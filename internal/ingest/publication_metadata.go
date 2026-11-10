@@ -91,3 +91,13 @@ type PublicationCaptureStore interface {
 type SessionCommitMergeStore interface {
 	MergeSessionCommits(context.Context, SessionID, []CommitInfo) error
 }
+
+// SessionCommitProjectionStore writes the current commit projection without
+// clearing the saved pair identity. preserveExisting false replaces that
+// projection, matching a complete detection. true merges, matching an
+// incomplete detection that must not drop a binding Git could not rediscover.
+// The association ledger stays append-only either way.
+type SessionCommitProjectionStore interface {
+	ListSessionCommits(context.Context, SessionID) ([]CommitInfo, error)
+	WriteSessionCommitProjection(context.Context, SessionID, []CommitInfo, bool) error
+}

@@ -35,6 +35,8 @@ tables:
   - annotator_kinds
   - annotators
   - claude_transcript_evidence
+  - claude_teammate_spawns
+  - codex_rollout_catalog
   - daily_summary
   - daily_summary_by_project
   - daily_summary_harness
@@ -106,6 +108,9 @@ tables:
   - type_origins
   - value_domain_kinds
 indexes:
+  - idx_claude_evidence_identity_root
+  - idx_claude_teammate_spawns_identity
+  - idx_codex_rollout_catalog_session
   - idx_sessions_root_page
   - idx_sessions_child_page
   - idx_collective_observation_versions_current

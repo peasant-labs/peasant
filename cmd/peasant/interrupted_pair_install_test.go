@@ -295,7 +295,7 @@ func snapshotInstall(t *testing.T, w installWorld, id ingest.SessionID) installS
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Repair, err = db.ListSessionsNeedingRepair(t.Context(), ingest.GenerationTargets(ingest.HarvesterVersionRegistry))
+	s.Repair, err = db.ListSessionsNeedingRepair(t.Context(), ingest.GenerationTargets(ingest.HarvesterVersionRegistry), ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatal(err)
 	}

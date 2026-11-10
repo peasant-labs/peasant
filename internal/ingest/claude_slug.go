@@ -1,5 +1,12 @@
 package ingest
 
+import "os"
+
+// DecodeClaudeSlugOnDisk resolves a Claude slug against existing directories.
+func DecodeClaudeSlugOnDisk(encoded string) string {
+	return DecodeClaudeSlug(encoded, func(path string) bool { info, err := os.Stat(path); return err == nil && info.IsDir() })
+}
+
 // DecodeClaudeSlug decodes a Claude project slug to a real filesystem path.
 // Claude encodes paths by replacing the path separator with "-":
 //

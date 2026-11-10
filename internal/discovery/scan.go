@@ -299,10 +299,7 @@ func ResolveListingOrigin(discovered sessionorigin.Origin) sessionorigin.Origin 
 // DecodeClaudeSlugToPath decodes a Claude project slug to a filesystem path
 // when that path is an existing directory.
 func DecodeClaudeSlugToPath(encoded string) string {
-	return ingest.DecodeClaudeSlug(encoded, func(path string) bool {
-		info, err := os.Stat(path)
-		return err == nil && info.IsDir()
-	})
+	return ingest.DecodeClaudeSlugOnDisk(encoded)
 }
 
 // ShortenPath replaces the home directory prefix with "~" for display.

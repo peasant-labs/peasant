@@ -104,7 +104,7 @@ func TestUnchangedIndexSkipCompletesWriteBookkeeping(t *testing.T) {
 				t.Fatalf("the skip did not stamp the publication capture revision: %d, want 3", got)
 			}
 			// The row is now settled: nothing about it selects it again.
-			needing, err := db.ListSessionsNeedingRepair(t.Context(), ingest.HarvesterVersionRegistry)
+			needing, err := db.ListSessionsNeedingRepair(t.Context(), ingest.HarvesterVersionRegistry, ingest.AllStoredSessions())
 			if err != nil {
 				t.Fatal(err)
 			}

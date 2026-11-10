@@ -1,0 +1,8 @@
+peasant: harvest failed: session 5a1f... was found but --since excludes it, so nothing was recorded
+  what:     this session-scoped harvest looked for session 5a1f... and found it, but this run's --since excludes it
+  why:      the session was found, but --since excludes it
+  where:    session lookup (ingest scoped locate)
+  when:     before any session was swept, recorded, or indexed
+  impact:   no session was recorded or changed. Start-up maintenance (recovery of interrupted writes,
+            store migration, search-index repair) may still have run. No full scan was run.
+  fix:      drop --since, or use an earlier --since

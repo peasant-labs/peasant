@@ -158,14 +158,14 @@ type orphanTransientReconcileStore struct {
 
 var _ ingest.OrphanParentReconciler = (*orphanTransientReconcileStore)(nil)
 
-func (s *orphanTransientReconcileStore) InvalidateStaleParentOrigins(ctx context.Context) (int64, error) {
+func (s *orphanTransientReconcileStore) InvalidateStaleParentOrigins(ctx context.Context, scope ingest.StoreScope) (int64, error) {
 	if s.invalidateFault != "" {
 		fault := s.invalidateFault
 		s.invalidateFault = ""
 		s.invalidateInjections++
 		return 0, errors.New(fault)
 	}
-	return s.Store.InvalidateStaleParentOrigins(ctx)
+	return s.Store.InvalidateStaleParentOrigins(ctx, scope)
 }
 
 func (s *orphanTransientReconcileStore) ReconcileParentCache(ctx context.Context, updates []ingest.ParentCacheReconcile) error {
@@ -867,7 +867,7 @@ func assertOrphanOrigins(t *testing.T, ctx context.Context, db *store.Store, lab
 	if len(want) == 0 {
 		return
 	}
-	rows, err := db.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion+1)
+	rows, err := db.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion+1, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("case %q: ListStaleOriginSessions: %v", label, err)
 	}
