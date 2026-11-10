@@ -125,7 +125,11 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 	if err != nil {
 		return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: take connection: %w", err)
 	}
-	defer s.pool.Put(conn)
+	defer func() {
+		if conn != nil {
+			s.pool.Put(conn)
+		}
+	}()
 
 	endFn := sqlitex.Transaction(conn)
 	ended := false
@@ -269,6 +273,10 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 	if err != nil {
 		return ingest.PruneResult{}, err
 	}
+	// GC acquires its own connection. Release the committed transaction's
+	// connection first so a single-connection pool cannot deadlock.
+	s.pool.Put(conn)
+	conn = nil
 	if s.attachmentDir != "" {
 		if _, gcErr := s.AttachmentStore().GC(ctx); gcErr != nil {
 			return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: garbage-collect unreferenced images after the session rows were deleted: %w; the sessions are gone and an unreferenced image file may remain until the next prune; retry the prune", gcErr)

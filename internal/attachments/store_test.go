@@ -227,7 +227,9 @@ func testAttachmentPruneKeepsSharedBlob(t *testing.T) {
 	payload := onePixelPNG(t)
 	first := putImage(t, files, testutil.TestSessionUUID, "img-shared", "main", "image/png", payload)
 	putImage(t, files, second, "img-shared-other", "main", "image/png", payload)
-	if _, err := db.PruneSessions(context.Background(), []ingest.SessionID{schema.SessionID(testutil.TestSessionUUID)}); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := db.PruneSessions(ctx, []ingest.SessionID{schema.SessionID(testutil.TestSessionUUID)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(files.Dir(), first.SHA256)); err != nil {
@@ -242,7 +244,9 @@ func testAttachmentPrune(t *testing.T) {
 	t.Helper()
 	db, files := openAttachmentFixture(t)
 	row := putImage(t, files, testutil.TestSessionUUID, "img-prune", "main", "image/png", onePixelPNG(t))
-	if _, err := db.PruneSessions(context.Background(), []ingest.SessionID{schema.SessionID(testutil.TestSessionUUID)}); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := db.PruneSessions(ctx, []ingest.SessionID{schema.SessionID(testutil.TestSessionUUID)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(files.Dir(), row.SHA256)); !os.IsNotExist(err) {
@@ -304,7 +308,7 @@ func openAttachmentFixture(t *testing.T) (*store.Store, *attachments.Store) {
 	t.Helper()
 	dir := t.TempDir()
 	// ast-grep-ignore: no-migrating-store-open-in-tests -- the attachment table is created by the migration this test exercises.
-	db, err := store.Open(filepath.Join(dir, "peasant.db"))
+	db, err := store.Open(filepath.Join(dir, "peasant.db"), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -677,7 +677,8 @@ CREATE TABLE session_entries_ext (
       REFERENCES session_entries(session_id, entry_index) ON DELETE CASCADE
 ) STRICT;
 
-CREATE VIRTUAL TABLE session_entries_fts USING fts5(
+CREATE VIRTUAL TABLE session_entries_fts
+USING fts5(
     content_preview,
     tool_input,
     tool_output,
