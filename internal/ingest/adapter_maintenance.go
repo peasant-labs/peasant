@@ -19,10 +19,7 @@ func (p *Pipeline) adapterNeedsRefresh(metadata *UnifiedMetadata) bool {
 		return false
 	}
 	target := p.versionTargets()[metadata.ModelHarness].AdapterVersion
-	version := 1
-	if metadata.AdapterVersion != nil {
-		version = *metadata.AdapterVersion
-	}
+	version := storedAdapterRevision(metadata.AdapterVersion)
 	return version <= target && (version < target || metadataNeedsNativeRefresh(metadata.SchemaVersion))
 }
 

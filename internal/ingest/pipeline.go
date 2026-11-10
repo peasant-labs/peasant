@@ -3086,9 +3086,14 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// and only a published capture advances the stamp. Without this a
 			// session whose bytes happen to project identically is selected on
 			// every harvest, opened every time, and never settles.
+			//
+			// The harness-wide target applies even to a legacy OpenCode origin
+			// that keeps the baseline target for indexing: ListStaleAdapterSessions
+			// selects by harness, so a narrower classifier rule would leave those
+			// rows selected forever instead of republishing them once.
 			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || metadataNeedsNativeRefresh(loc.SchemaVersion) ||
 				(loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled) ||
-				loc.adapterStampBehind(session.Harness, p.versionTargets()) {
+				adapterRevisionBehind(loc.AdapterVersion, p.versionTargets()[session.Harness]) {
 				status = DiffUpdated
 			}
 		}

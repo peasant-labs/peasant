@@ -237,21 +237,6 @@ type SessionLocation struct {
 	IndexedInputHash *string
 }
 
-// adapterStampBehind reports whether the stored artifact was produced by an
-// adapter revision older than this build's target for the harness. A missing
-// stamp is not behind: it is an unknown producer, and the ordinary clock and
-// schema rules decide whether to re-read it.
-func (l SessionLocation) adapterStampBehind(harness Harness, targets map[Harness]HarvesterVersions) bool {
-	if l.AdapterVersion == nil {
-		return false
-	}
-	target, ok := targets[harness]
-	if !ok {
-		return false
-	}
-	return *l.AdapterVersion < target.AdapterVersion
-}
-
 // MetricSeedStore reads stored adapter statistics independently of computed
 // results. A nil seed means no stored input has been reconciled yet.
 type MetricSeedStore interface {
