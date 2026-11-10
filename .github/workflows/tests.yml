@@ -217,12 +217,14 @@ jobs:
       RACE: '0'
       TMPDIR: /tmp
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
-    # 20 minutes = the measured amd64 pool gate (~9m30s wall for the whole suite
-    # at RACE=0) plus ~2x headroom. This is a wedging cap, not the budget check:
-    # the committed budget fixture is what fails a slow suite, and the 5-minute
-    # aggregate is assessed on this job's wall (it is the critical path; the
-    # other pool jobs run in parallel). See docs/testing/ci-phase-measurement.md.
-    timeout-minutes: 20
+    # 30 minutes = the measured amd64 pool gate plus headroom. The suite exceeds
+    # 20 minutes when internal/ingest is disk-bound (#941), and the old cap
+    # killed the gate before its non-blocking budget report could run. This
+    # remains a wedging cap, not the budget check: the committed budget fixture
+    # reports a slow suite and the gate stays green, and the 5-minute aggregate
+    # is assessed on this job's wall (it is the critical path; the other pool
+    # jobs run in parallel). See docs/testing/ci-phase-measurement.md.
+    timeout-minutes: 30
     steps:
       # Job-start clock for the phase report. It must be the first step so the
       # pre-test phase covers checkout, toolchain setup, and cache restore.
