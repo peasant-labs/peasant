@@ -199,6 +199,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteReviewChange.String(), s.handleReviewChange)
 	mux.HandleFunc("GET "+defaults.RouteReviewDiff.String(), s.handleReviewDiff)
 	mux.HandleFunc("GET "+defaults.RouteSearch.String(), s.handleSearch)
+	mux.HandleFunc("GET "+defaults.RouteQuality.String(), s.handleQualityPage)
 	mux.HandleFunc("GET "+groupedMembersRoute, s.handleHelperGroupMembers)
 
 	// Annotation REST routes

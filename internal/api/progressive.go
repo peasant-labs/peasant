@@ -128,6 +128,21 @@ func (p *ProgressiveProvider) QualitySessions(ctx context.Context, f QualityFilt
 	return prov.QualitySessions(ctx, f)
 }
 
+// QualityPage routes the paginated quality read to the provider that backs the
+// quality section, so a mocked quality section serves its own page and a real
+// one serves the store page.
+func (p *ProgressiveProvider) QualityPage(ctx context.Context, page int, perPage schema.PageSize) (*schema.QualityPage, error) {
+	prov, err := p.getProvider(defaults.MockSections.QualitySessions)
+	if err != nil {
+		return nil, err
+	}
+	quality, ok := prov.(QualityPageProvider)
+	if !ok {
+		return nil, fmt.Errorf("progressive provider: quality page: provider %T has no paginated quality read; the full-library topic is retired for this surface; disable the mocked quality section or restart Peasant with its store provider configured, then retry", prov)
+	}
+	return quality.QualityPage(ctx, page, perPage)
+}
+
 func (p *ProgressiveProvider) AnnotationsForSession(ctx context.Context, sessionID string) ([]schema.AnnotationSummary, error) {
 	prov, err := p.getProvider(defaults.MockSections.Annotations)
 	if err != nil {
@@ -282,6 +297,7 @@ func (p *ProgressiveProvider) SelectionScopeByID(ctx context.Context, ids []stri
 
 // Ensure implementation of DataProvider interface.
 var _ DataProvider = (*ProgressiveProvider)(nil)
+var _ QualityPageProvider = (*ProgressiveProvider)(nil)
 
 // The publication read reaches the stored sessions through the provider the
 // server is started with, which is a ProgressiveProvider in production.

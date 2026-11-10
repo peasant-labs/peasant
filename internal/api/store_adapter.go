@@ -50,6 +50,9 @@ type StoreDataProvider struct {
 	pathIdentityResolver ingest.PathIdentityResolver
 	fs                   ingest.FileSystem
 	managedRoot          string
+	// qualityAnalysis caches the library summary and the personal medians at
+	// one store revision; the quality page and the transcript read share it.
+	qualityAnalysis qualityAnalysisCache
 }
 
 // NewStoreDataProvider creates a StoreDataProvider backed by the given store,
