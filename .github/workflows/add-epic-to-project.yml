@@ -1,0 +1,19 @@
+name: Add epic to Peasant Labs Tracker
+
+# Adds `epic`-labeled issues and pull requests to project #4. The work happens
+# in the shared reusable workflow; this file only wires the events to it.
+
+on:
+  issues:
+    types: [opened, reopened, labeled, transferred]
+  pull_request_target:
+    types: [opened, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  add-to-project:
+    uses: peasant-labs/.github/.github/workflows/add-epic-to-project.yml@main
+    secrets:
+      ADD_TO_PROJECT_PAT: ${{ secrets.ADD_TO_PROJECT_PAT }}
