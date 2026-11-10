@@ -1,0 +1,9 @@
+requiredNames:
+  - grok-build
+  - devin-desktop
+  - cline
+  - kiro
+  - kiro-cli
+  - kiro-crew
+  - cursor-cli
+  - cursor-ide-state

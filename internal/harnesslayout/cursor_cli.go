@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -318,6 +319,7 @@ func cursorFirstNonBlank(values ...string) string {
 func init() {
 	Register(Layout{
 		Tool:        ToolCursorCLI,
+		Harness:     schema.HarnessCursor,
 		DisplayName: "Cursor CLI chat store",
 		Sessions:    "One chat directory per session, holding a SQLite store.db and JSON sidecars.",
 		Roots: []Root{

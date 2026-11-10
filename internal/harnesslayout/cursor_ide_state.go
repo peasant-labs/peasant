@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -432,6 +433,7 @@ func cursorKeyRange(conn *sqlite.Conn, query string, args []any, prefix string, 
 func init() {
 	Register(Layout{
 		Tool:        ToolCursorIDEState,
+		Harness:     schema.HarnessCursor,
 		DisplayName: "Cursor IDE composer store",
 		Sessions:    "One composer per session: a composerData:<composerId> row and its bubbleId:<composerId>:* rows in the global state.vscdb.",
 		Roots: []Root{
