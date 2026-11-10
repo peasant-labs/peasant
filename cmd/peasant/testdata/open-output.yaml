@@ -195,7 +195,7 @@ cases:
     want:
       failed: true
       lines:
-        - 'peasant: harvest failed: peasant open refused to run: the maximum redaction level is not supported in this version; fix: run `{peasant} harvest --session {session_id} --force --detect-commits` to see the full report'
+        - 'peasant: harvest failed: peasant open refused to run: the maximum redaction level is not supported in this version; fix: run `{peasant} harvest --session {session_id} --detect-commits --refresh-commits` to see the full report'
 
   - name: malformed-transcript
     session: known
@@ -207,7 +207,7 @@ cases:
     want:
       failed: true
       lines:
-        - 'peasant: harvest failed: record session {session_id}: capture transcript source for {session_id}: capture JSONL record 2: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest; prior stored state remains unchanged; restore source readability and retry; fix: run `{peasant} harvest --session {session_id} --force --detect-commits` to see the full report'
+        - 'peasant: harvest failed: record session {session_id}: capture transcript source for {session_id}: capture JSONL record 2: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest; prior stored state remains unchanged; restore source readability and retry; fix: run `{peasant} harvest --session {session_id} --detect-commits --refresh-commits` to see the full report'
 
   - name: server-start-failure
     session: known
@@ -260,7 +260,7 @@ cases:
     want:
       failed: true
       lines:
-        - 'peasant: session lookup failed: session {session_id} is not recorded, and no configured source holds a transcript with that id; fix: check the id with `{peasant} sessions list`, or enable the harness that recorded it with `{peasant} kickstart`'
+        - 'peasant: harvest failed: session 6b2e... was not found, so nothing was recorded; searched store, claude-code; not enabled: codex, opencode, cursor, strike, pi; fix: check the id with `{peasant} sessions list`, or run `{peasant} harvest` once without --session, then retry'
 
   - name: missing-session
     session: missing

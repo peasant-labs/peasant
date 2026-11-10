@@ -958,7 +958,7 @@ func runLogicalParentOriginListing(t *testing.T, ctx context.Context, db *Store,
 	activateLogicalParentEvidence(t, db, child, fixture.LatestAttemptGeneration, logicalParentEvidenceTargetKnown, target)
 	arrangeLogicalParentPointers(t, db, child, nil, &fixture.LatestAttemptGeneration, nil)
 
-	rows, err := db.ListStaleOriginSessions(ctx, 1)
+	rows, err := db.ListStaleOriginSessions(ctx, 1, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleOriginSessions: %v", err)
 	}

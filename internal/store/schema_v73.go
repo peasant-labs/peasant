@@ -4,7 +4,7 @@ package store
 // The CREATE bodies are frozen slot-70 sqlite_master text; do not hand-edit them.
 // Recreate session triggers after copying rows so the copy does not advance the revision.
 const migrationV73 = `
-CREATE TABLE sessions_v71 AS SELECT * FROM sessions;
+CREATE TABLE sessions_v73 AS SELECT * FROM sessions;
 DROP TABLE sessions;
 
 CREATE TABLE sessions (
@@ -57,8 +57,8 @@ CREATE TABLE sessions (
   CHECK (parent_state IN ('root','resolved','unresolved')), resolved_parent_id TEXT
   CHECK ((parent_state = 'resolved') = (resolved_parent_id IS NOT NULL))) STRICT;
 
-INSERT INTO sessions SELECT * FROM sessions_v71;
-DROP TABLE sessions_v71;
+INSERT INTO sessions SELECT * FROM sessions_v73;
+DROP TABLE sessions_v73;
 
 CREATE INDEX idx_sessions_child_page
   ON sessions(resolved_parent_id, start_ms DESC, session_id ASC)
@@ -284,7 +284,7 @@ BEGIN
  UPDATE sessions SET indexed_publication_capture_revision=0, cwd_provenance_kind='not_recovered' WHERE session_id=NEW.session_id;
 END;
 
-CREATE TABLE daily_summary_harness_v71 AS SELECT * FROM daily_summary_harness;
+CREATE TABLE daily_summary_harness_v73 AS SELECT * FROM daily_summary_harness;
 DROP TABLE daily_summary_harness;
 
 CREATE TABLE daily_summary_harness (
@@ -300,7 +300,7 @@ CREATE TABLE daily_summary_harness (
     PRIMARY KEY (date_utc, model_harness)
 ) STRICT, WITHOUT ROWID;
 
-INSERT INTO daily_summary_harness SELECT * FROM daily_summary_harness_v71;
-DROP TABLE daily_summary_harness_v71;
+INSERT INTO daily_summary_harness SELECT * FROM daily_summary_harness_v73;
+DROP TABLE daily_summary_harness_v73;
 
 `

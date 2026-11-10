@@ -19,6 +19,7 @@
 required_names:
   - live-session-reindexes-only-itself
   - malformed-record-reindexes-stored-copy-and-names-it
+  - stored-copy-kept-when-source-is-gone
   - unrecorded-session-is-refused
   - busy-index-is-refused
   - running-cli-harvest-is-refused-not-waited-for
@@ -61,6 +62,14 @@ cases:
     user_turns_after: 12
     neighbour_user_turns_after: 3
     scan_status: 200
+  - name: stored-copy-kept-when-source-is-gone
+    turns: 12
+    neighbour_turns: 3
+    source_gone: true
+    status: 200
+    message: 'peasant: session 6a1f... was not read again; showing its stored transcript (the source no longer holds it)'
+    user_turns_after: 12
+    neighbour_user_turns_after: 3
   - name: unrecorded-session-is-refused
     turns: 12
     neighbour_turns: 3

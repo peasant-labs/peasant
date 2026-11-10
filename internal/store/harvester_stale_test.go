@@ -78,7 +78,7 @@ func TestStore_HarvesterStaleSelection(t *testing.T) {
 			for harness, version := range fixture.Targets {
 				targets[harness] = ingest.HarvesterVersions{AdapterVersion: 1, IndexerVersion: version, IndexVersion: 1}
 			}
-			ids, err := s.ListStaleIndexSessions(ctx, targets)
+			ids, err := s.ListStaleIndexSessions(ctx, targets, ingest.AllStoredSessions())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -21,8 +21,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
+	"github.com/peasant-labs/peasant/internal/selectionfilter"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/spf13/cobra"
@@ -74,20 +76,22 @@ const (
 
 // harvestFlags holds all CLI flags shared across harvest subcommands.
 type harvestFlags struct {
-	sourceHarness string
-	sourcePath    string
-	outputPath    string
-	dryRun        bool
-	force         bool
-	all           bool
-	includeActive bool
-	verbose       bool
-	debug         bool
-	jsonOutput    bool
-	detectCommits bool
-	profileIndex  bool
-	sessionIDs    []string
-	since         string
+	sourceHarness  string
+	sourcePath     string
+	outputPath     string
+	dryRun         bool
+	force          bool
+	all            bool
+	includeActive  bool
+	verbose        bool
+	debug          bool
+	jsonOutput     bool
+	detectCommits  bool
+	refreshCommits bool
+	profileIndex   bool
+	sessionIDs     []string
+	since          string
+	noRelated      bool
 }
 
 // BuildHarvestCommand constructs the harvest command with logs/index subcommands.
@@ -170,6 +174,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	_ = cmd.Flags().MarkHidden("debug")
 	cmd.Flags().BoolVar(&flags.jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().StringSliceVar(&flags.sessionIDs, "session", nil, "Filter to specific session IDs (repeatable, comma-separated)")
+	cmd.Flags().BoolVar(&flags.noRelated, "no-related", false, "Process only the named sessions. By default a session-scoped run also processes each named session's child sessions and its ancestors that are not recorded yet.")
 	cmd.Flags().StringVar(&flags.since, "since", "", "Only sessions newer than this ("+timeFilterHelp+")")
 	cmd.Flags().StringVar(&flags.outputPath, "output", "", "Override output base path")
 
@@ -181,11 +186,20 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the harness (replaces config, not additive)")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", true, "Deprecated compatibility flag; active sessions are processed by default")
 	}
+	// --harness is the same flag under the name every message uses. Both names
+	// are accepted, resolve to one value, and neither is deprecated.
+	cmd.Flags().StringVar(&flags.sourceHarness, "harness", "", "Alias for --source-harness")
 
 	// Detect-commits flag (relevant for index and all modes).
 	if mode != harvestLogsOnly {
 		cmd.Flags().BoolVar(&flags.detectCommits, "detect-commits", true, "Detect and store git commits linked to each session")
 		cmd.Flags().BoolVar(&flags.profileIndex, "profile-index", false, "Print INDEX parse/write timing diagnostics")
+	}
+	// The unchanged-session commit refresh is a harvest-run behavior. logs has
+	// no store to write, and index does not take this path, so neither accepts
+	// the flag.
+	if mode == harvestAll {
+		cmd.Flags().BoolVar(&flags.refreshCommits, "refresh-commits", false, "For a named unchanged session, refresh its commit rows without re-extracting or re-indexing")
 	}
 }
 
@@ -219,7 +233,30 @@ func countIndexFailures(log []ingest.IndexLogEntry) int {
 }
 
 func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, filesystem ingest.FileSystem) error {
-	return runHarvestWith(cmd, mode, flags, filesystem, outputHarvest)
+	err := runHarvestWith(cmd, mode, flags, filesystem, outputHarvest)
+	// A scope miss is a refusal, not a session failure: its labelled block is
+	// the whole output, so it goes to stderr once and nothing is printed
+	// through the summary. Cobra must not repeat it, and the exit is non-zero.
+	var scopeErr *ingest.SessionScopeError
+	if errors.As(err, &scopeErr) {
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		fmt.Fprintln(cmd.ErrOrStderr(), scopeErr.Error())
+	}
+	return err
+}
+
+// harvestCommandName is the words the user typed for this run, used only to
+// render a scope miss and the stored-but-unreadable warning.
+func harvestCommandName(mode harvestMode) string {
+	switch mode {
+	case harvestLogsOnly:
+		return "harvest logs"
+	case harvestIndexOnly:
+		return "harvest index"
+	default:
+		return "harvest"
+	}
 }
 
 // harvestReport consumes one committed harvest execution. The harvest command
@@ -358,6 +395,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		Sources:            sources,
 		OutputDir:          resolvedOutput,
 		Force:              force,
+		RefreshCommits:     flags.refreshCommits,
 		IncludeActive:      flags.includeActive,
 		StalenessThreshold: staleness,
 		DryRun:             flags.dryRun,
@@ -370,17 +408,42 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		Progress:           progState,
 	}
 
-	// 6b. Wire --session flag into AllowedSessionIDs (unless --all clears filters).
+	// 6b. A session-scoped run builds a scope (unless --all clears filters). The
+	// scope owns the cohort: setting AllowedSessionIDs beside it is refused by
+	// the pipeline, because two narrowings can disagree.
+	if flags.noRelated && (len(flags.sessionIDs) == 0 || flags.all) {
+		cmd.SilenceUsage = true
+		return fmt.Errorf("--no-related was given, but it changes only a session-scoped run; where: the harvest command in cmd/peasant/cmd_harvest.go; when: before any session was looked up; impact: nothing was harvested, and the flag would otherwise be silently ignored; fix: add --session <id>, or remove --no-related")
+	}
 	if !flags.all && len(flags.sessionIDs) > 0 {
-		allowed := make(map[ingest.SessionID]bool, len(flags.sessionIDs))
+		ids := make([]ingest.SessionID, 0, len(flags.sessionIDs))
 		for _, raw := range flags.sessionIDs {
 			sid, err := ingest.NewSessionID(raw)
 			if err != nil {
 				return fmt.Errorf("invalid session ID %q: %w", raw, err)
 			}
-			allowed[sid] = true
+			ids = append(ids, sid)
 		}
-		pipelineCfg.AllowedSessionIDs = allowed
+		related := ingest.RelatedInclude
+		if flags.noRelated {
+			related = ingest.RelatedExclude
+		}
+		scope, err := ingest.NewSessionScope(ids, related)
+		if err != nil {
+			return err
+		}
+		pipelineCfg.Scope = &scope
+		pipelineCfg.Command = harvestCommandName(mode)
+		pipelineCfg.CommandPrefix = githooks.CommandPrefix(hookBinding(cmd))
+		// A named harness filters the scope by name, so a stored session under
+		// another harness is a stated miss instead of a disabled source.
+		if flags.sourceHarness != "" {
+			harness, err := resolveHarnessFlag(flags.sourceHarness)
+			if err != nil {
+				return err
+			}
+			pipelineCfg.Harness = &harness
+		}
 	}
 
 	// 6c. Wire --since flag into Since (unless --all clears filters).
@@ -393,10 +456,11 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	}
 
 	// 6d. Saved selection scopes native discovery, not stored maintenance.
-	var selectionConflicts *selectionConflictRecorder
-	implicitSelection := mode != harvestIndexOnly && !flags.all && len(flags.sessionIDs) == 0
-	if implicitSelection && cfg.Selection.Mode == config.SelectionModeSelected {
-		selectionFilter, recorder := buildSelectionFilterWithRecorder(cfg, git)
+	// Index-only, --all, and an explicit --session keep their own scope and do
+	// not apply the saved selection.
+	var selectionConflicts *selectionfilter.ConflictRecorder
+	if harvestAppliesSavedSelection(mode, flags, cfg) {
+		selectionFilter, recorder := selectionfilter.New(cfg, git, ingest.NewPhysicalPathResolver())
 		pipelineCfg.PrepareSessionFilter = selectionFilter.Prepare
 		pipelineCfg.SessionFilter = selectionFilter.Match
 		pipelineCfg.SessionExclusionFilter = selectionFilter.Excludes
@@ -546,6 +610,9 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler,
 		rebuildAll: reindex && flags.all,
 		upgrade:    upgradeResult,
+		scopeRun:   pipelineCfg.Scope != nil,
+		command:    pipelineCfg.Command,
+		prefix:     pipelineCfg.CommandPrefix,
 	})
 }
 
@@ -555,7 +622,7 @@ type harvestOutputOptions struct {
 	configPath         string
 	sources            map[defaults.Harness]ingest.SourceConfig
 	customPatternCount int
-	selectionConflicts *selectionConflictRecorder
+	selectionConflicts *selectionfilter.ConflictRecorder
 	indexProfiler      *ingest.IndexProfiler
 	// rebuildAll is set for `harvest index --all`: the run prints the
 	// not-restored summary line at the end.
@@ -563,6 +630,11 @@ type harvestOutputOptions struct {
 	// upgrade carries the one-time upgrade pass result so its summary line
 	// prints after the renderer clears.
 	upgrade ingest.UpgradeResult
+	// scopeRun says this run named its sessions; command and prefix are the
+	// words and the store the stored-but-unreadable warning must render.
+	scopeRun bool
+	command  string
+	prefix   string
 }
 
 // errSessionsFailed ends a harvest that finished but failed at least one
@@ -584,8 +656,9 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		return fmt.Errorf("pipeline failed: %w", execution.runErr)
 	}
 	result := execution.result
+	printScopeWarnings(cmd.ErrOrStderr(), result, options)
 	if options.selectionConflicts != nil {
-		options.selectionConflicts.notice(cmd.ErrOrStderr(), options.configPath)
+		options.selectionConflicts.Notice(cmd.ErrOrStderr(), options.configPath)
 	}
 	if options.upgrade.Ran {
 		fmt.Fprintln(cmd.ErrOrStderr(), options.upgrade.Report())
@@ -599,7 +672,7 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		fmt.Fprintf(os.Stderr, "warning: %v\n", result.Summary.StoreError)
 	}
 	for _, diagnostic := range result.DiscoveryDiagnostics {
-		fmt.Fprintf(os.Stderr, "warning: %s discovery skipped %s: %s\n", string(diagnostic.Provider), diagnostic.Location, diagnostic.Summary)
+		fmt.Fprintf(os.Stderr, "warning: %s discovery skipped %s: %s; %s\n", string(diagnostic.Provider), diagnostic.Location, diagnostic.Summary, diagnostic.Detail)
 	}
 	if options.indexProfiler != nil {
 		printIndexProfile(os.Stderr, options.indexProfiler.Snapshot())
@@ -639,6 +712,19 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		return fmt.Errorf("%d %w", result.Summary.Errors, errSessionsFailed)
 	}
 	return nil
+}
+
+// printScopeWarnings prints the stored-but-unreadable block once per unreadable
+// selected session, on stderr and before the summary. The block is not a
+// failure: the run keeps the stored copy, prints the summary for the sessions it
+// did process, and exits 0.
+func printScopeWarnings(w io.Writer, result *ingest.PipelineResult, options harvestOutputOptions) {
+	if !options.scopeRun || result == nil || result.ScopeReport == nil {
+		return
+	}
+	for _, block := range result.ScopeReport.UnreadableWarnings(options.command, options.prefix) {
+		fmt.Fprintln(w, block)
+	}
 }
 
 func harvestCancellationError(err error) error {
@@ -1598,203 +1684,13 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	}
 }
 
-type selectionConflict struct {
-	session ingest.DiscoveredSession
-	branch  string
-	// entries are the disagreeing entries reported by the matcher itself, not
-	// every entry configured for the harness. Naming the whole harness would
-	// grow less actionable the more projects a user configures — exactly
-	// backwards from what the disclosure is for.
-	entries []ingest.SelectionEntry
-}
-
-type selectionConflictRecorder struct {
-	conflicts []selectionConflict
-}
-
-// entrySeparator joins the disagreeing entries in the withheld-conflict
-// warning. It is named because the boundary is load-bearing for a reader: each
-// entry's identity has to be findable as one run of text, not assembled from
-// pieces of several, so anything asserting about one entry needs the same
-// boundary the renderer used.
-const entrySeparator = " and "
-
-// describeEntries renders the disagreeing entries by the identity the user
-// wrote in their configuration, so the warning names text they can search for.
-func describeEntries(entries []ingest.SelectionEntry) string {
-	rendered := make([]string, len(entries))
-	for i, entry := range entries {
-		rendered[i] = entry.String()
-	}
-	return strings.Join(rendered, entrySeparator)
-}
-
-func (r *selectionConflictRecorder) notice(w io.Writer, configPath string) {
-	const limit = 10
-	for i, conflict := range r.conflicts {
-		if i == limit {
-			fmt.Fprintf(w, "warning: %d additional sessions were withheld because selection rules conflict; inspect %q and edit one project entry or add the branch\n", len(r.conflicts)-limit, configPath)
-			break
-		}
-		fmt.Fprintf(w, "warning: session %s (%s) was withheld during ingest because project selection entries %s disagree on branch %q in %q; the session was not ingested; edit one entry or add the branch\n", conflict.session.SessionID, conflict.session.Harness, describeEntries(conflict.entries), conflict.branch, configPath)
-	}
-}
-
-type preparedHarvestSelection struct {
-	candidate ingest.DiscoveryCandidate
-	decision  ingest.DiscoveryDecision
-	excluded  bool
-	session   ingest.DiscoveredSession
-}
-
-type harvestSelectionFilter struct {
-	matcher               ingest.SelectionMatcher
-	autoIngestNewBranches bool
-	git                   ingest.GitResolver
-	pathResolver          ingest.PathIdentityResolver
-	projectHarnesses      map[ingest.Harness]bool
-	prepared              map[ingest.SessionID]preparedHarvestSelection
-	recordedConflicts     map[ingest.SessionID]bool
-	recorder              *selectionConflictRecorder
-}
-
-func buildSelectionFilterWithRecorder(cfg *config.Config, git ingest.GitResolver) (*harvestSelectionFilter, *selectionConflictRecorder) {
-	return buildSelectionFilterWithResolver(cfg, git, ingest.NewPhysicalPathResolver())
-}
-
-func buildSelectionFilterWithResolver(
-	cfg *config.Config,
-	git ingest.GitResolver,
-	pathResolver ingest.PathIdentityResolver,
-) (*harvestSelectionFilter, *selectionConflictRecorder) {
-	recorder := &selectionConflictRecorder{}
-	projectHarnesses := make(map[ingest.Harness]bool)
-	for harness, selection := range cfg.Selection.Harnesses {
-		if len(selection.Projects) > 0 || len(selection.Exclusions.Branches) > 0 {
-			projectHarnesses[ingest.Harness(harness)] = true
-		}
-	}
-	filter := &harvestSelectionFilter{
-		matcher:               cfg.SelectionMatcher(),
-		autoIngestNewBranches: cfg.Selection.AutoIngestNewBranches,
-		git:                   git,
-		pathResolver:          pathResolver,
-		projectHarnesses:      projectHarnesses,
-		recorder:              recorder,
-	}
-	return filter, recorder
-}
-
-// Prepare materializes every discovered session before the first Match call.
-// Decisions are cached by session ID; Match is lookup-only and fails closed if
-// the pipeline supplies a session outside the prepared cohort.
-func (f *harvestSelectionFilter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSession) error {
-	type gitContext struct{ remote, branch string }
-	resolvedGit := make(map[string]gitContext)
-	inputs := make([]selectionCandidateInput, len(sessions))
-	for index, session := range sessions {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		projectPath := discoveredSessionProjectPath(session)
-		branch := session.Branch
-		gitRemote := ""
-		if (f.projectHarnesses[session.Harness] || f.matcher.DiscoveryNeedsGit(session.Harness, session.SessionID)) && f.git != nil {
-			dir := discoveredSessionGitDirectory(session, projectPath)
-			if dir != "" {
-				gitCtx, ok := resolvedGit[dir]
-				if !ok {
-					if remote, err := f.git.RemoteURL(ctx, dir); err == nil {
-						gitCtx.remote = remote
-					}
-					if resolvedBranch, err := f.git.Branch(ctx, dir); err == nil {
-						gitCtx.branch = resolvedBranch
-					}
-					resolvedGit[dir] = gitCtx
-				}
-				gitRemote = gitCtx.remote
-				if gitCtx.branch != "" {
-					branch = gitCtx.branch
-				}
-			}
-		}
-		inputs[index] = selectionCandidateInput{
-			Harness:     session.Harness,
-			GitRemote:   gitRemote,
-			ProjectName: session.ProjectName,
-			ProjectPath: projectPath,
-			Branch:      branch,
-			SessionID:   session.SessionID,
-		}
-	}
-
-	candidates, err := prepareSelectionCandidates(ctx, inputs, f.pathResolver)
-	if err != nil {
-		return err
-	}
-	f.prepared = make(map[ingest.SessionID]preparedHarvestSelection, len(candidates))
-	f.recordedConflicts = make(map[ingest.SessionID]bool)
-	f.recorder.conflicts = nil
-	for index, candidate := range candidates {
-		f.prepared[candidate.SessionID] = preparedHarvestSelection{
-			candidate: candidate,
-			decision:  f.matcher.MatchDiscoveryCandidateDecision(candidate, f.autoIngestNewBranches),
-			excluded:  f.matcher.ExcludesCandidate(candidate),
-			session:   sessions[index],
-		}
-	}
-	return nil
-}
-
-// Excludes reports the exact-denial result cached during complete-cohort
-// preparation. An unknown session fails closed so a child outside that cohort
-// cannot inherit a selected parent's result.
-func (f *harvestSelectionFilter) Excludes(session ingest.DiscoveredSession) bool {
-	prepared, ok := f.prepared[session.SessionID]
-	return !ok || prepared.excluded
-}
-
-func (f *harvestSelectionFilter) Match(session ingest.DiscoveredSession) bool {
-	prepared, ok := f.prepared[session.SessionID]
-	if !ok {
+// harvestAppliesSavedSelection reports whether this harvest run should scope
+// native discovery with the saved selection. Index-only maintenance, --all, and
+// an explicit --session keep their own scope. A nil config or flag set does not
+// apply a selection.
+func harvestAppliesSavedSelection(mode harvestMode, flags *harvestFlags, cfg *config.Config) bool {
+	if cfg == nil || flags == nil {
 		return false
 	}
-	switch prepared.decision.Match {
-	case ingest.BranchMatchYes:
-		return true
-	case ingest.BranchMatchWithheldConflict:
-		if !f.recordedConflicts[session.SessionID] {
-			f.recorder.conflicts = append(f.recorder.conflicts, selectionConflict{
-				session: prepared.session,
-				branch:  prepared.candidate.Branch,
-				entries: prepared.decision.Conflicting(),
-			})
-			f.recordedConflicts[session.SessionID] = true
-		}
-	}
-	return false
-}
-
-func discoveredSessionProjectPath(session ingest.DiscoveredSession) string {
-	if filepath.IsAbs(session.CWD) {
-		return filepath.Clean(session.CWD)
-	}
-	if session.Harness == defaults.HarnessClaudeCode {
-		slug := filepath.Base(filepath.Dir(string(session.SourcePath)))
-		if decoded := decodeClaudeSlugToPath(slug); decoded != "" {
-			return decoded
-		}
-	}
-	return ""
-}
-
-func discoveredSessionGitDirectory(session ingest.DiscoveredSession, projectPath string) string {
-	if projectPath != "" {
-		return projectPath
-	}
-	dir := string(session.OriginalRoot)
-	if dir == "" && session.SourcePath != "" {
-		dir = filepath.Dir(string(session.SourcePath))
-	}
-	return dir
+	return mode != harvestIndexOnly && !flags.all && len(flags.sessionIDs) == 0 && cfg.Selection.Mode == config.SelectionModeSelected
 }

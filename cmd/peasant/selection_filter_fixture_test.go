@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/selectionfilter"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -303,8 +304,8 @@ func loadSelectionFilterFixtures(t *testing.T) selectionFilterFixtures {
 		// quietly restore the whole-notice search this replaced.
 		for _, project := range fixture.Projects {
 			for _, value := range append([]string{project.GitRemote, project.Name}, project.Branches...) {
-				if strings.Contains(value, entrySeparator) {
-					t.Fatalf("selection filter fixture %q configures the value %q, which contains the separator %q the warning joins entries with; that would merge two entries into one segment and undo the per-entry scoping", fixture.Name, value, entrySeparator)
+				if strings.Contains(value, selectionfilter.EntrySeparator) {
+					t.Fatalf("selection filter fixture %q configures the value %q, which contains the separator %q the warning joins entries with; that would merge two entries into one segment and undo the per-entry scoping", fixture.Name, value, selectionfilter.EntrySeparator)
 				}
 			}
 		}
@@ -389,7 +390,7 @@ func TestBuildSelectionFilter_Fixtures(t *testing.T) {
 				fixture.Configured: {Projects: fixture.Projects, Sessions: fixture.ExplicitSessions, Exclusions: fixture.Exclusions},
 			}}
 			git := &countingGitResolver{StubGitResolver: &testutil.StubGitResolver{Remote: "https://github.com/acme/tool.git", BranchName: "main"}}
-			filter, recorder := buildSelectionFilterWithResolver(cfg, git, fixturePathIdentityResolver{})
+			filter, recorder := selectionfilter.New(cfg, git, fixturePathIdentityResolver{})
 			sessionID, err := ingest.NewSessionID(fixture.SessionID)
 			if err != nil {
 				t.Fatalf("fixture session ID: %v", err)
@@ -424,7 +425,7 @@ func TestBuildSelectionFilter_Fixtures(t *testing.T) {
 				t.Fatalf("git calls = %d, want %d under policy %q", got, fixture.ExpectedGitCalls, fixture.GitPolicy)
 			}
 			var notice bytes.Buffer
-			recorder.notice(&notice, "/config/chosen.yaml")
+			recorder.Notice(&notice, "/config/chosen.yaml")
 			if fixture.ExpectedMatch != testutil.SelectionWithheld {
 				if notice.Len() != 0 {
 					t.Fatalf("case expects no withheld conflict but one was reported: %s", notice.String())
@@ -450,7 +451,7 @@ func TestBuildSelectionFilter_Fixtures(t *testing.T) {
 			// against ONE segment of the notice: every field the user wrote for
 			// an entry has to land together, in the same segment, which no other
 			// entry can supply.
-			segments := strings.Split(notice.String(), entrySeparator)
+			segments := strings.Split(notice.String(), selectionfilter.EntrySeparator)
 			for _, project := range fixture.Projects {
 				var required []string
 				for _, field := range []struct{ label, value string }{
@@ -518,7 +519,7 @@ func TestSelectionConflictNotice_CapsTheListAndSaysHowManyItHeldBack(t *testing.
 		}},
 	}}
 	git := &countingGitResolver{StubGitResolver: &testutil.StubGitResolver{Remote: "https://github.com/acme/tool.git", BranchName: "main"}}
-	filter, recorder := buildSelectionFilterWithResolver(cfg, git, fixturePathIdentityResolver{})
+	filter, recorder := selectionfilter.New(cfg, git, fixturePathIdentityResolver{})
 	sessions := make([]ingest.DiscoveredSession, 0, overflow.DeclaredConflicts)
 	for i := 0; i < overflow.DeclaredConflicts; i++ {
 		sessionID, err := ingest.NewSessionID(fmt.Sprintf("%08d-1111-4111-8111-111111111111", i))
@@ -541,12 +542,12 @@ func TestSelectionConflictNotice_CapsTheListAndSaysHowManyItHeldBack(t *testing.
 			t.Fatalf("session %d was selected; the fixture must configure a conflict for every one of them", i)
 		}
 	}
-	if len(recorder.conflicts) != overflow.DeclaredConflicts {
-		t.Fatalf("recorded %d conflicts, want %d; the case cannot exercise the cap unless every session actually conflicts", len(recorder.conflicts), overflow.DeclaredConflicts)
+	if recorder.Recorded() != overflow.DeclaredConflicts {
+		t.Fatalf("recorded %d conflicts, want %d; the case cannot exercise the cap unless every session actually conflicts", recorder.Recorded(), overflow.DeclaredConflicts)
 	}
 
 	var notice bytes.Buffer
-	recorder.notice(&notice, "/config/chosen.yaml")
+	recorder.Notice(&notice, "/config/chosen.yaml")
 	listed := strings.Count(notice.String(), "was withheld during ingest")
 	if listed != overflow.ExpectedListed {
 		t.Errorf("the notice lists %d sessions individually, want %d; a cap that lists a different number than it claims to is the one thing this arm exists to get right", listed, overflow.ExpectedListed)
@@ -658,7 +659,7 @@ func TestHarvestCmd_ReportsWithheldSelectionConflict(t *testing.T) {
 func initConflictedSourceRepo(t *testing.T, fixture mountedConflictFixture) string {
 	t.Helper()
 	sourceDir := t.TempDir()
-	if decoded := decodeClaudeSlugToPath(fixture.ClaudeSlug); decoded != "" {
+	if decoded := ingest.DecodeClaudeSlugOnDisk(fixture.ClaudeSlug); decoded != "" {
 		t.Fatalf("fixture claude_slug %q decodes to an existing directory %q; pick a slug that cannot resolve", fixture.ClaudeSlug, decoded)
 	}
 	for _, args := range [][]string{

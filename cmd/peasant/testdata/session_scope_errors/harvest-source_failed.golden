@@ -1,0 +1,14 @@
+peasant: session 5a1f... was not read again, so its stored transcript was kept
+  what:     this session-scoped harvest kept the stored copy of session 5a1f... and did not re-read its source
+  why:      the source recorded for this session could not be read: the located Claude path "/outside/roots/5a1f0c3e-7b2d-4e8a-9c61-0d4b3e2f1a70.jsonl" lies outside every configured Claude source root
+            /outside/roots/5a1f0c3e-7b2d-4e8a-9c61-0d4b3e2f1a70.jsonl
+  where:    session lookup (ingest scoped locate)
+  when:     before the session was diffed; its transcript was not re-read or re-indexed
+  impact:   the stored transcript, its index and its links were not recomputed, and `peasant open`
+            shows the stored copy. The bookkeeping a full harvest does for a recorded session (its
+            origin verdict, its metrics, and stored-copy maintenance) ran for it as in a full
+            harvest. Start-up maintenance may also have run.
+  fix:      nothing is needed to keep using the stored copy; to record it again, repair the source at
+            /outside/roots/5a1f0c3e-7b2d-4e8a-9c61-0d4b3e2f1a70.jsonl, then run
+            `peasant --config '/sandbox/config/peasant/config.yaml' --config-dir '/sandbox/config' --data-dir '/sandbox/data' --state-dir '/sandbox/state' harvest --session 5a1f0c3e-7b2d-4e8a-9c61-0d4b3e2f1a70`
+            again

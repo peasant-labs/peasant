@@ -1,0 +1,23 @@
+evidence:
+  - path: /synthetic/evidence/read-one.jsonl
+    scope: root
+    identityTeam: alpha
+    identityName: worker
+    spawns: []
+  - path: /synthetic/evidence/read-two.jsonl
+    scope: subagent
+    identityTeam: ""
+    identityName: ""
+    spawns: []
+
+cases:
+  - name: present_and_absent_paths
+    paths:
+      - /synthetic/evidence/read-one.jsonl
+      - /synthetic/evidence/missing.jsonl
+    wantPresent:
+      - /synthetic/evidence/read-one.jsonl
+
+  - name: empty_paths_read_nothing
+    paths: []
+    wantPresent: []

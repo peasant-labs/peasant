@@ -2,8 +2,15 @@ package ingest
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
 // includesIndexTarget is the index inventory's scope test: the strict harness
@@ -34,7 +41,7 @@ func (p *Pipeline) repairSessions(ctx context.Context) []SessionID {
 	if !ok {
 		return nil
 	}
-	ids, err := lister.ListSessionsNeedingRepair(ctx, p.indexerTargets())
+	ids, err := lister.ListSessionsNeedingRepair(ctx, p.indexerTargets(), p.runStoreScope())
 	if err != nil {
 		p.reportMetadataRefusal("repair selection", err)
 		return nil
@@ -282,6 +289,440 @@ func (p *Pipeline) scanPeasantSyncSessions(ctx context.Context) []reindexTarget 
 		p.reportMetadataRefusal(string(p.config.OutputDir), err)
 	}
 	return targets
+}
+
+// scopedIndexScan is what a session-scoped `harvest index` found in the saved
+// tree. It is built before any stage runs, so a selection no saved pair can
+// satisfy is refused with nothing recorded.
+type scopedIndexScan struct {
+	// targets are the saved pairs this run may index. Each pair is named by an
+	// id the run already resolved; the tree is never walked to find one.
+	targets []reindexTarget
+	// report is the cohort the scan located: the selected sessions, their
+	// children, and any unstored ancestor a saved pair holds.
+	report ScopeReport
+	// unreadable names the recorded sessions whose saved pair is gone. Their
+	// stored transcripts are kept and their store-side upkeep still runs, but
+	// their pairs are never rebuilt by this run.
+	unreadable map[SessionID]bool
+	// parents holds each located member's stored logical parent, so the
+	// unstored-ancestor walk can continue from the pair it just found.
+	parents map[SessionID]*SessionID
+}
+
+// scanScopedManagedSessions is the session-scoped variant of
+// scanPeasantSyncSessions. It reconstructs each named session's saved pair from
+// the location the store records, probes the retained tree for a session the
+// store does not record, and never walks the output root.
+//
+// The scan reads and writes nothing: it builds the cohort report and the pairs
+// this run may index, and a selected id no saved pair holds is a miss that stops
+// the run before any stage records anything.
+func (p *Pipeline) scanScopedManagedSessions(ctx context.Context) (*scopedIndexScan, error) {
+	scope := p.config.Scope
+	if scope == nil {
+		return nil, fmt.Errorf("ingest: a session-scoped index scan was requested without a session scope; where: ingest.Pipeline.scanScopedManagedSessions in internal/ingest/index_selection.go; when: starting a `harvest index --session` run; impact: no saved pair was read and no store row was written; fix: build the scope with NewSessionScope, or run without --session")
+	}
+	reader, err := p.scopedIndexSourceReader()
+	if err != nil {
+		return nil, err
+	}
+	locations := p.compatibilityBacking()
+	if locations == nil {
+		return nil, fmt.Errorf("ingest: a session-scoped index run needs the analytics database to say where each named session's saved pair is; where: ingest.Pipeline.scanScopedManagedSessions in internal/ingest/index_selection.go; when: before any saved pair was read; impact: no saved pair was read and no store row was written; fix: run `harvest index` with its database attached")
+	}
+	tree, err := p.readIndexPairTree()
+	if err != nil {
+		return nil, err
+	}
+
+	selected := scope.IDs()
+	stored, err := reader.StoredSessionSources(ctx, selected)
+	if err != nil {
+		return nil, fmt.Errorf("ingest: read the stored locations of the selected sessions before a session-scoped index run: %w; no saved pair was read and no store row was written; restore database access and retry", err)
+	}
+	storedLocations, err := locations.BulkLookupSessionLocations(ctx, selected)
+	if err != nil {
+		return nil, fmt.Errorf("ingest: read the stored pair locations of the selected sessions before a session-scoped index run: %w; no saved pair was read and no store row was written; restore database access and retry", err)
+	}
+
+	scan := &scopedIndexScan{
+		unreadable: make(map[SessionID]bool, len(selected)),
+		parents:    make(map[SessionID]*SessionID, len(selected)),
+	}
+	var misses []ScopeMiss
+
+	for _, id := range selected {
+		row, isStored := stored[id]
+		if isStored {
+			member, target, miss := p.locateStoredIndexPair(id, row, storedLocations[id], CohortSelected)
+			if miss != nil {
+				misses = append(misses, *miss)
+				continue
+			}
+			scan.add(member, target)
+			scan.parents[id] = row.Parent
+			continue
+		}
+		result, probeErr := p.probeIndexPair(tree, id)
+		if probeErr != nil {
+			return nil, probeErr
+		}
+		if result == nil {
+			misses = append(misses, ScopeMiss{ID: id, Reason: MissNotFound})
+			continue
+		}
+		member := LocatedMember{ID: id, Harness: result.session.Harness, Outcome: LocateDirectLookup, Role: CohortSelected}
+		if !p.includesIndexHarness(member.Harness) {
+			misses = append(misses, ScopeMiss{ID: id, Reason: MissHarnessFiltered, StoredHarness: member.Harness})
+			continue
+		}
+		if !p.withinRunAge(result.startMs) {
+			misses = append(misses, ScopeMiss{ID: id, Reason: MissSinceFiltered})
+			continue
+		}
+		target := indexTargetFrom(result)
+		scan.add(member, &target)
+		scan.parents[id] = result.session.ParentUUID
+	}
+
+	if len(misses) > 0 {
+		return nil, p.scopedIndexMissError(misses)
+	}
+
+	if scope.Related() == RelatedInclude {
+		if err := p.scanRelatedIndexPairs(ctx, reader, locations, tree, selected, scan); err != nil {
+			return nil, err
+		}
+	}
+
+	scan.report = orderScopeReport(scan.report.Members)
+	return scan, nil
+}
+
+// scopedIndexSourceReader returns the store capability that says which named
+// sessions are recorded and who their children are.
+func (p *Pipeline) scopedIndexSourceReader() (SessionSourceReader, error) {
+	if reader, ok := p.store.(SessionSourceReader); ok {
+		return reader, nil
+	}
+	if reader, ok := p.metricsStore.(SessionSourceReader); ok {
+		return reader, nil
+	}
+	return nil, fmt.Errorf("ingest: the attached store cannot say which sessions are recorded, so a session-scoped index run cannot tell a saved pair the database already knows from one a full index would record; where: ingest.Pipeline.scanScopedManagedSessions in internal/ingest/index_selection.go; when: starting a `harvest index --session` run; impact: no saved pair was read and no store row was written; fix: attach a store that implements SessionSourceReader, or run `harvest index` without --session")
+}
+
+// indexPairTree is the retained tree's host list, read once so every unstored
+// probe costs one metadata read per host and never a directory walk.
+type indexPairTree struct {
+	output string
+	hosts  []string
+}
+
+// readIndexPairTree reads the output root's host directories once. The list is
+// the bound every saved-pair probe in this run is subject to.
+func (p *Pipeline) readIndexPairTree() (*indexPairTree, error) {
+	output := string(p.config.OutputDir)
+	tree := &indexPairTree{output: output}
+	entries, err := p.fs.ReadDir(output)
+	if errors.Is(err, fs.ErrNotExist) {
+		return tree, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("ingest: inspect the retained transcript tree %q before a session-scoped index run: %w; where: ingest.Pipeline.readIndexPairTree in internal/ingest/index_selection.go; when: before any saved pair was read; impact: no saved pair was read and no store row was written; fix: restore read access to the output directory and retry", p.managedRelativePath(output), err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == managedArtifactStateDir || strings.HasPrefix(entry.Name(), defaults.TempDirPrefix) {
+			continue
+		}
+		if _, err := NewHostSlug(entry.Name()); err != nil {
+			continue
+		}
+		tree.hosts = append(tree.hosts, entry.Name())
+	}
+	sort.Strings(tree.hosts)
+	return tree, nil
+}
+
+// probeIndexPair reads {output}/*/{id}/{id}--metadata.json for an id the store
+// does not record. The probe only inspects the flat root layout: a subagent pair
+// lives under its parent's directory, so an unstored subagent cannot be found by
+// name. A nil result means no host holds the pair.
+func (p *Pipeline) probeIndexPair(tree *indexPairTree, id SessionID) (*sessionMetadataResult, error) {
+	for _, host := range tree.hosts {
+		result, err := p.readSessionMetadata(filepath.Join(tree.output, host), id, "index inventory")
+		if err != nil {
+			return nil, fmt.Errorf("ingest: read the saved pair of session %s from the retained tree at %q: %w; where: ingest.Pipeline.probeIndexPair in internal/ingest/index_selection.go; when: probing the retained tree for the named session; impact: no saved pair was indexed and no store row was written; fix: repair or remove the damaged saved pair, then retry", id, filepath.Join(tree.output, host), err)
+		}
+		if result != nil {
+			return result, nil
+		}
+	}
+	return nil, nil
+}
+
+// locateStoredIndexPair reconstructs one recorded session's saved pair from the
+// location the store holds. A pair the recorded location does not hold is
+// unreadable, not a miss: the stored transcript is kept and the run continues.
+func (p *Pipeline) locateStoredIndexPair(id SessionID, row StoredSessionSource, location SessionLocation, role CohortRole) (LocatedMember, *reindexTarget, *ScopeMiss) {
+	member := LocatedMember{ID: id, Harness: row.Harness, Role: role, StoredPath: row.Path}
+	if row.Harness == "" {
+		member.Outcome = LocateStoredUnreadable
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = "the store records no harness for this session, so its saved pair cannot be attributed to an adapter"
+		return member, nil, nil
+	}
+	// A named --harness is the more specific answer: the user excluded this
+	// session on this run. The config's own disabled state answers only when no
+	// harness filter was given.
+	if !p.includesIndexHarness(row.Harness) {
+		if role == CohortSelected {
+			return member, nil, &ScopeMiss{ID: id, Reason: MissHarnessFiltered, StoredHarness: row.Harness}
+		}
+		// A related saved pair the harness filter excludes is dropped, which is
+		// what a full `harvest index` with the same filter does: its scan never
+		// lists the pair. The source-locating path instead marks such a related
+		// member unreadable, because a full harvest's store-side upkeep still
+		// reaches its row. The two commands differ here on purpose; this run
+		// only maintains saved pairs, so an excluded pair is not its work.
+		return member, nil, nil
+	}
+	if _, enabled := p.enabledSourceConfig(row.Harness); !enabled {
+		member.Outcome = LocateStoredUnreadable
+		member.Unreadable = UnreadableHarnessDisabled
+		return member, nil, nil
+	}
+	if location.HostSlug == "" {
+		member.Outcome = LocateStoredUnreadable
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = "the store records no host location for this session, so its saved pair cannot be reconstructed"
+		return member, nil, nil
+	}
+	metadataPath := SessionMetadataPath(string(p.config.OutputDir), location.HostSlug, string(id), location.ParentID)
+	member.StoredPath = ResolvedPath(metadataPath)
+	result, err := p.readSessionMetadata(filepath.Dir(filepath.Dir(metadataPath)), id, "index inventory")
+	if err != nil {
+		member.Outcome = LocateStoredUnreadable
+		member.Unreadable = UnreadableSourceFailed
+		member.Detail = firstLineOr(err.Error(), "the saved pair could not be read")
+		return member, nil, nil
+	}
+	if result == nil {
+		member.Outcome = LocateStoredUnreadable
+		member.Unreadable = UnreadableSourceGone
+		return member, nil, nil
+	}
+	if role == CohortSelected && !p.withinRunAge(result.startMs) {
+		return member, nil, &ScopeMiss{ID: id, Reason: MissSinceFiltered}
+	}
+	if role != CohortSelected && !p.withinRunAge(result.startMs) {
+		return member, nil, nil
+	}
+	member.Outcome = LocateStoredPath
+	target := indexTargetFrom(result)
+	return member, &target, nil
+}
+
+// scanRelatedIndexPairs adds the stored children of each selected session and
+// any unstored ancestor a saved pair holds. A stored ancestor stops the walk: it
+// is not this run's work, and its own pair is irrelevant to the selected
+// session's pair.
+func (p *Pipeline) scanRelatedIndexPairs(ctx context.Context, reader SessionSourceReader, locations SessionStore, tree *indexPairTree, selectedIDs []SessionID, scan *scopedIndexScan) error {
+	if len(selectedIDs) == 0 {
+		return nil
+	}
+	children, err := reader.StoredChildren(ctx, selectedIDs)
+	if err != nil {
+		return fmt.Errorf("ingest: read the stored children of the selected sessions before a session-scoped index run: %w; no saved pair was indexed and no store row was written; restore database access and retry", err)
+	}
+	childIDs := make([]SessionID, 0, len(children))
+	for _, rows := range children {
+		for _, child := range rows {
+			childIDs = append(childIDs, child.ID)
+		}
+	}
+	sort.Slice(childIDs, func(i, j int) bool { return childIDs[i] < childIDs[j] })
+	childLocations, err := locations.BulkLookupSessionLocations(ctx, childIDs)
+	if err != nil {
+		return fmt.Errorf("ingest: read the stored pair locations of the related sessions before a session-scoped index run: %w; no saved pair was indexed and no store row was written; restore database access and retry", err)
+	}
+	for _, id := range childIDs {
+		if scan.has(id) {
+			continue // already in the cohort under a higher-precedence role
+		}
+		row := storedChild(id, children)
+		member, target, _ := p.locateStoredIndexPair(id, row, childLocations[id], CohortChild)
+		if member.Outcome == locateOutcomeUnset {
+			continue // dropped by the run's own filters
+		}
+		// The saved-pair scan knows the recorded parent, so the warning's
+		// `also:` count names only this session's children.
+		member.Parent = row.Parent
+		scan.add(member, target)
+		scan.parents[id] = row.Parent
+	}
+
+	// Unstored ancestors: the stored logical parent of a selected or child
+	// member names an id the database has no row for. Its saved pair can still
+	// be on disk, and a full scan would index it.
+	starts := append(append([]SessionID(nil), selectedIDs...), childIDs...)
+	for _, start := range starts {
+		if err := p.walkUnstoredIndexAncestors(ctx, reader, tree, start, scan); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// storedChild finds the child row a StoredChildren map returned for id.
+func storedChild(id SessionID, children map[SessionID][]StoredSessionSource) StoredSessionSource {
+	for _, rows := range children {
+		for _, row := range rows {
+			if row.ID == id {
+				return row
+			}
+		}
+	}
+	return StoredSessionSource{ID: id}
+}
+
+// walkUnstoredIndexAncestors follows the stored logical parent chain of start
+// while each parent is unrecorded, probing the retained tree for that parent's
+// saved pair. The walk stops at a recorded parent, a root, a miss, or an id
+// already in the cohort.
+func (p *Pipeline) walkUnstoredIndexAncestors(ctx context.Context, reader SessionSourceReader, tree *indexPairTree, start SessionID, scan *scopedIndexScan) error {
+	seen := map[SessionID]bool{start: true}
+	parent := scan.parents[start]
+	for parent != nil && !seen[*parent] {
+		ancestorID := *parent
+		seen[ancestorID] = true
+
+		rows, err := reader.StoredSessionSources(ctx, []SessionID{ancestorID})
+		if err != nil {
+			return fmt.Errorf("ingest: read the stored location of ancestor session %s before a session-scoped index run: %w; no saved pair was indexed and no store row was written; restore database access and retry", ancestorID, err)
+		}
+		if _, isStored := rows[ancestorID]; isStored {
+			return nil // a recorded ancestor is not this run's work
+		}
+
+		result, probeErr := p.probeIndexPair(tree, ancestorID)
+		if probeErr != nil {
+			return probeErr
+		}
+		if result == nil || !p.includesIndexHarness(result.session.Harness) || !p.withinRunAge(result.startMs) {
+			return nil
+		}
+		if scan.has(ancestorID) {
+			return nil
+		}
+		member := LocatedMember{ID: ancestorID, Harness: result.session.Harness, Outcome: LocateDirectLookup, Role: CohortAncestor}
+		target := indexTargetFrom(result)
+		scan.add(member, &target)
+		scan.parents[ancestorID] = result.session.ParentUUID
+		parent = result.session.ParentUUID
+	}
+	return nil
+}
+
+// add records one located member and its saved pair.
+func (s *scopedIndexScan) add(member LocatedMember, target *reindexTarget) {
+	s.report.Members = append(s.report.Members, member)
+	if member.Outcome == LocateStoredUnreadable && (member.Role == CohortSelected || member.Role == CohortChild) {
+		s.unreadable[member.ID] = true
+	}
+	if target != nil {
+		s.targets = append(s.targets, *target)
+	}
+}
+
+// has reports whether the cohort already holds a member for id.
+func (s *scopedIndexScan) has(id SessionID) bool {
+	for _, member := range s.report.Members {
+		if member.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// indexTargetFrom turns one saved pair the metadata reader reconstructed into a
+// reindex target.
+func indexTargetFrom(result *sessionMetadataResult) reindexTarget {
+	return reindexTarget{session: result.session, startMs: result.startMs, transcriptPath: result.transcriptPath, originalSourcePath: result.originalSourcePath, refreshMetadata: result.refreshMetadata}
+}
+
+// includesIndexHarness is the harness half of the run's explicit filters for a
+// saved pair.
+func (p *Pipeline) includesIndexHarness(harness Harness) bool {
+	return p.config.Harness == nil || harness == *p.config.Harness
+}
+
+// enabledSourceConfig reports whether the harness that recorded a session is
+// enabled in this run's configuration.
+func (p *Pipeline) enabledSourceConfig(harness Harness) (SourceConfig, bool) {
+	cfg, ok := p.config.Sources[harness]
+	if !ok || !cfg.Enabled {
+		return SourceConfig{}, false
+	}
+	return cfg, true
+}
+
+// scopedIndexMissError renders the refusal for the selected ids no saved pair
+// can serve.
+func (p *Pipeline) scopedIndexMissError(misses []ScopeMiss) error {
+	command := p.config.Command
+	if command == "" {
+		command = "harvest index"
+	}
+	return &SessionScopeError{Misses: misses, Command: command, Prefix: p.config.CommandPrefix, Store: StoreAttached}
+}
+
+// rebuildIndexDerivedLookups reconciles the derived lookup tables from the walk
+// this run just enumerated. `harvest index --all` runs it: the teammate spawns
+// are re-derived from the stored transcript evidence, and the Codex rollout
+// catalog from the enumeration the Codex walk reported.
+func (p *Pipeline) rebuildIndexDerivedLookups(ctx context.Context, enumeration RolloutEnumeration) error {
+	var rebuilder DerivedLookupRebuilder
+	if candidate, ok := p.store.(DerivedLookupRebuilder); ok {
+		rebuilder = candidate
+	} else if candidate, ok := p.metricsStore.(DerivedLookupRebuilder); ok {
+		rebuilder = candidate
+	}
+	if rebuilder == nil {
+		return fmt.Errorf("ingest: the attached store cannot rebuild the derived lookup tables, which `harvest index --all` is the entry point for; where: ingest.Pipeline.rebuildIndexDerivedLookups in internal/ingest/index_selection.go; when: rebuilding the derived lookups after the source walk; impact: the derived tables were left as they were and no saved pair was indexed; fix: run `harvest index --all` with its analytics database attached")
+	}
+	if len(enumeration.CompletedRoots) > 0 {
+		catalog, ok := p.store.(CodexRolloutCatalogStore)
+		if !ok {
+			return fmt.Errorf("pipeline reindex: cannot read the Codex rollout catalog; attach the analytics database and retry")
+		}
+		existing, err := catalog.LoadCodexRolloutCatalog(ctx)
+		if err != nil {
+			return fmt.Errorf("pipeline reindex: load Codex rollout catalog before reconciliation: %w", err)
+		}
+		enumeration.Deletes = codexCatalogDeletes(p.fs, existing, enumeration.Files, enumeration.CompletedRoots)
+	}
+	if err := rebuilder.RebuildDerivedLookups(ctx, enumeration); err != nil {
+
+		return fmt.Errorf("pipeline reindex: rebuild the derived lookup tables: %w; no saved pair was indexed after the failure; repair the store and rerun `harvest index --all`", err)
+	}
+	return nil
+}
+
+// orderScopeReport returns the report's members selected first, then children,
+// then ancestors, then context members, so a caller reads the cohort in the
+// order the scan resolved it.
+func orderScopeReport(members []LocatedMember) ScopeReport {
+	order := []CohortRole{CohortSelected, CohortChild, CohortAncestor, CohortContext}
+	ordered := make([]LocatedMember, 0, len(members))
+	for _, role := range order {
+		for _, member := range members {
+			if member.Role == role {
+				ordered = append(ordered, member)
+			}
+		}
+	}
+	return ScopeReport{Members: ordered}
 }
 
 // withinRunAge applies the run's --since window to a session start. A nil

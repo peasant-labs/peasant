@@ -341,7 +341,7 @@ func runParentReconcileInvalidateCase(t *testing.T, fixture parentReconcileAutho
 	assertAuthorityParentCache(t, ctx, db, control, &parent)
 	assertAuthorityParentCache(t, ctx, db, parent, nil)
 
-	requeued, err := db.InvalidateStaleParentOrigins(ctx)
+	requeued, err := db.InvalidateStaleParentOrigins(ctx, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("InvalidateStaleParentOrigins: %v", err)
 	}
@@ -354,7 +354,7 @@ func runParentReconcileInvalidateCase(t *testing.T, fixture parentReconcileAutho
 		parent:  ingest.OriginRuleVersion,
 	})
 
-	again, err := db.InvalidateStaleParentOrigins(ctx)
+	again, err := db.InvalidateStaleParentOrigins(ctx, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("InvalidateStaleParentOrigins second application: %v", err)
 	}
@@ -429,7 +429,7 @@ func settleAuthorityOrigin(t *testing.T, ctx context.Context, db *Store, id inge
 // verdict still unknown.
 func assertAuthorityOrigins(t *testing.T, ctx context.Context, db *Store, want map[ingest.SessionID]int) {
 	t.Helper()
-	rows, err := db.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion+1)
+	rows, err := db.ListStaleOriginSessions(ctx, ingest.OriginRuleVersion+1, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("ListStaleOriginSessions: %v", err)
 	}

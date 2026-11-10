@@ -76,7 +76,7 @@ func TestHarvestSweepPathSetsAndClearsFlag(t *testing.T) {
 	if got := harvestSweepCount(t, dbPath, `SELECT COUNT(*) FROM session_entry_bodies WHERE session_id = ?`, sid); got != 4 {
 		t.Fatalf("bodies with staged orphans = %d, want 2 committed + 2 staged", got)
 	}
-	swept, warnings, err := db.SweepFlaggedSessionsForHarvest(ctx)
+	swept, warnings, err := db.SweepFlaggedSessionsForHarvest(ctx, ingest.AllStoredSessions())
 	if err != nil {
 		t.Fatalf("harvest-start sweep through the harvest entry point: %v", err)
 	}

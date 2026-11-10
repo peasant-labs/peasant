@@ -451,7 +451,7 @@ func ftueDiscoverWith(
 			// Claude-specific: decode project slug to filesystem path for project name.
 			if provider == defaults.HarnessClaudeCode {
 				slug := filepath.Base(filepath.Dir(string(d.SourcePath)))
-				if decoded := decodeClaudeSlugToPath(slug); decoded != "" {
+				if decoded := ingest.DecodeClaudeSlugOnDisk(slug); decoded != "" {
 					claudeProjectDir = decoded
 					if projectName == "" {
 						projectName = shortenPath(decoded)
@@ -604,15 +604,6 @@ func filterRootSessions(discovered []ingest.DiscoveredSession) []ingest.Discover
 		}
 	}
 	return roots
-}
-
-// decodeClaudeSlugToPath decodes a Claude project slug to the real filesystem path.
-// Delegates to ingest.DecodeClaudeSlug with an os.Stat-based directory checker.
-func decodeClaudeSlugToPath(encoded string) string {
-	return ingest.DecodeClaudeSlug(encoded, func(path string) bool {
-		info, err := os.Stat(path)
-		return err == nil && info.IsDir()
-	})
 }
 
 // shortenPath replaces the home directory prefix with "~" for display.

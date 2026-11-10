@@ -56,6 +56,23 @@ func TestDryRunCommandsPreserveExistingFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(native, string(session.ID)+".jsonl"), []byte(session.Transcript), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// The seeded session is recorded by Claude Code, and a session-scoped index
+	// run reads a recorded session's saved pair only while that harness is
+	// enabled. Enabling it here keeps the forecast about the stored session
+	// rather than about this test's all-sources-disabled fixture.
+	claude, ok := cfg.Sources.Provider(defaults.HarnessClaudeCode)
+	if !ok {
+		t.Fatal("fixture invariant: the test config has no claude-code source")
+	}
+	claude.Enabled = true
+	claude.Paths = []string{native}
+	encoded, err = yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, encoded, 0600); err != nil {
+		t.Fatal(err)
+	}
 	before := dryRunFileState(t, directory)
 	run := func(args ...string) string {
 		t.Helper()

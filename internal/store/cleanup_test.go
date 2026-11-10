@@ -100,7 +100,7 @@ func TestCleanupOrphanProjects_RemovesOrphanProject(t *testing.T) {
 
 	// Project X now has no sessions; project Y still has session B.
 	// Run CleanupOrphanProjects.
-	if err := s.CleanupOrphanProjects(ctx); err != nil {
+	if err := s.CleanupOrphanProjects(ctx, ingest.AllProjects()); err != nil {
 		t.Fatalf("CleanupOrphanProjects: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func TestCleanupOrphanProjects_NoOrphans(t *testing.T) {
 
 	seedCleanupSession(t, s, cleanupSessionC, cleanupProjectX)
 
-	if err := s.CleanupOrphanProjects(ctx); err != nil {
+	if err := s.CleanupOrphanProjects(ctx, ingest.AllProjects()); err != nil {
 		t.Fatalf("CleanupOrphanProjects on non-empty store: %v", err)
 	}
 
@@ -140,7 +140,7 @@ func TestCleanupOrphanProjects_EmptyDB(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	if err := s.CleanupOrphanProjects(ctx); err != nil {
+	if err := s.CleanupOrphanProjects(ctx, ingest.AllProjects()); err != nil {
 		t.Errorf("CleanupOrphanProjects on empty DB: %v", err)
 	}
 }
