@@ -54,7 +54,6 @@ func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []sch
 	if err != nil {
 		return schema.TranscriptContent{}, err
 	}
-	payload.TurnCount = transcript.ConversationTurnCount(payload.Turns)
 	payload.SchemaVersion = emit
 	// Peasant ALWAYS declares, for all three stored values, and never refuses a
 	// session on account of its origin. The stored menu and the wire menu are

@@ -57,7 +57,7 @@ const sqlPushSessionsBase = `SELECT
     s.ingested_ms, s.pushed_at,
     s.source_path, s.source_format,
     s.git_branch, s.tool_version,
-    CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END,
+    ` + sqlSessionTurnCount + `,
     CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END,
     m.input_tokens,
     CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END,

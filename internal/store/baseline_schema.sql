@@ -530,7 +530,8 @@ CREATE TABLE session_captured_stats (
   source                 TEXT NOT NULL CHECK(source IN ('harness','derived')),
   updated_at_ms          INTEGER NOT NULL CHECK(updated_at_ms >= 0),
   overflow               TEXT
-) STRICT;
+, conversation_turn_count INTEGER NOT NULL DEFAULT 0
+ CHECK(conversation_turn_count >= 0)) STRICT;
 
 CREATE TABLE session_commands (
     session_id   TEXT NOT NULL,
@@ -2170,4 +2171,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 70;
+PRAGMA user_version = 71;

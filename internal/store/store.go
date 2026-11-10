@@ -502,6 +502,16 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		_ = pool.Close()
 		return nil, err
 	}
+	// The pre-migration version decides whether the one-time Go backfills
+	// below run. A fresh database (version zero) is built at head and needs
+	// none; a database already at head must not re-fold its sessions on every
+	// open.
+	versionBeforeMigration, err := readPragmaInt(conn, "PRAGMA user_version")
+	if err != nil {
+		pool.Put(conn)
+		_ = pool.Close()
+		return nil, fmt.Errorf("store: read the pre-migration schema version: %w", err)
+	}
 	if !o.skipMigrations {
 		if err := refuseUnmappableCaptureFormats(conn); err != nil {
 			pool.Put(conn)
@@ -540,6 +550,19 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		if err := applyV23DataMigration(pool); err != nil {
 			_ = pool.Close()
 			return nil, fmt.Errorf("store: apply V23 data migration: %w", err)
+		}
+
+		// V71 Go-driven phase: a store upgraded from a pre-V70 version folds
+		// each managed session's stored entries once and records the
+		// conversation turn count. A fresh baseline and an already-upgraded
+		// store skip it, so a normal open never pays for the fold.
+		if versionBeforeMigration > 0 && versionBeforeMigration < int64(CurrentSchemaVersion()) {
+			report, err := backfillConversationTurnCounts(pool)
+			if err != nil {
+				_ = pool.Close()
+				return nil, fmt.Errorf("store: apply the conversation turn count backfill: %w", err)
+			}
+			logConversationTurnCountBackfill(report)
 		}
 	} else {
 		// The caller guarantees the schema: the newer-schema check above

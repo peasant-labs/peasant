@@ -470,6 +470,14 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 				t.Fatalf("open recovered store: %v", err)
 			}
 			entries, entriesErr := localStore.ListEntries(t.Context(), targetID)
+			// Model the one-time upgrade backfill: the recovered legacy entries
+			// supply the conversation count the count surfaces read.
+			if entriesErr == nil {
+				turns := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
+				if _, statsErr := localStore.UpsertCapturedStats(t.Context(), store.CapturedStats{SessionID: targetID, ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); statsErr != nil {
+					t.Fatalf("seed recovered conversation turn count: %v", statsErr)
+				}
+			}
 			metrics, metricsErr := localStore.GetMetrics(t.Context(), targetID)
 			closeErr := localStore.Close()
 			if entriesErr != nil || metricsErr != nil || closeErr != nil {

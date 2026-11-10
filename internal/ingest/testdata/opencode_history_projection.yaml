@@ -378,7 +378,7 @@ cases:
         want:
           completeness: complete
           own: 0
-          turnCount: 3
+          turnCount: 2
           titleRefs: []
           segmentRefs: [[e_c1, e_c2]]
           earlierStates: []
@@ -457,7 +457,7 @@ cases:
         want:
           completeness: complete
           own: 0
-          turnCount: 3
+          turnCount: 2
           titleRefs: []
           segmentRefs: []
           earlierStates: []

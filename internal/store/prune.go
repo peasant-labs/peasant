@@ -24,7 +24,7 @@ const (
 	sqlQueryPrunableSessions = `SELECT
     s.session_id, s.model_harness,
     COALESCE(p.canonical_cwd, p.project_hash, ''), COALESCE(h.git_remote, ''),
-    s.start_ms, COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0), h.host_slug,
+    s.start_ms, COALESCE(` + sqlSessionTurnCount + `, 0), h.host_slug,
     s.project_hash, ` + sqlRecordedDirectory + `,
     COALESCE(s.git_branch, '')
 FROM sessions s

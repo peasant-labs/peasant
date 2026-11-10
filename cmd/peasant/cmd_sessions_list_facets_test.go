@@ -11,12 +11,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -219,6 +221,18 @@ func seedFacetStore(t *testing.T, fixture facetFixture) facetStore {
 		}
 		if err := db.IndexSessionEntries(t.Context(), schema.SessionID(session.ID), entries); err != nil {
 			t.Fatalf("index legacy entries for %s: %v", session.ID, err)
+		}
+		// The fixture's turn count is the stored legacy value the list must
+		// report. Indexing writes the folded count, so restore the fixture's
+		// explicit value as the post-upgrade store would carry it.
+		turnCount := session.Turns
+		if _, err := db.UpsertCapturedStats(t.Context(), store.CapturedStats{
+			SessionID:             schema.SessionID(session.ID),
+			ConversationTurnCount: &turnCount,
+			Source:                store.StatsSourceHarness,
+			UpdatedAtMs:           time.Now().UnixMilli(),
+		}); err != nil {
+			t.Fatalf("seed conversation turn count for %s: %v", session.ID, err)
 		}
 	}
 	conn, err := db.Pool().Take(t.Context())

@@ -295,7 +295,8 @@ func (e *Engine) computeMetrics(ctx context.Context, sessionIDs []ingest.Session
 				continue
 			}
 			if seed != nil {
-				merged.TurnCount = &seed.TurnCount
+				// The retired seed turn count is not carried forward; the
+				// conversation count is producer state, not a derived metric.
 				merged.SubagentCount = &seed.SubagentCount
 				merged.InputTokens = &seed.TokensIn
 				merged.OutputTokens = &seed.TokensOut

@@ -93,7 +93,7 @@ cases:
               toolCallKey: call-a1
               toolResult: parser.go:12 plus fixture long output
         want:
-          turnCount: 5
+          turnCount: 4
           inputSubmissionCount: 1
           titleRefs: [e_u1]
           main:
@@ -1655,7 +1655,7 @@ cases:
               toolResult: orphan output kept as evidence
               rawByteLength: 4096
         want:
-          turnCount: 2
+          turnCount: 1
           inputSubmissionCount: 0
           titleRefs: []
           main:
@@ -1818,7 +1818,7 @@ cases:
                 limitBytes: 8000
                 toolCallId: toolu_omitted_1
         want:
-          turnCount: 1
+          turnCount: 2
           inputSubmissionCount: 0
           titleRefs: []
           main:

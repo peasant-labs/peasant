@@ -238,6 +238,9 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 					t.Fatal(getErr)
 				}
 				turns := 777
+				if _, statsErr := s.UpsertCapturedStats(ctx, store.CapturedStats{SessionID: id, ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); statsErr != nil {
+					t.Fatal(statsErr)
+				}
 				m.TurnCount = &turns
 				err = s.SaveMetrics(ctx, m)
 			case "unsupported":

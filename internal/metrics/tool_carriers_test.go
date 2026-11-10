@@ -27,7 +27,6 @@ func TestComputeClaudeToolCarriers(t *testing.T) {
 				Tools   string         `yaml:"tools"`
 				Call    string         `yaml:"call"`
 			} `yaml:"entries"`
-			Turns     int `yaml:"turns"`
 			Tools     int `yaml:"tools"`
 			Subagents int `yaml:"subagents"`
 		} `yaml:"cases"`
@@ -59,9 +58,6 @@ func TestComputeClaudeToolCarriers(t *testing.T) {
 				entries[i] = entry
 			}
 			result := runMetrics(t, sid, entries)
-			if result.TurnCount == nil || *result.TurnCount != c.Turns {
-				t.Errorf("turn count=%v, want %d", result.TurnCount, c.Turns)
-			}
 			if result.ToolCalls == nil || *result.ToolCalls != c.Tools {
 				t.Errorf("tool calls=%v, want %d", result.ToolCalls, c.Tools)
 			}

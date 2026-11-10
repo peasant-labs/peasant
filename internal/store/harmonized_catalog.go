@@ -184,21 +184,28 @@ type GenerationChildren struct {
 // per-field provenance. SeedJSON is the harness-only seed home: written only
 // by the harness updates and the migration backfills, never by COMPUTE.
 type CapturedStats struct {
-	SessionID            schema.SessionID
-	TurnCount            *int
-	InputSubmissionCount *int64
-	ToolCallCount        *int
-	SubagentCount        *int
-	DurationMs           *int64
-	TokensIn             *int
-	TokensOut            *int
-	ThoughtTokens        *int
-	CachedReadTokens     *int
-	CachedWriteTokens    *int
-	SeedJSON             *string // harness-only seed document; never written by COMPUTE
-	Source               StatsSource
-	UpdatedAtMs          int64
-	Overflow             *string // opaque: stat kinds not yet promoted
+	SessionID schema.SessionID
+	// TurnCount is the retired raw harness record count. It stays readable so
+	// a pre-V70 store can be backfilled from its own legacy value, but no
+	// capture or compute lane writes it.
+	TurnCount *int
+	// ConversationTurnCount is the producer's conversation turn count: the
+	// projected turns whose role is not system. It is the only turn count a
+	// store read, detail payload, export or publication reports.
+	ConversationTurnCount *int
+	InputSubmissionCount  *int64
+	ToolCallCount         *int
+	SubagentCount         *int
+	DurationMs            *int64
+	TokensIn              *int
+	TokensOut             *int
+	ThoughtTokens         *int
+	CachedReadTokens      *int
+	CachedWriteTokens     *int
+	SeedJSON              *string // harness-only seed document; never written by COMPUTE
+	Source                StatsSource
+	UpdatedAtMs           int64
+	Overflow              *string // opaque: stat kinds not yet promoted
 }
 
 // SeedWriteAllowed is the seed rule: it reports whether an origin may write
@@ -372,6 +379,10 @@ func serializeMetadata(gen GenerationRecord, children GenerationChildren, stats 
 // NULL-to-wire mapping) and as absent for the optional pointers.
 func capturedStatsToSessionStats(stats CapturedStats) schema.SessionStats {
 	out := schema.SessionStats{}
+	// The rebuilt metadata document is compared byte-for-byte with the
+	// pre-upgrade document during migration and reused as prior evidence, so it
+	// keeps the retired raw field exactly as stored. Serving surfaces read
+	// capturedStatsToWire, which reports the conversation count.
 	if stats.TurnCount != nil {
 		out.TurnCount = *stats.TurnCount
 	}

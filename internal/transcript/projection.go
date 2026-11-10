@@ -112,7 +112,7 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 			"role", warning.Role,
 			"fix", warning.Fix)
 	}
-	p.Turns = foldEntries(entries, evidence)
+	p.Turns = ingest.FoldEntries(entries, evidence)
 	tools := make(map[string]*ingest.ToolCall)
 	toolTargets := make(map[string]int)
 	for i := range p.Turns {

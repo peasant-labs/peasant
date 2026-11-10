@@ -142,6 +142,20 @@ func seedOne(t *testing.T, ctx context.Context, db *store.Store, name string, op
 			t.Fatalf("%s: index entries for %q: %v", name, opts.SessionID, err)
 		}
 	}
+	if opts.TurnCount > 0 {
+		// Model the post-upgrade store: the producer's conversation count is
+		// recorded beside the session, so every count surface reads it instead
+		// of the retired metrics column.
+		turnCount := opts.TurnCount
+		if _, err := db.UpsertCapturedStats(ctx, store.CapturedStats{
+			SessionID:             schema.SessionID(opts.SessionID),
+			ConversationTurnCount: &turnCount,
+			Source:                store.StatsSourceHarness,
+			UpdatedAtMs:           time.Now().UnixMilli(),
+		}); err != nil {
+			t.Fatalf("%s: seed conversation turn count for %q: %v", name, opts.SessionID, err)
+		}
+	}
 }
 
 // seedTestSessionFull seeds a session with extended project and entry information.

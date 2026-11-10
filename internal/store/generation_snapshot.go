@@ -281,6 +281,16 @@ func buildReadSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, 
 	return generationReadSnapshotOnConn(conn, sessionID, *active, row)
 }
 
+// sqlSnapshotSessionRow reads the legacy snapshot row's turn and tool counts
+// through the one shared count expression, so a snapshot never reports a count
+// a list or transcript would disagree with.
+var sqlSnapshotSessionRow = `SELECT s.model_harness, ` + LogicalParentSQL("s") + `, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
+ COALESCE(` + sqlSessionTurnCount + `, 0),
+ COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END, 0)
+  FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id
+  LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
+  WHERE s.session_id = ?`
+
 type snapshotSessionRow struct {
 	sessionID     schema.SessionID
 	harness       schema.Harness
@@ -297,12 +307,7 @@ type snapshotSessionRow struct {
 func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (snapshotSessionRow, error) {
 	row := snapshotSessionRow{sessionID: sessionID}
 	found := false
-	if err := sqlitex.Execute(conn, `SELECT s.model_harness, `+LogicalParentSQL("s")+`, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
- COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END, 0),
- COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END, 0)
-  FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id
-  LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
-  WHERE s.session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, sqlSnapshotSessionRow, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			found = true

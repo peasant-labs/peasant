@@ -1,4 +1,5 @@
 requiredNames:
+  - v71-conversation-turn-count
   - v70-parent-state
   - v69-source-unavailability-cause
   - v68-collective-observations

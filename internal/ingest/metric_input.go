@@ -56,10 +56,15 @@ func (input *MetricInput) Hash() (string, error) {
 	return schema.ComputeTranscriptHash(data), nil
 }
 
-// MetricOutputHash excludes the completion clock but includes the algorithm.
+// MetricOutputHash excludes the completion clock and the loaded turn count,
+// and includes the algorithm. The turn count is producer state carried on the
+// session (the conversation turn count), not an output of the metric engine;
+// it is read from the store's count column on every read, so hashing it would
+// make a stored output look stale the moment the count is loaded.
 func MetricOutputHash(metrics *SessionMetrics) (string, error) {
 	output := metrics.QualityMetrics
 	output.ComputedAt = nil
+	output.TurnCount = nil
 	// These established NOT NULL SQLite columns store absent flags as false.
 	// Hash that stored meaning so empty/minimal computations survive a reread.
 	absent := false

@@ -9,6 +9,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -18,6 +19,7 @@ import (
 // Returns the indexed entries for use in assertions.
 func seedEntriesFromJSONL(t *testing.T, ctx context.Context, s interface {
 	IndexSessionEntryBatch(context.Context, []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult
+	UpsertCapturedStats(context.Context, store.CapturedStats) (bool, error)
 }, fs ingest.FileSystem, sessionID string, data []byte) []schema.SessionEntry {
 	t.Helper()
 	session := ingest.DiscoveredSession{
@@ -34,6 +36,7 @@ func seedEntriesFromJSONL(t *testing.T, ctx context.Context, s interface {
 	if err := testutil.WriteFullEntries(ctx, s, schema.SessionID(sessionID), entries); err != nil {
 		t.Fatalf("seedEntries: IndexSessionEntries: %v", err)
 	}
+	seedConversationTurnCount(t, ctx, s, sessionID, entries)
 	return entries
 }
 
@@ -41,6 +44,7 @@ func seedEntriesFromJSONL(t *testing.T, ctx context.Context, s interface {
 // Returns the indexed entries for use in assertions.
 func seedEntriesFromOpenCode(t *testing.T, ctx context.Context, s interface {
 	IndexSessionEntryBatch(context.Context, []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult
+	UpsertCapturedStats(context.Context, store.CapturedStats) (bool, error)
 }, fs ingest.FileSystem, sessionID string, sourcePath string) []schema.SessionEntry {
 	t.Helper()
 	session := ingest.DiscoveredSession{
@@ -57,10 +61,30 @@ func seedEntriesFromOpenCode(t *testing.T, ctx context.Context, s interface {
 	if err := testutil.WriteFullEntries(ctx, s, schema.SessionID(sessionID), entries); err != nil {
 		t.Fatalf("seedEntriesFromOpenCode: IndexSessionEntries: %v", err)
 	}
+	seedConversationTurnCount(t, ctx, s, sessionID, entries)
 	return entries
 }
 
-// countConversationalTurns counts depth-0 user+assistant entries (matches computeTurns semantics).
+// seedConversationTurnCount writes the producer's conversation count the way
+// the capture lane does, so a fixture session exposes the same loaded value a
+// real indexed session carries.
+func seedConversationTurnCount(t *testing.T, ctx context.Context, s interface {
+	UpsertCapturedStats(context.Context, store.CapturedStats) (bool, error)
+}, sessionID string, entries []schema.SessionEntry) {
+	t.Helper()
+	count := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
+	if _, err := s.UpsertCapturedStats(ctx, store.CapturedStats{
+		SessionID:             schema.SessionID(sessionID),
+		ConversationTurnCount: &count,
+		Source:                store.StatsSourceHarness,
+		UpdatedAtMs:           1,
+	}); err != nil {
+		t.Fatalf("seed conversation turn count: %v", err)
+	}
+}
+
+// countConversationalTurns counts the producer's conversation turns through the
+// one ingest fold.
 func countConversationalTurns(entries []schema.SessionEntry) int {
 	count := 0
 	for i := range entries {

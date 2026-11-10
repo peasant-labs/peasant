@@ -9,6 +9,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -115,6 +116,11 @@ func TestEntriesToTurns_PreservesModelObservationBoundaries(t *testing.T) {
 	assertModelObservationSurvivalResults(t, results)
 }
 
+type observedModelExpectation struct {
+	present bool
+	value   string
+}
+
 type modelObservationSurvivalResult struct {
 	Name     string
 	Failures []string
@@ -125,10 +131,11 @@ func runModelObservationSurvivalFixture(fixture modelObservationSurvivalFixture)
 	for _, fixtureCase := range fixture.Cases {
 		result := modelObservationSurvivalResult{Name: fixtureCase.Name}
 		entries := make([]schema.SessionEntry, len(fixtureCase.Entries))
-		observationsByIndex := make(map[int]entryModelObservation, len(fixtureCase.Entries))
+		observationsByIndex := make(map[int]observedModelExpectation, len(fixtureCase.Entries))
 		for index, source := range fixtureCase.Entries {
 			entries[index] = fixtureEntry(source)
-			observationsByIndex[source.Index] = modelObservation(entries[index])
+			present, value := ingest.ObservedModelEvidence(entries[index])
+			observationsByIndex[source.Index] = observedModelExpectation{present: present, value: value}
 		}
 		turns := EntriesToTurns(entries)
 		if len(turns) != len(fixtureCase.Expected) {

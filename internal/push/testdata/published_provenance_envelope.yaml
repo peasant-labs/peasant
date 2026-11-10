@@ -137,9 +137,10 @@ cases:
       requiredCapabilities: [session_graph_provenance_v1]
       mirrors: true
       detail:
-        # The metadata part carries the durable generation mirror (four); the
-        # published detail reports the conversation turns a reader sees.
-        turnCount: 1
+        # The stored generation mirror (four) disagrees with the one projected
+        # turn on purpose: the published detail serves the producer's stored
+        # conversation count and never re-derives it from the projected turns.
+        turnCount: 4
         inputSubmissionCount: 0
         rootSessionId: target
         purpose: interaction
@@ -201,15 +202,15 @@ cases:
     advertisement: graph
     redaction: none
     entries: provenance
-    # The durable turn mirror (seven) stays on the metadata part; the published
-    # detail reports the conversation turns a reader sees.
+    # The stored durable mirror (seven) is served unchanged even though the
+    # projection holds one turn; the producer does not recompute it at publish.
     generationTurnCount: 7
     expect:
       uploads: 1
       requiredCapabilities: [session_graph_provenance_v1]
       mirrors: true
       detail:
-        turnCount: 1
+        turnCount: 7
         inputSubmissionCount: 3
         rootSessionId: target
         purpose: interaction

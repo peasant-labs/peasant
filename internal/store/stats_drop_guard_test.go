@@ -52,6 +52,9 @@ func TestDeprecatedStatsColumnsGuarded(t *testing.T) {
 		// The current activation's legacy mirrors; the activation commit
 		// records them alongside the generation rows.
 		{file: "internal/store/index_format_v2.go", contains: "INSERT INTO session_metrics (session_id, turn_count, tool_calls, title)", why: "activation legacy mirrors"},
+		// The one-time V71 upgrade fallback reads the legacy value only for a
+		// session whose entries are gone and cannot be folded.
+		{file: "internal/store/conversation_turn_count_backfill.go", contains: "SELECT COALESCE(COALESCE(c.turn_count, m.turn_count), 0)", why: "V71 entry-less session legacy fallback"},
 	}
 	var violations []string
 	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {

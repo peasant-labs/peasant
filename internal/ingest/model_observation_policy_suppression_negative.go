@@ -1,6 +1,6 @@
 //go:build evidence_negative_suppression
 
-package transcript
+package ingest
 
 func shouldSuppressEmptyTurn(hasContent, hasTools, _ bool) bool {
 	return !hasContent && !hasTools

@@ -57,8 +57,8 @@ VALUES(?, 'opencode', 'list-model', 'list-host', 'list-project', 1, 2, 3, '/synt
 VALUES(?, ?, ?, ?, ?, 0.5)`, nativeID, c.LegacyTurns, c.LegacyTools, c.PeakInput, c.LegacyOutput)
 	exec(`INSERT INTO session_metrics(session_id, turn_count, tool_calls, input_tokens, output_tokens, duration_minutes)
 VALUES(?, ?, ?, ?, ?, 0.5)`, legacyID, c.LegacyTurns, c.LegacyTools, c.PeakInput, c.LegacyOutput)
-	exec(`INSERT INTO session_captured_stats(session_id, turn_count, tool_call_count, tokens_out, duration_ms, tokens_in, source, updated_at_ms)
-VALUES(?, ?, ?, ?, ?, 111, 'harness', 100)`, nativeID, c.NativeTurns, c.NativeTools, c.NativeOutput, c.DurationMs)
+	exec(`INSERT INTO session_captured_stats(session_id, turn_count, tool_call_count, tokens_out, duration_ms, tokens_in, conversation_turn_count, source, updated_at_ms)
+VALUES(?, ?, ?, ?, ?, 111, ?, 'harness', 100)`, nativeID, c.NativeTurns, c.NativeTools, c.NativeOutput, c.DurationMs, c.NativeTurns)
 }
 
 // runListDetailStatsSource pins list-detail-stats-source: list and detail
@@ -71,6 +71,18 @@ func runListDetailStatsSource(t *testing.T, c capturedStatsCase) {
 	seedStatsListSuite(t, s, c)
 	nativeID := "0a999aaa-36bc-424c-a789-8be54d9702e1"
 	legacyID := "0a999aaa-36bc-424c-a789-8be54d9702e2"
+	// The upgrade backfill gives a legacy session the same conversation count
+	// column; only the other moved measurements stay on the legacy row.
+	conn, err := s.PoolForTest().Take(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_captured_stats(session_id, conversation_turn_count, source, updated_at_ms) VALUES(?, ?, 'harness', 100)`,
+		&sqlitex.ExecOptions{Args: []any{legacyID, c.LegacyTurns}}); err != nil {
+		s.PoolForTest().Put(conn)
+		t.Fatal(err)
+	}
+	s.PoolForTest().Put(conn)
 	rows, err := s.ListSessionsFiltered(ctx, store.SessionListFilter{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -147,8 +159,13 @@ func TestComputeDerivedScopeNativeVsLegacy(t *testing.T) {
 	if stats.Source != store.StatsSourceDerived {
 		t.Fatalf("captured source = %s, want derived", stats.Source)
 	}
-	if stats.TurnCount == nil || *stats.TurnCount != 12 {
-		t.Fatalf("captured turn = %v, want 12", stats.TurnCount)
+	// The derived save no longer owns a turn count: the harness measurement and
+	// the producer's conversation count both survive untouched.
+	if stats.TurnCount == nil || *stats.TurnCount != 10 {
+		t.Fatalf("captured harness turn = %v, want 10", stats.TurnCount)
+	}
+	if stats.ConversationTurnCount == nil || *stats.ConversationTurnCount != 10 {
+		t.Fatalf("captured conversation turn = %v, want 10", stats.ConversationTurnCount)
 	}
 	if stats.DurationMs == nil || *stats.DurationMs != 120000 {
 		t.Fatalf("captured duration = %v, want 120000ms", stats.DurationMs)
@@ -157,8 +174,8 @@ func TestComputeDerivedScopeNativeVsLegacy(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("get metrics: %v %v", got, err)
 	}
-	if got.TurnCount == nil || *got.TurnCount != 12 {
-		t.Fatalf("metrics turn = %v, want derived 12", got.TurnCount)
+	if got.TurnCount == nil || *got.TurnCount != 10 {
+		t.Fatalf("metrics turn = %v, want the stored conversation count 10", got.TurnCount)
 	}
 	if got.InputTokens == nil || *got.InputTokens != 700 {
 		t.Fatalf("metrics peak input = %v, want analysis 700", got.InputTokens)
@@ -172,8 +189,10 @@ func TestComputeDerivedScopeNativeVsLegacy(t *testing.T) {
 		t.Fatal("legacy save created a captured row, want none")
 	}
 	legacyGot, err := s.GetMetrics(ctx, legacyID)
-	if err != nil || legacyGot == nil || legacyGot.TurnCount == nil || *legacyGot.TurnCount != 12 {
-		t.Fatalf("legacy metrics = %+v, %v; want turn 12", legacyGot, err)
+	// A legacy save writes no turn count at all; the count surface reads the
+	// captured conversation column, which this session does not have.
+	if err != nil || legacyGot == nil || legacyGot.TurnCount == nil || *legacyGot.TurnCount != 0 {
+		t.Fatalf("legacy metrics = %+v, %v; want no stored turn count", legacyGot, err)
 	}
 }
 

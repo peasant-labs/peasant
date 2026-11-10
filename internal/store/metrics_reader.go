@@ -21,7 +21,7 @@ WHERE s.session_id = ? LIMIT 1`
 
 	sqlGetMetrics = `SELECT
     m.session_id,
-    CASE WHEN s.active_generation_id IS NOT NULL THEN c.turn_count ELSE m.turn_count END,
+    ` + sqlSessionTurnCount + `,
     CASE WHEN s.active_generation_id IS NOT NULL THEN c.subagent_count ELSE m.subagent_count END,
     title, outcome,
     total_tokens, input_tokens,

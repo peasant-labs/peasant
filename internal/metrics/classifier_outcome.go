@@ -12,7 +12,8 @@ import (
 // failed, abandoned).
 //
 // Strategy:
-//  1. Abandoned heuristic: zero tool calls AND turn_count ≤ 1 (checked first).
+//  1. Abandoned heuristic: zero tool calls AND at most one conversation turn
+//     (checked first).
 //  2. Otherwise: delegate to computeOutcome for the 3-value metric-derived result
 //     (resolved / partial / failed) and map to the annotation domain.
 //
@@ -27,26 +28,25 @@ func classifyOutcome(
 		return nil
 	}
 
-	// The abandoned heuristic is zero tool calls and at most one turn.
-	// Checked before computeOutcome because it takes precedence.
+	// The abandoned heuristic is zero tool calls and at most one conversation
+	// turn. The count comes from the same fold every reader uses, never from
+	// the raw harness record count the retired metric seed carried. Checked
+	// before computeOutcome because it takes precedence.
 	toolCalls := 0
 	if metrics.ToolCalls != nil {
 		toolCalls = *metrics.ToolCalls
 	}
-	turnCount := 0
-	if metrics.TurnCount != nil {
-		turnCount = *metrics.TurnCount
-	}
-	if toolCalls == 0 && turnCount <= 1 {
+	conversationTurnCount := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
+	if toolCalls == 0 && conversationTurnCount <= 1 {
 		return &ClassifierResult{
 			TypeID:     typeIDSessionOutcome,
 			Value:      "abandoned",
 			Confidence: 0.85,
-			Reason:     "zero tool calls and single turn indicate session was abandoned",
+			Reason:     "zero tool calls and at most one conversation turn indicate session was abandoned",
 			Provenance: &schema.Provenance{
 				Method:  "heuristic",
 				Version: "1",
-				Details: map[string]string{"rule": "tool_calls==0 AND turn_count<=1"},
+				Details: map[string]string{"rule": "tool_calls==0 AND conversation_turn_count<=1"},
 			},
 		}
 	}

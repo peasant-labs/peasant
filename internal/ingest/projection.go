@@ -1436,11 +1436,13 @@ func buildProjectionAliases(resolved []*resolvedBlock) ([]indexformat.NativeAlia
 }
 
 // applyStrictCounts writes the single count authority and the prose-title refs.
-// TurnCount is the emitted main entry cardinality after folding; the input
-// count is the distinct submission refs that satisfy the strict predicate.
+// TurnCount is the conversation turn count: the folded projection's turns whose
+// rendered role is not system. It is computed here, once, from the same fold
+// every reader uses, so a stored or published count is never a raw record count
+// and every count surface reports the same thing. The input count is the
+// distinct submission refs that satisfy the strict predicate.
 func applyStrictCounts(generation *indexformat.Generation, completeness indexformat.GenerationCompleteness) {
 	main := generation.Main.Entries
-	turnCount := 0
 	submissions := make(map[schema.SubmissionRef]struct{})
 	var titleRefs []schema.SourceEntryRef
 	for i := range main {
@@ -1454,9 +1456,6 @@ func applyStrictCounts(generation *indexformat.Generation, completeness indexfor
 			// from the count the same way an evidence-only carrier is.
 			continue
 		}
-		if entry.Depth == 0 {
-			turnCount++
-		}
 		if !eligibleInputProvenance(entry.Provenance) {
 			continue
 		}
@@ -1465,7 +1464,7 @@ func applyStrictCounts(generation *indexformat.Generation, completeness indexfor
 			titleRefs = append(titleRefs, entry.SourceEntryRef)
 		}
 	}
-	generation.Metadata.Stats.TurnCount = turnCount
+	generation.Metadata.Stats.TurnCount = ConversationTurnCount(EntriesToTurns(main))
 	generation.TitleRefs = titleRefs
 	if completeness == indexformat.GenerationCompletenessComplete {
 		count := int64(len(submissions))
