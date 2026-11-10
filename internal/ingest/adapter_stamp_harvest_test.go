@@ -90,7 +90,7 @@ func TestAdapterBumpRepairsAnAlreadyHarvestedOpenCodeSession(t *testing.T) {
 		t.Helper()
 		// The fixture uses a current schema, so no native-refresh revision list
 		// is needed; production passes the refresh set here.
-		stale, err := database.ListStaleAdapterSessions(t.Context(), ingest.GenerationTargets(ingest.HarvesterVersionRegistry), nil)
+		stale, err := database.ListStaleAdapterSessions(t.Context(), ingest.GenerationTargets(ingest.HarvesterVersionRegistry), nil, ingest.AllStoredSessions())
 		if err != nil {
 			t.Fatal(err)
 		}
