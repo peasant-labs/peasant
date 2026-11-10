@@ -12,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/migrations/v71_harness_check_widening.yaml
@@ -23,31 +22,19 @@ var v71Manifest []byte
 
 func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 	var f struct {
-		Scenarios []struct {
-			Name string `yaml:"name"`
-		} `yaml:"scenarios"`
 		RequiredObjects []string `yaml:"requiredObjects"`
 	}
 	var m struct {
 		RequiredNames []string `yaml:"requiredNames"`
 	}
-	if err := yaml.Unmarshal(v71Fixture, &f); err != nil {
+	if err := decodeMigrationSlotYAML(v71Fixture, &f, "v71_harness_check_widening.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	if err := yaml.Unmarshal(v71Manifest, &m); err != nil {
+	if err := decodeMigrationSlotYAML(v71Manifest, &m, "v71_harness_check_widening.manifest.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	names := map[string]bool{}
-	for _, v := range f.Scenarios {
-		if v.Name == "" || names[v.Name] {
-			t.Fatalf("invalid scenario name %q", v.Name)
-		}
-		names[v.Name] = true
-	}
-	for _, n := range m.RequiredNames {
-		if !names[n] {
-			t.Fatalf("missing scenario %q", n)
-		}
+	if err := validateMigrationNames(m.RequiredNames, f.RequiredObjects, "V71 schema objects"); err != nil {
+		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "upgrade.db")
 	c, err := sqlite.OpenConn(path, sqlite.OpenReadWrite, sqlite.OpenCreate)
@@ -91,11 +78,40 @@ func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 	}
 	stateSQL := `SELECT 'revision',CAST(revision AS TEXT) FROM store_state UNION ALL SELECT session_id,coalesce(parent_id,'') || ':' || parent_state || ':' || coalesce(resolved_parent_id,'') || ':' || model_harness FROM sessions UNION ALL SELECT 'summary',model_harness || ':' || session_count FROM daily_summary_harness`
 	state := query(stateSQL)
-	if err = sqlitemigration.Migrate(context.Background(), c, dbSchema); err != nil {
+	// Encode every column by name and SQLite literal representation, including NULLs
+	// and blobs, so a changed value or a missing row cannot hide in a sample.
+	dumpRows := func(table, key string) map[string]string {
+		t.Helper()
+		var columns []string
+		err := sqlitex.ExecuteTransient(c, `SELECT name FROM pragma_table_info(?) ORDER BY cid`, &sqlitex.ExecOptions{Args: []any{table}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			name := stmt.ColumnText(0)
+			columns = append(columns, `hex(quote("`+strings.ReplaceAll(name, `"`, `""`)+`"))`)
+			return nil
+		}})
+		if err != nil || len(columns) == 0 {
+			t.Fatalf("read columns for %s: %v", table, err)
+		}
+		return query(`SELECT ` + key + `, ` + strings.Join(columns, ` || ':' || `) + ` FROM ` + table + ` ORDER BY ` + key)
+	}
+	sessionsBefore := dumpRows("sessions", "session_id")
+	summaryBefore := dumpRows("daily_summary_harness", "date_utc || ':' || model_harness")
+	if err = sqlitemigration.Migrate(context.Background(), c, frozenSchema(71)); err != nil {
 		t.Fatal(err)
 	}
 	if got := query(stateSQL); !reflect.DeepEqual(got, state) {
 		t.Fatalf("rows or parent lane changed: before %v after %v", state, got)
+	}
+	if got := dumpRows("sessions", "session_id"); !reflect.DeepEqual(got, sessionsBefore) {
+		t.Fatalf("session rows changed: before %v after %v", sessionsBefore, got)
+	}
+	if got := dumpRows("daily_summary_harness", "date_utc || ':' || model_harness"); !reflect.DeepEqual(got, summaryBefore) {
+		t.Fatalf("summary rows changed: before %v after %v", summaryBefore, got)
+	}
+	if err := sqlitex.ExecuteTransient(c, `PRAGMA foreign_key_check`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		t.Errorf("foreign key violation in %s row %d", stmt.ColumnText(0), stmt.ColumnInt64(1))
+		return nil
+	}}); err != nil {
+		t.Fatal(err)
 	}
 	fk := query(`SELECT 'foreign_keys',CAST(foreign_keys AS TEXT) FROM pragma_foreign_keys`)
 	if fk["foreign_keys"] != "1" {
@@ -103,13 +119,15 @@ func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 	}
 	old := "'claude-code','opencode','codex','gemini-cli','cursor','antigravity','strike','pi'"
 	widened := old + ",'grok-build','devin-desktop','cline','kiro','kiro-cli','kiro-crew'"
+	after := query(objectsSQL)
 	for _, n := range []string{"sessions", "daily_summary_harness"} {
-		if !strings.Contains(before[n], old) {
-			t.Fatalf("missing predecessor check %s", n)
+		if strings.Count(before[n], old) != 1 || strings.Count(after[n], widened) != 1 {
+			t.Fatalf("%s harness CHECK does not match the frozen predecessor or V71 set", n)
 		}
-		before[n] = strings.Replace(before[n], old, widened, 1)
+		before[n] = strings.Replace(before[n], old, "<harness-set>", 1)
+		after[n] = strings.Replace(after[n], widened, "<harness-set>", 1)
 	}
-	if got := query(objectsSQL); !reflect.DeepEqual(got, before) {
+	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("schema objects changed beyond harness check")
 	}
 	for name := range before {
@@ -120,19 +138,20 @@ func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 		}
 	}
 	freshPath := filepath.Join(t.TempDir(), "fresh.db")
-	fresh := openFreshStore(t, freshPath)
-	_ = fresh
-	freshConn, err := sqlite.OpenConn(freshPath, sqlite.OpenReadOnly)
+	freshConn, err := sqlite.OpenConn(freshPath, sqlite.OpenReadWrite, sqlite.OpenCreate)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer freshConn.Close()
+	if err := sqlitemigration.Migrate(context.Background(), freshConn, frozenSchema(71)); err != nil {
+		t.Fatal(err)
+	}
 	freshObjects := map[string]string{}
 	if err := sqlitex.ExecuteTransient(freshConn, objectsSQL, &sqlitex.ExecOptions{ResultFunc: func(s *sqlite.Stmt) error { freshObjects[s.ColumnText(0)] = s.ColumnText(1); return nil }}); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(freshObjects, query(objectsSQL)) {
-		t.Fatal("fresh and upgraded schema objects differ")
+		t.Fatal("fresh and upgraded V71 schema objects differ")
 	}
 	for _, h := range schema.Harnesses() {
 		for _, tbl := range []string{"sessions", "daily_summary_harness"} {
@@ -146,7 +165,7 @@ func TestMigrationV71WidensHarnessChecks(t *testing.T) {
 				args = []any{string(h)}
 			}
 			if err := sqlitex.ExecuteTransient(c, sql, &sqlitex.ExecOptions{Args: args}); err != nil {
-				t.Errorf("%s rejected %s: %v", tbl, h, err)
+				t.Errorf("%s rejected %s: %v; add a new widening migration; never edit V71", tbl, h, err)
 			}
 		}
 	}

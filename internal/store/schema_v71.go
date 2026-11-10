@@ -1,6 +1,7 @@
 package store
 
 // migrationV71 widens the stored harness set without changing existing rows.
+// The CREATE bodies are frozen slot-70 sqlite_master text; do not hand-edit them.
 // Recreate session triggers after copying rows so the copy does not advance the revision.
 const migrationV71 = `
 CREATE TABLE sessions_v71 AS SELECT * FROM sessions;
