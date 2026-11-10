@@ -3,9 +3,11 @@
 Measured on 2026-11-09 at revision
 `74fc97a100a3a4c77bd782633a17282582de056f` (clean worktree), using the pinned
 Nix development shell (Go 1.26.3). This revision is the integration branch tip
-after the final teammate-link changes; the numbers below were re-taken at it,
+after the final teammate-link changes; the tables below were re-taken at it,
 not copied from the earlier sample at `778c1c131` (see **What changed since the
-previous measurement**).
+previous measurement**). Those tables remain that revision's record. The later
+`open --session` number in finding 1 was taken from commit `e80517fab`, after
+`open` stopped passing `--force`.
 
 This is the landing record for the session-scoped `harvest --session` and
 `open --session` cost. Three requirements apply, all on a sandbox copy of the
@@ -431,11 +433,12 @@ transcript.
    does not pass `--force`. `--refresh-commits` is off by default, so a plain
    `harvest --session` does not detect commits for an unchanged session. An
    unchanged named session opened this way refreshes only its commit rows.
-   Measured 2026-11-09 on the large sandbox at `/tmp/opencode/slice17-timing/large`,
-   session `9aec3ccd-622c-46ee-b346-92d6e20fd2a5`, port 8799, five runs after
-   one warmup, with `open` passing `--refresh-commits`: median 810.9 ms, max
-   850.2 ms (722.8, 741.1, 810.9, 815.8, 850.2). Every timed run exited 0 and
-   opened the session. The 7,210 ms median in the issue is the before number.
+   Measured 2026-11-09 from commit `e80517fab`, on the large sandbox copy of
+   the store, session `9aec3ccd-622c-46ee-b346-92d6e20fd2a5`, port 8799, five
+   runs after one warmup, with `open` passing `--refresh-commits`: median
+   810.9 ms, max 850.2 ms (722.8, 741.1, 810.9, 815.8, 850.2). Every timed run
+   exited 0 and opened the session. The 7,210 ms median in the issue is the
+   before number. The tables above remain the record of `74fc97a10`.
 2. **The unchanged scoped harvest sits at about 0.68 s on this host**, and the
    settled `--dry-run` is 51 ms, so the source read plus the evidence/audit
    write path is about 0.6 s. It meets the 1 s target with about 0.32 s of

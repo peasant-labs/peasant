@@ -61,7 +61,7 @@ func loadOpenCommitRefreshFixture(t *testing.T) openCommitRefreshFixture {
 		}
 		present[testCase.Name] = true
 		switch testCase.AfterRecord {
-		case "none", "add-commit", "hide-git":
+		case "none", "add-commit", "hide-git", "append-record", "replace-fingerprint", "stale-index":
 		default:
 			t.Fatalf("case %q has unknown afterRecord %q", testCase.Name, testCase.AfterRecord)
 		}
@@ -76,7 +76,7 @@ func loadOpenCommitRefreshFixture(t *testing.T) openCommitRefreshFixture {
 			t.Fatalf("case %q has unknown commits want %q", testCase.Name, testCase.Want.Commits)
 		}
 		switch testCase.Want.Stored {
-		case "identical", "extracted":
+		case "identical", "extracted", "reindexed":
 		default:
 			t.Fatalf("case %q has unknown stored want %q", testCase.Name, testCase.Want.Stored)
 		}
@@ -150,6 +150,12 @@ func runOpenCommitRefreshCase(t *testing.T, testCase openCommitRefreshCase) {
 		added = world.addWindowCommit(t)
 	case "hide-git":
 		world.hideGit(t)
+	case "append-record":
+		world.appendTranscriptRecord(t)
+	case "replace-fingerprint":
+		world.replaceStoredFingerprint(t)
+	case "stale-index":
+		world.setIndexVersionBehind(t)
 	}
 
 	stdout, stderr, err := world.run(t, testCase.Command)
@@ -162,7 +168,7 @@ func runOpenCommitRefreshCase(t *testing.T, testCase openCommitRefreshCase) {
 	after := world.snapshot(t)
 	for _, absent := range testCase.Want.StderrAbsent {
 		if strings.Contains(stderr, absent) {
-			t.Fatalf("%s wrote %q, which a run without commit refresh must not emit:\n%s", testCase.Command, absent, stderr)
+			t.Fatalf("%s wrote %q, which this run must not emit:\n%s", testCase.Command, absent, stderr)
 		}
 	}
 
@@ -207,8 +213,12 @@ func runOpenCommitRefreshCase(t *testing.T, testCase openCommitRefreshCase) {
 			t.Fatal("the saved metadata file changed; an unchanged session must not be re-extracted")
 		}
 	case "extracted":
-		if after.indexCount <= before.indexCount && after.identity == before.identity && after.metadata == before.metadata {
-			t.Fatal("forced harvest left the index, the saved pair, and the metadata file untouched; --force must still re-extract and re-index")
+		if after.identity == before.identity && after.metadata == before.metadata {
+			t.Fatal("the saved pair was not rewritten; this session must be extracted, not refreshed")
+		}
+	case "reindexed":
+		if after.indexCount <= before.indexCount {
+			t.Fatalf("index log rows = %d, want more than %d; a session whose indexer revision is behind the producer must be re-indexed, not left as a commit-only refresh", after.indexCount, before.indexCount)
 		}
 	}
 }
@@ -305,6 +315,101 @@ func (w *commitRefreshWorld) commitAt(t *testing.T, message, date string) string
 func (w *commitRefreshWorld) addWindowCommit(t *testing.T) string {
 	t.Helper()
 	return w.commitAt(t, "change 3", "2024-01-02T03:19:00Z")
+}
+
+func (w *commitRefreshWorld) sourceTranscript() string {
+	return filepath.Join(w.root, "transcripts", "project", openTestSessionID+".jsonl")
+}
+
+// appendTranscriptRecord adds one record after the recorded session. The
+// source bytes change, so the stored fingerprint no longer matches and the
+// next open must extract.
+func (w *commitRefreshWorld) appendTranscriptRecord(t *testing.T) {
+	t.Helper()
+	path := w.sourceTranscript()
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := map[string]any{
+		"type":      "assistant",
+		"sessionId": openTestSessionID,
+		"cwd":       w.repo,
+		"timestamp": "2024-01-02T03:20:30Z",
+		"message": map[string]any{
+			"role":  "assistant",
+			"model": "claude-sonnet-4-20250514",
+			"content": []any{
+				map[string]any{"type": "text", "text": "Noted."},
+			},
+		},
+	}
+	line, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := append(append([]byte{}, before...), line...)
+	updated = append(updated, '\n')
+	if err := os.WriteFile(path, updated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// replaceStoredFingerprint changes the recorded source digest without touching
+// the source file. The next capture no longer matches, so the session must be
+// extracted.
+func (w *commitRefreshWorld) replaceStoredFingerprint(t *testing.T) {
+	t.Helper()
+	w.withStore(t, func(conn *sqlite.Conn) {
+		current := queryText(t, conn, `SELECT hex(source_fingerprint) FROM sessions WHERE session_id = ?`, openTestSessionID)
+		if current == "" {
+			t.Fatal("recorded session has no source fingerprint, so replacing it would not prove a mismatch")
+		}
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET source_fingerprint = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
+			Args: []any{[]byte("replaced-source-fingerprint"), openTestSessionID},
+		}); err != nil {
+			t.Fatalf("replace stored fingerprint: %v", err)
+		}
+		if got := queryText(t, conn, `SELECT hex(source_fingerprint) FROM sessions WHERE session_id = ?`, openTestSessionID); got == current || got == "" {
+			t.Fatalf("stored fingerprint = %q, want a replacement distinct from %q", got, current)
+		}
+	})
+}
+
+// setIndexVersionBehind puts sessions.index_version behind the producer. The
+// next open must re-index that session instead of leaving it as a commit-only
+// refresh.
+func (w *commitRefreshWorld) setIndexVersionBehind(t *testing.T) {
+	t.Helper()
+	w.withStore(t, func(conn *sqlite.Conn) {
+		version := queryInt(t, conn, `SELECT index_version FROM sessions WHERE session_id = ?`, openTestSessionID)
+		if version < 2 {
+			t.Fatalf("recorded index_version = %d, want a current producer revision so putting it behind is a real change", version)
+		}
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET index_version = 1 WHERE session_id = ?`, &sqlitex.ExecOptions{
+			Args: []any{openTestSessionID},
+		}); err != nil {
+			t.Fatalf("put index revision behind the producer: %v", err)
+		}
+		if got := queryInt(t, conn, `SELECT index_version FROM sessions WHERE session_id = ?`, openTestSessionID); got != 1 {
+			t.Fatalf("index_version = %d after the mutation, want 1", got)
+		}
+	})
+}
+
+func (w *commitRefreshWorld) withStore(t *testing.T, fn func(*sqlite.Conn)) {
+	t.Helper()
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(w.dataDir())), mustGenerationStoreOptions(t, filepath.Join(w.root, "output"))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	conn, err := db.Pool().Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Pool().Put(conn)
+	fn(conn)
 }
 
 func (w *commitRefreshWorld) hideGit(t *testing.T) {

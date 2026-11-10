@@ -11,6 +11,9 @@ requiredNames:
   - force-reprocesses
   - dry-run-skips
   - detection-failure-keeps-commits
+  - changed-transcript-extracts
+  - replaced-fingerprint-extracts
+  - stale-index-reindexes
 
 cases:
   # A new commit in the session window is stored. Entries, the index, and the
@@ -58,8 +61,8 @@ cases:
       commits: same-rows
       stored: identical
 
-  # A full harvest leaves an unchanged session's commits alone. Removing the
-  # named-session restriction records the new commit and fails this case.
+  # A full harvest that was not asked to refresh commits leaves the commit
+  # rows and the stored transcript and index byte-identical to before.
   - name: full-harvest-skips
     afterRecord: add-commit
     command: harvest
@@ -87,8 +90,10 @@ cases:
       commits: unchanged
       stored: extracted
 
-  # A dry run writes nothing even when the flag is set. Removing the dry-run
-  # restriction records the new commit and fails this case.
+  # A dry run writes nothing even when the flag is set. The store is opened
+  # read-only, so a commit write cannot be the witness. Removing the dry-run
+  # restriction makes the detector or the refresh diagnostic appear on stderr,
+  # which this case rejects.
   - name: dry-run-skips
     afterRecord: add-commit
     command: harvest-dry-run
@@ -96,6 +101,9 @@ cases:
       succeeded: true
       commits: unchanged
       stored: identical
+      stderrAbsent:
+        - commit refresh
+        - commit_detector
 
   # A git failure stays a diagnostic. The run succeeds and the commits already
   # stored are kept. Replacing the projection on an incomplete detection, or
@@ -107,3 +115,35 @@ cases:
       succeeded: true
       commits: unchanged
       stored: identical
+
+  # Appending a source record must extract, not refresh. Ignoring a fingerprint
+  # mismatch and refreshing instead leaves the saved pair untouched and fails
+  # this case.
+  - name: changed-transcript-extracts
+    afterRecord: append-record
+    command: open
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: extracted
+
+  # A stored fingerprint that no longer matches the source must extract, not
+  # refresh. The same ignored-mismatch mutation fails this case.
+  - name: replaced-fingerprint-extracts
+    afterRecord: replace-fingerprint
+    command: open
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: extracted
+
+  # sessions.index_version is put behind the producer. The next open must
+  # re-index, not leave the session as a commit-only refresh. Skipping that
+  # re-index leaves the index log unchanged and fails this case.
+  - name: stale-index-reindexes
+    afterRecord: stale-index
+    command: open
+    want:
+      succeeded: true
+      commits: unchanged
+      stored: reindexed

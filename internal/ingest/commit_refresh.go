@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
-
-	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
 // commitRefreshEmailTimeout matches the extraction path's cap on the git
@@ -183,13 +182,8 @@ func (p *Pipeline) installedTranscriptPath(session DiscoveredSession) (string, b
 	if ext == "" {
 		ext = string(SourceFormatJSON)
 	}
-	outputDir := string(p.config.OutputDir)
-	if loc.ParentID != "" {
-		return fmt.Sprintf("%s/%s/%s/%s/%s/%s--transcript.%s",
-			outputDir, loc.HostSlug, loc.ParentID, defaults.DirSubagents.String(), session.SessionID, session.SessionID, ext), true
-	}
-	return fmt.Sprintf("%s/%s/%s/%s--transcript.%s",
-		outputDir, loc.HostSlug, session.SessionID, session.SessionID, ext), true
+	dir := SessionDir(string(p.config.OutputDir), loc.HostSlug, string(session.SessionID), loc.ParentID)
+	return filepath.Join(dir, string(session.SessionID)+"--transcript."+ext), true
 }
 
 func (p *Pipeline) persistRefreshedCommits(ctx context.Context, id SessionID, commits []CommitInfo, preserveExisting bool) {
