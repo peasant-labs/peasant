@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -188,6 +189,10 @@ func runScopedIngestIgnoresSelection(t *testing.T, ids ingestSelectionIDs, item 
 
 	cfg := webIngestConfig(t, source, output, ingestSelectionCase{Mode: "all"}, "", "")
 	hs := newTestXDGHomes(t)
+	if err := os.MkdirAll(filepath.Dir(hs.dbPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	storetest.CopyGoldenTo(t, hs.dbPath())
 	handler := hs.handler(nil, cfg)
 	first := runWebIngest(t, handler, false)
 	assertIngestMembership(t, first, []string{ids.Selected, ids.Other}, nil)
@@ -196,7 +201,7 @@ func runScopedIngestIgnoresSelection(t *testing.T, ids ingestSelectionIDs, item 
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
+	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithWriteConfig(cfg.Write), store.WithSkipMigrations())...)
 	if err != nil {
 		t.Fatal(err)
 	}
