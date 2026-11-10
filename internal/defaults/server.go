@@ -118,6 +118,11 @@ const (
 	// optional ?limit=; no path param (search spans all projects).
 	RouteSearch Route = "/api/v1/search"
 
+	// RouteQuality reads one offset page of quality rows plus the library-wide
+	// analytics summary at the page revision. Query: ?page= and ?maxItems=.
+	// The full-library quality WebSocket topic is retired for this surface.
+	RouteQuality Route = "/api/v1/quality"
+
 	// RouteSettings reads every configuration key (GET) and changes one editable
 	// key in config.yaml (PATCH).
 	RouteSettings Route = "/api/v1/settings"

@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
@@ -17,6 +18,8 @@ func init() {
 		return NewProvider()
 	}
 }
+
+var _ api.QualityPageProvider = (*Provider)(nil)
 
 // Provider implements api.DataProvider with static mock data.
 type Provider struct {
@@ -278,6 +281,64 @@ func (p *Provider) QualitySessions(_ context.Context, f api.QualityFilter) ([]ap
 		}
 	}
 	return filtered, nil
+}
+
+// QualityPage serves the mock paginated quality read: one bounded page of the
+// in-memory quality rows plus the summary computed over all of them, so the
+// dashboard has one coherent mock bundle at any page size.
+func (p *Provider) QualityPage(_ context.Context, page int, perPage schema.PageSize) (*schema.QualityPage, error) {
+	total := len(p.qualitySessions)
+	if page < 1 {
+		page = 1
+	}
+	if last := (total + int(perPage) - 1) / int(perPage); last > 0 && page > last {
+		page = last
+	}
+	if total == 0 {
+		page = 1
+	}
+	start := min((page-1)*int(perPage), total)
+	end := min(start+int(perPage), total)
+	nextEnd := min(end+int(perPage), total)
+
+	items := append([]api.QualitySession{}, p.qualitySessions[start:end]...)
+	next := append([]api.QualitySession{}, p.qualitySessions[end:nextEnd]...)
+
+	records := make([]store.AnalyticsSession, 0, total)
+	for _, session := range p.qualitySessions {
+		records = append(records, store.AnalyticsSession{
+			StartMs:         mockQualityStartMs(session.Date),
+			ProjectHash:     session.Project,
+			Outcome:         session.Outcome,
+			DurationMinutes: session.DurationMinutes,
+			TotalTokens:     session.TotalTokens,
+			TurnCount:       session.TurnCount,
+			ToolCalls:       session.ToolCalls,
+		})
+	}
+
+	return &schema.QualityPage{
+		OffsetPage: schema.OffsetPage[schema.QualitySession]{
+			Items:     items,
+			NextItems: next,
+			Page:      page,
+			PerPage:   perPage,
+			Total:     total,
+			Revision:  "0",
+		},
+		Summary: store.ComputeProjectAnalytics(records),
+	}, nil
+}
+
+// mockQualityStartMs parses a mock quality row's day or timestamp date.
+func mockQualityStartMs(raw string) int64 {
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return parsed.UnixMilli()
+	}
+	if parsed, err := time.Parse("2006-01-02", raw); err == nil {
+		return parsed.UnixMilli()
+	}
+	return 0
 }
 
 func (p *Provider) AnnotationsForSession(_ context.Context, sessionID string) ([]schema.AnnotationSummary, error) {

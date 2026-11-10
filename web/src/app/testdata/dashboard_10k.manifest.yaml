@@ -1,0 +1,31 @@
+# The dashboard section inventory at 10,000 sessions and page 1 of 25.
+# Fairtrade's PROJECT_OVERVIEW_SECTION_DEFS owns the section list; this manifest
+# pins one named case per key so a section that stops rendering is a named
+# failure rather than a missing assertion. The page tuple is the quality page
+# the dashboard is scoped to; the summary is the only data the dashboard reads.
+requiredNames:
+  - summary-10k
+  - sessions-per-week-10k
+  - weekly-active-contributors-10k
+  - new-contributor-velocity-10k
+  - avg-duration-per-active-week-10k
+  - outcome-distribution-10k
+  - session-stats-10k
+  - contributor-table-10k
+sections:
+  - {name: summary-10k, section: summary, label: summary}
+  - {name: sessions-per-week-10k, section: sessionsPerWeek, label: sessions/week}
+  - {name: weekly-active-contributors-10k, section: weeklyActiveContributors, label: active}
+  - {name: new-contributor-velocity-10k, section: newContributorVelocity, label: new}
+  - {name: avg-duration-per-active-week-10k, section: avgDurationPerActiveWeek, label: duration}
+  - {name: outcome-distribution-10k, section: outcomeDistribution, label: outcomes}
+  - {name: session-stats-10k, section: sessionStats, label: typical}
+  - {name: contributor-table-10k, section: contributorTable, label: table}
+page: 1
+perPage: 25
+total: 10000
+expected:
+  totalSessions: 10000
+  contributorId: "local user"
+  contributorSessions: 10000
+  outcomeTotal: 10000
