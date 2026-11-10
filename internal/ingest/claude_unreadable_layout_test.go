@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"context"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -67,6 +68,15 @@ func TestClaudeAdapter_UnreadableLayoutParentDoesNotRelink(t *testing.T) {
 	if len(unreadable) != 0 || len(stored[ingest.ResolvedPath(layoutPath)]) == 0 {
 		t.Fatalf("stored layout chain = %d links, unreadable = %v; a refill from an empty store would not relink the child", len(stored[ingest.ResolvedPath(layoutPath)]), unreadable)
 	}
+	before, err := database.LoadClaudeEvidence(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := ingest.ResolvedPath(layoutPath)
+	beforeRow, found := before[path]
+	if !found || beforeRow.ProofVersion != ingest.ClaudeIdentityProofVersion {
+		t.Fatalf("layout evidence before failure missing or stale: found=%t proof=%d", found, beforeRow.ProofVersion)
+	}
 
 	// A changed mtime forces the re-mine. The planted read error is the only
 	// difference from the discovery that just proved the link.
@@ -82,6 +92,21 @@ func TestClaudeAdapter_UnreadableLayoutParentDoesNotRelink(t *testing.T) {
 	}
 	if fs.ReadCount(layoutPath) == 0 {
 		t.Fatal("second discovery did not read the layout parent; the cached chain was used without a failed re-mine")
+	}
+	after, err := database.LoadClaudeEvidence(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRow, found := after[path]
+	if !found || !reflect.DeepEqual(beforeRow, afterRow) {
+		t.Fatalf("failed read changed stored layout evidence: found=%t before=%+v after=%+v", found, beforeRow, afterRow)
+	}
+	afterChains, unreadable, err := database.LoadClaudeIdentityChains(ctx, []ingest.ResolvedPath{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unreadable) != 0 || !reflect.DeepEqual(stored[path], afterChains[path]) {
+		t.Fatalf("failed read changed stored layout chain: before=%v after=%v unreadable=%v", stored[path], afterChains[path], unreadable)
 	}
 }
 

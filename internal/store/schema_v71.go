@@ -36,8 +36,8 @@ const claudeIdentitySkeletonElementFault = `json_type(j.value) != 'object'
 //
 // proof_version is left as stored on a row the backfill could read. This
 // build's proof version is newer, so discovery re-mines that row once and
-// rewrites the facts from the transcript. The backfill is what a reader uses
-// until that happens, and what a row keeps if its file is not visited.
+// rewrites the facts from the transcript. The backfill is not a live discovery
+// answer: the old proof version forces a re-mine before its facts are used.
 const migrationV71 = `
 ALTER TABLE claude_transcript_evidence
   ADD COLUMN identity_session_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(identity_session_ids_json));

@@ -56,8 +56,12 @@ func TestMigrationV71UnparseableSkeletonIsRemined(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof, sessions, chain := readV71Facts(t, conn, layoutPath)
-	database.pool.Put(conn)
+	var proof int
+	var sessions, chain string
+	func() {
+		defer database.pool.Put(conn)
+		proof, sessions, chain = readV71Facts(t, conn, layoutPath)
+	}()
 	if proof != 0 || sessions != "[]" || chain != "[]" {
 		t.Fatalf("unparseable skeleton migrated to proof=%d sessions=%s chain=%s, want proof 0 and default facts", proof, sessions, chain)
 	}
@@ -129,8 +133,10 @@ func TestMigrationV71BackfillsOldWriterSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertV71FactsMatch(t, conn, path, want, "backfill")
-	database.pool.Put(conn)
+	func() {
+		defer database.pool.Put(conn)
+		assertV71FactsMatch(t, conn, path, want, "backfill")
+	}()
 
 	adapter := ingest.NewClaudeAdapter(&ingest.OSFileSystem{}, nil, salt.Salt{})
 	ingest.AttachClaudeEvidenceCache(adapter, database)

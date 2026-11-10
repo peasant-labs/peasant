@@ -727,8 +727,6 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 		evidence.Origin, evidence.Signal = sessionorigin.Classify(sessionorigin.Evidence{})
 		evidence.Records = []ClaudeIdentityRecord{}
 		evidence.Chain = []ClaudeIdentityChainLink{}
-		evidence.SessionIDs = []string{}
-		evidence.SpawnAgentIDs = []string{}
 		return evidence, false
 	}
 	beginClaudeIdentity(data, &evidence)
