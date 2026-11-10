@@ -891,8 +891,8 @@ func TestTranscriptProducerSingleFlight(t *testing.T) {
 
 // TestTranscriptProducerCutBuild32MiB pins the in-memory cut over the synthetic
 // 32 MiB fixture (1,312 turns, no real transcript text). It measures the cut,
-// not the cold build through the store: the store content pass is measured by
-// TestTranscriptDirectoryColdBuildThroughStore against the ratified budget.
+// not the cold build through the store: the store content pass is measured and
+// reported by TestTranscriptDirectoryColdBuildThroughStore.
 func TestTranscriptProducerCutBuild32MiB(t *testing.T) {
 	t.Parallel()
 	const turns = 1312
@@ -918,9 +918,9 @@ func TestTranscriptProducerCutBuild32MiB(t *testing.T) {
 			t.Fatalf("segment %d is %d bytes, over the %d budget", ref.Index, ref.ByteLength, defaults.TranscriptSegmentBudgetBytes)
 		}
 	}
-	t.Logf("in-memory segment cut build: %s (cold-build budget %s)", elapsed, defaults.TranscriptSegmentColdBuildBudget)
-	if elapsed > defaults.TranscriptSegmentColdBuildBudget {
-		t.Fatalf("in-memory cut build took %s, over the %s cold-build budget", elapsed, defaults.TranscriptSegmentColdBuildBudget)
+	t.Logf("in-memory segment cut build: %s (cut budget %s)", elapsed, defaults.TranscriptSegmentCutBuildBudget)
+	if elapsed > defaults.TranscriptSegmentCutBuildBudget {
+		t.Fatalf("in-memory cut build took %s, over the %s cut budget", elapsed, defaults.TranscriptSegmentCutBuildBudget)
 	}
 }
 

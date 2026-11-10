@@ -18,13 +18,24 @@ const TranscriptSegmentBudgetBytes int = 1 << 20
 // kilobytes rather than transcripts.
 const TranscriptSegmentDirectoryCapacity = 8
 
+// TranscriptSegmentCutBuildBudget is the in-memory cut target for the 32 MiB
+// synthetic fixture with an empty producer cache. It pins the cut itself (turn
+// projection, measurement, and segmentation) without a store pass, so it is
+// stable enough to assert on a shared runner.
+const TranscriptSegmentCutBuildBudget = 400 * time.Millisecond
+
 // TranscriptSegmentColdBuildBudget is the ratified cold-build target for one
-// segment directory on the 32 MiB synthetic fixture with an empty cache,
-// measured through the full store content pass. The pass reads and verifies the
-// stored transcript; the in-memory cut itself is much cheaper and is pinned
-// separately by its own test. The budget was raised from the earlier 400 ms
-// estimate after the store-path measurement landed in the 430-505 ms range.
+// segment directory on the 32 MiB synthetic fixture, measured through the full
+// store content pass. The pass reads and verifies the stored transcript, so the
+// measurement is reported beside this target and warns when it is exceeded; it
+// is not a hard pass/fail on a shared runner.
 const TranscriptSegmentColdBuildBudget = 600 * time.Millisecond
+
+// TranscriptSegmentColdBuildCeiling is the fail-closed guard for the store-path
+// measurement. It exists to catch a catastrophic regression (a full-session
+// fold per page, a lost index, an unbounded read), not to police normal runner
+// contention: the recorded local range is roughly 0.43-0.51 s.
+const TranscriptSegmentColdBuildCeiling = 2 * time.Second
 
 // TranscriptWindowSpanDefault is the design number of assistant turns a window
 // collects on each side of its anchor.
