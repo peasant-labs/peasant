@@ -5192,6 +5192,7 @@ func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
 			HostSlug:                string(stored.Metadata.HostSlug),
 			IngestedMs:              stored.Metadata.Timestamp.Ingested,
 			SchemaVersion:           stored.Metadata.SchemaVersion,
+			AdapterVersion:          stored.Metadata.AdapterVersion,
 			SourceEvidenceSupported: true,
 			SourceFingerprint:       stored.SourceFingerprint,
 		},

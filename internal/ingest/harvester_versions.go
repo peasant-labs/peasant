@@ -157,6 +157,28 @@ func (p *Pipeline) resolveVersionTargets() map[Harness]HarvesterVersions {
 	return HarvesterVersionRegistry
 }
 
+// storedAdapterRevision is the revision a stored artifact records, or baseline
+// 1 when the producer omitted it. The selector's COALESCE(adapter_version, 1)
+// is the SQL twin; provenance keeps an omitted stamp unknown until an actual
+// extraction succeeds.
+func storedAdapterRevision(version *int) int {
+	if version == nil {
+		return 1
+	}
+	return *version
+}
+
+// adapterRevisionBehind reports whether a stored artifact was produced by an
+// adapter revision older than target. An absent harness yields a zero target
+// and is not behind, the same answer the previous map miss gave; declared
+// targets are validated positive.
+func adapterRevisionBehind(version *int, target HarvesterVersions) bool {
+	if target.AdapterVersion < 1 {
+		return false
+	}
+	return storedAdapterRevision(version) < target.AdapterVersion
+}
+
 func (p *Pipeline) versionTargets() map[Harness]HarvesterVersions {
 	if p.resolvedVersions != nil {
 		return p.resolvedVersions
