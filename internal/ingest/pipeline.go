@@ -3220,7 +3220,14 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		transcriptPath := filepath.Join(filepath.Dir(metaPath), fmt.Sprintf("%s--transcript.%s", session.SessionID, session.SourceFormat))
 		transcript, transcriptErr := p.fs.ReadFile(transcriptPath)
 		matchingEvidence := readErr == nil && transcriptErr == nil && bytes.Equal(evidence, want)
-		matchingCapture := matchingEvidence && existing.SchemaVersion >= CurrentSchemaVersion && existing.ContentHash == schema.ComputeTranscriptHash(transcript)
+		// The stored producer revision is part of the evidence: an artifact
+		// written by an older parser keeps its old projection and failure text
+		// even when the source bytes and marker still match. A file-only
+		// harvest has no store row to carry that rule, so it is applied here.
+		matchingCapture := matchingEvidence &&
+			!adapterRevisionBehind(existing.AdapterVersion, p.versionTargets()[session.Harness]) &&
+			existing.SchemaVersion >= CurrentSchemaVersion &&
+			existing.ContentHash == schema.ComputeTranscriptHash(transcript)
 		if matchingCapture {
 			return DiffUnchanged, nil
 		}
