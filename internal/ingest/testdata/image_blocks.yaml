@@ -1,0 +1,55 @@
+cases:
+  - name: text_only_keeps_carrier
+    role: user
+    blocks:
+      - {type: text, text: hello}
+    want:
+      - {depth: 0, entry_type: text, text: hello}
+  - name: text_then_image_emits_every_block
+    role: user
+    blocks:
+      - {type: text, text: look}
+      - {type: image, media_type: image/png}
+    want:
+      - {depth: 0, entry_type: text}
+      - {depth: 1, entry_type: text, part_type: text, text: look}
+      - {depth: 1, entry_type: image, part_type: image, has_ref: true}
+  - name: image_then_text_keeps_source_order
+    role: assistant
+    blocks:
+      - {type: image, media_type: image/jpeg}
+      - {type: text, text: after}
+    want:
+      - {depth: 0, entry_type: text}
+      - {depth: 1, entry_type: image, part_type: image, has_ref: true}
+      - {depth: 1, entry_type: text, part_type: text, text: after}
+  - name: image_only_keeps_empty_carrier
+    role: user
+    blocks:
+      - {type: image, media_type: image/png}
+    want:
+      - {depth: 0, entry_type: text, text: ""}
+      - {depth: 1, entry_type: image, part_type: image, has_ref: true}
+  - name: webp_is_unsupported
+    role: user
+    blocks:
+      - {type: image, media_type: image/webp}
+    want:
+      - {depth: 0, entry_type: text, text: ""}
+      - {depth: 1, entry_type: image, part_type: image, omitted_reason: unsupported, has_ref: false}
+  - name: gif_is_unsupported
+    role: assistant
+    blocks:
+      - {type: text, text: before}
+      - {type: image, media_type: image/gif}
+    want:
+      - {depth: 0, entry_type: text}
+      - {depth: 1, entry_type: text, part_type: text, text: before}
+      - {depth: 1, entry_type: image, part_type: image, omitted_reason: unsupported, has_ref: false}
+  - name: attachment_payload_emits_image
+    record: attachment
+    blocks:
+      - {type: image, media_type: image/png}
+    want:
+      - {depth: 0, entry_type: text}
+      - {depth: 1, entry_type: image, part_type: image, has_ref: true}

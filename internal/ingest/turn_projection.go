@@ -488,6 +488,21 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra) []Turn
 		}
 	}
 
+	// Image-bearing messages keep every text and image child as an ordered part
+	// of the depth-0 carrier. The children are not their own turns.
+	imageParts := imagePartsByParent(entries)
+	for _, entry := range entries {
+		if entry.ParentIndex == nil {
+			continue
+		}
+		if _, ok := imageParts[*entry.ParentIndex]; !ok {
+			continue
+		}
+		if entry.EntryType == schema.EntryTypeImage || (entry.EntryType == schema.EntryTypeText && entry.PartType != nil && *entry.PartType == "text") {
+			suppress[entry.EntryIndex] = true
+		}
+	}
+
 	// Pass 3: Emit turns.
 	turns := make([]Turn, 0, len(entries))
 	turnObservations := make(map[int]entryModelObservation)
@@ -535,7 +550,14 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra) []Turn
 			}
 		}
 
+		parts := imageParts[e.EntryIndex]
+		if e.ContentPreview == nil || *e.ContentPreview == "" {
+			if joined := joinedPartText(parts); joined != "" {
+				content = joined
+			}
+		}
 		t := Turn{
+			Parts:          parts,
 			ControlKind:    controlKind,
 			SourceEntryRef: evidence[e.EntryIndex].SourceRef,
 			Usage:          evidence[e.EntryIndex].Usage,
@@ -658,6 +680,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra) []Turn
 	for _, t := range turns {
 		hasContent := strings.TrimSpace(t.Content) != ""
 		hasTools := len(t.ToolCalls) > 0
+		hasParts := len(t.Parts) > 0
 		hasObservation := turnObservations[t.Index].present
 		// An empty depth-0 system turn is never a turn, whatever record kind
 		// produced it: a managed generation puts a source ref on every entry,
@@ -667,7 +690,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra) []Turn
 		// whether a turn that carries content, a tool call, a command or an
 		// observation survives.
 		suppressionCandidate := t.SourceEntryRef == "" || (t.Role == schema.RoleSystem && t.Depth == 0)
-		if suppressionCandidate && t.Command == nil && suppressEmptyTurn(hasContent, hasTools, hasObservation) {
+		if suppressionCandidate && t.Command == nil && !hasParts && suppressEmptyTurn(hasContent, hasTools, hasObservation) {
 			continue
 		}
 		filtered = append(filtered, t)

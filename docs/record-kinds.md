@@ -16,7 +16,7 @@ remain errors, not successful unknown-kind captures.
 - **Namespace** separates discriminator domains. Equal record and block names
   are not the same key. **Match** is literal unless explicitly marked prefix.
 - **Status** is the closed set below, listed with what this build declares.
-  **represented** (interpreted entries or owning-entry state) — 279 rows;
+  **represented** (interpreted entries or owning-entry state) — 281 rows;
   **tracked-only** (stored non-conversation evidence outside interpreted
   transcript entries) — 5 rows; **ignored-control** (no row; the capture
   accounts for the kind and can still certify complete) — 82 rows;
@@ -57,11 +57,11 @@ integration suites. Publication requires validated retained evidence, partial
 signaling and the receiver's preservation capability; failed or oversized
 transfer must not silently discard evidence. Schema release/tag precedes pins.
 
-## claude-code (adapter 4, indexer 23)
+## claude-code (adapter 4, indexer 24)
 
 Baseline index format: 1.
 
-Managed generation: adapter 4, indexer 24, index format 2.
+Managed generation: adapter 4, indexer 25, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -104,6 +104,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | content_block | `tool_use` | literal | represented | no | tool name and arguments |  | `content_capture.go captureContentBlockKinds; content_capture.go validateCaptureContent` |
 | retained-format-1 | content_block | `tool_result` | literal | represented | yes | tool output |  | `content_capture.go captureContentBlockKinds; content_capture.go validateCaptureContent` |
 | retained-format-1 | content_block | `tool_reference` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go captureContentBlockKinds; content_capture.go validateCaptureContent` |
+| retained-format-1 | content_block | `image` | literal | represented | yes | textual media marker |  | `content_capture.go captureContentBlockKinds; content_capture.go validateCaptureContent` |
 | native-generation | record | `user` | literal | represented | yes | session entries |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | native-generation | record | `assistant` | literal | represented | yes | session entries |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
 | native-generation | record | `human` | literal | represented | yes | session entries |  | `content_capture.go claudeStrictRecordKinds; content_capture.go claudeCaptureRecordValidator; claude_control_records.go claudeControlRecordTypes; claude_control_records.go isClaudeControlRecordType` |
@@ -141,6 +142,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | content_block | `tool_use` | literal | represented | no | tool name and arguments |  | `content_capture.go captureContentBlockKinds; claude_indexer.go decomposeClaudeContentBlocks` |
 | native-generation | content_block | `tool_result` | literal | represented | yes | tool output |  | `content_capture.go captureContentBlockKinds; claude_indexer.go decomposeClaudeContentBlocks` |
 | native-generation | content_block | `tool_reference` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go captureContentBlockKinds; claude_indexer.go decomposeClaudeContentBlocks` |
+| native-generation | content_block | `image` | literal | represented | yes | textual media marker |  | `content_capture.go captureContentBlockKinds; claude_indexer.go decomposeClaudeContentBlocks` |
 
 ## codex (adapter 2, indexer 19)
 

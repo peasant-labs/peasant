@@ -2118,6 +2118,9 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			// surface silently and change this dispatch, so a wrapper owns its
 			// optional surfaces explicitly.
 			usedGenerationCandidate := false
+			if persister, ok := p.store.(ImagePersister); ok {
+				ctx = WithImagePersister(ctx, persister)
+			}
 			if declared != strictIndexFormat {
 				candidate, builder, candidateErr := p.buildGenerationCandidate(ctx, input, indexer)
 				if builder {

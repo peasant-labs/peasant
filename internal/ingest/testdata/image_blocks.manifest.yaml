@@ -1,0 +1,8 @@
+requiredNames:
+  - text_only_keeps_carrier
+  - text_then_image_emits_every_block
+  - image_then_text_keeps_source_order
+  - image_only_keeps_empty_carrier
+  - webp_is_unsupported
+  - gif_is_unsupported
+  - attachment_payload_emits_image

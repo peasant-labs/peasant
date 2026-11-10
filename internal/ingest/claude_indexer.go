@@ -113,7 +113,7 @@ func (idx *ClaudeIndexer) IndexTranscriptResult(ctx context.Context, session Dis
 // IndexTranscriptBytesResult consumes precisely the supplied transcript snapshot.
 func (idx *ClaudeIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
 	completion := &indexCompletion{ctx: ctx, session: session}
-	entries, err := idx.parseJSONLWithCompletion(session.SessionID, data, completion)
+	entries, err := idx.parseJSONLWithCompletion(ctx, session.SessionID, data, completion)
 	return completion.result(entries, err)
 }
 
@@ -136,7 +136,7 @@ func (idx *ClaudeIndexer) IndexTranscript(_ context.Context, session DiscoveredS
 	if err != nil {
 		return nil, fmt.Errorf("claude indexer: read %s: %w", session.SourcePath, err)
 	}
-	return idx.parseJSONL(session.SessionID, data)
+	return idx.parseJSONL(context.Background(), session.SessionID, data)
 }
 
 // IndexTranscriptBytes parses a Claude JSONL transcript from the provided bytes.
@@ -146,17 +146,20 @@ func (idx *ClaudeIndexer) IndexTranscript(_ context.Context, session DiscoveredS
 // transcript as recorded: nothing on the ingest path redacts transcript content
 // at any level a user can choose.
 func (idx *ClaudeIndexer) IndexTranscriptBytes(_ context.Context, session DiscoveredSession, data []byte) ([]schema.SessionEntry, error) {
-	return idx.parseJSONL(session.SessionID, data)
+	return idx.parseJSONL(context.Background(), session.SessionID, data)
 }
 
 // parseJSONL is the shared JSONL parsing kernel used by both IndexTranscript and
 // IndexTranscriptBytes. Malformed lines are skipped (not fatal).
-func (idx *ClaudeIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema.SessionEntry, error) {
-	return idx.parseJSONLWithCompletion(sessionID, data, nil)
+func (idx *ClaudeIndexer) parseJSONL(ctx context.Context, sessionID SessionID, data []byte) ([]schema.SessionEntry, error) {
+	return idx.parseJSONLWithCompletion(ctx, sessionID, data, nil)
 }
 
-func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
-	return idx.parseClaudeRecords(context.Background(), sessionID, data, completion, false)
+func (idx *ClaudeIndexer) parseJSONLWithCompletion(ctx context.Context, sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return idx.parseClaudeRecords(ctx, sessionID, data, completion, false)
 }
 
 // parseClaudeRecords keeps the decoded envelope local to one record. Managed
@@ -277,15 +280,22 @@ func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID Sess
 		entryIndex++
 
 		// Full-depth decomposition: emit depth=1 entries for each content block.
-		if idx.fullDepth {
-			childEntries := decomposeClaudeContentBlocks(sessionID, &entryIndex, parentIndex, line, idx.fullContent, askUserCallIDs)
+		// An image-bearing message decomposes even when full depth is off, so
+		// its text and image blocks stay in source order instead of being skipped.
+		if idx.fullDepth || claudeLineHasImage(line) {
+			childEntries, err := decomposeClaudeContentBlocks(ctx, idx, sessionID, &entryIndex, parentIndex, line, idx.fullContent, askUserCallIDs)
+			if err != nil {
+				return nil, err
+			}
 			// Propagate reclassified role to depth=1 children — if the parent
 			// was reclassified (e.g. system-injected skill body), children must
 			// inherit the reclassified role, not the original JSONL role.
 			if entry.Role == RoleSystem {
 				for i := range childEntries {
 					childEntries[i].Role = RoleSystem
-					childEntries[i].EntryType = EntryTypeSystem
+					if childEntries[i].EntryType != schema.EntryTypeImage {
+						childEntries[i].EntryType = EntryTypeSystem
+					}
 				}
 			}
 
@@ -709,6 +719,7 @@ type claudeFullBlock struct {
 	Thinking  string          `json:"thinking"` // Claude puts the thinking trace text here, not in `text`.
 	Content   json.RawMessage `json:"content"`
 	Input     json.RawMessage `json:"input"`
+	Source    json.RawMessage `json:"source"`
 	IsError   bool            `json:"is_error"`
 }
 
@@ -718,22 +729,23 @@ type claudeFullBlock struct {
 // askUserCallIDs is the set of tool_call_ids that correspond to AskUserQuestion tool_use blocks
 // seen earlier in the transcript; tool_result blocks that reference these IDs keep role=user
 // (genuine user responses), while all other tool_result blocks are reclassified to role=tool.
-func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIndex int, line claudeIndexLine, fullContent bool, askUserCallIDs map[string]bool) []schema.SessionEntry {
+func decomposeClaudeContentBlocks(ctx context.Context, idx *ClaudeIndexer, sessionID SessionID, entryIndex *int, parentIndex int, line claudeIndexLine, fullContent bool, askUserCallIDs map[string]bool) ([]schema.SessionEntry, error) {
 	if fullContent && len(line.Message.Content) == 0 && line.Type == "system" {
 		line.Message.Content = line.Content
 		line.Message.Role = RoleSystem.String()
 	}
 
-	if len(line.Message.Content) == 0 {
-		return nil
+	contentImages, attachedImages := claudeLineImages(line)
+	if len(line.Message.Content) == 0 && len(attachedImages) == 0 {
+		return nil, nil
 	}
 
 	var blocks []claudeFullBlock
-	if json.Unmarshal(line.Message.Content, &blocks) != nil {
-		return nil // plain string content or unparseable — no depth=1 entries
+	if len(line.Message.Content) > 0 && json.Unmarshal(line.Message.Content, &blocks) != nil {
+		blocks = nil
 	}
-	if len(blocks) == 0 {
-		return nil
+	if len(blocks) == 0 && len(attachedImages) == 0 {
+		return nil, nil
 	}
 
 	role := Role(line.Message.Role)
@@ -742,8 +754,9 @@ func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIn
 	}
 	// The carrier already holds a plain user prompt's whole text. A mixed
 	// tool-result wrapper keeps its per-block decomposition so its children can
-	// be folded as tool calls.
-	plainUserPrompt := role == RoleUser
+	// be folded as tool calls. An image-bearing message does not skip text:
+	// every block is emitted in source order.
+	plainUserPrompt := role == RoleUser && len(contentImages) == 0 && len(attachedImages) == 0
 	if plainUserPrompt {
 		for _, block := range blocks {
 			if block.Type == "tool_result" {
@@ -831,6 +844,15 @@ func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIn
 					entry.ToolOutput = &s
 				}
 			}
+		case "image":
+			source := imageSourceFromRaw(block.Source)
+			child, err := idx.imageChildEntry(ctx, sessionID, *entryIndex, parentIndex, role, "main", source)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, child)
+			*entryIndex++
+			continue
 		case "thinking":
 			pt := block.Type
 			entry.PartType = &pt
@@ -863,8 +885,18 @@ func decomposeClaudeContentBlocks(sessionID SessionID, entryIndex *int, parentIn
 		entries = append(entries, entry)
 		*entryIndex++
 	}
+	if len(contentImages) == 0 {
+		for _, source := range attachedImages {
+			child, err := idx.imageChildEntry(ctx, sessionID, *entryIndex, parentIndex, role, "main", source)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, child)
+			*entryIndex++
+		}
+	}
 
-	return entries
+	return entries, nil
 }
 
 // classifyClaudeEntry determines EntryType and Role from a Claude JSONL line.
