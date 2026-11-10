@@ -157,7 +157,7 @@ func assertNoImageBytes(t *testing.T, seam string, extra *string, fixture contro
 			t.Fatalf("%s[%q] is not JSON: %v", seam, key, err)
 		}
 		if err := json.Unmarshal([]byte(want), &wantValue); err != nil {
-			t.Fatalf("fixture want is not JSON: %v", err)
+			wantValue = want
 		}
 		gotEncoded, _ := json.Marshal(gotValue)
 		wantEncoded, _ := json.Marshal(wantValue)

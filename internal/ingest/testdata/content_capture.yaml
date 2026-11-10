@@ -58,6 +58,7 @@ required_names:
   - claude-control-atis-latch
   - claude-control-attachment
   - claude-control-attachment-oversized
+  - claude-control-attachment-oversized-shape-preview
   - claude-control-bridge-session
   - claude-control-started
   - claude-control-cost-state
@@ -507,6 +508,22 @@ cases:
     want_part_type: attachment
     want_role: system
     want_preview: "attachment"
+    want_extra_keys: [attachmentType, kind, rawBytes]
+    want_extra_members:
+      kind: attachment
+      attachmentType: hook_success
+    want_extra_absent: [attachment, hookData, uuid]
+    want_raw_bytes_min: 262144
+  - name: claude-control-attachment-oversized-shape-preview
+    # The preview is computed from the stripped payload before the cap, so an
+    # oversized record still renders its safe shape instead of only the kind.
+    harness: claude-code
+    control: true
+    oversized: true
+    source: '{"type":"attachment","attachment":{"type":"hook_success","hookName":"post-tool","hookData":TEXT},"uuid":"at-big-hook"}'
+    want_part_type: attachment
+    want_role: system
+    want_preview: "post-tool"
     want_extra_keys: [attachmentType, kind, rawBytes]
     want_extra_members:
       kind: attachment

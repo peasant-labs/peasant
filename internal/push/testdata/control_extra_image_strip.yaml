@@ -14,3 +14,9 @@ cases:
     want_extra_members:
       attachment: '{"type":"image","source":{"type":"base64","media_type":"image/jpeg","byteSize":300000}}'
     want_absent: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  - name: flat-image-source-data-absent-from-publication
+    source: '{"type":"attachment","attachmentType":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="},"uuid":"at-flat-image"}'
+    want_extra_members:
+      attachmentType: image
+      source: '{"type":"base64","media_type":"image/png","byteSize":8}'
+    want_absent: "iVBORw0KGgo="

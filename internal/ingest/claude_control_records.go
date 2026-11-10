@@ -238,60 +238,73 @@ func claudeAttachmentType(payload map[string]json.RawMessage) string {
 }
 
 // claudeControlPayloadWithoutImageBytes returns the payload with an embedded
-// image's base64 source data replaced by its decoded byte size. The retained
-// control payload keeps the image's identity (media type and size) and never
-// its bytes, so a stored or published Extra cannot carry a screenshot. The
-// caller's payload map is not modified.
+// image's base64 source data replaced by its decoded byte size. It handles both
+// attachment shapes: the nested attachment object the real Claude record uses,
+// and the flat fallback that carries attachmentType and source at the top
+// level. The retained control payload keeps the image's identity (media type
+// and size) and never its bytes, so a stored or published Extra cannot carry a
+// screenshot. The caller's payload map is not modified.
 func claudeControlPayloadWithoutImageBytes(payload map[string]json.RawMessage) map[string]json.RawMessage {
-	rawAttachment, ok := payload["attachment"]
-	if !ok {
+	if rawAttachment, ok := payload["attachment"]; ok {
+		var attachment map[string]json.RawMessage
+		if json.Unmarshal(rawAttachment, &attachment) == nil {
+			if stripped, changed := claudeFieldsWithoutImageBytes(attachment); changed {
+				encoded, err := json.Marshal(stripped)
+				if err == nil {
+					return claudePayloadWithField(payload, "attachment", encoded)
+				}
+			}
+		}
+	}
+	stripped, changed := claudeFieldsWithoutImageBytes(payload)
+	if !changed {
 		return payload
 	}
-	var attachment map[string]json.RawMessage
-	if json.Unmarshal(rawAttachment, &attachment) != nil {
-		return payload
-	}
-	rawSource, ok := attachment["source"]
+	return stripped
+}
+
+// claudeFieldsWithoutImageBytes returns a copy of fields with an embedded
+// image's base64 source data replaced by its decoded byte size, reporting
+// whether it changed anything. fields is never mutated.
+func claudeFieldsWithoutImageBytes(fields map[string]json.RawMessage) (map[string]json.RawMessage, bool) {
+	rawSource, ok := fields["source"]
 	if !ok {
-		return payload
+		return fields, false
 	}
 	var source map[string]json.RawMessage
 	if json.Unmarshal(rawSource, &source) != nil {
-		return payload
+		return fields, false
 	}
 	rawData, ok := source["data"]
 	if !ok {
-		return payload
+		return fields, false
 	}
 	var data string
 	if json.Unmarshal(rawData, &data) != nil {
-		return payload
+		return fields, false
 	}
 	mediaType := claudeControlValue(source, "media_type", "mediaType")
 	if !strings.HasPrefix(mediaType, "image/") {
-		return payload
+		return fields, false
 	}
 	delete(source, "data")
 	source["byteSize"] = json.RawMessage(strconv.Itoa(claudeBase64ByteSize(data)))
 	encodedSource, err := json.Marshal(source)
 	if err != nil {
-		return payload
+		return fields, false
 	}
-	strippedAttachment := make(map[string]json.RawMessage, len(attachment))
-	for key, value := range attachment {
-		strippedAttachment[key] = value
+	return claudePayloadWithField(fields, "source", encodedSource), true
+}
+
+// claudePayloadWithField returns a shallow copy of payload with one field
+// replaced.
+func claudePayloadWithField(payload map[string]json.RawMessage, key string, value json.RawMessage) map[string]json.RawMessage {
+	clone := make(map[string]json.RawMessage, len(payload))
+	for existing, field := range payload {
+		clone[existing] = field
 	}
-	strippedAttachment["source"] = encodedSource
-	encodedAttachment, err := json.Marshal(strippedAttachment)
-	if err != nil {
-		return payload
-	}
-	strippedPayload := make(map[string]json.RawMessage, len(payload))
-	for key, value := range payload {
-		strippedPayload[key] = value
-	}
-	strippedPayload["attachment"] = encodedAttachment
-	return strippedPayload
+	clone[key] = value
+	return clone
 }
 
 // claudeBase64ByteSize returns the decoded byte size of base64 data, falling
@@ -346,7 +359,7 @@ func claudeAttachmentPreview(payload map[string]json.RawMessage) string {
 		}
 		return "attachment"
 	case "total_tokens_reminder":
-		if count, ok := claudeAttachmentCount(fields, "tokensLeft", "tokensRemaining", "remainingTokens", "totalTokens", "tokens"); ok {
+		if count, ok := claudeAttachmentCount(fields, "tokensLeft", "tokensRemaining", "remainingTokens"); ok {
 			return strconv.Itoa(count) + " tokens left"
 		}
 		return "attachment"

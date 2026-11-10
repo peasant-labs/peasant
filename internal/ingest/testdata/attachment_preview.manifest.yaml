@@ -21,6 +21,7 @@ requiredNames:
   - output-style-absent
   - total-tokens-reminder
   - total-tokens-reminder-absent
+  - total-tokens-reminder-total-is-not-remaining
   - environment-snapshot
   - date
   - date-change
@@ -33,4 +34,6 @@ requiredNames:
   - image-jpeg-source-data-stripped
   - image-source-data-oversized-stripped
   - image-source-without-data
+  - flat-image-source-data-stripped
+  - flat-image-source-data-oversized-stripped
   - non-image-source-data-retained

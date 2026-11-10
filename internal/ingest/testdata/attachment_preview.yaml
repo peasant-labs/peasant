@@ -66,6 +66,9 @@ cases:
   - name: total-tokens-reminder-absent
     source: '{"type":"attachment","attachment":{"type":"total_tokens_reminder"},"uuid":"at-tokens-none"}'
     want_preview: "attachment"
+  - name: total-tokens-reminder-total-is-not-remaining
+    source: '{"type":"attachment","attachment":{"type":"total_tokens_reminder","totalTokens":5000},"uuid":"at-tokens-total"}'
+    want_preview: "attachment"
   - name: environment-snapshot
     source: '{"type":"attachment","attachment":{"type":"environment","environment":{"os":"linux","shell":"/bin/zsh"}},"uuid":"at-environment"}'
     want_preview: "environment snapshot"
@@ -119,6 +122,23 @@ cases:
     want_extra_keys: [attachment]
     want_extra_members:
       attachment: '{"type":"image","source":{"type":"base64","media_type":"image/png"}}'
+  - name: flat-image-source-data-stripped
+    source: '{"type":"attachment","attachmentType":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="},"uuid":"at-flat-image"}'
+    want_preview: "attachment"
+    want_extra_keys: [attachmentType, source]
+    want_extra_members:
+      attachmentType: image
+      source: '{"type":"base64","media_type":"image/png","byteSize":8}'
+    want_absent_text: "iVBORw0KGgo="
+  - name: flat-image-source-data-oversized-stripped
+    source: '{"type":"attachment","attachmentType":"image","source":{"type":"base64","media_type":"image/jpeg","data":"IMAGE_BYTES"},"uuid":"at-flat-image-big"}'
+    image_data_bytes: 400000
+    want_preview: "attachment"
+    want_extra_keys: [attachmentType, source]
+    want_extra_members:
+      attachmentType: image
+      source: '{"type":"base64","media_type":"image/jpeg","byteSize":300000}'
+    want_absent_text: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
   - name: non-image-source-data-retained
     source: '{"type":"attachment","attachment":{"type":"file","source":{"type":"text","media_type":"text/plain","data":"keep-me"}},"uuid":"at-file"}'
     want_preview: "attachment"

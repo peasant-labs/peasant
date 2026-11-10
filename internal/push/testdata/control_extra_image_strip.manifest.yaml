@@ -2,3 +2,4 @@
 requiredNames:
   - image-source-data-absent-from-publication
   - image-source-data-oversized-absent-from-publication
+  - flat-image-source-data-absent-from-publication
