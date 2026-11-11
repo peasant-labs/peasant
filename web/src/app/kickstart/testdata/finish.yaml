@@ -1,0 +1,114 @@
+# The finish panel after a save: the server's next steps, the import's pushed
+# progress, the notes from reading sessions. It never installs a hook and
+# never publishes. Each case reaches the review stop and saves.
+requiredNames:
+  - auto-publish-link-navigates-to-real-section
+  - diagnostics-render
+  - import-now-disabled-while-running
+  - no-hook-install
+cases:
+  - name: auto-publish-link-navigates-to-real-section
+    # The href is a section the settings page has; the test checks that against
+    # the settings catalogue, so a rename there fails here.
+    section: automatic-publishing
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: /home/ada/.config/peasant/config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [your setup is saved, what to do next]
+      - expectLink: {name: choose automatic publishing rules, href: "/settings?section=automatic-publishing"}
+      - expectLink: {name: change a setting later, href: /settings}
+      - expectLink: {name: open the dashboard, href: /}
+      - expectLink: {name: connect to peasant online later, href: "/settings?section=account"}
+      - expectLink: {name: "publish later, explicitly", href: /share}
+
+  - name: diagnostics-render
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config]
+          diagnostics:
+            - "withheld one session: two saved rules both match the branch feature/x"
+            - "withheld one session: its project path is not on this computer"
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText:
+          - notes from reading your sessions
+          - "withheld one session: two saved rules both match the branch feature/x"
+          - "withheld one session: its project path is not on this computer"
+
+  - name: import-now-disabled-while-running
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config]
+      "POST /api/v1/sync/ingest": {body: {status: running}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [importing]
+      - expectControl: {role: button, name: import now, disabled: true}
+      # An earlier import was still running when the save started the next.
+      - push: {kind: ingest, sessionId: ses-full, revision: 3, ingest: {state: busy, note: an import started earlier is still running, new: 0, updated: 0}}
+      - expectText: [an earlier import is still running, an import started earlier is still running]
+      - expectControl: {role: button, name: import now, disabled: false}
+      - click: import now
+      - expectCalls: {route: "POST /api/v1/sync/ingest", count: 1}
+      - expectControl: {role: button, name: import now, disabled: true}
+      - push: {kind: ingest, sessionId: ses-full, revision: 3, ingest: {state: failed, error: the store is locked by another process, new: 2, updated: 0}}
+      - expectText: [import failed, the store is locked by another process]
+      - expectControl: {role: button, name: import now, disabled: false}
+
+  - name: no-hook-install
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [your setup is saved]
+      - expectNoControlMatching: {role: button, pattern: "install|publish now|push|share"}
+      - expectNoControlMatching: {role: link, pattern: "install a hook|publish now"}
+      # The save and the import are the only writes: no hook, no rule, no village call.
+      - expectNoCalls: "hooks|auto-publish|/sync/push|/sync/login|/village/"

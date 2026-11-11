@@ -19,6 +19,10 @@ requiredNames:
   - absurd
   - absurd-answered
   - selection-scope
+  - boundary-skipped
+  - connected-with-answer
+  - redacted-differently
+  - no-example
 cases:
   - name: fresh
     session:
@@ -404,3 +408,32 @@ cases:
               kind: notice
               label: importing transcripts
               value: null
+
+  - name: boundary-skipped
+    extends: fresh
+    set:
+      revision: 3
+      connect: {offered: false}
+
+  - name: connected-with-answer
+    extends: second-tab-answer
+    set:
+      revision: 4
+      village: {connected: true}
+      stops[village].visible: false
+      stops[destination].visible: true
+
+  - name: redacted-differently
+    extends: fresh
+    set:
+      revision: 2
+      stops[privacy].fields[redaction-level].example:
+        - {kind: label, text: your text now}
+        - {kind: before, text: "token sk-live-123 in /srv/app"}
+        - {kind: after, text: "token [SECRET] in [PATH]"}
+
+  - name: no-example
+    extends: fresh
+    set:
+      revision: 2
+      stops[privacy].fields[redaction-level].example: []

@@ -36,4 +36,6 @@ consumerScan:
   # Production code that reads these sets must compare members, never tokens.
   roots:
     - src/lib/kickstart
+    - src/components/kickstart
+    - src/app/kickstart
   definitionSite: src/lib/kickstart/values.ts

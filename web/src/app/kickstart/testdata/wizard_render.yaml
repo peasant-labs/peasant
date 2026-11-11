@@ -1,0 +1,167 @@
+# The mounted /kickstart route against served sessions (models in
+# src/test/fixtures/kickstart/models.yaml). Each case scripts the server's
+# answers and then acts as a person would; the assertions read what the page
+# draws. The page must draw the served model and decide nothing on top of it.
+requiredNames:
+  - synthetic-model-with-absurd-labels
+  - hidden-stop-not-rendered
+  - offered-connect-rendered-on-the-stop-after-afterStop
+  - option-set-from-server-only
+  - no-client-visibility-decision
+  - review-stacks-rows-summary-then-collapsed-diff
+  - both-themes
+  - conflict-choice-is-sent-per-field
+  - commit-refusal-shows-the-rows-and-saves-nothing
+cases:
+  - name: synthetic-model-with-absurd-labels
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: absurd}}
+    steps:
+      - expectText:
+          - ZEBRA Crossing No. 9
+          - Do what the zebra says.
+          - hint ONE
+          - hint two, with a comma
+          - Frobnicate The Quux
+          - A strange question.
+          - Quux ONE
+          - quux two
+          - QUUX THREE
+          - Wibble the wobble
+          - step 1 of 4
+      - expectControl: {role: radio, name: quux two, checked: true}
+      - expectControl: {role: radio, name: Quux ONE, checked: false}
+      - expectControl: {role: radio, name: QUUX THREE, checked: false}
+      - expectControl: {role: checkbox, name: Wibble the wobble, checked: true}
+      - expectNoText: [A Hidden Chamber, Spook everyone]
+
+  - name: hidden-stop-not-rendered
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - expectText: [step 1 of 8, peasant online]
+      - expectNoText: [auto-ingest, sharing]
+      - click: continue
+      - click: continue
+      - expectText: [publication preference]
+      - expectNoText: [auto-ingest, sharing]
+
+  - name: offered-connect-rendered-on-the-stop-after-afterStop
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: absurd}}
+      "PATCH /api/v1/kickstart/sessions/ses-odd": {body: {revision: 8, stale: false, view: {$model: absurd-answered}}}
+    steps:
+      # The server says the offer follows `zebra`: it is not drawn on `zebra`.
+      - expectNoText: [Shall the QUUX be woven into the loom?]
+      - click: continue
+      # The next visible stop is `wombat` (the stop between them is hidden):
+      # the offer is drawn there, in place of that stop's fields.
+      - expectText: [Shall the QUUX be woven into the loom?]
+      - expectControl: {role: button, name: nay}
+      - expectControl: {role: button, name: continue, present: false}
+      - expectNoText: [How deep]
+      - click: nay
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-odd", subset: {revision: 7, connectAnswer: skip}}
+      - expectText: [How deep, Not Very]
+      - expectNoText: [Shall the QUUX be woven into the loom?]
+
+  - name: option-set-from-server-only
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: absurd-answered}}
+    steps:
+      - expectControl: {role: radio, name: Quux ONE}
+      - expectControl: {role: radio, name: quux two}
+      - expectControl: {role: radio, name: QUUX THREE}
+      # Not one option of the real sets appears: nothing is hard-coded.
+      - expectNoText: [standard, keep local, CC0, private, 30 days]
+      - click: continue
+      - expectControl: {role: radio, name: Not Very}
+      - expectControl: {role: radio, name: Rather Deep}
+
+  - name: no-client-visibility-decision
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - expectText: [peasant online, step 1 of 8]
+      - expectNoText: [sharing]
+      # The server connects the village account and re-evaluates visibility:
+      # one stop leaves the rail and another joins it. The page only draws it.
+      - push: {kind: session, model: connected}
+      - expectText: [sharing, step 1 of 8]
+      - expectNoText: [peasant online]
+
+  - name: review-stacks-rows-summary-then-collapsed-diff
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: conflicted}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectText:
+          - saved values that changed while you set up
+          - your answer
+          - saved now
+          - your choices
+          - what this does
+          - nothing is published when setup finishes.
+          - exact changes to config.yaml
+      - expectOrder:
+          - saved values that changed while you set up
+          - your choices
+          - exact changes to config.yaml
+      - expectDetails: {summary: exact changes to config.yaml, open: false}
+
+  - name: both-themes
+    themes: [light, dark]
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - expectText: [peasant online, connect to peasant online now?, step 1 of 8]
+      - expectControl: {role: button, name: "yes"}
+      - expectControl: {role: button, name: "no"}
+      - expectControl: {role: button, name: continue}
+
+  - name: conflict-choice-is-sent-per-field
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: conflicted}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectText: [publication preference, redaction level]
+      # A choice field shows the option's label; a value the options do not name is shown as it is.
+      - expectText: [plan to publish later, keep local, do not publish]
+      - click: keep mine for publication preference
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-full", subset: {revision: 3, resolutions: {publication-preference: mine}}}
+      - click: take theirs for redaction level
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-full", subset: {revision: 3, resolutions: {redaction-level: theirs}}}
+
+  - name: commit-refusal-shows-the-rows-and-saves-nothing
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        status: 409
+        body:
+          error: a value you answered changed in your saved settings
+          conflicts:
+            - {field: publication-preference, stop: publication, label: publication preference, mine: share-later, theirs: keep-local}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-full/commit", count: 1}
+      - expectText: [nothing was saved, saved values that changed while you set up, publication preference]
+      - expectControl: {role: button, name: keep mine for publication preference}
+      # The page is still the review: nothing moved to the finish panel.
+      - expectNoText: [your setup is saved]

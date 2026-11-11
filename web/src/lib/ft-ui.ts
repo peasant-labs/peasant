@@ -39,6 +39,10 @@ import {
   EmptyState as FtEmptyState,
   FeedbackPanel as FtFeedbackPanel,
   GroupedMultiSelect,
+  DiffView,
+  Progress,
+  SelectionTree,
+  Spinner,
   HelperGroup as FtHelperGroup,
   HelperGroupListItem as FtHelperGroupListItem,
   HelperThreadRow as FtHelperThreadRow,
@@ -233,6 +237,10 @@ export const Skeleton = FtSkeleton as unknown as ComponentType<SkeletonProps>;
 // These take only their declared props at this app's call-sites — re-export as
 // shipped (their declared types are sufficient).
 export { GroupedMultiSelect, RedactionReview, WhereDoesThisGo };
+
+// The server-grouped selection forest, the unified hunk diff, the progress bar and the spinner:
+// their shipped declarations already carry their props.
+export { DiffView, Progress, SelectionTree, Spinner };
 
 // The settings page parts. Their declared props cover these call-sites; a row's
 // `data-*` attributes pass through to its element at runtime.

@@ -1,0 +1,122 @@
+# Village sign-in in the wizard: the village question at the start and the
+# server's connect offer at the license boundary. The sign-in is the app's
+# existing browser flow (POST /api/v1/sync/login, then GET /api/v1/sync/auth
+# until it says so); the page records an answer only once this computer is
+# signed in. Whether the offer is due is the server's `connect.offered`.
+requiredNames:
+  - connect-works
+  - continue-locally-works
+  - start-skip-still-offers-boundary-connect-after-license
+  - boundary-skip-suppresses-for-the-rest-of-the-session
+  - failed-login-re-offers
+  - late-login-flips-visibility-without-losing-answers
+cases:
+  - name: connect-works
+    fakeTimers: true
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "POST /api/v1/sync/login": {body: {status: pending}}
+      "GET /api/v1/sync/auth": [{body: {authenticated: false}}, {body: {authenticated: true, username: ada}}]
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false, view: {$model: connected}}}
+    steps:
+      - expectText: [connect to peasant online now?, peasant online]
+      - click: "yes"
+      - expectCalls: {route: "POST /api/v1/sync/login", count: 1}
+      - expectText: [finish signing in on the page that opened in your browser]
+      # Nothing is recorded while the sign-in is open.
+      - expectCalls: {route: "PATCH /api/v1/kickstart/sessions/ses-full", count: 0}
+      - advance: 2100
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-full", subset: {revision: 1, values: {village-connect: accept}}}
+      # The server hid the village stop and showed the sharing stop.
+      - expectText: [sharing]
+      - expectNoText: [connect to peasant online now?]
+
+  - name: continue-locally-works
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: boundary-offer}}}
+    steps:
+      - click: "no"
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-full", subset: {revision: 1, values: {village-connect: skip}}}
+      - expectNoCalls: "/sync/login"
+      # Declining moves on to the next visible stop.
+      - expectText: [step 2 of 8]
+
+  - name: start-skip-still-offers-boundary-connect-after-license
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: boundary-offer}}}
+    steps:
+      - click: "no"
+      # selection, publication, privacy, license: the offer follows the license.
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectText: [content license]
+      - expectNoText: [log in now to choose a default sharing visibility?]
+      - click: continue
+      # The next visible stop is retention (sharing is hidden while disconnected):
+      # the server's offer is drawn there, before its fields.
+      - expectText: [log in now to choose a default sharing visibility?]
+      - expectControl: {role: button, name: "yes"}
+      - expectControl: {role: button, name: "no"}
+      - expectNoText: [how long claude code keeps its transcripts]
+
+  - name: boundary-skip-suppresses-for-the-rest-of-the-session
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full":
+        - {body: {revision: 2, stale: false, view: {$model: boundary-offer}}}
+        - {body: {revision: 3, stale: false, view: {$model: boundary-skipped}}}
+    steps:
+      # The start skip leaves the boundary offer due; the boundary skip ends it.
+      - click: "no"
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectText: [log in now to choose a default sharing visibility?]
+      - click: "no"
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-full", subset: {revision: 2, connectAnswer: skip}}
+      - expectText: [how long claude code keeps its transcripts]
+      - expectNoText: [log in now to choose a default sharing visibility?]
+      # Going back and forward again does not bring the offer back.
+      - click: back
+      - click: continue
+      - expectNoText: [log in now to choose a default sharing visibility?]
+      - expectText: [how long claude code keeps its transcripts]
+
+  - name: failed-login-re-offers
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: boundary-offer}}}
+      "POST /api/v1/sync/login": {status: 500, body: {error: could not open the browser to sign in}}
+    steps:
+      - click: "no"
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectText: [log in now to choose a default sharing visibility?]
+      - click: "yes"
+      - expectText: [could not open the browser to sign in]
+      # The failed sign-in recorded nothing, so the offer is still the page.
+      - expectText: [log in now to choose a default sharing visibility?]
+      - expectControl: {role: button, name: "yes", disabled: false}
+      - expectCalls: {route: "PATCH /api/v1/kickstart/sessions/ses-full", count: 1}
+
+  - name: late-login-flips-visibility-without-losing-answers
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: second-tab-answer}}}
+    steps:
+      - click: "no"
+      - click: continue
+      - choose: plan to publish later
+      - expectControl: {role: radio, name: plan to publish later, checked: true}
+      - expectNoText: [sharing]
+      # Signing in elsewhere flips what the server shows; the answer stays.
+      - push: {kind: session, model: connected-with-answer}
+      - expectText: [sharing]
+      - expectNoText: [peasant online]
+      - expectControl: {role: radio, name: plan to publish later, checked: true}

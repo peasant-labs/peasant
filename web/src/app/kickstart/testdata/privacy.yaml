@@ -1,0 +1,54 @@
+# The privacy stop's example. The lines come from the server's real redactor
+# run on the current draft; the page has no sample of its own. When the server
+# withholds the example it says why, and the page shows that and no example.
+requiredNames:
+  - real-redactor-lines-for-current-draft
+  - failure-withholds-and-shows-actionable-error
+  - no-static-sample
+cases:
+  - name: real-redactor-lines-for-current-draft
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectText:
+          - redaction level
+          - your text
+          - open /home/ada/work/ledger and email ada@example.com
+          - open [PATH] and email [EMAIL]
+      - expectControl: {role: list, name: example for redaction level}
+      # The draft changed (another tab, or this one): the server sends lines for
+      # the new draft and the old ones are gone.
+      - push: {kind: answers, model: redacted-differently}
+      - expectText:
+          - your text now
+          - token sk-live-123 in /srv/app
+          - "token [SECRET] in [PATH]"
+      - expectNoText: [open /home/ada/work/ledger]
+
+  - name: failure-withholds-and-shows-actionable-error
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: privacy-refused}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectText:
+          - the redaction preview could not run, so no example is shown. restart peasant, then reopen this step.
+      - expectNoText: [open /home/ada, "[PATH]", "[EMAIL]"]
+      - expectControl: {role: list, name: example for redaction level, present: false}
+
+  - name: no-static-sample
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: no-example}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectText: [redaction level]
+      # The server sent no example and no refusal: the page shows none, and
+      # does not stand a sample of its own in its place.
+      - expectControl: {role: list, name: example for redaction level, present: false}
+      - expectNoText: ["[PATH]", "[EMAIL]", "[SECRET]", sk-live, ada@example.com, "/home/"]

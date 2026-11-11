@@ -97,10 +97,15 @@ export interface KickstartSessionApi {
   /** Answers sent and not yet settled. */
   readonly pending: number;
 
-  answer(key: string, value: LocalSettingValue): Promise<void>;
-  selectIds(ids: readonly string[]): Promise<void>;
-  resolve(field: string, resolution: KickstartResolution): Promise<void>;
-  answerConnect(answer: KickstartConnectAnswer): Promise<void>;
+  /**
+   * Each write resolves true once the server applied it and false when it was
+   * refused or could not be sent (see `answerError`), so a caller moves on only
+   * after a recorded answer.
+   */
+  answer(key: string, value: LocalSettingValue): Promise<boolean>;
+  selectIds(ids: readonly string[]): Promise<boolean>;
+  resolve(field: string, resolution: KickstartResolution): Promise<boolean>;
+  answerConnect(answer: KickstartConnectAnswer): Promise<boolean>;
   commit(): Promise<void>;
   rescan(): Promise<void>;
   reloadTree(): Promise<void>;
@@ -181,21 +186,27 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     }
   }, []);
 
-  const takeScan = useCallback((next: KickstartScan, revision: number): void => {
-    if (revision < scanRevision.current) return;
-    const wasDone = scanState.current !== null && scanState.current.state === KickstartScanState.Done;
+  /**
+   * Take a scan state. Returns true when it reads the forest again: the forest
+   * is not in any event, so it is read when a scan this page saw running ends.
+   * The first scan state seen is not that: the open reads the forest itself.
+   */
+  const takeScan = useCallback((next: KickstartScan, revision: number): boolean => {
+    if (revision < scanRevision.current) return false;
+    const previous = scanState.current;
     scanRevision.current = revision;
     scanState.current = next;
     setScan(next);
-    // The forest is not in any event: it is read again when a scan ends.
-    if (next.state === KickstartScanState.Done && !wasDone) void loadTree();
+    const ended = previous !== null && previous.state !== KickstartScanState.Done && next.state === KickstartScanState.Done;
+    if (ended) void loadTree();
+    return ended;
   }, [loadTree]);
 
-  const takeSession = useCallback((view: KickstartSession): void => {
-    if (view.id !== sessionId.current || view.revision < viewRevision.current) return;
+  const takeSession = useCallback((view: KickstartSession): boolean => {
+    if (view.id !== sessionId.current || view.revision < viewRevision.current) return false;
     viewRevision.current = view.revision;
     setSession(view);
-    takeScan(view.scan, view.revision);
+    return takeScan(view.scan, view.revision);
   }, [takeScan]);
 
   const takeIngest = useCallback((next: KickstartIngest): void => {
@@ -301,8 +312,8 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     fetchKickstartSession(id)
       .then((view) => {
         if (!alive.current || mine !== generation.current) return;
-        takeSession(view);
-        if (view.scan.state === KickstartScanState.Done) void loadTree();
+        const reloaded = takeSession(view);
+        if (!reloaded && view.scan.state === KickstartScanState.Done) void loadTree();
       })
       .catch((failure: unknown) => {
         if (!alive.current || mine !== generation.current) return;
@@ -314,28 +325,30 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
   }, [connected, finish, loadTree, takeSession]);
 
   /** Queue one write behind the ones before it, so each carries the revision its predecessor left. */
-  const write = useCallback((build: (revision: number) => KickstartAnswers): Promise<void> => {
-    const run = writes.current.then(async () => {
+  const write = useCallback((build: (revision: number) => KickstartAnswers): Promise<boolean> => {
+    const run = writes.current.then(async (): Promise<boolean> => {
       const id = sessionId.current;
-      if (id === null || ended.current) return;
+      if (id === null || ended.current) return false;
       const mine = generation.current;
       setPending((count) => count + 1);
       try {
         const result = await patchKickstartSession(id, build(viewRevision.current));
-        if (!alive.current || mine !== generation.current) return;
+        if (!alive.current || mine !== generation.current) return false;
         setAnswerError(null);
         setRefusal([]);
         if (result.stale && result.overwritten.length > 0) {
           setOverwritten((current) => [...current, ...result.overwritten]);
         }
         if (result.view !== null) takeSession(result.view);
+        return true;
       } catch (failure) {
         if (alive.current && mine === generation.current) setAnswerError(asError(failure));
+        return false;
       } finally {
         if (alive.current) setPending((count) => count - 1);
       }
     });
-    writes.current = run.catch(() => undefined);
+    writes.current = run.then(() => undefined);
     return run;
   }, [takeSession]);
 
