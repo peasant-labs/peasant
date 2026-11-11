@@ -87,9 +87,8 @@ type kickstartSpec struct {
 	HoldIngest bool `yaml:"holdIngest"`
 }
 
-// kickstartStep is one thing a case does or checks. Exactly one of Call,
-// Await, Events, Release, SetListings, SetVillage, Expire, WS, or WSEvents is
-// set.
+// kickstartStep is one thing a case does or checks. Exactly one of the fields
+// below is set.
 type kickstartStep struct {
 	// Call is "METHOD /path"; {name} is replaced by a saved value.
 	Call    string `yaml:"call"`
@@ -130,10 +129,10 @@ type kickstartStep struct {
 	Idle string `yaml:"idle"`
 	// SetStoredError changes the local-store failure the next scan meets.
 	SetStoredError *string `yaml:"setStoredError"`
-	// Commit drives the seam a commit uses.
+	// Commit holds a session in the state a save puts it in, or frees it. It is
+	// the one seam in the script: a save under way cannot be held open through
+	// the route, and a case that needs the state itself needs it held.
 	Commit *kickstartCommitStep `yaml:"commit"`
-	// Conflicts publishes conflict rows the way a commit does.
-	Conflicts *kickstartConflictsStep `yaml:"conflicts"`
 	// ConfigFile checks the configuration file on disk: "unchanged" or "absent".
 	ConfigFile string `yaml:"configFile"`
 
@@ -158,30 +157,11 @@ type kickstartStep struct {
 type kickstartCommitStep struct {
 	// Session is the saved name of the session id.
 	Session string `yaml:"session"`
-	// Action is begin, abort, or close.
+	// Action is begin, which freezes the session for a save, or abort, which
+	// frees it again.
 	Action string `yaml:"action"`
 	// Error is a substring the action's refusal must contain.
 	Error string `yaml:"error"`
-	// Answered and Resolutions are what begin must have read.
-	Answered    []string          `yaml:"answered"`
-	Resolutions map[string]string `yaml:"resolutions"`
-	// Seen is the file value a resolution must carry as the one the user saw.
-	Seen map[string]any `yaml:"seen"`
-	// Ingest publishes an ingest state after a close.
-	Ingest string `yaml:"ingest"`
-}
-
-type kickstartConflictsStep struct {
-	Session string              `yaml:"session"`
-	Rows    []kickstartConflict `yaml:"rows"`
-}
-
-type kickstartConflict struct {
-	Field  string `yaml:"field"`
-	Stop   string `yaml:"stop"`
-	Label  string `yaml:"label"`
-	Mine   any    `yaml:"mine"`
-	Theirs any    `yaml:"theirs"`
 }
 
 type kickstartEventSpec struct {
@@ -191,6 +171,11 @@ type kickstartEventSpec struct {
 	JSON     map[string]any `yaml:"json"`
 	Absent   []string       `yaml:"absent"`
 	Len      map[string]int `yaml:"len"`
+	// After names a saved revision. The event's revision must be the next one:
+	// the events of one session count on without a gap or a repeat.
+	After string `yaml:"after"`
+	// Save maps a name to the dotted path in the event it keeps.
+	Save map[string]string `yaml:"save"`
 }
 
 type kickstartWSStep struct {
@@ -521,8 +506,6 @@ func (w *kickstartWorld) run(index int, step kickstartStep) {
 		w.storedError.Store(step.SetStoredError)
 	case step.Commit != nil:
 		w.commit(index, *step.Commit)
-	case step.Conflicts != nil:
-		w.conflicts(index, *step.Conflicts)
 	case step.ConfigFile != "":
 		w.configFile(index, step.ConfigFile)
 	case step.ReleaseIngest:
@@ -770,6 +753,16 @@ func (w *kickstartWorld) eventMatches(event schema.LocalKickstartEvent, spec kic
 	if spec.Revision != nil && event.Revision != *spec.Revision {
 		return false, fmt.Sprintf("revision %d, want %d", event.Revision, *spec.Revision)
 	}
+	if spec.After != "" {
+		saved, ok := w.vars[spec.After]
+		previous, isNumber := saved.(float64)
+		if !ok || !isNumber {
+			return false, fmt.Sprintf("no revision was saved as %q", spec.After)
+		}
+		if want := uint64(previous) + 1; event.Revision != want {
+			return false, fmt.Sprintf("revision %d, want %d, the one after the saved %s", event.Revision, want, spec.After)
+		}
+	}
 	for path, want := range spec.JSON {
 		got, found := jsonPath(decoded, path)
 		if !found || !reflect.DeepEqual(normalizeJSON(got), normalizeJSON(w.substitute(want))) {
@@ -791,6 +784,27 @@ func (w *kickstartWorld) eventMatches(event schema.LocalKickstartEvent, spec kic
 	return true, ""
 }
 
+// keep saves the values a matched event's spec asks to keep.
+func (w *kickstartWorld) keep(index int, event schema.LocalKickstartEvent, spec kickstartEventSpec) {
+	w.t.Helper()
+	if len(spec.Save) == 0 {
+		return
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		w.fail(index, "encode the event to keep from it: %v", err)
+	}
+	var decoded any
+	_ = json.Unmarshal(data, &decoded)
+	for name, path := range spec.Save {
+		got, found := jsonPath(decoded, path)
+		if !found {
+			w.fail(index, "cannot save %s: %s is absent from the %s event", name, path, event.Kind)
+		}
+		w.vars[name] = got
+	}
+}
+
 // await waits for a published event to match, then moves the cursor past it.
 func (w *kickstartWorld) await(index int, spec kickstartEventSpec) {
 	w.t.Helper()
@@ -801,6 +815,7 @@ func (w *kickstartWorld) await(index int, spec kickstartEventSpec) {
 		for offset, event := range events {
 			if ok, _ := w.eventMatches(event, spec); ok {
 				w.cursor = position + offset + 1
+				w.keep(index, event, spec)
 				return
 			}
 		}
@@ -827,6 +842,7 @@ func (w *kickstartWorld) events(index int, specs []kickstartEventSpec) {
 				if ok, why := w.eventMatches(events[i], spec); !ok {
 					w.fail(index, "event %d (%s): %s", i+1, events[i].Kind, why)
 				}
+				w.keep(index, events[i], spec)
 			}
 			w.cursor += len(specs)
 			return
@@ -948,7 +964,9 @@ func (w *kickstartWorld) wsRead(index int, read kickstartWSRead) {
 	}
 }
 
-// commit drives the seam the commit owner uses, the way a commit route would.
+// commit holds a session in the state a save puts it in, or frees it. A save
+// under way cannot be held open through the route: it is one request that ends
+// when the save does. Every other part of a save is driven through the route.
 func (w *kickstartWorld) commit(index int, step kickstartCommitStep) {
 	w.t.Helper()
 	id := fmt.Sprint(w.vars[step.Session])
@@ -958,50 +976,13 @@ func (w *kickstartWorld) commit(index int, step kickstartCommitStep) {
 	case "begin":
 		var draft kickstartDraft
 		draft, err = sessions.beginCommit(id)
-		if err == nil {
-			answered := make([]string, len(draft.Answered))
-			for i, key := range draft.Answered {
-				answered[i] = key.String()
-			}
-			if step.Answered != nil && !reflect.DeepEqual(answered, step.Answered) {
-				w.fail(index, "the draft's answered fields are %v, want %v", answered, step.Answered)
-			}
-			for field, side := range step.Resolutions {
-				if got := draft.Resolutions[onboarding.FieldKey(field)]; string(got.Choice) != side {
-					w.fail(index, "the draft's resolution for %s is %q, want %q", field, got.Choice, side)
-				}
-			}
-			for field, want := range step.Seen {
-				got := draft.Resolutions[onboarding.FieldKey(field)].Seen
-				wantJSON, _ := json.Marshal(want)
-				if !onboarding.SameSettingValue(got, wantJSON) {
-					w.fail(index, "the draft's resolution for %s saw %s, want %s", field, got, wantJSON)
-				}
-			}
-			if draft.SessionID != id || draft.Draft == nil || draft.Write.Config == nil {
-				w.fail(index, "the draft does not carry its session, draft, and write context: %+v", draft)
-			}
+		if err == nil && (draft.Draft == nil || draft.Write.Config == nil) {
+			w.fail(index, "the draft does not carry its draft and write context: %+v", draft)
 		}
 	case "abort":
 		sessions.abortCommit(id)
-	case "close":
-		var body schema.LocalKickstartCommitted
-		for _, next := range onboarding.NextStepsWeb() {
-			body.NextSteps = append(body.NextSteps, schema.LocalKickstartNextStep(next))
-		}
-		body.Saved, body.ConfigPath, body.Ingest = true, w.configPath, schema.LocalKickstartIngest{State: schema.LocalKickstartIngestIdle}
-		var finish *kickstartFinish
-		finish, err = sessions.closeCommitted(id, body)
-		if err == nil {
-			if step.Ingest != "" {
-				finish.publishIngest(schema.LocalKickstartIngest{State: schema.LocalKickstartIngestState(step.Ingest)})
-			}
-		}
-	case "ingest":
-		// An import started after the session is gone publishes under its id.
-		sessions.finishFor(id).publishIngest(schema.LocalKickstartIngest{State: schema.LocalKickstartIngestState(step.Ingest)})
 	default:
-		w.fail(index, "commit action %q is not begin, abort, close, or ingest", step.Action)
+		w.fail(index, "commit action %q is not begin or abort", step.Action)
 	}
 	switch {
 	case step.Error == "" && err != nil:
@@ -1010,20 +991,6 @@ func (w *kickstartWorld) commit(index int, step kickstartCommitStep) {
 		w.fail(index, "commit %s succeeded, want an error containing %q", step.Action, step.Error)
 	case step.Error != "" && !strings.Contains(err.Error(), step.Error):
 		w.fail(index, "commit %s: %v, want an error containing %q", step.Action, err, step.Error)
-	}
-}
-
-// conflicts publishes conflict rows the way a refused commit does.
-func (w *kickstartWorld) conflicts(index int, step kickstartConflictsStep) {
-	w.t.Helper()
-	rows := make([]schema.LocalKickstartConflict, len(step.Rows))
-	for i, row := range step.Rows {
-		mine, _ := json.Marshal(row.Mine)
-		theirs, _ := json.Marshal(row.Theirs)
-		rows[i] = schema.LocalKickstartConflict{Field: row.Field, Stop: row.Stop, Label: row.Label, Mine: mine, Theirs: theirs}
-	}
-	if _, err := w.server.kickstart.publishConflicts(fmt.Sprint(w.vars[step.Session]), rows); err != nil {
-		w.fail(index, "publish conflicts: %v", err)
 	}
 }
 

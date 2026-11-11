@@ -181,7 +181,15 @@ cases:
         body: {revision: "{rev}", values: {content-license: CC0-1.0}}
       # a save under way refuses another, and an answer, with its reason
       - commit: {session: full, action: begin}
+      - commit: {session: full, action: begin, error: "already being saved"}
       - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 400
+        json: {code: kickstart_session_committing}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC-BY-4.0}}
+        status: 400
+        json: {code: kickstart_session_committing}
+      - call: POST /api/v1/kickstart/sessions/{full}/scan
         status: 400
         json: {code: kickstart_session_committing}
       - commit: {session: full, action: abort}

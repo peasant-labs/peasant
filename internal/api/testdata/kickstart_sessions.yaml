@@ -335,31 +335,43 @@ cases:
           - {kind: answers, revision: 4}
 
   - name: closed-committed-reason
-    world: {listings: two-projects, gate: true}
+    world:
+      listings: two-projects
+      gate: true
+      config: |
+        version: 1
+        push:
+          visibility: private
+          license: ""
     steps:
       - call: POST /api/v1/kickstart/sessions
         body: {scope: full}
         save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      # the selection page has its own session; saving the wizard's does not end it
       - call: POST /api/v1/kickstart/sessions
         body: {scope: selection}
         save: {selection: id}
-      - commit: {session: full, action: begin}
-      - commit: {session: full, action: begin, error: "already being saved"}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
       - call: PATCH /api/v1/kickstart/sessions/{full}
-        body: {revision: 1, values: {content-license: CC0-1.0}}
-        status: 400
-        json: {code: kickstart_session_committing}
-      - commit: {session: full, action: close, ingest: running}
-      - commit: {session: full, action: ingest, ingest: idle}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+        len: {nextSteps: 5}
+      # the session ends first, with the reason and the finish body, and the
+      # import's end follows under the same id and the next revision
+      - await:
+          kind: closed
+          session: "{full}"
+          json: {reason: committed, committed.saved: true, committed.nextSteps.0: config}
+          len: {committed.nextSteps: 5}
+          absent: [view, scan, ingest]
+          save: {closedAt: revision}
       - events:
-          - kind: closed
-            session: "{full}"
-            revision: 2
-            json: {reason: committed, committed.saved: true, committed.nextSteps.0: config}
-            len: {committed.nextSteps: 5}
-            absent: [view, scan, ingest]
-          - {kind: ingest, session: "{full}", revision: 3, json: {ingest.state: running}, absent: [view, committed]}
-          - {kind: ingest, session: "{full}", revision: 4, json: {ingest.state: idle}}
+          - {kind: ingest, session: "{full}", after: closedAt, json: {ingest.state: idle}, absent: [view, committed]}
       - call: GET /api/v1/kickstart/sessions/{full}
         status: 404
       - call: GET /api/v1/kickstart/sessions/{selection}

@@ -39,9 +39,8 @@ import (
 //
 //	beginCommit(id) (kickstartDraft, error)
 //	    Freezes the session for one commit and returns what the commit reads:
-//	    the model, every answer (Answers) and the part a configuration write
-//	    applies (ConfigAnswers), the answered-field set, the revision, the
-//	    resolutions with the file value each saw, the draft, and a write
+//	    the model, the answers a configuration write applies (ConfigAnswers),
+//	    the resolutions with the file value each saw, the draft, and a write
 //	    context. The draft's baseline is the configuration file parsed as it was
 //	    when the session opened; a legacy selection conversion lives in the
 //	    working copy only, so the commit's comparison against the file is not
@@ -1016,20 +1015,17 @@ func withoutConflict(rows []schema.LocalKickstartConflict, key onboarding.FieldK
 	return out
 }
 
-// kickstartDraft is what a commit reads from a live session.
+// kickstartDraft is what a commit reads from a live session: the model, the
+// answers a configuration write applies, the sides the user chose for conflict
+// rows already shown, the draft that holds the file as it was when the session
+// opened, and the write context for the answers as they stand. The session's id,
+// scope and revision are not repeated: the caller holds the id, the model holds
+// the scope, and the commit is judged against the file, not the revision.
 type kickstartDraft struct {
-	SessionID string
-	Scope     onboarding.ModelScope
-	// Revision is the session revision the draft was read at.
-	Revision uint64
-	Model    onboarding.Model
-	// Answers holds every answer: the configuration writes and the action
-	// choices. Only a configuration answer reaches ApplyAnswers; ConfigAnswers
-	// is that part.
-	Answers       onboarding.Answers
+	Model onboarding.Model
+	// ConfigAnswers are the answers ApplyAnswers applies. An action answer is a
+	// choice made in the session and never reaches the configuration.
 	ConfigAnswers onboarding.Answers
-	// Answered lists the answered fields in model order.
-	Answered []onboarding.FieldKey
 	// Resolutions are the sides the user chose for conflict rows already shown,
 	// each with the file value the user saw when choosing.
 	Resolutions onboarding.Resolutions
@@ -1066,21 +1062,12 @@ func (st *kickstartSessions) beginCommit(id string) (kickstartDraft, error) {
 			"The save could not read setup session %q because its answers no longer apply in internal/api.kickstartSessions.beginCommit: %v. Nothing was changed. Report this defect.", id, err)
 	}
 	sess.committing = true
-	answers := onboarding.Answers{}
-	var answered []onboarding.FieldKey
-	for _, field := range sess.model.Fields() {
-		if value, ok := sess.answers[field.Key()]; ok {
-			answers[field.Key()] = append(schema.LocalSettingValue(nil), value...)
-			answered = append(answered, field.Key())
-		}
-	}
 	resolutions := make(onboarding.Resolutions, len(sess.resolutions))
 	for key, resolution := range sess.resolutions {
 		resolutions[key] = onboarding.Resolution{Choice: resolution.Choice, Seen: append(schema.LocalSettingValue(nil), resolution.Seen...)}
 	}
 	return kickstartDraft{
-		SessionID: sess.id, Scope: sess.scope, Revision: sess.revision, Model: sess.model,
-		Answers: answers, ConfigAnswers: configAnswers, Answered: answered, Resolutions: resolutions,
+		Model: sess.model, ConfigAnswers: configAnswers, Resolutions: resolutions,
 		Draft: draft,
 		Write: sess.writeContext(applied, configAnswers, facts),
 	}, nil
