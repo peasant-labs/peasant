@@ -9,6 +9,7 @@ requiredNames:
   - seed-refuses-more-prompts-than-the-template-has
   - seed-filler-is-deterministic
   - seed-checkouts-match-recorded-branches
+  - seed-refuses-a-root-whose-project-names-are-ambiguous
   - served-build-exact
   - served-page-stale-refused
   - served-asset-stale-refused
@@ -25,6 +26,7 @@ cases:
   - {name: seed-refuses-more-prompts-than-the-template-has, mode: prompts}
   - {name: seed-filler-is-deterministic, mode: filler}
   - {name: seed-checkouts-match-recorded-branches, mode: checkouts}
+  - {name: seed-refuses-a-root-whose-project-names-are-ambiguous, mode: slug-root}
   - {name: served-build-exact, mode: exact}
   - {name: served-page-stale-refused, mode: stale-page, error: differs from this export}
   - {name: served-asset-stale-refused, mode: stale-asset, error: differs from this build}

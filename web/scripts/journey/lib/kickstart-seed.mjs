@@ -72,6 +72,21 @@ export function fillerRepositories({ repositories, sessions }) {
   }));
 }
 
+/**
+ * Claude Code names a project directory after its working directory with every
+ * punctuation mark flattened to a dash, so the name does not say which dashes
+ * were separators. Discovery recovers the directory by probing the disk, and a
+ * root with dots or dashes in it can recover a different, real directory (the
+ * enclosing checkout's), which silently gives every seeded project that
+ * checkout's remote. The seeded computer therefore lives under a root of
+ * letters, digits and slashes only; this refuses any other.
+ */
+export function assertSlugSafeRoot(root) {
+  if (!/^\/[A-Za-z0-9]+(\/[A-Za-z0-9]+)*$/.test(root)) {
+    throw new Error(`the seeded computer's root ${JSON.stringify(root)} has a character that Claude Code's project names flatten (anything but letters, digits and "/"); discovery could resolve its projects to another directory. Seed under a plain path such as /tmp/ksjourneyXXXX.`);
+  }
+}
+
 /** The directory of the checkout for one branch of a repository. */
 export function worktreeFor(root, repository, branch) {
   return join(root, 'repos', `${repository}--${branch.replace(/[^a-zA-Z0-9]+/g, '-')}`);
@@ -91,6 +106,7 @@ function git(cwd, ...args) {
  * counts it should expect.
  */
 export function seedRecordings({ home, root, repoRoot, fixture }) {
+  assertSlugSafeRoot(root);
   const template = readFileSync(join(repoRoot, fixture.template), 'utf8');
   const projects = join(home, '.claude', 'projects');
   mkdirSync(projects, { recursive: true });

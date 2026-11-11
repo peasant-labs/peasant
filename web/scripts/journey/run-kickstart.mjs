@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parse } from 'yaml';
@@ -37,6 +37,7 @@ let app;
 let stopApp = async () => {};
 let cleaning;
 let stopping = false;
+let sandbox;
 let manifest;
 let saveManifest = () => {};
 
@@ -99,7 +100,6 @@ try {
 
   const artifacts = join(repo, 'review-capture', `kickstart-${randomUUID()}`);
   mkdirSync(artifacts, { recursive: true });
-  const state = life.identity.stateRoot;
   const binary = join(repo, 'peasant');
   const out = join(web, 'out');
 
@@ -125,7 +125,11 @@ try {
   saveManifest = () => writeFileSync(join(artifacts, 'manifest.json'), JSON.stringify(manifest, null, 2));
   saveManifest();
 
-  const sandbox = join(state, 'computer');
+  // The seeded computer lives under a plain path: Claude Code's project names
+  // flatten punctuation, and a root with dots or dashes (the lifecycle's own state
+  // root and the Nix shell's TMPDIR both have them) can make discovery resolve the
+  // projects to the enclosing checkout.
+  sandbox = mkdtempSync('/tmp/ksjourney');
   const paths = (root) => ({
     root,
     home: join(root, 'home'),
@@ -165,7 +169,7 @@ try {
 
   for (const theme of projects) {
     // A fresh computer for each theme: nothing the last one saved is here.
-    const computer = paths(join(sandbox, theme.name));
+    const computer = paths(join(sandbox, theme.theme));
     rmSync(computer.root, { recursive: true, force: true });
     mkdirSync(computer.home, { recursive: true });
     const seeded = seedRecordings({ home: computer.home, root: computer.root, repoRoot: repo, fixture: fixture.recordings });
@@ -213,5 +217,7 @@ try {
   process.exitCode = 1;
 } finally {
   try { await stopApp(); } catch (error) { console.error(error.message); }
+  // Only the directory this run created, and only after the app that used it has stopped.
+  if (sandbox && !app) rmSync(sandbox, { recursive: true, force: true });
   try { await cleanup(); } catch (error) { console.error(error.message); process.exit(1); }
 }

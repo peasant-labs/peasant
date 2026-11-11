@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
-import { encodeProjectDirectory, fillerRepositories, seedRecordings, sessionLines } from './lib/kickstart-seed.mjs';
+import { assertSlugSafeRoot, encodeProjectDirectory, fillerRepositories, seedRecordings, sessionLines } from './lib/kickstart-seed.mjs';
 import { verifyKickstartServed } from './lib/kickstart-provenance.mjs';
 
 const f = parse(readFileSync(new URL('./testdata/kickstart-support.yaml', import.meta.url), 'utf8'));
@@ -17,11 +17,18 @@ const template = f.template.lines.join('\n');
 const input = { sessionId: 'sess-a', cwd: '/work/ledger', branch: 'main', prompts: ['first prompt', 'second prompt'], startedAt: '2026-02-03T09:00:00Z' };
 
 for (const row of f.cases) {
-  if (['encode', 'lines', 'reproducible', 'unique', 'prompts', 'filler', 'checkouts'].includes(row.mode)) {
+  if (['encode', 'lines', 'reproducible', 'unique', 'prompts', 'filler', 'checkouts', 'slug-root'].includes(row.mode)) {
     test(row.name, (t) => {
       if (row.mode === 'encode') return assert.equal(encodeProjectDirectory(row.cwd), row.expected);
+      if (row.mode === 'slug-root') {
+        assert.doesNotThrow(() => assertSlugSafeRoot('/tmp/ksjourneyAb12/dark'));
+        for (const root of ['/work/peasant-893--feat/web/.kickstart-journey-owner/state', '/tmp/a.b', '/tmp/a_b', 'relative/path', '/tmp//x', '/']) {
+          assert.throws(() => assertSlugSafeRoot(root), /Claude Code's project names flatten/, root);
+        }
+        return;
+      }
       if (row.mode === 'checkouts') {
-        const dir = mkdtempSync(join(tmpdir(), 'peasant-kickstart-seed-'));
+        const dir = mkdtempSync('/tmp/ksseed');
         t.after(() => rmSync(dir, { recursive: true, force: true }));
         mkdirSync(join(dir, 'home'));
         writeFileSync(join(dir, 'template.jsonl'), `${f.template.lines.join('\n')}\n`);
