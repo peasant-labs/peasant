@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
@@ -615,7 +616,7 @@ func screenFixtureRegistry() Registry {
 					Option[int]{Label: "30 days", Value: 30},
 					Option[int]{Label: "90 days", Value: 90},
 					Option[int]{Label: "365 days", Value: 365},
-					Option[int]{Label: "never", Value: 99999}),
+					Option[int]{Label: "never", Value: onboarding.NeverExpireDays}),
 			},
 		},
 	}}
@@ -780,8 +781,8 @@ func nextRetentionFixtureValue(current, direction int) int {
 	case direction > 0 && current == 90:
 		return 365
 	case direction > 0 && current == 365:
-		return 99999
-	case direction < 0 && current == 99999:
+		return onboarding.NeverExpireDays
+	case direction < 0 && current == onboarding.NeverExpireDays:
 		return 365
 	case direction < 0 && current == 365:
 		return 90
