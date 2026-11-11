@@ -144,7 +144,6 @@ VALUES('oc_bad_source', 'lo_fixture', ?, ?, 'fixture-user', 7000, 'not-a-source'
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- this open is the subject: it must refuse a database upgraded by a newer build.
 	if _, err := Open(path); err == nil {
 		t.Fatal("opening a database from a newer schema version succeeded")
 	} else if !strings.Contains(err.Error(), "newer Peasant") {
