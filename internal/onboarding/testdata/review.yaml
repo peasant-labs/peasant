@@ -14,6 +14,7 @@ requiredNames:
   - review-absent-file-is-all-add
   - review-writes-nothing-and-takes-no-lock
   - review-refuses-an-answer-the-scope-does-not-have
+  - review-one-field-rerun-is-a-one-line-change
 cases:
   - name: review-lists-rows-and-diffs-an-existing-file
     opened: &opened |
@@ -86,3 +87,41 @@ cases:
       failure: invalid
       errorContains: is not a field of the selection setup
       fileUnchanged: true
+  # The diff of a rerun against a hand-written file holds the changed line and
+  # its context and nothing else: blank lines and comment spacing are kept.
+  - name: review-one-field-rerun-is-a-one-line-change
+    opened: |
+      # peasant configuration, edited by hand
+      version: 1
+
+      # where transcripts go
+      output:
+        basePath: /data/peasant   # keep this comment
+        stalenessThresholdSec: 90
+
+      village:
+        url: https://village.example   # self-hosted
+
+      push:
+        # who may read a push
+        visibility: private
+        license: ""
+        method: all
+      selection:
+        mode: all
+        autoIngestNewBranches: true
+    answers: {content-license: '"CC0-1.0"'}
+    want:
+      conflicts: []
+      unresolved: []
+      diffFile: config.yaml
+      hunkHeaders: ["-12,7 +12,7"]
+      diffLines:
+        - "ctx:push:"
+        - "ctx:  # who may read a push"
+        - "ctx:  visibility: private"
+        - "del:  license: \"\""
+        - "add:  license: CC0-1.0"
+        - "ctx:  method: all"
+        - "ctx:selection:"
+        - "ctx:  mode: all"
