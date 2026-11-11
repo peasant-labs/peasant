@@ -750,7 +750,10 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          # The pool already shares /var/cache/runner/gobuild, so the action
+          # cache is redundant here. Saving the multi-GB cache in the post-step
+          # ran past the job timeout after every test step had passed.
+          cache: false
       - name: Gate mounted Home table scroll at phone width
         run: |
           set -euo pipefail
