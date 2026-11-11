@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor, within, type BoundFunctions, type queries } from '@testing-library/react';
 import { type ReactElement } from 'react';
 import { expect, vi } from 'vitest';
@@ -77,6 +79,21 @@ export interface Step {
   expectOrder?: string[];
   /** A <details> by its summary text: whether it is open. */
   expectDetails?: { summary: string; open: boolean };
+  /**
+   * The step rail's labels: these texts, one per step in step order, each
+   * placed by where its step sits (first, last, or between) and kept inside the
+   * rail's frame. jsdom has no layout engine, so the placement is read from the
+   * real stylesheet the labels are given: their computed alignment, shift and
+   * wrapping.
+   */
+  expectRailLabels?: { labels: string[]; first: RailPlacement; middle: RailPlacement; last: RailPlacement };
+}
+
+/** How a rail label sits under its marker, as the stylesheet resolves it. */
+export interface RailPlacement {
+  textAlign: string;
+  /** Whether the label is moved so its edge meets its marker's edge. */
+  shifted: boolean;
 }
 
 export const API = '/api/v1/kickstart';
@@ -257,7 +274,23 @@ export async function playTabs(entry: FixtureCase, pages: Readonly<Record<string
   return mounted;
 }
 
+const STYLESHEET_MARK = 'data-kickstart-stylesheet';
+
+/**
+ * Give the document the wizard's real stylesheet. The test runner does not
+ * apply imported CSS, so a check of how something is styled has to load the
+ * file the page would ship.
+ */
+function loadWizardStylesheet(): void {
+  if (document.head.querySelector(`style[${STYLESHEET_MARK}]`) !== null) return;
+  const style = document.createElement('style');
+  style.setAttribute(STYLESHEET_MARK, '');
+  style.textContent = readFileSync(resolve(process.cwd(), 'src/components/kickstart/kickstart.css'), 'utf8');
+  document.head.appendChild(style);
+}
+
 export function teardown(): void {
+  document.head.querySelectorAll(`style[${STYLESHEET_MARK}]`).forEach((style) => style.remove());
   cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -420,6 +453,27 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
       const details = summary.closest('details');
       expect(details, `${at}: ${step.expectDetails.summary} is inside <details>`).not.toBeNull();
       expect(details!.open, `${at}: ${step.expectDetails.summary} open state`).toBe(step.expectDetails.open);
+    }
+    if (step.expectRailLabels) {
+      loadWizardStylesheet();
+      const { labels, first, middle, last } = step.expectRailLabels;
+      const rail = q.getByRole('navigation', { name: /progress$/i });
+      const drawn = [...rail.querySelectorAll<HTMLElement>('.ks-rail-label')];
+      expect(drawn.map((label) => label.textContent), `${at}: the rail's labels`).toEqual(labels);
+      // The cap each label wraps inside is the rail's width over its step count.
+      expect(rail.parentElement?.style.getPropertyValue('--ks-rail-steps'), `${at}: steps the rail shares between its labels`).toBe(String(labels.length));
+      drawn.forEach((label, position) => {
+        const where = `${at}: label ${JSON.stringify(labels[position])}`;
+        const want = position === 0 ? first : position === drawn.length - 1 ? last : middle;
+        const style = getComputedStyle(label);
+        expect(style.textAlign, `${where} is aligned by its place`).toBe(want.textAlign);
+        const shifted = style.left !== '' && style.left !== 'auto';
+        expect(shifted, `${where} is ${want.shifted ? '' : 'not '}moved onto its marker's edge`).toBe(want.shifted);
+        if (want.shifted) expect(style.position, `${where} is moved by position`).toBe('relative');
+        // Capped and wrapping: a long label breaks inside its share of the rail.
+        expect(style.whiteSpace, `${where} wraps`).toBe('normal');
+        expect(style.maxWidth, `${where} is capped`).not.toMatch(/^(|none)$/);
+      });
     }
     if (step.expectNoReload) expect(mounted.reloads.count, `${at}: the page reloaded`).toBe(0);
   }
