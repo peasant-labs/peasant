@@ -1,0 +1,8 @@
+name: covering failure restores the boundary and retry clears only its fault
+anchor: 4
+failedSegment: 1
+heldTurn: 0
+unrelatedTurn: 8
+unrelatedAnchor: 8
+span: 10
+copy: 'the transcript window around turn 4 (span 10) could not load: the local server returned HTTP 503. the surrounding transcript remains available. try again.'

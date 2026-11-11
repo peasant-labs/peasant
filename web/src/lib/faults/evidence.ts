@@ -26,6 +26,7 @@ const payloadEvidenceBrand: unique symbol = Symbol('payloadEvidence');
 const topicEvidenceBrand: unique symbol = Symbol('topicEvidence');
 const httpEvidenceBrand: unique symbol = Symbol('httpEvidence');
 const detailEvidenceBrand: unique symbol = Symbol('detailEvidence');
+const transcriptWindowEvidenceBrand: unique symbol = Symbol('transcriptWindowEvidence');
 
 /** A frame measured over the app's byte limit. */
 export class PayloadEvidence {
@@ -79,4 +80,14 @@ export class DetailEvidence {
   }
 }
 
-export type FaultEvidence = PayloadEvidence | TopicEvidence | HttpEvidence | DetailEvidence;
+/** The exact window requested and a safe explanation of the read failure. */
+export class TranscriptWindowEvidence {
+  private readonly [transcriptWindowEvidenceBrand] = true;
+  readonly detail: string;
+
+  constructor(readonly anchor: number, readonly span: number, detail: string) {
+    this.detail = boundedDetail(detail);
+  }
+}
+
+export type FaultEvidence = PayloadEvidence | TopicEvidence | HttpEvidence | DetailEvidence | TranscriptWindowEvidence;

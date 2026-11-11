@@ -743,6 +743,19 @@ jobs:
           fi
           echo "OK: real pnpm-built dashboard present at web/out/index.html"
 
+      - name: Set up Go for the mounted Home gate
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Gate mounted Home table scroll at phone width
+        run: |
+          set -euo pipefail
+          pnpm --dir web exec playwright install --with-deps chromium
+          go build -o peasant ./cmd/peasant
+          mkdir -p /tmp/opencode
+          PLAYWRIGHT_MODULE=@playwright/test node web/scripts/visual/home-pages-visual.mjs
+
   windows:
     name: windows-latest
     if: >-

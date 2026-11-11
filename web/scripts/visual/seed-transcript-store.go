@@ -21,10 +21,12 @@ import (
 )
 
 const (
-	sessionID   = "11111111-1111-4111-8111-111111111111"
-	projectHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	projectName = "synthetic-large"
-	hostSlug    = "github.com-synthetic"
+	sessionID         = "11111111-1111-4111-8111-111111111111"
+	projectHash       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	projectName       = "synthetic-large"
+	hostSlug          = "github.com-synthetic"
+	firstActionParent = 31
+	lastActionParent  = 51
 )
 
 func main() {
@@ -82,8 +84,8 @@ func main() {
 				FilePath: "/tmp/synthetic-large",
 			},
 			Stats: ingest.StatsInfo{
-				TurnCount:     80,
-				ToolCallCount: 0,
+				TurnCount:     69,
+				ToolCallCount: 11,
 				DurationMs:    60_000,
 				TokensIn:      1000,
 				TokensOut:     500,
@@ -102,23 +104,39 @@ func main() {
 	if err := db.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		fail(err)
 	}
-	// Depth-0 indexes are the turn numbers the header and the boundary captions
-	// both print. A tool row between them, or one parked past the last turn,
-	// either opens a gap the captions cannot explain or falls outside the span
-	// a segment read is allowed to return. The bulk lives in the turn text, so
-	// the cut still crosses the segment budget and the read can reproduce it.
+	// Entry indexes remain contiguous and the final entry is a parent, so each
+	// child is inside the span a segment read can return. The middle action run
+	// has multiple wordless assistant turns, each with a tool child. Their bulk
+	// forces the run across segment boundaries without huge painted content.
 	entries := make([]schema.SessionEntry, 0, 80)
 	// Spaces retain their wire size but collapse in normal HTML whitespace, so
 	// the seed does not exceed the browser's maximum scrollable paint height.
 	page := strings.Repeat(" ", 400_000)
 	for turn := 0; turn < 80; turn++ {
+		timestamp := start + int64(turn)*1000
+		if turn >= firstActionParent+1 && turn <= lastActionParent+1 && turn%2 == 0 {
+			parent := turn - 1
+			id := fmt.Sprintf("synthetic-tool-%d", turn)
+			name := "Bash"
+			input := fmt.Sprintf(`{"command":"echo segment-action-%d"}`, turn)
+			output := fmt.Sprintf("segment-action-%d complete", turn)
+			entries = append(entries, schema.SessionEntry{
+				SessionID: sid, EntryIndex: turn, Harness: schema.HarnessClaudeCode,
+				EntryType: schema.EntryTypeToolUse, Role: schema.RoleAssistant,
+				TimestampMs: &timestamp, Depth: 1, ParentIndex: &parent,
+				ToolCallID: &id, ToolNamesCSV: &name, ToolInput: &input, ToolOutput: &output,
+			})
+			continue
+		}
 		role := schema.RoleUser
 		content := fmt.Sprintf("synthetic user turn %d. the reader can page from here.", turn)
-		if turn%2 == 1 {
+		if turn%2 == 1 && turn != 53 {
 			role = schema.RoleAssistant
 			content = fmt.Sprintf("synthetic assistant turn %d.%s end of turn.", turn, page)
+			if turn >= firstActionParent+2 && turn <= lastActionParent {
+				content = page
+			}
 		}
-		timestamp := start + int64(turn)*1000
 		entries = append(entries, schema.SessionEntry{
 			SessionID:      sid,
 			EntryIndex:     turn,
@@ -136,11 +154,12 @@ func main() {
 	if err := db.Close(); err != nil {
 		fail(err)
 	}
-	encoded, err := json.Marshal(map[string]string{
-		"dataDir":     root,
-		"sessionId":   sessionID,
-		"projectHash": projectHash,
-		"projectName": projectName,
+	encoded, err := json.Marshal(map[string]any{
+		"dataDir":       root,
+		"sessionId":     sessionID,
+		"projectHash":   projectHash,
+		"projectName":   projectName,
+		"actionParents": []int{firstActionParent, lastActionParent},
 	})
 	if err != nil {
 		fail(err)

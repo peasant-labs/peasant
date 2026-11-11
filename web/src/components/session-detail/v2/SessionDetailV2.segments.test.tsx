@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { EarlierHistoryState } from '@peasant-labs/schema';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord } from '@/test/strictYaml';
 import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2 } from './SessionDetailV2';
+import { FaultCause, FaultOperation, FaultRemedy, TranscriptWindowEvidence, WebFault } from '@/lib/faults';
+import type { TranscriptSegmentState } from './lib/useTranscriptSegments';
 
 const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ProjectHash;
 const SESSION_ID = 'sess-segment-host';
@@ -42,6 +45,10 @@ const scanRequests = vi.hoisted(() => vi.fn());
 let revision = '7';
 let servePreBoundInline = false;
 let failNextDirectory = false;
+let failSegment: number | null = null;
+let windowRejected = false;
+let releaseFailure: (() => void) | null = null;
+let observedSegments: TranscriptSegmentState | null = null;
 let activeCase: SegmentCase | null = null;
 
 vi.mock('@/lib/share/publishing', async (importOriginal) => ({
@@ -77,6 +84,25 @@ vi.mock('@/hooks/useTheme', () => ({
   useTheme: () => ({ theme: 'dark', setTheme: vi.fn(), toggle: vi.fn() }),
 }));
 vi.mock('@peasant-labs/fairtrade/graph', () => ({ TrajectoryGraph: () => null }));
+vi.mock('./lib/useTranscriptSegments', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./lib/useTranscriptSegments')>();
+  return { ...actual, useTranscriptSegments: (...args: Parameters<typeof actual.useTranscriptSegments>) => {
+    const result = actual.useTranscriptSegments(...args);
+    if (activeCase?.name === 'window-cover-failure') observedSegments = result;
+    return result;
+  } };
+});
+vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@peasant-labs/fairtrade/ui')>();
+  return { ...actual, TranscriptViewer: (props: React.ComponentProps<typeof actual.TranscriptViewer>) => <>
+    {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => {
+      void Promise.resolve(props.onLoadWindow?.(windowFailureFixture.anchor, windowFailureFixture.span)).catch(() => { windowRejected = true; });
+    }}>request window</button>}
+    {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => { void props.onLoadSegment?.(2); }}>request unrelated segment</button>}
+    {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => { void props.onLoadWindow?.(windowFailureFixture.unrelatedAnchor, windowFailureFixture.span); }}>request unrelated window</button>}
+    <actual.TranscriptViewer {...props} />
+  </> };
+});
 
 let currentSearch = new URLSearchParams();
 let channelData: unknown;
@@ -157,7 +183,9 @@ function directoryBody(plan: SegmentCase) {
 }
 
 function windowBody(plan: SegmentCase, anchor: number) {
-  const declared = plan.window;
+  const declared = plan.name === 'window-cover-failure' && anchor === windowFailureFixture.unrelatedAnchor
+    ? { requestedAnchor: anchor, anchorTurn: anchor, segments: [2] }
+    : plan.window;
   if (!declared) throw new Error(`${plan.name} has no window to answer anchor ${anchor}`);
   const segments = declared.segments;
   const first = plan.segments.find((segment) => segment.index === segments[0]);
@@ -237,6 +265,11 @@ async function answer(input: RequestInfo | URL): Promise<Response> {
   }
   const segment = url.match(/\/transcript\/segments\/(\d+)/);
   if (segment) {
+    if (failSegment === Number(segment[1])) {
+      failSegment = null;
+      await new Promise<void>((resolve) => { releaseFailure = resolve; });
+      return Response.json({ error: 'fixture segment read refused' }, { status: 503 });
+    }
     const found = plan.segments.find((item) => item.index === Number(segment[1]));
     if (!found) return new Response(JSON.stringify({ error: `segment ${segment[1]} is not in ${plan.name}` }), { status: 404 });
     return Response.json(segmentBody(found, plan.totalSegments, plan));
@@ -374,6 +407,168 @@ describe('SessionDetailV2 segmented transcript', () => {
         expect(view.getByText(/this turn's text is truncated/), 'per-field bound').toBeTruthy();
       }
       assertReads(plan);
+    });
+  }
+});
+
+type WindowFailureFixture = { name: string; anchor: number; span: number; failedSegment: number; heldTurn: number; unrelatedTurn: number; unrelatedAnchor: number; copy: string };
+const windowFailureFixture = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/window_failure.yaml'), 'utf8'), 'window failure') as WindowFailureFixture;
+
+describe('failed covering window on the mounted transcript', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); reads.length = 0; activeCase = null; failSegment = null; releaseFailure = null; windowRejected = false; observedSegments = null; });
+
+  it(windowFailureFixture.name, async () => {
+    const base = loadCases().find((row) => row.name === 'mount-segment-zero');
+    if (!base) throw new Error('missing initial segment fixture');
+    activeCase = { ...base, name: 'window-cover-failure', window: { requestedAnchor: windowFailureFixture.anchor, anchorTurn: windowFailureFixture.anchor, segments: [0, windowFailureFixture.failedSegment] } };
+    revision = base.revision;
+    channelData = detail(activeCase);
+    vi.stubGlobal('fetch', vi.fn(answer));
+    const view = render(<TestDetail turn={null} />);
+    await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).not.toBeNull());
+    failSegment = windowFailureFixture.failedSegment;
+    fireEvent.click(view.getByRole('button', { name: 'request window' }));
+    await waitFor(() => expect(releaseFailure).not.toBeNull());
+    await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).toBeNull());
+    await act(async () => { releaseFailure?.(); });
+    await waitFor(() => expect(view.getAllByRole('alert').filter((node) => node.textContent?.includes(windowFailureFixture.copy))).toHaveLength(1));
+    expect(windowRejected).toBe(true);
+    const fault = observedSegments?.windowFaults[0];
+    expect(fault).toBeInstanceOf(WebFault);
+    expect(fault?.operation).toBe(FaultOperation.TranscriptWindowRead);
+    expect(fault?.cause).toBe(FaultCause.TranscriptReadFailed);
+    expect(fault?.remedy).toBe(FaultRemedy.Retry);
+    expect(fault?.evidence).toBeInstanceOf(TranscriptWindowEvidence);
+    if (!(fault?.evidence instanceof TranscriptWindowEvidence)) throw new Error('missing window evidence');
+    expect(fault.evidence.anchor).toBe(windowFailureFixture.anchor);
+    expect(fault.evidence.span).toBe(windowFailureFixture.span);
+    expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).not.toBeNull();
+    const boundary = view.container.querySelector('[data-segment-boundary="newer"] button');
+    if (!(boundary instanceof HTMLButtonElement)) throw new Error('the surrounding boundary was not restored');
+    // Segment 2 is not part of the failed window.
+    fireEvent.click(view.getByRole('button', { name: 'request unrelated segment' }));
+    await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.unrelatedTurn}"]`)).not.toBeNull());
+    expect(view.getAllByRole('alert').filter((node) => node.textContent?.includes(windowFailureFixture.copy))).toHaveLength(1);
+    fireEvent.click(view.getByRole('button', { name: 'request unrelated window' }));
+    await waitFor(() => expect(reads.filter((read) => read === 'window')).toHaveLength(2));
+    expect(observedSegments?.window?.requestedAnchor).toBe(windowFailureFixture.unrelatedAnchor);
+    expect(observedSegments?.windowFaults[0]).toBe(fault);
+    expect(view.getAllByRole('alert').filter((node) => node.textContent?.includes(windowFailureFixture.copy))).toHaveLength(1);
+    fireEvent.click(view.getByRole('button', { name: 'try again' }));
+    await waitFor(() => expect(view.queryByText(windowFailureFixture.copy, { exact: false })).toBeNull());
+    expect(observedSegments?.windowFaults).toHaveLength(0);
+    expect(reads.filter((read) => read === 'window')).toHaveLength(3);
+    expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).not.toBeNull();
+    expect(view.container.querySelector(`[data-turn="${windowFailureFixture.anchor}"]`)).not.toBeNull();
+  });
+});
+
+type HistoryCase = { name: string; segmentCase: string; actions: string[]; reads: number };
+const historyFixture = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/earlier_history.yaml'), 'utf8'), 'earlier history') as {
+  requiredNames: string[]; cases: HistoryCase[]; history: { content: string; label: string; explanation: string };
+};
+const historyManifest = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/earlier_history.manifest.yaml'), 'utf8'), 'earlier history manifest') as { requiredNames: string[] };
+
+describe('explicit earlier history on the mounted transcript', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); reads.length = 0; activeCase = null; });
+
+  it('keeps every required scenario', () => {
+    expect(historyFixture.requiredNames).toEqual(historyManifest.requiredNames);
+    expect(historyFixture.cases.map((row) => row.name)).toEqual(historyManifest.requiredNames);
+  });
+
+  for (const testCase of historyFixture.cases) {
+    it(testCase.name, async () => {
+      const plan = loadCases().find((candidate) => candidate.name === testCase.segmentCase);
+      if (!plan) throw new Error(`missing segment case ${testCase.segmentCase}`);
+      activeCase = plan;
+      revision = plan.revision;
+      channelData = detail(plan);
+      let durableReads = 0;
+      let fail = false;
+      let releaseRead: (() => void) | undefined;
+      let oldSignal: AbortSignal | null | undefined;
+      let search = plan.turn == null ? '' : `turn=${plan.turn}`;
+      const component = () => {
+        currentSearch = new URLSearchParams(search);
+        const routeQuery = parseTranscriptRouteQuery(currentSearch);
+        if (!routeQuery) throw new Error('invalid history route');
+        return <PublishProvider><SessionDetailV2 sessionId={SESSION_ID} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} /></PublishProvider>;
+      };
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith(`/api/v1/sessions/${SESSION_ID}`)) {
+          durableReads += 1;
+          if (fail) { fail = false; return Response.json({ error: 'fixture read refused' }, { status: 503 }); }
+          if (testCase.name === 'history-disclosure' || (testCase.name === 'stale-response-after-revision' && durableReads === 1)) {
+            oldSignal = init?.signal;
+            await new Promise<void>((resolve) => { releaseRead = resolve; });
+          }
+          return Response.json({
+            ...detail(plan),
+            turns: [turnWire(0, plan)],
+            earlierHistory: [{ state: EarlierHistoryState.UncertainUnresolved, turns: [{ ...turnWire(40, plan), content: historyFixture.history.content, truncated: undefined, byteLength: undefined }] }],
+          });
+        }
+        return answer(input);
+      }));
+      const view = render(component());
+      await waitFor(() => expect(view.container.querySelector('[data-segment-mode="true"]')).not.toBeNull());
+      expect(durableReads).toBe(0);
+      for (const action of testCase.actions) {
+        if (action === 'fail') fail = true;
+        if (action === 'load-pending') {
+          fireEvent.click(view.getByRole('button', { name: 'show earlier history' }));
+          expect(view.getByText(/loading the session to read earlier history/)).toBeVisible();
+        } else if (action === 'finish-stale') {
+          expect(oldSignal?.aborted).toBe(true);
+          if (!releaseRead) throw new Error('history read did not start');
+          await act(async () => { releaseRead?.(); });
+          expect(view.container.querySelector('[data-earlier-section]')).toBeNull();
+        } else if (action === 'load' || action === 'fail' || action === 'retry') {
+          fireEvent.click(view.getByRole('button', { name: action === 'retry' ? 'try loading earlier history again' : 'show earlier history' }));
+          if (testCase.name === 'history-disclosure') {
+            expect(view.getByText(/loading the session to read earlier history/)).toBeVisible();
+            const loadingButton = view.getByRole('button', { name: 'loading earlier history…' });
+            expect(loadingButton).toBeDisabled();
+            fireEvent.click(loadingButton);
+            expect(durableReads).toBe(1);
+            if (!releaseRead) throw new Error('history read did not start');
+            releaseRead();
+          }
+          if (action === 'fail') await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent('fixture read refused'));
+          else await waitFor(() => expect(view.container.querySelector('[data-earlier-section="earlier-0"]')).not.toBeNull());
+        } else if (action === 'unrelated-segment') {
+          const button = view.container.querySelector('[data-segment-boundary="newer"] button');
+          if (!(button instanceof HTMLButtonElement)) throw new Error('missing load-more control');
+          fireEvent.click(button);
+          await waitFor(() => expect(reads).toContain('segment:1'));
+          expect(view.getByRole('alert')).toHaveTextContent('fixture read refused');
+        } else if (action === 'revision') {
+          revision = '8'; channelData = detail(plan); view.rerender(component());
+          await waitFor(() => expect(view.getByRole('button', { name: 'show earlier history' })).toBeInTheDocument());
+        } else if (action === 'disclose' || action === 'disclose-again') {
+          search = action === 'disclose' ? 'earlier=earlier-0' : '';
+          view.rerender(component());
+          if (action === 'disclose') {
+            expect(view.getByText(historyFixture.history.content)).toBeVisible();
+            expect(view.getByText(historyFixture.history.label)).toBeVisible();
+            expect(view.getByText(new RegExp(historyFixture.history.explanation))).toBeVisible();
+            expect(view.queryByText(/state:/)).toBeNull();
+            const stream = view.container.querySelector('.txn-stream');
+            const history = stream?.querySelector('[data-earlier-section]');
+            const turn = stream?.querySelector('[data-turn="0"]');
+            expect(history && turn && (history.compareDocumentPosition(turn) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+          }
+        } else if (action === 'missing') {
+          search = 'earlier=earlier-1'; view.rerender(component());
+          expect(view.getByText(/section earlier-1 was not returned/)).toBeVisible();
+        } else if (action === 'limitation') {
+          expect(view.getAllByText(/this turn's text is truncated/)).toHaveLength(1);
+          expect(view.queryByText(/transcript page cannot load more/)).toBeNull();
+          expect(view.queryByRole('button', { name: 'load this turn in full' })).toBeNull();
+        }
+      }
+      expect(durableReads).toBe(testCase.reads);
     });
   }
 });

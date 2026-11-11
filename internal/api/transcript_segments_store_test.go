@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -18,10 +19,86 @@ import (
 	"github.com/peasant-labs/peasant/internal/attachments"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
+
+// Compare the same seeded oversized turn through both production HTTP reads.
+func TestTranscriptOversizedDurableReadComparison(t *testing.T) {
+	data, err := os.ReadFile("testdata/transcript_segments.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Cases []struct {
+			Name  string `yaml:"name"`
+			Turns []struct {
+				Index        int `yaml:"index"`
+				ContentBytes int `yaml:"contentBytes"`
+			} `yaml:"turns"`
+		} `yaml:"segment_cases"`
+	}
+	if err := yaml.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	var size, index int
+	for _, c := range fixture.Cases {
+		if c.Name == "one-oversized-turn" {
+			size, index = c.Turns[0].ContentBytes, c.Turns[0].Index
+		}
+	}
+	if size == 0 {
+		t.Fatal("missing oversized fixture")
+	}
+	db := openTestStore(t)
+	const sessionID = "77777777-7777-4777-8777-777777777777"
+	seedStoreTranscript(t, db, sessionID, 1, storeTranscriptEntries(t, sessionID, []storeTranscriptTurn{{index: index, role: schema.RoleAssistant, contentBytes: size}}))
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := api.NewServer(api.ServerConfig{Port: 0, Store: db, Provider: api.NewStoreDataProvider(db, sessionvisibility.Browsing())})
+	if err := srv.Listen(ctx); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil && err != context.Canceled {
+			t.Error(err)
+		}
+	})
+	base := "http://" + srv.Addr().String() + "/api/v1/sessions/" + sessionID
+	read := func(path string, target any) {
+		t.Helper()
+		resp, err := http.Get(base + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("%s: %d %s", path, resp.StatusCode, body)
+		}
+		if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var segment schema.TranscriptSegment
+	var detail schema.SessionDetailReadPayload
+	read("/transcript/segments/0", &segment)
+	read("", &detail)
+	if len(segment.Turns) != 1 || len(detail.Turns) != 1 {
+		t.Fatalf("unexpected turns: segment %d durable %d", len(segment.Turns), len(detail.Turns))
+	}
+	turn := segment.Turns[0]
+	t.Logf("segment content bytes=%d byteLength=%d truncated=%v; durable content bytes=%d; per-field bound=%d document budget=%d; input bytes=%d", len(turn.Content), turn.ByteLength, turn.Truncated, len(detail.Turns[0].Content), defaults.ServedTextFieldBudgetBytes, defaults.ServedDetailDocumentBudgetBytes, size)
+	if !turn.Truncated || len(detail.Turns[0].Content) != len(turn.Content) {
+		t.Fatal("expected a truncated segment and equal durable and segment content byte lengths")
+	}
+}
 
 func TestTranscriptSegmentJoinsImageMetadata(t *testing.T) {
 	db := openTestStore(t)

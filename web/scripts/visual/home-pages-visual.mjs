@@ -143,11 +143,14 @@ try {
           scrollWidth: box.scrollWidth,
           clientWidth: box.clientWidth,
           tableWidth: table ? table.getBoundingClientRect().width : 0,
+          documentWidth: document.documentElement.scrollWidth,
+          viewportWidth: document.documentElement.clientWidth,
         };
       });
       assert.ok(scroll, 'The shared table scroll container must mount at phone width');
       assert.equal(scroll.overflowX, 'auto', 'The shared table must own its horizontal scroll');
       assert.ok(scroll.tableWidth > scroll.clientWidth, `The shared table must scroll horizontally at ${viewport.width}px: ${JSON.stringify(scroll)}`);
+      assert.ok(scroll.documentWidth <= scroll.viewportWidth, `The page must not overflow horizontally: ${JSON.stringify(scroll)}`);
     }
     await page.locator('[data-session-group="root-0"] button').click();
     await page.getByRole('link', { name: 'session child-0', exact: true }).waitFor();

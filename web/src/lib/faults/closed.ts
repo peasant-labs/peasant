@@ -17,6 +17,8 @@ import { ChannelTopic } from '@peasant-labs/schema';
 export const FaultOperation = Object.freeze({
   QualityPage: closed('quality-page', 'quality'),
   SessionDetailRead: closed('session-detail-read', 'session detail'),
+  TranscriptInitialRead: closed('transcript-initial-read', 'transcript'),
+  TranscriptWindowRead: closed('transcript-window-read', 'transcript window'),
   SessionsRead: closed('sessions-read', 'sessions'),
   ProjectRead: closed('project-read', 'projects'),
   DashboardRead: closed('dashboard-read', 'dashboard'),
@@ -33,6 +35,7 @@ export const FaultCause = Object.freeze({
   FrameInvalid: closed('frame-invalid', 'the update did not match this app'),
   TopicError: closed('topic-error', 'the server refused the read'),
   HttpError: closed('http-error', 'the server refused the page'),
+  TranscriptReadFailed: closed('transcript-read-failed', 'the transcript read failed'),
   ConnectFailed: closed('connect-failed', 'the app is not answering'),
   SocketClosed: closed('socket-closed', 'the connection closed'),
 } as const);
@@ -52,6 +55,8 @@ export type FaultRemedy = (typeof FaultRemedy)[keyof typeof FaultRemedy];
 export const ALL_FAULT_OPERATIONS = Object.freeze([
   FaultOperation.QualityPage,
   FaultOperation.SessionDetailRead,
+  FaultOperation.TranscriptInitialRead,
+  FaultOperation.TranscriptWindowRead,
   FaultOperation.SessionsRead,
   FaultOperation.ProjectRead,
   FaultOperation.DashboardRead,
@@ -68,6 +73,7 @@ export const ALL_FAULT_CAUSES = Object.freeze([
   FaultCause.FrameInvalid,
   FaultCause.TopicError,
   FaultCause.HttpError,
+  FaultCause.TranscriptReadFailed,
   FaultCause.ConnectFailed,
   FaultCause.SocketClosed,
 ] as const);

@@ -1,0 +1,46 @@
+requiredNames:
+  - mount-does-not-read
+  - jump-does-not-read
+  - history-disclosure
+  - revision-refetch
+  - failure-persists-until-retry
+  - stale-response-after-revision
+  - missing-section
+  - truncated-turn-limitation
+cases:
+  - name: mount-does-not-read
+    segmentCase: mount-segment-zero
+    actions: []
+    reads: 0
+  - name: jump-does-not-read
+    segmentCase: jump-window
+    actions: []
+    reads: 0
+  - name: history-disclosure
+    segmentCase: mount-segment-zero
+    actions: [load, disclose, disclose-again]
+    reads: 1
+  - name: revision-refetch
+    segmentCase: mount-segment-zero
+    actions: [load, revision, load]
+    reads: 2
+  - name: failure-persists-until-retry
+    segmentCase: mount-segment-zero
+    actions: [fail, unrelated-segment, retry]
+    reads: 2
+  - name: stale-response-after-revision
+    segmentCase: mount-segment-zero
+    actions: [load-pending, revision, finish-stale, load]
+    reads: 2
+  - name: missing-section
+    segmentCase: mount-segment-zero
+    actions: [load, missing]
+    reads: 1
+  - name: truncated-turn-limitation
+    segmentCase: per-field-bound
+    actions: [limitation]
+    reads: 0
+history:
+  content: synthetic earlier history content
+  label: ownership unresolved
+  explanation: ownership of this earlier history could not be resolved. it is retained separately from current turns and input submissions.
