@@ -41,6 +41,7 @@ import {
   GroupedMultiSelect,
   DiffView,
   Progress,
+  SelectionNodeKind,
   SelectionTree,
   Spinner,
   HelperGroup as FtHelperGroup,
@@ -239,8 +240,9 @@ export const Skeleton = FtSkeleton as unknown as ComponentType<SkeletonProps>;
 export { GroupedMultiSelect, RedactionReview, WhereDoesThisGo };
 
 // The server-grouped selection forest, the unified hunk diff, the progress bar and the spinner:
-// their shipped declarations already carry their props.
-export { DiffView, Progress, SelectionTree, Spinner };
+// their shipped declarations already carry their props. SelectionNodeKind is the forest's own
+// closed set of row kinds; a host that needs to name one takes it from here.
+export { DiffView, Progress, SelectionNodeKind, SelectionTree, Spinner };
 
 // The settings page parts. Their declared props cover these call-sites; a row's
 // `data-*` attributes pass through to its element at runtime.

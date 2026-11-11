@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, existsSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +18,7 @@ const template = f.template.lines.join('\n');
 const input = { sessionId: 'sess-a', cwd: '/work/ledger', branch: 'main', prompts: ['first prompt', 'second prompt'], startedAt: '2026-02-03T09:00:00Z' };
 
 for (const row of f.cases) {
-  if (['encode', 'lines', 'reproducible', 'unique', 'prompts', 'filler', 'checkouts', 'slug-root', 'rail'].includes(row.mode)) {
+  if (['encode', 'lines', 'reproducible', 'unique', 'prompts', 'filler', 'checkouts', 'mtimes', 'slug-root', 'rail'].includes(row.mode)) {
     test(row.name, (t) => {
       if (row.mode === 'encode') return assert.equal(encodeProjectDirectory(row.cwd), row.expected);
       if (row.mode === 'rail') {
@@ -52,6 +52,22 @@ for (const row of f.cases) {
           assert.equal(remote, 'https://github.com/acme/ledger.git');
         }
         assert.equal(new Set(written.map((entry) => entry.cwd)).size, 2, 'one checkout per branch');
+        return;
+      }
+      if (row.mode === 'mtimes') {
+        // The import leaves a recording that was written a moment ago out of its
+        // counts, as one still being written. A seeded recording is as old as
+        // its session, never as new as the seeding.
+        const dir = mkdtempSync('/tmp/ksseed');
+        t.after(() => rmSync(dir, { recursive: true, force: true }));
+        mkdirSync(join(dir, 'home'));
+        writeFileSync(join(dir, 'template.jsonl'), `${f.template.lines.join('\n')}\n`);
+        const written = seedRecordings({ home: join(dir, 'home'), root: dir, repoRoot: dir, fixture: f.fixture });
+        assert.equal(written.length, 3);
+        for (const entry of written) {
+          assert.equal(statSync(entry.path).mtimeMs, Date.parse(entry.startedAt), `${entry.name}'s file says when its session started`);
+          assert.ok(statSync(entry.path).mtimeMs < Date.now() - 86_400_000, `${entry.name} is not recent enough to count as active`);
+        }
         return;
       }
       if (row.mode === 'prompts') return assert.throws(() => sessionLines(template, { ...input, prompts: ['1', '2', '3'] }), /user lines/);

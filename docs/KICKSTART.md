@@ -118,9 +118,10 @@ same `config.yaml` for the same answers. The page decides none of that: what a s
 shows, and whether an answer is valid are the server's.
 
 - **First run.** Until setup has been saved, every top-level page of the app sends you to
-  `/kickstart`. Once it is saved the app never redirects again. A link to a recorded session, the
-  publish wizard, or `/selection` is never redirected. If the app cannot tell whether setup was saved,
-  it redirects nothing.
+  `/kickstart`, and so does `/selection`, which changes the file that setup creates. Once setup is
+  saved the app never redirects again. A link to a recorded session or the publish wizard is never
+  redirected. `/selection` waits for the answer before it starts anything, so it opens no session on
+  the way to setup. If the app cannot tell whether setup was saved, it redirects nothing.
 - **Run it again.** Settings has a "run setup again" link at the top. It opens `/kickstart` with your
   saved choices filled in, the way `peasant kickstart` restores them.
 - **Only the selection.** `/selection` is the same page with three steps: choose sessions, review,

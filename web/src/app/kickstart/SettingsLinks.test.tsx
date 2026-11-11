@@ -49,6 +49,6 @@ describe('settings-rerun-link-prefills', () => {
   it('opens setup from settings with the saved choices drawn as the server served them', async () => {
     const { origin } = entry() as unknown as { origin: string };
     route.search = `from=${origin}`;
-    await playCase(entry(), <WizardClient />);
+    await playCase(entry(), <WizardClient />, ['link', 'selectionLink', 'origin']);
   });
 });

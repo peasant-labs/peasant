@@ -12,7 +12,7 @@ import { CommandPalette } from '@/components/command/CommandPalette';
 import { DevAnnotateOverlay } from '@/components/dev/DevAnnotateOverlay';
 import { playEnter } from '@/lib/motion/enter';
 import { parseTranscriptRoute } from '@/lib/navigation/projectRoutes';
-import { useFirstRunRedirect } from '@/hooks/useFirstRun';
+import { FirstRunProvider } from '@/hooks/useFirstRun';
 
 /** The transcript holds dialogs that position against the screen, so it only fades in. */
 const FADE_ONLY = ['/projects'];
@@ -43,12 +43,6 @@ function PageEnter() {
   return null;
 }
 
-/** Sends the person to setup from any top-level page until setup has been saved. */
-function FirstRunRedirect() {
-  useFirstRunRedirect();
-  return null;
-}
-
 /**
  * LayoutShell wraps the app in the WebSocket provider and renders the
  * persistent chrome: fairtrade's sidebar beside the page (a top bar with a
@@ -76,11 +70,14 @@ export function LayoutShell({ children }: { children: ReactNode }) {
     <WebSocketProvider>
       <ServerCapabilitiesProvider>
         <PublishProvider>
-          <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} mainAs="main">
-            {children}
-          </AppSidebarLayout>
+          {/* Sends the person to setup from any top-level page until setup has been saved,
+              and holds a page that starts something on mount until that is decided. */}
+          <FirstRunProvider>
+            <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} mainAs="main">
+              {children}
+            </AppSidebarLayout>
+          </FirstRunProvider>
           <PageEnter />
-          <FirstRunRedirect />
           <CommandPalette />
           {process.env.NODE_ENV === 'development' && <DevAnnotateOverlay />}
         </PublishProvider>

@@ -16,7 +16,6 @@ import type {
   KickstartScan,
   KickstartSession,
   KickstartStop,
-  KickstartTree,
   LocalSettingValue,
 } from './model';
 import { KickstartFieldKind, KickstartStopKind } from './values';
@@ -253,39 +252,4 @@ export function overwriteNotices(session: KickstartSession, overwritten: readonl
 export function scanPercent(scan: KickstartScan): number | null {
   if (scan.total <= 0) return null;
   return Math.min(100, Math.round((scan.done / scan.total) * 100));
-}
-
-/** The rows of a tree, shaped for fairtrade's SelectionTree. State and lock are passed through untouched. */
-export function treeRows(tree: KickstartTree): readonly {
-  id: string;
-  parentId?: string;
-  kind: string;
-  state: string;
-  label: string;
-  sessionId?: string;
-  harness?: string;
-  childCount?: number;
-  locked: boolean;
-}[] {
-  return tree.nodes.map((node) => ({
-    id: node.id,
-    ...(node.parentId !== null ? { parentId: node.parentId } : {}),
-    kind: node.kind.wire,
-    state: node.state.wire,
-    label: node.label,
-    ...(node.sessionId !== null ? { sessionId: node.sessionId } : {}),
-    ...(node.harness !== null ? { harness: node.harness } : {}),
-    ...(node.childCount !== null ? { childCount: node.childCount } : {}),
-    locked: node.locked,
-  }));
-}
-
-/** The sentence that names rows the page could not draw, or null when none were dropped. */
-export function droppedRowsNotice(tree: KickstartTree): string | null {
-  const { unreadable, unknownKind, unknownState } = tree.dropped;
-  const parts: string[] = [];
-  if (unknownKind > 0) parts.push(`${unknownKind} with a kind this page does not know`);
-  if (unknownState > 0) parts.push(`${unknownState} with a state this page does not know`);
-  if (unreadable > 0) parts.push(`${unreadable} without an id or a name`);
-  return parts.length === 0 ? null : `some rows are hidden: ${parts.join(', ')}. update peasant and reload to see them.`;
 }

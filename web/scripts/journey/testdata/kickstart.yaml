@@ -88,14 +88,24 @@ recordings:
   # the scan's progress is on screen long enough to be seen.
   filler: {repositories: 4, sessions: 80}
 # What the person chooses on the journey: the ledger project's main branch only.
+# `imported` is what the finish panel reports for the import that follows the
+# save: every chosen session is new, none is updated. The seeded recordings are
+# as old as their sessions, so none is counted as still being written.
 chosen:
   repository: ledger
   branch: main
   imported: 2
   left: [tax-report, hero-copy, stray]
+# The selection page adds one session to what is stored. Its import brings in
+# that one; the sessions stored already are neither new nor counted again.
+selectionPage:
+  session: tax-report
+  imported: 1
 # The selection page's own case: one branch of a project whose clone has since
-# moved off the branch an older session recorded.
+# moved off the branch an older session recorded. `imported` is the sessions
+# that branch adds to what is stored.
 branchChoice:
   repository: marketing-site
   branch: main
   recordedElsewhere: stray
+  imported: 1

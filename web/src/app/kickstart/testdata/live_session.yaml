@@ -226,6 +226,8 @@ cases:
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
     steps:
+      # A kind the contract does not list: the breach is the point of the case.
       - frame: {type: kickstart, data: {kind: replaced, sessionId: ses-full, revision: 9}}
+        malformed: true
       - expectText: [peasant online, step 1 of 8]
       - expectNoText: [this setup session timed out]

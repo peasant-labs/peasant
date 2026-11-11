@@ -30,7 +30,7 @@ for (const [title, path] of Object.entries(FILES)) {
   describe(title, () => {
     for (const entry of loadCases(path)) {
       it(entry.name, async () => {
-        await playCase(entry, <WizardClient />);
+        await playCase(entry, <WizardClient />, ['section']);
         if (typeof entry.section === 'string') {
           // The link lands on a section the settings page really has, not on
           // the default it falls back to for a name it does not know.
