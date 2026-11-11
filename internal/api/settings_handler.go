@@ -288,9 +288,15 @@ func requireOneYAMLDocument(data []byte) error {
 // the configuration it applies. A missing file reads as no bytes, an empty
 // document, and the defaults every command applies without one.
 func (h *settingsHandler) readConfig(ctx context.Context) ([]byte, *yaml.Node, *config.Config, error) {
-	data, err := os.ReadFile(h.path)
+	return readConfigFile(ctx, h.path, h.git)
+}
+
+// readConfigFile is the one read of a configuration file the settings routes and
+// the kickstart session share.
+func readConfigFile(ctx context.Context, path string, git ingest.GitResolver) ([]byte, *yaml.Node, *config.Config, error) {
+	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, &yaml.Node{}, config.LoadDefaults(ctx, h.git), nil
+		return nil, &yaml.Node{}, config.LoadDefaults(ctx, git), nil
 	}
 	if err != nil {
 		return nil, nil, nil, err

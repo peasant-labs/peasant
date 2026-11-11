@@ -170,7 +170,7 @@ cases:
     body: '{"key": "selection.mode", "value": "selected"}'
     status: 400
     key: selection.mode
-    errorContains: ["change it with peasant kickstart or peasant config", "Nothing was changed"]
+    errorContains: ["change it on the selection page", "Nothing was changed"]
   - name: a request with an undeclared field is refused
     file: |
       version: 1
