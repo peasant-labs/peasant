@@ -66,6 +66,9 @@ type ingestSelectionCase struct {
 	// ExpectWritten is what the finish panel and the status route report for
 	// the run: the sessions written new and the sessions written again.
 	ExpectWritten *ingestSelectionWritten `yaml:"expectWritten"`
+	// ExpectIngestError makes the case run the import and require it to refuse
+	// to start, with each of these in its message.
+	ExpectIngestError []string `yaml:"expectIngestError"`
 	// ActiveRecordings leaves each recording's modification time at the moment
 	// it was written, so the run meets it while it is still being written.
 	// Without it every recording is two hours old.
@@ -190,6 +193,10 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	hs := newTestXDGHomes(t)
 	handler := hs.handler(nil, cfg)
 	handler.configPath = filepath.Join(root, "custom-config", "settings.yaml")
+	if len(item.ExpectIngestError) > 0 {
+		assertIngestRefused(t, handler, item.ExpectIngestError)
+		return
+	}
 	if item.PreludeAll {
 		prelude := hs.handler(nil, webIngestConfig(t, source, output, ingestSelectionCase{Mode: "all"}, "", ""))
 		first := runWebIngest(t, prelude, false)
@@ -232,6 +239,24 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 		}
 		if !found {
 			t.Fatalf("ingest diagnostics do not name the withheld session %s and config %s: %+v", ids.Selected, configPath, result.Diagnostics)
+		}
+	}
+}
+
+// assertIngestRefused runs the import and requires it to end in an error that
+// says what is wrong and where, before it read or imported any source.
+func assertIngestRefused(t *testing.T, handler *syncHandler, wantInMessage []string) {
+	t.Helper()
+	handler.runIngestPipeline(ingest.NewProgressState())
+	handler.mu.Lock()
+	status, refusal, result := handler.ingestStatus, handler.ingestError, handler.ingestResult
+	handler.mu.Unlock()
+	if status != "error" || refusal == nil || result != nil {
+		t.Fatalf("the import status = %q, error = %v, result = %v; want an error and no result", status, refusal, result)
+	}
+	for _, part := range wantInMessage {
+		if !strings.Contains(refusal.Error(), part) {
+			t.Errorf("the refusal %q should contain %q", refusal, part)
 		}
 	}
 }

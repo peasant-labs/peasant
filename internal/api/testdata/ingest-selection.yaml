@@ -13,6 +13,7 @@ requiredNames:
   - stored-session-excluded-by-selection-remains-viewable
   - moved-clone-tree-branch-and-import-agree
   - sessions-stored-while-active-are-counted-new
+  - invalid-saved-selection-refuses-the-import-and-says-where
 ids:
   selected: 11111111-1111-4111-8111-111111111111
   other: 22222222-2222-4222-8222-222222222222
@@ -112,3 +113,11 @@ cases:
       - 11111111-1111-4111-8111-111111111111
       - 22222222-2222-4222-8222-222222222222
     expectWritten: {new: 2, updated: 0}
+  # A saved selection this version cannot read stops the import before any
+  # source is read, and the refusal names the check that made it and what to do.
+  - name: invalid-saved-selection-refuses-the-import-and-says-where
+    mode: everything
+    expectIngestError:
+      - internal/api.checkIngestable
+      - unknown selection.mode
+      - choose the sessions to import again in setup
