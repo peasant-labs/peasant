@@ -23,10 +23,9 @@ import { seedRecordings } from './lib/kickstart-seed.mjs';
  * tree, a stale server or a marker the base commit also had stops the run
  * before any capture is trusted.
  *
- * `make build` also runs a provider-policy guard that this tree's schema pin
- * does not satisfy (it expects the eight-harness contract, the pin exposes
- * the current set). The journey therefore runs the two steps it needs, the web
- * export and the binary, and records the guard's state as not run.
+ * The build is `make build`: the web export, the binary and the provider-policy
+ * guard that checks both. The guard's own lines are kept in the manifest, and a
+ * build that does not print them is refused.
  */
 
 const web = fileURLToPath(new URL('../../', import.meta.url));
@@ -38,6 +37,7 @@ let stopApp = async () => {};
 let cleaning;
 let stopping = false;
 let sandbox;
+const buildOutput = [];
 let manifest;
 let saveManifest = () => {};
 
@@ -104,9 +104,14 @@ try {
   const out = join(web, 'out');
 
   await bounded((async () => {
-    await launch('make', ['web'], { env: { ...process.env, GOWORK: 'off' } }).done;
-    await launch('make', ['go'], { env: { ...process.env, GOWORK: 'off' } }).done;
-  })(), 900000, 'web export and binary build');
+    const build = launch('make', ['build'], { env: { ...process.env, GOWORK: 'off' }, stdio: ['ignore', 'pipe', 'inherit'] });
+    build.child.stdout.on('data', (chunk) => { process.stdout.write(chunk); buildOutput.push(chunk); });
+    await build.done;
+  })(), 900000, 'make build (web export, binary, provider-policy guard)');
+  const guardLines = Buffer.concat(buildOutput).toString().split('\n').filter((line) => line.startsWith('provider build provenance'));
+  if (!guardLines.some((line) => /found in web\/out and \.\/peasant/.test(line))) {
+    throw new Error(`make build finished without the provider-policy guard's verdict on web/out and ./peasant; its lines were ${JSON.stringify(guardLines)}. A build the guard did not vouch for is not the build to take captures from.`);
+  }
   for (const [path, digest] of Object.entries(sourceFiles)) {
     if (hash(readFileSync(join(repo, path))) !== digest) throw new Error(`Source changed while building: ${path}`);
   }
@@ -119,7 +124,7 @@ try {
     binaryHash: hash(readFileSync(binaryPath)),
     node: process.version,
     chrome,
-    providerBuildGuard: 'not run: make build fails it on this tree before and after this work; the web export and the binary were built by make web and make go',
+    providerBuildGuard: { command: 'make build', result: guardLines },
     projects: [],
   };
   saveManifest = () => writeFileSync(join(artifacts, 'manifest.json'), JSON.stringify(manifest, null, 2));

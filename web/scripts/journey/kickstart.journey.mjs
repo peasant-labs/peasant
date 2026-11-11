@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parse } from 'yaml';
+import { railProblems } from './lib/kickstart-rail.mjs';
 
 /**
  * The setup journey on the built binary: a fresh computer with seeded agent
@@ -163,6 +164,27 @@ async function probe(page) {
       }
     }
     const tabular = [...document.querySelectorAll('.ks-num')].filter((element) => !getComputedStyle(element).fontVariantNumeric.includes('tabular-nums')).map(describe);
+    // The step rail: where each label and its text were laid out, against the frame they sit in.
+    const frame = document.querySelector('.ks-wizard');
+    const frameBox = frame ? frame.getBoundingClientRect() : null;
+    const rail = {
+      labelled: !!frame && frame.classList.contains('ks-wizard-labelled'),
+      frame: frameBox ? { left: frameBox.left, right: frameBox.right } : { left: 0, right: 0 },
+      viewportWidth: document.documentElement.clientWidth,
+      labels: [...(frame ? frame.querySelectorAll('.ks-rail-label') : [])].map((element) => {
+        const box = element.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const text = range.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          text: element.textContent.trim(),
+          place: (/ks-rail-label-(\w+)/.exec(element.className) ?? [])[1] ?? '',
+          left: box.left, right: box.right, textLeft: text.left, textRight: text.right,
+          visible: box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none',
+        };
+      }),
+    };
     return {
       theme: document.documentElement.getAttribute('data-theme'),
       body: getComputedStyle(document.body).fontFamily,
@@ -172,6 +194,7 @@ async function probe(page) {
       textElements,
       offenders,
       tabularOffenders: tabular,
+      rail,
     };
   });
 }
@@ -606,6 +629,14 @@ test('computed-styles-and-themes', async () => {
     expect(entry.offenders.font, `${entry.name}: elements whose font is not Atkinson`).toEqual([]);
     expect(entry.offenders.radius, `${entry.name}: elements with a rounded corner`).toEqual([]);
     expect(entry.tabularOffenders, `${entry.name}: counts without tabular numbers`).toEqual([]);
+    expect(railProblems(entry.rail), `${entry.name}: the step rail's labels sit inside the frame`).toEqual([]);
+  }
+  // The rail check must have looked at labels: a rail with few steps shows them,
+  // so the screens named in the fixture are the ones that prove it.
+  for (const [name, count] of Object.entries(fixture.railScreens)) {
+    const entry = probes.find((candidate) => candidate.name === name);
+    expect(entry.rail.labelled, `${name}: the rail shows its labels`).toBe(true);
+    expect(entry.rail.labels.map((label) => label.text), `${name}: the rail measured one label per step`).toHaveLength(count);
   }
   expect(consoleErrors, 'no console error or page error in any tab').toEqual([]);
   // Every refused request was one the journey provoked on purpose: the save that

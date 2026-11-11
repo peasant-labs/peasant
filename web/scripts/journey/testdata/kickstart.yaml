@@ -35,6 +35,11 @@ expectedRefusals:
   - "400 GET /api/v1/sync/sessions"
   - "404 GET /api/v1/projects/resolve"
   - "409 POST /api/v1/kickstart/sessions/<id>/commit"
+# The screens whose step rail shows its labels (a rail with four steps or fewer
+# does), with how many labels each has. The rail check fails on these if the
+# labels were not measured, so it cannot pass by looking at nothing.
+railScreens:
+  10-selection-page: 3
 # Every screen that is captured and probed, in both themes (one file per theme
 # and name: <theme>-<name>.png under review-capture/).
 screens:

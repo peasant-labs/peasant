@@ -10,6 +10,7 @@ requiredNames:
   - seed-filler-is-deterministic
   - seed-checkouts-match-recorded-branches
   - seed-refuses-a-root-whose-project-names-are-ambiguous
+  - rail-labels-are-judged-against-the-frame
   - served-build-exact
   - served-page-stale-refused
   - served-asset-stale-refused
@@ -27,6 +28,7 @@ cases:
   - {name: seed-filler-is-deterministic, mode: filler}
   - {name: seed-checkouts-match-recorded-branches, mode: checkouts}
   - {name: seed-refuses-a-root-whose-project-names-are-ambiguous, mode: slug-root}
+  - {name: rail-labels-are-judged-against-the-frame, mode: rail}
   - {name: served-build-exact, mode: exact}
   - {name: served-page-stale-refused, mode: stale-page, error: differs from this export}
   - {name: served-asset-stale-refused, mode: stale-asset, error: differs from this build}
@@ -35,6 +37,74 @@ cases:
   - {name: served-no-marker-refused, mode: no-markers, error: names no marker}
   - {name: served-wrong-binary-refused, mode: wrong-binary, error: not the binary this run built}
   - {name: served-route-without-export-refused, mode: no-export, error: has no export}
+# Boxes as the browser measures them, in pixels, for a frame from 100 to 700 in a
+# 1000 wide viewport. `problems` are the words each judgement must contain; none
+# means the rail is fine. The first row is the placement the page has now, the
+# second the centred placement that clipped the first label at the frame's edge.
+rails:
+  - name: labels-inside-the-frame
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: start, left: 110, right: 230, textLeft: 110, textRight: 230, visible: true}
+        - {text: review, place: middle, left: 380, right: 420, textLeft: 380, textRight: 420, visible: true}
+        - {text: ingest, place: end, left: 560, right: 690, textLeft: 560, textRight: 690, visible: true}
+    problems: []
+  - name: first-label-clipped-at-the-left-edge
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: middle, left: 60, right: 180, textLeft: 60, textRight: 180, visible: true}
+        - {text: review, place: middle, left: 380, right: 420, textLeft: 380, textRight: 420, visible: true}
+        - {text: ingest, place: end, left: 560, right: 690, textLeft: 560, textRight: 690, visible: true}
+    problems: [spills out of the frame on the left, "the first label is placed"]
+  - name: last-label-spills-past-the-right-edge
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: start, left: 110, right: 230, textLeft: 110, textRight: 230, visible: true}
+        - {text: review, place: middle, left: 380, right: 420, textLeft: 380, textRight: 420, visible: true}
+        - {text: ingest, place: end, left: 600, right: 740, textLeft: 600, textRight: 740, visible: true}
+    problems: [spills out of the frame on the right]
+  - name: only-the-text-spills-though-the-box-fits
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: start, left: 110, right: 230, textLeft: 90, textRight: 230, visible: true}
+        - {text: ingest, place: end, left: 560, right: 690, textLeft: 560, textRight: 690, visible: true}
+    problems: [spills out of the frame on the left]
+  - name: neighbours-meet
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: start, left: 110, right: 400, textLeft: 110, textRight: 400, visible: true}
+        - {text: ingest, place: end, left: 380, right: 690, textLeft: 380, textRight: 690, visible: true}
+    problems: [overlap]
+  - name: a-label-that-is-not-drawn
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: start, left: 110, right: 230, textLeft: 110, textRight: 230, visible: false}
+        - {text: ingest, place: end, left: 560, right: 690, textLeft: 560, textRight: 690, visible: true}
+    problems: [is not visible]
+  - name: a-labelled-rail-with-no-labels
+    rail: {labelled: true, frame: {left: 100, right: 700}, viewportWidth: 1000, labels: []}
+    problems: [none was found]
+  - name: a-rail-of-numbers-has-no-labels-to-judge
+    rail: {labelled: false, frame: {left: 100, right: 700}, viewportWidth: 1000, labels: []}
+    problems: []
 fixture:
   # A small computer for the checkout case: one repository, three sessions on two branches.
   template: template.jsonl
