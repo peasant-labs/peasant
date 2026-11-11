@@ -22,9 +22,11 @@ export type TranscriptSegmentState = {
   loading: boolean;
   initialFault: WebFault | null;
   windowFaults: WebFault[];
+  hostWindowFaults: WebFault[];
   reload: () => void;
   loadSegment: (index: number) => Promise<void>;
   loadWindow: (anchor: number, span?: number) => Promise<void>;
+  retryHostWindow: (anchor: number, span?: number) => Promise<void>;
 };
 
 type OpenedJump = {
@@ -55,6 +57,9 @@ export function useTranscriptSegments({
   const [cache, setCache] = useState<RegionCache | null>(null);
   const [loading, setLoading] = useState(false);
   const faultStore = useRef(new FaultStore());
+  // Associate ownership with the fault object itself, so replacing or clearing a
+  // keyed fault cannot leave stale ownership behind.
+  const viewerFaults = useRef(new WeakSet<WebFault>());
   const [, notifyFaults] = useReducer((value: number) => value + 1, 0);
   const [reloadNonce, setReloadNonce] = useState(0);
   const cacheRef = useRef<RegionCache | null>(null);
@@ -70,6 +75,11 @@ export function useTranscriptSegments({
   const recordFault = useCallback((operation: FaultOperation, key: string, fault: WebFault) => {
     if (faultStore.current.set(operation, key, fault)) notifyFaults();
   }, []);
+  const recordWindowFault = useCallback((key: string, anchor: number, span: number, caught: unknown, viewer: boolean) => {
+    const fault = WebFault.transcriptWindowRead(anchor, span, readFailureDetail(caught));
+    if (viewer) viewerFaults.current.add(fault);
+    recordFault(FaultOperation.TranscriptWindowRead, key, fault);
+  }, [recordFault]);
 
   if (opened.current.sessionId !== sessionId) {
     opened.current = { sessionId, opened: jumpAnchor != null, anchor: jumpAnchor };
@@ -177,6 +187,21 @@ export function useTranscriptSegments({
       : jumpAnchor;
 
     const run = async () => {
+      let coveringWindow = false;
+      const failRead = (caught: unknown) => {
+        const live = cacheRef.current;
+        if (coveringWindow && anchor != null && live?.sessionId === sessionId) {
+          const key = windowCacheKey(anchor, TRANSCRIPT_WINDOW_SPAN);
+          const windows = new Map(live.windows);
+          windows.delete(key);
+          publish({ ...live, windows, activeWindowKey: live.activeWindowKey === key ? null : live.activeWindowKey });
+          clearFault(FaultOperation.TranscriptInitialRead, requestKey);
+          recordWindowFault(`${windowKeyPrefix}${anchor},${TRANSCRIPT_WINDOW_SPAN}]`, anchor, TRANSCRIPT_WINDOW_SPAN, caught, false);
+          return;
+        }
+        publish(null);
+        recordFault(FaultOperation.TranscriptInitialRead, requestKey, WebFault.transcriptInitialRead(readFailureDetail(caught)));
+      };
       try {
         let current = cacheRef.current;
         const sameCut = current?.sessionId === sessionId && current.frameRevision === frameRevision && !revisionChanged;
@@ -189,6 +214,7 @@ export function useTranscriptSegments({
           return;
         }
         if (anchor != null) {
+          coveringWindow = true;
           const descriptor = await loadWindowInto(current, anchor, TRANSCRIPT_WINDOW_SPAN, controller.signal);
           if (descriptor) await coverJump(descriptor, controller.signal);
           if (descriptor) clearFault(FaultOperation.TranscriptWindowRead, `${windowKeyPrefix}${anchor},${TRANSCRIPT_WINDOW_SPAN}]`);
@@ -204,6 +230,7 @@ export function useTranscriptSegments({
             const refreshed = await replaceDirectory(controller.signal, ticket);
             if (!refreshed || generation.current !== ticket || controller.signal.aborted) return;
             if (anchor != null) {
+              coveringWindow = true;
               const descriptor = await loadWindowInto(refreshed, anchor, TRANSCRIPT_WINDOW_SPAN, controller.signal);
               if (descriptor) await coverJump(descriptor, controller.signal);
               if (descriptor) clearFault(FaultOperation.TranscriptWindowRead, `${windowKeyPrefix}${anchor},${TRANSCRIPT_WINDOW_SPAN}]`);
@@ -214,13 +241,11 @@ export function useTranscriptSegments({
             return;
           } catch (retryError) {
             if (controller.signal.aborted || generation.current !== ticket) return;
-            publish(null);
-            recordFault(FaultOperation.TranscriptInitialRead, requestKey, WebFault.transcriptInitialRead(readFailureDetail(retryError)));
+            failRead(retryError);
             return;
           }
         }
-        publish(null);
-        recordFault(FaultOperation.TranscriptInitialRead, requestKey, WebFault.transcriptInitialRead(readFailureDetail(caught)));
+        failRead(caught);
       } finally {
         if (generation.current === ticket) setLoading(false);
       }
@@ -241,6 +266,7 @@ export function useTranscriptSegments({
     sessionId,
     clearFault,
     recordFault,
+    recordWindowFault,
     requestKey,
     windowKeyPrefix,
   ]);
@@ -251,7 +277,7 @@ export function useTranscriptSegments({
     await loadSegmentInto(current, index);
   }, [loadSegmentInto]);
 
-  const loadWindow = useCallback(async (anchor: number, span: number = TRANSCRIPT_WINDOW_SPAN) => {
+  const requestWindow = useCallback(async (anchor: number, span: number, viewer: boolean) => {
     const current = cacheRef.current;
     if (!current) throw new Error('The transcript directory is unavailable. Reload the transcript and try again.');
     const key = windowCacheKey(anchor, span);
@@ -270,20 +296,25 @@ export function useTranscriptSegments({
         const windows = new Map(live.windows);
         windows.delete(key);
         publish({ ...live, windows, activeWindowKey: live.activeWindowKey === key ? null : live.activeWindowKey });
-        recordFault(FaultOperation.TranscriptWindowRead, faultKey, WebFault.transcriptWindowRead(anchor, span, readFailureDetail(caught)));
+        recordWindowFault(faultKey, anchor, span, caught, viewer);
       }
       throw caught;
     }
-  }, [clearFault, loadListed, loadWindowInto, publish, recordFault, windowKeyPrefix]);
+  }, [clearFault, loadListed, loadWindowInto, publish, recordWindowFault, windowKeyPrefix]);
+
+  const loadWindow = useCallback((anchor: number, span = TRANSCRIPT_WINDOW_SPAN) => requestWindow(anchor, span, true), [requestWindow]);
+  const retryHostWindow = useCallback((anchor: number, span = TRANSCRIPT_WINDOW_SPAN) => requestWindow(anchor, span, false), [requestWindow]);
 
   const live = cache?.sessionId === sessionId ? cache : null;
+  const windowFaults = faultStore.current.forOperation(FaultOperation.TranscriptWindowRead, windowKeyPrefix);
   return {
     directory: live?.directory ?? null,
     segments: live ? [...live.segments.values()].sort((left, right) => left.index - right.index) : [],
     window: live?.activeWindowKey ? live.windows.get(live.activeWindowKey) ?? null : null,
     loading,
     initialFault: faultStore.current.get(FaultOperation.TranscriptInitialRead, requestKey),
-    windowFaults: faultStore.current.forOperation(FaultOperation.TranscriptWindowRead, windowKeyPrefix),
+    windowFaults,
+    hostWindowFaults: windowFaults.filter((fault) => !viewerFaults.current.has(fault)),
     reload: () => {
       cacheRef.current = null;
       inflight.current.clear();
@@ -291,6 +322,7 @@ export function useTranscriptSegments({
     },
     loadSegment,
     loadWindow,
+    retryHostWindow,
   };
 }
 
