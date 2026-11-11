@@ -8,13 +8,35 @@ import (
 	"testing"
 )
 
+// moduleRoot locates the module root the guard walks. `go test` runs the test
+// binary in its package directory, so the root is two levels up even under
+// -trimpath, where runtime.Caller reports a module-relative path that no
+// filesystem resolves.
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	// The walk below skips hidden directories by matching a "/." segment, so the
+	// root itself must be absolute: a "../.." root would make every path look
+	// hidden.
+	working, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the working directory: %v", err)
+	}
+	candidates := []string{working}
+	if _, file, _, ok := runtime.Caller(0); ok && filepath.IsAbs(file) {
+		candidates = append(candidates, filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..")))
+	}
+	for _, root := range candidates {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			return root
+		}
+	}
+	t.Fatalf("locate the module root: none of %v holds go.mod", candidates)
+	return ""
+}
+
 func TestGroupingLivesOnlyInBuildForest(t *testing.T) {
 	t.Parallel()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate grouping guard: caller path is unavailable")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	root := moduleRoot(t)
 	var declarations []string
 	var duplicates []string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
