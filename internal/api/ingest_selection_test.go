@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -62,6 +63,18 @@ type ingestSelectionCase struct {
 	ExpectImported      []string `yaml:"expectImported"`
 	ExpectExcluded      []string `yaml:"expectExcluded"`
 	ExpectDiagnostic    bool     `yaml:"expectDiagnostic"`
+	// ExpectWritten is what the finish panel and the status route report for
+	// the run: the sessions written new and the sessions written again.
+	ExpectWritten *ingestSelectionWritten `yaml:"expectWritten"`
+	// ActiveRecordings leaves each recording's modification time at the moment
+	// it was written, so the run meets it while it is still being written.
+	// Without it every recording is two hours old.
+	ActiveRecordings bool `yaml:"activeRecordings"`
+}
+
+type ingestSelectionWritten struct {
+	New     int `yaml:"new"`
+	Updated int `yaml:"updated"`
 }
 
 func loadIngestSelectionFixture(t *testing.T) ingestSelectionFixture {
@@ -157,6 +170,14 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	}
 	writeClaudeSession(t, filepath.Join(project, ids.Selected+".jsonl"), ids.Selected, selectedCWD, branchOf(item))
 	writeClaudeSession(t, filepath.Join(project, ids.Other+".jsonl"), ids.Other, otherCWD, "main")
+	if item.ActiveRecordings {
+		for _, id := range []string{ids.Selected, ids.Other} {
+			now := time.Now()
+			if err := os.Chtimes(filepath.Join(project, id+".jsonl"), now, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	if item.WithChild {
 		childDir := filepath.Join(project, ids.Selected, "subagents")
 		if err := os.MkdirAll(childDir, 0o700); err != nil {
@@ -176,6 +197,9 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	}
 	result := runWebIngest(t, handler, item.ThroughRoute)
 	assertIngestMembership(t, result, item.ExpectImported, item.ExpectExcluded)
+	if item.ExpectWritten != nil {
+		assertIngestWritten(t, handler, *item.ExpectWritten)
+	}
 	if item.PreludeAll {
 		opts, err := store.ManagedGenerationOptions(output)
 		if err != nil {
@@ -209,6 +233,31 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 		if !found {
 			t.Fatalf("ingest diagnostics do not name the withheld session %s and config %s: %+v", ids.Selected, configPath, result.Diagnostics)
 		}
+	}
+}
+
+// assertIngestWritten checks the counts the finish panel is given when the
+// import ends and the counts the status route serves to a tab that reconnects:
+// both are what the run wrote, one number each for new and updated.
+func assertIngestWritten(t *testing.T, handler *syncHandler, want ingestSelectionWritten) {
+	t.Helper()
+	wire := handler.ingestWire()
+	if wire.New != want.New || wire.Updated != want.Updated {
+		t.Errorf("the finish panel is told %d new and %d updated, want %d and %d", wire.New, wire.Updated, want.New, want.Updated)
+	}
+	response := httptest.NewRecorder()
+	handler.handleSyncIngestStatus(response, httptest.NewRequest(http.MethodGet, "/api/v1/sync/ingest/status", nil))
+	var status struct {
+		Result struct {
+			New     int `json:"new"`
+			Updated int `json:"updated"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode the ingest status: %v; body %s", err, response.Body.String())
+	}
+	if status.Result.New != want.New || status.Result.Updated != want.Updated {
+		t.Errorf("the status route reports %d new and %d updated, want %d and %d", status.Result.New, status.Result.Updated, want.New, want.Updated)
 	}
 }
 

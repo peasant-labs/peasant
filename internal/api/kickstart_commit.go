@@ -22,7 +22,7 @@ import (
 //	freeze the session            kickstartSessions.beginCommit
 //	lock, read, compare, swap,
 //	retention, live publish       onboarding.Draft.Commit (releases the lock)
-//	start the import              syncHandler.StartIngest
+//	claim and start the import    syncHandler.reserveIngest
 //	end the session               kickstartSessions.closeCommitted
 //	push the import's progress    kickstartImportFeed, after the closed event
 //
