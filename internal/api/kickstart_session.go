@@ -155,6 +155,9 @@ type kickstartEnv struct {
 	writeRetention func(days int) error
 	// lockWait bounds how long a save waits for the configuration lock.
 	lockWait time.Duration
+	// review previews a save of a draft. It reads the configuration file, which
+	// is why it is never run under the store lock; a test holds it to prove that.
+	review func(ctx context.Context, draft *onboarding.Draft, input onboarding.ReviewInput) (onboarding.ReviewResult, error)
 	// nextSteps is the finish menu a save answers with. The setup model owns it;
 	// a test replaces it to reach a menu the contract refuses.
 	nextSteps func() []onboarding.NextStep
@@ -207,6 +210,11 @@ func (e kickstartEnv) withDefaults() kickstartEnv {
 	}
 	if e.lockWait <= 0 {
 		e.lockWait = defaultKickstartLockWait
+	}
+	if e.review == nil {
+		e.review = func(ctx context.Context, draft *onboarding.Draft, input onboarding.ReviewInput) (onboarding.ReviewResult, error) {
+			return draft.Review(ctx, input)
+		}
 	}
 	if e.nextSteps == nil {
 		e.nextSteps = onboarding.NextStepsWeb
@@ -294,11 +302,12 @@ type kickstartSession struct {
 type kickstartSessions struct {
 	env kickstartEnv
 
-	// mu guards every session. emitMu orders publication: a mutation takes
-	// emitMu before it releases mu, so events leave in revision order while the
-	// hub is never called with mu held.
+	// mu guards every session and is held only for work on memory. line orders
+	// publication: a mutation joins it while it holds mu, so events leave in the
+	// order the changes were made, while the slow part of a view (the file read,
+	// the redactor) and the hub are never reached with mu held.
 	mu      sync.Mutex
-	emitMu  sync.Mutex
+	line    publishLine
 	byScope map[onboarding.ModelScope]*kickstartSession
 	byID    map[string]*kickstartSession
 	// finished keeps the publishers of sessions a commit ended, so an import
@@ -319,14 +328,52 @@ func newKickstartSessions(env kickstartEnv) *kickstartSessions {
 	}
 }
 
+// publishLine puts publication in the order the changes were made without
+// holding the store lock while an earlier change finishes its view.
+type publishLine struct {
+	mu   sync.Mutex
+	last chan struct{}
+}
+
+// join takes the next place in the line. wait is closed once everything before
+// this place has been published (nil for the first place); the caller closes
+// done when its own publication is out.
+func (l *publishLine) join() (wait <-chan struct{}, done chan struct{}) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	wait, done = l.last, make(chan struct{})
+	l.last = done
+	return wait, done
+}
+
 // mutate runs fn under the store lock and publishes the events it returns, in
 // order, after the lock is released.
 func (st *kickstartSessions) mutate(fn func() []schema.LocalKickstartEvent) {
+	st.mutateViews(func() ([]schema.LocalKickstartEvent, []*kickstartViewDraft) { return fn(), nil })
+}
+
+// mutateViews runs fn under the store lock. fn changes the session and returns
+// the events the change publishes, and the drafts of the views those events (or
+// the caller) carry. Everything fn can refuse happens under the lock, so a
+// refused change is rolled back there. The slow parts of each draft are then
+// added after the lock is released, and the events are published in the order
+// the changes were made.
+func (st *kickstartSessions) mutateViews(fn func() ([]schema.LocalKickstartEvent, []*kickstartViewDraft)) {
 	st.mu.Lock()
-	events := fn()
-	st.emitMu.Lock()
+	events, drafts := fn()
+	if len(events) == 0 && len(drafts) == 0 {
+		st.mu.Unlock()
+		return
+	}
+	wait, done := st.line.join()
 	st.mu.Unlock()
-	defer st.emitMu.Unlock()
+	defer close(done)
+	for _, draft := range drafts {
+		st.completeView(draft)
+	}
+	if wait != nil {
+		<-wait
+	}
 	for _, event := range events {
 		st.publish(event)
 	}
@@ -428,35 +475,58 @@ func (st *kickstartSessions) closeLocked(sess *kickstartSession, reason schema.L
 }
 
 // open returns the live session for scope, or opens one. The same scope returns
-// the same session; the other scope's session is never touched.
+// the same session; the other scope's session is never touched. The
+// configuration file a new session starts from is read before the store lock is
+// taken.
 func (st *kickstartSessions) open(ctx context.Context, scope onboarding.ModelScope) (schema.LocalKickstartSession, error) {
-	var view schema.LocalKickstartSession
-	var failure error
-	st.mutate(func() []schema.LocalKickstartEvent {
-		sess, ok := st.byScope[scope]
-		if !ok {
-			var err error
-			if sess, err = st.createLocked(ctx, scope); err != nil {
-				failure = err
-				return nil
+	if !scope.IsValid() {
+		return schema.LocalKickstartSession{}, errKickstartScopeInvalid(scope)
+	}
+	var loaded *config.Config
+	for {
+		var draft *kickstartViewDraft
+		var failure error
+		needsFile := false
+		st.mutateViews(func() ([]schema.LocalKickstartEvent, []*kickstartViewDraft) {
+			sess, ok := st.byScope[scope]
+			if !ok {
+				if loaded == nil {
+					needsFile = true
+					return nil, nil
+				}
+				var err error
+				if sess, err = st.createLocked(scope, loaded); err != nil {
+					failure = err
+					return nil, nil
+				}
 			}
+			if draft, failure = st.draftView(sess.frozen()); failure != nil {
+				return nil, nil
+			}
+			return nil, []*kickstartViewDraft{draft}
+		})
+		switch {
+		case needsFile:
+			var err error
+			if loaded, err = st.env.loadConfig(ctx); err != nil {
+				return schema.LocalKickstartSession{}, newKickstartError(http.StatusInternalServerError, "kickstart_config_unreadable",
+					"The setup session could not start because the configuration file %s could not be read in internal/api.kickstartSessions.open: %v. No session was opened and the file was not changed. Fix or restore the file, then open the session again.", st.env.configPath, err)
+			}
+		case failure != nil:
+			return schema.LocalKickstartSession{}, failure
+		default:
+			return draft.view, nil
 		}
-		view, failure = st.viewLocked(sess)
-		return nil
-	})
-	return view, failure
+	}
 }
 
-func (st *kickstartSessions) createLocked(ctx context.Context, scope onboarding.ModelScope) (*kickstartSession, error) {
-	if !scope.IsValid() {
-		return nil, newKickstartError(http.StatusBadRequest, "kickstart_scope_invalid",
-			"The setup scope %q is not full or selection in internal/api.kickstartSessions.open. No session was opened. Send full or selection.", scope)
-	}
-	loaded, err := st.env.loadConfig(ctx)
-	if err != nil {
-		return nil, newKickstartError(http.StatusInternalServerError, "kickstart_config_unreadable",
-			"The setup session could not start because the configuration file %s could not be read in internal/api.kickstartSessions.open: %v. No session was opened and the file was not changed. Fix or restore the file, then open the session again.", st.env.configPath, err)
-	}
+func errKickstartScopeInvalid(scope onboarding.ModelScope) *kickstartError {
+	return newKickstartError(http.StatusBadRequest, "kickstart_scope_invalid",
+		"The setup scope %q is not full or selection in internal/api.kickstartSessions.open. No session was opened. Send full or selection.", scope)
+}
+
+// createLocked opens a session for scope over the configuration file as loaded.
+func (st *kickstartSessions) createLocked(scope onboarding.ModelScope, loaded *config.Config) (*kickstartSession, error) {
 	sess := &kickstartSession{
 		id:                st.env.newID(),
 		scope:             scope,
@@ -499,7 +569,7 @@ func (st *kickstartSessions) get(id string) (schema.LocalKickstartSession, error
 	if err != nil {
 		return schema.LocalKickstartSession{}, err
 	}
-	return st.viewLocked(frozen)
+	return st.viewOf(frozen)
 }
 
 // activeFullSessionID is the id of the live full-scope session, or empty.
@@ -668,20 +738,65 @@ func (s *kickstartSession) restore(state kickstartMutableState) {
 // patch applies one answer request. A request at an older revision is applied
 // and reported, never refused: last edit wins, and the writer is told which
 // fields it replaced.
+//
+// A choice on a conflict row records the file value the user saw. That value
+// comes from a review of the file, which is read from a copy of the session
+// before the store lock is taken and used only if the session has not changed
+// since; a session that keeps changing is reviewed under the lock instead.
 func (st *kickstartSessions) patch(id string, request schema.LocalKickstartAnswers) (schema.LocalKickstartPatchResult, error) {
-	var result schema.LocalKickstartPatchResult
-	var failure error
-	st.mutate(func() []schema.LocalKickstartEvent {
-		sess, err := st.liveLocked(id)
-		if err != nil {
-			failure = err
-			return nil
+	var seen *kickstartSeenRows
+	for attempt := 0; ; attempt++ {
+		var result schema.LocalKickstartPatchResult
+		var failure error
+		var toReview *kickstartSession
+		st.mutateViews(func() ([]schema.LocalKickstartEvent, []*kickstartViewDraft) {
+			sess, err := st.liveLocked(id)
+			if err != nil {
+				failure = err
+				return nil, nil
+			}
+			current := seen
+			if !seen.reviews(sess) {
+				current = nil
+				if len(request.Resolutions) > 0 && attempt < kickstartReviewAttempts {
+					toReview = sess.frozen()
+					return nil, nil
+				}
+			}
+			var events []schema.LocalKickstartEvent
+			var drafts []*kickstartViewDraft
+			result, events, drafts, failure = st.patchLocked(sess, request, current)
+			return events, drafts
+		})
+		if toReview == nil {
+			return result, failure
 		}
-		var events []schema.LocalKickstartEvent
-		result, events, failure = st.patchLocked(sess, request)
-		return events
-	})
-	return result, failure
+		seen = st.seenRowsOf(toReview)
+	}
+}
+
+// kickstartReviewAttempts is how many times a request that resolves conflict
+// rows reviews the file outside the lock before it reviews under the lock.
+const kickstartReviewAttempts = 3
+
+// kickstartSeenRows are the conflict rows a review of a session found, taken at
+// one revision of it. They say what file value a row shows.
+type kickstartSeenRows struct {
+	revision uint64
+	rows     []schema.LocalKickstartConflict
+}
+
+// reviews reports whether the rows were taken from this session as it is now.
+func (r *kickstartSeenRows) reviews(sess *kickstartSession) bool {
+	return r != nil && r.revision == sess.revision
+}
+
+func (st *kickstartSessions) seenRowsOf(frozen *kickstartSession) *kickstartSeenRows {
+	seen := &kickstartSeenRows{revision: frozen.revision}
+	if review, ok := st.reviewOf(frozen, st.env.village()); ok {
+		seen.rows = review.Conflicts
+	}
+	return seen
 }
 
 type kickstartPlan struct {
@@ -690,32 +805,36 @@ type kickstartPlan struct {
 	resolutions map[onboarding.FieldKey]schema.LocalKickstartResolution
 }
 
-func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.LocalKickstartAnswers) (schema.LocalKickstartPatchResult, []schema.LocalKickstartEvent, error) {
+// patchLocked applies one request to a live session. seen, when it is not nil,
+// holds the conflict rows of a review of the session at its current revision.
+// It returns the result, the events to publish, and the drafts of the views they
+// carry; the drafts are completed after the lock is released.
+func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.LocalKickstartAnswers, seen *kickstartSeenRows) (schema.LocalKickstartPatchResult, []schema.LocalKickstartEvent, []*kickstartViewDraft, error) {
 	if sess.committing {
-		return schema.LocalKickstartPatchResult{}, nil, errKickstartCommitting(sess.id)
+		return schema.LocalKickstartPatchResult{}, nil, nil, errKickstartCommitting(sess.id)
 	}
 	if request.Revision > sess.revision {
-		return schema.LocalKickstartPatchResult{}, nil, newKickstartError(http.StatusBadRequest, "kickstart_revision_ahead",
+		return schema.LocalKickstartPatchResult{}, nil, nil, newKickstartError(http.StatusBadRequest, "kickstart_revision_ahead",
 			"The answer was sent at revision %d, which is ahead of setup session %q at revision %d, in internal/api.kickstartSessions.patch. Nothing was changed. Send the revision of the last view you rendered.", request.Revision, sess.id, sess.revision)
 	}
 	stale := request.Revision < sess.revision
 	facts := st.env.village()
 	plan, err := st.planLocked(sess, request, facts)
 	if err != nil {
-		return schema.LocalKickstartPatchResult{}, nil, err
+		return schema.LocalKickstartPatchResult{}, nil, nil, err
 	}
 
-	changed := st.changedKeysLocked(sess, plan)
+	changed := st.changedKeysLocked(sess, plan, seen)
 	if len(changed) == 0 {
-		view, err := st.viewLocked(sess)
+		draft, err := st.draftView(sess.frozen())
 		if err != nil {
-			return schema.LocalKickstartPatchResult{}, nil, err
+			return schema.LocalKickstartPatchResult{}, nil, nil, err
 		}
-		result := schema.LocalKickstartPatchResult{Revision: sess.revision, Stale: stale, View: &view}
+		result := schema.LocalKickstartPatchResult{Revision: sess.revision, Stale: stale, View: &draft.view}
 		if stale {
 			result.Overwritten = []schema.LocalKickstartOverwrite{}
 		}
-		return result, nil, nil
+		return result, nil, []*kickstartViewDraft{draft}, nil
 	}
 
 	var overwritten []schema.LocalKickstartOverwrite
@@ -736,11 +855,11 @@ func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.
 		sess.connect = *plan.connect
 	}
 	for key, choice := range plan.resolutions {
-		if st.coupledRowLocked(sess, key) {
+		if st.coupledRowLocked(sess, key, seen) {
 			// The draft never answered this field: another answer moves it. Both
 			// sides are recorded with the file value the user saw, and the save
 			// keeps the file's value for "theirs" instead of giving an answer up.
-			sess.resolutions[key] = onboarding.Resolution{Choice: choice, Seen: st.servedConflictSide(sess, key)}
+			sess.resolutions[key] = onboarding.Resolution{Choice: choice, Seen: st.servedConflictSide(sess, seen, key)}
 			sess.conflicts = withoutConflict(sess.conflicts, key)
 			continue
 		}
@@ -752,7 +871,7 @@ func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.
 		default:
 			// Keeping the draft's side records which file value the user saw, so
 			// the choice never settles a value its owner did not see.
-			sess.resolutions[key] = onboarding.Resolution{Choice: choice, Seen: st.servedConflictSide(sess, key)}
+			sess.resolutions[key] = onboarding.Resolution{Choice: choice, Seen: st.servedConflictSide(sess, seen, key)}
 		}
 		sess.conflicts = withoutConflict(sess.conflicts, key)
 	}
@@ -761,29 +880,29 @@ func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.
 	}
 	if err := st.rebuildLocked(sess); err != nil {
 		sess.restore(before)
-		return schema.LocalKickstartPatchResult{}, nil, newKickstartError(http.StatusBadRequest, "kickstart_answer_refused",
+		return schema.LocalKickstartPatchResult{}, nil, nil, newKickstartError(http.StatusBadRequest, "kickstart_answer_refused",
 			"The answer was refused when the draft was rebuilt in internal/api.kickstartSessions.patch: %v. Nothing was changed. Send an answer the setup model accepts.", err)
 	}
 	if err := st.refuseHiddenAnswerLocked(sess, plan, facts); err != nil {
 		sess.restore(before)
-		return schema.LocalKickstartPatchResult{}, nil, err
+		return schema.LocalKickstartPatchResult{}, nil, nil, err
 	}
-	view, err := st.viewLocked(sess)
+	draft, err := st.draftView(sess.frozen())
 	if err != nil {
 		sess.restore(before)
-		return schema.LocalKickstartPatchResult{}, nil, err
+		return schema.LocalKickstartPatchResult{}, nil, nil, err
 	}
 	st.touchLocked(sess)
 	kind := schema.LocalKickstartEventAnswers
 	if len(sess.conflicts) != conflictsBefore {
 		kind = schema.LocalKickstartEventConflicts
 	}
-	event := schema.LocalKickstartEvent{Kind: kind, SessionID: sess.id, Revision: revision, View: &view}
-	result := schema.LocalKickstartPatchResult{Revision: revision, Stale: stale, View: &view}
+	event := schema.LocalKickstartEvent{Kind: kind, SessionID: sess.id, Revision: revision, View: &draft.view}
+	result := schema.LocalKickstartPatchResult{Revision: revision, Stale: stale, View: &draft.view}
 	if stale {
 		result.Overwritten = append([]schema.LocalKickstartOverwrite{}, overwritten...)
 	}
-	return result, []schema.LocalKickstartEvent{event}, nil
+	return result, []schema.LocalKickstartEvent{event}, []*kickstartViewDraft{draft}, nil
 }
 
 // refuseHiddenAnswerLocked refuses a request that answers a field the setup
@@ -941,7 +1060,7 @@ func (st *kickstartSessions) connectPlanLocked(sess *kickstartSession, answer sc
 
 // changedKeysLocked lists, in order, the field keys a plan really changes. An
 // answer equal to the one the session holds changes nothing.
-func (st *kickstartSessions) changedKeysLocked(sess *kickstartSession, plan kickstartPlan) []string {
+func (st *kickstartSessions) changedKeysLocked(sess *kickstartSession, plan kickstartPlan, seen *kickstartSeenRows) []string {
 	changed := map[string]struct{}{}
 	for key, value := range plan.answers {
 		if current, ok := sess.answers[key]; ok && onboarding.SameSettingValue(current, value) {
@@ -956,7 +1075,7 @@ func (st *kickstartSessions) changedKeysLocked(sess *kickstartSession, plan kick
 		_, answered := sess.answers[key]
 		open := hasConflict(sess.conflicts, key)
 		recorded := sess.resolutions[key].Choice == resolution
-		if st.coupledRowLocked(sess, key) {
+		if st.coupledRowLocked(sess, key, seen) {
 			// A field an answer moves as a side effect has no answer to give up
 			// or keep: the choice itself is what changes.
 			if !recorded {
@@ -1030,11 +1149,11 @@ func connectToken(answer onboarding.ConnectAnswer) string {
 // coupledRowLocked reports whether key is a field the draft did not answer that
 // a row is shown for: another answer moves it as a side effect, and the file
 // moved it since the session opened.
-func (st *kickstartSessions) coupledRowLocked(sess *kickstartSession, key onboarding.FieldKey) bool {
+func (st *kickstartSessions) coupledRowLocked(sess *kickstartSession, key onboarding.FieldKey, seen *kickstartSeenRows) bool {
 	if _, answered := sess.answers[key]; answered {
 		return false
 	}
-	return st.servedConflictSide(sess, key) != nil
+	return st.servedConflictSide(sess, seen, key) != nil
 }
 
 // seenConflictSide is the file value a served conflict row showed for key.
@@ -1141,22 +1260,22 @@ func (st *kickstartSessions) abortCommit(id string) {
 func (st *kickstartSessions) publishConflicts(id string, rows []schema.LocalKickstartConflict) (uint64, error) {
 	var revision uint64
 	var failure error
-	st.mutate(func() []schema.LocalKickstartEvent {
+	st.mutateViews(func() ([]schema.LocalKickstartEvent, []*kickstartViewDraft) {
 		sess, err := st.liveLocked(id)
 		if err != nil {
 			failure = err
-			return nil
+			return nil, nil
 		}
 		before := sess.snapshot()
 		sess.conflicts = append([]schema.LocalKickstartConflict{}, rows...)
 		revision = st.bumpLocked(sess)
-		view, err := st.viewLocked(sess)
+		draft, err := st.draftView(sess.frozen())
 		if err != nil {
 			sess.restore(before)
 			failure = err
-			return nil
+			return nil, nil
 		}
-		return []schema.LocalKickstartEvent{{Kind: schema.LocalKickstartEventConflicts, SessionID: sess.id, Revision: revision, View: &view}}
+		return []schema.LocalKickstartEvent{{Kind: schema.LocalKickstartEventConflicts, SessionID: sess.id, Revision: revision, View: &draft.view}}, []*kickstartViewDraft{draft}
 	})
 	return revision, failure
 }
@@ -1178,8 +1297,11 @@ func (f *kickstartFinish) SessionID() string { return f.sessionID }
 
 // publishIngest publishes one ingest state on the topic.
 func (f *kickstartFinish) publishIngest(ingest schema.LocalKickstartIngest) {
-	f.st.emitMu.Lock()
-	defer f.st.emitMu.Unlock()
+	wait, done := f.st.line.join()
+	defer close(done)
+	if wait != nil {
+		<-wait
+	}
 	f.mu.Lock()
 	f.revision++
 	revision := f.revision

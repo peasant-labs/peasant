@@ -48,7 +48,7 @@ func (st *kickstartSessions) snapshotEvents(sessionID string) []schema.LocalKick
 	// built after the store lock is released.
 	var events []schema.LocalKickstartEvent
 	for _, sess := range frozen {
-		view, err := st.viewLocked(sess)
+		view, err := st.viewOf(sess)
 		if err != nil {
 			slog.Error("kickstart: a session snapshot could not be built for a subscription", "session", sess.id, "error", err)
 			continue

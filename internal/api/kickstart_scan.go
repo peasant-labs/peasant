@@ -161,9 +161,9 @@ func (st *kickstartSessions) runScan(ctx context.Context, sess *kickstartSession
 // Tabs learn of it twice, in order: a scan event that reports done, on which
 // they reload the forest, then a session event that carries the pruned answer.
 func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, result kickstartScanResult) {
-	st.mutate(func() []schema.LocalKickstartEvent {
+	st.mutateViews(func() ([]schema.LocalKickstartEvent, []*kickstartViewDraft) {
 		if sess.closed || sess.scanGen != gen {
-			return nil
+			return nil, nil
 		}
 		before := sess.snapshot()
 
@@ -175,7 +175,7 @@ func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, resu
 			if found.Count > 0 {
 				value, err := onboarding.SelectionIDsValue(kept)
 				if err != nil {
-					return st.failScanLocked(sess, err)
+					return st.failScanLocked(sess, err), nil
 				}
 				sess.answers[onboarding.FieldSelection] = value
 				prunedTree = true
@@ -198,7 +198,7 @@ func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, resu
 		scan, err := sess.scan.wire()
 		if err != nil {
 			sess.restore(before)
-			return st.failScanLocked(sess, err)
+			return st.failScanLocked(sess, err), nil
 		}
 		events := []schema.LocalKickstartEvent{{Kind: schema.LocalKickstartEventScan, SessionID: sess.id, Revision: scanRevision, Scan: &scan}}
 
@@ -208,14 +208,14 @@ func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, resu
 		}
 		if err := st.rebuildLocked(sess); err != nil {
 			sess.restore(before)
-			return st.failScanLocked(sess, fmt.Errorf("rebuild the draft over the new forest: %w", err))
+			return st.failScanLocked(sess, fmt.Errorf("rebuild the draft over the new forest: %w", err)), nil
 		}
-		view, err := st.viewLocked(sess)
+		draft, err := st.draftView(sess.frozen())
 		if err != nil {
 			sess.restore(before)
-			return st.failScanLocked(sess, err)
+			return st.failScanLocked(sess, err), nil
 		}
-		return append(events, schema.LocalKickstartEvent{Kind: schema.LocalKickstartEventSession, SessionID: sess.id, Revision: revision, View: &view})
+		return append(events, schema.LocalKickstartEvent{Kind: schema.LocalKickstartEventSession, SessionID: sess.id, Revision: revision, View: &draft.view}), []*kickstartViewDraft{draft}
 	})
 }
 

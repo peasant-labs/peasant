@@ -334,18 +334,21 @@ func (f *kickstartImportFeed) observer(own *kickstartFinish) func(schema.LocalKi
 	}
 }
 
-// reviewLocked previews a session's save with the commit's own chain: the
-// moved fields and the structured diff of what the file would become. A review
-// that cannot be built is logged and leaves the view without a diff; the save
-// itself re-reads the file under its lock.
-func (st *kickstartSessions) reviewLocked(sess *kickstartSession, facts kickstartFacts) (onboarding.ReviewResult, bool) {
+// reviewOf previews a session's save with the commit's own chain: the moved
+// fields and the structured diff of what the file would become. It reads the
+// configuration file, so it is given a frozen copy of the session and is never
+// called with the store lock held, except as the last resort of a request that
+// could not get a review of a session that stood still. A review that cannot be
+// built is logged and leaves the view without a diff; the save itself re-reads
+// the file under its lock.
+func (st *kickstartSessions) reviewOf(sess *kickstartSession, facts kickstartFacts) (onboarding.ReviewResult, bool) {
 	working, draft, err := sess.freshWorking(st.env.configPath)
 	if err != nil {
 		slog.Warn("kickstart: a review could not open its draft", "session", sess.id, "error", err)
 		return onboarding.ReviewResult{}, false
 	}
 	answers := sess.configAnswers()
-	review, err := draft.Review(st.env.ctx, onboarding.ReviewInput{
+	review, err := st.env.review(st.env.ctx, draft, onboarding.ReviewInput{
 		Model:       sess.model,
 		Answers:     answers,
 		Resolutions: sess.resolutions,
@@ -378,12 +381,16 @@ func reviewRows(published []schema.LocalKickstartConflict, review onboarding.Rev
 }
 
 // servedConflictSide is the file value a conflict row showed for key: from the
-// rows a refused save published, or from the review the view carried.
-func (st *kickstartSessions) servedConflictSide(sess *kickstartSession, key onboarding.FieldKey) schema.LocalSettingValue {
+// rows a refused save published, or from the review of the session that seen
+// carries. A request that has no such review (it is nil) reads the file now.
+func (st *kickstartSessions) servedConflictSide(sess *kickstartSession, seen *kickstartSeenRows, key onboarding.FieldKey) schema.LocalSettingValue {
 	if side := seenConflictSide(sess.conflicts, key); side != nil {
 		return side
 	}
-	if review, ok := st.reviewLocked(sess, st.env.village()); ok {
+	if seen != nil {
+		return seenConflictSide(seen.rows, key)
+	}
+	if review, ok := st.reviewOf(sess, st.env.village()); ok {
 		return seenConflictSide(review.Conflicts, key)
 	}
 	return nil
