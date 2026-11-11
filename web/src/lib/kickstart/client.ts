@@ -47,12 +47,15 @@ const NO_REASON = 'the server gave no reason; retry, then check the peasant serv
 export class KickstartRequestError extends Error {
   readonly status: number;
   readonly path: string;
+  /** The server's machine code for the refusal (`kickstart_config_busy`, ...), when it sent one. */
+  readonly code: string | null;
 
-  constructor(path: string, status: number, message: string) {
+  constructor(path: string, status: number, message: string, code: string | null = null) {
     super(message);
     this.name = 'KickstartRequestError';
     this.path = path;
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -61,24 +64,34 @@ export class KickstartCommitRefused extends KickstartRequestError {
   readonly conflicts: readonly KickstartConflict[];
 
   constructor(path: string, message: string, conflicts: readonly KickstartConflict[]) {
-    super(path, 409, message);
+    super(path, 409, message, null);
     this.name = 'KickstartCommitRefused';
     this.conflicts = conflicts;
   }
 }
 
-function reasonOf(text: string): string {
+/** What a refusal says and its machine code: the server's own `{error, code}` envelope, else the text. */
+function reasonOf(text: string): { message: string; code: string | null } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return text.trim() || NO_REASON;
+    return { message: text.trim() || NO_REASON, code: null };
   }
-  if (parsed !== null && typeof parsed === 'object' && typeof (parsed as { error?: unknown }).error === 'string') {
-    const reason = ((parsed as { error: string }).error).trim();
-    if (reason) return reason;
+  if (parsed !== null && typeof parsed === 'object') {
+    const envelope = parsed as { error?: unknown; code?: unknown };
+    const code = typeof envelope.code === 'string' && envelope.code.trim() !== '' ? envelope.code.trim() : null;
+    if (typeof envelope.error === 'string' && envelope.error.trim() !== '') return { message: envelope.error.trim(), code };
+    // An envelope with no usable reason: its JSON is not a sentence to show.
+    return { message: NO_REASON, code };
   }
-  return text.trim() || NO_REASON;
+  return { message: text.trim() || NO_REASON, code: null };
+}
+
+/** The error a refused request throws: the server's reason, its code, and the request it answered. */
+function refused(path: string, status: number, text: string): KickstartRequestError {
+  const { message, code } = reasonOf(text);
+  return new KickstartRequestError(path, status, message, code);
 }
 
 /** The answer's JSON, or the failure that explains why there is none. */
@@ -107,7 +120,7 @@ function jsonOf(path: string, status: number, text: string): unknown {
 
 async function call<T>(method: string, path: string, read: (raw: unknown) => T, body?: unknown): Promise<T> {
   const { status, text } = await exchange(method, path, body);
-  if (status < 200 || status >= 300) throw new KickstartRequestError(path, status, reasonOf(text));
+  if (status < 200 || status >= 300) throw refused(path, status, text);
   return read(jsonOf(path, status, text));
 }
 
@@ -173,7 +186,7 @@ export async function commitKickstartSession(id: string): Promise<KickstartCommi
     const refusal = parseKickstartCommitRefusal(jsonOf(path, status, text));
     throw new KickstartCommitRefused(path, refusal.error, refusal.conflicts);
   }
-  if (status < 200 || status >= 300) throw new KickstartRequestError(path, status, reasonOf(text));
+  if (status < 200 || status >= 300) throw refused(path, status, text);
   return parseKickstartCommitted(jsonOf(path, status, text));
 }
 
@@ -185,6 +198,6 @@ export async function commitKickstartSession(id: string): Promise<KickstartCommi
 export async function startKickstartImport(): Promise<{ started: boolean }> {
   const { status, text } = await exchange('POST', INGEST_PATH);
   if (status === 409) return { started: false };
-  if (status < 200 || status >= 300) throw new KickstartRequestError(INGEST_PATH, status, reasonOf(text));
+  if (status < 200 || status >= 300) throw refused(INGEST_PATH, status, text);
   return { started: true };
 }
