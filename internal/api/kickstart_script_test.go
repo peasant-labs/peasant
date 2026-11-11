@@ -436,7 +436,7 @@ func (w *kickstartWorld) scan(ctx context.Context, _ *config.Config, _ ingest.Kn
 		}
 	}
 	listings := *w.listings.Load()
-	progress.SetPhase("Discovering Claude Code sessions...")
+	progress.SetPhase(discovery.DiscoveringPhase(defaults.HarnessClaudeCode))
 	for index := range listings {
 		progress.SetProgress(index+1, len(listings))
 	}

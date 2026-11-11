@@ -13,7 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
-	"github.com/peasant-labs/schema"
 )
 
 // Scan runs discovery for each configured provider. It returns the provider
@@ -57,7 +56,7 @@ func Scan(
 		// Inventory available data before the user chooses providers. The saved
 		// selection still controls which providers ingestion enables.
 		src.Enabled = true
-		setPhase(progress, fmt.Sprintf("Discovering %s sessions...", schema.HarnessDisplayName(provider)))
+		setPhase(progress, DiscoveringPhase(provider))
 		adapter := factory(fs, git, salt.Salt{})
 		ingest.AttachClaudeEvidenceCache(adapter, evidence)
 		discovered, err := adapter.Discover(ctx, src)
@@ -74,7 +73,7 @@ func Scan(
 
 		roots := FilterRootSessions(discovered)
 		rootCount := len(roots)
-		setPhase(progress, fmt.Sprintf("Resolving %s project info...", schema.HarnessDisplayName(provider)))
+		setPhase(progress, ResolvingPhase(provider))
 		setProgress(progress, 0, rootCount)
 		for idx, d := range roots {
 			setProgress(progress, idx+1, rootCount)
@@ -145,6 +144,19 @@ func Scan(
 		inventory[provider] = discovery
 	}
 	return inventory, sessions, subagents
+}
+
+// DiscoveringPhase is what a scan says while it lists a harness's sessions. It
+// is written in the lowercase chrome of the surfaces that show it: the terminal
+// spinner and the setup page.
+func DiscoveringPhase(harness defaults.Harness) string {
+	return fmt.Sprintf("discovering %s sessions...", HarnessLabel(harness.String()))
+}
+
+// ResolvingPhase is what a scan says while it resolves each listed session's
+// project.
+func ResolvingPhase(harness defaults.Harness) string {
+	return fmt.Sprintf("resolving %s project info...", HarnessLabel(harness.String()))
 }
 
 func reusable(known ingest.KnownSessionIndex, session ingest.DiscoveredSession, staleness time.Duration) (ingest.KnownSession, bool) {

@@ -268,7 +268,7 @@ cases:
       - await:
           kind: scan
           session: "{full}"
-          json: {scan.state: running, scan.phase: "Discovering Claude Code sessions...", scan.done: 0, scan.total: 0}
+          json: {scan.state: running, scan.phase: "discovering claude code sessions...", scan.done: 0, scan.total: 0}
           absent: [view]
       - await:
           kind: scan
@@ -448,7 +448,7 @@ cases:
           - kind: scan
             session: "{full}"
             revision: 2
-            json: {scan.state: running, scan.phase: "Discovering Claude Code sessions...", scan.done: 0}
+            json: {scan.state: running, scan.phase: "discovering claude code sessions...", scan.done: 0}
           - kind: scan
             session: "{full}"
             revision: 3
