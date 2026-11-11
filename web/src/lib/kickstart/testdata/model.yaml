@@ -106,7 +106,19 @@ trees:
       tree: forest
     - name: an-unknown-kind-or-state-refuses-the-whole-forest
       tree: unknown-kind-and-state
-      refuses: [nodes.1.kind, nodes.2.state, breaks the Local API contract, nothing was changed, reload]
+      # what (the list, which rows), why (what each held and what is allowed), what
+      # it means (none of it is drawn, nothing changed) and what to do (same version, reload).
+      refuses:
+        - the list of sessions
+        - row 2 ("not a kind")
+        - 'holds "folder" for kind'
+        - row 3 ("not a state")
+        - 'holds "partial" for state'
+        - none of it is drawn
+        - breaks the Local API contract
+        - nothing was changed
+        - same version
+        - reload
     - name: a-total-or-a-cursor-is-refused
       body: {nodes: [], total: 0}
       refuses: [total, breaks the Local API contract]
@@ -115,9 +127,9 @@ trees:
         nodes:
           - {kind: project, state: none, label: no id}
           - {id: p-ok, kind: project, state: none, label: ok}
-      refuses: [nodes.0.id]
+      refuses: ['row 1 ("no id")', 'has none for id']
     - name: a-row-without-a-label-is-refused
       body:
         nodes:
           - {id: p-ok, kind: project, state: none}
-      refuses: [nodes.0.label]
+      refuses: ['row 1 (id p-ok)', 'has none for label']

@@ -27,6 +27,7 @@ requiredNames:
   - copy-covers-every-scope
   - conflict-row-shows-structured-value-readably
   - rail-labels-stay-inside-the-frame
+  - a-forest-with-a-bad-row-is-refused-whole-and-says-what-to-do
 cases:
   # The page opens a session of its own and draws only the stops the server
   # serves for it. Events of the wizard's session are not its own.
@@ -478,3 +479,31 @@ cases:
           first: {textAlign: left, shifted: true}
           middle: {textAlign: center, shifted: false}
           last: {textAlign: right, shifted: true}
+
+  # A forest the contract refuses is held back whole. The message says what is
+  # wrong, why nothing is drawn, and what to do, and the page offers to try again.
+  - name: a-forest-with-a-bad-row-is-refused-whole-and-says-what-to-do
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: unknown-kind-and-state}, malformed: true}
+    steps:
+      - expectText:
+          - the sessions could not be listed
+          # what: the list of sessions, and the rows in it that the contract does not allow
+          - the list of sessions
+          - row 2
+          - row 3
+          # why: what each row held, and what it may hold
+          - folder
+          - partial
+          # what it means: none of it is drawn, and nothing was changed
+          - none of it is drawn
+          - nothing was changed
+          # what to do
+          - same version
+          - reload
+      - expectControl: {role: button, name: try again}
+      # No row is drawn, not even the one the contract accepts.
+      - expectRows: []
+      - expectNoCalls: "PATCH"

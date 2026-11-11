@@ -70,19 +70,27 @@ export class KickstartContractError extends Error {
   }
 }
 
-interface Decoder<T> {
-  safeParse(value: unknown):
-    | { success: true; data: T }
-    | { success: false; error: { issues: readonly { path: PropertyKey[]; message: string }[] } };
+interface Issue {
+  readonly path: PropertyKey[];
+  readonly message: string;
 }
 
-function decode<T>(schema: Decoder<T>, raw: unknown, where: string): T {
+interface Decoder<T> {
+  safeParse(value: unknown): { success: true; data: T } | { success: false; error: { issues: readonly Issue[] } };
+}
+
+const SHOWN_ISSUES = 3;
+
+function decode<T>(schema: Decoder<T>, raw: unknown, where: string, describe?: (issues: readonly Issue[]) => string): T {
   const parsed = schema.safeParse(raw);
   if (parsed.success) return parsed.data;
-  const detail = parsed.error.issues
-    .slice(0, 3)
-    .map((issue) => `${issue.path.map(String).join('.') || '<root>'}: ${issue.message}`)
-    .join('; ');
+  const { issues } = parsed.error;
+  const detail =
+    describe?.(issues) ??
+    issues
+      .slice(0, SHOWN_ISSUES)
+      .map((issue) => `${issue.path.map(String).join('.') || '<root>'}: ${issue.message}`)
+      .join('; ');
   throw new KickstartContractError(where, detail || 'unknown shape');
 }
 
@@ -386,14 +394,36 @@ export function parseKickstartPreview(raw: unknown): readonly KickstartLine[] {
 }
 
 /**
+ * What is wrong with a forest, said row by row: which row (by its place in the
+ * list and its name), which field, what it held and what the contract allows.
+ * An issue that is not about a row is said by its path.
+ */
+function describeForestIssues(raw: unknown, issues: readonly Issue[]): string {
+  const rows = typeof raw === 'object' && raw !== null && Array.isArray((raw as { nodes?: unknown }).nodes) ? (raw as { nodes: unknown[] }).nodes : [];
+  const said = issues.slice(0, SHOWN_ISSUES).map((issue) => {
+    const [head, index, field] = issue.path;
+    if (head !== 'nodes' || typeof index !== 'number') return `${issue.path.map(String).join('.') || 'the list'}: ${issue.message}`;
+    const row = rows[index];
+    const fields = typeof row === 'object' && row !== null ? (row as Record<string, unknown>) : {};
+    const name = typeof fields.label === 'string' && fields.label !== '' ? `"${fields.label}"` : typeof fields.id === 'string' && fields.id !== '' ? `id ${fields.id}` : 'with no name';
+    if (typeof field !== 'string') return `row ${index + 1} (${name}): ${issue.message}`;
+    const held = field in fields ? `holds ${JSON.stringify(fields[field])}` : 'has none';
+    return `row ${index + 1} (${name}) ${held} for ${field}: ${issue.message}`;
+  });
+  const more = issues.length > SHOWN_ISSUES ? `; and ${issues.length - SHOWN_ISSUES} more` : '';
+  return `the list of sessions has rows the contract does not allow, so none of it is drawn rather than drawing the rest from rows it had to guess at: ${said.join('; ')}${more}`;
+}
+
+/**
  * GET …/tree: the whole forest. It is checked against the generated contract
  * like every other body, so a row outside it (an id or a label missing, a kind
  * or a state the contract does not list) refuses the whole forest with the
- * actionable contract error. The forest is not drawn from rows the page had to
- * guess at, and no row is relabelled as another kind or state.
+ * actionable contract error: which rows, why, that nothing was changed and what
+ * to do. The forest is not drawn from rows the page had to guess at, and no row
+ * is relabelled as another kind or state.
  */
 export function parseKickstartTree(raw: unknown): KickstartTree {
-  return decode(zLocalKickstartTree, raw, 'GET /api/v1/kickstart/sessions/{id}/tree');
+  return decode(zLocalKickstartTree, raw, 'GET /api/v1/kickstart/sessions/{id}/tree', (issues) => describeForestIssues(raw, issues));
 }
 
 // ── events ───────────────────────────────────────────────────────────────
