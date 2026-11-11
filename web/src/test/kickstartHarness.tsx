@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within, type BoundFunctions, type queries } from '@testing-library/react';
 import { type ReactElement } from 'react';
 import { expect, vi } from 'vitest';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
@@ -35,6 +35,8 @@ export interface Step {
   /** Push a raw frame as the server would send it. */
   frame?: Json;
   click?: string;
+  /** Move keyboard focus to the checkbox with this name (a forest row, to read its preview). */
+  focus?: string;
   choose?: string;
   check?: string;
   /** Answer the next calls of a route differently from here on. */
@@ -54,6 +56,13 @@ export interface Step {
   expectCalls?: { route: string; count: number };
   /** Assert the nth (default last) body sent to a route contains this subset. */
   expectBody?: { route: string; nth?: number; subset: Json };
+  /**
+   * Every body sent to a route names only these keys, and at least one was
+   * sent. The check cannot pass because nothing was sent.
+   */
+  expectBodyKeys?: { route: string; only: string[] };
+  /** The forest rows on the page, by node id, in the order they are drawn. */
+  expectRows?: string[];
   expectLink?: { name: string; href: string };
   expectNoReload?: true;
   /** Texts that must all appear, in this order in the document. */
@@ -136,14 +145,19 @@ export class KickstartServer {
   }
 }
 
+type Queries = BoundFunctions<typeof queries>;
+
 export interface Mounted {
   server: KickstartServer;
   socket: MockWebSocket;
   reloads: { count: number };
+  /** Where this page is drawn. A single page owns the document body. */
+  container: HTMLElement;
+  /** Queries limited to this page, so two pages in one document do not collide. */
+  root: Queries;
 }
 
-/** Mount a page under the real WebSocket provider with the boundary played from fixtures. */
-export async function mountKickstart(element: ReactElement, server: KickstartServer): Promise<Mounted> {
+function stubBrowser(server: KickstartServer): { count: number } {
   MockWebSocket.reset();
   vi.stubGlobal('WebSocket', MockWebSocket);
   server.install();
@@ -153,12 +167,49 @@ export async function mountKickstart(element: ReactElement, server: KickstartSer
     configurable: true,
     value: { ...original, href: original.href, origin: original.origin, pathname: '/kickstart', search: '', reload: () => { reloads.count += 1; } },
   });
+  return reloads;
+}
+
+/** Mount a page under the real WebSocket provider with the boundary played from fixtures. */
+export async function mountKickstart(element: ReactElement, server: KickstartServer): Promise<Mounted> {
+  const reloads = stubBrowser(server);
   render(<WebSocketProvider>{element}</WebSocketProvider>);
   const socket = MockWebSocket.latest();
   await act(async () => {
     socket.simulateOpen();
   });
-  return { server, socket, reloads };
+  return { server, socket, reloads, container: document.body, root: screen };
+}
+
+/**
+ * Mount several pages of one browser, each with its own socket on the one
+ * server: two tabs, or the wizard beside the selection page. They mount in
+ * order, each once it has drawn its first stop, so the server's scripted
+ * answers go to the tabs in the order they are named.
+ */
+export async function mountKickstartTabs(pages: readonly { name: string; element: ReactElement }[], server: KickstartServer): Promise<Record<string, Mounted>> {
+  const reloads = stubBrowser(server);
+  const tabs: Record<string, Mounted> = {};
+  for (const page of pages) {
+    const container = document.body.appendChild(document.createElement('div'));
+    render(<WebSocketProvider>{page.element}</WebSocketProvider>, { container, baseElement: document.body });
+    const socket = MockWebSocket.latest();
+    await act(async () => {
+      socket.simulateOpen();
+    });
+    const root = within(container);
+    await waitFor(() => expect(root.queryAllByRole('heading', { level: 2 }).length, `tab ${page.name} draws its first stop`).toBeGreaterThan(0));
+    tabs[page.name] = { server, socket, reloads, container, root };
+  }
+  return tabs;
+}
+
+function scriptServer(entry: FixtureCase): KickstartServer {
+  const server = new KickstartServer();
+  for (const [route, answers] of Object.entries((entry.server ?? {}) as Record<string, RouteAnswer | RouteAnswer[]>)) {
+    server.script(route, answers);
+  }
+  return server;
 }
 
 /** Mount a page for one fixture case: its scripted server answers, then its steps. */
@@ -166,12 +217,35 @@ export async function playCase(entry: FixtureCase, element: ReactElement): Promi
   // Only timeouts are faked, and the clock still moves with real time, so
   // Testing Library's own polling keeps working while a case controls timers.
   if (entry.fakeTimers === true) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
-  const server = new KickstartServer();
-  for (const [route, answers] of Object.entries((entry.server ?? {}) as Record<string, RouteAnswer | RouteAnswer[]>)) {
-    server.script(route, answers);
-  }
+  const server = scriptServer(entry);
   const mounted = await mountKickstart(element, server);
   await runSteps((entry.steps ?? []) as Step[], mounted);
+  return mounted;
+}
+
+/** A step of a case with several pages: it names the page it acts on, or `all`. */
+export type TabStep = Step & { tab: string };
+
+/**
+ * Mount the pages a case names, in the order its `tabs` lists them, then run its
+ * steps, each on the page it names (`all` runs it on every page: a topic push
+ * reaches every subscriber). The server and its call log are shared, as one
+ * browser's are.
+ */
+export async function playTabs(entry: FixtureCase, pages: Readonly<Record<string, ReactElement>>): Promise<Record<string, Mounted>> {
+  const order = entry.tabs;
+  if (!Array.isArray(order) || order.some((name) => typeof name !== 'string' || pages[name] === undefined)) {
+    throw new Error(`case ${entry.name}: tabs must name pages from ${Object.keys(pages).join(', ')}, in mount order`);
+  }
+  if (entry.fakeTimers === true) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+  const server = scriptServer(entry);
+  const mounted = await mountKickstartTabs((order as string[]).map((name) => ({ name, element: pages[name] })), server);
+  for (const [position, raw] of ((entry.steps ?? []) as TabStep[]).entries()) {
+    const { tab, ...step } = raw;
+    const targets = tab === 'all' ? Object.values(mounted) : mounted[tab] === undefined ? [] : [mounted[tab]];
+    if (targets.length === 0) throw new Error(`case ${entry.name} step ${position + 1}: tab ${JSON.stringify(tab)} is not one of ${Object.keys(mounted).join(', ')}, all`);
+    for (const target of targets) await runSteps([step], target, `tab ${tab}, step ${position + 1}`);
+  }
   return mounted;
 }
 
@@ -181,15 +255,19 @@ export function teardown(): void {
   vi.useRealTimers();
 }
 
-function control(role: string, name: string): HTMLElement {
-  return screen.getByRole(role as never, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+function control(q: Queries, role: string, name: string): HTMLElement {
+  return q.getByRole(role as never, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
 }
 
-/** Run the steps of a fixture case against a mounted page. */
-export async function runSteps(steps: readonly Step[], mounted: Mounted): Promise<void> {
-  const { server, socket } = mounted;
+/**
+ * Run the steps of a fixture case against a mounted page. `where` names the
+ * page and position in a failure message when the steps are a slice of a longer
+ * case.
+ */
+export async function runSteps(steps: readonly Step[], mounted: Mounted, where?: string): Promise<void> {
+  const { server, socket, container, root: q } = mounted;
   for (const [position, step] of steps.entries()) {
-    const at = `step ${position + 1}`;
+    const at = where ?? `step ${position + 1}`;
     if (step.push) {
       await act(async () => {
         socket.simulateMessage({ type: 'kickstart', data: server.event(step.push!) });
@@ -203,17 +281,22 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted): Promis
     if (step.script) server.script(step.script.route, step.script.answers);
     if (step.click) {
       await act(async () => {
-        fireEvent.click(control('button', step.click!));
+        fireEvent.click(control(q, 'button', step.click!));
+      });
+    }
+    if (step.focus) {
+      await act(async () => {
+        control(q, 'checkbox', step.focus!).focus();
       });
     }
     if (step.choose) {
       await act(async () => {
-        fireEvent.click(control('radio', step.choose!));
+        fireEvent.click(control(q, 'radio', step.choose!));
       });
     }
     if (step.check) {
       await act(async () => {
-        fireEvent.click(control('checkbox', step.check!));
+        fireEvent.click(control(q, 'checkbox', step.check!));
       });
     }
     if (step.socket === 'close') {
@@ -238,14 +321,14 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted): Promis
       });
     }
     for (const text of step.expectText ?? []) {
-      await waitFor(() => expect(screen.getAllByText(text, { exact: false }).length, `${at}: expected text ${JSON.stringify(text)}`).toBeGreaterThan(0));
+      await waitFor(() => expect(q.getAllByText(text, { exact: false }).length, `${at}: expected text ${JSON.stringify(text)}`).toBeGreaterThan(0));
     }
     for (const text of step.expectNoText ?? []) {
-      expect(screen.queryAllByText(text, { exact: false }), `${at}: expected no text ${JSON.stringify(text)}`).toHaveLength(0);
+      expect(q.queryAllByText(text, { exact: false }), `${at}: expected no text ${JSON.stringify(text)}`).toHaveLength(0);
     }
     if (step.expectControl) {
       const { role, name, present = true, disabled, checked, valueNow } = step.expectControl;
-      const found = screen.queryAllByRole(role as never, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+      const found = q.queryAllByRole(role as never, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
       if (!present) {
         expect(found, `${at}: expected no ${role} named ${name}`).toHaveLength(0);
       } else {
@@ -263,7 +346,7 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted): Promis
     }
     if (step.expectNoControlMatching) {
       const pattern = new RegExp(step.expectNoControlMatching.pattern, 'i');
-      const found = screen.queryAllByRole(step.expectNoControlMatching.role as never, { name: pattern });
+      const found = q.queryAllByRole(step.expectNoControlMatching.role as never, { name: pattern });
       expect(found, `${at}: no ${step.expectNoControlMatching.role} matching ${pattern}`).toHaveLength(0);
     }
     if (step.expectNoCalls) {
@@ -283,13 +366,27 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted): Promis
         expect(isSubset(body, subset), `${at}: body ${JSON.stringify(body)} should contain ${JSON.stringify(subset)}`).toBe(true);
       });
     }
+    if (step.expectBodyKeys) {
+      const { route, only } = step.expectBodyKeys;
+      await waitFor(() => expect(server.bodies(route).length, `${at}: a body was sent to ${route}`).toBeGreaterThan(0));
+      for (const body of server.bodies(route)) {
+        const keys = body !== null && typeof body === 'object' ? Object.keys(body as Record<string, Json>) : [];
+        expect(keys.filter((key) => !only.includes(key)), `${at}: keys sent to ${route} beyond ${only.join(', ')}`).toEqual([]);
+      }
+    }
+    if (step.expectRows) {
+      await waitFor(() => {
+        const drawn = [...container.querySelectorAll('[data-node-id]')].map((row) => row.getAttribute('data-node-id'));
+        expect(drawn, `${at}: forest rows on the page`).toEqual(step.expectRows);
+      });
+    }
     if (step.expectLink) {
-      const link = screen.getByRole('link', { name: new RegExp(`^${step.expectLink.name}$`, 'i') });
+      const link = q.getByRole('link', { name: new RegExp(`^${step.expectLink.name}$`, 'i') });
       expect(link.getAttribute('href'), `${at}: link ${step.expectLink.name}`).toBe(step.expectLink.href);
     }
     if (step.expectOrder) {
       const positions = step.expectOrder.map((text) => {
-        const found = screen.getAllByText(text, { exact: false })[0];
+        const found = q.getAllByText(text, { exact: false })[0];
         expect(found, `${at}: ${text} is on the page`).toBeDefined();
         return found;
       });
@@ -302,7 +399,7 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted): Promis
       });
     }
     if (step.expectDetails) {
-      const summary = screen.getAllByText(step.expectDetails.summary, { exact: false })[0];
+      const summary = q.getAllByText(step.expectDetails.summary, { exact: false })[0];
       const details = summary.closest('details');
       expect(details, `${at}: ${step.expectDetails.summary} is inside <details>`).not.toBeNull();
       expect(details!.open, `${at}: ${step.expectDetails.summary} open state`).toBe(step.expectDetails.open);
