@@ -537,7 +537,7 @@ func (d *Draft) plan(model Model, input Answers, resolutions Resolutions, w Writ
 			return nil, commitFailure(CommitFailureInvalid, err)
 		}
 	}
-	out, err := d.document(model, snap, &working, answers)
+	out, err := d.document(model, snap, base, &working, answers)
 	if err != nil {
 		return nil, commitFailure(CommitFailureInvalid, err)
 	}
@@ -624,10 +624,10 @@ func fieldPlace(model Model, field Field) (FlowKey, string) {
 
 // document builds the bytes the save would write. A file that is absent now is
 // written whole, from the working configuration, as the terminal's first save
-// writes it. A file that exists is edited in place: each answered path is set in
-// its own document, so the keys the file does not name stay unnamed and its
-// comments and key order survive.
-func (d *Draft) document(model Model, snap snapshot, working *config.Config, answers Answers) ([]byte, error) {
+// writes it. A file that exists is edited in place: each answered path, and each
+// path the answers moved, is set in its own document, so the keys the file does
+// not name stay unnamed and its comments and key order survive.
+func (d *Draft) document(model Model, snap snapshot, base, working *config.Config, answers Answers) ([]byte, error) {
 	if snap.data == nil {
 		out, err := yaml.Marshal(working)
 		if err != nil {
@@ -644,7 +644,7 @@ func (d *Draft) document(model Model, snap snapshot, working *config.Config, ans
 	for key := range answers {
 		keys = append(keys, key)
 	}
-	if err := model.ProjectAnswered(snap.doc, working, keys); err != nil {
+	if err := model.ProjectEdits(snap.doc, base, working, keys); err != nil {
 		return nil, err
 	}
 	var buf bytes.Buffer

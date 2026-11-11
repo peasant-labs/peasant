@@ -1,8 +1,11 @@
 package onboarding
 
 import (
-	"encoding/json"
+	"bytes"
 	"fmt"
+	"reflect"
+	"slices"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"gopkg.in/yaml.v3"
@@ -61,45 +64,109 @@ func DocumentPath(root *yaml.Node, path []string) (*yaml.Node, bool) {
 	return lookupMappingPath(mapping, path)
 }
 
-// ProjectAnswered writes each answered field that has a YAML path into doc from
-// cfg. Retention and other path-less fields are skipped, so they never appear
-// in config.yaml. Selection is written as the one mapping at its path.
-func (m Model) ProjectAnswered(doc *yaml.Node, cfg *config.Config, answered []FieldKey) error {
-	if cfg == nil {
-		return documentPathError("the configuration pointer is nil", "pass the configuration the answers produced")
+// ProjectEdits writes into doc every configuration value the answers set. A
+// field is written when the user answered it, and also when applying the answers
+// moved its stored value away from base: a choice can move another stored key
+// (publishing automatically sets the share preference, keeping transcripts
+// local clears the intent), and leaving that key behind would make the file
+// say something the user did not choose.
+//
+// Each value is the one the configuration holds at the field's YAML path, with
+// the type the configuration gives it, so a boolean is written as a boolean.
+// Fields with no path (retention) are skipped and never enter config.yaml.
+// Selection is written as the one mapping at its path. A field the answers did
+// not touch is left exactly as doc has it.
+func (m Model) ProjectEdits(doc *yaml.Node, base, working *config.Config, answered []FieldKey) error {
+	if base == nil || working == nil {
+		return documentPathError("a configuration pointer is nil", "pass the configuration before the answers and the one they produced")
 	}
 	wanted := map[FieldKey]bool{}
 	for _, key := range answered {
 		wanted[key] = true
 	}
 	for _, field := range m.Fields() {
-		if !wanted[field.Key()] || len(field.YAMLPath()) == 0 {
+		path := field.YAMLPath()
+		if len(path) == 0 {
 			continue
 		}
-		value, err := projectedValue(cfg, field)
+		after, err := configValueAtPath(working, path)
 		if err != nil {
 			return err
 		}
-		if err := SetDocumentPath(doc, field.YAMLPath(), value); err != nil {
+		if !wanted[field.Key()] {
+			before, err := configValueAtPath(base, path)
+			if err != nil {
+				return err
+			}
+			if sameYAMLValue(before, after) {
+				continue
+			}
+		}
+		if err := SetDocumentPath(doc, path, after); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func projectedValue(cfg *config.Config, field Field) (any, error) {
-	if field.Key() == FieldSelection {
-		return cfg.Selection, nil
+// configValueAtPath returns what the configuration holds at a YAML path, found
+// through the struct's own yaml tags. The configuration decides the type, so
+// this is the representation the terminal's whole-document save writes.
+func configValueAtPath(cfg *config.Config, path []string) (any, error) {
+	current := reflect.ValueOf(cfg).Elem()
+	for depth, segment := range path {
+		next, ok := yamlStructField(current, segment)
+		if !ok {
+			return nil, documentPathError(
+				fmt.Sprintf("the configuration has no value at %s (stopped at %q, segment %d)", joinPath(path), segment, depth+1),
+				"give the field a YAML path the configuration declares")
+		}
+		current = next
 	}
-	raw, err := field.Read(cfg)
-	if err != nil {
-		return nil, err
+	return current.Interface(), nil
+}
+
+// yamlStructField finds the field of struct v that the YAML key name maps to,
+// looking through inline structs. yaml.v3 names an untagged field by its
+// lowercased Go name.
+func yamlStructField(v reflect.Value, name string) (reflect.Value, bool) {
+	if v.Kind() == reflect.Pointer && !v.IsNil() {
+		v = v.Elem()
 	}
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, fmt.Errorf("project %s into the document: %w", field.Key(), err)
+	if v.Kind() != reflect.Struct {
+		return reflect.Value{}, false
 	}
-	return value, nil
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		key, options, _ := strings.Cut(field.Tag.Get("yaml"), ",")
+		if key == "-" {
+			continue
+		}
+		if slices.Contains(strings.Split(options, ","), "inline") {
+			if inner, ok := yamlStructField(v.Field(i), name); ok {
+				return inner, true
+			}
+			continue
+		}
+		if key == "" {
+			key = strings.ToLower(field.Name)
+		}
+		if key == name {
+			return v.Field(i), true
+		}
+	}
+	return reflect.Value{}, false
+}
+
+// sameYAMLValue compares two configuration values by what they encode to.
+func sameYAMLValue(a, b any) bool {
+	left, leftErr := yaml.Marshal(a)
+	right, rightErr := yaml.Marshal(b)
+	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
 }
 
 func documentPathError(why, fix string) error {

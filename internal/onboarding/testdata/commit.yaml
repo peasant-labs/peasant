@@ -34,6 +34,7 @@ requiredNames:
   - retention-failure-copy
   - no-hooks-write
   - no-village-call
+  - existing-file-projects-typed-values-and-side-effects
 cases:
   - name: untouched-field-change-survives-without-a-row
     scenarios:
@@ -396,3 +397,48 @@ cases:
           saved: true
           parsed: {license: CC0-1.0}
           villageRequests: 0
+  # An existing file is edited in place, so each written value must keep the type
+  # the configuration gives it (a boolean stays a boolean) and a choice that
+  # moves another stored key must move that key too. The terminal's save marshals
+  # the whole configuration, so cliEquivalent holds the two to the same result.
+  - name: existing-file-projects-typed-values-and-side-effects
+    scenarios:
+      - note: publishing automatically writes a boolean and the share preference it implies
+        opened: *licenseOpened
+        answers: {publish-automatically: '"true"'}
+        want:
+          saved: true
+          conflicts: []
+          parsed: {autoPublishIntent: true, autoPublishIntended: true, sharePreference: share-later}
+          dirEntries: [config.yaml, config.yaml.lock]
+          cliEquivalent: true
+      - note: declining to publish automatically writes a boolean false
+        opened: &autoPublishing |
+          version: 1
+          push:
+            sharePreference: share-later
+            autoPublishIntent: true
+        answers: {publish-automatically: '"false"'}
+        want:
+          saved: true
+          parsed: {autoPublishIntent: false, autoPublishIntended: false, sharePreference: share-later}
+          cliEquivalent: true
+      - note: keeping transcripts local clears the stored intent it contradicts
+        opened: *autoPublishing
+        answers: {publication-preference: '""'}
+        want:
+          saved: true
+          parsed: {autoPublishIntent: false, autoPublishIntended: false, sharePreference: ""}
+          cliEquivalent: true
+      - note: choosing every transcript turns auto-ingest on
+        opened: |
+          version: 1
+          selection:
+            mode: selected
+            autoIngestNewBranches: false
+        answers:
+          transcripts: '{"mode":"all"}'
+        want:
+          saved: true
+          parsed: {autoIngest: true}
+          cliEquivalent: true
