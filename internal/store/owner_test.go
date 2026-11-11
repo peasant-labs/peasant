@@ -61,7 +61,7 @@ func ownerTestCreateSessionAnnotation(t *testing.T, ctx context.Context, s *stor
 	return id
 }
 
-func ownerTestCount(t *testing.T, s *store.Store, query string) int64 {
+func ownerTestCount(t *testing.T, s *store.Store, query string, args ...any) int64 {
 	t.Helper()
 	conn, err := s.PoolForTest().Take(t.Context())
 	if err != nil {
@@ -70,6 +70,7 @@ func ownerTestCount(t *testing.T, s *store.Store, query string) int64 {
 	defer s.PoolForTest().Put(conn)
 	var n int64
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+		Args:       args,
 		ResultFunc: func(stmt *sqlite.Stmt) error { n = stmt.ColumnInt64(0); return nil },
 	}); err != nil {
 		t.Fatalf("query %q: %v", query, err)
@@ -174,6 +175,29 @@ func TestLocalOwnerAndClaims(t *testing.T) {
 		}
 		if counts.UnclaimedSessions != 0 || counts.UnclaimedAnnotations != 0 {
 			t.Fatalf("counts after default claim = %+v, want nothing unclaimed", counts)
+		}
+	})
+
+	t.Run("claim-harvest-covers-entry-targets", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := t.Context()
+		ownerTestSeedSessions(t, ctx, s, "owner-session-a", "owner-session-b")
+		sessionAnnotation := ownerTestCreateSessionAnnotation(t, ctx, s, "owner-session-a")
+		unrelated := ownerTestCreateSessionAnnotation(t, ctx, s, "owner-session-b")
+		ownerTestExec(t, s, `INSERT INTO annotations(id, target_kind_id, annotation_type_id, annotator_id, value, created_at)
+SELECT 'owner-entry-ann', (SELECT id FROM target_kinds WHERE name = 'entry'), annotation_type_id, annotator_id, 'entry-target', created_at
+FROM annotations WHERE id = ?`, sessionAnnotation)
+		ownerTestExec(t, s, `INSERT INTO annotation_target_entries(annotation_id, session_id, entry_index, end_index) VALUES('owner-entry-ann', 'owner-session-a', 0, 1)`)
+		home := t.TempDir()
+		snapshot := ownerTestSnapshot(t, home, ownerTestUserOne, "alice")
+		if _, err := s.ClaimSessionIDs(ctx, snapshot, []string{"owner-session-a"}, store.ClaimSourceAutomatic, 2000); err != nil {
+			t.Fatal(err)
+		}
+		if got := ownerTestCount(t, s, `SELECT COUNT(*) FROM annotations WHERE id = 'owner-entry-ann' AND owner_claim_id IS NOT NULL`); got != 1 {
+			t.Fatalf("entry-target annotation claimed = %d, want 1", got)
+		}
+		if got := ownerTestCount(t, s, `SELECT COUNT(*) FROM annotations WHERE id = ? AND owner_claim_id IS NULL`, unrelated); got != 1 {
+			t.Fatalf("unrelated annotation claimed = %d, want it left unclaimed", got)
 		}
 	})
 

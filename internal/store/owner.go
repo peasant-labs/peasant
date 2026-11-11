@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -297,9 +298,11 @@ func (s *Store) ClaimSessionIDs(ctx context.Context, snapshot auth.CredentialSna
 				return fmt.Errorf("claim harvest sessions: %w", err)
 			}
 			sessionChanges += int64(conn.Changes())
-			if err := sqlitex.ExecuteTransient(conn, `UPDATE annotations SET owner_claim_id = ?
-WHERE owner_claim_id IS NULL
-  AND id IN (SELECT annotation_id FROM annotation_target_sessions WHERE session_id IN (`+sqlPlaceholders(len(batch))+`))`, &sqlitex.ExecOptions{Args: args}); err != nil {
+			targets, err := json.Marshal(batch)
+			if err != nil {
+				return fmt.Errorf("claim harvest annotations: encode the session target set: %w", err)
+			}
+			if err := sqlitex.ExecuteTransient(conn, claimHarvestAnnotationsSQL, &sqlitex.ExecOptions{Args: []any{claimID, string(targets), string(targets), string(targets)}}); err != nil {
 				return fmt.Errorf("claim harvest annotations: %w", err)
 			}
 			annotationChanges += int64(conn.Changes())
@@ -376,11 +379,12 @@ func countSessionsByID(conn *sqlite.Conn, sessionIDs []string) (total, claimed i
 // countSessionTargetAnnotations returns the total and currently owned local
 // annotations whose explicit target is one of the named sessions.
 func countSessionTargetAnnotations(conn *sqlite.Conn, sessionIDs []string) (total, claimed int64, err error) {
-	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*), COUNT(a.owner_claim_id)
-FROM annotations a
-JOIN annotation_target_sessions t ON t.annotation_id = a.id
-WHERE t.session_id IN (`+sqlPlaceholders(len(sessionIDs))+`)`, &sqlitex.ExecOptions{
-		Args: sessionIDArgs(sessionIDs),
+	targets, err := json.Marshal(sessionIDs)
+	if err != nil {
+		return 0, 0, fmt.Errorf("encode the session target set: %w", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, countHarvestAnnotationsSQL, &sqlitex.ExecOptions{
+		Args: []any{string(targets), string(targets), string(targets)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			total, claimed = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
 			return nil
@@ -390,6 +394,39 @@ WHERE t.session_id IN (`+sqlPlaceholders(len(sessionIDs))+`)`, &sqlitex.ExecOpti
 	}
 	return total, claimed, nil
 }
+
+// countHarvestAnnotationsSQL counts annotations attached to a harvest session
+// set: session-target annotations, entry-target annotations, and association
+// targets whose session is in the set. The three json_each arguments each carry
+// the same session-id array.
+const countHarvestAnnotationsSQL = `SELECT COUNT(*), COUNT(a.owner_claim_id)
+FROM annotations a
+WHERE a.id IN (
+  SELECT annotation_id FROM annotation_target_sessions WHERE session_id IN (SELECT value FROM json_each(?1))
+  UNION
+  SELECT annotation_id FROM annotation_target_entries WHERE session_id IN (SELECT value FROM json_each(?2))
+  UNION
+  SELECT annotation_id FROM annotation_target_associations WHERE association_id IN (
+    SELECT association_id FROM session_commit_associations WHERE session_id IN (SELECT value FROM json_each(?3))
+  )
+)`
+
+// claimHarvestAnnotationsSQL sets the current owner pointer on the same
+// annotation set countHarvestAnnotationsSQL selects: session targets, entry
+// targets, and association targets for the harvest's sessions. Materialized
+// annotations outside those targets stay unclaimed and are picked up by an
+// explicit `peasant user claim`.
+const claimHarvestAnnotationsSQL = `UPDATE annotations SET owner_claim_id = ?1
+WHERE owner_claim_id IS NULL
+  AND id IN (
+    SELECT annotation_id FROM annotation_target_sessions WHERE session_id IN (SELECT value FROM json_each(?2))
+    UNION
+    SELECT annotation_id FROM annotation_target_entries WHERE session_id IN (SELECT value FROM json_each(?3))
+    UNION
+    SELECT annotation_id FROM annotation_target_associations WHERE association_id IN (
+      SELECT association_id FROM session_commit_associations WHERE session_id IN (SELECT value FROM json_each(?4))
+    )
+  )`
 
 // uniqueNonEmptyStrings trims, drops empty values, and deduplicates ids while
 // preserving their first-seen order.
