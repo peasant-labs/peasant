@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -1718,36 +1719,116 @@ func TestOpenCodeSQLiteSourceRepeatedWALCatalogDoesNotCheckpointOrTruncate(t *te
 	assertWALStateEqual(t, materialized.Path, walBefore)
 }
 
+func awaitWALWorkers(bound, grace time.Duration, writerDone, readerDone <-chan error) (finished bool, writerErr, readerErr error) {
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	timedOut := false
+	for writerDone != nil || readerDone != nil {
+		select {
+		case writerErr = <-writerDone:
+			writerDone = nil
+		case readerErr = <-readerDone:
+			readerDone = nil
+		case <-timer.C:
+			if timedOut {
+				return false, writerErr, readerErr
+			}
+			timedOut = true
+			timer.Reset(grace)
+		}
+	}
+	return true, writerErr, readerErr
+}
+
+// The caller retains the close decision: never close either connection while a worker may own it.
+func joinAndCloseWALWorkers(bound, grace time.Duration, writerDone, readerDone <-chan error, closeConnections func()) (bool, error, error) {
+	finished, writerErr, readerErr := awaitWALWorkers(bound, grace, writerDone, readerDone)
+	if finished {
+		closeConnections()
+	}
+	return finished, writerErr, readerErr
+}
+
+func TestAwaitWALWorkersStuckWorker(t *testing.T) {
+	t.Run("stuck worker leaves connections open", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			writerDone := make(chan error, 1)
+			writerDone <- nil
+			readerDone := make(chan error)
+			closed := false
+			finished, writerErr, readerErr := joinAndCloseWALWorkers(time.Millisecond, time.Millisecond, writerDone, readerDone, func() { closed = true })
+			if finished {
+				t.Error("stuck reader was reported finished")
+			}
+			if closed {
+				t.Error("connections closed while reader was stuck")
+			}
+			if writerErr != nil {
+				t.Errorf("writer error = %v, want nil", writerErr)
+			}
+			if readerErr != nil {
+				t.Errorf("reader error = %v, want nil", readerErr)
+			}
+		})
+	})
+}
+
+func TestAwaitWALWorkersFinishesDuringGrace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		writerDone := make(chan error, 1)
+		writerDone <- nil
+		readerDone := make(chan error, 1)
+		readerExited := make(chan struct{})
+		go func() {
+			defer close(readerExited)
+			time.Sleep(25 * time.Millisecond)
+			readerDone <- nil
+		}()
+		defer func() { <-readerExited }()
+		closed := 0
+		finished, writerErr, readerErr := joinAndCloseWALWorkers(10*time.Millisecond, time.Second, writerDone, readerDone, func() { closed++ })
+		if !finished {
+			t.Error("reader completed during grace but join reported unfinished")
+		}
+		if closed != 1 {
+			t.Errorf("close calls = %d, want 1 after both workers finish", closed)
+		}
+		if writerErr != nil {
+			t.Errorf("writer error = %v, want nil", writerErr)
+		}
+		if readerErr != nil {
+			t.Errorf("late reader error = %v, want nil", readerErr)
+		}
+	})
+}
+
+func TestAwaitWALWorkersReturnsErrors(t *testing.T) {
+	writerFailure := errors.New("writer failed")
+	readerFailure := errors.New("reader failed")
+	writerDone := make(chan error, 1)
+	readerDone := make(chan error, 1)
+	writerDone <- writerFailure
+	readerDone <- readerFailure
+	finished, writerErr, readerErr := awaitWALWorkers(time.Second, time.Second, writerDone, readerDone)
+	if !finished || writerErr != writerFailure || readerErr != readerFailure {
+		t.Fatalf("join: finished=%t writer=%v reader=%v", finished, writerErr, readerErr)
+	}
+}
+
 func TestOpenCodeSQLiteSourceConcurrentWALWriterRemainsHealthy(t *testing.T) {
 	materialized := testfixture.MaterializeByName(t, "wal-capable")
 	writer := openWALWriter(t, materialized.Path)
-	writerSafeToClose := true
-	defer func() {
-		if writerSafeToClose {
-			closeSQLiteConnection(t, writer, "synthetic WAL writer")
-		}
-	}()
 	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
-	readerSafeToClose := true
-	defer func() {
-		if readerSafeToClose {
-			if err := source.Close(context.Background()); err != nil {
-				t.Errorf("close synthetic source through production boundary: %v", err)
-			}
-		}
-	}()
-
 	const work = 10
-	const bound = 30 * time.Second
-	const grace = 5 * time.Second
-	ctx, cancel := context.WithCancel(context.Background())
+	// The gate uses -timeout=0, so real SQLite I/O needs a fixed 30s bound and 5s unwind grace.
+	const bound, grace = 30 * time.Second, 5 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	writer.SetInterrupt(ctx.Done())
+	oldInterrupt := writer.SetInterrupt(ctx.Done())
 	var written, read atomic.Int64
 	writerDone := make(chan error, 1)
 	readerDone := make(chan error, 1)
 	start := make(chan struct{})
-	writerSafeToClose, readerSafeToClose = false, false
 	go func() {
 		<-start
 		var err error
@@ -1771,35 +1852,15 @@ func TestOpenCodeSQLiteSourceConcurrentWALWriterRemainsHealthy(t *testing.T) {
 		readerDone <- err
 	}()
 	close(start)
-
-	var writerErr, readerErr error
-	writerFinished, readerFinished := false, false
-	timer := time.NewTimer(bound)
-	defer timer.Stop()
-	timedOut := false
-	for !writerFinished || !readerFinished {
-		select {
-		case writerErr = <-writerDone:
-			writerFinished = true
-			writerSafeToClose = true
-			writerDone = nil
-		case readerErr = <-readerDone:
-			readerFinished = true
-			readerSafeToClose = true
-			readerDone = nil
-		case <-timer.C:
-			if timedOut {
-				// A stuck operation still owns its connection; do not close it underneath it.
-				goto finished
-			}
-			timedOut = true
-			cancel()
-			timer.Reset(grace)
+	finished, writerErr, readerErr := joinAndCloseWALWorkers(bound, grace, writerDone, readerDone, func() {
+		writer.SetInterrupt(oldInterrupt)
+		if err := source.Close(context.Background()); err != nil {
+			t.Errorf("close synthetic source through production boundary: %v", err)
 		}
-	}
-finished:
-	if timedOut {
-		t.Fatalf("concurrent WAL work exceeded %s (cancellation grace %s): writer %d/%d sequences (finished=%t), reader %d/%d iterations (finished=%t)", bound, grace, written.Load(), work, writerFinished, read.Load(), work, readerFinished)
+		closeSQLiteConnection(t, writer, "synthetic WAL writer")
+	})
+	if !finished || ctx.Err() != nil {
+		t.Fatalf("concurrent WAL work exceeded %s (cancellation grace %s): writer %d/%d sequences, reader %d/%d iterations; both finished=%t", bound, grace, written.Load(), work, read.Load(), work, finished)
 	}
 	if writerErr != nil || readerErr != nil {
 		t.Fatalf("concurrent WAL work failed: writer after %d/%d sequences: %v; reader after %d/%d iterations: %v", written.Load(), work, writerErr, read.Load(), work, readerErr)
