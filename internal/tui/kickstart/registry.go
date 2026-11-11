@@ -309,30 +309,3 @@ func harnessDisplayName(harness string) string {
 }
 
 func harnessFacetLabel(harness string) string { return harnessDisplayName(harness) }
-
-func adaptNextSteps(steps []onboarding.NextStep) []NextStepKind {
-	out := make([]NextStepKind, 0, len(steps))
-	for _, step := range steps {
-		kind, ok := kickstartNextStep(step)
-		if !ok {
-			return []NextStepKind{NextStepUnknown}
-		}
-		out = append(out, kind)
-	}
-	return out
-}
-
-func kickstartNextStep(step onboarding.NextStep) (NextStepKind, bool) {
-	switch step {
-	case onboarding.NextStepConfig:
-		return NextStepConfig, true
-	case onboarding.NextStepWebStart:
-		return NextStepWebStart, true
-	case onboarding.NextStepVillageLogin:
-		return NextStepVillageLogin, true
-	case onboarding.NextStepVillagePush:
-		return NextStepVillagePush, true
-	default:
-		return NextStepUnknown, false
-	}
-}
