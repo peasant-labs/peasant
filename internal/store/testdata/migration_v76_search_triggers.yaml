@@ -1,0 +1,66 @@
+# Migration V76 search-trigger repair: a store consolidated before V75 ends up
+# with its session_entries triggers pointed at the retired session_entries_fts
+# (V75 re-creates it) while session_search_fts goes stale for every
+# session_entries write. V76 re-points the triggers at session_search_fts,
+# restores findability for the union's entries half without a rebuild, and
+# drops the retired index. Each case builds a V74 store, simulates the
+# production consolidation, seeds entries and bodies, migrates, writes after
+# the migration legs, and asserts what the union index serves.
+#
+# chain selects the migration under test: full runs V75 then V76, v75 caps the
+# chain at V75 to pin the defect V76 repairs (the capped case stays red until
+# V76 heals it, so removing V76 fails the full-chain cases). Leg A writes land
+# between V75 and V76 (V75 routes them to the legacy index only); leg B writes
+# land after the final leg (through whatever triggers the chain left live).
+# The want fields name the observable union postings per leg; the runner
+# hardcodes the invariants (untouched seeds and both body terms stay
+# searchable, the FTS integrity-check stays clean, post-leg writes land in
+# the legacy index on the capped chain) and the production-path reads.
+#
+# Residual, pinned honestly: FTS5 un-indexes by value, so postings whose
+# indexed values no longer exist in the table survive any non-rebuild resync.
+# Leg A residue (wantLegAUpdatedOldInUnion, wantLegAGhostInUnion) stays true
+# on the full chain: removed terms of rows updated after V75 still match, and
+# ghosts of rows deleted after V75 still match raw union MATCH. Leg B writes
+# go through live union triggers, which carry exact old values, so they leave
+# no residue. The runner proves the production impact beside each: ghosts
+# return no production hit (the unified read filters rows absent from
+# session_entries), while removed terms of live rows still return their row
+# (relevance noise with current snippets until a future whole-index rebuild).
+cases:
+  - name: healed-entries-writes-reach-union
+    chain: full
+    presetNeedsRebuild: false
+    wantInsertedInUnion: true
+    wantUpdatedNewInUnion: true
+    wantLegAUpdatedOldInUnion: true
+    wantLegBUpdatedOldInUnion: false
+    wantLegAGhostInUnion: true
+    wantLegBGhostInUnion: false
+    wantLegacyAbsent: true
+    wantTriggersTarget: union
+    wantNeedsRebuild: false
+  - name: healed-rebuild-flag-preserved
+    chain: full
+    presetNeedsRebuild: true
+    wantInsertedInUnion: true
+    wantUpdatedNewInUnion: true
+    wantLegAUpdatedOldInUnion: true
+    wantLegBUpdatedOldInUnion: false
+    wantLegAGhostInUnion: true
+    wantLegBGhostInUnion: false
+    wantLegacyAbsent: true
+    wantTriggersTarget: union
+    wantNeedsRebuild: true
+  - name: v75-defect-union-misses-new-entries-writes
+    chain: v75
+    presetNeedsRebuild: false
+    wantInsertedInUnion: false
+    wantUpdatedNewInUnion: false
+    wantLegAUpdatedOldInUnion: true
+    wantLegBUpdatedOldInUnion: true
+    wantLegAGhostInUnion: true
+    wantLegBGhostInUnion: true
+    wantLegacyAbsent: false
+    wantTriggersTarget: legacy
+    wantNeedsRebuild: false

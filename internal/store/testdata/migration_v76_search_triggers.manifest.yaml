@@ -1,0 +1,6 @@
+# Required-name manifest for migration_v76_search_triggers: deletion
+# protection by NAME, never by count.
+requiredNames:
+  - healed-entries-writes-reach-union
+  - healed-rebuild-flag-preserved
+  - v75-defect-union-misses-new-entries-writes
