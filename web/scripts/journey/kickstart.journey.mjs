@@ -67,7 +67,14 @@ function watch(page, label) {
     if (response.status() >= 400) failedResponses.push({ tab: label, status: response.status(), method: response.request().method(), path: new URL(response.url()).pathname });
   });
   page.on('pageerror', (error) => consoleErrors.push(`${label} pageerror: ${error.message}`));
-  page.on('request', (request) => requests.push({ tab: label, method: request.method(), path: new URL(request.url()).pathname }));
+  page.on('request', (request) => {
+    const entry = { tab: label, method: request.method(), path: new URL(request.url()).pathname };
+    // Which scope a page asked a session for says which page opened it.
+    if (entry.method === 'POST' && entry.path === `${API}/sessions`) {
+      try { entry.scope = JSON.parse(request.postData() ?? '{}').scope; } catch { entry.scope = null; }
+    }
+    requests.push(entry);
+  });
   page.on('websocket', (socket) => socket.on('framereceived', (event) => {
     if (typeof event.payload !== 'string') return;
     let message;
@@ -241,7 +248,7 @@ test.afterAll(async () => {
   writeFileSync(join(artifacts, `${theme()}-evidence.json`), JSON.stringify({
     theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, laterImports, importedAfterSetup,
     frames: frames.map(({ tab, kind, revision, reason, scan, ingest }) => ({ tab, kind, revision, reason, scan, ingest })),
-    requests: requests.filter((entry) => entry.path.startsWith('/api/')).map((entry) => `${entry.tab} ${entry.method} ${entry.path}`),
+    requests: requests.filter((entry) => entry.path.startsWith('/api/')).map((entry) => `${entry.tab} ${entry.method} ${entry.path}${entry.scope === undefined ? '' : ` (scope ${entry.scope})`}`),
   }, null, 2));
   await context?.close();
 });
@@ -258,6 +265,18 @@ test('fresh-install-redirects-to-setup', async () => {
   // A top-level page sends a fresh install to setup.
   await pageA.goto('/settings/');
   await expect(pageA).toHaveURL(/\/kickstart\/?$/);
+  // So does the standalone selection page, and it starts nothing on the way: its
+  // body waits for the status answer, so no selection session is opened. The
+  // setup page the redirect lands on opens its own (full) session.
+  const beforeSelection = requests.length;
+  await pageA.goto('/selection/');
+  await expect(pageA).toHaveURL(/\/kickstart\/?$/);
+  await expect(title(pageA)).toHaveText('peasant online');
+  const opened = requests.slice(beforeSelection)
+    .filter((entry) => entry.tab === 'A' && entry.method === 'POST' && entry.path === `${API}/sessions`)
+    .map((entry) => entry.scope);
+  expect(opened, 'the setup page opened its own session').toContain('full');
+  expect(opened, 'the selection page opened no session before setup was saved').not.toContain('selection');
   // The pages that are never redirected stay where they are.
   await opensInPlace(pageA, '/share/');
   // Deep links into recorded work are honoured: a project's page and a transcript.
