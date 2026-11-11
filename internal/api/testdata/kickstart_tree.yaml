@@ -1,0 +1,442 @@
+# The discovery scan, the whole-forest tree route, the preview route, and what a
+# rescan does to an answered selection.
+#
+# The forest is the production one: the scan is replaced by a fixed set of
+# discovered sessions (kickstart_listings.yaml), and everything after it runs as
+# in production. A session id is ses-1, ses-2, ... in opening order. Project
+# rows are keyed by their clone path and branch rows by "branch:<n>:<path><name>".
+requiredNames:
+  - tree-is-whole-forest
+  - node-state-server-supplied
+  - locked-row
+  - child-count
+  - preview-bounded-and-typed-lines
+  - preview-unknown-node-refused
+  - tree-absent-from-session-view-and-scan-event
+  - scan-state-phase-count-pushed
+  - scan-error-pushed
+  - dropped-selections-count-and-at-most-three-labels
+  - rescan-keeps-ids-and-drops-vanished-non-silently
+  - rescan-never-widens
+  - preview-of-an-unreadable-transcript-reports-the-reason
+  - scan-progress-ticks-are-coalesced
+cases:
+  - name: tree-is-whole-forest
+    world: {listings: two-projects}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        keys: [nodes]
+        len: {nodes: 9}
+        json:
+          "nodes[id=/work/tool].kind": project
+          "nodes[id=branch:10:/work/toolmain].kind": branch
+          "nodes[id=branch:10:/work/toolmain].parentId": /work/tool
+          "nodes[id=11111111-1111-4111-8111-111111111111].kind": session
+          "nodes[id=11111111-1111-4111-8111-111111111111].parentId": branch:10:/work/toolmain
+          "nodes[id=11111111-1111-4111-8111-111111111111].sessionId": 11111111-1111-4111-8111-111111111111
+          "nodes[id=44444444-4444-4444-8444-444444444444].label": landing page
+        noReset: true
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - await: {kind: session, session: "{selection}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{selection}/tree
+        len: {nodes: 9}
+
+  - name: node-state-server-supplied
+    world:
+      listings: two-projects
+      config: |
+        version: 1
+        selection:
+          mode: selected
+          autoIngestNewBranches: false
+          harnesses:
+            claude-code:
+              projects:
+                - gitRemote: "git@github.com:acme/tool.git"
+                  clonePaths: [/work/tool]
+                  branches: [main]
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        json:
+          "nodes[id=/work/tool].state": some
+          "nodes[id=branch:10:/work/toolmain].state": all
+          "nodes[id=branch:10:/work/toolfeature/x].state": none
+          "nodes[id=11111111-1111-4111-8111-111111111111].state": all
+          "nodes[id=22222222-2222-4222-8222-222222222222].state": all
+          "nodes[id=33333333-3333-4333-8333-333333333333].state": none
+          "nodes[id=/work/site].state": none
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+        json:
+          "stops[key=selection].fields[key=transcripts].value.0": 11111111-1111-4111-8111-111111111111
+        len: {"stops[key=selection].fields[key=transcripts].value": 2}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", selectedIds: [33333333-3333-4333-8333-333333333333]}
+        json:
+          stale: false
+          "view.stops[key=selection].fields[key=transcripts].value.0": 33333333-3333-4333-8333-333333333333
+        len: {"view.stops[key=selection].fields[key=transcripts].value": 1}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        json:
+          "nodes[id=/work/tool].state": some
+          "nodes[id=branch:10:/work/toolmain].state": none
+          "nodes[id=branch:10:/work/toolfeature/x].state": all
+          "nodes[id=11111111-1111-4111-8111-111111111111].state": none
+          "nodes[id=33333333-3333-4333-8333-333333333333].state": all
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", selectedIds: [/work/site]}
+        json:
+          "view.stops[key=selection].fields[key=transcripts].value.0": 44444444-4444-4444-8444-444444444444
+        len: {"view.stops[key=selection].fields[key=transcripts].value": 1}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        json:
+          "nodes[id=/work/site].state": all
+          "nodes[id=branch:10:/work/sitemain].state": all
+          "nodes[id=/work/tool].state": none
+
+  - name: locked-row
+    world:
+      listings: two-projects
+      config: |
+        version: 1
+        selection:
+          mode: selected
+          autoIngestNewBranches: false
+          harnesses:
+            claude-code:
+              projects:
+                - gitRemote: "git@github.com:acme/tool.git"
+                  clonePaths: [/work/tool]
+                  branches: [main]
+                - name: tool
+                  clonePaths: [/work/tool]
+                  branches: [feature/x]
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        json:
+          "nodes[id=11111111-1111-4111-8111-111111111111].locked": true
+          "nodes[id=11111111-1111-4111-8111-111111111111].state": none
+          "nodes[id=33333333-3333-4333-8333-333333333333].locked": true
+          "nodes[id=/work/tool].state": some
+        absent: ["nodes[id=44444444-4444-4444-8444-444444444444].locked"]
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+        json: {scan.lockedNodes: 3}
+        len: {"stops[key=selection].fields[key=transcripts].value": 0}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", selectedIds: [11111111-1111-4111-8111-111111111111, 44444444-4444-4444-8444-444444444444]}
+        json:
+          "view.stops[key=selection].fields[key=transcripts].value.0": 44444444-4444-4444-8444-444444444444
+          view.scan.lockedNodes: 3
+        len: {"view.stops[key=selection].fields[key=transcripts].value": 1}
+
+  - name: child-count
+    world: {listings: two-projects}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        json:
+          "nodes[id=11111111-1111-4111-8111-111111111111].childCount": 2
+          "nodes[id=/work/tool].childCount": 2
+          "nodes[id=branch:10:/work/toolmain].childCount": 2
+        absent: ["nodes[id=22222222-2222-4222-8222-222222222222].childCount"]
+
+  - name: preview-bounded-and-typed-lines
+    world:
+      listings: two-projects
+      transcripts:
+        11111111-1111-4111-8111-111111111111:
+          - '{"type":"user","uuid":"e1","message":{"role":"user","content":"please refactor the ingest pipeline so a failed write leaves nothing behind."}}'
+          - '{"type":"assistant","uuid":"e2","parentUuid":"e1","message":{"role":"assistant","content":[{"type":"text","text":"write to a temp directory first, then rename it into place."}]}}'
+          - '@repeat 300 {"type":"user","uuid":"r{n}","message":{"role":"user","content":"follow-up question number {n}"}}'
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      # a session with a transcript: typed lines, bounded, closed by a notice
+      - call: GET /api/v1/kickstart/sessions/{full}/tree/11111111-1111-4111-8111-111111111111/preview
+        keys: [lines]
+        lenMax: {lines: 200}
+        json:
+          lines.0.kind: label
+          lines.0.text: fix the gate
+          lines.1.kind: spacer
+          lines.2.kind: label
+          lines.2.text: user
+          lines.3.kind: text
+          lines.3.text: please refactor the ingest pipeline so a failed write leaves nothing behind.
+        noReset: true
+      # a session discovery found no transcript for is described, not refused
+      - call: GET /api/v1/kickstart/sessions/{full}/tree/22222222-2222-4222-8222-222222222222/preview
+        json:
+          lines.0.kind: label
+          lines.0.text: add tests
+          lines.1.kind: text
+        contains: {lines.1.text: "no transcript preview is available"}
+      # a project row and a branch row are described from the forest's own
+      # metadata; their ids carry slashes, so the page percent-encodes them
+      - call: GET /api/v1/kickstart/sessions/{full}/tree/%2Fwork%2Ftool/preview
+        json:
+          lines.0.kind: label
+          lines.0.text: github.com:acme/tool
+          lines.1.text: "sessions: 3"
+          lines.2.text: "harnesses:"
+          lines.3.text: "  claude-code"
+        lenMax: {lines: 200}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree/branch:10:%2Fwork%2Ftoolmain/preview
+        json:
+          lines.0.text: main
+          lines.1.text: "branch: main"
+          lines.2.text: "sessions: 2"
+
+  - name: preview-unknown-node-refused
+    world: {listings: two-projects}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree/not-a-row/preview
+        status: 404
+        json: {code: kickstart_preview_row_not_found}
+        contains: {error: "not-a-row"}
+      - call: GET /api/v1/kickstart/sessions/nope/tree/11111111-1111-4111-8111-111111111111/preview
+        status: 404
+        json: {code: kickstart_session_not_found}
+      - call: GET /api/v1/kickstart/sessions/nope/tree
+        status: 404
+
+  - name: tree-absent-from-session-view-and-scan-event
+    world: {listings: two-projects}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+        absent: [nodes, tree, forest, scan.nodes]
+      - await:
+          kind: scan
+          session: "{full}"
+          json: {scan.state: done}
+          absent: [nodes, tree, forest, scan.nodes, scan.forest, view]
+      - await:
+          kind: session
+          session: "{full}"
+          json: {view.scan.state: done}
+          absent: [nodes, view.nodes, view.tree, view.forest, view.scan.nodes]
+      - call: GET /api/v1/kickstart/sessions/{full}
+        absent: [nodes, tree, forest, scan.nodes]
+
+  - name: scan-state-phase-count-pushed
+    world: {listings: two-projects}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+        json: {scan.state: running}
+      - await:
+          kind: scan
+          session: "{full}"
+          json: {scan.state: running, scan.phase: "Discovering Claude Code sessions...", scan.done: 0, scan.total: 0}
+          absent: [view]
+      - await:
+          kind: scan
+          session: "{full}"
+          json: {scan.state: running, scan.done: 2, scan.total: 4}
+      - await:
+          kind: scan
+          session: "{full}"
+          json: {scan.state: running, scan.done: 4, scan.total: 4}
+      - await:
+          kind: scan
+          session: "{full}"
+          json: {scan.state: done, scan.done: 4, scan.total: 4}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+
+  - name: scan-error-pushed
+    world: {listings: two-projects, storedError: disk on fire}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: scan, session: "{full}", json: {scan.state: error}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {scan.state: error}
+        contains: {scan.error: "disk on fire"}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        len: {nodes: 0}
+      # fixing the cause and rescanning recovers the session
+      - setStoredError: ""
+      - call: POST /api/v1/kickstart/sessions/{full}/scan
+        json: {state: running}
+        absent: [error]
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {scan.state: done}
+        absent: [scan.error]
+
+  - name: dropped-selections-count-and-at-most-three-labels
+    world: {listings: five-sessions}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body:
+          revision: "{rev}"
+          selectedIds:
+            - b1111111-1111-4111-8111-111111111111
+            - b2222222-2222-4222-8222-222222222222
+            - b3333333-3333-4333-8333-333333333333
+            - b4444444-4444-4444-8444-444444444444
+            - b5555555-5555-4555-8555-555555555555
+        len: {"view.stops[key=selection].fields[key=transcripts].value": 5}
+      - setListings: other-project
+      - call: POST /api/v1/kickstart/sessions/{full}/scan
+        json: {state: running}
+      - await:
+          kind: scan
+          session: "{full}"
+          json: {scan.state: done, scan.droppedSelections: 5}
+          len: {scan.droppedLabels: 3}
+      - await: {kind: session, session: "{full}", json: {view.scan.droppedSelections: 5}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json:
+          scan.droppedSelections: 5
+          scan.droppedLabels.0: first
+          scan.droppedLabels.1: second
+          scan.droppedLabels.2: third
+        len:
+          scan.droppedLabels: 3
+          "stops[key=selection].fields[key=transcripts].value": 0
+      # the next rescan starts the report over
+      - call: POST /api/v1/kickstart/sessions/{full}/scan
+        json: {state: running}
+        absent: [droppedSelections, droppedLabels]
+
+  - name: rescan-keeps-ids-and-drops-vanished-non-silently
+    world: {listings: two-projects}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body:
+          revision: "{rev}"
+          selectedIds:
+            - 11111111-1111-4111-8111-111111111111
+            - 33333333-3333-4333-8333-333333333333
+            - 44444444-4444-4444-8444-444444444444
+        len: {"view.stops[key=selection].fields[key=transcripts].value": 3}
+      - setListings: after-rescan
+      - call: POST /api/v1/kickstart/sessions/{full}/scan
+        json: {state: running}
+      - await:
+          kind: scan
+          session: "{full}"
+          json: {scan.state: done, scan.droppedSelections: 1, scan.droppedLabels.0: wip}
+      - await:
+          kind: session
+          session: "{full}"
+          json:
+            view.scan.droppedSelections: 1
+            view.scan.droppedLabels.0: wip
+          len: {"view.stops[key=selection].fields[key=transcripts].value": 2}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json:
+          scan.droppedSelections: 1
+          "stops[key=selection].fields[key=transcripts].value.0": 44444444-4444-4444-8444-444444444444
+          "stops[key=selection].fields[key=transcripts].value.1": 11111111-1111-4111-8111-111111111111
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        json:
+          "nodes[id=44444444-4444-4444-8444-444444444444].state": all
+          "nodes[id=11111111-1111-4111-8111-111111111111].state": all
+          "nodes[id=22222222-2222-4222-8222-222222222222].state": none
+
+  - name: rescan-never-widens
+    world: {listings: two-projects}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      # the whole main branch of acme/tool is selected
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body:
+          revision: "{rev}"
+          selectedIds: ["branch:10:/work/toolmain"]
+        len: {"view.stops[key=selection].fields[key=transcripts].value": 2}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        json:
+          "nodes[id=branch:10:/work/toolmain].state": all
+          "nodes[id=/work/tool].state": some
+      # a session appears on that branch; the answer does not grow to take it
+      - setListings: after-rescan
+      - call: POST /api/v1/kickstart/sessions/{full}/scan
+        json: {state: running}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        json:
+          "nodes[id=55555555-5555-4555-8555-555555555555].state": none
+          "nodes[id=branch:10:/work/toolmain].state": some
+          "nodes[id=11111111-1111-4111-8111-111111111111].state": all
+          "nodes[id=22222222-2222-4222-8222-222222222222].state": all
+      - call: GET /api/v1/kickstart/sessions/{full}
+        len: {"stops[key=selection].fields[key=transcripts].value": 2}
+
+  - name: preview-of-an-unreadable-transcript-reports-the-reason
+    # the listing points at a transcript the world never wrote
+    world: {listings: two-projects}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}/tree/11111111-1111-4111-8111-111111111111/preview
+        status: 500
+        json: {code: kickstart_preview_unreadable}
+        contains: {error: "still imports normally"}
+
+  - name: scan-progress-ticks-are-coalesced
+    world: {listings: two-projects, scanPush: 1h}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      # a phase is pushed at once, the counts inside it are not, and the end of
+      # the scan is pushed with the session that carries the pruned answer
+      - events:
+          - kind: scan
+            session: "{full}"
+            revision: 2
+            json: {scan.state: running, scan.phase: "Discovering Claude Code sessions...", scan.done: 0}
+          - kind: scan
+            session: "{full}"
+            revision: 3
+            json: {scan.state: done, scan.done: 4, scan.total: 4}
+          - {kind: session, session: "{full}", revision: 4}
