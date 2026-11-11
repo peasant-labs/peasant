@@ -29,6 +29,7 @@ import { CustomPatterns } from '@/components/settings/CustomPatterns';
 import { AutoPublishRules, type CollectiveNames } from '@/components/settings/AutoPublishRules';
 import { RedactionCategories } from '@/components/settings/RedactionCategories';
 import { onlineCollectivesHref } from '@/lib/village/links';
+import { KickstartOrigin, SELECTION_ROUTE, kickstartHref } from '@/lib/kickstart/entry';
 import './settings.css';
 
 /** The glyph each settings section leads with in the section bar. */
@@ -264,7 +265,12 @@ export default function SettingsPageClient({ section: sectionId }: { section?: s
               label="record sessions from"
               value={optionLabel('selection.mode', String(shownValue(mode)))}
               help={selectionSummary(mode, harnesses).trim()}
-              action={<DocsLink topic="selection">change the selection</DocsLink>}
+              action={(
+                <>
+                  <Link className="btn btn-secondary btn-sm" href={SELECTION_ROUTE}>choose sessions</Link>
+                  <DocsLink topic="selection">change the selection</DocsLink>
+                </>
+              )}
             />
           ) : null,
           // Part of the selection, so it changes with it, not here: the switch
@@ -457,6 +463,7 @@ function SettingsFrame({ section, children }: { section: SettingsSection; childr
     <div className="asb-page stg-page" data-settings-section={section.id}>
       <header className="iu-page-head">
         <h1 className="iu-page-title page-title">settings</h1>
+        <Link className="btn btn-secondary btn-sm stg-rerun" href={kickstartHref(KickstartOrigin.Settings)}>run setup again</Link>
       </header>
       <SettingsLayout sections={NAV_SECTIONS} currentId={section.id} LinkComponent={NextLink} label="settings sections">
         {children}

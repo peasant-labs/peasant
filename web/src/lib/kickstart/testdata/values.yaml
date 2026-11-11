@@ -38,4 +38,5 @@ consumerScan:
     - src/lib/kickstart
     - src/components/kickstart
     - src/app/kickstart
+    - src/hooks/useFirstRun.ts
   definitionSite: src/lib/kickstart/values.ts
