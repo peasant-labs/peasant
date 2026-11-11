@@ -107,7 +107,7 @@ func buildHarvestCommand(filesystem ingest.FileSystem) *cobra.Command {
 		Use:     "harvest",
 		Aliases: []string{"ingest"},
 		Short:   "Harvest AI coding agent transcripts",
-		Long:    "Discover, normalize, and store AI coding agent transcripts from Claude Code, OpenCode, Codex, Cursor, Strike, and Pi.\nUse 'harvest logs' for file extraction only, or 'harvest index' for DB population only.",
+		Long:    "Discover, normalize, and store AI coding agent transcripts.\nUse 'harvest logs' for file extraction only, or 'harvest index' for DB population only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHarvest(cmd, harvestAll, &flags, filesystem)
 		},
@@ -178,11 +178,17 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	cmd.Flags().StringVar(&flags.since, "since", "", "Only sessions newer than this ("+timeFilterHelp+")")
 	cmd.Flags().StringVar(&flags.outputPath, "output", "", "Override output base path")
 
+	harnesses := make([]string, 0, len(ingest.DefaultAdapterRegistry))
+	for harness := range ingest.DefaultAdapterRegistry {
+		harnesses = append(harnesses, string(harness))
+	}
+	sort.Strings(harnesses)
+	harnessList := strings.Join(harnesses, ", ")
 	if mode == harvestIndexOnly {
-		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Filter stored sessions by harness (claude-code, opencode, codex, cursor, strike, pi; cleared by --all)")
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Filter stored sessions by harness ("+harnessList+"; cleared by --all)")
 	} else {
 		// Native source overrides are relevant only for logs and all modes.
-		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Limit discovery to one harness, using its configured or default path (claude-code, opencode, codex, cursor, strike, pi)")
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Limit discovery to one harness, using its configured or default path ("+harnessList+")")
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the harness (replaces config, not additive)")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", true, "Deprecated compatibility flag; active sessions are processed by default")
 	}

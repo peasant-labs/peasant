@@ -24,7 +24,7 @@ peasant harvest logs [flags]
       --output string           Override output base path
       --session strings         Filter to specific session IDs (repeatable, comma-separated)
       --since string            Only sessions newer than this (positive Go duration (e.g. 30m, 1h30m), integer d, w, mo (months), y, YYYY-MM-DD (UTC), or RFC3339)
-      --source-harness string   Limit discovery to one harness, using its configured or default path (claude-code, opencode, codex, cursor, strike, pi)
+      --source-harness string   Limit discovery to one harness, using its configured or default path (claude-code, codex, cursor, opencode, pi, strike)
       --source-path string      Override source paths for the harness (replaces config, not additive)
       --verbose                 Show file-level detail
 ```

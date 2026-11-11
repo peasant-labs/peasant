@@ -7,7 +7,7 @@
  * failure placement — not the rendering package — is what this suite measures.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PublishProvider } from '@/contexts/PublishContext';
@@ -178,11 +178,35 @@ describe('transcript surface fault placement', () => {
       });
     });
 
-    // The rows stay; the failure is a note beside them, not a fatal panel.
+    // The rows stay; the failure is a distinct channel banner with a retry.
     expect(screen.getByTestId('package-session-detail')).toBeInTheDocument();
     expect(screen.queryByText('transcript unavailable')).not.toBeInTheDocument();
-    expect(screen.getByText(/the re-index refused this read/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'try again' })).toBeInTheDocument();
+    const banner = screen.getByRole('alert');
+    expect(banner).toHaveTextContent('transcript update unavailable');
+    expect(banner).toHaveTextContent('the re-index refused this read');
+    const before = ws.sent.length;
+    fireEvent.click(within(banner).getByRole('button', { name: 'try again' }));
+    expect(ws.sent.length).toBeGreaterThan(before);
+  });
+
+  it('topicless provider errors do not create a transcript channel banner', async () => {
+    render(transcriptSurface());
+    const ws = MockWebSocket.latest();
+    await act(async () => ws.simulateOpen());
+    await act(async () => ws.simulateMessage({ type: 'session_detail', data: DETAIL }));
+    await act(async () => ws.simulateMessage({ type: 'error', message: 'provider refused the request' }));
+    expect(screen.getByTestId('package-session-detail')).toBeInTheDocument();
+    expect(screen.queryByText('transcript update unavailable')).not.toBeInTheDocument();
+  });
+
+  it('socket onerror does not create a transcript channel banner', async () => {
+    render(transcriptSurface());
+    const ws = MockWebSocket.latest();
+    await act(async () => ws.simulateOpen());
+    await act(async () => ws.simulateMessage({ type: 'session_detail', data: DETAIL }));
+    await act(async () => ws.simulateError());
+    expect(screen.getByTestId('package-session-detail')).toBeInTheDocument();
+    expect(screen.queryByText('transcript update unavailable')).not.toBeInTheDocument();
   });
 
   it('a late detail replaces the skeleton with no residual fatal state', async () => {

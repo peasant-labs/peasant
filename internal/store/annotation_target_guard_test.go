@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -29,14 +29,20 @@ func TestAnnotationTargetGuardedInsert(t *testing.T) {
 	if _, err := exec.LookPath("ast-grep"); err != nil {
 		t.Skipf("ast-grep binary not found on PATH; run inside the nix devShell: %v", err)
 	}
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller did not report this file; the module root cannot be located")
+	// internal/store is two levels below the module root, and `go test` runs the
+	// test binary in its package directory. Resolving from there keeps this
+	// working under -trimpath, where runtime.Caller reports a module-relative
+	// path that no filesystem resolves.
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the module root: %v", err)
 	}
-	// internal/store/<file> -> module root. ast-grep resolves the rule's
-	// files/ignores globs against the scan's working directory, so the scan
-	// must run from the root, not from an absolute target path.
-	root := filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+	if _, statErr := os.Stat(filepath.Join(root, "sgconfig.yml")); statErr != nil {
+		t.Fatalf("the module root %s holds no sgconfig.yml: %v", root, statErr)
+	}
+	// ast-grep resolves the rule's files/ignores globs against the scan's
+	// working directory, so the scan must run from the root, not from an
+	// absolute target path.
 	cmd := exec.Command("ast-grep", "scan", "--config", "sgconfig.yml", "--json=compact", "--filter", "^no-unguarded-annotation-target-insert$", ".")
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer

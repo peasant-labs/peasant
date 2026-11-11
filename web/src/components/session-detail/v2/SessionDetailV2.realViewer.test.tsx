@@ -254,3 +254,57 @@ describe('packed Fairtrade viewer mounted through Peasant', () => {
     });
   }
 });
+
+describe('transcript host preferences and attachments', () => {
+  function session(turns: unknown[]) {
+    channelData = {
+      id: 'sess-12345678', project: 'alpha-project', harness: 'codex',
+      startTime: '2026-07-15T08:00:00Z', endTime: '2026-07-15T08:01:00Z', durationMins: 1,
+      totalTokens: 12, tokensIn: 5, tokensOut: 7, turnCount: turns.length, toolCallCount: 0, turns,
+    };
+    currentSearchParams = new URLSearchParams();
+  }
+
+  it('remembers explicit system choices across mounts and clears them with clear all', async () => {
+    session([{ index: 0, role: 'user', depth: 0, content: 'hello', timestamp: '2026-07-15T08:00:00Z', toolCalls: [] },
+      { index: 1, role: 'system', depth: 0, content: 'system evidence', timestamp: '2026-07-15T08:00:01Z', toolCalls: [] }]);
+    const key = 'peasant.transcript.filter-intent';
+    let view = render(<TestDetail />);
+    fireEvent.click(await screen.findByRole('button', { name: 'expand filters' }));
+    const system = screen.getByRole('checkbox', { name: /system/i });
+    expect(system).not.toBeChecked();
+    fireEvent.click(system);
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual({ version: 1, system: true });
+    view.unmount();
+    view = render(<TestDetail />);
+    fireEvent.click(await screen.findByRole('button', { name: 'expand filters' }));
+    expect(screen.getByRole('checkbox', { name: /system/i })).toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: /system/i }));
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual({ version: 1, system: false });
+    view.unmount();
+    view = render(<TestDetail />);
+    fireEvent.click(await screen.findByRole('button', { name: 'expand filters' }));
+    expect(screen.getByRole('checkbox', { name: /system/i })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: /prompts/i }));
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual({ version: 1, system: false });
+    fireEvent.click(screen.getByRole('checkbox', { name: /system/i }));
+    fireEvent.click(screen.getByRole('button', { name: /clear \(/i }));
+    expect(localStorage.getItem(key)).toBeNull();
+    view.unmount();
+  });
+
+  it('renders retained images via the local route and does not request missing images', async () => {
+    const fixture = requireRecord(parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/transcript_host_content.yaml'), 'utf8'), 'transcript host content'), 'transcript host content');
+    const manifest = requireRecord(parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/transcript_host_content.manifest.yaml'), 'utf8'), 'transcript host manifest'), 'transcript host manifest');
+    expect(fixture.requiredNames).toEqual(manifest.requiredNames);
+    const rows = fixture.cases as Array<{ name: string; ref: string; parts: unknown[] }>;
+    expect(rows.map((row) => row.name)).toEqual(fixture.requiredNames);
+    const row = rows[0];
+    session([{ index: 0, role: 'user', depth: 0, content: 'inspect these images', contentParts: row.parts, timestamp: '2026-07-15T08:00:00Z', toolCalls: [] }]);
+    const view = render(<TestDetail />);
+    const image = await screen.findByRole('img', { name: /image 1/i });
+    expect(image).toHaveAttribute('src', `/api/v1/attachments/${row.ref}`);
+    expect(view.container.querySelector('[data-image-omitted="missing"]')).toBeInTheDocument();
+    expect(view.container.querySelectorAll('img[src*="/api/v1/attachments/"]')).toHaveLength(1);
+  });
+});

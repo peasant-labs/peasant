@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -93,12 +92,10 @@ type parityDocument struct {
 	Rows                     []parityRow                     `yaml:"rows"`
 }
 
+// registryParityPath is package-relative so the read survives -trimpath, where
+// runtime.Caller reports a module-relative path that no filesystem resolves.
 func registryParityPath() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return ""
-	}
-	return filepath.Join(filepath.Dir(file), "..", "..", "onboarding", "testdata", "registry_parity.yaml")
+	return filepath.Join("..", "..", "onboarding", "testdata", "registry_parity.yaml")
 }
 
 func loadParityDocument(t *testing.T) parityDocument {
