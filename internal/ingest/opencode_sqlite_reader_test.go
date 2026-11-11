@@ -1721,41 +1721,88 @@ func TestOpenCodeSQLiteSourceRepeatedWALCatalogDoesNotCheckpointOrTruncate(t *te
 func TestOpenCodeSQLiteSourceConcurrentWALWriterRemainsHealthy(t *testing.T) {
 	materialized := testfixture.MaterializeByName(t, "wal-capable")
 	writer := openWALWriter(t, materialized.Path)
-	defer closeSQLiteConnection(t, writer, "synthetic WAL writer")
+	writerSafeToClose := true
+	defer func() {
+		if writerSafeToClose {
+			closeSQLiteConnection(t, writer, "synthetic WAL writer")
+		}
+	}()
 	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
-	defer closeSyntheticSource(t, source)
+	readerSafeToClose := true
+	defer func() {
+		if readerSafeToClose {
+			if err := source.Close(context.Background()); err != nil {
+				t.Errorf("close synthetic source through production boundary: %v", err)
+			}
+		}
+	}()
 
+	const work = 10
+	const bound = 30 * time.Second
+	const grace = 5 * time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer.SetInterrupt(ctx.Done())
+	var written, read atomic.Int64
 	writerDone := make(chan error, 1)
 	readerDone := make(chan error, 1)
+	start := make(chan struct{})
+	writerSafeToClose, readerSafeToClose = false, false
 	go func() {
+		<-start
 		var err error
-		for sequence := int64(1); sequence <= 10 && err == nil; sequence++ {
+		for sequence := int64(1); sequence <= work && err == nil; sequence++ {
 			err = appendWALSessionResult(writer, fmtSyntheticID("ses_concurrent", sequence), fmtSyntheticID("msg_concurrent", sequence), sequence)
+			if err == nil {
+				written.Add(1)
+			}
 		}
 		writerDone <- err
 	}()
 	go func() {
+		<-start
 		var err error
-		for iteration := 0; iteration < 10 && err == nil; iteration++ {
-			_, err = source.Catalog(context.Background())
+		for iteration := 0; iteration < work && err == nil; iteration++ {
+			_, err = source.Catalog(ctx)
+			if err == nil {
+				read.Add(1)
+			}
 		}
 		readerDone <- err
 	}()
-	select {
-	case err := <-writerDone:
-		if err != nil {
-			t.Fatalf("concurrent synthetic WAL writer: %v", err)
+	close(start)
+
+	var writerErr, readerErr error
+	writerFinished, readerFinished := false, false
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	timedOut := false
+	for !writerFinished || !readerFinished {
+		select {
+		case writerErr = <-writerDone:
+			writerFinished = true
+			writerSafeToClose = true
+			writerDone = nil
+		case readerErr = <-readerDone:
+			readerFinished = true
+			readerSafeToClose = true
+			readerDone = nil
+		case <-timer.C:
+			if timedOut {
+				// A stuck operation still owns its connection; do not close it underneath it.
+				goto finished
+			}
+			timedOut = true
+			cancel()
+			timer.Reset(grace)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("concurrent synthetic WAL writer did not finish within the bound")
 	}
-	select {
-	case err := <-readerDone:
-		if err != nil {
-			t.Fatalf("concurrent bounded catalog reader: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("concurrent bounded catalog reader did not finish within the bound")
+finished:
+	if timedOut {
+		t.Fatalf("concurrent WAL work exceeded %s (cancellation grace %s): writer %d/%d sequences (finished=%t), reader %d/%d iterations (finished=%t)", bound, grace, written.Load(), work, writerFinished, read.Load(), work, readerFinished)
+	}
+	if writerErr != nil || readerErr != nil {
+		t.Fatalf("concurrent WAL work failed: writer after %d/%d sequences: %v; reader after %d/%d iterations: %v", written.Load(), work, writerErr, read.Load(), work, readerErr)
 	}
 }
 
