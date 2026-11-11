@@ -1,0 +1,39 @@
+# The setup journey's support code, before any browser: the seeded recordings
+# and the served-build provenance. Provenance must fail closed, so each way a
+# capture could be taken from the wrong build is a case that must be refused.
+requiredNames:
+  - seed-names-a-project-directory-like-claude-code
+  - seed-session-lines-replace-identity-and-prompts
+  - seed-session-lines-are-reproducible
+  - seed-ids-are-unique-per-session
+  - seed-refuses-more-prompts-than-the-template-has
+  - seed-filler-is-deterministic
+  - served-build-exact
+  - served-page-stale-refused
+  - served-asset-stale-refused
+  - served-marker-missing-refused
+  - served-marker-in-base-refused
+  - served-no-marker-refused
+  - served-wrong-binary-refused
+  - served-route-without-export-refused
+cases:
+  - {name: seed-names-a-project-directory-like-claude-code, mode: encode, cwd: /tmp/a.b/ledger-1, expected: -tmp-a-b-ledger-1}
+  - {name: seed-session-lines-replace-identity-and-prompts, mode: lines}
+  - {name: seed-session-lines-are-reproducible, mode: reproducible}
+  - {name: seed-ids-are-unique-per-session, mode: unique}
+  - {name: seed-refuses-more-prompts-than-the-template-has, mode: prompts}
+  - {name: seed-filler-is-deterministic, mode: filler}
+  - {name: served-build-exact, mode: exact}
+  - {name: served-page-stale-refused, mode: stale-page, error: differs from this export}
+  - {name: served-asset-stale-refused, mode: stale-asset, error: differs from this build}
+  - {name: served-marker-missing-refused, mode: missing-marker, error: lacks}
+  - {name: served-marker-in-base-refused, mode: base-has-marker, error: base commit already contains}
+  - {name: served-no-marker-refused, mode: no-markers, error: names no marker}
+  - {name: served-wrong-binary-refused, mode: wrong-binary, error: not the binary this run built}
+  - {name: served-route-without-export-refused, mode: no-export, error: has no export}
+template:
+  # Two user lines and two assistant lines, as the ingest fixture's root session has.
+  lines:
+    - '{"type":"user","uuid":"11111111-1111-4111-8111-111111111111","sessionId":"x","cwd":"/old","gitBranch":"old","timestamp":"2026-01-01T10:00:00.000Z","message":{"role":"user","content":"old one"}}'
+    - '{"type":"assistant","uuid":"22222222-2222-4222-8222-222222222222","parentUuid":"11111111-1111-4111-8111-111111111111","sessionId":"x","cwd":"/old","gitBranch":"old","timestamp":"2026-01-01T10:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"reply"}]}}'
+    - '{"type":"user","uuid":"33333333-3333-4333-8333-333333333333","parentUuid":"22222222-2222-4222-8222-222222222222","sessionId":"x","cwd":"/old","gitBranch":"old","timestamp":"2026-01-01T10:00:02.000Z","message":{"role":"user","content":"old two"}}'
