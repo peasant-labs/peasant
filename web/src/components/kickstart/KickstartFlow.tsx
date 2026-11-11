@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { Button, FeedbackPanel, Skeleton } from '@/lib/ft-ui';
+import { kickstartCopy } from '@/lib/kickstart/copy';
 import type { KickstartSession, KickstartStop } from '@/lib/kickstart/model';
 import { useKickstartSession } from '@/lib/kickstart/useKickstartSession';
 import { useVillageSignIn } from '@/lib/kickstart/useVillageSignIn';
@@ -55,6 +56,7 @@ export interface KickstartFlowProps {
  */
 export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowProps) {
   const api = useKickstartSession(scope);
+  const copy = kickstartCopy(scope);
   const signIn = useVillageSignIn();
   const { session, ending } = api;
   const [currentKey, setCurrentKey] = useState<string | null>(null);
@@ -88,7 +90,7 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
 
   if (api.openError !== null) {
     return frame(
-      <FeedbackPanel variant="error" title="setup could not start">
+      <FeedbackPanel variant="error" title={copy.openFailed}>
         <span>{api.openError.message}</span>
         <Button variant="secondary" size="sm" onClick={() => void api.reopen()}>
           try again
@@ -97,7 +99,7 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
     );
   }
   if (session === null || stop === undefined) {
-    return frame(<Skeleton label="opening setup" lines={3} />);
+    return frame(<Skeleton label={copy.opening} lines={3} />);
   }
 
   const visible = visibleStops(session);
@@ -125,7 +127,7 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
           <StaleNotice session={session} overwritten={api.overwritten} dismiss={api.dismissOverwritten} />
           {api.refusal.length > 0 && (
             <div className="ks-notice" role="alert">
-              nothing was saved: {api.refusal.length === 1 ? 'a value' : 'some values'} changed in your saved settings while you set up. settle {api.refusal.length === 1 ? 'it' : 'them'} on this page, then save again.
+              {copy.refused(api.refusal.length)}
             </div>
           )}
           {api.answerError !== null && (
@@ -146,16 +148,17 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
   let body: ReactNode;
   if (expired) {
     body = (
-      <FeedbackPanel variant="empty" title="this setup session timed out">
-        <span>nothing was saved, and the answers you had not saved are gone. open a new one to start again from your saved settings.</span>
+      <FeedbackPanel variant="empty" title={copy.expired.title}>
+        <span>{copy.expired.body}</span>
         <Button variant="primary" size="sm" onClick={() => void api.reopen()}>
-          open a new setup
+          {copy.expired.reopen}
         </Button>
       </FeedbackPanel>
     );
   } else if (committed && ending !== null && ending.committed !== null) {
     body = (
       <FinishPanel
+        copy={copy}
         committed={ending.committed}
         ingest={api.ingest ?? ending.committed.ingest}
         importNow={() => void api.importNow()}
@@ -170,6 +173,7 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
         stop={stop}
         session={session}
         api={api}
+        copy={copy}
         signIn={signIn}
         answeredConnection={() => go(nextVisibleStop(session, stop.key))}
       />

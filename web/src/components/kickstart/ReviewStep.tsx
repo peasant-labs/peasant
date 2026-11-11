@@ -1,5 +1,6 @@
 'use client';
 
+import type { KickstartCopy } from '@/lib/kickstart/copy';
 import type { KickstartConflict, KickstartSession, KickstartStop } from '@/lib/kickstart/model';
 import type { KickstartSessionApi } from '@/lib/kickstart/useKickstartSession';
 import { ConfigDiff } from './ConfigDiff';
@@ -15,10 +16,12 @@ export function ReviewStep({
   stop,
   session,
   api,
+  copy,
 }: {
   stop: KickstartStop;
   session: KickstartSession;
   api: KickstartSessionApi;
+  copy: KickstartCopy;
 }) {
   // The session lists the rows it still holds. A commit the server refused names
   // the same rows; they are shown until the session answers with its own.
@@ -28,7 +31,7 @@ export function ReviewStep({
       {stop.fields.map((field) => (
         <NoticeText key={field.key} field={field} />
       ))}
-      <ConflictPane session={session} rows={rows} resolve={(field, resolution) => void api.resolve(field, resolution)} />
+      <ConflictPane copy={copy} session={session} rows={rows} resolve={(field, resolution) => void api.resolve(field, resolution)} />
       {stop.summary !== null && (
         <section className="ks-summary" aria-label="what saving does">
           {stop.summary.values.length > 0 && (

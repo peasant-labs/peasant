@@ -11,6 +11,7 @@
 #   parity    the same reader actions on the wizard and on this page, with
 #             `{session}`, `{model}` and `{answered}` filled in for each
 #   settings  the settings page's link to this page
+#   copy      the words of each scope against the scopes the module lists
 requiredNames:
   - own-live-session
   - wizard-undisturbed
@@ -21,6 +22,10 @@ requiredNames:
   - two-selection-tabs-share-one-session
   - commit-ends-only-the-selection-session
   - status-scope-token-is-selection
+  - ending-copy-names-the-selection
+  - expiry-copy-names-the-selection
+  - copy-covers-every-scope
+  - conflict-row-shows-structured-value-readably
 cases:
   # The page opens a session of its own and draws only the stops the server
   # serves for it. Events of the wizard's session are not its own.
@@ -79,7 +84,7 @@ cases:
       - expectText: [your choices, "selection: 1 session"]
       - click: save and import
       - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-selection/commit", count: 1}
-      - expectText: [your setup is saved, /home/ada/.config/peasant/config.yaml, nothing was published and no hook was installed]
+      - expectText: [your selection is saved, /home/ada/.config/peasant/config.yaml, nothing was published and no hook was installed]
       # Nothing was sent to the wizard's session, and nothing else was written.
       - expectNoCalls: "ses-full"
       - expectNoCalls: "^PUT |^DELETE |/api/v1/settings"
@@ -102,10 +107,10 @@ cases:
       # The server ends the session; opening a new one asks for the same scope,
       # and an answer that names a scope outside the closed set is refused.
       - push: {kind: closed, sessionId: ses-selection, revision: 2, reason: expired}
-      - expectText: [this setup session timed out]
-      - click: open a new setup
+      - expectText: [this selection session timed out]
+      - click: reopen the selection
       - expectBody: {route: "POST /api/v1/kickstart/sessions", nth: 1, subset: {scope: selection}}
-      - expectText: [setup could not start, breaks the Local API contract, scope]
+      - expectText: [the selection could not be opened, breaks the Local API contract, scope]
       - expectNoText: [choose sessions to import]
 
   # The tree, its preview, the conflict rows, the save and the import are the
@@ -147,16 +152,16 @@ cases:
       # The commit is refused with the row that changed; nothing is saved.
       - click: continue
       - click: save and import
-      - expectText: [nothing was saved, saved values that changed while you set up, sessions to import, your answer, saved now]
+      - expectText: [nothing was saved, saved values that changed while you chose sessions, sessions to import, your answer, saved now]
       - expectControl: {role: button, name: keep mine for sessions to import}
       - expectControl: {role: button, name: take theirs for sessions to import}
-      - expectNoText: [your setup is saved]
+      - expectNoText: [your selection is saved]
       # The reader settles the row and the save goes through.
       - click: keep mine for sessions to import
       - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", subset: {revision: 4, resolutions: {transcripts: mine}}}
       - click: save and import
       - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-selection/commit", count: 2}
-      - expectText: [your setup is saved, /home/ada/.config/peasant/config.yaml, importing]
+      - expectText: [your selection is saved, /home/ada/.config/peasant/config.yaml, importing]
       # The import's progress is pushed on the topic for this session only.
       - push: {kind: ingest, sessionId: ses-full, revision: 9, ingest: {state: failed, error: not this session, new: 0, updated: 0}}
       - expectNoText: [not this session]
@@ -212,7 +217,7 @@ cases:
       - {tab: selection, expectText: [step 1 of 3]}
       - {tab: selection, click: continue}
       - {tab: selection, click: save and import}
-      - {tab: selection, expectText: [your setup is saved]}
+      - {tab: selection, expectText: [your selection is saved]}
       # The server closes the selection session on the topic that both tabs hear.
       - tab: all
         push:
@@ -225,8 +230,8 @@ cases:
             configPath: /home/ada/.config/peasant/config.yaml
             ingest: {state: running, new: 0, updated: 0}
             nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
-      - {tab: selection, expectText: [your setup is saved]}
-      - {tab: wizard, expectNoText: [your setup is saved, this setup session timed out]}
+      - {tab: selection, expectText: [your selection is saved]}
+      - {tab: wizard, expectNoText: [your setup is saved, your selection is saved, this setup session timed out, this selection session timed out]}
       - {tab: wizard, expectText: [step 1 of 8, peasant online]}
       - {tab: wizard, expectControl: {role: button, name: continue}}
       # The import it started is the selection session's, not the wizard's.
@@ -265,7 +270,7 @@ cases:
       - {tab: all, push: {kind: answers, model: selection-scope-two-selected}}
       - {tab: selection, click: continue}
       - {tab: selection, click: save and import}
-      - {tab: selection, expectText: [your setup is saved]}
+      - {tab: selection, expectText: [your selection is saved]}
       - tab: all
         push:
           kind: closed
@@ -279,7 +284,7 @@ cases:
             nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
       # The wizard is where it was, with its answer and without a notice.
       - {tab: wizard, expectText: [publication preference]}
-      - {tab: wizard, expectNoText: [your setup is saved, another tab changed, this setup session timed out]}
+      - {tab: wizard, expectNoText: [your setup is saved, your selection is saved, another tab changed, this setup session timed out]}
       - {tab: wizard, expectControl: {role: radio, name: plan to publish later, checked: true}}
       - {tab: wizard, expectControl: {role: radio, name: "keep local, do not publish", checked: false}}
       # The wizard never heard from the server about its own session, and the
@@ -320,3 +325,134 @@ cases:
     # Everything under a section of the registry is a top-level page the
     # first-run redirect covers; this page is neither.
     exemptPaths: [/selection, /selection/]
+
+  # The words about the session's ending are the selection's own: a refused
+  # save, the rows that moved, and the saved heading name the selection and
+  # never the wizard's setup.
+  - name: ending-copy-names-the-selection
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+      "PATCH /api/v1/kickstart/sessions/ses-selection": {body: {revision: 1, stale: false}}
+      "POST /api/v1/kickstart/sessions/ses-selection/commit":
+        - status: 409
+          body:
+            error: a value you answered changed in your saved settings
+            conflicts:
+              - {field: transcripts, stop: selection, label: sessions to import, mine: [s-one, s-two], theirs: [s-one]}
+        - body:
+            saved: true
+            configPath: /home/ada/.config/peasant/config.yaml
+            ingest: {state: running, new: 0, updated: 0}
+            nextSteps: [config]
+    steps:
+      - click: continue
+      - click: save and import
+      - expectText:
+          - "nothing was saved: a value changed in your saved settings while you chose sessions. settle it on this page, then save again."
+          - saved values that changed while you chose sessions
+          - these were changed in your saved settings after you chose them here
+      - expectNoText: [while you set up, after you answered them here, your setup is saved]
+      - click: keep mine for sessions to import
+      - click: save and import
+      - expectText: [your selection is saved, /home/ada/.config/peasant/config.yaml]
+      - expectNoText: [your setup is saved, setup, set up]
+
+  # A selection session that timed out says so in the selection's words, and
+  # reopening it names the selection too, also when the reopen fails.
+  - name: expiry-copy-names-the-selection
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions":
+        - body: {$model: selection-scope}
+        - status: 500
+          body: {error: peasant could not read the saved selection}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: closed, sessionId: ses-selection, revision: 2, reason: expired}
+      - expectText:
+          - this selection session timed out
+          - "nothing was saved, and the choices you had not saved are gone. reopen it to start again from your saved selection."
+      - expectControl: {role: button, name: reopen the selection}
+      - expectNoText: [this setup session timed out, answers you had not saved]
+      - expectControl: {role: button, name: open a new setup, present: false}
+      - click: reopen the selection
+      - expectText: [the selection could not be opened, peasant could not read the saved selection]
+      - expectNoText: [setup could not start]
+
+  # Every scope the module lists has words of its own, in lowercase chrome, and
+  # the wizard's words are the ones its pages have always said.
+  - name: copy-covers-every-scope
+    kind: copy
+    scopes:
+      full:
+        opening: opening setup
+        openFailed: setup could not start
+        refusedOne: "nothing was saved: a value changed in your saved settings while you set up. settle it on this page, then save again."
+        refusedMany: "nothing was saved: some values changed in your saved settings while you set up. settle them on this page, then save again."
+        expiredTitle: this setup session timed out
+        expiredBody: nothing was saved, and the answers you had not saved are gone. open a new one to start again from your saved settings.
+        reopen: open a new setup
+        conflictsTitle: saved values that changed while you set up
+        conflictsHelp: these were changed in your saved settings after you answered them here. choose which value to keep for each one.
+        saved: your setup is saved
+      selection:
+        opening: opening the selection
+        openFailed: the selection could not be opened
+        refusedOne: "nothing was saved: a value changed in your saved settings while you chose sessions. settle it on this page, then save again."
+        refusedMany: "nothing was saved: some values changed in your saved settings while you chose sessions. settle them on this page, then save again."
+        expiredTitle: this selection session timed out
+        expiredBody: nothing was saved, and the choices you had not saved are gone. reopen it to start again from your saved selection.
+        reopen: reopen the selection
+        conflictsTitle: saved values that changed while you chose sessions
+        conflictsHelp: these were changed in your saved settings after you chose them here. choose which value to keep for each one.
+        saved: your selection is saved
+
+  # A row whose saved value is an object or a list is shown as the server sent
+  # it, one key and value to a line in a mono block, not as one line of JSON. A
+  # long one is collapsed. A scalar is a phrase, as before.
+  - name: conflict-row-shows-structured-value-readably
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+      "POST /api/v1/kickstart/sessions/ses-selection/commit":
+        status: 409
+        body:
+          error: a value you answered changed in your saved settings
+          conflicts:
+            - field: selection
+              stop: selection
+              label: sessions to import
+              mine:
+                mode: selected
+                harnesses: {claude: {projects: [{name: ledger, branches: [main]}]}}
+              theirs: {mode: all}
+            - field: session-ids
+              stop: selection
+              label: chosen session ids
+              mine: [s-one]
+              theirs: [s-01, s-02, s-03, s-04, s-05, s-06, s-07, s-08, s-09, s-10]
+            - {field: publication-preference, stop: selection, label: publication preference, mine: share-later, theirs: keep-local}
+    steps:
+      - click: continue
+      - click: save and import
+      - expectText: [saved values that changed while you chose sessions, sessions to import, chosen session ids, publication preference]
+      # Scalars stay phrases; the two structured sides of the first row and the
+      # two lists of the second are blocks, and only the long one is collapsed.
+      - expectText: [share-later, keep-local]
+      - expectBlocks:
+          - lines: ["mode: selected", "harnesses:", "  claude:", "    projects:", "      - name: ledger", "        branches:", "          - main"]
+            collapsed: false
+          - lines: ["mode: all"]
+            collapsed: false
+          - lines: ["- s-one"]
+            collapsed: false
+          - lines: ["- s-01", "- s-02", "- s-03", "- s-04", "- s-05", "- s-06", "- s-07", "- s-08", "- s-09", "- s-10"]
+            collapsed: true
+      - expectDetails: {summary: show 10 lines, open: false}
+      # None of it is one line of JSON.
+      - expectNoText: ['{"mode"', '"harnesses"', '["s-']
+      - expectControl: {role: group, name: "your answer, sessions to import"}
+      - expectControl: {role: group, name: "saved now, chosen session ids"}

@@ -328,6 +328,35 @@
   color: var(--ink);
   overflow-wrap: anywhere;
 }
+.ks-value {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--bd);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink);
+  white-space: pre;
+  overflow-x: auto;
+}
+.ks-value:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset-inset);
+}
+.ks-value-details > summary {
+  display: flex;
+  align-items: baseline;
+  min-height: var(--target-min);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.ks-value-details > summary:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
 .ks-summary-group {
   display: flex;
   flex-direction: column;

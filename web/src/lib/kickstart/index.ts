@@ -6,6 +6,7 @@
  */
 
 export * from './client';
+export * from './copy';
 export * from './model';
 export * from './values';
 export * from './view';

@@ -1,0 +1,91 @@
+# How one side of a conflict row is written out. A scalar stays a phrase. An
+# object or a list becomes indented lines in the order the server sent it:
+# `key: value`, nested keys two spaces in, list items led by `- `. Display
+# only: nothing is counted, sorted, merged or reread as a selection rule.
+#
+# `value` is the wire value; `lines` the expected lines of a structure, or
+# `phrase` the expected phrase of a scalar. `model` and `field` name a served
+# session and one of its fields, for a scalar that reads as an option label.
+requiredNames:
+  - flat-object
+  - nested-object
+  - list-of-scalars
+  - list-of-objects
+  - list-of-lists
+  - empty-object
+  - empty-list
+  - empty-values-inside-a-structure
+  - key-order-is-the-servers
+  - strings-that-read-as-another-type-are-quoted
+  - awkward-keys-are-quoted
+  - null-booleans-and-numbers
+  - multiline-string-is-quoted
+  - scalar-string-is-a-phrase
+  - scalar-empty-string-is-a-phrase
+  - scalar-null-is-a-phrase
+  - scalar-boolean-is-a-phrase
+  - scalar-number-is-a-phrase
+  - scalar-takes-the-option-label
+cases:
+  - name: flat-object
+    value: {mode: selected, autoIngestNewBranches: false}
+    lines: ["mode: selected", "autoIngestNewBranches: false"]
+  - name: nested-object
+    value: {mode: selected, harnesses: {claude: {projects: {ledger: {branches: main}}}}}
+    lines: ["mode: selected", "harnesses:", "  claude:", "    projects:", "      ledger:", "        branches: main"]
+  - name: list-of-scalars
+    value: [s-one, s-two]
+    lines: ["- s-one", "- s-two"]
+  - name: list-of-objects
+    value:
+      - {name: ledger, branches: [main, release]}
+      - {name: notes}
+    lines: ["- name: ledger", "  branches:", "    - main", "    - release", "- name: notes"]
+  - name: list-of-lists
+    value: [[a, b], [c]]
+    lines: ["- - a", "  - b", "- - c"]
+  - name: empty-object
+    value: {}
+    lines: ["{}"]
+  - name: empty-list
+    value: []
+    lines: ["[]"]
+  - name: empty-values-inside-a-structure
+    value: {harnesses: {}, branches: [], note: ""}
+    lines: ["harnesses: {}", "branches: []", 'note: ""']
+  - name: key-order-is-the-servers
+    value: {zebra: 1, apple: 2, mango: 3}
+    lines: ["zebra: 1", "apple: 2", "mango: 3"]
+  - name: strings-that-read-as-another-type-are-quoted
+    value: {a: "true", b: "null", c: "12", d: "1.5", e: "a: b", f: "x #y", g: "- dash", h: " padded", i: "plain/path.go", j: "s-one"}
+    lines: ['a: "true"', 'b: "null"', 'c: "12"', 'd: "1.5"', 'e: "a: b"', 'f: "x #y"', 'g: "- dash"', 'h: " padded"', "i: plain/path.go", "j: s-one"]
+  - name: awkward-keys-are-quoted
+    value: {"two words": 1, "a:b": 2, "": 3, plain.key-1: 4}
+    lines: ['"two words": 1', '"a:b": 2', '"": 3', "plain.key-1: 4"]
+  - name: null-booleans-and-numbers
+    value: {a: null, b: true, c: false, d: 0, e: -3, f: 2.5}
+    lines: ["a: null", "b: true", "c: false", "d: 0", "e: -3", "f: 2.5"]
+  - name: multiline-string-is-quoted
+    value: {note: "one\ntwo"}
+    lines: ['note: "one\ntwo"']
+  - name: scalar-string-is-a-phrase
+    value: share-later
+    phrase: share-later
+  - name: scalar-empty-string-is-a-phrase
+    value: ""
+    phrase: empty
+  - name: scalar-null-is-a-phrase
+    value: null
+    phrase: not set
+  - name: scalar-boolean-is-a-phrase
+    value: true
+    phrase: "on"
+  - name: scalar-number-is-a-phrase
+    value: 30
+    phrase: "30"
+  - name: scalar-takes-the-option-label
+    # A scalar of a field the session serves reads as that field's option label.
+    model: fresh
+    field: publication-preference
+    value: keep-local
+    phrase: keep local, do not publish

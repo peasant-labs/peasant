@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import SettingsPageClient from '@/app/settings/SettingsPageClient';
 import { WizardClient } from '@/app/kickstart/WizardClient';
 import { firstRunRoutes, isFirstRunRoute } from '@/hooks/useFirstRun';
-import { KickstartScope } from '@/lib/kickstart/values';
+import { kickstartCopy } from '@/lib/kickstart/copy';
+import { ALL_KICKSTART_SCOPES, KickstartScope } from '@/lib/kickstart/values';
 import { LOCAL_SECTIONS } from '@/lib/nav/sections';
 import { loadCases, type FixtureCase } from '@/test/fixtures/kickstart';
 import { loadSettingsResponse } from '@/test/fixtures/settings';
@@ -30,7 +31,7 @@ afterEach(teardown);
 const PATH = 'src/app/selection/testdata/selection_page.yaml';
 
 /** What the fixture says about how a case is played. */
-const CASE_KINDS = ['page', 'tabs', 'parity', 'settings'] as const;
+const CASE_KINDS = ['page', 'tabs', 'parity', 'settings', 'copy'] as const;
 type CaseKind = (typeof CASE_KINDS)[number];
 
 function kindOf(entry: FixtureCase): CaseKind {
@@ -102,6 +103,36 @@ describe('/selection', () => {
         expect(seen.wizard.rows).toEqual(seen.selection.rows);
         expect(seen.wizard.selected).toEqual([sides.selectedIds]);
         expect(seen.selection.selected).toEqual(seen.wizard.selected);
+      });
+    }
+    if (kind === 'copy') {
+      it(entry.name, () => {
+        const scopes = (entry as unknown as { scopes: Record<string, Record<string, string>> }).scopes;
+        // The fixture names every scope the module lists, and no other.
+        expect(Object.keys(scopes).sort()).toEqual(ALL_KICKSTART_SCOPES.map((scope) => scope.wire).sort());
+        const seen = new Set<string>();
+        for (const scope of ALL_KICKSTART_SCOPES) {
+          const want = scopes[scope.wire];
+          const copy = kickstartCopy(scope);
+          const got = {
+            opening: copy.opening,
+            openFailed: copy.openFailed,
+            refusedOne: copy.refused(1),
+            refusedMany: copy.refused(2),
+            expiredTitle: copy.expired.title,
+            expiredBody: copy.expired.body,
+            reopen: copy.expired.reopen,
+            conflictsTitle: copy.conflicts.title,
+            conflictsHelp: copy.conflicts.help,
+            saved: copy.saved,
+          };
+          expect(got, `the words of the ${scope.wire} scope`).toEqual(want);
+          for (const [name, text] of Object.entries(got)) {
+            expect(text, `${scope.wire} ${name} is lowercase chrome`).toBe(text.toLowerCase());
+            expect(seen.has(text), `${scope.wire} ${name} repeats another scope's words`).toBe(false);
+            seen.add(text);
+          }
+        }
       });
     }
     if (kind === 'settings') {
