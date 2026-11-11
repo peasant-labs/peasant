@@ -5,27 +5,26 @@ import { type ReactElement } from 'react';
 import { expect, vi } from 'vitest';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { MockWebSocket } from '@/test/mockWebSocket';
-import { expandRefs, loadModels, loadTrees, type FixtureCase } from '@/test/fixtures/kickstart';
+import { checkPushedEvent, checkScriptedAnswer, expandRefs, loadModels, loadTrees, type FixtureCase, type ScriptedAnswer } from '@/test/fixtures/kickstart';
 
 /**
  * The HTTP and WebSocket boundary of the kickstart pages, played from fixtures.
  *
  * `fetch` and `WebSocket` are the only things replaced. The server's answers
- * are wire JSON from the fixtures (named sessions and forests, checked against
- * the generated contract), scripted per route; this file holds no rule of the
- * server and cannot make a session out of anything but a fixture. A route that
- * no script answers is a 404 and is recorded, so a test can assert that a page
+ * are wire JSON from the fixtures (named sessions and forests, scripted
+ * answers, pushed events), each checked against the generated contract unless
+ * the fixture marks it `malformed: true`; this file holds no rule of the server
+ * and cannot make a session out of anything but a fixture. A route that no
+ * script answers is a 404 and is recorded, so a test can assert that a page
  * made no call it should not have.
+ *
+ * A fixture is read strictly: a step key or a case key that nothing reads is
+ * an error, never an assertion that silently does not run.
  */
 
 type Json = unknown;
 
-export interface RouteAnswer {
-  status?: number;
-  body?: Json;
-  /** A body that is not JSON, sent as written (a proxy's page, a crash's text). */
-  text?: string;
-}
+export type RouteAnswer = ScriptedAnswer;
 
 export interface Call {
   method: string;
@@ -38,6 +37,11 @@ export interface Step {
   push?: { kind: string; model?: string; sessionId?: string; revision?: number; reason?: string; scan?: Json; ingest?: Json; committed?: Json; withView?: boolean };
   /** Push a raw frame as the server would send it. */
   frame?: Json;
+  /**
+   * The event or frame this step pushes is a deliberate breach of the contract.
+   * Without it, a pushed kickstart event that the contract forbids is an error.
+   */
+  malformed?: true;
   click?: string;
   /** Move keyboard focus to the checkbox with this name (a forest row, to read its preview). */
   focus?: string;
@@ -45,6 +49,8 @@ export interface Step {
   check?: string;
   /** Answer the next calls of a route differently from here on. */
   script?: { route: string; answers: RouteAnswer | RouteAnswer[] };
+  /** Send the answers a route has been holding (`held: true`), and let its later calls through at once. */
+  release?: string;
   socket?: 'close' | 'open';
   advance?: number;
   /** Let pending promises settle. */
@@ -98,6 +104,80 @@ export interface RailPlacement {
 
 export const API = '/api/v1/kickstart';
 
+/**
+ * Every key a step may have: the closed set the runner reads. Declared against
+ * the interface in both directions, so a step kind added to one and not the
+ * other stops the build, and a step that names anything else fails when it is
+ * played instead of asserting nothing.
+ */
+const STEP_KEYS = Object.freeze({
+  push: true,
+  frame: true,
+  malformed: true,
+  click: true,
+  focus: true,
+  choose: true,
+  check: true,
+  script: true,
+  release: true,
+  socket: true,
+  advance: true,
+  settle: true,
+  expectText: true,
+  expectNoText: true,
+  expectControl: true,
+  expectNoControlMatching: true,
+  expectNoCalls: true,
+  expectCalls: true,
+  expectBody: true,
+  expectBodyKeys: true,
+  expectRows: true,
+  expectBlocks: true,
+  expectLink: true,
+  expectNoReload: true,
+  expectOrder: true,
+  expectDetails: true,
+  expectRailLabels: true,
+} satisfies Record<keyof Step, true>);
+
+const STEP_KEY_NAMES: readonly string[] = Object.keys(STEP_KEYS);
+const PUSH_KEYS: readonly string[] = ['kind', 'model', 'sessionId', 'revision', 'reason', 'scan', 'ingest', 'committed', 'withView'];
+const SOCKET_ACTIONS: readonly string[] = ['close', 'open'];
+
+/** Refuse a step that names a key the runner does not read, names nothing, or names an action it does not know. */
+function checkStep(step: unknown, where: string): void {
+  if (step === null || typeof step !== 'object' || Array.isArray(step)) {
+    throw new Error(`${where} is not a mapping of step keys; steps are ${STEP_KEY_NAMES.join(', ')}`);
+  }
+  const keys = Object.keys(step);
+  if (keys.length === 0) throw new Error(`${where} is empty, so it does nothing and asserts nothing; give it one of ${STEP_KEY_NAMES.join(', ')}`);
+  const unknown = keys.filter((key) => !STEP_KEY_NAMES.includes(key));
+  if (unknown.length > 0) {
+    throw new Error(`${where} has ${unknown.map((key) => JSON.stringify(key)).join(', ')}, which the runner does not read; a misspelt key would let the step pass without running. the keys are ${STEP_KEY_NAMES.join(', ')}`);
+  }
+  const { socket, malformed } = step as Step;
+  if (socket !== undefined && !SOCKET_ACTIONS.includes(socket)) {
+    throw new Error(`${where} has socket ${JSON.stringify(socket)}; a socket step is ${SOCKET_ACTIONS.join(' or ')}`);
+  }
+  if (malformed !== undefined && (malformed !== true || (!('push' in step) && !('frame' in step)))) {
+    throw new Error(`${where} is marked malformed, which means that the event or frame it pushes breaks the contract on purpose; it must be \`malformed: true\` on a step that has a push or a frame`);
+  }
+}
+
+/** Refuse a case that has a key neither the harness nor the test that plays it reads. */
+function checkCaseKeys(entry: FixtureCase, played: readonly string[], own: readonly string[]): void {
+  const unknown = Object.keys(entry).filter((key) => !played.includes(key) && !own.includes(key));
+  if (unknown.length > 0) {
+    throw new Error(
+      `case ${entry.name} has ${unknown.map((key) => JSON.stringify(key)).join(', ')}, which neither the harness nor the test that plays it reads; ` +
+      `the harness reads ${played.join(', ')}${own.length > 0 ? ` and this test reads ${own.join(', ')}` : ''}. a key nothing reads asserts nothing.`,
+    );
+  }
+}
+
+const CASE_KEYS: readonly string[] = ['name', 'server', 'steps', 'fakeTimers'];
+const TAB_CASE_KEYS: readonly string[] = [...CASE_KEYS, 'tabs'];
+
 function isSubset(actual: Json, subset: Json): boolean {
   if (subset !== null && typeof subset === 'object' && !Array.isArray(subset)) {
     if (actual === null || typeof actual !== 'object') return false;
@@ -115,10 +195,25 @@ export class KickstartServer {
   readonly trees = loadTrees();
   private readonly scripts = new Map<string, RouteAnswer[]>();
   private readonly used = new Map<string, number>();
+  private readonly holding = new Map<string, (() => void)[]>();
+  private readonly released = new Set<string>();
 
   script(route: string, answers: RouteAnswer | RouteAnswer[]): void {
-    this.scripts.set(route, (Array.isArray(answers) ? answers : [answers]).map((answer) => expandRefs(answer, this.models, this.trees) as RouteAnswer));
+    const expanded = (Array.isArray(answers) ? answers : [answers]).map((answer) => expandRefs(answer, this.models, this.trees) as RouteAnswer);
+    for (const answer of expanded) checkScriptedAnswer(route, answer);
+    this.scripts.set(route, expanded);
     this.used.set(route, 0);
+    this.released.delete(route);
+  }
+
+  /** Send what a route holds and stop holding it. Releasing a route nothing holds is an error. */
+  release(route: string): void {
+    if (!(this.scripts.get(route) ?? []).some((answer) => answer.held === true)) {
+      throw new Error(`a step releases ${route}, which no scripted answer holds; script it with held: true`);
+    }
+    this.released.add(route);
+    for (const send of this.holding.get(route) ?? []) send();
+    this.holding.delete(route);
   }
 
   model(name: string): Record<string, Json> {
@@ -150,12 +245,21 @@ export class KickstartServer {
       const index = Math.min(this.used.get(route) ?? 0, answers.length - 1);
       this.used.set(route, (this.used.get(route) ?? 0) + 1);
       const answer = answers[index];
+      if (answer.held === true && !this.released.has(route)) {
+        await new Promise<void>((send) => {
+          this.holding.set(route, [...(this.holding.get(route) ?? []), send]);
+        });
+      }
       return new Response(answer.text ?? JSON.stringify(answer.body ?? {}), { status: answer.status ?? 200 });
     });
   }
 
   /** The frame data of a topic message built from a fixture model. */
   event(spec: NonNullable<Step['push']>): Json {
+    const unknown = Object.keys(spec).filter((key) => !PUSH_KEYS.includes(key));
+    if (unknown.length > 0) {
+      throw new Error(`a pushed event has ${unknown.map((key) => JSON.stringify(key)).join(', ')}, which a push does not read; it reads ${PUSH_KEYS.join(', ')}`);
+    }
     const model = spec.model === undefined ? undefined : this.model(spec.model);
     const sessionId = spec.sessionId ?? (model?.id as string | undefined);
     if (sessionId === undefined) throw new Error('a pushed event names a model or a sessionId');
@@ -237,14 +341,28 @@ function scriptServer(entry: FixtureCase): KickstartServer {
   return server;
 }
 
-/** Mount a page for one fixture case: its scripted server answers, then its steps. */
-export async function playCase(entry: FixtureCase, element: ReactElement): Promise<Mounted> {
+/** The steps of a case, which must exist: a case with none mounts a page and asserts nothing. */
+function stepsOf(entry: FixtureCase): Step[] {
+  if (!Array.isArray(entry.steps) || entry.steps.length === 0) {
+    throw new Error(`case ${entry.name} has no steps, so it would mount a page and assert nothing`);
+  }
+  return entry.steps as Step[];
+}
+
+/**
+ * Mount a page for one fixture case: its scripted server answers, then its
+ * steps. `own` names the case keys the calling test reads itself; any other
+ * key the harness does not read is an error.
+ */
+export async function playCase(entry: FixtureCase, element: ReactElement, own: readonly string[] = []): Promise<Mounted> {
+  checkCaseKeys(entry, CASE_KEYS, own);
+  const steps = stepsOf(entry);
   // Only timeouts are faked, and the clock still moves with real time, so
   // Testing Library's own polling keeps working while a case controls timers.
   if (entry.fakeTimers === true) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
   const server = scriptServer(entry);
   const mounted = await mountKickstart(element, server);
-  await runSteps((entry.steps ?? []) as Step[], mounted);
+  await runSteps(steps, mounted);
   return mounted;
 }
 
@@ -257,7 +375,9 @@ export type TabStep = Step & { tab: string };
  * reaches every subscriber). The server and its call log are shared, as one
  * browser's are.
  */
-export async function playTabs(entry: FixtureCase, pages: Readonly<Record<string, ReactElement>>): Promise<Record<string, Mounted>> {
+export async function playTabs(entry: FixtureCase, pages: Readonly<Record<string, ReactElement>>, own: readonly string[] = []): Promise<Record<string, Mounted>> {
+  checkCaseKeys(entry, TAB_CASE_KEYS, own);
+  const steps = stepsOf(entry);
   const order = entry.tabs;
   if (!Array.isArray(order) || order.some((name) => typeof name !== 'string' || pages[name] === undefined)) {
     throw new Error(`case ${entry.name}: tabs must name pages from ${Object.keys(pages).join(', ')}, in mount order`);
@@ -265,7 +385,7 @@ export async function playTabs(entry: FixtureCase, pages: Readonly<Record<string
   if (entry.fakeTimers === true) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
   const server = scriptServer(entry);
   const mounted = await mountKickstartTabs((order as string[]).map((name) => ({ name, element: pages[name] })), server);
-  for (const [position, raw] of ((entry.steps ?? []) as TabStep[]).entries()) {
+  for (const [position, raw] of (steps as TabStep[]).entries()) {
     const { tab, ...step } = raw;
     const targets = tab === 'all' ? Object.values(mounted) : mounted[tab] === undefined ? [] : [mounted[tab]];
     if (targets.length === 0) throw new Error(`case ${entry.name} step ${position + 1}: tab ${JSON.stringify(tab)} is not one of ${Object.keys(mounted).join(', ')}, all`);
@@ -309,17 +429,28 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
   const { server, socket, container, root: q } = mounted;
   for (const [position, step] of steps.entries()) {
     const at = where ?? `step ${position + 1}`;
+    checkStep(step, at);
     if (step.push) {
+      const data = server.event(step.push);
+      checkPushedEvent(data, step.malformed, at);
       await act(async () => {
-        socket.simulateMessage({ type: 'kickstart', data: server.event(step.push!) });
+        socket.simulateMessage({ type: 'kickstart', data });
       });
     }
     if (step.frame !== undefined) {
+      const frame = step.frame as { type?: unknown; data?: unknown } | null;
+      if (frame !== null && typeof frame === 'object' && frame.type === 'kickstart') checkPushedEvent(frame.data, step.malformed, at);
       await act(async () => {
         socket.simulateMessage(step.frame);
       });
     }
     if (step.script) server.script(step.script.route, step.script.answers);
+    if (step.release !== undefined) {
+      server.release(step.release);
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
     if (step.click) {
       await act(async () => {
         fireEvent.click(control(q, 'button', step.click!));

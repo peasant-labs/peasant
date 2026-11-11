@@ -9,10 +9,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchVillageAuth, startVillageSignIn } from '@/lib/share/publishing';
+import { startVillageSignIn } from '@/lib/share/publishing';
+import { SIGN_IN_POLL_MS, watchVillageSignIn } from '@/lib/share/villageSignIn';
 
-/** How often the sign-in is checked, and how long it is given. The server waits three minutes. */
-export const SIGN_IN_POLL_MS = 2000;
+/** How long the sign-in is given. The server waits three minutes. */
 export const SIGN_IN_TIMEOUT_MS = 180_000;
 
 export interface VillageSignIn {
@@ -39,7 +39,7 @@ export function useVillageSignIn(
   const [waiting, setWaiting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const attempt = useRef(0);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const watching = useRef<AbortController | null>(null);
   const alive = useRef(true);
 
   useEffect(() => {
@@ -47,19 +47,20 @@ export function useVillageSignIn(
     return () => {
       alive.current = false;
       attempt.current += 1;
-      if (timer.current !== null) clearTimeout(timer.current);
+      watching.current?.abort();
     };
   }, []);
 
   const cancel = useCallback(() => {
     attempt.current += 1;
-    if (timer.current !== null) clearTimeout(timer.current);
-    timer.current = null;
+    watching.current?.abort();
+    watching.current = null;
     setWaiting(false);
   }, []);
 
   const signIn = useCallback(async (): Promise<boolean> => {
     attempt.current += 1;
+    watching.current?.abort();
     const mine = attempt.current;
     const current = () => alive.current && mine === attempt.current;
     setFailure(null);
@@ -73,30 +74,18 @@ export function useVillageSignIn(
       }
       return false;
     }
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      if (!current()) return false;
-      try {
-        const auth = await fetchVillageAuth();
-        if (!current()) return false;
-        if (auth.authenticated) {
-          setWaiting(false);
-          return true;
-        }
-      } catch {
-        // A missed poll is not a failed sign-in: the browser flow still runs.
-      }
-      if (Date.now() >= deadline) {
-        if (current()) {
-          setFailure('the sign-in did not finish in the browser within three minutes. try again.');
-          setWaiting(false);
-        }
-        return false;
-      }
-      await new Promise<void>((resolve) => {
-        timer.current = setTimeout(resolve, pollMs);
-      });
+    if (!current()) return false;
+    const watch = new AbortController();
+    watching.current = watch;
+    const outcome = await watchVillageSignIn({ signal: watch.signal, pollMs, timeoutMs, checkNow: true });
+    if (!current()) return false;
+    if (outcome === 'signed-in') {
+      setWaiting(false);
+      return true;
     }
+    if (outcome === 'timed-out') setFailure('the sign-in did not finish in the browser within three minutes. try again.');
+    setWaiting(false);
+    return false;
   }, [pollMs, timeoutMs]);
 
   return { waiting, failure, signIn, cancel };

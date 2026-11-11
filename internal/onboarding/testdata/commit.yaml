@@ -13,6 +13,9 @@
 #   resolutions    field key -> {choice, seen}
 #   claudeSessions the session found Claude Code sessions (the retention stop is shown)
 #   villageConnected this machine is signed in (the sharing stop is shown)
+#   scope          the setup scope of the model (full by default)
+#   retentionSeed  the retention period the session showed on its retention stop
+#                  (a transient value: it is in the draft, never in the file)
 #   retentionError the injected retention writer fails with this message
 #   gitEmail       the email git supplied when a missing file was defaulted
 #   villageServer  point village.url at a counting server ({{villageURL}} in a document)
@@ -38,6 +41,9 @@ requiredNames:
   - rerun-preserves-blank-lines-and-comment-spacing
   - changed-line-takes-encoder-output
   - blank-line-preservation-never-changes-meaning
+  - retention-shown-unanswered-writes-the-shown-value
+  - coupled-field-change-yields-a-row
+  - selection-scope-commit-without-a-config-file-is-refused
 cases:
   - name: untouched-field-change-survives-without-a-row
     scenarios:
@@ -375,6 +381,139 @@ cases:
             days: 90
             noteStarts: "config saved, retention not applied"
             noteContains: settings.json is read-only
+  # The retention stop shows a period and the review promises to apply it. The
+  # save applies the period that was shown whether or not it was answered, which is
+  # what the terminal's finish step does. The period is a transient value: the file
+  # never holds it, so it comes from the draft's seed.
+  - name: retention-shown-unanswered-writes-the-shown-value
+    scenarios:
+      - note: a shown period nobody changed is written after the save
+        opened: *licenseOpened
+        claudeSessions: true
+        retentionSeed: 99999
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: true
+          parsed: {license: CC0-1.0}
+          effects: [retention, publish]
+          retention: {status: applied, days: 99999}
+          effectSawSavedFile: [retention, publish]
+          effectSawHeldLock: [retention, publish]
+          lacksText: ["99999", "cleanup"]
+      - note: an answered period replaces the shown one
+        opened: *licenseOpened
+        claudeSessions: true
+        retentionSeed: 99999
+        answers: {content-license: '"CC0-1.0"', claude-retention-days: '"90"'}
+        want:
+          saved: true
+          effects: [retention, publish]
+          retention: {status: applied, days: 90}
+      - note: a stop that is hidden shows no period, so none is written
+        opened: *licenseOpened
+        claudeSessions: false
+        retentionSeed: 99999
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: true
+          effects: [publish]
+          retention: {status: not-requested}
+      - note: no period was shown, so none is written
+        opened: *licenseOpened
+        claudeSessions: true
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: true
+          effects: [publish]
+          retention: {status: not-requested}
+  # An answer can move a field the user did not answer: publishing automatically
+  # sets the share preference. When another writer moved that field since the draft
+  # opened, the save would replace their change without a word, so it is a row.
+  - name: coupled-field-change-yields-a-row
+    scenarios:
+      - note: the share preference an answer would set was changed by another writer
+        opened: &sharingOpened |
+          version: 1
+          push:
+            sharePreference: share-later
+            license: ""
+        onDisk: &sharingTheirs |
+          version: 1
+          push:
+            sharePreference: ""
+            license: ""
+        answers: {publish-automatically: '"true"'}
+        want:
+          saved: false
+          conflicts:
+            - field: publication-preference
+              stop: publication
+              label: publication preference
+              mine: '"share-later"'
+              theirs: '""'
+          fileUnchanged: true
+          effects: []
+      - note: keeping mine applies the side effect the user asked for
+        opened: *sharingOpened
+        onDisk: *sharingTheirs
+        answers: {publish-automatically: '"true"'}
+        resolutions: {publication-preference: {choice: mine, seen: '""'}}
+        want:
+          saved: true
+          parsed: {autoPublishIntent: true, autoPublishIntended: true, sharePreference: share-later}
+      - note: keeping theirs leaves the other writer's value and saves the answer
+        opened: *sharingOpened
+        onDisk: *sharingTheirs
+        answers: {publish-automatically: '"true"'}
+        resolutions: {publication-preference: {choice: theirs, seen: '""'}}
+        want:
+          saved: true
+          parsed: {autoPublishIntent: true, autoPublishIntended: false}
+          lacksText: ["share-later"]
+      - note: a choice made against a value the file no longer holds raises the row again
+        opened: *sharingOpened
+        onDisk: *sharingTheirs
+        answers: {publish-automatically: '"true"'}
+        resolutions: {publication-preference: {choice: theirs, seen: '"share-later"'}}
+        want:
+          saved: false
+          conflicts:
+            - field: publication-preference
+              stop: publication
+              label: publication preference
+              mine: '"share-later"'
+              theirs: '""'
+          fileUnchanged: true
+      - note: an answer with no side effect on the moved field raises no row
+        opened: *sharingOpened
+        onDisk: *sharingTheirs
+        answers: {publish-automatically: '"false"'}
+        want:
+          saved: true
+          conflicts: []
+          parsed: {autoPublishIntent: false, autoPublishIntended: false}
+  # The selection page edits a configuration that setup wrote. With no file the
+  # save would write the whole default document and end first-run setup.
+  - name: selection-scope-commit-without-a-config-file-is-refused
+    scenarios:
+      - note: no configuration file, so nothing is written
+        scope: selection
+        openedAbsent: true
+        answers: {transcripts: '{"mode":"all"}'}
+        want:
+          saved: false
+          failure: invalid
+          errorContains: run setup first at /kickstart
+          fileAbsent: true
+          effects: []
+          lockReleased: true
+      - note: a file that setup wrote takes the selection
+        scope: selection
+        opened: *licenseOpened
+        answers: {transcripts: '{"mode":"all"}'}
+        want:
+          saved: true
+          parsed: {autoIngest: true}
   - name: no-hooks-write
     scenarios:
       - note: choosing to publish automatically installs no hook and writes no rules file

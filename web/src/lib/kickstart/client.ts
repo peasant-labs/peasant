@@ -198,6 +198,23 @@ export async function commitKickstartSession(id: string): Promise<KickstartCommi
 export async function startKickstartImport(): Promise<{ started: boolean }> {
   const { status, text } = await exchange('POST', INGEST_PATH);
   if (status === 409) return { started: false };
+  if (status === 503) throw importUnavailable(text);
   if (status < 200 || status >= 300) throw refused(INGEST_PATH, status, text);
   return { started: true };
+}
+
+/**
+ * The refusal of an import that peasant has no settings to run under. The
+ * server's own words are a status line ("config not available"); on the panel
+ * the person needs what failed, that nothing was imported, and what to do.
+ */
+function importUnavailable(text: string): KickstartRequestError {
+  const { message, code } = reasonOf(text);
+  return new KickstartRequestError(
+    INGEST_PATH,
+    503,
+    `the import did not start: peasant answered "${message}", so it has no saved settings to import under. ` +
+      'nothing was imported and your saved setup is unchanged. check that peasant\'s settings file is in place and can be read, then choose import now again.',
+    code,
+  );
 }

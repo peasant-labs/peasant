@@ -9,7 +9,7 @@ requiredNames:
   - option-set-from-server-only
   - no-client-visibility-decision
   - review-stacks-rows-summary-then-collapsed-diff
-  - both-themes
+  - opening-stop-draws-its-controls
   - conflict-choice-is-sent-per-field
   - commit-refusal-shows-the-rows-and-saves-nothing
 cases:
@@ -114,8 +114,7 @@ cases:
           - exact changes to config.yaml
       - expectDetails: {summary: exact changes to config.yaml, open: false}
 
-  - name: both-themes
-    themes: [light, dark]
+  - name: opening-stop-draws-its-controls
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
     steps:

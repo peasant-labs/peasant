@@ -3,11 +3,16 @@
 # /kickstart. The set of top-level pages is derived from the section registry
 # by the test, so a registry change moves it with no edit here; the lists below
 # are only the extra pages and the exempt ones that the derivation must treat
-# as stated.
+# as stated. The standalone selection page is not exempt: it saves into the
+# settings file that setup creates, so it sends an unconfigured install to setup.
+# `decision` is what the page is told while it is on screen: `open` (it may start
+# its work: setup is saved, the page is exempt, or the status could not be read)
+# or `redirecting` (setup is not saved and the person is being sent to setup).
 requiredNames:
   - every-derived-top-level-route-redirects-when-unconfigured
   - kickstart-is-exempt
-  - selection-is-exempt
+  - selection-redirects-until-setup-is-saved
+  - selection-is-left-alone-once-setup-is-saved
   - share-and-everything-under-it-is-exempt
   - sessions-and-everything-under-it-is-exempt
   - project-deep-links-are-honoured
@@ -23,44 +28,60 @@ cases:
     pages: [/projects, /projects/, /review/0123, /map/0123/node, /village/, /settings]
     deriveFromRegistry: true
     redirects: true
+    decision: redirecting
   - name: kickstart-is-exempt
     status: {configured: false}
     pages: [/kickstart, /kickstart/]
     redirects: false
-  - name: selection-is-exempt
+    decision: open
+  - name: selection-redirects-until-setup-is-saved
     status: {configured: false}
     pages: [/selection, /selection/]
+    redirects: true
+    decision: redirecting
+  - name: selection-is-left-alone-once-setup-is-saved
+    status: {configured: true}
+    pages: [/selection, /selection/]
     redirects: false
+    decision: open
+    statusReads: 1
   - name: share-and-everything-under-it-is-exempt
     status: {configured: false}
     pages: [/share, /share/, /share/step/redact]
     redirects: false
+    decision: open
   - name: sessions-and-everything-under-it-is-exempt
     status: {configured: false}
     pages: [/sessions/s-1, /sessions/s-1/transcript]
     redirects: false
+    decision: open
   - name: project-deep-links-are-honoured
     status: {configured: false}
     pages: [/projects/0123456789abcdef/sessions/s-1, /dev/visual-harness, /somewhere-else]
     redirects: false
+    decision: open
   - name: failed-status-fetch-redirects-nothing
     statusAnswer: {status: 500, body: {error: the server could not read its settings}}
     pages: ["/", /settings, /map]
     redirects: false
+    decision: open
   - name: configured-true-never-redirects
     status: {configured: true}
     pages: ["/", /settings, /map, /projects]
     redirects: false
+    decision: open
     # Configured is final for the page load: the status is read once.
     statusReads: 1
   - name: unconfigured-status-is-read-again-after-setup-is-saved
     status: {configured: false}
     pages: ["/"]
     redirects: true
+    decision: redirecting
     then:
       status: {configured: true}
       pages: [/settings]
       redirects: false
+      decision: open
   - name: settings-rerun-link-prefills
     # The settings page links to the setup page with its origin, and the setup
     # page opened that way draws the saved choices the server served.

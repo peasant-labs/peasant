@@ -12,6 +12,10 @@
 #             `{session}`, `{model}` and `{answered}` filled in for each
 #   settings  the settings page's link to this page
 #   copy      the words of each scope against the scopes the module lists
+#   gate      the page inside the shell's first-run decision, with the status
+#             answer scripted by the case (`held: true` keeps it back until a
+#             `release` step); `redirects` says whether the person is sent to
+#             setup. The request log is the evidence of what the page started.
 requiredNames:
   - own-live-session
   - wizard-undisturbed
@@ -27,6 +31,10 @@ requiredNames:
   - copy-covers-every-scope
   - conflict-row-shows-structured-value-readably
   - rail-labels-stay-inside-the-frame
+  - selection-opens-no-session-before-the-status-answer
+  - unconfigured-selection-redirects-without-opening-a-session
+  - a-failed-status-read-opens-the-page-without-redirecting
+  - a-forest-with-a-bad-row-is-refused-whole-and-says-what-to-do
 cases:
   # The page opens a session of its own and draws only the stops the server
   # serves for it. Events of the wizard's session are not its own.
@@ -93,17 +101,19 @@ cases:
 
   # The scope token the page opens its session with is the closed set's
   # `selection`, and a token the page does not know is refused, never read as
-  # another scope. The page never reads the redirect's status itself.
+  # another scope. The page does not read the status itself; the shell's first-run
+  # decision reads it once.
   - name: status-scope-token-is-selection
     kind: page
     scopeToken: selection
     server:
-      "POST /api/v1/kickstart/sessions": [{body: {$model: selection-scope}}, {body: {$model: selection-scope, scope: replaced}}]
+      "POST /api/v1/kickstart/sessions": [{body: {$model: selection-scope}}, {body: {$model: selection-scope, scope: replaced}, malformed: true}]
       "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
     steps:
       - expectBody: {route: "POST /api/v1/kickstart/sessions", nth: 0, subset: {scope: selection}}
       - expectBodyKeys: {route: "POST /api/v1/kickstart/sessions", only: [scope]}
-      - expectNoCalls: "GET /api/v1/kickstart/status"
+      # The status is read once, by the shell's first-run decision; the page does not read it.
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
       - expectText: [step 1 of 3]
       # The server ends the session; opening a new one asks for the same scope,
       # and an answer that names a scope outside the closed set is refused.
@@ -318,14 +328,15 @@ cases:
       - expectRows: [p-ledger, g-main, s-one, s-two, p-locked]
       - expectControl: {role: checkbox, name: add a CSV export, checked: true}
 
-  # The settings page's selection row leads here, to a route that exists, and
-  # the route is outside the registry and the first-run redirect.
+  # The settings page's selection row leads here, to a route that exists. The
+  # route is outside the registry, and the first-run redirect covers it: it
+  # saves into the settings file that setup creates, so an install that has
+  # not been set up is sent to setup first.
   - name: reachable-from-settings
     kind: settings
     link: {name: choose sessions, href: /selection}
-    # Everything under a section of the registry is a top-level page the
-    # first-run redirect covers; this page is neither.
-    exemptPaths: [/selection, /selection/]
+    # Not a section of the registry, but a top-level page the redirect covers.
+    coveredPaths: [/selection, /selection/]
 
   # The words about the session's ending are the selection's own: a refused
   # save, the rows that moved, and the saved heading name the selection and
@@ -477,3 +488,87 @@ cases:
           first: {textAlign: left, shifted: true}
           middle: {textAlign: center, shifted: false}
           last: {textAlign: right, shifted: true}
+
+  # The page opens a session of its own as soon as it is drawn, so its body waits
+  # for the shell's status answer. Nothing is started before it arrives.
+  - name: selection-opens-no-session-before-the-status-answer
+    kind: gate
+    redirects: false
+    server:
+      "GET /api/v1/kickstart/status": {body: {configured: true}, held: true}
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+      - settle: true
+      - settle: true
+      - expectNoCalls: "/api/v1/kickstart/sessions"
+      - expectNoText: [choose sessions, step 1 of 3]
+      - release: "GET /api/v1/kickstart/status"
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
+      - expectBody: {route: "POST /api/v1/kickstart/sessions", subset: {scope: selection}}
+      - expectText: [choose sessions to import, step 1 of 3, fix the ledger rounding]
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+
+  # With no setup saved the person is sent to setup, and the page starts nothing
+  # on the way: no session of any scope, no forest, nothing drawn.
+  - name: unconfigured-selection-redirects-without-opening-a-session
+    kind: gate
+    redirects: true
+    server:
+      "GET /api/v1/kickstart/status": {body: {configured: false}, held: true}
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+      - settle: true
+      - expectNoCalls: "/api/v1/kickstart/sessions"
+      - release: "GET /api/v1/kickstart/status"
+      - settle: true
+      - settle: true
+      - settle: true
+      - expectNoCalls: "/api/v1/kickstart/sessions"
+      - expectNoText: [choose sessions, step 1 of 3, fix the ledger rounding]
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+
+  # A status that cannot be read is not "not set up": nothing is redirected, and
+  # the page opens as it did before it waited.
+  - name: a-failed-status-read-opens-the-page-without-redirecting
+    kind: gate
+    redirects: false
+    server:
+      "GET /api/v1/kickstart/status": {status: 500, body: {error: the server could not read its settings}}
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
+      - expectText: [choose sessions to import, step 1 of 3, fix the ledger rounding]
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+
+  # A forest the contract refuses is held back whole. The message says what is
+  # wrong, why nothing is drawn, and what to do, and the page offers to try again.
+  - name: a-forest-with-a-bad-row-is-refused-whole-and-says-what-to-do
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: unknown-kind-and-state}, malformed: true}
+    steps:
+      - expectText:
+          - the sessions could not be listed
+          # what: the list of sessions, and the rows in it that the contract does not allow
+          - the list of sessions
+          - row 2
+          - row 3
+          # why: what each row held, and what it may hold
+          - folder
+          - partial
+          # what it means: none of it is drawn, and nothing was changed
+          - none of it is drawn
+          - nothing was changed
+          # what to do
+          - same version
+          - reload
+      - expectControl: {role: button, name: try again}
+      # No row is drawn, not even the one the contract accepts.
+      - expectRows: []
+      - expectNoCalls: "PATCH"

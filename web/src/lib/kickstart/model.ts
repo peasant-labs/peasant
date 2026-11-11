@@ -21,10 +21,13 @@ import {
   zLocalKickstartScan,
   zLocalKickstartSession,
   zLocalKickstartStatus,
+  zLocalKickstartTree,
   type LocalKickstartCommitted as WireCommitted,
   type LocalKickstartIngest as WireIngest,
+  type LocalKickstartNode,
   type LocalKickstartScan as WireScan,
   type LocalKickstartSession as WireSession,
+  type LocalKickstartTree,
   type LocalSettingValue,
 } from '@peasant-labs/schema';
 import {
@@ -38,8 +41,6 @@ import {
   parseKickstartIngestState,
   parseKickstartLineKind,
   parseKickstartNextStep,
-  parseKickstartNodeKind,
-  parseKickstartNodeState,
   parseKickstartScanState,
   parseKickstartScope,
   parseKickstartStopKind,
@@ -48,8 +49,6 @@ import {
   type KickstartIngestState,
   type KickstartLineKind,
   type KickstartNextStep,
-  type KickstartNodeKind,
-  type KickstartNodeState,
   type KickstartScanState as KickstartScanStateMember,
   type KickstartScope,
   type KickstartStopKind,
@@ -71,19 +70,27 @@ export class KickstartContractError extends Error {
   }
 }
 
-interface Decoder<T> {
-  safeParse(value: unknown):
-    | { success: true; data: T }
-    | { success: false; error: { issues: readonly { path: PropertyKey[]; message: string }[] } };
+interface Issue {
+  readonly path: PropertyKey[];
+  readonly message: string;
 }
 
-function decode<T>(schema: Decoder<T>, raw: unknown, where: string): T {
+interface Decoder<T> {
+  safeParse(value: unknown): { success: true; data: T } | { success: false; error: { issues: readonly Issue[] } };
+}
+
+const SHOWN_ISSUES = 3;
+
+function decode<T>(schema: Decoder<T>, raw: unknown, where: string, describe?: (issues: readonly Issue[]) => string): T {
   const parsed = schema.safeParse(raw);
   if (parsed.success) return parsed.data;
-  const detail = parsed.error.issues
-    .slice(0, 3)
-    .map((issue) => `${issue.path.map(String).join('.') || '<root>'}: ${issue.message}`)
-    .join('; ');
+  const { issues } = parsed.error;
+  const detail =
+    describe?.(issues) ??
+    issues
+      .slice(0, SHOWN_ISSUES)
+      .map((issue) => `${issue.path.map(String).join('.') || '<root>'}: ${issue.message}`)
+      .join('; ');
   throw new KickstartContractError(where, detail || 'unknown shape');
 }
 
@@ -232,29 +239,15 @@ export interface KickstartStatus {
   readonly activeSessionId: string | null;
 }
 
-export interface KickstartTreeNode {
-  readonly id: string;
-  readonly parentId: string | null;
-  readonly kind: KickstartNodeKind;
-  readonly state: KickstartNodeState;
-  readonly label: string;
-  readonly sessionId: string | null;
-  readonly harness: string | null;
-  readonly childCount: number | null;
-  readonly locked: boolean;
-}
+/**
+ * One row of the selection forest, as the contract serves it. The page does
+ * not model a row: fairtrade's selection tree owns the kind and the state of a
+ * row, so the validated wire rows are handed to it as they came.
+ */
+export type KickstartTreeNode = LocalKickstartNode;
 
-/** Rows this page could not name, counted by why. They are never relabelled. */
-export interface KickstartTreeDrops {
-  readonly unreadable: number;
-  readonly unknownKind: number;
-  readonly unknownState: number;
-}
-
-export interface KickstartTree {
-  readonly nodes: readonly KickstartTreeNode[];
-  readonly dropped: KickstartTreeDrops;
-}
+/** The whole forest: a list of rows and nothing else. */
+export type KickstartTree = LocalKickstartTree;
 
 // ── wire → model ─────────────────────────────────────────────────────────
 
@@ -400,62 +393,37 @@ export function parseKickstartPreview(raw: unknown): readonly KickstartLine[] {
   return lines(decode(zLocalKickstartPreview, raw, where).lines, where);
 }
 
-function record(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+/**
+ * What is wrong with a forest, said row by row: which row (by its place in the
+ * list and its name), which field, what it held and what the contract allows.
+ * An issue that is not about a row is said by its path.
+ */
+function describeForestIssues(raw: unknown, issues: readonly Issue[]): string {
+  const rows = typeof raw === 'object' && raw !== null && Array.isArray((raw as { nodes?: unknown }).nodes) ? (raw as { nodes: unknown[] }).nodes : [];
+  const said = issues.slice(0, SHOWN_ISSUES).map((issue) => {
+    const [head, index, field] = issue.path;
+    if (head !== 'nodes' || typeof index !== 'number') return `${issue.path.map(String).join('.') || 'the list'}: ${issue.message}`;
+    const row = rows[index];
+    const fields = typeof row === 'object' && row !== null ? (row as Record<string, unknown>) : {};
+    const name = typeof fields.label === 'string' && fields.label !== '' ? `"${fields.label}"` : typeof fields.id === 'string' && fields.id !== '' ? `id ${fields.id}` : 'with no name';
+    if (typeof field !== 'string') return `row ${index + 1} (${name}): ${issue.message}`;
+    const held = field in fields ? `holds ${JSON.stringify(fields[field])}` : 'has none';
+    return `row ${index + 1} (${name}) ${held} for ${field}: ${issue.message}`;
+  });
+  const more = issues.length > SHOWN_ISSUES ? `; and ${issues.length - SHOWN_ISSUES} more` : '';
+  return `the list of sessions has rows the contract does not allow, so none of it is drawn rather than drawing the rest from rows it had to guess at: ${said.join('; ')}${more}`;
 }
 
 /**
- * GET …/tree: the whole forest. A row the page cannot name (a kind or a state
- * outside the closed sets, or no id or label) is counted and left out, so one
- * bad row cannot blank the tree. Nothing is relabelled as another kind or state.
+ * GET …/tree: the whole forest. It is checked against the generated contract
+ * like every other body, so a row outside it (an id or a label missing, a kind
+ * or a state the contract does not list) refuses the whole forest with the
+ * actionable contract error: which rows, why, that nothing was changed and what
+ * to do. The forest is not drawn from rows the page had to guess at, and no row
+ * is relabelled as another kind or state.
  */
 export function parseKickstartTree(raw: unknown): KickstartTree {
-  const where = 'GET /api/v1/kickstart/sessions/{id}/tree';
-  const body = record(raw);
-  if (body === null || !Array.isArray(body.nodes)) {
-    throw new KickstartContractError(where, 'nodes: expected a list of rows');
-  }
-  const extra = Object.keys(body).filter((key) => key !== 'nodes');
-  if (extra.length > 0) {
-    throw new KickstartContractError(where, `unexpected field ${extra.join(', ')}; the tree has no page, cursor or total`);
-  }
-  const nodes: KickstartTreeNode[] = [];
-  let unreadable = 0;
-  let unknownKind = 0;
-  let unknownState = 0;
-  for (const entry of body.nodes as unknown[]) {
-    const row = record(entry);
-    if (row === null || typeof row.id !== 'string' || row.id === '' || typeof row.label !== 'string' || row.label === '') {
-      unreadable += 1;
-      continue;
-    }
-    let kind: KickstartNodeKind;
-    let state: KickstartNodeState;
-    try {
-      kind = parseKickstartNodeKind(row.kind, where);
-    } catch {
-      unknownKind += 1;
-      continue;
-    }
-    try {
-      state = parseKickstartNodeState(row.state, where);
-    } catch {
-      unknownState += 1;
-      continue;
-    }
-    nodes.push({
-      id: row.id,
-      parentId: typeof row.parentId === 'string' && row.parentId !== '' ? row.parentId : null,
-      kind,
-      state,
-      label: row.label,
-      sessionId: typeof row.sessionId === 'string' && row.sessionId !== '' ? row.sessionId : null,
-      harness: typeof row.harness === 'string' && row.harness !== '' ? row.harness : null,
-      childCount: typeof row.childCount === 'number' && Number.isInteger(row.childCount) && row.childCount >= 0 ? row.childCount : null,
-      locked: row.locked === true,
-    });
-  }
-  return { nodes, dropped: { unreadable, unknownKind, unknownState } };
+  return decode(zLocalKickstartTree, raw, 'GET /api/v1/kickstart/sessions/{id}/tree', (issues) => describeForestIssues(raw, issues));
 }
 
 // ── events ───────────────────────────────────────────────────────────────

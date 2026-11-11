@@ -85,6 +85,9 @@ type kickstartSpec struct {
 	Recordings []string `yaml:"recordings"`
 	// HoldIngest holds each import until a releaseIngest step.
 	HoldIngest bool `yaml:"holdIngest"`
+	// NextSteps replaces the finish menu a save answers with, to reach a menu the
+	// contract refuses.
+	NextSteps []string `yaml:"nextSteps"`
 }
 
 // kickstartStep is one thing a case does or checks. Exactly one of the fields
@@ -157,25 +160,28 @@ type kickstartStep struct {
 type kickstartCommitStep struct {
 	// Session is the saved name of the session id.
 	Session string `yaml:"session"`
-	// Action is begin, which freezes the session for a save, or abort, which
-	// frees it again.
+	// Action is begin or abort: the two ends of a save under way, which the
+	// commit route runs inside one request.
 	Action string `yaml:"action"`
 	// Error is a substring the action's refusal must contain.
 	Error string `yaml:"error"`
 }
 
+// kickstartRevisionFrom names a revision relative to one a step saved: the saved
+// value plus Plus.
+type kickstartRevisionFrom struct {
+	Saved string `yaml:"saved"`
+	Plus  uint64 `yaml:"plus"`
+}
+
 type kickstartEventSpec struct {
-	Kind     string         `yaml:"kind"`
-	Session  string         `yaml:"session"`
-	Revision *uint64        `yaml:"revision"`
-	JSON     map[string]any `yaml:"json"`
-	Absent   []string       `yaml:"absent"`
-	Len      map[string]int `yaml:"len"`
-	// After names a saved revision. The event's revision must be the next one:
-	// the events of one session count on without a gap or a repeat.
-	After string `yaml:"after"`
-	// Save maps a name to the dotted path in the event it keeps.
-	Save map[string]string `yaml:"save"`
+	Kind         string                 `yaml:"kind"`
+	Session      string                 `yaml:"session"`
+	Revision     *uint64                `yaml:"revision"`
+	RevisionFrom *kickstartRevisionFrom `yaml:"revisionFrom"`
+	JSON         map[string]any         `yaml:"json"`
+	Absent       []string               `yaml:"absent"`
+	Len          map[string]int         `yaml:"len"`
 }
 
 type kickstartWSStep struct {
@@ -384,6 +390,7 @@ func (w *kickstartWorld) tune(env *kickstartEnv) {
 	}
 	env.scan = w.scan
 	env.writeRetention = w.saving.writeRetention(w.configPath)
+	w.saving.tuneEnv(env)
 	env.stored = func(context.Context) ([]store.IngestedSessionRow, error) {
 		if message := *w.storedError.Load(); message != "" {
 			return nil, errors.New(message)
@@ -628,8 +635,7 @@ func (w *kickstartWorld) call(index int, step kickstartStep) {
 	}
 	for path, substring := range step.Contains {
 		got, found := jsonPath(decoded, path)
-		text, _ := got.(string)
-		if !found || !strings.Contains(text, substring) {
+		if !found || !containsText(got, substring) {
 			w.fail(index, "%s should contain %q; got %v", path, substring, got)
 		}
 	}
@@ -690,11 +696,48 @@ func normalizeJSON(value any) any {
 	return out
 }
 
+// containsText reports whether a string holds part, or whether any string of an
+// array does.
+func containsText(value any, part string) bool {
+	switch typed := value.(type) {
+	case string:
+		return strings.Contains(typed, part)
+	case []any:
+		for _, element := range typed {
+			if text, ok := element.(string); ok && strings.Contains(text, part) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// splitPath splits a dotted path at every dot outside brackets, so a selector
+// value may hold a dotted key such as key[key=selection.mode].
+func splitPath(path string) []string {
+	var segments []string
+	depth, start := 0, 0
+	for i, r := range path {
+		switch r {
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case '.':
+			if depth == 0 {
+				segments = append(segments, path[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(segments, path[start:])
+}
+
 // jsonPath reads a dotted path. A segment is a key, an array index, or
 // key[field=value], which selects the array element whose field equals value.
 func jsonPath(root any, path string) (any, bool) {
 	current := root
-	for _, segment := range strings.Split(path, ".") {
+	for _, segment := range splitPath(path) {
 		name, selector, hasSelector := strings.Cut(segment, "[")
 		if name != "" {
 			switch typed := current.(type) {
@@ -753,14 +796,13 @@ func (w *kickstartWorld) eventMatches(event schema.LocalKickstartEvent, spec kic
 	if spec.Revision != nil && event.Revision != *spec.Revision {
 		return false, fmt.Sprintf("revision %d, want %d", event.Revision, *spec.Revision)
 	}
-	if spec.After != "" {
-		saved, ok := w.vars[spec.After]
-		previous, isNumber := saved.(float64)
-		if !ok || !isNumber {
-			return false, fmt.Sprintf("no revision was saved as %q", spec.After)
+	if from := spec.RevisionFrom; from != nil {
+		saved, ok := w.vars[from.Saved].(float64)
+		if !ok {
+			return false, fmt.Sprintf("revisionFrom names %q, which no step saved as a number", from.Saved)
 		}
-		if want := uint64(previous) + 1; event.Revision != want {
-			return false, fmt.Sprintf("revision %d, want %d, the one after the saved %s", event.Revision, want, spec.After)
+		if want := uint64(saved) + from.Plus; event.Revision != want {
+			return false, fmt.Sprintf("revision %d, want %d (%s %d plus %d)", event.Revision, want, from.Saved, uint64(saved), from.Plus)
 		}
 	}
 	for path, want := range spec.JSON {
@@ -784,27 +826,6 @@ func (w *kickstartWorld) eventMatches(event schema.LocalKickstartEvent, spec kic
 	return true, ""
 }
 
-// keep saves the values a matched event's spec asks to keep.
-func (w *kickstartWorld) keep(index int, event schema.LocalKickstartEvent, spec kickstartEventSpec) {
-	w.t.Helper()
-	if len(spec.Save) == 0 {
-		return
-	}
-	data, err := json.Marshal(event)
-	if err != nil {
-		w.fail(index, "encode the event to keep from it: %v", err)
-	}
-	var decoded any
-	_ = json.Unmarshal(data, &decoded)
-	for name, path := range spec.Save {
-		got, found := jsonPath(decoded, path)
-		if !found {
-			w.fail(index, "cannot save %s: %s is absent from the %s event", name, path, event.Kind)
-		}
-		w.vars[name] = got
-	}
-}
-
 // await waits for a published event to match, then moves the cursor past it.
 func (w *kickstartWorld) await(index int, spec kickstartEventSpec) {
 	w.t.Helper()
@@ -815,13 +836,14 @@ func (w *kickstartWorld) await(index int, spec kickstartEventSpec) {
 		for offset, event := range events {
 			if ok, _ := w.eventMatches(event, spec); ok {
 				w.cursor = position + offset + 1
-				w.keep(index, event, spec)
 				return
 			}
 		}
 		position += len(events)
 		select {
 		case <-wake:
+		case <-w.saving.broken:
+			w.breached(index)
 		case <-ctx.Done():
 			w.fail(index, "no published event matched %+v before the deadline; saw %d events since the cursor", spec, position-w.cursor)
 		}
@@ -842,13 +864,14 @@ func (w *kickstartWorld) events(index int, specs []kickstartEventSpec) {
 				if ok, why := w.eventMatches(events[i], spec); !ok {
 					w.fail(index, "event %d (%s): %s", i+1, events[i].Kind, why)
 				}
-				w.keep(index, events[i], spec)
 			}
 			w.cursor += len(specs)
 			return
 		}
 		select {
 		case <-wake:
+		case <-w.saving.broken:
+			w.breached(index)
 		case <-ctx.Done():
 			w.fail(index, "only %d of %d events were published: %s", len(events), len(specs), describeEvents(events))
 		}
@@ -982,7 +1005,7 @@ func (w *kickstartWorld) commit(index int, step kickstartCommitStep) {
 	case "abort":
 		sessions.abortCommit(id)
 	default:
-		w.fail(index, "commit action %q is not begin or abort", step.Action)
+		w.fail(index, "commit action %q is not begin or abort; the commit route itself ends a session", step.Action)
 	}
 	switch {
 	case step.Error == "" && err != nil:

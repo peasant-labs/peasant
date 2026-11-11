@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -138,7 +138,14 @@ export function seedRecordings({ home, root, repoRoot, fixture }) {
       const lines = sessionLines(template, { sessionId, cwd, branch: session.branch, prompts: session.prompts, startedAt: session.startedAt });
       const path = join(directory, `${sessionId}.jsonl`);
       writeFileSync(path, `${lines.join('\n')}\n`, { mode: 0o600 });
-      written.push({ repository: repo.name, remote: repo.remote, branch: session.branch, name: session.name, sessionId, cwd, path, prompt: session.prompts[0] });
+      // A recording that was last written a moment ago is still being written:
+      // the import counts it as active and leaves it out of the new and updated
+      // counts the finish panel reports. A recording that is over is as old as
+      // its session, so the file says when the session started, not when this
+      // computer was seeded.
+      const recordedAt = new Date(Date.parse(session.startedAt));
+      utimesSync(path, recordedAt, recordedAt);
+      written.push({ repository: repo.name, remote: repo.remote, branch: session.branch, name: session.name, sessionId, cwd, path, prompt: session.prompts[0], startedAt: session.startedAt });
     }
   }
   return written;

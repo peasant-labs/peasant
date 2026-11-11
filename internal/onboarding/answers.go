@@ -114,16 +114,18 @@ func (m Model) ApplyAnswers(cfg *config.Config, answers Answers, w WriteContext)
 	return nil
 }
 
-// DiffValues runs ApplyAnswers on a copy and returns Field.Read of each
-// answered field. The caller's configuration is not mutated.
-func (m Model) DiffValues(cfg *config.Config, answers Answers, w WriteContext) (map[FieldKey]schema.LocalSettingValue, error) {
+// AppliedCopy runs ApplyAnswers on a copy of cfg and returns the copy: the
+// configuration the answers would produce. The caller's configuration is not
+// mutated. Reading the copy shows every field the answers moved, the answered
+// ones and the ones an answer moves as a side effect.
+func (m Model) AppliedCopy(cfg *config.Config, answers Answers, w WriteContext) (*config.Config, error) {
 	if cfg == nil {
 		return nil, actionable(
-			"diff setup answers",
+			"apply setup answers to a copy",
 			"the configuration pointer is nil",
-			"onboarding.Model.DiffValues",
+			"onboarding.Model.AppliedCopy",
 			"before the copy was written",
-			"no diff was returned",
+			"no copy was returned",
 			"pass the configuration the answers would change")
 	}
 	copied, err := cloneConfig(cfg)
@@ -134,18 +136,7 @@ func (m Model) DiffValues(cfg *config.Config, answers Answers, w WriteContext) (
 	if err := m.ApplyAnswers(&copied, answers, w); err != nil {
 		return nil, err
 	}
-	out := map[FieldKey]schema.LocalSettingValue{}
-	for _, field := range m.Fields() {
-		if _, ok := answers[field.Key()]; !ok {
-			continue
-		}
-		value, err := field.Read(&copied)
-		if err != nil {
-			return nil, err
-		}
-		out[field.Key()] = value
-	}
-	return out, nil
+	return &copied, nil
 }
 
 // DropHidden removes answers whose fields are hidden after the remaining

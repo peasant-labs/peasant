@@ -155,6 +155,9 @@ type kickstartEnv struct {
 	writeRetention func(days int) error
 	// lockWait bounds how long a save waits for the configuration lock.
 	lockWait time.Duration
+	// nextSteps is the finish menu a save answers with. The setup model owns it;
+	// a test replaces it to reach a menu the contract refuses.
+	nextSteps func() []onboarding.NextStep
 }
 
 func (e kickstartEnv) withDefaults() kickstartEnv {
@@ -204,6 +207,9 @@ func (e kickstartEnv) withDefaults() kickstartEnv {
 	}
 	if e.lockWait <= 0 {
 		e.lockWait = defaultKickstartLockWait
+	}
+	if e.nextSteps == nil {
+		e.nextSteps = onboarding.NextStepsWeb
 	}
 	if e.reader == nil {
 		e.reader = func(listings []onboarding.SessionListing) kickstartPreviewReader {
@@ -730,6 +736,14 @@ func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.
 		sess.connect = *plan.connect
 	}
 	for key, choice := range plan.resolutions {
+		if st.coupledRowLocked(sess, key) {
+			// The draft never answered this field: another answer moves it. Both
+			// sides are recorded with the file value the user saw, and the save
+			// keeps the file's value for "theirs" instead of giving an answer up.
+			sess.resolutions[key] = onboarding.Resolution{Choice: choice, Seen: st.servedConflictSide(sess, key)}
+			sess.conflicts = withoutConflict(sess.conflicts, key)
+			continue
+		}
 		switch choice {
 		case schema.LocalKickstartResolutionTheirs:
 			// Taking the file's side gives the draft's answer up.
@@ -942,6 +956,14 @@ func (st *kickstartSessions) changedKeysLocked(sess *kickstartSession, plan kick
 		_, answered := sess.answers[key]
 		open := hasConflict(sess.conflicts, key)
 		recorded := sess.resolutions[key].Choice == resolution
+		if st.coupledRowLocked(sess, key) {
+			// A field an answer moves as a side effect has no answer to give up
+			// or keep: the choice itself is what changes.
+			if !recorded {
+				changed[key.String()] = struct{}{}
+			}
+			continue
+		}
 		switch resolution {
 		case schema.LocalKickstartResolutionTheirs:
 			// Taking the file's side drops the draft's answer, if there is one.
@@ -1003,6 +1025,16 @@ func connectToken(answer onboarding.ConnectAnswer) string {
 	default:
 		return ""
 	}
+}
+
+// coupledRowLocked reports whether key is a field the draft did not answer that
+// a row is shown for: another answer moves it as a side effect, and the file
+// moved it since the session opened.
+func (st *kickstartSessions) coupledRowLocked(sess *kickstartSession, key onboarding.FieldKey) bool {
+	if _, answered := sess.answers[key]; answered {
+		return false
+	}
+	return st.servedConflictSide(sess, key) != nil
 }
 
 // seenConflictSide is the file value a served conflict row showed for key.

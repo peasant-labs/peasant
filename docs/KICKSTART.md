@@ -118,15 +118,17 @@ same `config.yaml` for the same answers. The page decides none of that: what a s
 shows, and whether an answer is valid are the server's.
 
 - **First run.** Until setup has been saved, every top-level page of the app sends you to
-  `/kickstart`. Once it is saved the app never redirects again. A link to a recorded session, the
-  publish wizard, or `/selection` is never redirected. If the app cannot tell whether setup was saved,
-  it redirects nothing.
+  `/kickstart`, and so does `/selection`, which changes the file that setup creates. Once setup is
+  saved the app never redirects again. A link to a recorded session or the publish wizard is never
+  redirected. `/selection` waits for the answer before it starts anything, so it opens no session on
+  the way to setup. If the app cannot tell whether setup was saved, it redirects nothing.
 - **Run it again.** Settings has a "run setup again" link at the top. It opens `/kickstart` with your
   saved choices filled in, the way `peasant kickstart` restores them.
 - **Only the selection.** `/selection` is the same page with three steps: choose sessions, review,
   and import. Settings links to it from the projects section. It saves only the `selection` keys and
-  leaves every other setting as it was. It has its own session, so opening it never disturbs a setup
-  that is already open.
+  leaves every other setting as it was. It edits a configuration that setup wrote: before setup has
+  been saved it refuses to save, writes nothing, and says to run setup first at `/kickstart`. It has
+  its own session, so opening it never disturbs a setup that is already open.
 - **Many tabs.** Every tab of a page shares one live session. An answer in one tab appears in the
   others without a reload. If you change a field that another tab changed after you last looked, your
   answer is applied and the page says which field it replaced.
@@ -134,8 +136,13 @@ shows, and whether an answer is valid are the server's.
   is shown as it runs. The import runs once, after you save, and keeps running if you close the page.
 - **Saving.** Nothing is written until the review step. The review lists any answered field whose
   saved value changed while you were setting up, with a choice of keeping yours or taking the saved
-  value for each. A field you did not answer is never listed and is never overwritten. Under the
-  summary, a collapsed view shows the exact lines that change in `config.yaml`.
+  value for each. A field you did not answer is never overwritten, with one exception: an answer can
+  set another field as a side effect (choosing to publish automatically sets the share preference),
+  and if that field's saved value changed while you were setting up, the review lists it too. The
+  summary describes what the save will write, starting from the file as it is now, so taking the
+  saved value shows the saved value. When the retention step showed a Claude Code period, the save
+  applies that period after the configuration is saved, whether you changed it or not, as the terminal
+  does. Under the summary, a collapsed view shows the exact lines that change in `config.yaml`.
 - **After saving.** The page shows the import's progress, the notes from reading your sessions, and
   links to what you may want next, including the automatic publishing section of settings. Setup
   never publishes a transcript and never installs a Git hook. Both stay explicit actions that you

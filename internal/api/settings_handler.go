@@ -15,9 +15,11 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/filelock"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -109,6 +111,30 @@ type settingsHandler struct {
 	// so two updates cannot both start from the same file and lose one of the
 	// changes, and a read never applies a file an update is replacing.
 	mu sync.Mutex
+	// lockWait bounds how long an update waits for the configuration file's
+	// lock, which the setup commit and `peasant config` also take. Zero waits
+	// defaultSettingsLockWait.
+	lockWait time.Duration
+	// afterRead, when set, runs between an update's read of the file and its
+	// swap. A test replaces the file there, as a writer that ignores the lock
+	// would. It is nil in production.
+	afterRead func()
+}
+
+// defaultSettingsLockWait is how long an update waits for another writer of
+// config.yaml before it is refused. A request should not hang for minutes.
+const defaultSettingsLockWait = 5 * time.Second
+
+// settingsConfigBusyStatus answers an update that could not take the
+// configuration lock. The contract declares 500 for an update that cannot write
+// the file, and a busy lock is that.
+const settingsConfigBusyStatus = http.StatusInternalServerError
+
+func (h *settingsHandler) lockWaitOrDefault() time.Duration {
+	if h.lockWait > 0 {
+		return h.lockWait
+	}
+	return defaultSettingsLockWait
 }
 
 // handleGetSettings answers GET /api/v1/settings: every key of config.Config
@@ -214,40 +240,112 @@ func (h *settingsHandler) handleUpdateSetting(w http.ResponseWriter, r *http.Req
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	data, document, _, err := h.readConfig(r.Context())
-	if err == nil && data != nil {
-		err = requireOneYAMLDocument(data)
+	// The file lock is the one every writer of config.yaml takes: this route,
+	// the setup commit and `peasant config`. Holding it from the read to the swap
+	// means an update starts from the file as the last writer left it and cannot
+	// put back a setting that writer just saved.
+	file, err := config.OpenConfigFile(h.path, time.Now().Add(h.lockWaitOrDefault()))
+	if err != nil {
+		slog.Warn("settings: take the configuration lock before an update", "path", h.path, "key", request.Key, "error", err)
+		reason := fmt.Sprintf("%s could not be saved: %v; no file was changed; fix the directory's ownership or permissions, then retry.", request.Key, err)
+		if filelock.IsDeadline(err) {
+			reason = fmt.Sprintf("%s could not be saved because another change holds the configuration file %s: %v. Nothing was changed. Wait for it to finish, then retry.", request.Key, h.path, err)
+		}
+		writeSettingRefusal(w, settingsConfigBusyStatus, request.Key, reason)
+		return
 	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			slog.Warn("settings: release the configuration lock after an update", "path", h.path, "key", request.Key, "error", closeErr)
+		}
+	}()
+	data, document, _, err := file.Read(r.Context())
 	if err != nil {
 		slog.Warn("settings: read the configuration file before an update", "path", h.path, "key", request.Key, "error", err)
 		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("The configuration file %s could not be read: %v. Nothing was changed. Fix or restore the file, then retry.", h.path, err))
 		return
 	}
-	if data == nil {
-		// No file yet: start from the defaults every command applies, so that
-		// writing one key does not drop the others, such as the email git
-		// supplies.
-		if data, err = yaml.Marshal(config.LoadDefaults(r.Context(), h.git)); err == nil {
-			err = yaml.Unmarshal(data, document)
+	for attempt := 0; ; attempt++ {
+		update, refusal := h.prepareUpdate(r.Context(), spec, request.Key, replacement, data, document)
+		if refusal != nil {
+			writeSettingRefusal(w, refusal.status, request.Key, refusal.reason)
+			return
 		}
-		if err != nil {
-			writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("The default configuration could not be prepared for %s: %v. Nothing was changed.", h.path, err))
+		if h.afterRead != nil {
+			h.afterRead()
+		}
+		swapErr := file.Swap(data, update.bytes)
+		if swapErr == nil {
+			h.live.apply(h.catalog, update.saved)
+			w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+			// The row passed the contract check before the save.
+			_ = json.NewEncoder(w).Encode(update.row)
+			return
+		}
+		var changed *config.ConfigChangedError
+		if !errors.As(swapErr, &changed) {
+			slog.Warn("settings: write the configuration file", "path", h.path, "key", request.Key, "error", swapErr)
+			// The save error says what happened to the file, so the reason repeats
+			// it rather than claim nothing changed.
+			writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("%s could not be saved: %v.", request.Key, swapErr))
+			return
+		}
+		if attempt > 0 {
+			writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("%s could not be saved because %s changed again while the update was recomputed against it. Nothing was changed. Stop the program that keeps rewriting it, then retry.", request.Key, h.path))
+			return
+		}
+		// A writer that does not take the lock replaced the file after it was
+		// read. Compute the update once more against what is there now.
+		data = changed.Fresh
+		if document, _, err = config.ParseDocument(data); err != nil {
+			slog.Warn("settings: read the configuration file after it changed", "path", h.path, "key", request.Key, "error", err)
+			writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("The configuration file %s could not be read: %v. Nothing was changed. Fix or restore the file, then retry.", h.path, err))
 			return
 		}
 	}
+}
+
+// settingUpdate is an update computed against one reading of the file: the
+// bytes to write, the configuration they parse to, and the row the answer
+// carries.
+type settingUpdate struct {
+	bytes []byte
+	saved *config.Config
+	row   schema.LocalSetting
+}
+
+// settingRefusal is why an update was not computed and what status says so.
+type settingRefusal struct {
+	status int
+	reason string
+}
+
+// prepareUpdate applies replacement at the setting's key in the document read
+// from data, and checks the result the way a save will. A nil data is a file
+// that does not exist yet: the update starts from the defaults every command
+// applies, so that writing one key does not drop the others, such as the email
+// git supplies.
+func (h *settingsHandler) prepareUpdate(ctx context.Context, spec settingSpec, key string, replacement *yaml.Node, data []byte, document *yaml.Node) (settingUpdate, *settingRefusal) {
+	if data == nil {
+		base, err := yaml.Marshal(config.LoadDefaults(ctx, h.git))
+		if err == nil {
+			document = &yaml.Node{}
+			err = yaml.Unmarshal(base, document)
+		}
+		if err != nil {
+			return settingUpdate{}, &settingRefusal{http.StatusInternalServerError, fmt.Sprintf("The default configuration could not be prepared for %s: %v. Nothing was changed.", h.path, err)}
+		}
+	}
 	if err := setSettingNode(document, strings.Split(spec.key, "."), replacement); err != nil {
-		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("%s could not be changed in %s: %v. Nothing was changed. Edit the file by hand.", request.Key, h.path, err))
-		return
+		return settingUpdate{}, &settingRefusal{http.StatusInternalServerError, fmt.Sprintf("%s could not be changed in %s: %v. Nothing was changed. Edit the file by hand.", key, h.path, err)}
 	}
 	updated, err := yaml.Marshal(document)
 	if err != nil {
-		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("The configuration could not be written for %s: %v. Nothing was changed.", request.Key, err))
-		return
+		return settingUpdate{}, &settingRefusal{http.StatusInternalServerError, fmt.Sprintf("The configuration could not be written for %s: %v. Nothing was changed.", key, err)}
 	}
 	saved, err := config.Parse(updated)
 	if err != nil {
-		writeSettingRefusal(w, http.StatusBadRequest, request.Key, fmt.Sprintf("This value would make the configuration invalid: %v. Nothing was changed.", err))
-		return
+		return settingUpdate{}, &settingRefusal{http.StatusBadRequest, fmt.Sprintf("This value would make the configuration invalid: %v. Nothing was changed.", err)}
 	}
 	row, err := spec.row(document, saved)
 	if err == nil {
@@ -255,40 +353,9 @@ func (h *settingsHandler) handleUpdateSetting(w http.ResponseWriter, r *http.Req
 	}
 	if err != nil {
 		slog.Error("settings: render an updated setting", "key", spec.key, "error", err)
-		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("%s could not be read back after the change: %v. Nothing was changed. Report this defect.", request.Key, err))
-		return
+		return settingUpdate{}, &settingRefusal{http.StatusInternalServerError, fmt.Sprintf("%s could not be read back after the change: %v. Nothing was changed. Report this defect.", key, err)}
 	}
-	if err := config.SaveAtomicYAML(h.path, updated); err != nil {
-		slog.Warn("settings: write the configuration file", "path", h.path, "key", request.Key, "error", err)
-		// The save error says what happened to the file, so the reason repeats
-		// it rather than claim nothing changed.
-		writeSettingRefusal(w, http.StatusInternalServerError, request.Key, fmt.Sprintf("%s could not be saved: %v.", request.Key, err))
-		return
-	}
-	h.live.apply(h.catalog, saved)
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	// The row passed the contract check before the save.
-	_ = json.NewEncoder(w).Encode(row)
-}
-
-// requireOneYAMLDocument refuses a configuration file that holds more than one
-// YAML document. Peasant reads only the first, and writing the edited first
-// document back would drop the others.
-func requireOneYAMLDocument(data []byte) error {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	for count := 0; ; count++ {
-		var document yaml.Node
-		err := decoder.Decode(&document)
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if count == 1 {
-			return errors.New("it holds more than one YAML document; peasant reads only the first, and a change here would drop the others; merge them into one by hand")
-		}
-	}
+	return settingUpdate{bytes: updated, saved: saved, row: row}, nil
 }
 
 // readConfig reads the configuration file: its bytes, its YAML document, and
