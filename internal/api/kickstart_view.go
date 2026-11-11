@@ -18,11 +18,24 @@ func (st *kickstartSessions) viewLocked(sess *kickstartSession) (schema.LocalKic
 	answers := sess.configAnswers()
 	w := sess.writeContext(working, answers, facts)
 
+	// The review previews the save with the commit's own chain. It reads the file
+	// now, so a save by the other scope shows up here as a row before this
+	// session's own save.
+	review, reviewed := st.reviewLocked(sess, facts)
+	conflicts := append([]schema.LocalKickstartConflict{}, sess.conflicts...)
+	if reviewed {
+		conflicts = reviewRows(sess.conflicts, review)
+	}
+
 	stops := make([]schema.LocalKickstartStop, 0, len(sess.model.Stops))
 	for _, stop := range sess.model.Stops {
 		row, err := sess.stopView(stop, w)
 		if err != nil {
 			return schema.LocalKickstartSession{}, err
+		}
+		if stop.Key == onboarding.FlowReview && reviewed {
+			diff := review.Diff
+			row.Diff = &diff
 		}
 		stops = append(stops, row)
 	}
@@ -45,7 +58,7 @@ func (st *kickstartSessions) viewLocked(sess *kickstartSession) (schema.LocalKic
 		Revision:  sess.revision,
 		OpenedAt:  sess.openedAt.UTC().Format(time.RFC3339),
 		Stops:     stops,
-		Conflicts: append([]schema.LocalKickstartConflict{}, sess.conflicts...),
+		Conflicts: conflicts,
 		Connect:   connect,
 		Scan:      scan,
 		Village:   schema.LocalKickstartVillage{Connected: facts.villageConnected, URL: facts.villageURL, UserID: facts.villageUserID},

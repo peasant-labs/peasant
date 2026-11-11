@@ -73,6 +73,10 @@ const kickstartConnectKey = "connect"
 // before it is dropped.
 const defaultKickstartIdle = 30 * time.Minute
 
+// defaultKickstartLockWait is how long a save waits for the configuration lock
+// before it gives up and says another change holds it.
+const defaultKickstartLockWait = 10 * time.Second
+
 // defaultKickstartScanPush is the shortest interval between two pushed scan
 // progress ticks. A phase change and the end of a scan are always pushed.
 const defaultKickstartScanPush = 200 * time.Millisecond
@@ -148,6 +152,11 @@ type kickstartEnv struct {
 	repositories ingest.RepositoryIdentityResolver
 	// reader reads a session's first transcript page for a preview.
 	reader func(listings []onboarding.SessionListing) kickstartPreviewReader
+	// writeRetention writes Claude Code's cleanupPeriodDays after a save. Nil
+	// writes the real Claude settings file.
+	writeRetention func(days int) error
+	// lockWait bounds how long a save waits for the configuration lock.
+	lockWait time.Duration
 }
 
 func (e kickstartEnv) withDefaults() kickstartEnv {
@@ -191,6 +200,12 @@ func (e kickstartEnv) withDefaults() kickstartEnv {
 		e.scan = func(ctx context.Context, cfg *config.Config, known discovery.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
 			return discovery.Scan(ctx, cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, known, nil, progress)
 		}
+	}
+	if e.writeRetention == nil {
+		e.writeRetention = claudesettings.WriteCleanupDays
+	}
+	if e.lockWait <= 0 {
+		e.lockWait = defaultKickstartLockWait
 	}
 	if e.reader == nil {
 		e.reader = func(listings []onboarding.SessionListing) kickstartPreviewReader {
@@ -751,7 +766,7 @@ func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.
 		default:
 			// Keeping the draft's side records which file value the user saw, so
 			// the choice never settles a value its owner did not see.
-			sess.resolutions[key] = onboarding.Resolution{Choice: choice, Seen: seenConflictSide(sess.conflicts, key)}
+			sess.resolutions[key] = onboarding.Resolution{Choice: choice, Seen: st.servedConflictSide(sess, key)}
 		}
 		sess.conflicts = withoutConflict(sess.conflicts, key)
 	}

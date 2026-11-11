@@ -17,4 +17,5 @@ func registerKickstartRoutes(mux *http.ServeMux, h *kickstartHandler) {
 	mux.HandleFunc("GET "+defaults.RouteKickstartTree.String(), h.handleTree)
 	mux.HandleFunc("GET "+defaults.RouteKickstartPreview.String(), h.handlePreview)
 	mux.HandleFunc("POST "+defaults.RouteKickstartScan.String(), h.handleScan)
+	mux.HandleFunc("POST "+defaults.RouteKickstartCommit.String(), h.handleCommit)
 }

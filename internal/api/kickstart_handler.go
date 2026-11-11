@@ -22,6 +22,9 @@ const maxKickstartBody = 8 << 20
 type kickstartHandler struct {
 	sessions   *kickstartSessions
 	configPath string
+	// commit saves a session and starts the import. Listen wires it to the
+	// server's live configuration and its ingest.
+	commit *kickstartCommitter
 }
 
 func (h *kickstartHandler) available(w http.ResponseWriter) bool {

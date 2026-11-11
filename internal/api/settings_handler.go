@@ -66,6 +66,13 @@ func (l *liveConfig) load() *config.Config {
 // apply makes the saved file the snapshot, keeping the current value of every
 // read-only key in catalog.
 func (l *liveConfig) apply(catalog []settingSpec, saved *config.Config) {
+	l.applyOwning(catalog, saved, nil)
+}
+
+// applyOwning is apply for a writer that owns some read-only keys: owned reports
+// the keys the saved file may change in the snapshot although the settings
+// routes may not. A nil owned owns none.
+func (l *liveConfig) applyOwning(catalog []settingSpec, saved *config.Config, owned func(key string) bool) {
 	if l == nil {
 		return
 	}
@@ -75,7 +82,7 @@ func (l *liveConfig) apply(catalog []settingSpec, saved *config.Config) {
 	}
 	next := *saved
 	for _, spec := range catalog {
-		if spec.readOnly != "" {
+		if spec.readOnly != "" && (owned == nil || !owned(spec.key)) {
 			reflect.ValueOf(&next).Elem().FieldByIndex(spec.index).Set(reflect.ValueOf(current).Elem().FieldByIndex(spec.index))
 		}
 	}

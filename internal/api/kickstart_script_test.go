@@ -80,6 +80,11 @@ type kickstartSpec struct {
 	ScanPush string `yaml:"scanPush"`
 	// StoredError makes reading the local store fail with this text.
 	StoredError string `yaml:"storedError"`
+	// Recordings are Claude session ids whose recordings the import reads. They
+	// are written under {recordings}, which a configuration may name.
+	Recordings []string `yaml:"recordings"`
+	// HoldIngest holds each import until a releaseIngest step.
+	HoldIngest bool `yaml:"holdIngest"`
 }
 
 // kickstartStep is one thing a case does or checks. Exactly one of Call,
@@ -131,6 +136,23 @@ type kickstartStep struct {
 	Conflicts *kickstartConflictsStep `yaml:"conflicts"`
 	// ConfigFile checks the configuration file on disk: "unchanged" or "absent".
 	ConfigFile string `yaml:"configFile"`
+
+	// The steps below belong to the commit fixtures (kickstart_commit_test.go).
+	// ReleaseIngest lets one held import run.
+	ReleaseIngest bool `yaml:"releaseIngest"`
+	// Ingest checks the imports the server ran.
+	Ingest *kickstartIngestCheck `yaml:"ingest"`
+	// Retention checks the Claude retention writes.
+	Retention *kickstartRetentionCheck `yaml:"retention"`
+	// SettingsSection requires the settings page to have this section.
+	SettingsSection string `yaml:"settingsSection"`
+	// ConfigHas requires the configuration file to contain each substring.
+	ConfigHas []string `yaml:"configHas"`
+	// WriteConfig replaces the configuration file the way another program would.
+	WriteConfig *string `yaml:"writeConfig"`
+	// EditConfig changes one line of the configuration file the way another
+	// program would.
+	EditConfig *kickstartEditConfig `yaml:"editConfig"`
 }
 
 type kickstartCommitStep struct {
@@ -282,6 +304,7 @@ type kickstartWorld struct {
 	sequence    atomic.Int64
 	idle        []time.Duration
 	idleMu      sync.Mutex
+	saving      kickstartCommitWorld
 }
 
 // identityPaths resolves a working directory to itself. The fixture directories
@@ -320,6 +343,8 @@ func newKickstartWorld(t *testing.T, c kickstartCase, sets kickstartListingSets)
 
 	homes := newTestXDGHomes(t)
 	configPath := defaults.ResolveConfigFilePathWith(homes.Config).String()
+	w.saving.prepare(t, w.dir, homes, c.World)
+	c.World.Config = w.saving.fill(c.World.Config)
 	w.configPath, w.configBytes = configPath, c.World.Config
 	if c.World.Config != "" {
 		if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
@@ -330,8 +355,9 @@ func newKickstartWorld(t *testing.T, c kickstartCase, sets kickstartListingSets)
 		}
 	}
 	hub := NewHub(&mockDataProvider{})
-	server := NewServer(homes.config(ServerConfig{Hub: hub, ConfigPath: configPath, Config: config.BaseConfig()}))
+	server := NewServer(homes.config(ServerConfig{Hub: hub, ConfigPath: configPath, Config: w.saving.serverConfig()}))
 	server.kickstartTune = w.tune
+	server.syncTune = w.saving.tuneSync
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := server.Listen(ctx); err != nil {
 		cancel()
@@ -372,6 +398,7 @@ func (w *kickstartWorld) tune(env *kickstartEnv) {
 		return kickstartFacts{}
 	}
 	env.scan = w.scan
+	env.writeRetention = w.saving.writeRetention(w.configPath)
 	env.stored = func(context.Context) ([]store.IngestedSessionRow, error) {
 		if message := *w.storedError.Load(); message != "" {
 			return nil, errors.New(message)
@@ -498,6 +525,20 @@ func (w *kickstartWorld) run(index int, step kickstartStep) {
 		w.conflicts(index, *step.Conflicts)
 	case step.ConfigFile != "":
 		w.configFile(index, step.ConfigFile)
+	case step.ReleaseIngest:
+		w.releaseIngest()
+	case step.Ingest != nil:
+		w.ingestCheck(index, *step.Ingest)
+	case step.Retention != nil:
+		w.retentionCheck(index, *step.Retention)
+	case step.SettingsSection != "":
+		w.settingsSectionCheck(index, step.SettingsSection)
+	case step.ConfigHas != nil:
+		w.configHas(index, step.ConfigHas)
+	case step.WriteConfig != nil:
+		w.writeConfig(index, *step.WriteConfig)
+	case step.EditConfig != nil:
+		w.editConfig(index, *step.EditConfig)
 	default:
 		w.fail(index, "the step does nothing")
 	}
@@ -576,7 +617,9 @@ func (w *kickstartWorld) call(index int, step kickstartStep) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		w.fail(index, "%s %s: the body is not JSON: %v; body: %s", method, path, err, raw)
 	}
-	if step.NoReset && strings.Contains(strings.ToLower(string(raw)), "reset") {
+	// The configuration path is the case's directory, which carries the case's
+	// name; it is not part of what the payload says.
+	if step.NoReset && strings.Contains(strings.ToLower(strings.ReplaceAll(string(raw), w.configPath, "<config>")), "reset") {
 		w.fail(index, "%s %s: the payload carries a reset control: %s", method, path, raw)
 	}
 	w.check(index, decoded, step.JSON, step.Absent, step.Len)
