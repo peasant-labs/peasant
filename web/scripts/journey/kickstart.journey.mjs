@@ -32,7 +32,7 @@ const chosenIds = new Set(chosenSessions.map((entry) => entry.sessionId));
 const chosenTitles = chosenSessions.map((entry) => entry.prompt).sort();
 const ledger = fixture.recordings.repositories.find((repo) => repo.name === fixture.chosen.repository);
 const ledgerLabel = new URL(ledger.remote).pathname.replace(/^\//, '').replace(/\.git$/, '');
-const taxReport = seeded.find((entry) => entry.name === 'tax-report');
+const taxReport = seeded.find((entry) => entry.name === fixture.selectionPage.session);
 const marketing = seeded.find((entry) => entry.name === 'hero-copy');
 const stray = seeded.find((entry) => entry.name === fixture.branchChoice.recordedElsewhere);
 const marketingRepo = fixture.recordings.repositories.find((repo) => repo.name === fixture.branchChoice.repository);
@@ -55,6 +55,7 @@ const walked = [];
 let offerSeen = null;
 let ingestCounts = null;
 let importedAfterSetup = null;
+const laterImports = {};
 
 function watch(page, label) {
   page.on('console', (message) => {
@@ -127,6 +128,29 @@ async function storedTitles(request) {
 }
 
 const readConfig = () => parse(readFileSync(configPath, 'utf8'));
+
+/**
+ * What the finish panel says the import did, once it has ended: the sessions
+ * the store did not have (new) and the ones it had and re-read (updated).
+ */
+async function finishCounts(page) {
+  await expect(page.getByText('import finished')).toBeVisible();
+  const text = await page.locator('.ks-finish .ks-counts').first().textContent();
+  const counts = /(\d+) new,\s*(\d+) updated/.exec(text ?? '');
+  expect(counts, `the finish panel counts the import (reads ${JSON.stringify(text)})`).not.toBeNull();
+  return { new: Number(counts[1]), updated: Number(counts[2]) };
+}
+
+/**
+ * Open a page the first-run redirect must leave where it is, and show that it
+ * did. A redirect is ordered by one read of the status route, so the wake source
+ * is the page's own network going quiet after it loaded: a read that started
+ * with the page has answered by then, and a redirect it ordered has happened.
+ */
+async function opensInPlace(page, path) {
+  await page.goto(path, { waitUntil: 'networkidle', timeout: 20000 });
+  expect(new URL(page.url()).pathname, `${path} is not redirected`).toBe(path);
+}
 
 // ── the tree ────────────────────────────────────────────────────────────────
 const projectOf = (page, label) => page.locator('li.st-node[data-kind="project"]', { hasText: label });
@@ -215,7 +239,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   writeFileSync(join(artifacts, `${theme()}-evidence.json`), JSON.stringify({
-    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, importedAfterSetup,
+    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, laterImports, importedAfterSetup,
     frames: frames.map(({ tab, kind, revision, reason, scan, ingest }) => ({ tab, kind, revision, reason, scan, ingest })),
     requests: requests.filter((entry) => entry.path.startsWith('/api/')).map((entry) => `${entry.tab} ${entry.method} ${entry.path}`),
   }, null, 2));
@@ -235,16 +259,10 @@ test('fresh-install-redirects-to-setup', async () => {
   await pageA.goto('/settings/');
   await expect(pageA).toHaveURL(/\/kickstart\/?$/);
   // The pages that are never redirected stay where they are.
-  await pageA.goto('/share/');
-  await pageA.waitForTimeout(1500);
-  expect(new URL(pageA.url()).pathname, '/share is exempt from the redirect').toBe('/share/');
+  await opensInPlace(pageA, '/share/');
   // Deep links into recorded work are honoured: a project's page and a transcript.
   const hash = 'a'.repeat(64);
-  for (const deepLink of [`/sessions/${hash}/`, `/projects/${hash}/not-recorded/`]) {
-    await pageA.goto(deepLink);
-    await pageA.waitForTimeout(1500);
-    expect(new URL(pageA.url()).pathname, `${deepLink} is exempt from the redirect`).toBe(deepLink);
-  }
+  for (const deepLink of [`/sessions/${hash}/`, `/projects/${hash}/not-recorded/`]) await opensInPlace(pageA, deepLink);
   await pageA.goto('/');
   await expect(pageA).toHaveURL(/\/kickstart\/?$/);
 
@@ -456,11 +474,10 @@ test('save-finish-and-ingest-end', async () => {
   await expect(pageA.getByText('nothing was published and no hook was installed')).toBeVisible();
 
   // The import reports its end: idle with counts, never a stream of ticks.
-  await expect(pageA.getByText('import finished')).toBeVisible();
-  const text = await pageA.locator('.ks-finish .ks-counts').first().textContent();
-  const counts = /(\d+) new,\s*(\d+) updated/.exec(text ?? '');
-  expect(counts, `the finish panel counts the import (reads ${JSON.stringify(text)})`).not.toBeNull();
-  ingestCounts = { new: Number(counts[1]), updated: Number(counts[2]) };
+  ingestCounts = await finishCounts(pageA);
+  // Every chosen session is new to a fresh store, and nothing is updated. A panel
+  // that reports 0 new after the sessions were stored is a finding, not a count.
+  expect(ingestCounts, 'the import brought in exactly the chosen sessions').toEqual({ new: fixture.chosen.imported, updated: 0 });
   const ingests = frames.filter((frame) => frame.tab === 'A' && frame.kind === 'ingest');
   expect(ingests.filter((frame) => frame.ingest.state === 'idle'), 'one end event').toHaveLength(1);
   expect(ingests.at(-1).ingest.state).toBe('idle');
@@ -484,9 +501,12 @@ test('save-finish-and-ingest-end', async () => {
   await expect(pageA).toHaveURL(/\/settings\/?\?section=automatic-publishing/);
   await expect(pageA.getByRole('heading', { name: 'automatic publishing' }).first()).toBeVisible();
 
-  // Setup is saved, so no page redirects again.
-  await pageA.goto('/');
-  await pageA.waitForTimeout(1500);
+  // Setup is saved, so no page redirects again. The top-level page reads the
+  // status route when it loads; the redirect is decided by that answer, so the
+  // answer is awaited and the network is let go quiet before the address is read.
+  const statusRead = pageA.waitForResponse((response) => new URL(response.url()).pathname === `${API}/status`, { timeout: 20000 });
+  await pageA.goto('/', { waitUntil: 'networkidle', timeout: 20000 });
+  expect((await (await statusRead).json()).configured, 'the page was told that setup is saved').toBe(true);
   expect(new URL(pageA.url()).pathname, 'a saved setup is never redirected').toBe('/');
   expect((await (await pageA.request.get(`${API}/status`)).json()).configured).toBe(true);
 });
@@ -501,7 +521,9 @@ test('config-holds-only-the-chosen-selection', async () => {
   // The chosen branch lives in one checkout, so the selection names that clone
   // and no other: the other branch's checkout is not in it.
   expect(projects[0].clonePaths).toEqual([...new Set(chosenSessions.map((entry) => entry.cwd))]);
-  if (projects[0].branches) expect(projects[0].branches).toEqual([fixture.chosen.branch]);
+  // Only one of the project's branches was chosen, so the selection names that
+  // branch rather than the whole project.
+  expect(projects[0].branches, 'the selection names the chosen branch and no other').toEqual([fixture.chosen.branch]);
   const text = JSON.stringify(config.selection);
   for (const other of ['marketing-site', 'filler-', 'tax-report', 'stray']) expect(text, `the selection names nothing of ${other}`).not.toContain(other);
   for (const entry of seeded.filter((candidate) => !chosenIds.has(candidate.sessionId))) expect(text).not.toContain(entry.sessionId);
@@ -561,7 +583,9 @@ test('selection-page-saves-only-selection', async () => {
   await expect(pageD.locator('.ks-summary')).toContainText('your choices');
   await save(pageD).click();
   await expect(pageD.getByRole('heading', { name: 'your selection is saved' })).toBeVisible();
-  await expect(pageD.getByText('import finished')).toBeVisible();
+  // The sessions stored already are not counted again: the import brings in the one that was added.
+  laterImports.selectionPage = await finishCounts(pageD);
+  expect(laterImports.selectionPage.new, 'the import brought in the session that was added').toBe(fixture.selectionPage.imported);
 
   // Only the selection changed on disk.
   const after = readConfig();
@@ -598,7 +622,8 @@ test('selection-page-names-the-chosen-branch', async () => {
   await advance(page, 'review');
   await save(page).click();
   await expect(page.getByRole('heading', { name: 'your selection is saved' })).toBeVisible();
-  await expect(page.getByText('import finished')).toBeVisible();
+  laterImports.branchChoice = await finishCounts(page);
+  expect(laterImports.branchChoice.new, 'the import brought in the session of the chosen branch').toBe(fixture.branchChoice.imported);
 
   const projects = readConfig().selection.harnesses['claude-code'].projects;
   const entry = projects.find((candidate) => candidate.gitRemote === marketingRepo.remote);

@@ -9,6 +9,7 @@ requiredNames:
   - seed-refuses-more-prompts-than-the-template-has
   - seed-filler-is-deterministic
   - seed-checkouts-match-recorded-branches
+  - seed-recordings-are-dated-by-their-session
   - seed-refuses-a-root-whose-project-names-are-ambiguous
   - rail-labels-are-judged-against-the-frame
   - served-build-exact
@@ -27,6 +28,7 @@ cases:
   - {name: seed-refuses-more-prompts-than-the-template-has, mode: prompts}
   - {name: seed-filler-is-deterministic, mode: filler}
   - {name: seed-checkouts-match-recorded-branches, mode: checkouts}
+  - {name: seed-recordings-are-dated-by-their-session, mode: mtimes}
   - {name: seed-refuses-a-root-whose-project-names-are-ambiguous, mode: slug-root}
   - {name: rail-labels-are-judged-against-the-frame, mode: rail}
   - {name: served-build-exact, mode: exact}
