@@ -442,7 +442,7 @@ func (w *kickstartWorld) setListings(name string) {
 
 // scan is what the filesystem scan finds. It reports its phase and one count per
 // session, as the real scan does.
-func (w *kickstartWorld) scan(ctx context.Context, _ *config.Config, _ discovery.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
+func (w *kickstartWorld) scan(ctx context.Context, _ *config.Config, _ ingest.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
 	if w.gate != nil {
 		select {
 		case <-w.gate:

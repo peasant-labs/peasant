@@ -384,7 +384,7 @@ func ftueDiscoverWith(
 	cfg *config.Config,
 	fs ingest.FileSystem,
 	git ingest.GitResolver,
-	known discovery.KnownSessionIndex,
+	known ingest.KnownSessionIndex,
 	evidence ingest.ClaudeEvidenceCache,
 	spinner *discoverySpinner,
 ) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {

@@ -145,7 +145,7 @@ type kickstartEnv struct {
 	// stored reads the sessions the local store already holds.
 	stored func(ctx context.Context) ([]store.IngestedSessionRow, error)
 	// scan runs discovery. known may be nil.
-	scan func(ctx context.Context, cfg *config.Config, known discovery.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation)
+	scan func(ctx context.Context, cfg *config.Config, known ingest.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation)
 	// paths and repositories resolve a working directory to its clone and its
 	// repository for the forest.
 	paths        ingest.PathIdentityResolver
@@ -197,7 +197,7 @@ func (e kickstartEnv) withDefaults() kickstartEnv {
 		e.paths = ingest.NewPhysicalPathResolver()
 	}
 	if e.scan == nil {
-		e.scan = func(ctx context.Context, cfg *config.Config, known discovery.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
+		e.scan = func(ctx context.Context, cfg *config.Config, known ingest.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
 			return discovery.Scan(ctx, cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, known, nil, progress)
 		}
 	}
@@ -1259,7 +1259,7 @@ func (s *Server) kickstartEnv(ctx context.Context) kickstartEnv {
 	}
 	if db := s.cfg.Store; db != nil {
 		env.stored = db.AllIngestedSessions
-		env.scan = func(ctx context.Context, cfg *config.Config, known discovery.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
+		env.scan = func(ctx context.Context, cfg *config.Config, known ingest.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
 			return discovery.Scan(ctx, cfg, &ingest.OSFileSystem{}, git, known, db, progress)
 		}
 	}

@@ -29,7 +29,7 @@ func Scan(
 	cfg *config.Config,
 	fs ingest.FileSystem,
 	git ingest.GitResolver,
-	known KnownSessionIndex,
+	known ingest.KnownSessionIndex,
 	evidence ingest.ClaudeEvidenceCache,
 	progress ScanProgress,
 ) (ProviderInventory, []SessionListing, SubagentRelation) {
@@ -84,7 +84,6 @@ func Scan(
 			}
 			projectName := d.ProjectName
 			title := d.Title
-			branchName := d.Branch
 			workingDir := d.CWD
 			var gitRemote string
 			claudeProjectDir := ""
@@ -114,15 +113,9 @@ func Scan(
 			} else {
 				gitRemote = ResolveSessionRemote(ctx, git, d, claudeProjectDir)
 			}
-			// The import filter builds the same evidence from the same index, so
-			// the branch a session is listed under is the branch it is judged by.
-			branchName = ingest.ResolveSessionBranch(ctx, git, ingest.SessionBranchEvidence{
-				Harness:      d.Harness,
-				Recorded:     branchName,
-				StoredBranch: record.Branch,
-				StoredKnown:  stored,
-				Directory:    ingest.SessionProjectDirectory(d),
-			})
+			// The import filter asks the same function with the same index, so the
+			// branch a session is listed under is the branch it is judged by.
+			branchName := ingest.SessionBranchFor(ctx, git, d, record, stored)
 
 			sessions = append(sessions, SessionListing{
 				Harness:     provider.String(),
@@ -154,9 +147,9 @@ func Scan(
 	return inventory, sessions, subagents
 }
 
-func reusable(known KnownSessionIndex, session ingest.DiscoveredSession, staleness time.Duration) (KnownSession, bool) {
+func reusable(known ingest.KnownSessionIndex, session ingest.DiscoveredSession, staleness time.Duration) (ingest.KnownSession, bool) {
 	if known == nil {
-		return KnownSession{}, false
+		return ingest.KnownSession{}, false
 	}
 	return known.Reusable(session, staleness)
 }
@@ -251,7 +244,7 @@ func ExpandAllowedSessionIDs(selected []SessionListing) map[ingest.SessionID]boo
 }
 
 // ResolveSessionRemote walks git for one discovered session's remote. Its
-// branch is not resolved here: ingest.ResolveSessionBranch owns that, for the
+// branch is not resolved here: ingest.SessionBranchFor owns that, for the
 // tree and for the import filter alike.
 func ResolveSessionRemote(
 	ctx context.Context,

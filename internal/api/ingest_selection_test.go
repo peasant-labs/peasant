@@ -323,7 +323,7 @@ func runMovedCloneTreeAndImportAgree(t *testing.T, ids ingestSelectionIDs, item 
 
 	// tree is what the setup tree shows: the branch each session is listed under
 	// and the sessions the saved selection marks as chosen.
-	tree := func(known discovery.KnownSessionIndex) (map[string]string, []string) {
+	tree := func(known ingest.KnownSessionIndex) (map[string]string, []string) {
 		_, listings, relation := discovery.Scan(t.Context(), cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, known, nil, nil)
 		prepared := discovery.PrepareSessionListings(listings, ingest.NewPhysicalPathResolver())
 		forest, _, err := onboarding.RestoreSelection(discovery.BuildForest(prepared, nil, relation), cfg.Selection)

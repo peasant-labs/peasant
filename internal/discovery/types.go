@@ -2,7 +2,6 @@ package discovery
 
 import (
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 )
 
@@ -57,13 +56,6 @@ type ProjectIdentity = onboarding.ProjectIdentity
 
 // PreparedSessionListing is owned by onboarding.
 type PreparedSessionListing = onboarding.PreparedSessionListing
-
-// KnownSession is owned by ingest, so the import filter reads the same record.
-type KnownSession = ingest.KnownSession
-
-// KnownSessionIndex is owned by ingest, so the tree and the import filter read
-// one index.
-type KnownSessionIndex = ingest.KnownSessionIndex
 
 // ScanProgress receives phase and count updates while a scan runs. A nil
 // progress value is ignored. Implementations must tolerate a nil receiver.

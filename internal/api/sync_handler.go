@@ -1537,10 +1537,7 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		return nil, nil, nil, fmt.Errorf("resolve output path: %w", err)
 	}
 
-	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
-	if staleness == 0 {
-		staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-	}
+	staleness := discovery.ConfigStaleness(cfg)
 
 	pipelineCfg := ingest.PipelineConfig{
 		Sources:            sources,
