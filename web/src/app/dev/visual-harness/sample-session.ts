@@ -326,6 +326,13 @@ function turnToWire(t: TurnFixture): TurnDetail {
     timestamp: turnTimestamp(t.id),
     depth: t.depth ?? 0,
   };
+  if (t.id === 0) {
+    wire.contentParts = [
+      { type: 'text', text: 'Please inspect this example image.' },
+      { type: 'image', image: { ref: 'b79bc1732d91a8cd7505578c250e29e2d830f098185781bd3b2e35200faaa643', mediaType: 'image/png', width: 320, height: 160, byteSize: 3596 } },
+      { type: 'text', text: 'The text after the image stays in order.' },
+    ];
+  }
   if (t.thinking) wire.hasThinking = true;
   if (t.tools) wire.toolCalls = t.tools.map(toolToWire);
   if (t.subagent) wire.agentName = t.subagent;

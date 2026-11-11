@@ -205,6 +205,7 @@ export default function VisualHarnessPage() {
         <TranscriptViewer
           viewModel={vm}
           theme={theme}
+          attachmentUrl={() => '/dev/transcript-example.png'}
           capabilities={{
             canEdit: false,
             canLabel: true,
