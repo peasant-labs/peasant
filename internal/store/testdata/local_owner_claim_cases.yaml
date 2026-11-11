@@ -1,0 +1,42 @@
+# Named local-owner and claim-log cases from peasant-labs/peasant#890. Each row
+# names one observable the store layer must satisfy; requiredNames guards the
+# set in both directions. Decoded by the strict loader in owner_test.go.
+requiredNames:
+  - owner-created-without-village-login
+  - owner-survives-sign-out
+  - owner-second-row-refused
+  - claim-default-unclaimed-only
+  - claim-all-retains-earlier-entries
+  - claim-username-snapshot-only
+  - claim-username-reuse-different-uuid
+  - claim-unlink-and-reclaim-other-account
+  - claim-existing-install-prompted-once
+  - claim-never-touches-pulled-transcripts
+  - migration-forward-only
+  - user-show-no-network
+
+cases:
+  - name: owner-created-without-village-login
+    kind: ownerCreatedWithoutVillageLogin
+  - name: owner-survives-sign-out
+    kind: ownerSurvivesSignOut
+  - name: owner-second-row-refused
+    kind: ownerSecondRowRefused
+  - name: claim-default-unclaimed-only
+    kind: claimDefaultUnclaimedOnly
+  - name: claim-all-retains-earlier-entries
+    kind: claimAllRetainsEarlierEntries
+  - name: claim-username-snapshot-only
+    kind: claimUsernameSnapshotOnly
+  - name: claim-username-reuse-different-uuid
+    kind: claimUsernameReuseDifferentUUID
+  - name: claim-unlink-and-reclaim-other-account
+    kind: claimUnlinkAndReclaimOtherAccount
+  - name: claim-existing-install-prompted-once
+    kind: claimExistingInstallPromptedOnce
+  - name: claim-never-touches-pulled-transcripts
+    kind: claimNeverTouchesPulledTranscripts
+  - name: migration-forward-only
+    kind: migrationForwardOnly
+  - name: user-show-no-network
+    kind: userShowNoNetwork
