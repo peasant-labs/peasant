@@ -79,6 +79,7 @@ slots:
   - {name: v73-harness-check-widening, slot: 73, needle: "CREATE TABLE sessions_v73 AS SELECT * FROM sessions;"}
   - {name: v74-conversation-turn-count, slot: 74, needle: "conversation_turn_count INTEGER NOT NULL DEFAULT 0"}
   - {name: v75-image-attachments, slot: 75, needle: "CREATE TABLE session_attachments ("}
+  - {name: v76-search-trigger-repair, slot: 76, needle: "DELETE FROM session_search_fts WHERE rowid < 1125899906842624;"}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot

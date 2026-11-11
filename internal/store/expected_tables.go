@@ -8,7 +8,7 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
-// retiredSearchIndex is the legacy FTS table migrate retires.
+// retiredSearchIndex is the legacy FTS table migration V76 removes.
 const retiredSearchIndex = "session_entries_fts"
 
 // ExpectedTableNames lists, by name, every table a database at
@@ -16,8 +16,10 @@ const retiredSearchIndex = "session_entries_fts"
 // into an in-memory database and reads the tables back, so the list follows
 // the real schema (virtual tables and their shadow tables included) instead
 // of a hand-kept copy. The legacy session_entries_fts index and its shadow
-// tables are left out: `peasant migrate` drops them once search consolidates
-// into session_search_fts (migrateConsolidateSearch), so either state is valid.
+// tables are left out: V76 drops them once the entries triggers point at
+// session_search_fts again, so no current database carries them. The filter
+// stays as a guard so a stale snapshot carrying the retired index still
+// compares clean.
 func ExpectedTableNames() ([]string, error) {
 	conn, err := sqlite.OpenConn(":memory:", 0)
 	if err != nil {

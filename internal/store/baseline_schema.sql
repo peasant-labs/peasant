@@ -689,18 +689,6 @@ CREATE TABLE session_entries_ext (
       REFERENCES session_entries(session_id, entry_index) ON DELETE CASCADE
 ) STRICT;
 
-CREATE VIRTUAL TABLE session_entries_fts
-USING fts5(
-    content_preview,
-    tool_input,
-    tool_output,
-    session_id UNINDEXED,
-    entry_index UNINDEXED,
-    content='session_entries',
-    content_rowid='rowid',
-    tokenize='unicode61 remove_diacritics 2'
-);
-
 CREATE TABLE session_entry_bodies (
   body_id          INTEGER PRIMARY KEY CHECK(body_id >= 1125899906842624),
   session_id       TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -1360,19 +1348,19 @@ CREATE VIEW session_search_source(rid, session_id, entry_index, content_preview,
     FROM session_entry_bodies;
 
 CREATE TRIGGER session_entries_ad AFTER DELETE ON session_entries BEGIN
-    INSERT INTO session_entries_fts(session_entries_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index)
+    INSERT INTO session_search_fts(session_search_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index)
     VALUES ('delete', old.rowid, old.content_preview, old.tool_input, old.tool_output, old.session_id, old.entry_index);
 END;
 
 CREATE TRIGGER session_entries_ai AFTER INSERT ON session_entries BEGIN
-    INSERT INTO session_entries_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index)
+    INSERT INTO session_search_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index)
     VALUES (new.rowid, new.content_preview, new.tool_input, new.tool_output, new.session_id, new.entry_index);
 END;
 
 CREATE TRIGGER session_entries_au AFTER UPDATE ON session_entries BEGIN
-    INSERT INTO session_entries_fts(session_entries_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index)
+    INSERT INTO session_search_fts(session_search_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index)
     VALUES ('delete', old.rowid, old.content_preview, old.tool_input, old.tool_output, old.session_id, old.entry_index);
-    INSERT INTO session_entries_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index)
+    INSERT INTO session_search_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index)
     VALUES (new.rowid, new.content_preview, new.tool_input, new.tool_output, new.session_id, new.entry_index);
 END;
 
@@ -2200,13 +2188,6 @@ INSERT INTO "type_origins" ("id", "name") VALUES (2, 'user');
 INSERT INTO "type_origins" ("id", "name") VALUES (3, 'group');
 INSERT INTO "value_domain_kinds" ("id", "name") VALUES (1, 'enumerated');
 INSERT INTO "value_domain_kinds" ("id", "name") VALUES (2, 'described');
-DELETE FROM "session_entries_fts_config";
-INSERT INTO "session_entries_fts_config" ("k", "v") VALUES ('version', 4);
-
-DELETE FROM "session_entries_fts_data";
-INSERT INTO "session_entries_fts_data" ("id", "block") VALUES (1, X'000000000000');
-INSERT INTO "session_entries_fts_data" ("id", "block") VALUES (10, X'00000000000000');
-
 DELETE FROM "session_search_fts_config";
 INSERT INTO "session_search_fts_config" ("k", "v") VALUES ('version', 4);
 
@@ -2214,4 +2195,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'000000000000');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 75;
+PRAGMA user_version = 76;
