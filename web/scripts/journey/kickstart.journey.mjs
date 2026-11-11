@@ -586,16 +586,10 @@ test('selection-page-names-the-chosen-branch', async () => {
 });
 
 test('import-honours-the-recorded-branch', async () => {
-  // KNOWN GAP, recorded here so it cannot be forgotten and cannot pass unseen:
-  // the scan and the tree list a session under the branch its transcript
-  // records, but the import's selection filter judges it by the branch that is
-  // checked out in the session's directory (internal/selectionfilter Prepare
-  // replaces the recorded branch with git's HEAD). The clone sits on main now, so
-  // a session recorded on feature/stray is imported although only main was
-  // chosen. This case states the correct behaviour; Playwright expects it to
-  // fail until the import honours the recorded branch, and reports it when it
-  // starts to pass so this marker is removed.
-  test.fail(true, 'the import judges a session by the checked-out branch, not the recorded one');
+  // The scan, the tree and the import's selection filter place a session on the
+  // branch its transcript records. The clone sits on main now, so a session
+  // recorded on feature/stray is not imported when only main was chosen, even
+  // though main is what git has checked out.
   const stored = await storedTitles(pageA.request);
   expect(stored, `a session recorded on ${stray.branch} was not chosen, so it is not imported`).not.toContain(stray.prompt);
 });

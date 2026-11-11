@@ -11,6 +11,7 @@ requiredNames:
   - conflict-recorder-lines-appear-in-diagnostics
   - session-exclusion-removes-branch
   - stored-session-excluded-by-selection-remains-viewable
+  - moved-clone-tree-branch-and-import-agree
 ids:
   selected: 11111111-1111-4111-8111-111111111111
   other: 22222222-2222-4222-8222-222222222222
@@ -80,6 +81,18 @@ cases:
     preludeAll: true
     mode: selected
     allow:
+      - 11111111-1111-4111-8111-111111111111
+    expectExcluded:
+      - 22222222-2222-4222-8222-222222222222
+  # One clone hosts a session recorded on main and a session recorded on
+  # feature/stray, and the clone now sits on main. The tree groups each session
+  # under the branch it recorded; the saved choice of main must import the
+  # session recorded on main and nothing the tree showed as unchosen.
+  - name: moved-clone-tree-branch-and-import-agree
+    movedClone: true
+    chosenBranch: main
+    otherRecordedBranch: feature/stray
+    expectImported:
       - 11111111-1111-4111-8111-111111111111
     expectExcluded:
       - 22222222-2222-4222-8222-222222222222

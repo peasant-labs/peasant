@@ -34,6 +34,8 @@ type harvestDelegationCase struct {
 	All                    bool     `yaml:"all"`
 	IndexOnly              bool     `yaml:"indexOnly"`
 	Conflict               bool     `yaml:"conflict"`
+	BranchRule             bool     `yaml:"branchRule"`
+	RecordedElsewhere      bool     `yaml:"recordedElsewhere"`
 	PreludeAll             bool     `yaml:"preludeAll"`
 	Session                string   `yaml:"session"`
 	ExpectFilter           bool     `yaml:"expectFilter"`
@@ -85,9 +87,13 @@ func runHarvestDelegationCase(t *testing.T, ids harvestDelegationIDs, item harve
 	writeDelegationSession(t, filepath.Join(project, ids.Selected+".jsonl"), ids.Selected)
 	writeDelegationSession(t, filepath.Join(project, ids.Other+".jsonl"), ids.Other)
 	var conflict mountedConflictFixture
-	if item.Conflict {
+	if item.Conflict || item.BranchRule {
 		conflict = loadSelectionFilterFixtures(t).MountedConflict
 		source = initConflictedSourceRepo(t, conflict)
+	}
+	if item.RecordedElsewhere {
+		// The clone stays on the admitted branch; the session was recorded on another.
+		writeConflictedSession(t, source, conflict, conflict.RejectedBranch)
 	}
 
 	cfg := config.BaseConfig()
@@ -105,12 +111,19 @@ func runHarvestDelegationCase(t *testing.T, ids harvestDelegationIDs, item harve
 			defaults.HarnessClaudeCode.String(): {Sessions: []string{ids.Selected}},
 		},
 	}
-	if item.Conflict {
+	if item.Conflict || item.BranchRule {
 		cfg.Sources.ClaudeCode.Enabled = true
 		cfg.Sources.ClaudeCode.Paths = []string{source}
+	}
+	if item.Conflict {
 		cfg.Selection.Harnesses[defaults.HarnessClaudeCode.String()] = config.SelectionHarnessConfig{Projects: []config.ProjectSelection{
 			{GitRemote: conflict.GitRemote, Branches: []string{conflict.AdmittedBranch}},
 			{GitRemote: conflict.GitRemote, Branches: []string{conflict.RejectedBranch}},
+		}}
+	}
+	if item.BranchRule {
+		cfg.Selection.Harnesses[defaults.HarnessClaudeCode.String()] = config.SelectionHarnessConfig{Projects: []config.ProjectSelection{
+			{GitRemote: conflict.GitRemote, Branches: []string{conflict.AdmittedBranch}},
 		}}
 	}
 	configPath := filepath.Join(dir, string(defaults.Config.FileName))

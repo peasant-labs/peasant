@@ -446,6 +446,30 @@ func ResolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch,
 	return remote, tracking
 }
 
+// ResolveGitBranch is the one rule for which branch a session belongs to. The
+// branch the session recorded wins: it names where the work happened and it does
+// not change when the checkout later moves. Only a session that recorded no
+// branch is attributed to the branch checked out in dir now, and an empty result
+// means neither source knew. Git is not asked when a branch was recorded, when
+// git is nil, or when dir is empty.
+//
+// Everything that groups, selects, or imports a session by branch calls this
+// function, so the tree a person chooses from and the import that follows it
+// cannot place one session on two branches.
+func ResolveGitBranch(ctx context.Context, git GitResolver, dir, recordedBranch string) string {
+	if recordedBranch != "" {
+		return recordedBranch
+	}
+	if git == nil || dir == "" {
+		return ""
+	}
+	checkedOut, err := git.Branch(ctx, dir)
+	if err != nil {
+		return ""
+	}
+	return checkedOut
+}
+
 func (g *ExecGitResolver) Branch(ctx context.Context, dir string) (string, error) {
 	return runGit(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD")
 }
