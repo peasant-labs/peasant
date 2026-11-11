@@ -63,6 +63,12 @@ export interface Step {
   expectBodyKeys?: { route: string; only: string[] };
   /** The forest rows on the page, by node id, in the order they are drawn. */
   expectRows?: string[];
+  /**
+   * The structured-value blocks on the page, in order: the lines of each as
+   * drawn, and whether it sits inside a collapsed `<details>`. These are all of
+   * them, so a value drawn as a block that is not listed fails.
+   */
+  expectBlocks?: { lines: string[]; collapsed: boolean }[];
   expectLink?: { name: string; href: string };
   expectNoReload?: true;
   /** Texts that must all appear, in this order in the document. */
@@ -378,6 +384,15 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
       await waitFor(() => {
         const drawn = [...container.querySelectorAll('[data-node-id]')].map((row) => row.getAttribute('data-node-id'));
         expect(drawn, `${at}: forest rows on the page`).toEqual(step.expectRows);
+      });
+    }
+    if (step.expectBlocks) {
+      await waitFor(() => {
+        const drawn = [...container.querySelectorAll('pre.ks-value')].map((block) => ({
+          lines: (block.textContent ?? '').split('\n'),
+          collapsed: block.closest('details') !== null,
+        }));
+        expect(drawn, `${at}: structured-value blocks on the page`).toEqual(step.expectBlocks);
       });
     }
     if (step.expectLink) {
