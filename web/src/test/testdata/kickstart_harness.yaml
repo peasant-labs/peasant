@@ -1,0 +1,141 @@
+# What the kickstart fixture harness refuses. A fixture that names a step key
+# nothing reads, a case with no steps, an answer the contract forbids, or an
+# event it forbids must fail when it is played, not pass without running. Each
+# case is a fixture case in miniature (`play`, with `own` for the case keys the
+# playing test reads itself) and either `refuses`, text the error must contain,
+# or nothing, meaning the harness plays it.
+requiredNames:
+  - a-valid-case-is-played
+  - a-misspelt-step-key-is-refused
+  - an-empty-step-is-refused
+  - a-socket-step-with-an-unknown-action-is-refused
+  - a-case-without-steps-is-refused
+  - an-unknown-case-key-is-refused
+  - a-case-key-the-playing-test-reads-is-allowed
+  - an-answer-that-breaks-the-contract-is-refused
+  - an-answer-marked-malformed-is-let-through
+  - a-malformed-mark-on-a-valid-answer-is-refused
+  - a-text-answer-needs-the-malformed-mark
+  - an-answer-key-nothing-reads-is-refused
+  - a-refusal-without-an-error-sentence-is-refused
+  - a-pushed-event-that-breaks-the-contract-is-refused
+  - a-pushed-event-marked-malformed-is-let-through
+  - a-malformed-mark-on-a-valid-event-is-refused
+  - a-malformed-mark-without-a-push-is-refused
+  - a-push-key-nothing-reads-is-refused
+  - a-raw-frame-that-breaks-the-contract-is-refused
+cases:
+  - name: a-valid-case-is-played
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      steps:
+        - expectText: [hello]
+        - push: {kind: session, model: fresh}
+        - settle: true
+  - name: a-misspelt-step-key-is-refused
+    play:
+      steps:
+        - expectTxt: [hello]
+    refuses: ['"expectTxt"', does not read, expectText]
+  - name: an-empty-step-is-refused
+    play:
+      steps:
+        - {}
+    refuses: [is empty, asserts nothing]
+  - name: a-socket-step-with-an-unknown-action-is-refused
+    play:
+      steps:
+        - socket: reopen
+    refuses: ['"reopen"', close or open]
+  - name: a-case-without-steps-is-refused
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    refuses: [has no steps, assert nothing]
+  - name: an-unknown-case-key-is-refused
+    play:
+      steps:
+        - expectText: [hello]
+      stpes: []
+    refuses: ['"stpes"', a key nothing reads asserts nothing]
+  - name: a-case-key-the-playing-test-reads-is-allowed
+    own: [themes]
+    play:
+      themes: [light, dark]
+      steps:
+        - expectText: [hello]
+  - name: an-answer-that-breaks-the-contract-is-refused
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions": {body: {$model: fresh, scope: everything}}
+      steps:
+        - expectText: [hello]
+    refuses: [breaks the Local API contract, scope, malformed]
+  - name: an-answer-marked-malformed-is-let-through
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions": {body: {$model: fresh, scope: everything}, malformed: true}
+      steps:
+        - expectText: [hello]
+  - name: a-malformed-mark-on-a-valid-answer-is-refused
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions": {body: {$model: fresh}, malformed: true}
+      steps:
+        - expectText: [hello]
+    refuses: [the Local API contract accepts it, drop the mark]
+  - name: a-text-answer-needs-the-malformed-mark
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions/ses-full/commit": {status: 502, text: bad gateway}
+      steps:
+        - expectText: [hello]
+    refuses: [is text, not wire JSON, malformed]
+  - name: an-answer-key-nothing-reads-is-refused
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions": {body: {$model: fresh}, bodyy: {}}
+      steps:
+        - expectText: [hello]
+    refuses: ['"bodyy"', does not read]
+  - name: a-refusal-without-an-error-sentence-is-refused
+    play:
+      server:
+        "POST /api/v1/sync/ingest": {status: 503, body: {}}
+      steps:
+        - expectText: [hello]
+    refuses: [without an error sentence]
+  - name: a-pushed-event-that-breaks-the-contract-is-refused
+    play:
+      steps:
+        - push: {kind: replaced, sessionId: ses-full, revision: 1}
+    refuses: [breaks the Local API contract, kind, malformed]
+  - name: a-pushed-event-marked-malformed-is-let-through
+    play:
+      steps:
+        - push: {kind: replaced, sessionId: ses-full, revision: 1}
+          malformed: true
+        - expectText: [hello]
+  - name: a-malformed-mark-on-a-valid-event-is-refused
+    play:
+      steps:
+        - push: {kind: session, sessionId: ses-full, revision: 1}
+          malformed: true
+    refuses: [the Local API contract accepts it, drop the mark]
+  - name: a-malformed-mark-without-a-push-is-refused
+    play:
+      steps:
+        - expectText: [hello]
+          malformed: true
+    refuses: [marked malformed, a push or a frame]
+  - name: a-push-key-nothing-reads-is-refused
+    play:
+      steps:
+        - push: {kind: session, sessionId: ses-full, revision: 1, reasn: expired}
+    refuses: ['"reasn"', does not read]
+  - name: a-raw-frame-that-breaks-the-contract-is-refused
+    play:
+      steps:
+        - frame: {type: kickstart, data: {kind: replaced, sessionId: ses-full, revision: 9}}
+    refuses: [breaks the Local API contract, kind]

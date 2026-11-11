@@ -60,7 +60,7 @@ describe('/selection', () => {
     const kind = kindOf(entry);
     if (kind === 'page') {
       it(entry.name, async () => {
-        await playCase(entry, <SelectionPage />);
+        await playCase(entry, <SelectionPage />, ['kind', 'scopeToken']);
         if (typeof entry.scopeToken === 'string') {
           // The token the page opens its session with is the closed set's own.
           expect(KickstartScope.Selection.wire).toBe(entry.scopeToken);
@@ -69,7 +69,7 @@ describe('/selection', () => {
     }
     if (kind === 'tabs') {
       it(entry.name, async () => {
-        await playTabs(entry, PAGES);
+        await playTabs(entry, PAGES, ['kind']);
       });
     }
     if (kind === 'parity') {
@@ -88,7 +88,7 @@ describe('/selection', () => {
           const values = sides[side];
           const played = fill(entry, { session: values.session, model: values.model, answered: values.answered });
           const steps = [...values.before, ...(played.steps as unknown[])];
-          const mounted = await playCase({ ...played, steps }, side === 'wizard' ? <WizardClient /> : <SelectionPage />);
+          const mounted = await playCase({ ...played, steps }, side === 'wizard' ? <WizardClient /> : <SelectionPage />, ['kind', 'rows', 'selectedIds', 'wizard', 'selection']);
           seen[side] = {
             rows: [...mounted.container.querySelectorAll('[data-node-id]')].map((row) => row.getAttribute('data-node-id')),
             selected: mounted.server
