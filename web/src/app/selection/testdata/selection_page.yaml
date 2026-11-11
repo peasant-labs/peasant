@@ -26,6 +26,7 @@ requiredNames:
   - expiry-copy-names-the-selection
   - copy-covers-every-scope
   - conflict-row-shows-structured-value-readably
+  - rail-labels-stay-inside-the-frame
 cases:
   # The page opens a session of its own and draws only the stops the server
   # serves for it. Events of the wizard's session are not its own.
@@ -456,3 +457,23 @@ cases:
       - expectNoText: ['{"mode"', '"harnesses"', '["s-']
       - expectControl: {role: group, name: "your answer, sessions to import"}
       - expectControl: {role: group, name: "saved now, chosen session ids"}
+
+  # A rail label is wider than its marker, so a label centred on its marker
+  # spills past both sides of it: the first would leave the frame on the left
+  # and the last on the right. The first label starts at its marker's left edge,
+  # the last ends at its marker's right edge, the ones between stay centred, and
+  # each wraps inside its share of the rail. There is no layout engine here, so
+  # the placement is read from the real stylesheet: what each label's computed
+  # alignment, shift and wrapping resolve to.
+  - name: rail-labels-stay-inside-the-frame
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - expectText: [step 1 of 3]
+      - expectRailLabels:
+          labels: [choose sessions to import, review, ingest]
+          first: {textAlign: left, shifted: true}
+          middle: {textAlign: center, shifted: false}
+          last: {textAlign: right, shifted: true}
