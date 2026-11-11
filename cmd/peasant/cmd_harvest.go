@@ -377,10 +377,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	sources := buildSourceConfigsTo(cfg, cmd.ErrOrStderr())
 
 	// 6. Build pipeline config.
-	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
-	if staleness == 0 {
-		staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-	}
+	staleness := discovery.ConfigStaleness(cfg)
 
 	// --all implies --force and --include-active, and clears all session filters.
 	force := flags.force || flags.all
@@ -536,7 +533,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 
 	// The store, when this run opens one, is what the saved selection reads to
 	// place an already-stored session on the branch the setup tree lists it under.
-	var storedSessions discovery.KnownSessionIndex
+	var storedSessions ingest.KnownSessionIndex
 	if !skipDB {
 		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write)
 		if err != nil {

@@ -146,7 +146,7 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 		},
 	}
 
-	var known discovery.KnownSessionIndex
+	var known ingest.KnownSessionIndex
 	if c.Stored {
 		ingested := time.Now()
 		if c.SourceChanged {

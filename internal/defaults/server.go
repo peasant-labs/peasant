@@ -139,7 +139,7 @@ const (
 	// The kickstart routes are the local setup session. A session is one live
 	// draft per scope; the page opens or joins it, answers it with PATCH, and
 	// reads the forest and a row's preview from the routes under it. The commit
-	// route is declared by the commit owner.
+	// route saves the answers and starts the import.
 	//
 	// RouteKickstartStatus reads the first-run redirect hook.
 	RouteKickstartStatus Route = "/api/v1/kickstart/status"

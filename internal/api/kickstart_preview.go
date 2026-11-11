@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -23,10 +22,11 @@ const (
 	kickstartPreviewMaxLines = 200
 	// kickstartPreviewMaxLineRunes bounds one line.
 	kickstartPreviewMaxLineRunes = 400
-	// kickstartPreviewMaxListed bounds the entries listed under one heading of a
-	// repository preview.
-	kickstartPreviewMaxListed = 20
 )
+
+// kickstartPreviewShortened closes a preview that filled its line bound, or
+// that stopped where the source did not say how large it is.
+const kickstartPreviewShortened = "preview shortened here. the full session ingests normally."
 
 // kickstartPreviewReader reads the first page of a discovered session.
 type kickstartPreviewReader interface {
@@ -75,14 +75,20 @@ func (st *kickstartSessions) preview(ctx context.Context, id, nodeID string) (sc
 		return schema.LocalKickstartPreview{}, err
 	}
 	lines := newPreviewLines()
-	lines.label(target.node.Label, target.node.ID)
 	switch {
 	case target.node.Kind == onboarding.NodeKindSession:
+		lines.label(target.node.Label, target.node.ID)
 		if err := st.sessionPreviewLines(ctx, target, lines); err != nil {
 			return schema.LocalKickstartPreview{}, err
 		}
 	case target.isRepo:
-		repositoryPreviewLines(target.repository, lines)
+		// The first line names the project, so the row's own label is not
+		// repeated above it.
+		for _, line := range discovery.RepositoryPreviewLines(target.repository, discovery.CleanPreviewValue) {
+			lines.text(line)
+		}
+	default:
+		lines.label(target.node.Label, target.node.ID)
 	}
 	return schema.LocalKickstartPreview{Lines: lines.finish()}, nil
 }
@@ -95,7 +101,7 @@ func (st *kickstartSessions) sessionPreviewLines(ctx context.Context, target kic
 	}
 	page, err := reader.Read(ctx, sessionID)
 	if errors.Is(err, discovery.ErrPreviewUnavailable) {
-		lines.text("no transcript preview is available for this session; it still imports normally.")
+		lines.text("no transcript preview is available for this session; it still ingests normally.")
 		return nil
 	}
 	if err != nil {
@@ -103,7 +109,7 @@ func (st *kickstartSessions) sessionPreviewLines(ctx context.Context, target kic
 			"The preview of session %q could not be read in internal/api.kickstartSessions.preview: %v. Nothing was changed. The session still imports normally; check that its transcript is readable, then preview it again.", sessionID, err)
 	}
 	if len(page.Turns) == 0 {
-		lines.text("this session has no turns to show.")
+		lines.text(discovery.PreviewNoTurnsNote)
 	}
 	for _, turn := range page.Turns {
 		if !lines.hasRoom() {
@@ -122,29 +128,21 @@ func (st *kickstartSessions) sessionPreviewLines(ctx context.Context, target kic
 		}
 	}
 	if page.More {
-		lines.cut(fmt.Sprintf("showing the first %s of this %s session. the full session imports normally.", previewBytes(page.ConsumedBytes), previewBytes(page.TotalBytes)))
+		notice := discovery.PreviewCutNotice(page.ConsumedBytes, page.TotalBytes, page.More, false)
+		if notice == "" {
+			notice = kickstartPreviewShortened
+		}
+		lines.cut(notice)
 	}
 	return nil
-}
-
-// repositoryPreviewLines describes a project or branch row from the forest's
-// metadata. It runs no git command and reads no file.
-func repositoryPreviewLines(repo discovery.PreviewContext, lines *previewLines) {
-	if repo.Kind == discovery.PreviewBranch && repo.Branch != "" {
-		lines.text("branch: " + repo.Branch)
-	}
-	lines.text(fmt.Sprintf("sessions: %d", repo.SessionCount))
-	lines.list("harnesses", repo.Harnesses)
-	lines.list("remotes", repo.Remotes)
-	lines.list("branches", repo.Branches)
-	lines.list("clone paths", repo.ClonePaths)
-	lines.list("git directories", repo.GitDirectories)
 }
 
 // previewLines accumulates the lines of one preview under the bounds.
 type previewLines struct {
 	lines []schema.LocalKickstartLine
 	full  bool
+	// closed is set once a note that ends the preview has been added.
+	closed bool
 }
 
 func newPreviewLines() *previewLines { return &previewLines{} }
@@ -173,46 +171,21 @@ func (p *previewLines) text(text string) { p.add(schema.LocalKickstartLineText, 
 
 func (p *previewLines) spacer() { p.add(schema.LocalKickstartLineSpacer, "") }
 
-// list writes a heading and its entries, bounded, or nothing when it is empty.
-func (p *previewLines) list(heading string, entries []string) {
-	if len(entries) == 0 {
-		return
-	}
-	p.text(heading + ":")
-	for index, entry := range entries {
-		if index == kickstartPreviewMaxListed {
-			p.text(fmt.Sprintf("  and %d more", len(entries)-index))
-			return
-		}
-		p.text("  " + entry)
-	}
-}
-
 // cut closes a preview that stopped before the end of its source.
 func (p *previewLines) cut(note string) {
 	p.full = true
+	p.closed = true
 	p.lines = append(p.lines, schema.LocalKickstartLine{Kind: schema.LocalKickstartLineText, Text: note})
 }
 
 // finish returns the lines. A preview that filled its bound says so, and the
 // notice is the last line.
 func (p *previewLines) finish() []schema.LocalKickstartLine {
-	if p.full && (len(p.lines) == 0 || !strings.HasPrefix(p.lines[len(p.lines)-1].Text, "showing the first")) {
-		p.lines = append(p.lines, schema.LocalKickstartLine{Kind: schema.LocalKickstartLineText, Text: "preview shortened here. the full session imports normally."})
+	if p.full && !p.closed {
+		p.cut(kickstartPreviewShortened)
 	}
 	if p.lines == nil {
 		return []schema.LocalKickstartLine{}
 	}
 	return p.lines
-}
-
-func previewBytes(size int64) string {
-	switch {
-	case size >= 1<<20:
-		return fmt.Sprintf("%d MiB", size/(1<<20))
-	case size >= 1<<10:
-		return fmt.Sprintf("%d KiB", size/(1<<10))
-	default:
-		return fmt.Sprintf("%d bytes", size)
-	}
 }

@@ -86,7 +86,7 @@ func New(cfg *config.Config, git ingest.GitResolver, r ingest.PathIdentityResolv
 // Decisions are cached by session ID. Git lookups are memoized by directory and
 // run only when the matcher can change its answer from repository evidence.
 // A session belongs to the branch the tree lists it under, which
-// ingest.ResolveSessionBranch decides for both: the branch its transcript
+// ingest.SessionBranchFor decides for both: the branch its transcript
 // recorded, else the branch the store holds for an unchanged stored session,
 // else the branch checked out in its project directory.
 // A cancelled context returns before this call's decisions are cached.
@@ -186,20 +186,15 @@ func (f *Filter) Match(session ingest.DiscoveredSession) bool {
 	return false
 }
 
-// sessionBranch is the branch the tree lists this session under. It builds the
-// evidence the scan builds, from the same index, and lets
-// ingest.ResolveSessionBranch decide.
+// sessionBranch is the branch the tree lists this session under: the answer of
+// the function the tree asks, over the same index.
 func (f *Filter) sessionBranch(ctx context.Context, git ingest.GitResolver, session ingest.DiscoveredSession) string {
-	evidence := ingest.SessionBranchEvidence{
-		Harness:   session.Harness,
-		Recorded:  session.Branch,
-		Directory: ingest.SessionProjectDirectory(session),
-	}
+	var record ingest.KnownSession
+	stored := false
 	if f.known != nil {
-		record, stored := f.known.Reusable(session, f.staleness)
-		evidence.StoredBranch, evidence.StoredKnown = record.Branch, stored
+		record, stored = f.known.Reusable(session, f.staleness)
 	}
-	return ingest.ResolveSessionBranch(ctx, git, evidence)
+	return ingest.SessionBranchFor(ctx, git, session, record, stored)
 }
 
 type gitAnswer struct {

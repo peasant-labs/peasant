@@ -34,6 +34,7 @@ type restorationListing struct {
 	GitRemote   string `yaml:"gitRemote"`
 	WorkingDir  string `yaml:"workingDir"`
 	Branch      string `yaml:"branch"`
+	Title       string `yaml:"title"`
 	SessionID   string `yaml:"sessionId"`
 }
 
@@ -48,8 +49,15 @@ type restorationCase struct {
 	ClearBranches          []restorationBranch    `yaml:"clearBranches"`
 	SelectAll              bool                   `yaml:"selectAll"`
 	LaterListings          []restorationListing   `yaml:"laterListings"`
-	ExpectLaterChecked     []string               `yaml:"expectLaterChecked"`
-	Expected               config.SelectionConfig `yaml:"expected"`
+	// PreviousListings is the machine the answer was given over; Listings is
+	// what the rescan found. The check reads dropped labels from the former.
+	PreviousListings    []restorationListing   `yaml:"previousListings"`
+	Answered            []string               `yaml:"answered"`
+	ExpectKept          []string               `yaml:"expectKept"`
+	ExpectDroppedCount  int                    `yaml:"expectDroppedCount"`
+	ExpectDroppedLabels []string               `yaml:"expectDroppedLabels"`
+	ExpectLaterChecked  []string               `yaml:"expectLaterChecked"`
+	Expected            config.SelectionConfig `yaml:"expected"`
 }
 
 type restorationDocument struct {
@@ -175,25 +183,22 @@ func assertLockedBlocksCommit(t *testing.T) {
 
 func assertRescanKeepsIDs(t *testing.T, row restorationCase) {
 	t.Helper()
-	roots := loadForest(t, row.Listings)
-	forest := settings.SelectionForest(roots)
-	answered := []string{"kept-session", "vanished-a", "vanished-b", "vanished-c", "vanished-d"}
-	kept, dropped := onboarding.RescanIDs(answered, forest)
-	if !reflect.DeepEqual(kept, []string{"kept-session"}) {
-		t.Fatalf("kept = %v, want only the id that still exists", kept)
+	current := settings.SelectionForest(loadForest(t, row.Listings))
+	previous := settings.SelectionForest(loadForest(t, row.PreviousListings))
+	kept, dropped := onboarding.RescanIDs(row.Answered, previous, current)
+	if !reflect.DeepEqual(kept, row.ExpectKept) {
+		t.Fatalf("kept = %v, want only the ids that still exist: %v", kept, row.ExpectKept)
 	}
-	if dropped.Count != 4 {
-		t.Fatalf("dropped count = %d, want 4", dropped.Count)
+	if dropped.Count != row.ExpectDroppedCount {
+		t.Fatalf("dropped count = %d, want %d", dropped.Count, row.ExpectDroppedCount)
 	}
-	if len(dropped.Labels) != 3 {
-		t.Fatalf("dropped labels = %v, want at most three", dropped.Labels)
+	if !reflect.DeepEqual(dropped.Labels, row.ExpectDroppedLabels) {
+		t.Fatalf("dropped labels = %v, want %v (read from the forest the answer was given over)", dropped.Labels, row.ExpectDroppedLabels)
 	}
-	for _, id := range kept {
-		if id == "vanished-a" {
-			t.Fatal("rescan widened or kept a vanished id")
-		}
+	if len(dropped.Labels) > onboarding.DroppedLabelsMax {
+		t.Fatalf("dropped labels = %v, want at most %d", dropped.Labels, onboarding.DroppedLabelsMax)
 	}
-	if len(kept) > len(answered) {
+	if len(kept) > len(row.Answered) {
 		t.Fatal("rescan widened the answered set")
 	}
 }
@@ -269,6 +274,7 @@ func loadForest(t *testing.T, listings []restorationListing) []*kit.TreeNode {
 			GitRemote:   row.GitRemote,
 			WorkingDir:  row.WorkingDir,
 			Branch:      row.Branch,
+			Title:       row.Title,
 			SessionID:   row.SessionID,
 		}
 	}

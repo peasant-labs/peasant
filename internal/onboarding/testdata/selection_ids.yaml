@@ -1,0 +1,81 @@
+# The selection tree is answered with the ids of the rows chosen. One module
+# encodes that answer ({"ids": [...]}, ids key always present) and decodes it,
+# and the same list is the tree's value on the setup page (a bare array).
+#
+# op decode: value is the stored answer; wantIDs is what it decodes to and
+#   wantIsIDAnswer says whether it is an id answer at all.
+# op encode: ids is the input; want is the exact encoded answer.
+# op list: ids is the input; want is the exact list value.
+requiredNames:
+  - ids-answer-decodes-its-ids
+  - empty-ids-list-is-an-answer
+  - mapping-answer-is-not-an-id-answer
+  - unset-value-is-not-an-id-answer
+  - ids-that-are-not-strings-are-not-an-id-answer
+  - null-ids-are-not-an-id-answer
+  - bare-array-is-not-an-id-answer
+  - encode-keeps-the-ids-key-for-an-empty-list
+  - encode-reads-nil-as-the-empty-list
+  - encode-keeps-the-order-of-the-ids
+  - list-value-is-a-bare-array
+  - list-value-of-nil-is-an-empty-array
+cases:
+  - name: ids-answer-decodes-its-ids
+    op: decode
+    value: '{"ids":["a","b"]}'
+    wantIsIDAnswer: true
+    wantIDs: [a, b]
+
+  - name: empty-ids-list-is-an-answer
+    op: decode
+    value: '{"ids":[]}'
+    wantIsIDAnswer: true
+    wantIDs: []
+
+  - name: mapping-answer-is-not-an-id-answer
+    op: decode
+    value: '{"mode":"selected","harnesses":{}}'
+    wantIsIDAnswer: false
+
+  - name: unset-value-is-not-an-id-answer
+    op: decode
+    value: ''
+    wantIsIDAnswer: false
+
+  - name: ids-that-are-not-strings-are-not-an-id-answer
+    op: decode
+    value: '{"ids":[1,2]}'
+    wantIsIDAnswer: false
+
+  - name: null-ids-are-not-an-id-answer
+    op: decode
+    value: '{"ids":null}'
+    wantIsIDAnswer: false
+
+  - name: bare-array-is-not-an-id-answer
+    op: decode
+    value: '["a"]'
+    wantIsIDAnswer: false
+
+  - name: encode-keeps-the-ids-key-for-an-empty-list
+    op: encode
+    ids: []
+    want: '{"ids":[]}'
+
+  - name: encode-reads-nil-as-the-empty-list
+    op: encode
+    want: '{"ids":[]}'
+
+  - name: encode-keeps-the-order-of-the-ids
+    op: encode
+    ids: [z, a, m]
+    want: '{"ids":["z","a","m"]}'
+
+  - name: list-value-is-a-bare-array
+    op: list
+    ids: [a, b]
+    want: '["a","b"]'
+
+  - name: list-value-of-nil-is-an-empty-array
+    op: list
+    want: '[]'

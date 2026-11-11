@@ -2,81 +2,168 @@ package api
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 
-	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/schema"
 )
 
-// viewLocked projects a session onto the wire. The setup model decides the
-// stops, their order, visibility, fields, option menus, copy, and values; this
-// function copies those decisions and adds none. The forest is not in the view:
-// the page loads it from the tree route.
-func (st *kickstartSessions) viewLocked(sess *kickstartSession) (schema.LocalKickstartSession, error) {
-	facts := st.env.village()
-	working := sess.working
-	answers := sess.configAnswers()
-	w := sess.writeContext(working, answers, facts)
+// A view is built in two steps, so that no request holds the store lock while
+// the file is read or the redactor runs.
+//
+// draftView builds everything that needs only the session: every stop with its
+// fields, options and values, the summary from the working copy, the conflict
+// rows the session holds, the scan, the connect offer and the sign-in. It is
+// the part that can fail, and it is built while the store lock is held, so a
+// change whose view cannot be built is refused and rolled back there.
+//
+// completeView adds what needs the file or the redactor: the review's conflict
+// rows and diff, the summary explained over the configuration the save would
+// produce, and the examples of the stops that show one. It cannot fail a
+// request. What it cannot add it leaves out and says so: an example the redactor
+// refused travels as that field's refusal, and a review that cannot be built
+// leaves the view without a diff.
 
-	// The review previews the save with the commit's own chain. It reads the file
-	// now, so a save by the other scope shows up here as a row before this
-	// session's own save.
-	review, reviewed := st.reviewLocked(sess, facts)
-	conflicts := append([]schema.LocalKickstartConflict{}, sess.conflicts...)
-	var saved *config.Config
-	if reviewed {
-		conflicts = reviewRows(sess.conflicts, review)
-		saved = review.Saved
-	}
+// kickstartViewDraft is a session's view with its slow parts missing. It holds a
+// frozen copy of the session, so completing it needs no lock.
+type kickstartViewDraft struct {
+	view  schema.LocalKickstartSession
+	sess  *kickstartSession
+	facts kickstartFacts
+	w     onboarding.WriteContext
+	// examples are the fields whose example is still to be added.
+	examples []kickstartExampleSlot
+	// reviewStop is the index of the review stop in view.Stops, or -1.
+	reviewStop int
+}
+
+// kickstartExampleSlot places a field whose example completeView adds.
+type kickstartExampleSlot struct {
+	stop, field int
+	of          onboarding.Field
+}
+
+// draftView projects a frozen session onto the wire, without the parts that read
+// the file or run the redactor. The setup model decides the stops, their order,
+// visibility, fields, option menus, copy, and values; this function copies those
+// decisions and adds none. The forest is not in the view: the page loads it from
+// the tree route.
+func (st *kickstartSessions) draftView(sess *kickstartSession) (*kickstartViewDraft, error) {
+	facts := st.env.village()
+	answers := sess.configAnswers()
+	w := sess.writeContext(sess.working, answers, facts)
+	draft := &kickstartViewDraft{sess: sess, facts: facts, w: w, reviewStop: -1}
 
 	stops := make([]schema.LocalKickstartStop, 0, len(sess.model.Stops))
-	for _, stop := range sess.model.Stops {
-		row, err := sess.stopView(stop, w, saved)
+	for index, stop := range sess.model.Stops {
+		row, examples, err := sess.stopView(stop, w)
 		if err != nil {
-			return schema.LocalKickstartSession{}, err
+			return nil, err
 		}
-		if stop.Key == onboarding.FlowReview && reviewed {
-			diff := review.Diff
-			row.Diff = &diff
+		for _, slot := range examples {
+			slot.stop = index
+			draft.examples = append(draft.examples, slot)
+		}
+		if stop.Key == onboarding.FlowReview {
+			draft.reviewStop = index
 		}
 		stops = append(stops, row)
 	}
 
 	scope, err := schema.NewLocalKickstartScope(sess.scope.String())
 	if err != nil {
-		return schema.LocalKickstartSession{}, err
+		return nil, err
 	}
 	scan, err := sess.scan.wire()
 	if err != nil {
-		return schema.LocalKickstartSession{}, err
+		return nil, err
 	}
 	connect, err := sess.connectView(w)
 	if err != nil {
-		return schema.LocalKickstartSession{}, err
+		return nil, err
 	}
-	return schema.LocalKickstartSession{
+	draft.view = schema.LocalKickstartSession{
 		ID:        sess.id,
 		Scope:     scope,
 		Revision:  sess.revision,
 		OpenedAt:  sess.openedAt.UTC().Format(time.RFC3339),
 		Stops:     stops,
-		Conflicts: conflicts,
+		Conflicts: append([]schema.LocalKickstartConflict{}, sess.conflicts...),
 		Connect:   connect,
 		Scan:      scan,
 		Village:   schema.LocalKickstartVillage{Connected: facts.villageConnected, URL: facts.villageURL, UserID: facts.villageUserID},
-	}, nil
+	}
+	return draft, nil
 }
 
-// stopView projects one stop. saved, when it is set, is the configuration the
-// save would produce (the review's own), which the review stop's summary
-// explains; the working copy is the snapshot the file had when the session
-// opened, with the answers on top, and says nothing of a value the file took
-// since or of an answer a "theirs" choice gave up.
-func (s *kickstartSession) stopView(stop onboarding.Stop, w onboarding.WriteContext, saved *config.Config) (schema.LocalKickstartStop, error) {
+// completeView adds the parts of a view that read the file and run the redactor.
+// The review previews the save with the commit's own chain, so a save by the
+// other scope shows up as a row before this session's own save.
+func (st *kickstartSessions) completeView(d *kickstartViewDraft) {
+	for _, slot := range d.examples {
+		row := &d.view.Stops[slot.stop].Fields[slot.field]
+		lines, err := slot.of.Example(d.w)
+		if err != nil {
+			// The example is withheld and the reason travels with the field, so
+			// the page never shows a sample the redactor did not produce.
+			row.Refusal = &schema.LocalSettingRefusal{Key: row.Key, Error: err.Error()}
+			continue
+		}
+		example, err := exampleLines(lines)
+		if err != nil {
+			slog.Error("kickstart: an example does not project onto the wire and was withheld", "field", row.Key, "error", err)
+			row.Refusal = &schema.LocalSettingRefusal{Key: row.Key, Error: err.Error()}
+			continue
+		}
+		row.Example = example
+	}
+
+	review, reviewed := st.reviewOf(d.sess, d.facts)
+	if !reviewed {
+		return
+	}
+	d.view.Conflicts = reviewRows(d.sess.conflicts, review)
+	if d.reviewStop < 0 {
+		return
+	}
+	stop := &d.view.Stops[d.reviewStop]
+	diff := review.Diff
+	stop.Diff = &diff
+	if review.Saved == nil {
+		return
+	}
+	// The working copy is the snapshot the file had when the session opened, with
+	// the answers on top, and says nothing of a value the file took since or of
+	// an answer a "theirs" choice gave up; the configuration the save would
+	// produce does.
+	explained := d.w
+	explained.Config = review.Saved
+	summary, err := onboarding.BuildConsentSummary(d.sess.model, explained)
+	if err != nil {
+		slog.Error("kickstart: the review summary could not be explained over the saved configuration; the working copy's stands", "session", d.sess.id, "error", err)
+		return
+	}
+	stop.Summary = &schema.LocalKickstartSummary{Values: nonNil(summary.Values), Effects: nonNil(summary.Effects)}
+}
+
+// viewOf builds the whole view of a frozen session, for a read: the lock is not
+// held, so the slow parts are added at once.
+func (st *kickstartSessions) viewOf(frozen *kickstartSession) (schema.LocalKickstartSession, error) {
+	draft, err := st.draftView(frozen)
+	if err != nil {
+		return schema.LocalKickstartSession{}, err
+	}
+	st.completeView(draft)
+	return draft.view, nil
+}
+
+// stopView projects one stop without its examples, and lists the fields whose
+// example completeView adds.
+func (s *kickstartSession) stopView(stop onboarding.Stop, w onboarding.WriteContext) (schema.LocalKickstartStop, []kickstartExampleSlot, error) {
 	kind, err := schema.NewLocalKickstartStopKind(stop.Key.Kind().String())
 	if err != nil {
-		return schema.LocalKickstartStop{}, err
+		return schema.LocalKickstartStop{}, nil, err
 	}
 	shown := stop.Shown(w)
 	row := schema.LocalKickstartStop{
@@ -95,31 +182,31 @@ func (s *kickstartSession) stopView(stop onboarding.Stop, w onboarding.WriteCont
 			}
 		}
 	}
+	var examples []kickstartExampleSlot
 	for _, field := range stop.Fields {
 		if field == nil || !onboarding.Visible(field, w) {
 			continue
 		}
-		fieldRow, err := s.fieldView(stop, field, w, shown)
+		fieldRow, err := s.fieldView(stop, field, w)
 		if err != nil {
-			return schema.LocalKickstartStop{}, err
+			return schema.LocalKickstartStop{}, nil, err
+		}
+		if shown {
+			examples = append(examples, kickstartExampleSlot{field: len(row.Fields), of: field})
 		}
 		row.Fields = append(row.Fields, fieldRow)
 	}
 	if stop.Key == onboarding.FlowReview {
-		explained := w
-		if saved != nil {
-			explained.Config = saved
-		}
-		summary, err := onboarding.BuildConsentSummary(s.model, explained)
+		summary, err := onboarding.BuildConsentSummary(s.model, w)
 		if err != nil {
-			return schema.LocalKickstartStop{}, fmt.Errorf("build the review summary: %w", err)
+			return schema.LocalKickstartStop{}, nil, fmt.Errorf("build the review summary: %w", err)
 		}
 		row.Summary = &schema.LocalKickstartSummary{Values: nonNil(summary.Values), Effects: nonNil(summary.Effects)}
 	}
-	return row, nil
+	return row, examples, nil
 }
 
-func (s *kickstartSession) fieldView(stop onboarding.Stop, field onboarding.Field, w onboarding.WriteContext, stopShown bool) (schema.LocalKickstartField, error) {
+func (s *kickstartSession) fieldView(stop onboarding.Stop, field onboarding.Field, w onboarding.WriteContext) (schema.LocalKickstartField, error) {
 	kind, err := schema.NewLocalKickstartFieldKind(field.Kind().String())
 	if err != nil {
 		return schema.LocalKickstartField{}, err
@@ -142,24 +229,20 @@ func (s *kickstartSession) fieldView(stop onboarding.Stop, field onboarding.Fiel
 	for _, option := range field.Options() {
 		row.Options = append(row.Options, schema.LocalKickstartOption{Value: option.Value, Label: option.Label, Description: option.Description})
 	}
-	if !stopShown {
-		return row, nil
-	}
-	lines, err := field.Example(w)
-	if err != nil {
-		// The example is withheld and the reason travels with the field, so the
-		// page never shows a sample the redactor did not produce.
-		row.Refusal = &schema.LocalSettingRefusal{Key: row.Key, Error: err.Error()}
-		return row, nil
-	}
+	return row, nil
+}
+
+// exampleLines projects the lines of a field's example onto the wire.
+func exampleLines(lines []onboarding.ExampleLine) ([]schema.LocalKickstartLine, error) {
+	var out []schema.LocalKickstartLine
 	for _, line := range lines {
 		lineKind, err := schema.NewLocalKickstartLineKind(line.Kind.String())
 		if err != nil {
-			return schema.LocalKickstartField{}, err
+			return nil, err
 		}
-		row.Example = append(row.Example, schema.LocalKickstartLine{Kind: lineKind, Text: line.Text})
+		out = append(out, schema.LocalKickstartLine{Kind: lineKind, Text: line.Text})
 	}
-	return row, nil
+	return out, nil
 }
 
 // fieldValue is the value the page shows for a field: the answer, or the value
@@ -168,7 +251,7 @@ func (s *kickstartSession) fieldView(stop onboarding.Stop, field onboarding.Fiel
 // page passes that array to the picker as it is.
 func (s *kickstartSession) fieldValue(field onboarding.Field, w onboarding.WriteContext) (schema.LocalSettingValue, error) {
 	if field.Kind() == onboarding.FieldKindTree {
-		return kickstartTreeWireValue(s.tree.SessionIDs)
+		return onboarding.SelectionIDsListValue(s.tree.SessionIDs)
 	}
 	if answer, ok := s.answers[field.Key()]; ok {
 		return append(schema.LocalSettingValue(nil), answer...), nil

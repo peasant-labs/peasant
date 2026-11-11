@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -62,6 +63,21 @@ type ingestSelectionCase struct {
 	ExpectImported      []string `yaml:"expectImported"`
 	ExpectExcluded      []string `yaml:"expectExcluded"`
 	ExpectDiagnostic    bool     `yaml:"expectDiagnostic"`
+	// ExpectWritten is what the finish panel and the status route report for
+	// the run: the sessions written new and the sessions written again.
+	ExpectWritten *ingestSelectionWritten `yaml:"expectWritten"`
+	// ExpectIngestError makes the case run the import and require it to refuse
+	// to start, with each of these in its message.
+	ExpectIngestError []string `yaml:"expectIngestError"`
+	// ActiveRecordings leaves each recording's modification time at the moment
+	// it was written, so the run meets it while it is still being written.
+	// Without it every recording is two hours old.
+	ActiveRecordings bool `yaml:"activeRecordings"`
+}
+
+type ingestSelectionWritten struct {
+	New     int `yaml:"new"`
+	Updated int `yaml:"updated"`
 }
 
 func loadIngestSelectionFixture(t *testing.T) ingestSelectionFixture {
@@ -157,6 +173,14 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	}
 	writeClaudeSession(t, filepath.Join(project, ids.Selected+".jsonl"), ids.Selected, selectedCWD, branchOf(item))
 	writeClaudeSession(t, filepath.Join(project, ids.Other+".jsonl"), ids.Other, otherCWD, "main")
+	if item.ActiveRecordings {
+		for _, id := range []string{ids.Selected, ids.Other} {
+			now := time.Now()
+			if err := os.Chtimes(filepath.Join(project, id+".jsonl"), now, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	if item.WithChild {
 		childDir := filepath.Join(project, ids.Selected, "subagents")
 		if err := os.MkdirAll(childDir, 0o700); err != nil {
@@ -169,6 +193,10 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	hs := newTestXDGHomes(t)
 	handler := hs.handler(nil, cfg)
 	handler.configPath = filepath.Join(root, "custom-config", "settings.yaml")
+	if len(item.ExpectIngestError) > 0 {
+		assertIngestRefused(t, handler, item.ExpectIngestError)
+		return
+	}
 	if item.PreludeAll {
 		prelude := hs.handler(nil, webIngestConfig(t, source, output, ingestSelectionCase{Mode: "all"}, "", ""))
 		first := runWebIngest(t, prelude, false)
@@ -176,6 +204,9 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	}
 	result := runWebIngest(t, handler, item.ThroughRoute)
 	assertIngestMembership(t, result, item.ExpectImported, item.ExpectExcluded)
+	if item.ExpectWritten != nil {
+		assertIngestWritten(t, handler, *item.ExpectWritten)
+	}
 	if item.PreludeAll {
 		opts, err := store.ManagedGenerationOptions(output)
 		if err != nil {
@@ -209,6 +240,49 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 		if !found {
 			t.Fatalf("ingest diagnostics do not name the withheld session %s and config %s: %+v", ids.Selected, configPath, result.Diagnostics)
 		}
+	}
+}
+
+// assertIngestRefused runs the import and requires it to end in an error that
+// says what is wrong and where, before it read or imported any source.
+func assertIngestRefused(t *testing.T, handler *syncHandler, wantInMessage []string) {
+	t.Helper()
+	handler.runIngestPipeline(ingest.NewProgressState())
+	handler.mu.Lock()
+	status, refusal, result := handler.ingestStatus, handler.ingestError, handler.ingestResult
+	handler.mu.Unlock()
+	if status != "error" || refusal == nil || result != nil {
+		t.Fatalf("the import status = %q, error = %v, result = %v; want an error and no result", status, refusal, result)
+	}
+	for _, part := range wantInMessage {
+		if !strings.Contains(refusal.Error(), part) {
+			t.Errorf("the refusal %q should contain %q", refusal, part)
+		}
+	}
+}
+
+// assertIngestWritten checks the counts the finish panel is given when the
+// import ends and the counts the status route serves to a tab that reconnects:
+// both are what the run wrote, one number each for new and updated.
+func assertIngestWritten(t *testing.T, handler *syncHandler, want ingestSelectionWritten) {
+	t.Helper()
+	wire := handler.ingestWire()
+	if wire.New != want.New || wire.Updated != want.Updated {
+		t.Errorf("the finish panel is told %d new and %d updated, want %d and %d", wire.New, wire.Updated, want.New, want.Updated)
+	}
+	response := httptest.NewRecorder()
+	handler.handleSyncIngestStatus(response, httptest.NewRequest(http.MethodGet, "/api/v1/sync/ingest/status", nil))
+	var status struct {
+		Result struct {
+			New     int `json:"new"`
+			Updated int `json:"updated"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode the ingest status: %v; body %s", err, response.Body.String())
+	}
+	if status.Result.New != want.New || status.Result.Updated != want.Updated {
+		t.Errorf("the status route reports %d new and %d updated, want %d and %d", status.Result.New, status.Result.Updated, want.New, want.Updated)
 	}
 }
 
@@ -323,7 +397,7 @@ func runMovedCloneTreeAndImportAgree(t *testing.T, ids ingestSelectionIDs, item 
 
 	// tree is what the setup tree shows: the branch each session is listed under
 	// and the sessions the saved selection marks as chosen.
-	tree := func(known discovery.KnownSessionIndex) (map[string]string, []string) {
+	tree := func(known ingest.KnownSessionIndex) (map[string]string, []string) {
 		_, listings, relation := discovery.Scan(t.Context(), cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, known, nil, nil)
 		prepared := discovery.PrepareSessionListings(listings, ingest.NewPhysicalPathResolver())
 		forest, _, err := onboarding.RestoreSelection(discovery.BuildForest(prepared, nil, relation), cfg.Selection)

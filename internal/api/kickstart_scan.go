@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -13,10 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/schema"
 )
-
-// kickstartDroppedLabelsMax is how many vanished choices a scan names. The count
-// carries the rest.
-const kickstartDroppedLabelsMax = 3
 
 // startScanLocked starts a discovery job for the session, replacing a running
 // one. The job reports through the session, so a result that arrives after the
@@ -164,37 +161,21 @@ func (st *kickstartSessions) runScan(ctx context.Context, sess *kickstartSession
 // Tabs learn of it twice, in order: a scan event that reports done, on which
 // they reload the forest, then a session event that carries the pruned answer.
 func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, result kickstartScanResult) {
-	st.mutate(func() []schema.LocalKickstartEvent {
+	st.mutateViews(func() ([]schema.LocalKickstartEvent, []*kickstartViewDraft) {
 		if sess.closed || sess.scanGen != gen {
-			return nil
+			return nil, nil
 		}
 		before := sess.snapshot()
-		oldLabels := forestLabels(sess.forest)
 
 		dropped := onboarding.DroppedSelections{}
-		var droppedLabels []string
 		prunedTree := false
-		if ids, answered := kickstartTreeIDs(sess.answers); answered {
-			kept, found := onboarding.RescanIDs(ids, result.forest)
+		if ids, answered := onboarding.SelectionIDs(sess.answers[onboarding.FieldSelection]); answered {
+			kept, found := onboarding.RescanIDs(ids, sess.forest, result.forest)
 			dropped = found
 			if found.Count > 0 {
-				keptSet := make(map[string]struct{}, len(kept))
-				for _, id := range kept {
-					keptSet[id] = struct{}{}
-				}
-				for _, id := range ids {
-					if _, ok := keptSet[id]; ok || len(droppedLabels) >= kickstartDroppedLabelsMax {
-						continue
-					}
-					label := oldLabels[id]
-					if label == "" {
-						label = id
-					}
-					droppedLabels = append(droppedLabels, label)
-				}
-				value, err := kickstartTreeAnswer(kept)
+				value, err := onboarding.SelectionIDsValue(kept)
 				if err != nil {
-					return st.failScanLocked(sess, err)
+					return st.failScanLocked(sess, err), nil
 				}
 				sess.answers[onboarding.FieldSelection] = value
 				prunedTree = true
@@ -207,7 +188,7 @@ func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, resu
 		sess.scan.phase = result.note
 		sess.scan.locked = onboarding.LockedRows(result.forest)
 		sess.scan.droppedCount = dropped.Count
-		sess.scan.droppedLabels = droppedLabels
+		sess.scan.droppedLabels = dropped.Labels
 		if sess.cancelScan != nil {
 			sess.cancelScan()
 			sess.cancelScan = nil
@@ -217,7 +198,7 @@ func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, resu
 		scan, err := sess.scan.wire()
 		if err != nil {
 			sess.restore(before)
-			return st.failScanLocked(sess, err)
+			return st.failScanLocked(sess, err), nil
 		}
 		events := []schema.LocalKickstartEvent{{Kind: schema.LocalKickstartEventScan, SessionID: sess.id, Revision: scanRevision, Scan: &scan}}
 
@@ -227,14 +208,14 @@ func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, resu
 		}
 		if err := st.rebuildLocked(sess); err != nil {
 			sess.restore(before)
-			return st.failScanLocked(sess, fmt.Errorf("rebuild the draft over the new forest: %w", err))
+			return st.failScanLocked(sess, fmt.Errorf("rebuild the draft over the new forest: %w", err)), nil
 		}
-		view, err := st.viewLocked(sess)
+		draft, err := st.draftView(sess.frozen())
 		if err != nil {
 			sess.restore(before)
-			return st.failScanLocked(sess, err)
+			return st.failScanLocked(sess, err), nil
 		}
-		return append(events, schema.LocalKickstartEvent{Kind: schema.LocalKickstartEventSession, SessionID: sess.id, Revision: revision, View: &view})
+		return append(events, schema.LocalKickstartEvent{Kind: schema.LocalKickstartEventSession, SessionID: sess.id, Revision: revision, View: &draft.view}), []*kickstartViewDraft{draft}
 	})
 }
 
@@ -269,33 +250,21 @@ func (st *kickstartSessions) failScanLocked(sess *kickstartSession, cause error)
 	return []schema.LocalKickstartEvent{{Kind: schema.LocalKickstartEventScan, SessionID: sess.id, Revision: revision, Scan: &scan}}
 }
 
-func forestLabels(forest onboarding.Forest) map[string]string {
-	labels := make(map[string]string, len(forest.Nodes))
-	for _, node := range forest.Nodes {
-		labels[node.ID] = node.Label
-	}
-	return labels
-}
-
 // providerNote says which harnesses discovery could not read, so a scan that
 // listed fewer sessions than expected explains itself. It is empty when every
 // configured harness was inspected.
 func providerNote(inventory discovery.ProviderInventory) string {
-	harnesses := make([]string, 0, len(inventory))
-	for harness, found := range inventory {
-		if !found.State.IsOperational() {
-			harnesses = append(harnesses, string(harness))
+	notes := make([]string, 0, len(inventory))
+	for _, harness := range slices.Sorted(maps.Keys(inventory)) {
+		found := inventory[harness]
+		if found.State.IsOperational() {
+			continue
 		}
-	}
-	sort.Strings(harnesses)
-	notes := make([]string, 0, len(harnesses))
-	for _, name := range harnesses {
-		found := inventory[defaults.Harness(name)]
 		detail := found.Detail
 		if detail == "" {
 			detail = string(found.State)
 		}
-		notes = append(notes, fmt.Sprintf("%s could not be read: %s", schema.HarnessDisplayName(defaults.Harness(name)), detail))
+		notes = append(notes, fmt.Sprintf("%s could not be read: %s", schema.HarnessDisplayName(harness), detail))
 	}
 	return strings.Join(notes, "; ")
 }

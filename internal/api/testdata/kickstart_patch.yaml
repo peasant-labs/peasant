@@ -9,6 +9,7 @@ requiredNames:
   - connect-skip-records-session-only
   - resolutions-echo
   - stale-tree-answer-names-the-array-it-replaced
+  - hidden-field-answer-refused
 cases:
   - name: one-answer-per-field
     world: {listings: two-projects, gate: true}
@@ -214,55 +215,78 @@ cases:
         body: {scope: full}
         json: {id: ses-2, connect.offered: true}
 
+  # The user's choice on a conflict row is made against the file value the row
+  # showed. Every step goes through the routes: another program changes the
+  # file, the save is refused with its rows, the choices are sent, and the save
+  # is judged against the file as it is then.
   - name: resolutions-echo
-    world: {listings: two-projects, gate: true}
+    world:
+      listings: two-projects
+      gate: true
+      village: connected
+      config: |
+        version: 1
+        push:
+          visibility: private
+          license: ""
     steps:
       - call: POST /api/v1/kickstart/sessions
         body: {scope: full}
         save: {full: id}
-      - call: PATCH /api/v1/kickstart/sessions/{full}
-        body: {revision: 1, values: {publication-preference: share-later, content-license: CC0-1.0}}
-        json: {revision: 2}
-      # a refused save names a row for each answered field whose file value moved
-      - conflicts:
-          session: full
-          rows:
-            - {field: publication-preference, stop: publication, label: publication preference, mine: share-later, theirs: ""}
-            - {field: content-license, stop: license, label: default license, mine: CC0-1.0, theirs: CC-BY-4.0}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
       - call: GET /api/v1/kickstart/sessions/{full}
-        json: {revision: 3}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0, default-visibility: public}}
+        json: {stale: false}
+      - await: {kind: answers, session: "{full}"}
+      # another program changes both settings the user answered
+      - editConfig: {from: 'license: ""', to: "license: CC-BY-4.0"}
+      - editConfig: {from: "visibility: private", to: "visibility: group"}
+      # the refused save names a row for each, with the file value as it is now
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 409
         len: {conflicts: 2}
-      # the user keeps theirs for the license and mine for the preference
-      - call: PATCH /api/v1/kickstart/sessions/{full}
-        body: {revision: 3, resolutions: {content-license: theirs, publication-preference: mine}}
         json:
-          revision: 4
+          "conflicts[field=content-license].mine": CC0-1.0
+          "conflicts[field=content-license].theirs": CC-BY-4.0
+          "conflicts[field=default-visibility].mine": public
+          "conflicts[field=default-visibility].theirs": group
+      - await: {kind: conflicts, session: "{full}", len: {view.conflicts: 2}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+        len: {conflicts: 2}
+      # the user keeps their license and takes the file's visibility
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {content-license: mine, default-visibility: theirs}}
+        json:
           stale: false
-          "view.stops[key=publication].fields[key=publication-preference].value": share-later
-          "view.stops[key=license].fields[key=content-license].value": ""
+          "view.stops[key=license].fields[key=content-license].value": CC0-1.0
         len: {view.conflicts: 0}
-      - events:
-          - {kind: answers, revision: 2}
-          - {kind: conflicts, revision: 3}
-          - kind: conflicts
-            revision: 4
-            len: {view.conflicts: 0}
-      # what the save reads: the preference is still answered with the user's side
-      # chosen against the file value the user saw; the license answer was given up
-      - commit:
-          session: full
-          action: begin
-          answered: [publication-preference]
-          resolutions: {publication-preference: mine}
-          seen: {publication-preference: ""}
+      - await: {kind: conflicts, session: "{full}", len: {view.conflicts: 0}}
+      # the choice was made against CC-BY-4.0. The file moves on again, so the
+      # choice settles nothing about the value now there: the row comes back
+      - editConfig: {from: "license: CC-BY-4.0", to: "license: CC-BY-SA-4.0"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 409
+        len: {conflicts: 1}
+        json:
+          conflicts.0.field: content-license
+          conflicts.0.mine: CC0-1.0
+          conflicts.0.theirs: CC-BY-SA-4.0
+      - await: {kind: conflicts, session: "{full}", len: {view.conflicts: 1}}
+      - configHas: ["license: CC-BY-SA-4.0", "visibility: group"]
+      # keeping theirs for what was seen is still a choice about the value now seen
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
       - call: PATCH /api/v1/kickstart/sessions/{full}
-        body: {revision: 4, values: {content-license: CC0-1.0}}
-        status: 400
-        json: {code: kickstart_session_committing}
-      - commit: {session: full, action: abort}
-      - call: PATCH /api/v1/kickstart/sessions/{full}
-        body: {revision: 4, values: {content-license: CC0-1.0}}
-        json: {revision: 5}
+        body: {revision: "{rev}", resolutions: {content-license: mine}}
+        len: {view.conflicts: 0}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      # the user's license is saved; the visibility is the file's, never overwritten
+      - configHas: ["license: CC0-1.0", "visibility: group"]
 
   - name: stale-tree-answer-names-the-array-it-replaced
     world: {listings: two-projects}
@@ -285,3 +309,56 @@ cases:
           overwritten.0.revision: "{first}"
           "view.stops[key=selection].fields[key=transcripts].value.0": 22222222-2222-4222-8222-222222222222
         len: {overwritten: 1, overwritten.0.previous: 1}
+
+  # A field the setup does not show takes no answer. The refusal names the field
+  # and the condition that hides it, changes nothing, and publishes nothing.
+  - name: hidden-field-answer-refused
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      # the sharing stop is shown only while this computer is connected to online
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {default-visibility: private}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+        contains: {error: "default-visibility is shown only when village-connected"}
+      # a request with one hidden answer applies none of its shown ones
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: CC0-1.0, default-visibility: private}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json:
+          revision: 1
+          "stops[key=license].fields[key=content-license].value": ""
+      - events: []
+      # the refusal follows the sign-in: once connected the same answer is taken
+      - setVillage: connected
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {default-visibility: private}}
+        json:
+          revision: 2
+          "view.stops[key=destination].fields[key=default-visibility].value": private
+      - events:
+          - {kind: answers, revision: 2}
+      # the sign-in is lost again, and the stop is hidden again
+      - setVillage: disconnected
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {default-visibility: group}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+      # the retention stop is shown only once the scan found Claude sessions
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {claude-retention-days: 365}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+        contains: {error: "claude-retention-days is shown only when claude-sessions-present"}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {claude-retention-days: 365}}
+        json: {"view.stops[key=retention].fields[key=claude-retention-days].value": 365}

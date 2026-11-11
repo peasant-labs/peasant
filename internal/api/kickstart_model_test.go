@@ -75,7 +75,11 @@ func TestKickstartServedModelEqualsTheNeutralModel(t *testing.T) {
 					if label == "" {
 						label = stop.Title
 					}
-					if servedField.Key != field.Key().String() || servedField.Kind.String() != field.Kind().String() || servedField.Label != label || servedField.Description != field.Description() {
+					sameField := servedField.Key == field.Key().String() &&
+						servedField.Kind.String() == field.Kind().String() &&
+						servedField.Label == label &&
+						servedField.Description == field.Description()
+					if !sameField {
 						t.Errorf("field %s differs from the model's: served %s %s %q %q", field.Key(), servedField.Key, servedField.Kind, servedField.Label, servedField.Description)
 					}
 					options := field.Options()

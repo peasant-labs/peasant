@@ -167,6 +167,22 @@ type SessionBranchEvidence struct {
 	Directory string
 }
 
+// SessionBranchFor is the branch a discovered session belongs to. It builds the
+// evidence for the session from what its transcript recorded and from what the
+// known-session index holds for it (record and stored are the result of
+// KnownSessionIndex.Reusable; the zero record and false when there is none), and
+// lets ResolveSessionBranch decide. The tree and the import filter both call
+// it, so neither can build the evidence another way.
+func SessionBranchFor(ctx context.Context, git GitResolver, session DiscoveredSession, record KnownSession, stored bool) string {
+	return ResolveSessionBranch(ctx, git, SessionBranchEvidence{
+		Harness:      session.Harness,
+		Recorded:     session.Branch,
+		StoredBranch: record.Branch,
+		StoredKnown:  stored,
+		Directory:    SessionProjectDirectory(session),
+	})
+}
+
 // ResolveSessionBranch is the one precedence for which branch a session belongs
 // to, for the tree and for the import alike:
 //

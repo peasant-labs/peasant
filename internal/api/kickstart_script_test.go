@@ -90,9 +90,8 @@ type kickstartSpec struct {
 	NextSteps []string `yaml:"nextSteps"`
 }
 
-// kickstartStep is one thing a case does or checks. Exactly one of Call,
-// Await, Events, Release, SetListings, SetVillage, Expire, WS, or WSEvents is
-// set.
+// kickstartStep is one thing a case does or checks. Exactly one of the fields
+// below is set.
 type kickstartStep struct {
 	// Call is "METHOD /path"; {name} is replaced by a saved value.
 	Call    string `yaml:"call"`
@@ -133,10 +132,10 @@ type kickstartStep struct {
 	Idle string `yaml:"idle"`
 	// SetStoredError changes the local-store failure the next scan meets.
 	SetStoredError *string `yaml:"setStoredError"`
-	// Commit drives the seam a commit uses.
+	// Commit holds a session in the state a save puts it in, or frees it. It is
+	// the one seam in the script: a save under way cannot be held open through
+	// the route, and a case that needs the state itself needs it held.
 	Commit *kickstartCommitStep `yaml:"commit"`
-	// Conflicts publishes conflict rows the way a commit does.
-	Conflicts *kickstartConflictsStep `yaml:"conflicts"`
 	// ConfigFile checks the configuration file on disk: "unchanged" or "absent".
 	ConfigFile string `yaml:"configFile"`
 
@@ -166,24 +165,6 @@ type kickstartCommitStep struct {
 	Action string `yaml:"action"`
 	// Error is a substring the action's refusal must contain.
 	Error string `yaml:"error"`
-	// Answered and Resolutions are what begin must have read.
-	Answered    []string          `yaml:"answered"`
-	Resolutions map[string]string `yaml:"resolutions"`
-	// Seen is the file value a resolution must carry as the one the user saw.
-	Seen map[string]any `yaml:"seen"`
-}
-
-type kickstartConflictsStep struct {
-	Session string              `yaml:"session"`
-	Rows    []kickstartConflict `yaml:"rows"`
-}
-
-type kickstartConflict struct {
-	Field  string `yaml:"field"`
-	Stop   string `yaml:"stop"`
-	Label  string `yaml:"label"`
-	Mine   any    `yaml:"mine"`
-	Theirs any    `yaml:"theirs"`
 }
 
 // kickstartRevisionFrom names a revision relative to one a step saved: the saved
@@ -453,7 +434,7 @@ func (w *kickstartWorld) setListings(name string) {
 
 // scan is what the filesystem scan finds. It reports its phase and one count per
 // session, as the real scan does.
-func (w *kickstartWorld) scan(ctx context.Context, _ *config.Config, _ discovery.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
+func (w *kickstartWorld) scan(ctx context.Context, _ *config.Config, _ ingest.KnownSessionIndex, progress discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
 	if w.gate != nil {
 		select {
 		case <-w.gate:
@@ -462,7 +443,7 @@ func (w *kickstartWorld) scan(ctx context.Context, _ *config.Config, _ discovery
 		}
 	}
 	listings := *w.listings.Load()
-	progress.SetPhase("Discovering Claude Code sessions...")
+	progress.SetPhase(discovery.DiscoveringPhase(defaults.HarnessClaudeCode))
 	for index := range listings {
 		progress.SetProgress(index+1, len(listings))
 	}
@@ -532,8 +513,6 @@ func (w *kickstartWorld) run(index int, step kickstartStep) {
 		w.storedError.Store(step.SetStoredError)
 	case step.Commit != nil:
 		w.commit(index, *step.Commit)
-	case step.Conflicts != nil:
-		w.conflicts(index, *step.Conflicts)
 	case step.ConfigFile != "":
 		w.configFile(index, step.ConfigFile)
 	case step.ReleaseIngest:
@@ -1008,7 +987,9 @@ func (w *kickstartWorld) wsRead(index int, read kickstartWSRead) {
 	}
 }
 
-// commit drives the seam the commit owner uses, the way a commit route would.
+// commit holds a session in the state a save puts it in, or frees it. A save
+// under way cannot be held open through the route: it is one request that ends
+// when the save does. Every other part of a save is driven through the route.
 func (w *kickstartWorld) commit(index int, step kickstartCommitStep) {
 	w.t.Helper()
 	id := fmt.Sprint(w.vars[step.Session])
@@ -1018,29 +999,8 @@ func (w *kickstartWorld) commit(index int, step kickstartCommitStep) {
 	case "begin":
 		var draft kickstartDraft
 		draft, err = sessions.beginCommit(id)
-		if err == nil {
-			answered := make([]string, len(draft.Answered))
-			for i, key := range draft.Answered {
-				answered[i] = key.String()
-			}
-			if step.Answered != nil && !reflect.DeepEqual(answered, step.Answered) {
-				w.fail(index, "the draft's answered fields are %v, want %v", answered, step.Answered)
-			}
-			for field, side := range step.Resolutions {
-				if got := draft.Resolutions[onboarding.FieldKey(field)]; string(got.Choice) != side {
-					w.fail(index, "the draft's resolution for %s is %q, want %q", field, got.Choice, side)
-				}
-			}
-			for field, want := range step.Seen {
-				got := draft.Resolutions[onboarding.FieldKey(field)].Seen
-				wantJSON, _ := json.Marshal(want)
-				if !equalSettingValue(got, wantJSON) {
-					w.fail(index, "the draft's resolution for %s saw %s, want %s", field, got, wantJSON)
-				}
-			}
-			if draft.SessionID != id || draft.Draft == nil || draft.Write.Config == nil {
-				w.fail(index, "the draft does not carry its session, draft, and write context: %+v", draft)
-			}
+		if err == nil && (draft.Draft == nil || draft.Write.Config == nil) {
+			w.fail(index, "the draft does not carry its draft and write context: %+v", draft)
 		}
 	case "abort":
 		sessions.abortCommit(id)
@@ -1054,20 +1014,6 @@ func (w *kickstartWorld) commit(index int, step kickstartCommitStep) {
 		w.fail(index, "commit %s succeeded, want an error containing %q", step.Action, step.Error)
 	case step.Error != "" && !strings.Contains(err.Error(), step.Error):
 		w.fail(index, "commit %s: %v, want an error containing %q", step.Action, err, step.Error)
-	}
-}
-
-// conflicts publishes conflict rows the way a refused commit does.
-func (w *kickstartWorld) conflicts(index int, step kickstartConflictsStep) {
-	w.t.Helper()
-	rows := make([]schema.LocalKickstartConflict, len(step.Rows))
-	for i, row := range step.Rows {
-		mine, _ := json.Marshal(row.Mine)
-		theirs, _ := json.Marshal(row.Theirs)
-		rows[i] = schema.LocalKickstartConflict{Field: row.Field, Stop: row.Stop, Label: row.Label, Mine: mine, Theirs: theirs}
-	}
-	if _, err := w.server.kickstart.publishConflicts(fmt.Sprint(w.vars[step.Session]), rows); err != nil {
-		w.fail(index, "publish conflicts: %v", err)
 	}
 }
 

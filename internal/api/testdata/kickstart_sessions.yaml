@@ -348,7 +348,8 @@ cases:
         save: {full: id}
       - release: true
       - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
-      # the other scope opens after the wizard's scan, so its held scan says nothing
+      # the other scope opens after the wizard's scan, so its held scan says
+      # nothing; saving the wizard's session does not end the selection page's
       - call: POST /api/v1/kickstart/sessions
         body: {scope: selection}
         save: {selection: id}
@@ -362,18 +363,24 @@ cases:
         status: 400
         json: {code: kickstart_session_committing}
       - commit: {session: full, action: abort}
-      # the commit route saves it: the session ends as committed, and the import's
-      # end follows under the same id with the next revision
+      # the wizard answers, and the commit route saves it: the session ends as
+      # committed, and the import's end follows under the same id with the next
+      # revision
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+        save: {answered: revision}
+      - await: {kind: answers, session: "{full}"}
       - call: POST /api/v1/kickstart/sessions/{full}/commit
         json: {saved: true}
+        len: {nextSteps: 5}
       - events:
           - kind: closed
             session: "{full}"
-            revisionFrom: {saved: rev, plus: 1}
+            revisionFrom: {saved: answered, plus: 1}
             json: {reason: committed, committed.saved: true, committed.nextSteps.0: config}
             len: {committed.nextSteps: 5}
             absent: [view, scan, ingest]
-          - {kind: ingest, session: "{full}", revisionFrom: {saved: rev, plus: 2}, json: {ingest.state: idle}, absent: [view, committed]}
+          - {kind: ingest, session: "{full}", revisionFrom: {saved: answered, plus: 2}, json: {ingest.state: idle}, absent: [view, committed]}
       - call: GET /api/v1/kickstart/sessions/{full}
         status: 404
       - call: GET /api/v1/kickstart/sessions/{selection}
