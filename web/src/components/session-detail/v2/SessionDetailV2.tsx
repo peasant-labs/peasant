@@ -16,6 +16,9 @@ import {
   annotateTranscript,
   cleanSessionTitle,
   computeAnalytics,
+  DEFAULT_TRANSCRIPT_FILTERS,
+  applyFilterIntent,
+  encodeFilterIntent,
   type AdaptTranscriptOptions,
   type TranscriptInitialPosition,
   type TranscriptTab,
@@ -97,6 +100,20 @@ type ScorecardMedians = {
 /** The disclosed retained-history sections, keyed the way the viewer keys them. */
 type EarlierHistoryOpen = Record<string, boolean>;
 
+const FILTER_INTENT_KEY = 'peasant.transcript.filter-intent';
+type TranscriptFilters = NonNullable<React.ComponentProps<typeof TranscriptViewer>['filters']>;
+
+function readTranscriptFilters(): TranscriptFilters {
+  try {
+    const stored = window.localStorage.getItem(FILTER_INTENT_KEY);
+    return applyFilterIntent(DEFAULT_TRANSCRIPT_FILTERS, stored ? JSON.parse(stored) : undefined);
+  } catch {
+    return applyFilterIntent(DEFAULT_TRANSCRIPT_FILTERS, undefined);
+  }
+}
+
+const attachmentUrl = (ref: string) => `/api/v1/attachments/${encodeURIComponent(ref)}`;
+
 /**
  * Renders the demo's drop-in composite (`TranscriptViewer`) through the one
  * wire-to-view adapter (`adaptTranscript`). Peasant owns the *data layer* (the
@@ -137,6 +154,22 @@ export function SessionDetailV2(props: SessionDetailV2Props) {
 
 function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery }: SessionDetailV2Props) {
   const toast = useToast();
+  const [filters, setFilters] = useState<TranscriptFilters>(readTranscriptFilters);
+  const changeFilters = useCallback((next: TranscriptFilters) => {
+    try {
+      if (next === DEFAULT_TRANSCRIPT_FILTERS) {
+        window.localStorage.removeItem(FILTER_INTENT_KEY);
+      } else if (next.categories?.system !== filters.categories?.system) {
+        const intent = encodeFilterIntent(next);
+        // The encoder emits deviations. Preserve an explicit decision to hide.
+        if (next.categories?.system === false) intent.system = false;
+        window.localStorage.setItem(FILTER_INTENT_KEY, JSON.stringify(intent));
+      }
+    } catch {
+      // Storage may be unavailable; the current reading session still works.
+    }
+    setFilters(next);
+  }, [filters]);
   // Host element for the mounted viewer; the per-session reading state replays
   // the inner scroller offset against it on the way back.
   const transcriptHostRef = useRef<HTMLDivElement | null>(null);
@@ -575,7 +608,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   };
 
   // Host-owned status context contains state the reader needs: the active-scope
-  // chip plus stale-link and connection-error status. View controls remain in
+  // chip and stale-link status. View controls remain in
   // the shared composite, while copy-as-markdown is a header action below.
   //
   // The recorded teammate identity and the parent transcript link lead the
@@ -641,14 +674,6 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           </FeedbackPanel>
         </div>
       )}
-      {detailFault != null && (
-        <div className="flex flex-col items-start gap-2">
-          <p role="status" className="text-[12px] text-danger">
-            {detailFault.message}
-          </p>
-          <Button variant="secondary" size="sm" onClick={refreshDetail}>try again</Button>
-        </div>
-      )}
       {!history.sections && (
         <div>
           <Button variant="secondary" size="sm" disabled={history.loading} onClick={() => void history.load()}>
@@ -691,10 +716,22 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           .filter(Boolean)
           .join(' ')}
       >
+        {detailFault && (
+          <div>
+            <FeedbackPanel variant="error" title="transcript update unavailable">
+              {detailFault.message}
+              {' '}
+              <Button variant="secondary" size="sm" onClick={refreshDetail}>try again</Button>
+            </FeedbackPanel>
+          </div>
+        )}
         <div className="flex-1 min-h-0">
           <TranscriptViewer
             headingLevel={1}
             viewModel={vm!}
+            filters={filters}
+            onFiltersChange={changeFilters}
+            attachmentUrl={attachmentUrl}
             theme={theme}
             activeTab={activeTab}
             onTabChange={setActiveTab}
