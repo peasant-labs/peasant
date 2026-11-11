@@ -1,0 +1,30 @@
+# The branch OpenCode's managed (SQLite) projection stores for a session. It uses
+# the same ingest.ResolveGitBranch as every other harness: the recorded branch
+# wins and the checked-out branch answers only when none was recorded. The
+# checked-out branch is main in every case.
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - projection-recorded-branch-wins-over-checkout
+  - projection-checkout-answers-when-nothing-recorded
+  - projection-without-a-directory-asks-git-nothing
+cases:
+  - name: projection-recorded-branch-wins-over-checkout
+    cwd: /work/tool
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: projection-checkout-answers-when-nothing-recorded
+    cwd: /work/tool
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
+  # With no working directory there is no checkout to ask, even when a branch
+  # was recorded: the projection keeps no git context at all. The project table
+  # still names a root, so the session has an identity.
+  - name: projection-without-a-directory-asks-git-nothing
+    projectWorktree: /work/project-root
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: ""
+    wantCheckoutCalls: 0

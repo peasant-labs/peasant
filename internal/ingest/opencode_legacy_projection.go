@@ -944,10 +944,7 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 	}
 	var gitBranch, gitRemote, gitWorktree, gitTracking *string
 	if workDir != "" {
-		value := session.Branch
-		if value == "" {
-			value, _ = a.git.Branch(ctx, workDir)
-		}
+		value := ResolveGitBranch(ctx, a.git, workDir, session.Branch)
 		if value != "" {
 			gitBranch = &value
 		}

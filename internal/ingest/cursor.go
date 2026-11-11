@@ -831,11 +831,7 @@ func (a *CursorAdapter) enrichCursorProject(ctx context.Context, meta *UnifiedMe
 		return
 	}
 
-	branchStr, branchErr := a.git.Branch(ctx, projectDir)
-	branch := session.Branch
-	if branch == "" && branchErr == nil {
-		branch = branchStr
-	}
+	branch := ResolveGitBranch(ctx, a.git, projectDir, session.Branch)
 	remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, projectDir, branch, "")
 	remoteErr := error(nil)
 	// Walk up parent directories if direct remote lookup fails — handles cases where

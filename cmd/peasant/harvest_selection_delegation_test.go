@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -36,6 +37,9 @@ type harvestDelegationCase struct {
 	Conflict               bool     `yaml:"conflict"`
 	BranchRule             bool     `yaml:"branchRule"`
 	RecordedElsewhere      bool     `yaml:"recordedElsewhere"`
+	Unrecorded             bool     `yaml:"unrecorded"`
+	MoveClone              bool     `yaml:"moveClone"`
+	ExpectNoLeftOutNotice  bool     `yaml:"expectNoLeftOutNotice"`
 	PreludeAll             bool     `yaml:"preludeAll"`
 	Session                string   `yaml:"session"`
 	ExpectFilter           bool     `yaml:"expectFilter"`
@@ -95,6 +99,10 @@ func runHarvestDelegationCase(t *testing.T, ids harvestDelegationIDs, item harve
 		// The clone stays on the admitted branch; the session was recorded on another.
 		writeConflictedSession(t, source, conflict, conflict.RejectedBranch)
 	}
+	if item.Unrecorded {
+		// The recording names no branch, so only the store or the clone can place it.
+		writeConflictedSession(t, source, conflict, "")
+	}
 
 	cfg := config.BaseConfig()
 	cfg.Output.BasePath = output
@@ -153,6 +161,14 @@ func runHarvestDelegationCase(t *testing.T, ids harvestDelegationIDs, item harve
 			t.Fatalf("prelude harvest --all: %v\n%s", err, out)
 		}
 	}
+	if item.MoveClone {
+		// The clone leaves the branch the first harvest stored the session on.
+		move := exec.Command("git", "checkout", "--quiet", "-b", "moved-on")
+		move.Dir = source
+		if out, err := move.CombinedOutput(); err != nil {
+			t.Fatalf("move the clone to another branch: %v\n%s", err, out)
+		}
+	}
 	if item.Conflict {
 		control, err := runDelegationHarvest(t, dir, configPath, []string{"--include-active", "--output", output, "--source-harness", "claude-code", "--source-path", source})
 		if err != nil || !strings.Contains(control, "was withheld during ingest") {
@@ -175,6 +191,9 @@ func runHarvestDelegationCase(t *testing.T, ids harvestDelegationIDs, item harve
 	out, err := runDelegationHarvest(t, dir, configPath, args)
 	if err != nil {
 		t.Fatalf("harvest: %v\n%s", err, out)
+	}
+	if item.ExpectNoLeftOutNotice && strings.Contains(out, "excluded by selection") {
+		t.Fatalf("harvest left a session out although the store places it on the chosen branch:\n%s", out)
 	}
 	if item.ExpectNoWithholdNotice && strings.Contains(out, "was withheld during ingest") {
 		t.Fatalf("index-only harvest printed a selection withhold notice:\n%s", out)

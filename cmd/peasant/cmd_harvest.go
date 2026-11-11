@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
@@ -461,18 +462,6 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		pipelineCfg.Since = &cutoff
 	}
 
-	// 6d. Saved selection scopes native discovery, not stored maintenance.
-	// Index-only, --all, and an explicit --session keep their own scope and do
-	// not apply the saved selection.
-	var selectionConflicts *selectionfilter.ConflictRecorder
-	if harvestAppliesSavedSelection(mode, flags, cfg) {
-		selectionFilter, recorder := selectionfilter.New(cfg, git, ingest.NewPhysicalPathResolver())
-		pipelineCfg.PrepareSessionFilter = selectionFilter.Prepare
-		pipelineCfg.SessionFilter = selectionFilter.Match
-		pipelineCfg.SessionExclusionFilter = selectionFilter.Excludes
-		selectionConflicts = recorder
-	}
-
 	// 7. Count custom patterns before the dry-run branch (visible in both modes).
 	customPatternCount := len(cfg.Redaction.CustomPatterns)
 
@@ -545,6 +534,9 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		upgradeResult = ingest.RunUpgradePass(fs, string(resolvedOutput), progState)
 	}
 
+	// The store, when this run opens one, is what the saved selection reads to
+	// place an already-stored session on the branch the setup tree lists it under.
+	var storedSessions discovery.KnownSessionIndex
 	if !skipDB {
 		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write)
 		if err != nil {
@@ -560,6 +552,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 				return fmt.Errorf("heal the flagged search index: %w", err)
 			}
 		}
+		storedSessions = knownLookup{index: loadKnownSessionsFrom(ctx, db)}
 		pipelineOpts = append(pipelineOpts,
 			ingest.WithStore(db),
 			ingest.WithMetricsStore(db),
@@ -585,6 +578,19 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 				fmt.Fprintln(cmd.ErrOrStderr(), "notice: The database is empty, but peasant-sync/ already holds saved sessions. Run `peasant harvest index --all` first to rebuild the database from them. A harvest now reads the harness sources again and overwrites the saved copies.")
 			}
 		}
+	}
+
+	// 6d. Saved selection scopes native discovery, not stored maintenance.
+	// Index-only, --all, and an explicit --session keep their own scope and do
+	// not apply the saved selection.
+	var selectionConflicts *selectionfilter.ConflictRecorder
+	if harvestAppliesSavedSelection(mode, flags, cfg) {
+		selectionFilter, recorder := selectionfilter.New(cfg, git, ingest.NewPhysicalPathResolver(),
+			selectionfilter.WithKnownSessions(storedSessions, staleness))
+		pipelineCfg.PrepareSessionFilter = selectionFilter.Prepare
+		pipelineCfg.SessionFilter = selectionFilter.Match
+		pipelineCfg.SessionExclusionFilter = selectionFilter.Excludes
+		selectionConflicts = recorder
 	}
 
 	// Inject git diff analyzer when --detect-commits is set (not for logs-only).

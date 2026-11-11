@@ -1,0 +1,49 @@
+# The one directory a session's checkout is read from. cwd is the working
+# directory the discovery recorded; "{slug}" is the Claude project folder name
+# of the case's own temporary directory, which decodes back to it.
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - absolute-working-directory-is-used-as-recorded
+  - subfolder-is-not-replaced-by-its-repository-root
+  - absolute-working-directory-is-cleaned
+  - relative-working-directory-is-ignored
+  - claude-folder-decodes-when-no-directory-was-recorded
+  - claude-folder-that-decodes-to-nothing-is-ignored
+  - other-harness-never-reads-a-storage-folder
+  - storage-folder-is-never-the-directory
+cases:
+  - name: absolute-working-directory-is-used-as-recorded
+    harness: claude-code
+    cwd: /work/tool
+    want: /work/tool
+  # A checkout answers for every folder inside it, and a linked worktree has a
+  # branch of its own that only its own directory reports.
+  - name: subfolder-is-not-replaced-by-its-repository-root
+    harness: opencode
+    cwd: /work/tool/packages/web
+    want: /work/tool/packages/web
+  - name: absolute-working-directory-is-cleaned
+    harness: claude-code
+    cwd: /work/tool/../tool//
+    want: /work/tool
+  - name: relative-working-directory-is-ignored
+    harness: opencode
+    cwd: tool
+    want: ""
+  - name: claude-folder-decodes-when-no-directory-was-recorded
+    harness: claude-code
+    source: "/sources/{slug}/session.jsonl"
+    wantTemporaryDirectory: true
+  - name: claude-folder-that-decodes-to-nothing-is-ignored
+    harness: claude-code
+    source: /sources/-this-slug-decodes-to-nothing/session.jsonl
+    want: ""
+  - name: other-harness-never-reads-a-storage-folder
+    harness: opencode
+    source: "/sources/{slug}/session.json"
+    want: ""
+  - name: storage-folder-is-never-the-directory
+    harness: claude-code
+    original: /home/test/.claude/projects
+    source: /home/test/.claude/projects/-this-slug-decodes-to-nothing/session.jsonl
+    want: ""

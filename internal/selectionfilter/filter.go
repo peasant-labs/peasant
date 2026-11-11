@@ -3,6 +3,7 @@ package selectionfilter
 import (
 	"context"
 	"path/filepath"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -24,6 +25,8 @@ type Filter struct {
 	matcher               ingest.SelectionMatcher
 	autoIngestNewBranches bool
 	git                   ingest.GitResolver
+	known                 ingest.KnownSessionIndex
+	staleness             time.Duration
 	pathResolver          ingest.PathIdentityResolver
 	projectHarnesses      map[ingest.Harness]bool
 	prepared              map[ingest.SessionID]preparedSelection
@@ -31,11 +34,25 @@ type Filter struct {
 	recorder              *ConflictRecorder
 }
 
+// Option configures a Filter.
+type Option func(*Filter)
+
+// WithKnownSessions gives the filter the index the tree's scan reads, so a
+// session that is already stored and whose source has not changed is judged by
+// the branch the store holds for it, exactly as the tree lists it. staleness is
+// the window ingest and the scan share. A nil index changes nothing.
+func WithKnownSessions(index ingest.KnownSessionIndex, staleness time.Duration) Option {
+	return func(f *Filter) {
+		f.known = index
+		f.staleness = staleness
+	}
+}
+
 // New builds a filter and the recorder that names sessions the filter withholds
 // because project rules disagree. git may be nil; it is consulted only when a
 // project rule or an exact branch exclusion can change the decision. r may be
 // nil; an unresolved path stays empty and fails closed for path-only rules.
-func New(cfg *config.Config, git ingest.GitResolver, r ingest.PathIdentityResolver) (*Filter, *ConflictRecorder) {
+func New(cfg *config.Config, git ingest.GitResolver, r ingest.PathIdentityResolver, options ...Option) (*Filter, *ConflictRecorder) {
 	recorder := &ConflictRecorder{}
 	projectHarnesses := make(map[ingest.Harness]bool)
 	if cfg != nil {
@@ -59,15 +76,19 @@ func New(cfg *config.Config, git ingest.GitResolver, r ingest.PathIdentityResolv
 		projectHarnesses:      projectHarnesses,
 		recorder:              recorder,
 	}
+	for _, option := range options {
+		option(filter)
+	}
 	return filter, recorder
 }
 
 // Prepare materializes every discovered session before the first Match call.
 // Decisions are cached by session ID. Git lookups are memoized by directory and
 // run only when the matcher can change its answer from repository evidence.
-// A session belongs to the branch its transcript recorded, as it does in the
-// tree; the branch checked out in its directory counts only for a session that
-// recorded none (ingest.ResolveGitBranch).
+// A session belongs to the branch the tree lists it under, which
+// ingest.ResolveSessionBranch decides for both: the branch its transcript
+// recorded, else the branch the store holds for an unchanged stored session,
+// else the branch checked out in its project directory.
 // A cancelled context returns before this call's decisions are cached.
 func (f *Filter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSession) error {
 	if f == nil {
@@ -76,7 +97,7 @@ func (f *Filter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSessio
 	f.prepared = nil
 	f.recordedConflicts = nil
 	f.recorder.reset()
-	var git *memoizedGit
+	var git ingest.GitResolver
 	if f.git != nil {
 		git = newMemoizedGit(f.git)
 	}
@@ -85,18 +106,16 @@ func (f *Filter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSessio
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		projectPath := discoveredSessionProjectPath(session)
+		projectPath := ingest.SessionProjectDirectory(session)
 		branch := session.Branch
 		gitRemote := ""
-		if (f.projectHarnesses[session.Harness] || f.matcher.DiscoveryNeedsGit(session.Harness, session.SessionID)) && git != nil {
-			if dir := discoveredSessionGitDirectory(session, projectPath); dir != "" {
+		if f.projectHarnesses[session.Harness] || f.matcher.DiscoveryNeedsGit(session.Harness, session.SessionID) {
+			if dir := discoveredSessionGitDirectory(session, projectPath); dir != "" && git != nil {
 				if remote, err := git.RemoteURL(ctx, dir); err == nil {
 					gitRemote = remote
 				}
-				// The branch the session recorded is the one the tree grouped it
-				// under; the checkout only answers for a session that recorded none.
-				branch = ingest.ResolveGitBranch(ctx, git, dir, session.Branch)
 			}
+			branch = f.sessionBranch(ctx, git, session)
 		}
 		inputs[index] = CandidateInput{
 			Harness:     session.Harness,
@@ -167,6 +186,21 @@ func (f *Filter) Match(session ingest.DiscoveredSession) bool {
 	return false
 }
 
+// sessionBranch is the branch the tree lists this session under. It builds the
+// evidence the scan builds, from the same index, and lets
+// ingest.ResolveSessionBranch decide.
+func (f *Filter) sessionBranch(ctx context.Context, git ingest.GitResolver, session ingest.DiscoveredSession) string {
+	evidence := ingest.SessionBranchEvidence{
+		Recorded:  session.Branch,
+		Directory: ingest.SessionProjectDirectory(session),
+	}
+	if f.known != nil {
+		record, stored := f.known.Reusable(session, f.staleness)
+		evidence.StoredBranch, evidence.StoredKnown = record.Branch, stored
+	}
+	return ingest.ResolveSessionBranch(ctx, git, evidence)
+}
+
 type gitAnswer struct {
 	value string
 	err   error
@@ -207,19 +241,6 @@ func (m *memoizedGit) Branch(ctx context.Context, dir string) (string, error) {
 	value, err := m.GitResolver.Branch(ctx, dir)
 	m.branches[dir] = gitAnswer{value: value, err: err}
 	return value, err
-}
-
-func discoveredSessionProjectPath(session ingest.DiscoveredSession) string {
-	if filepath.IsAbs(session.CWD) {
-		return filepath.Clean(session.CWD)
-	}
-	if session.Harness == ingest.HarnessClaudeCode {
-		slug := filepath.Base(filepath.Dir(string(session.SourcePath)))
-		if decoded := ingest.DecodeClaudeSlugOnDisk(slug); decoded != "" {
-			return decoded
-		}
-	}
-	return ""
 }
 
 func discoveredSessionGitDirectory(session ingest.DiscoveredSession, projectPath string) string {

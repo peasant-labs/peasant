@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -36,6 +37,8 @@ type ingestSelectionIDs struct {
 	Selected string `yaml:"selected"`
 	Other    string `yaml:"other"`
 	Child    string `yaml:"child"`
+	// Unrecorded names a session whose recording carries no branch.
+	Unrecorded string `yaml:"unrecorded"`
 }
 
 type ingestSelectionCase struct {
@@ -77,7 +80,7 @@ func loadIngestSelectionFixture(t *testing.T) ingestSelectionFixture {
 	if err := testutil.RequireFixtureNames("internal/api/testdata/ingest-selection.yaml", "case", fixture.RequiredNames, present); err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{fixture.IDs.Selected, fixture.IDs.Other, fixture.IDs.Child} {
+	for _, raw := range []string{fixture.IDs.Selected, fixture.IDs.Other, fixture.IDs.Child, fixture.IDs.Unrecorded} {
 		if _, err := ingest.NewSessionID(raw); err != nil {
 			t.Fatalf("fixture session id %q: %v", raw, err)
 		}
@@ -281,11 +284,16 @@ func runScopedIngestIgnoresSelection(t *testing.T, ids ingestSelectionIDs, item 
 }
 
 // runMovedCloneTreeAndImportAgree proves the choice a person makes in the tree
-// is the import that follows. One clone hosts two sessions, one recorded on the
-// chosen branch and one on another; the clone now sits on the chosen branch, so
-// git's checked-out branch would put both sessions on it. The real scan, the
-// real forest and the saved selection decide what the tree shows as chosen; the
-// real web import must bring in exactly that set.
+// is the import that follows, however the clone has moved since. One clone
+// hosts three sessions: one recorded on the chosen branch, one recorded on
+// another, and one that recorded no branch. The real scan, the real forest and
+// the saved selection decide what the tree shows as chosen; the real web import
+// must bring in exactly that set.
+//
+// First the clone sits on the chosen branch, so git's checked-out branch would
+// put the session recorded elsewhere on it too. Then the clone moves to another
+// branch and the sessions, now stored and unchanged, are scanned and imported
+// again: the session that recorded no branch stays where the store put it.
 func runMovedCloneTreeAndImportAgree(t *testing.T, ids ingestSelectionIDs, item ingestSelectionCase) {
 	t.Helper()
 	root := t.TempDir()
@@ -302,6 +310,7 @@ func runMovedCloneTreeAndImportAgree(t *testing.T, ids ingestSelectionIDs, item 
 	initSelectionRepo(t, clone, remote, item.ChosenBranch)
 	writeClaudeSession(t, filepath.Join(project, ids.Selected+".jsonl"), ids.Selected, clone, item.ChosenBranch)
 	writeClaudeSession(t, filepath.Join(project, ids.Other+".jsonl"), ids.Other, clone, item.OtherRecordedBranch)
+	writeClaudeSession(t, filepath.Join(project, ids.Unrecorded+".jsonl"), ids.Unrecorded, clone, "")
 
 	cfg := webIngestConfig(t, source, output, ingestSelectionCase{Mode: "selected", EmptyHarnesses: true}, "", "")
 	cfg.Selection.Harnesses = map[string]config.SelectionHarnessConfig{
@@ -309,52 +318,107 @@ func runMovedCloneTreeAndImportAgree(t *testing.T, ids ingestSelectionIDs, item 
 			{GitRemote: remote, Branches: []string{item.ChosenBranch}},
 		}},
 	}
-
-	// The tree: what the scan finds, grouped by branch, with the saved selection restored.
-	_, listings, relation := discovery.Scan(t.Context(), cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, nil, nil, nil)
-	prepared := discovery.PrepareSessionListings(listings, ingest.NewPhysicalPathResolver())
-	forest, _, err := onboarding.RestoreSelection(discovery.BuildForest(prepared, nil, relation), cfg.Selection)
-	if err != nil {
-		t.Fatalf("restore the saved selection onto the tree: %v", err)
-	}
-	branchOfNode := make(map[string]string)
-	for _, node := range forest.Nodes {
-		if node.Kind == onboarding.NodeKindBranch {
-			branchOfNode[node.ID] = node.Label
-		}
-	}
-	treeBranch := make(map[string]string)
-	var treeChosen []string
-	for _, node := range forest.Nodes {
-		if node.Kind != onboarding.NodeKindSession {
-			continue
-		}
-		treeBranch[node.ID] = branchOfNode[node.ParentID]
-		if node.State == onboarding.NodeStateAll {
-			treeChosen = append(treeChosen, node.ID)
-		}
-	}
-	if treeBranch[ids.Selected] != item.ChosenBranch || treeBranch[ids.Other] != item.OtherRecordedBranch {
-		t.Fatalf("the tree groups the sessions under %v, want %s under %q and %s under %q", treeBranch, ids.Selected, item.ChosenBranch, ids.Other, item.OtherRecordedBranch)
-	}
-	if !slices.Equal(treeChosen, []string{ids.Selected}) {
-		t.Fatalf("the tree shows %v as chosen, want only %s", treeChosen, ids.Selected)
-	}
-
-	// The import: the same recordings, the same saved selection.
 	hs := newTestXDGHomes(t)
-	handler := hs.handler(nil, cfg)
-	result := runWebIngest(t, handler, false)
-	assertIngestMembership(t, result, item.ExpectImported, item.ExpectExcluded)
-	var imported []string
-	for _, session := range result.Sessions {
-		if !session.ExcludedBySelection && session.Error == nil && session.OutputPath != "" {
-			imported = append(imported, session.SessionID.String())
+	all := []string{ids.Selected, ids.Other, ids.Unrecorded}
+
+	// tree is what the setup tree shows: the branch each session is listed under
+	// and the sessions the saved selection marks as chosen.
+	tree := func(known discovery.KnownSessionIndex) (map[string]string, []string) {
+		_, listings, relation := discovery.Scan(t.Context(), cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, known, nil, nil)
+		prepared := discovery.PrepareSessionListings(listings, ingest.NewPhysicalPathResolver())
+		forest, _, err := onboarding.RestoreSelection(discovery.BuildForest(prepared, nil, relation), cfg.Selection)
+		if err != nil {
+			t.Fatalf("restore the saved selection onto the tree: %v", err)
+		}
+		branchOfNode := make(map[string]string)
+		for _, node := range forest.Nodes {
+			if node.Kind == onboarding.NodeKindBranch {
+				branchOfNode[node.ID] = node.Label
+			}
+		}
+		listedUnder := make(map[string]string)
+		var chosen []string
+		for _, node := range forest.Nodes {
+			if node.Kind != onboarding.NodeKindSession {
+				continue
+			}
+			listedUnder[node.ID] = branchOfNode[node.ParentID]
+			if node.State == onboarding.NodeStateAll {
+				chosen = append(chosen, node.ID)
+			}
+		}
+		slices.Sort(chosen)
+		return listedUnder, chosen
+	}
+	// importedAndLeftOut is what the web import did with each session.
+	importedAndLeftOut := func(result *ingest.PipelineResult) (imported, leftOut []string) {
+		for _, session := range result.Sessions {
+			switch {
+			case session.ExcludedBySelection:
+				leftOut = append(leftOut, session.SessionID.String())
+			case session.Error == nil && session.OutputPath != "":
+				imported = append(imported, session.SessionID.String())
+			}
+		}
+		slices.Sort(imported)
+		slices.Sort(leftOut)
+		return imported, leftOut
+	}
+	assertTreeShows := func(phase string, listedUnder map[string]string, wantUnrecorded string) {
+		t.Helper()
+		want := map[string]string{ids.Selected: item.ChosenBranch, ids.Other: item.OtherRecordedBranch, ids.Unrecorded: wantUnrecorded}
+		if !maps.Equal(listedUnder, want) {
+			t.Fatalf("%s: the tree lists the sessions under %v, want %v", phase, listedUnder, want)
 		}
 	}
-	slices.Sort(imported)
+
+	// The clone sits on the chosen branch. A session that recorded no branch is
+	// placed by it, and nothing else is.
+	listedUnder, treeChosen := tree(nil)
+	assertTreeShows("clone on the chosen branch", listedUnder, item.ChosenBranch)
+	wantChosen := []string{ids.Selected, ids.Unrecorded}
+	slices.Sort(wantChosen)
+	if !slices.Equal(treeChosen, wantChosen) {
+		t.Fatalf("clone on the chosen branch: the tree shows %v as chosen, want %v", treeChosen, wantChosen)
+	}
+	result := runWebIngest(t, hs.handler(nil, cfg), false)
+	assertIngestMembership(t, result, item.ExpectImported, item.ExpectExcluded)
+	imported, _ := importedAndLeftOut(result)
 	if !slices.Equal(imported, treeChosen) {
-		t.Fatalf("the import brought in %v but the tree showed %v as chosen", imported, treeChosen)
+		t.Fatalf("clone on the chosen branch: the import brought in %v but the tree showed %v as chosen", imported, treeChosen)
+	}
+
+	// The clone moves on. The stored, unchanged sessions are scanned and imported
+	// again against the rows the store now holds.
+	runGit(t, clone, "checkout", "--quiet", "-b", "moved-on")
+	storeOptions, err := store.ManagedGenerationOptions(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithWriteConfig(cfg.Write), store.WithSkipMigrations())...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.AllIngestedSessions(t.Context())
+	if closeErr := db.Close(); err != nil || closeErr != nil {
+		t.Fatalf("read the stored sessions: read=%v close=%v", err, closeErr)
+	}
+	listedUnder, treeChosen = tree(discovery.NewStoreKnownSessions(rows))
+	assertTreeShows("clone moved on", listedUnder, item.ChosenBranch)
+	if !slices.Equal(treeChosen, wantChosen) {
+		t.Fatalf("clone moved on: the tree shows %v as chosen, want %v", treeChosen, wantChosen)
+	}
+	result = runWebIngest(t, hs.handler(nil, cfg), false)
+	_, leftOut := importedAndLeftOut(result)
+	var treeUnchosen []string
+	for _, id := range all {
+		if !slices.Contains(treeChosen, id) {
+			treeUnchosen = append(treeUnchosen, id)
+		}
+	}
+	slices.Sort(treeUnchosen)
+	if !slices.Equal(leftOut, treeUnchosen) {
+		t.Fatalf("clone moved on: the import left out %v but the tree showed %v as unchosen", leftOut, treeUnchosen)
 	}
 }
 

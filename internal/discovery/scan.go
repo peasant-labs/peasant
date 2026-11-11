@@ -102,11 +102,9 @@ func Scan(
 				}
 			}
 
-			if record, ok := reusable(known, d, staleness); ok {
+			record, stored := reusable(known, d, staleness)
+			if stored {
 				gitRemote = record.GitRemote
-				if branchName == "" {
-					branchName = record.Branch
-				}
 				if title == "" {
 					title = record.Title
 				}
@@ -114,8 +112,16 @@ func Scan(
 					workingDir = record.WorkingDirectory()
 				}
 			} else {
-				gitRemote, branchName = ResolveSessionGit(ctx, git, d, claudeProjectDir, branchName)
+				gitRemote = ResolveSessionRemote(ctx, git, d, claudeProjectDir)
 			}
+			// The import filter builds the same evidence from the same index, so
+			// the branch a session is listed under is the branch it is judged by.
+			branchName = ingest.ResolveSessionBranch(ctx, git, ingest.SessionBranchEvidence{
+				Recorded:     branchName,
+				StoredBranch: record.Branch,
+				StoredKnown:  stored,
+				Directory:    ingest.SessionProjectDirectory(d),
+			})
 
 			sessions = append(sessions, SessionListing{
 				Harness:     provider.String(),
@@ -243,18 +249,17 @@ func ExpandAllowedSessionIDs(selected []SessionListing) map[ingest.SessionID]boo
 	return allowed
 }
 
-// ResolveSessionGit walks git for one discovered session's remote and branch.
-// The branch is the one the session recorded; git's checked-out branch only
-// stands in when none was recorded (ingest.ResolveGitBranch).
-func ResolveSessionGit(
+// ResolveSessionRemote walks git for one discovered session's remote. Its
+// branch is not resolved here: ingest.ResolveSessionBranch owns that, for the
+// tree and for the import filter alike.
+func ResolveSessionRemote(
 	ctx context.Context,
 	git ingest.GitResolver,
 	d ingest.DiscoveredSession,
 	claudeProjectDir string,
-	branchName string,
-) (string, string) {
+) string {
 	if git == nil {
-		return "", branchName
+		return ""
 	}
 	var gitRemote string
 	if claudeProjectDir != "" {
@@ -276,7 +281,7 @@ func ResolveSessionGit(
 			gitRemote = remote
 		}
 	}
-	return gitRemote, ingest.ResolveGitBranch(ctx, git, d.CWD, branchName)
+	return gitRemote
 }
 
 // ResolveListingOrigin turns discovery's typed origin into the listing value.

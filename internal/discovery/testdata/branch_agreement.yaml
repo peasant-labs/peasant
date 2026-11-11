@@ -1,0 +1,73 @@
+# The tree and the import filter place one session on one branch. Each case
+# writes a real Claude recording, then runs the real scan (the tree's listing)
+# and the real selection filter over it, with the same stored-session index and
+# a git double that answers headBranch for every directory it is asked about.
+#
+#   cwd            the working directory the recording names ("" = none)
+#   subfolder      a folder inside the case's temporary clone, used as the cwd
+#   folderOnly     the recording names no cwd; its project folder decodes to the clone
+#   recordedBranch the gitBranch the recording names
+#   stored         the store holds the session (branch storedBranch)
+#   sourceChanged  the recording changed after the store imported it
+#   chosenBranch   the saved selection names this branch of the project
+#   treeBranch     the branch the scan lists the session under
+#   matched        whether the filter admits the session
+#   branchDirs     the directories git was asked for the checked-out branch, by
+#                  the scan and by the filter alike ({clone} and {subfolder} name
+#                  the case's own directories)
+#
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - no-recorded-branch-tree-and-filter-ask-the-same-directory
+  - no-recorded-directory-tree-and-filter-ask-the-decoded-folder
+  - recorded-branch-tree-and-filter-ask-no-directory
+  - no-recorded-branch-uses-stored-branch
+  - changed-source-falls-back-to-the-checkout-in-both
+cases:
+  # The working directory is a subfolder of the clone. Both ask that folder, not
+  # the clone root: a linked worktree's branch is its own.
+  - name: no-recorded-branch-tree-and-filter-ask-the-same-directory
+    subfolder: packages/web
+    headBranch: main
+    chosenBranch: main
+    treeBranch: main
+    matched: true
+    branchDirs: ["{subfolder}"]
+  - name: no-recorded-directory-tree-and-filter-ask-the-decoded-folder
+    folderOnly: true
+    headBranch: main
+    chosenBranch: main
+    treeBranch: main
+    matched: true
+    branchDirs: ["{clone}"]
+  - name: recorded-branch-tree-and-filter-ask-no-directory
+    subfolder: packages/web
+    recordedBranch: feature/stray
+    headBranch: main
+    chosenBranch: main
+    treeBranch: feature/stray
+    matched: false
+    branchDirs: []
+  # The clone has moved to develop since the store imported the session with
+  # main. Both read the store: neither asks git.
+  - name: no-recorded-branch-uses-stored-branch
+    subfolder: packages/web
+    stored: true
+    storedBranch: main
+    headBranch: develop
+    chosenBranch: main
+    treeBranch: main
+    matched: true
+    branchDirs: []
+  # A recording that changed after the import is not stored evidence. Both ask
+  # the checkout, which has moved to develop.
+  - name: changed-source-falls-back-to-the-checkout-in-both
+    subfolder: packages/web
+    stored: true
+    sourceChanged: true
+    storedBranch: main
+    headBranch: develop
+    chosenBranch: main
+    treeBranch: develop
+    matched: false
+    branchDirs: ["{subfolder}"]

@@ -1,0 +1,55 @@
+# The branch each harness's metadata extraction stores for a session. Every
+# extractor takes it from ingest.ResolveGitBranch: the branch the session
+# recorded wins, and the branch checked out in the session's directory answers
+# only when none was recorded. The checked-out branch is main in every case, so a
+# recorded feature/recorded can only come from the recording; wantCheckoutCalls
+# is how many times the extractor asked git for the checked-out branch.
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - claude-recorded-branch-wins-over-checkout
+  - claude-checkout-answers-when-nothing-recorded
+  - cursor-recorded-branch-wins-over-checkout
+  - cursor-checkout-answers-when-nothing-recorded
+  - opencode-recorded-branch-wins-over-checkout
+  - opencode-checkout-answers-when-nothing-recorded
+  - pi-checkout-answers-because-pi-records-no-branch
+cases:
+  - name: claude-recorded-branch-wins-over-checkout
+    harness: claude-code
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: claude-checkout-answers-when-nothing-recorded
+    harness: claude-code
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
+  - name: cursor-recorded-branch-wins-over-checkout
+    harness: cursor
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: cursor-checkout-answers-when-nothing-recorded
+    harness: cursor
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
+  - name: opencode-recorded-branch-wins-over-checkout
+    harness: opencode
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: opencode-checkout-answers-when-nothing-recorded
+    harness: opencode
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
+  # Pi's recording carries no branch, so the checkout is the only evidence.
+  - name: pi-checkout-answers-because-pi-records-no-branch
+    harness: pi
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
