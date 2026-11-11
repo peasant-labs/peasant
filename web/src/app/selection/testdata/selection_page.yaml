@@ -318,14 +318,15 @@ cases:
       - expectRows: [p-ledger, g-main, s-one, s-two, p-locked]
       - expectControl: {role: checkbox, name: add a CSV export, checked: true}
 
-  # The settings page's selection row leads here, to a route that exists, and
-  # the route is outside the registry and the first-run redirect.
+  # The settings page's selection row leads here, to a route that exists. The
+  # route is outside the registry, and the first-run redirect covers it: it
+  # saves into the settings file that setup creates, so an install that has
+  # not been set up is sent to setup first.
   - name: reachable-from-settings
     kind: settings
     link: {name: choose sessions, href: /selection}
-    # Everything under a section of the registry is a top-level page the
-    # first-run redirect covers; this page is neither.
-    exemptPaths: [/selection, /selection/]
+    # Not a section of the registry, but a top-level page the redirect covers.
+    coveredPaths: [/selection, /selection/]
 
   # The words about the session's ending are the selection's own: a refused
   # save, the rows that moved, and the saved heading name the selection and

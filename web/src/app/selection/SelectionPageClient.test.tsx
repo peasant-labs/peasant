@@ -137,7 +137,7 @@ describe('/selection', () => {
     }
     if (kind === 'settings') {
       it(entry.name, async () => {
-        const { link, exemptPaths } = entry as unknown as { link: { name: string; href: string }; exemptPaths: string[] };
+        const { link, coveredPaths } = entry as unknown as { link: { name: string; href: string }; coveredPaths: string[] };
         vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
           const path = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost').pathname;
           const body = path === '/api/v1/settings' ? loadSettingsResponse() : { authenticated: false };
@@ -152,10 +152,11 @@ describe('/selection', () => {
         // The link lands on a route this app has: a page, not a dead link.
         expect(existsSync(resolve(process.cwd(), 'src/app', (href ?? '').replace(/^\//, ''), 'page.tsx'))).toBe(true);
         // It is outside the section registry, so no sidebar item or palette
-        // entry stands for it, and outside the first-run redirect.
+        // entry stands for it, and inside the first-run redirect: it saves
+        // into the settings file that setup creates.
         expect(LOCAL_SECTIONS.map((section) => section.href)).not.toContain(href);
-        expect(firstRunRoutes()).not.toContain(href);
-        for (const path of exemptPaths) expect(isFirstRunRoute(path), `${path} is exempt from the first-run redirect`).toBe(false);
+        expect(firstRunRoutes()).toContain(href);
+        for (const path of coveredPaths) expect(isFirstRunRoute(path), `${path} sends an unconfigured install to setup`).toBe(true);
       });
     }
   }

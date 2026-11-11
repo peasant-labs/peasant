@@ -3,11 +3,13 @@
 # /kickstart. The set of top-level pages is derived from the section registry
 # by the test, so a registry change moves it with no edit here; the lists below
 # are only the extra pages and the exempt ones that the derivation must treat
-# as stated.
+# as stated. The standalone selection page is not exempt: it saves into the
+# settings file that setup creates, so it sends an unconfigured install to setup.
 requiredNames:
   - every-derived-top-level-route-redirects-when-unconfigured
   - kickstart-is-exempt
-  - selection-is-exempt
+  - selection-redirects-until-setup-is-saved
+  - selection-is-left-alone-once-setup-is-saved
   - share-and-everything-under-it-is-exempt
   - sessions-and-everything-under-it-is-exempt
   - project-deep-links-are-honoured
@@ -27,10 +29,15 @@ cases:
     status: {configured: false}
     pages: [/kickstart, /kickstart/]
     redirects: false
-  - name: selection-is-exempt
+  - name: selection-redirects-until-setup-is-saved
     status: {configured: false}
     pages: [/selection, /selection/]
+    redirects: true
+  - name: selection-is-left-alone-once-setup-is-saved
+    status: {configured: true}
+    pages: [/selection, /selection/]
     redirects: false
+    statusReads: 1
   - name: share-and-everything-under-it-is-exempt
     status: {configured: false}
     pages: [/share, /share/, /share/step/redact]
