@@ -3,10 +3,10 @@ package onboarding
 import (
 	"bytes"
 	"reflect"
-	"regexp"
 	"strings"
 
 	"github.com/peasant-labs/schema"
+	regexp "github.com/wasilibs/go-re2"
 	"gopkg.in/yaml.v3"
 )
 
