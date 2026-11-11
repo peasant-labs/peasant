@@ -110,6 +110,40 @@ Village login and push remain separate, explicit actions.
 Pressing `esc` or `q` opens a leave-without-saving confirmation. Confirming that exit leaves the config
 and Claude settings bytes unchanged and does not run local ingest.
 
+## Setup in the browser
+
+The local web app runs the same setup at `/kickstart`. It reads the same steps, in the same order
+and with the same words as the terminal flow, from one definition on the server, and it saves the
+same `config.yaml` for the same answers. The page decides none of that: what a step offers, when it
+shows, and whether an answer is valid are the server's.
+
+- **First run.** Until setup has been saved, every top-level page of the app sends you to
+  `/kickstart`. Once it is saved the app never redirects again. A link to a recorded session, the
+  publish wizard, or `/selection` is never redirected. If the app cannot tell whether setup was saved,
+  it redirects nothing.
+- **Run it again.** Settings has a "run setup again" link at the top. It opens `/kickstart` with your
+  saved choices filled in, the way `peasant kickstart` restores them.
+- **Only the selection.** `/selection` is the same page with three steps: choose sessions, review,
+  and import. Settings links to it from the projects section. It saves only the `selection` keys and
+  leaves every other setting as it was. It has its own session, so opening it never disturbs a setup
+  that is already open.
+- **Many tabs.** Every tab of a page shares one live session. An answer in one tab appears in the
+  others without a reload. If you change a field that another tab changed after you last looked, your
+  answer is applied and the page says which field it replaced.
+- **Scan and import.** The scan of your recorded sessions starts when the page opens and its progress
+  is shown as it runs. The import runs once, after you save, and keeps running if you close the page.
+- **Saving.** Nothing is written until the review step. The review lists any answered field whose
+  saved value changed while you were setting up, with a choice of keeping yours or taking the saved
+  value for each. A field you did not answer is never listed and is never overwritten. Under the
+  summary, a collapsed view shows the exact lines that change in `config.yaml`.
+- **After saving.** The page shows the import's progress, the notes from reading your sessions, and
+  links to what you may want next, including the automatic publishing section of settings. Setup
+  never publishes a transcript and never installs a Git hook. Both stay explicit actions that you
+  start yourself.
+
+The page is a client of the same local API as the rest of the app, and it accepts changes only from
+the app's own origin. `--reset` exists only on the command line.
+
 ## Dense config editor
 
 Use `peasant config` when setup guidance is not needed. `peasant settings` is an alias for the same

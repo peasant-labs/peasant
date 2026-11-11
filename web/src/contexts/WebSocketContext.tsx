@@ -12,8 +12,9 @@ import {
   type ReactNode,
 } from 'react';
 import type { ChannelName, ClientMessage, ServerMessage, SubscriptionMessage } from '@/types/messages';
-import { subscriptionKey, subscribe as mkSub, ChannelTopic } from '@/types/messages';
+import { subscriptionKey, subscribe as mkSub, ChannelTopic, MessageType } from '@/types/messages';
 import { parseServerMessageRaw } from '@peasant-labs/schema';
+import { parseKickstartEvent, type KickstartEvent } from '@/lib/kickstart/model';
 import { DiscoveryErrorCode } from '@/lib/api/errors';
 import {
   codeFromFault,
@@ -137,6 +138,13 @@ interface WebSocketContextValue {
   /** Send an arbitrary client message. */
   sendMessage: (msg: ClientMessage) => void;
   /**
+   * Listen for the live setup events. They are discrete events, not a snapshot
+   * of a channel: the channel store keeps only the last value and drops a
+   * repeat, which would lose a scan tick or a second tab's answer. Returns the
+   * function that stops listening.
+   */
+  onKickstartEvent: (listener: (event: KickstartEvent) => void) => () => void;
+  /**
    * Connect again now instead of waiting out the reconnect backoff. A no-op
    * while a socket is open or still connecting.
    */
@@ -161,6 +169,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const mountedRef = useRef(true);
   // Keyed by subscriptionKey(); stores the full subscription + ref-count for reconnect.
   const subsRef = useRef<Map<string, { sub: SubscriptionMessage; count: number }>>(new Map());
+  const kickstartListenersRef = useRef(new Set<(event: KickstartEvent) => void>());
 
   const sendRaw = useCallback((msg: ClientMessage) => {
     const ws = wsRef.current;
@@ -277,6 +286,25 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             setConnectionFault(WebFault.connection(FaultCause.TopicError, detail));
           }
           break;
+
+        case MessageType.Kickstart: {
+          // A setup event is delivered to every listener once, in order. One the
+          // contract refuses is a bad frame, not a reason to stop listening.
+          let event: KickstartEvent;
+          try {
+            event = parseKickstartEvent(msg.data);
+          } catch (error) {
+            setConnectionFault(
+              WebFault.frameInvalid(
+                FaultOperation.Socket,
+                error instanceof Error ? error.message : 'a setup update did not match the contract',
+              ),
+            );
+            break;
+          }
+          for (const listener of Array.from(kickstartListenersRef.current)) listener(event);
+          break;
+        }
 
         case 'dashboard':
         case 'sessions':
@@ -431,6 +459,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [sendRaw]);
 
+  const onKickstartEvent = useCallback((listener: (event: KickstartEvent) => void) => {
+    kickstartListenersRef.current.add(listener);
+    return () => {
+      kickstartListenersRef.current.delete(listener);
+    };
+  }, []);
+
   // Context value changes ONLY when connected or the connection fault changes
   // (infrequent). Channel data and channel faults live in the ChannelStore ref
   // and are accessed via useSyncExternalStore — they never trigger context
@@ -444,9 +479,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       wsUnsubscribe,
       wsRefresh,
       sendMessage: sendRaw,
+      onKickstartEvent,
       reconnect,
     }),
-    [connected, connectionFault, wsSubscribe, wsUnsubscribe, wsRefresh, sendRaw, reconnect],
+    [connected, connectionFault, wsSubscribe, wsUnsubscribe, wsRefresh, sendRaw, onKickstartEvent, reconnect],
   );
 
   return (
@@ -581,4 +617,32 @@ export function useChannel<T = unknown>(
 export function useConnectionState() {
   const ctx = useWsContext();
   return { connected: ctx.connected, connectionFault: ctx.connectionFault, reconnect: ctx.reconnect };
+}
+
+/**
+ * Subscribe to the live setup topic and hand every event to `listener`.
+ *
+ * The topic carries no session id: each event names its own, so the caller
+ * filters. The subscription is shared with every other page that listens, and
+ * the server sends the current snapshot of each open session when it starts.
+ * `connected` is returned so a caller can re-read its snapshot after the
+ * socket comes back.
+ */
+export function useKickstartTopic(listener: (event: KickstartEvent) => void): { connected: boolean } {
+  const ctx = useWsContext();
+  const latest = useRef(listener);
+  useEffect(() => {
+    latest.current = listener;
+  });
+  const { wsSubscribe, wsUnsubscribe, onKickstartEvent } = ctx;
+  useEffect(() => {
+    const subscription = [mkSub.kickstart()];
+    wsSubscribe(subscription);
+    const stop = onKickstartEvent((event) => latest.current(event));
+    return () => {
+      stop();
+      wsUnsubscribe(subscription);
+    };
+  }, [wsSubscribe, wsUnsubscribe, onKickstartEvent]);
+  return { connected: ctx.connected };
 }

@@ -1,0 +1,453 @@
+# Served kickstart sessions, as GET/POST /api/v1/kickstart/sessions answer them.
+#
+# A model states a whole session or extends an earlier one with `set`
+# overrides at key paths (`stops[privacy].fields[redaction-level].value`).
+# Every model is checked against the generated Local API contract when it is
+# loaded. These are the server's answers: the page tests assert that the page
+# draws exactly them and decides nothing on top.
+requiredNames:
+  - fresh
+  - scanning
+  - scan-failed
+  - second-tab-answer
+  - licensed
+  - boundary-offer
+  - connected
+  - conflicted
+  - privacy-refused
+  - review-truncated
+  - absurd
+  - absurd-answered
+  - selection-scope
+  - boundary-skipped
+  - connected-with-answer
+  - redacted-differently
+  - no-example
+  - selected-two
+  - selected-two-licensed
+cases:
+  - name: fresh
+    session:
+      id: ses-full
+      scope: full
+      revision: 1
+      openedAt: "2026-11-10T09:00:00Z"
+      conflicts: []
+      connect: {offered: false}
+      scan: {state: done, done: 4, total: 4}
+      village: {connected: false}
+      stops:
+        - key: village
+          kind: connection
+          title: peasant online
+          visible: true
+          guide: {}
+          fields:
+            - key: village-connect
+              kind: action
+              label: connect to peasant online now?
+              description: connect this machine without publishing a transcript
+              value: null
+              options:
+                - {value: accept, label: "yes"}
+                - {value: skip, label: "no"}
+        - key: selection
+          kind: config
+          title: choose sessions to import
+          visible: true
+          guide: {}
+          fields:
+            - key: transcripts
+              kind: tree
+              label: sessions to import
+              value: [s-one]
+        - key: auto-ingest
+          kind: config
+          title: auto-ingest new branches
+          visible: false
+          hiddenBecause: selection-narrowed
+          guide:
+            intro: decide how future branches enter your saved local selection.
+            hints:
+              - this applies only to new branches in projects selected in full.
+          fields:
+            - key: auto-ingest-new-branches
+              kind: toggle
+              label: auto-ingest new branches in fully-selected projects
+              description: turn this on to import new branches of a fully-selected project without asking again.
+              value: false
+        - key: publication
+          kind: config
+          title: publication
+          visible: true
+          guide:
+            intro: choose whether to keep transcripts local or plan to publish later.
+            hints:
+              - this only records a preference; kickstart itself publishes nothing.
+          fields:
+            - key: publication-preference
+              kind: choice
+              label: publication preference
+              description: keep local means nothing ever leaves this machine until you explicitly publish.
+              value: keep-local
+              options:
+                - {value: keep-local, label: "keep local, do not publish", description: keep every transcript on this machine.}
+                - {value: share-later, label: plan to publish later, description: record that you intend to publish later.}
+        - key: privacy
+          kind: config
+          title: privacy
+          visible: true
+          guide:
+            intro: preview how standard redaction changes your text before you publish.
+          fields:
+            - key: redaction-level
+              kind: choice
+              label: redaction level
+              description: choose how much sensitive data peasant removes before a later explicit publication.
+              value: standard
+              options:
+                - {value: standard, label: standard, description: "removes secrets, file paths, personal data, and project identity."}
+              example:
+                - {kind: label, text: your text}
+                - {kind: before, text: "open /home/ada/work/ledger and email ada@example.com"}
+                - {kind: after, text: "open [PATH] and email [EMAIL]"}
+        - key: license
+          kind: config
+          title: content license
+          visible: true
+          guide:
+            intro: choose the default license for a later explicit publish.
+          fields:
+            - key: content-license
+              kind: choice
+              label: default license
+              value: ""
+              options:
+                - {value: "", label: none (do not attach a license)}
+                - {value: CC0-1.0, label: CC0-1.0}
+                - {value: CC-BY-4.0, label: CC-BY-4.0}
+        - key: destination
+          kind: config
+          title: sharing
+          visible: false
+          hiddenBecause: village-disconnected
+          guide:
+            intro: choose who may see transcripts after a later explicit publish.
+          fields:
+            - key: default-visibility
+              kind: choice
+              label: default visibility
+              value: private
+              options:
+                - {value: private, label: private}
+                - {value: group, label: group}
+        - key: retention
+          kind: config
+          title: claude retention
+          visible: true
+          guide:
+            intro: choose how long claude code keeps its source transcript files.
+          fields:
+            - key: claude-retention-days
+              kind: choice
+              label: how long claude code keeps its transcripts
+              value: 30
+              options:
+                - {value: "30", label: 30 days}
+                - {value: "90", label: 90 days}
+                - {value: "365", label: 1 year}
+        - key: review
+          kind: review
+          title: review
+          visible: true
+          guide: {}
+          fields:
+            - key: review-notice
+              kind: notice
+              label: review your changes
+              description: review the visible choices before they are saved.
+              value: null
+          summary:
+            values:
+              - "publication: keep local"
+              - "redaction level: standard"
+            effects:
+              - nothing is published when setup finishes.
+          diff:
+            file: config.yaml
+            hunks:
+              - header: "-1,2 +1,3"
+                lines:
+                  - {type: ctx, oldNo: 1, newNo: 1, text: "version: 1"}
+                  - {type: del, oldNo: 2, text: "redaction: {level: minimal}"}
+                  - {type: add, newNo: 2, text: "redaction: {level: standard}"}
+                  - {type: add, newNo: 3, text: "push: {sharePreference: keep-local}"}
+        - key: ingest
+          kind: ingest
+          title: ingest
+          visible: true
+          guide: {}
+          fields:
+            - key: ingest-notice
+              kind: notice
+              label: importing transcripts
+              description: import the selected transcripts into the local store after the configuration is saved.
+              value: null
+
+  - name: scanning
+    extends: fresh
+    set:
+      revision: 2
+      scan: {state: running, phase: reading projects, done: 1, total: 4}
+
+  - name: scan-failed
+    extends: fresh
+    set:
+      revision: 2
+      scan: {state: error, done: 1, total: 4, error: the projects folder could not be read}
+
+  - name: second-tab-answer
+    extends: fresh
+    set:
+      revision: 2
+      stops[publication].fields[publication-preference].value: share-later
+
+  - name: licensed
+    extends: second-tab-answer
+    set:
+      revision: 3
+      stops[license].fields[content-license].value: CC0-1.0
+
+  - name: boundary-offer
+    extends: fresh
+    set:
+      revision: 2
+      connect:
+        offered: true
+        afterStop: license
+        prompt: log in now to choose a default sharing visibility?
+        skip: "no"
+
+  - name: connected
+    extends: boundary-offer
+    set:
+      revision: 3
+      connect: {offered: false}
+      village: {connected: true}
+      stops[village].visible: false
+      stops[destination].visible: true
+
+  - name: conflicted
+    extends: second-tab-answer
+    set:
+      revision: 3
+      conflicts:
+        - {field: publication-preference, stop: publication, label: publication preference, mine: share-later, theirs: keep-local}
+        - {field: redaction-level, stop: privacy, label: redaction level, mine: standard, theirs: 7}
+
+  - name: privacy-refused
+    extends: fresh
+    set:
+      revision: 2
+      stops[privacy].fields[redaction-level].example: []
+      stops[privacy].fields[redaction-level].refusal:
+        key: redaction-level
+        error: the redaction preview could not run, so no example is shown. restart peasant, then reopen this step.
+
+  - name: review-truncated
+    extends: fresh
+    set:
+      revision: 2
+      stops[review].diff:
+        file: config.yaml
+        truncated: true
+        hunks:
+          - header: "-1 +1"
+            lines:
+              - {type: del, oldNo: 1, text: "a: 1"}
+              - {type: add, newNo: 1, text: "a: 2"}
+
+  # A model no real server would send: odd labels, a stop that exists nowhere
+  # else, an option set that is its own, a hidden stop, and an offered connect.
+  - name: absurd
+    session:
+      id: ses-odd
+      scope: full
+      revision: 7
+      openedAt: "2026-11-10T09:00:00Z"
+      conflicts: []
+      connect:
+        offered: true
+        afterStop: zebra
+        prompt: Shall the QUUX be woven into the loom?
+        skip: nay
+      scan: {state: done, done: 0, total: 0}
+      village: {connected: false}
+      stops:
+        - key: zebra
+          kind: config
+          title: ZEBRA Crossing No. 9
+          visible: true
+          guide:
+            intro: Do what the zebra says.
+            hints: [hint ONE, "hint two, with a comma"]
+          fields:
+            - key: frob
+              kind: choice
+              label: Frobnicate The Quux
+              description: A strange question.
+              value: q2
+              options:
+                - {value: q1, label: Quux ONE, description: the first quux}
+                - {value: q2, label: quux two}
+                - {value: q3, label: QUUX THREE}
+            - key: wibble
+              kind: toggle
+              label: Wibble the wobble
+              value: true
+        - key: ghost
+          kind: config
+          title: A Hidden Chamber
+          visible: false
+          hiddenBecause: moon-is-new
+          guide: {}
+          fields:
+            - key: spook
+              kind: toggle
+              label: Spook everyone
+              value: false
+        - key: wombat
+          kind: config
+          title: wombat burrow
+          visible: true
+          guide: {}
+          fields:
+            - key: dig
+              kind: choice
+              label: How deep
+              value: shallow
+              options:
+                - {value: shallow, label: Not Very}
+                - {value: deep, label: Rather Deep}
+        - key: review
+          kind: review
+          title: Final Reckoning
+          visible: true
+          guide: {}
+          fields:
+            - key: review-notice
+              kind: notice
+              label: Behold your choices
+              value: null
+          summary:
+            values: [the quux is q2]
+            effects: [the loom is woven]
+          diff:
+            file: odd.yaml
+            hunks:
+              - header: "-0,0 +1,1"
+                lines:
+                  - {type: add, newNo: 1, text: "quux: q2"}
+        - key: ingest
+          kind: ingest
+          title: Weaving
+          visible: true
+          guide: {}
+          fields:
+            - key: ingest-notice
+              kind: notice
+              label: weaving the loom
+              value: null
+
+  - name: absurd-answered
+    extends: absurd
+    set:
+      revision: 8
+      stops[zebra].fields[frob].value: q3
+      connect: {offered: false}
+
+  - name: selection-scope
+    session:
+      id: ses-selection
+      scope: selection
+      revision: 1
+      openedAt: "2026-11-10T09:00:00Z"
+      conflicts: []
+      connect: {offered: false}
+      scan: {state: done, done: 4, total: 4}
+      village: {connected: false}
+      stops:
+        - key: selection
+          kind: config
+          title: choose sessions to import
+          visible: true
+          guide: {}
+          fields:
+            - key: transcripts
+              kind: tree
+              label: sessions to import
+              value: [s-one]
+        - key: review
+          kind: review
+          title: review
+          visible: true
+          guide: {}
+          fields:
+            - key: review-notice
+              kind: notice
+              label: review your changes
+              value: null
+          summary:
+            values: ["selection: 1 session"]
+            effects: [nothing is published when setup finishes.]
+        - key: ingest
+          kind: ingest
+          title: ingest
+          visible: true
+          guide: {}
+          fields:
+            - key: ingest-notice
+              kind: notice
+              label: importing transcripts
+              value: null
+
+  - name: boundary-skipped
+    extends: fresh
+    set:
+      revision: 3
+      connect: {offered: false}
+
+  - name: connected-with-answer
+    extends: second-tab-answer
+    set:
+      revision: 4
+      village: {connected: true}
+      stops[village].visible: false
+      stops[destination].visible: true
+
+  - name: redacted-differently
+    extends: fresh
+    set:
+      revision: 2
+      stops[privacy].fields[redaction-level].example:
+        - {kind: label, text: your text now}
+        - {kind: before, text: "token sk-live-123 in /srv/app"}
+        - {kind: after, text: "token [SECRET] in [PATH]"}
+
+  - name: no-example
+    extends: fresh
+    set:
+      revision: 2
+      stops[privacy].fields[redaction-level].example: []
+
+  - name: selected-two
+    extends: fresh
+    set:
+      revision: 2
+      stops[selection].fields[transcripts].value: [s-one, s-two]
+
+  - name: selected-two-licensed
+    extends: selected-two
+    set:
+      revision: 3
+      stops[license].fields[content-license].value: CC0-1.0

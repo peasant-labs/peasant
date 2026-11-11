@@ -1,0 +1,77 @@
+# The first-run redirect. Each case names the status answer the server gives
+# and the pages a person opens; `redirects` says whether the app sends them to
+# /kickstart. The set of top-level pages is derived from the section registry
+# by the test, so a registry change moves it with no edit here; the lists below
+# are only the extra pages and the exempt ones that the derivation must treat
+# as stated.
+requiredNames:
+  - every-derived-top-level-route-redirects-when-unconfigured
+  - kickstart-is-exempt
+  - selection-is-exempt
+  - share-and-everything-under-it-is-exempt
+  - sessions-and-everything-under-it-is-exempt
+  - project-deep-links-are-honoured
+  - failed-status-fetch-redirects-nothing
+  - configured-true-never-redirects
+  - unconfigured-status-is-read-again-after-setup-is-saved
+  - settings-rerun-link-prefills
+cases:
+  - name: every-derived-top-level-route-redirects-when-unconfigured
+    status: {configured: false}
+    # On top of the registry's own pages: the projects page, a section's
+    # own pages beneath it, and a trailing slash.
+    pages: [/projects, /projects/, /review/0123, /map/0123/node, /village/, /settings]
+    deriveFromRegistry: true
+    redirects: true
+  - name: kickstart-is-exempt
+    status: {configured: false}
+    pages: [/kickstart, /kickstart/]
+    redirects: false
+  - name: selection-is-exempt
+    status: {configured: false}
+    pages: [/selection, /selection/]
+    redirects: false
+  - name: share-and-everything-under-it-is-exempt
+    status: {configured: false}
+    pages: [/share, /share/, /share/step/redact]
+    redirects: false
+  - name: sessions-and-everything-under-it-is-exempt
+    status: {configured: false}
+    pages: [/sessions/s-1, /sessions/s-1/transcript]
+    redirects: false
+  - name: project-deep-links-are-honoured
+    status: {configured: false}
+    pages: [/projects/0123456789abcdef/sessions/s-1, /dev/visual-harness, /somewhere-else]
+    redirects: false
+  - name: failed-status-fetch-redirects-nothing
+    statusAnswer: {status: 500, body: {error: the server could not read its settings}}
+    pages: ["/", /settings, /map]
+    redirects: false
+  - name: configured-true-never-redirects
+    status: {configured: true}
+    pages: ["/", /settings, /map, /projects]
+    redirects: false
+    # Configured is final for the page load: the status is read once.
+    statusReads: 1
+  - name: unconfigured-status-is-read-again-after-setup-is-saved
+    status: {configured: false}
+    pages: ["/"]
+    redirects: true
+    then:
+      status: {configured: true}
+      pages: [/settings]
+      redirects: false
+  - name: settings-rerun-link-prefills
+    # The settings page links to the setup page with its origin, and the setup
+    # page opened that way draws the saved choices the server served.
+    link: {name: run setup again, href: "/kickstart?from=settings"}
+    selectionLink: {name: choose sessions, href: /selection}
+    origin: settings
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+    steps:
+      - expectLink: {name: settings, href: /settings}
+      - click: continue
+      - click: continue
+      - expectControl: {role: radio, name: plan to publish later, checked: true}
+      - expectControl: {role: radio, name: "keep local, do not publish", checked: false}
