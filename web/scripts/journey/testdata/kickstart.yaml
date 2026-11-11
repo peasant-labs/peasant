@@ -12,6 +12,8 @@ requiredNames:
   - config-holds-only-the-chosen-selection
   - concurrent-change-offers-mine-or-theirs
   - selection-page-saves-only-selection
+  - selection-page-names-the-chosen-branch
+  - import-honours-the-recorded-branch
   - computed-styles-and-themes
 cases:
   - {name: fresh-install-redirects-to-setup}
@@ -23,7 +25,16 @@ cases:
   - {name: config-holds-only-the-chosen-selection}
   - {name: concurrent-change-offers-mine-or-theirs}
   - {name: selection-page-saves-only-selection}
+  - {name: selection-page-names-the-chosen-branch}
+  - {name: import-honours-the-recorded-branch}
   - {name: computed-styles-and-themes}
+# The only requests the journey provokes the server to refuse: the deep links to a
+# project and a transcript that were never recorded, and the save that found a
+# changed field. Anything else refused is a finding.
+expectedRefusals:
+  - "400 GET /api/v1/sync/sessions"
+  - "404 GET /api/v1/projects/resolve"
+  - "409 POST /api/v1/kickstart/sessions/<id>/commit"
 # Every screen that is captured and probed, in both themes (one file per theme
 # and name: <theme>-<name>.png under review-capture/).
 screens:
@@ -66,6 +77,8 @@ recordings:
       remote: https://github.com/acme/marketing-site.git
       sessions:
         - {name: hero-copy, branch: main, startedAt: "2026-02-06T09:00:00Z", prompts: ["Tighten the hero copy on the pricing page.", "Keep it to one sentence."]}
+        # Recorded on a branch the main clone has since moved off: the clone is on main now.
+        - {name: stray, branch: feature/stray, sharedClone: true, startedAt: "2026-02-07T09:00:00Z", prompts: ["Try a darker footer on the pricing page.", "Compare it with the light one."]}
   # Generated sessions that a scan reads but the journey never selects: enough that
   # the scan's progress is on screen long enough to be seen.
   filler: {repositories: 4, sessions: 80}
@@ -74,4 +87,10 @@ chosen:
   repository: ledger
   branch: main
   imported: 2
-  left: [tax-report, hero-copy]
+  left: [tax-report, hero-copy, stray]
+# The selection page's own case: one branch of a project whose clone has since
+# moved off the branch an older session recorded.
+branchChoice:
+  repository: marketing-site
+  branch: main
+  recordedElsewhere: stray

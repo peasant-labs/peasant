@@ -33,6 +33,9 @@ const ledger = fixture.recordings.repositories.find((repo) => repo.name === fixt
 const ledgerLabel = new URL(ledger.remote).pathname.replace(/^\//, '').replace(/\.git$/, '');
 const taxReport = seeded.find((entry) => entry.name === 'tax-report');
 const marketing = seeded.find((entry) => entry.name === 'hero-copy');
+const stray = seeded.find((entry) => entry.name === fixture.branchChoice.recordedElsewhere);
+const marketingRepo = fixture.recordings.repositories.find((repo) => repo.name === fixture.branchChoice.repository);
+const marketingLabel = new URL(marketingRepo.remote).pathname.replace(/^\//, '').replace(/\.git$/, '');
 
 const theme = () => test.info().project.metadata.theme;
 const API = '/api/v1/kickstart';
@@ -44,6 +47,7 @@ let pageB;
 const shots = [];
 const probes = [];
 const consoleErrors = [];
+const failedResponses = [];
 const frames = [];
 const requests = [];
 const walked = [];
@@ -53,7 +57,12 @@ let importedAfterSetup = null;
 
 function watch(page, label) {
   page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(`${label}: ${message.text()}`);
+    // The browser logs every non-2xx response as a console error with no URL;
+    // those are accounted for one by one in failedResponses below.
+    if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) consoleErrors.push(`${label}: ${message.text()}`);
+  });
+  page.on('response', (response) => {
+    if (response.status() >= 400) failedResponses.push({ tab: label, status: response.status(), method: response.request().method(), path: new URL(response.url()).pathname });
   });
   page.on('pageerror', (error) => consoleErrors.push(`${label} pageerror: ${error.message}`));
   page.on('request', (request) => requests.push({ tab: label, method: request.method(), path: new URL(request.url()).pathname }));
@@ -119,7 +128,8 @@ async function storedTitles(request) {
 const readConfig = () => parse(readFileSync(configPath, 'utf8'));
 
 // ── the tree ────────────────────────────────────────────────────────────────
-const project = (page) => page.locator('li.st-node[data-kind="project"]', { hasText: ledgerLabel });
+const projectOf = (page, label) => page.locator('li.st-node[data-kind="project"]', { hasText: label });
+const project = (page) => projectOf(page, ledgerLabel);
 const branch = (page, name) => project(page).locator('li.st-node[data-kind="branch"]').filter({ has: page.getByRole('checkbox', { name, exact: true }) }).last();
 const row = (page, name) => page.getByRole('checkbox', { name, exact: false });
 const checked = (locator) => locator.getAttribute('aria-checked');
@@ -182,7 +192,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   writeFileSync(join(artifacts, `${theme()}-evidence.json`), JSON.stringify({
-    theme: theme(), shots, probes, consoleErrors, walked, offerSeen, ingestCounts, importedAfterSetup,
+    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, importedAfterSetup,
     frames: frames.map(({ tab, kind, revision, reason, scan, ingest }) => ({ tab, kind, revision, reason, scan, ingest })),
     requests: requests.filter((entry) => entry.path.startsWith('/api/')).map((entry) => `${entry.tab} ${entry.method} ${entry.path}`),
   }, null, 2));
@@ -205,9 +215,13 @@ test('fresh-install-redirects-to-setup', async () => {
   await pageA.goto('/share/');
   await pageA.waitForTimeout(1500);
   expect(new URL(pageA.url()).pathname, '/share is exempt from the redirect').toBe('/share/');
-  await pageA.goto('/sessions/not-recorded/');
-  await pageA.waitForTimeout(1500);
-  expect(new URL(pageA.url()).pathname, 'a deep link to a session is exempt from the redirect').toBe('/sessions/not-recorded/');
+  // Deep links into recorded work are honoured: a project's page and a transcript.
+  const hash = 'a'.repeat(64);
+  for (const deepLink of [`/sessions/${hash}/`, `/projects/${hash}/not-recorded/`]) {
+    await pageA.goto(deepLink);
+    await pageA.waitForTimeout(1500);
+    expect(new URL(pageA.url()).pathname, `${deepLink} is exempt from the redirect`).toBe(deepLink);
+  }
   await pageA.goto('/');
   await expect(pageA).toHaveURL(/\/kickstart\/?$/);
 
@@ -268,11 +282,13 @@ test('scan-progress-and-tree-selection', async () => {
   await expect(row(pageA, taxReport.prompt), 'a session on another branch is not chosen').not.toBeChecked();
   await expect(row(pageA, marketing.prompt), 'a session of another project is not chosen').not.toBeChecked();
 
-  // Choosing narrowed the selection, and the server then showed one more stop.
-  const after = await stepOf(pageA);
-  expect(after.total, 'a narrowed selection adds the auto-ingest stop').toBe(first.total + 1);
+  // The page counts the stops the server shows, before and after the choice. It
+  // decides none of that: an unchosen selection already shows the auto-ingest
+  // stop, and the count is whatever the server's own list says.
   const { view } = await snapshot(pageA.request);
-  expect(after.total).toBe(visibleStops(view).length);
+  expect(first.total, 'the count before the choice is the server list').toBeGreaterThan(0);
+  expect((await stepOf(pageA)).total, 'the count after the choice is the server list').toBe(visibleStops(view).length);
+  expect(visibleStops(view).map((stop) => stop.key), 'the auto-ingest stop is in the server list').toContain('auto-ingest');
 
   // A row's preview is the server's reading of the real transcript.
   await row(pageA, chosenSessions[0].prompt).focus();
@@ -376,7 +392,7 @@ test('review-summary-and-collapsed-diff', async () => {
   })).toBe(true);
   await diff.locator(':scope > summary').click();
   await expect(diff).toHaveAttribute('open', '');
-  for (const text of ['selection', 'autoIngestNewBranches', 'CC0-1.0', 'main']) await expect(diff).toContainText(text);
+  for (const text of ['selection', 'autoIngestNewBranches', 'CC0-1.0', ledger.remote, chosenSessions[0].cwd]) await expect(diff).toContainText(text);
   await shoot(pageA, '07-review-diff');
 });
 
@@ -437,7 +453,10 @@ test('save-finish-and-ingest-end', async () => {
 
   // The finish only offers: the settings section it names is a real one.
   const link = pageA.getByRole('link', { name: 'choose automatic publishing rules' });
-  expect(await link.getAttribute('href')).toBe('/settings?section=automatic-publishing');
+  // The app serves directory-style pages, so the link carries the trailing slash.
+  const target = new URL(await link.getAttribute('href'), 'http://app.invalid');
+  expect(target.pathname.replace(/\/$/, '')).toBe('/settings');
+  expect(target.searchParams.get('section')).toBe('automatic-publishing');
   await link.click();
   await expect(pageA).toHaveURL(/\/settings\/?\?section=automatic-publishing/);
   await expect(pageA.getByRole('heading', { name: 'automatic publishing' }).first()).toBeVisible();
@@ -456,9 +475,12 @@ test('config-holds-only-the-chosen-selection', async () => {
   const projects = config.selection.harnesses['claude-code'].projects;
   expect(projects).toHaveLength(1);
   expect(projects[0].gitRemote).toBe(ledger.remote);
-  expect(projects[0].branches).toEqual([fixture.chosen.branch]);
+  // The chosen branch lives in one checkout, so the selection names that clone
+  // and no other: the other branch's checkout is not in it.
+  expect(projects[0].clonePaths).toEqual([...new Set(chosenSessions.map((entry) => entry.cwd))]);
+  if (projects[0].branches) expect(projects[0].branches).toEqual([fixture.chosen.branch]);
   const text = JSON.stringify(config.selection);
-  for (const other of ['marketing-site', 'filler-', 'tax-report']) expect(text, `the selection names nothing of ${other}`).not.toContain(other);
+  for (const other of ['marketing-site', 'filler-', 'tax-report', 'stray']) expect(text, `the selection names nothing of ${other}`).not.toContain(other);
   for (const entry of seeded.filter((candidate) => !chosenIds.has(candidate.sessionId))) expect(text).not.toContain(entry.sessionId);
   // The other answers are what was chosen, and the edit made while the wizard
   // was open survived because the person took it.
@@ -523,7 +545,7 @@ test('selection-page-saves-only-selection', async () => {
   const { selection: afterSelection, ...afterRest } = after;
   expect(isDeepStrictEqual(afterRest, beforeRest), 'every key but the selection is as it was').toBe(true);
   expect(isDeepStrictEqual(afterSelection, beforeSelection), 'the selection changed').toBe(false);
-  expect(JSON.stringify(afterSelection)).toMatch(new RegExp(`${taxReport.sessionId}|feature/tax-report`));
+  expect(JSON.stringify(afterSelection)).toMatch(new RegExp(`${taxReport.sessionId}|feature/tax-report|${taxReport.cwd}`));
   importedAfterSetup = await storedTitles(pageD.request);
   expect(importedAfterSetup).toEqual([...chosenTitles, taxReport.prompt].sort());
 
@@ -536,6 +558,46 @@ test('selection-page-saves-only-selection', async () => {
   }
   await expect(pageC.getByRole('radio', { name: 'keep local, do not publish' }), 'the wizard kept its unsaved answer').toBeChecked();
   expect(readConfig().push.sharePreference, 'and saved nothing').toBe('share-later');
+});
+
+test('selection-page-names-the-chosen-branch', async () => {
+  // One branch of a project whose clone hosts sessions of two branches: the
+  // selection page saves a branch rule, and only that.
+  const page = await openPage('E', '/selection/');
+  await expect(title(page)).toHaveText('choose sessions to import');
+  const marketingProject = projectOf(page, marketingLabel);
+  await expect(marketingProject).toBeVisible();
+  await expect(page.locator('.ks-counts', { hasText: `${chosenSessions.length + 1} chosen` })).toBeVisible();
+  await marketingProject.getByRole('checkbox', { name: fixture.branchChoice.branch, exact: true }).click();
+  await expect(row(page, marketing.prompt)).toBeChecked();
+  await expect(row(page, stray.prompt), 'a session recorded on another branch is not chosen').not.toBeChecked();
+  await expect(page.locator('.ks-counts', { hasText: `${chosenSessions.length + 2} chosen` })).toBeVisible();
+  await advance(page, 'review');
+  await save(page).click();
+  await expect(page.getByRole('heading', { name: 'your selection is saved' })).toBeVisible();
+  await expect(page.getByText('import finished')).toBeVisible();
+
+  const projects = readConfig().selection.harnesses['claude-code'].projects;
+  const entry = projects.find((candidate) => candidate.gitRemote === marketingRepo.remote);
+  expect(entry, 'the selection names the project').toBeDefined();
+  expect(entry.branches, 'and only the branch that was chosen').toEqual([fixture.branchChoice.branch]);
+  expect(await storedTitles(page.request), 'the chosen branch was imported').toContain(marketing.prompt);
+  await page.close();
+});
+
+test('import-honours-the-recorded-branch', async () => {
+  // KNOWN GAP, recorded here so it cannot be forgotten and cannot pass unseen:
+  // the scan and the tree list a session under the branch its transcript
+  // records, but the import's selection filter judges it by the branch that is
+  // checked out in the session's directory (internal/selectionfilter Prepare
+  // replaces the recorded branch with git's HEAD). The clone sits on main now, so
+  // a session recorded on feature/stray is imported although only main was
+  // chosen. This case states the correct behaviour; Playwright expects it to
+  // fail until the import honours the recorded branch, and reports it when it
+  // starts to pass so this marker is removed.
+  test.fail(true, 'the import judges a session by the checked-out branch, not the recorded one');
+  const stored = await storedTitles(pageA.request);
+  expect(stored, `a session recorded on ${stray.branch} was not chosen, so it is not imported`).not.toContain(stray.prompt);
 });
 
 test('computed-styles-and-themes', async () => {
@@ -552,5 +614,10 @@ test('computed-styles-and-themes', async () => {
     expect(entry.tabularOffenders, `${entry.name}: counts without tabular numbers`).toEqual([]);
   }
   expect(consoleErrors, 'no console error or page error in any tab').toEqual([]);
+  // Every refused request was one the journey provoked on purpose: the save that
+  // found a changed field (409), and the deep links to work that was never recorded.
+  const hash = 'a'.repeat(64);
+  const refused = failedResponses.map((entry) => `${entry.status} ${entry.method} ${entry.path.replaceAll(hash, '<hash>').replace(/\/sessions\/[0-9a-f]{32}\//, '/sessions/<id>/')}`).sort();
+  expect(refused, 'the refused requests are exactly the provoked ones').toEqual(fixture.expectedRefusals.slice().sort());
   await Promise.all([pageA, pageB].map((page) => page?.close()));
 });

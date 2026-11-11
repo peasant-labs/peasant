@@ -8,6 +8,7 @@ requiredNames:
   - seed-ids-are-unique-per-session
   - seed-refuses-more-prompts-than-the-template-has
   - seed-filler-is-deterministic
+  - seed-checkouts-match-recorded-branches
   - served-build-exact
   - served-page-stale-refused
   - served-asset-stale-refused
@@ -23,6 +24,7 @@ cases:
   - {name: seed-ids-are-unique-per-session, mode: unique}
   - {name: seed-refuses-more-prompts-than-the-template-has, mode: prompts}
   - {name: seed-filler-is-deterministic, mode: filler}
+  - {name: seed-checkouts-match-recorded-branches, mode: checkouts}
   - {name: served-build-exact, mode: exact}
   - {name: served-page-stale-refused, mode: stale-page, error: differs from this export}
   - {name: served-asset-stale-refused, mode: stale-asset, error: differs from this build}
@@ -31,6 +33,16 @@ cases:
   - {name: served-no-marker-refused, mode: no-markers, error: names no marker}
   - {name: served-wrong-binary-refused, mode: wrong-binary, error: not the binary this run built}
   - {name: served-route-without-export-refused, mode: no-export, error: has no export}
+fixture:
+  # A small computer for the checkout case: one repository, three sessions on two branches.
+  template: template.jsonl
+  repositories:
+    - name: ledger
+      remote: https://github.com/acme/ledger.git
+      sessions:
+        - {name: a, branch: main, startedAt: "2026-02-03T09:00:00Z", prompts: [first a, second a]}
+        - {name: b, branch: feature/x, startedAt: "2026-02-04T09:00:00Z", prompts: [first b, second b]}
+        - {name: c, branch: feature/x, startedAt: "2026-02-05T09:00:00Z", prompts: [first c, second c]}
 template:
   # Two user lines and two assistant lines, as the ingest fixture's root session has.
   lines:

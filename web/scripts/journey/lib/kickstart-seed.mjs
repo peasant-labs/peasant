@@ -11,8 +11,8 @@ import { join } from 'node:path';
  * is built from the ingest end-to-end fixture's own root session, so the lines
  * are ones the production parser already accepts; only the session id, working
  * directory, branch, timestamps, line ids and the two prompts differ. Each
- * working directory is a real Git repository with a remote and the branches
- * the sessions name, so project and branch grouping comes from Git, not from a
+ * working directory is a real Git checkout with a remote, one per branch the
+ * sessions name, so project and branch grouping comes from Git, not from a
  * string in the transcript.
  */
 
@@ -72,6 +72,11 @@ export function fillerRepositories({ repositories, sessions }) {
   }));
 }
 
+/** The directory of the checkout for one branch of a repository. */
+export function worktreeFor(root, repository, branch) {
+  return join(root, 'repos', `${repository}--${branch.replace(/[^a-zA-Z0-9]+/g, '-')}`);
+}
+
 function git(cwd, ...args) {
   return execFileSync('git', args, {
     cwd,
@@ -92,22 +97,32 @@ export function seedRecordings({ home, root, repoRoot, fixture }) {
   const written = [];
   const repositories = [...fixture.repositories, ...(fixture.filler ? fillerRepositories(fixture.filler) : [])];
   for (const repo of repositories) {
-    const cwd = join(root, 'repos', repo.name);
-    mkdirSync(cwd, { recursive: true });
-    git(cwd, 'init', '--quiet', '--initial-branch', 'main');
-    git(cwd, 'commit', '--quiet', '--allow-empty', '-m', 'seed');
-    git(cwd, 'remote', 'add', 'origin', repo.remote);
-    for (const branch of new Set(repo.sessions.map((session) => session.branch))) {
-      if (branch !== 'main') git(cwd, 'branch', branch);
+    const main = join(root, 'repos', repo.name);
+    mkdirSync(main, { recursive: true });
+    git(main, 'init', '--quiet', '--initial-branch', 'main');
+    git(main, 'commit', '--quiet', '--allow-empty', '-m', 'seed');
+    git(main, 'remote', 'add', 'origin', repo.remote);
+    // One checkout per branch, as an agent that works in worktrees leaves them:
+    // a session was recorded in a directory whose checked-out branch is the
+    // branch the transcript names. A session marked `sharedClone` was recorded
+    // in the main clone while it sat on another branch than the one it names,
+    // which is how an old session looks after the clone moved on.
+    const checkouts = new Map([['main', main]]);
+    for (const branch of new Set(repo.sessions.filter((session) => !session.sharedClone).map((session) => session.branch))) {
+      if (checkouts.has(branch)) continue;
+      const path = worktreeFor(root, repo.name, branch);
+      git(main, 'worktree', 'add', '--quiet', '-b', branch, path);
+      checkouts.set(branch, path);
     }
-    const directory = join(projects, encodeProjectDirectory(cwd));
-    mkdirSync(directory, { recursive: true });
     for (const session of repo.sessions) {
+      const cwd = session.sharedClone ? main : checkouts.get(session.branch);
+      const directory = join(projects, encodeProjectDirectory(cwd));
+      mkdirSync(directory, { recursive: true });
       const sessionId = uuidFrom(fixture.template, repo.name, session.name);
       const lines = sessionLines(template, { sessionId, cwd, branch: session.branch, prompts: session.prompts, startedAt: session.startedAt });
       const path = join(directory, `${sessionId}.jsonl`);
       writeFileSync(path, `${lines.join('\n')}\n`, { mode: 0o600 });
-      written.push({ repository: repo.name, remote: repo.remote, branch: session.branch, name: session.name, sessionId, path, prompt: session.prompts[0] });
+      written.push({ repository: repo.name, remote: repo.remote, branch: session.branch, name: session.name, sessionId, cwd, path, prompt: session.prompts[0] });
     }
   }
   return written;
