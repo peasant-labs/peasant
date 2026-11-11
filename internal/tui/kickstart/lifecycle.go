@@ -41,88 +41,52 @@ var _ Clock = ClockFunc(nil)
 // without blocking ingest or tying deterministic tests to real sleeps.
 type TickFunc func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
 
-// NextStepKind is the closed set of display-only actions kickstart may show on
-// successful completion. A next step carries no executable callback.
-type NextStepKind int
-
-const (
-	NextStepUnknown NextStepKind = iota
-	NextStepConfig
-	NextStepWebStart
-	NextStepVillageLogin
-	NextStepVillagePush
-)
-
-// IsValid reports whether k identifies one of the completion actions.
-func (k NextStepKind) IsValid() bool {
-	switch k {
-	case NextStepConfig, NextStepWebStart, NextStepVillageLogin, NextStepVillagePush:
-		return true
-	default:
-		return false
-	}
-}
-
-// String returns the stable lower-case identity for k.
-func (k NextStepKind) String() string {
-	switch k {
-	case NextStepConfig:
-		return "config"
-	case NextStepWebStart:
-		return "web-start"
-	case NextStepVillageLogin:
-		return "village-login"
-	case NextStepVillagePush:
-		return "village-push"
-	default:
-		return "unknown"
-	}
-}
-
-// nextStepDetails is the private display catalog for one typed completion
-// action. Providers return only NextStepKind, so titles, commands, and details
-// cannot be paired with an incoherent kind or a fabricated address.
+// nextStepDetails is the private terminal display catalog for one completion
+// action. The closed set of actions is onboarding.NextStep, shared with the web
+// setup; this catalog only says how the terminal words each one, so titles,
+// commands, and details cannot be paired with an incoherent step or a
+// fabricated address.
 type nextStepDetails struct {
 	title   string
 	command string
 	detail  string
 }
 
-// NextStepsFunc chooses typed completion instructions from the completed local
-// ingest result. Program resolves each kind through one canonical display
-// catalog; the provider has no free-form command text, command runner,
-// publisher, or other execution authority.
-type NextStepsFunc func(result *ftue.IngestResult) []NextStepKind
+// NextStepsFunc chooses completion instructions from the completed local ingest
+// result. Program resolves each step through one canonical display catalog; the
+// provider has no free-form command text, command runner, publisher, or other
+// execution authority.
+type NextStepsFunc func(result *ftue.IngestResult) []onboarding.NextStep
 
 // DefaultNextSteps returns the four honest, display-only actions available
 // after a local kickstart run. In particular, it does not invent a dashboard
 // address: peasant web start is the component that can report the real address
 // after the server has successfully bound and become ready.
-func DefaultNextSteps(_ *ftue.IngestResult) []NextStepKind {
-	return adaptNextSteps(onboarding.NextStepsTUI())
+func DefaultNextSteps(_ *ftue.IngestResult) []onboarding.NextStep {
+	return onboarding.NextStepsTUI()
 }
 
-func canonicalNextStep(kind NextStepKind) (nextStepDetails, bool) {
-	switch kind {
-	case NextStepConfig:
+func canonicalNextStep(step onboarding.NextStep) (nextStepDetails, bool) {
+	switch step {
+	case onboarding.NextStepConfig:
 		return nextStepDetails{
 			title:   "modify configuration interactively",
 			command: "peasant config",
 			detail:  "opens the settings editor without importing or publishing",
 		}, true
-	case NextStepWebStart:
+	case onboarding.NextStepWebStart:
 		return nextStepDetails{
 			title:   "open the local dashboard",
 			command: "peasant web start",
 			detail:  "starts the dashboard and prints or opens its actual url",
 		}, true
-	case NextStepVillageLogin:
+	case onboarding.NextStepVillageLogin:
 		return nextStepDetails{
 			title:   "connect to peasant online later",
 			command: "peasant village login",
 			detail:  "connects this machine without publishing a transcript",
 		}, true
-	case NextStepVillagePush:
+	case onboarding.NextStepVillagePush:
 		return nextStepDetails{
 			title:   "publish later, explicitly",
 			command: "peasant village push",
@@ -133,22 +97,22 @@ func canonicalNextStep(kind NextStepKind) (nextStepDetails, bool) {
 	}
 }
 
-func validateNextSteps(kinds []NextStepKind) error {
-	if len(kinds) == 0 {
+func validateNextSteps(steps []onboarding.NextStep) error {
+	if len(steps) == 0 {
 		return nextStepsActionableError("the completion provider returned no actions")
 	}
-	seen := make(map[NextStepKind]bool, len(kinds))
-	for index, kind := range kinds {
-		if !kind.IsValid() {
-			return nextStepsActionableError(fmt.Sprintf("action %d has unknown kind %d", index+1, kind))
+	seen := make(map[onboarding.NextStep]bool, len(steps))
+	for index, step := range steps {
+		if !step.IsValid() {
+			return nextStepsActionableError(fmt.Sprintf("action %d has unknown step %q", index+1, string(step)))
 		}
-		if seen[kind] {
-			return nextStepsActionableError(fmt.Sprintf("action %d repeats %q", index+1, kind))
+		if seen[step] {
+			return nextStepsActionableError(fmt.Sprintf("action %d repeats %q", index+1, step))
 		}
-		if _, present := canonicalNextStep(kind); !present {
-			return nextStepsActionableError(fmt.Sprintf("action %d has no canonical display catalog entry for %q", index+1, kind))
+		if _, present := canonicalNextStep(step); !present {
+			return nextStepsActionableError(fmt.Sprintf("action %d has no terminal display catalog entry for %q", index+1, step))
 		}
-		seen[kind] = true
+		seen[step] = true
 	}
 	return nil
 }
@@ -161,5 +125,5 @@ func nextStepsActionableError(reason string) error {
 			"where: kickstart completion provider validation.\n"+
 			"when: after local setup completed and before rendering follow-up commands.\n"+
 			"means: no unverified or incoherent command guidance was shown; setup remains complete.\n"+
-			"fix: use supported unique NextStepKind values and rerun kickstart.", reason)
+			"fix: use supported unique onboarding.NextStep values and rerun kickstart.", reason)
 }

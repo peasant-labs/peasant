@@ -245,7 +245,7 @@ type Program struct {
 	progressView       ingestprogress.Model
 	progressAnimFrame  int
 	lastProgressAnimAt time.Time
-	nextSteps          []NextStepKind
+	nextSteps          []onboarding.NextStep
 	nextStepsErr       error
 
 	width, height int
@@ -931,13 +931,13 @@ func (p Program) advanceProgressAnimation(at time.Time) Program {
 // guidance is retained as an actionable presentation error rather than being
 // silently dropped one row at a time.
 func (p Program) resolveNextSteps(result *ftue.IngestResult) Program {
-	kinds := p.deps.NextSteps(result)
-	if err := validateNextSteps(kinds); err != nil {
+	steps := p.deps.NextSteps(result)
+	if err := validateNextSteps(steps); err != nil {
 		p.nextSteps = nil
 		p.nextStepsErr = err
 		return p
 	}
-	p.nextSteps = append([]NextStepKind(nil), kinds...)
+	p.nextSteps = append([]onboarding.NextStep(nil), steps...)
 	p.nextStepsErr = nil
 	return p
 }
@@ -1358,8 +1358,8 @@ func (p Program) doneContent() string {
 			lines = append(lines, styles.Base.Render(line))
 		}
 		lines = append(lines, "")
-		for _, kind := range p.nextSteps {
-			step, present := canonicalNextStep(kind)
+		for _, next := range p.nextSteps {
+			step, present := canonicalNextStep(next)
 			if !present {
 				// resolveNextSteps validates the entire result before storing it;
 				// this branch is unreachable unless that invariant regresses.

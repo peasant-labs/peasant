@@ -31,6 +31,7 @@ type homonym struct {
 type neutralFixture struct {
 	Cases              []neutralCase `yaml:"cases"`
 	NeutralTypes       []string      `yaml:"neutralTypes"`
+	RetiredTypes       []string      `yaml:"retiredTypes"`
 	GuardedDirectories []string      `yaml:"guardedDirectories"`
 	PermittedHomonyms  []homonym     `yaml:"permittedHomonyms"`
 }
@@ -132,7 +133,10 @@ func walkGoFiles(t *testing.T, dir string, visit func(string, *ast.File)) {
 func checkNeutralDeclarations(t *testing.T, root string, f neutralFixture) {
 	t.Helper()
 	// These lists are the protected contract, not a count that can silently shrink.
-	types := map[string]bool{"ProjectIdentity": false, "PreparedSessionListing": false, "SessionListing": false, "SessionSource": false, "SessionSourceOrigin": false, "Forest": false, "Node": false, "Stop": false, "Field": false, "Draft": false, "Residual": false, "StopKind": false, "FieldKind": false, "ModelScope": false, "FlowKey": false}
+	types := map[string]bool{"ProjectIdentity": false, "PreparedSessionListing": false, "SessionListing": false, "SessionSource": false, "SessionSourceOrigin": false, "Forest": false, "Node": false, "Stop": false, "Field": false, "Draft": false, "Residual": false, "StopKind": false, "FieldKind": false, "ModelScope": false, "FlowKey": false, "NextStep": false}
+	// Names that once had a second declaration and were removed. No guarded
+	// directory and no onboarding file may declare one again, alias or not.
+	retired := map[string]bool{"NextStepKind": false}
 	dirs := map[string]bool{"internal/tui/settings": false, "internal/tui/kickstart": false, "internal/tui/ftue": false, "internal/discovery": false}
 	for _, name := range f.NeutralTypes {
 		if seen, ok := types[name]; !ok || seen {
@@ -143,6 +147,17 @@ func checkNeutralDeclarations(t *testing.T, root string, f neutralFixture) {
 	for name, seen := range types {
 		if !seen {
 			t.Fatalf("missing neutral type %q", name)
+		}
+	}
+	for _, name := range f.RetiredTypes {
+		if seen, ok := retired[name]; !ok || seen {
+			t.Fatalf("unknown or duplicate retired type %q", name)
+		}
+		retired[name] = true
+	}
+	for name, seen := range retired {
+		if !seen {
+			t.Fatalf("missing retired type %q", name)
 		}
 	}
 	for _, dir := range f.GuardedDirectories {
@@ -197,6 +212,10 @@ func checkNeutralDeclarations(t *testing.T, root string, f neutralFixture) {
 				for _, spec := range gen.Specs {
 					typ := spec.(*ast.TypeSpec)
 					name := typ.Name.Name
+					if retired[name] {
+						t.Errorf("%s declares retired type %s; use the onboarding type it was folded into", rel, name)
+						continue
+					}
 					if !types[name] {
 						continue
 					}
