@@ -3,14 +3,12 @@ package kickstart
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
-	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
-	"github.com/peasant-labs/schema"
 )
 
 // Options carries the runtime seams the kickstart presentation composes over.
@@ -304,8 +302,4 @@ func selectionTreeOptions(opts Options) []settings.TreeOption {
 	return out
 }
 
-func harnessDisplayName(harness string) string {
-	return strings.ToLower(schema.HarnessDisplayName(defaults.Harness(harness)))
-}
-
-func harnessFacetLabel(harness string) string { return harnessDisplayName(harness) }
+func harnessFacetLabel(harness string) string { return discovery.HarnessLabel(harness) }

@@ -192,20 +192,34 @@ cases:
           lines.1.kind: text
         contains: {lines.1.text: "no transcript preview is available"}
       # a project row and a branch row are described from the forest's own
-      # metadata; their ids carry slashes, so the page percent-encodes them
+      # metadata, in the words the terminal pane uses; their ids carry slashes,
+      # so the page percent-encodes them
       - call: GET /api/v1/kickstart/sessions/{full}/tree/%2Fwork%2Ftool/preview
         json:
-          lines.0.kind: label
-          lines.0.text: github.com:acme/tool
-          lines.1.text: "sessions: 3"
-          lines.2.text: "harnesses:"
-          lines.3.text: "  claude-code"
+          lines.0.kind: text
+          lines.0.text: "project: github.com:acme/tool"
+          lines.1.text: "harness: claude code"
+          lines.2.text: "remote: github.com/acme/tool"
+          lines.3.text: "git directory: /work/tool"
+          lines.4.text: "worktrees: 1"
+          lines.5.text: "  /work/tool"
+          lines.6.text: "branches: 2"
+          lines.7.text: "  feature/x"
+          lines.8.text: "  main"
+          lines.9.text: "sessions: 3"
+        len: {lines: 10}
         lenMax: {lines: 200}
       - call: GET /api/v1/kickstart/sessions/{full}/tree/branch:10:%2Fwork%2Ftoolmain/preview
         json:
-          lines.0.text: main
+          lines.0.text: "project: github.com:acme/tool"
           lines.1.text: "branch: main"
-          lines.2.text: "sessions: 2"
+          lines.2.text: "harness: claude code"
+          lines.3.text: "remote: github.com/acme/tool"
+          lines.4.text: "git directory: /work/tool"
+          lines.5.text: "worktrees: 1"
+          lines.6.text: "  /work/tool"
+          lines.7.text: "sessions: 2"
+        len: {lines: 8}
 
   - name: preview-unknown-node-refused
     world: {listings: two-projects}
