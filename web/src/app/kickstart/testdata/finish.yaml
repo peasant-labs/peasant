@@ -193,6 +193,7 @@ cases:
       - expectText: [import failed, the import could not start]
       - click: import now
       - expectCalls: {route: "POST /api/v1/sync/ingest", count: 1}
-      - expectText: [config not available]
+      # What failed, what the server said, that nothing was imported, and what to do.
+      - expectText: [the import did not start, config not available, nothing was imported and your saved setup is unchanged, choose import now again]
       # It is shown once, on the panel, not also as a page notice.
       - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-full/commit", count: 1}
