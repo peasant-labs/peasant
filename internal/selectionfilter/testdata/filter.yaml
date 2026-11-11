@@ -12,6 +12,9 @@ requiredNames:
   - pathless-rule-uses-resolved-clone-path
   - git-resolution-skipped-when-not-needed
   - auto-ingest-new-branches-follows-config
+  - recorded-branch-wins-over-current-head
+  - recorded-branch-admits-when-current-head-moved
+  - head-used-only-when-no-branch-recorded
 cases:
   - name: prepare-builds-complete-cohort
     harness: claude-code
@@ -152,3 +155,51 @@ cases:
     expectGitCalls: 2
     expectMatch: true
     expectMatchWhenDisabled: false
+  # A session belongs to the branch its transcript recorded, the branch the tree
+  # groups it under. The clone has moved on since: git is asked for the remote
+  # only, and the checked-out branch never replaces a recorded one.
+  - name: recorded-branch-wins-over-current-head
+    harness: claude-code
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+        branch: feature/stray
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: main
+    expectGitCalls: 1
+    expectMatch: false
+  - name: recorded-branch-admits-when-current-head-moved
+    harness: claude-code
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+        branch: main
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: feature/moved
+    expectGitCalls: 1
+    expectMatch: true
+  # Only a session that recorded no branch is placed by the checkout, and the
+  # directory is asked once however many sessions share it.
+  - name: head-used-only-when-no-branch-recorded
+    harness: claude-code
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+      - id: bbbb2222-2222-4222-8222-222222222222
+        cwd: /workspace/tool
+        branch: feature/stray
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: main
+    expectGitCalls: 2
+    checkSecondMatch: true
+    expectMatch: true
+    expectSecondMatch: false

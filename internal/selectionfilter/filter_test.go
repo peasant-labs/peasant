@@ -57,6 +57,7 @@ type filterSession struct {
 	ID            string `yaml:"id"`
 	CWD           string `yaml:"cwd"`
 	ProjectName   string `yaml:"projectName"`
+	Branch        string `yaml:"branch"`
 	UnrelatedSlug bool   `yaml:"unrelatedSlug"`
 }
 
@@ -195,6 +196,7 @@ func runFilterCase(t *testing.T, item filterCase) {
 				Harness:     ingest.Harness(item.Harness),
 				ProjectName: row.ProjectName,
 				CWD:         row.CWD,
+				Branch:      row.Branch,
 			}
 		}
 	}

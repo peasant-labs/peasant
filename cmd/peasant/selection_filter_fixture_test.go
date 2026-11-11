@@ -678,14 +678,22 @@ func initConflictedSourceRepo(t *testing.T, fixture mountedConflictFixture) stri
 		}
 	}
 
+	writeConflictedSession(t, sourceDir, fixture, fixture.AdmittedBranch)
+	return sourceDir
+}
+
+// writeConflictedSession records the fixture's one session in sourceDir on
+// recordedBranch, replacing any earlier recording of it. The repository's own
+// checked-out branch is not touched.
+func writeConflictedSession(t *testing.T, sourceDir string, fixture mountedConflictFixture, recordedBranch string) {
+	t.Helper()
 	sessionFile := filepath.Join(sourceDir, fixture.ClaudeSlug, fixture.SessionID+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(sessionFile), 0o755); err != nil {
 		t.Fatalf("create claude project slug directory: %v", err)
 	}
 	line := fmt.Sprintf(`{"type":"user","message":{"role":"user","content":"hi"},"uuid":%q,"sessionId":%q,"timestamp":"2026-05-30T04:29:24.992Z","cwd":%q,"gitBranch":%q,"version":"1.0","userType":"external"}`,
-		fixture.SessionID, fixture.SessionID, sourceDir, fixture.AdmittedBranch)
+		fixture.SessionID, fixture.SessionID, sourceDir, recordedBranch)
 	if err := os.WriteFile(sessionFile, []byte(line+"\n"), 0o644); err != nil {
 		t.Fatalf("write claude session fixture: %v", err)
 	}
-	return sourceDir
 }

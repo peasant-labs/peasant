@@ -244,6 +244,8 @@ func ExpandAllowedSessionIDs(selected []SessionListing) map[ingest.SessionID]boo
 }
 
 // ResolveSessionGit walks git for one discovered session's remote and branch.
+// The branch is the one the session recorded; git's checked-out branch only
+// stands in when none was recorded (ingest.ResolveGitBranch).
 func ResolveSessionGit(
 	ctx context.Context,
 	git ingest.GitResolver,
@@ -274,12 +276,7 @@ func ResolveSessionGit(
 			gitRemote = remote
 		}
 	}
-	if branchName == "" && d.CWD != "" {
-		if branch, err := git.Branch(ctx, d.CWD); err == nil && branch != "" {
-			branchName = branch
-		}
-	}
-	return gitRemote, branchName
+	return gitRemote, ingest.ResolveGitBranch(ctx, git, d.CWD, branchName)
 }
 
 // ResolveListingOrigin turns discovery's typed origin into the listing value.

@@ -1,0 +1,56 @@
+# Which branch a session belongs to. The branch it recorded wins; the branch
+# checked out in its directory counts only when it recorded none.
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - recorded-branch-wins-over-checkout
+  - checkout-answers-only-when-nothing-recorded
+  - nothing-known-is-empty
+  - unreadable-checkout-is-empty
+  - git-not-asked-when-a-branch-was-recorded
+  - git-not-asked-without-a-directory
+  - no-resolver-keeps-the-recorded-branch
+  - no-resolver-and-nothing-recorded-is-empty
+cases:
+  - name: recorded-branch-wins-over-checkout
+    dir: /work/tool
+    recordedBranch: feature/stray
+    checkout: main
+    wantBranch: feature/stray
+    wantCheckoutCalls: 0
+  - name: checkout-answers-only-when-nothing-recorded
+    dir: /work/tool
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
+  - name: nothing-known-is-empty
+    dir: /work/tool
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  - name: unreadable-checkout-is-empty
+    dir: /work/tool
+    checkout: main
+    checkoutFails: true
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  - name: git-not-asked-when-a-branch-was-recorded
+    dir: /work/tool
+    recordedBranch: release
+    checkout: release
+    wantBranch: release
+    wantCheckoutCalls: 0
+  - name: git-not-asked-without-a-directory
+    recordedBranch: ""
+    checkout: main
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  - name: no-resolver-keeps-the-recorded-branch
+    dir: /work/tool
+    noResolver: true
+    recordedBranch: feature/stray
+    wantBranch: feature/stray
+    wantCheckoutCalls: 0
+  - name: no-resolver-and-nothing-recorded-is-empty
+    dir: /work/tool
+    noResolver: true
+    wantBranch: ""
+    wantCheckoutCalls: 0

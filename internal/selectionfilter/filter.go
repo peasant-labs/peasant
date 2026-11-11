@@ -65,6 +65,9 @@ func New(cfg *config.Config, git ingest.GitResolver, r ingest.PathIdentityResolv
 // Prepare materializes every discovered session before the first Match call.
 // Decisions are cached by session ID. Git lookups are memoized by directory and
 // run only when the matcher can change its answer from repository evidence.
+// A session belongs to the branch its transcript recorded, as it does in the
+// tree; the branch checked out in its directory counts only for a session that
+// recorded none (ingest.ResolveGitBranch).
 // A cancelled context returns before this call's decisions are cached.
 func (f *Filter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSession) error {
 	if f == nil {
@@ -73,8 +76,10 @@ func (f *Filter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSessio
 	f.prepared = nil
 	f.recordedConflicts = nil
 	f.recorder.reset()
-	type gitContext struct{ remote, branch string }
-	resolvedGit := make(map[string]gitContext)
+	var git *memoizedGit
+	if f.git != nil {
+		git = newMemoizedGit(f.git)
+	}
 	inputs := make([]CandidateInput, len(sessions))
 	for index, session := range sessions {
 		if err := ctx.Err(); err != nil {
@@ -83,23 +88,14 @@ func (f *Filter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSessio
 		projectPath := discoveredSessionProjectPath(session)
 		branch := session.Branch
 		gitRemote := ""
-		if (f.projectHarnesses[session.Harness] || f.matcher.DiscoveryNeedsGit(session.Harness, session.SessionID)) && f.git != nil {
-			dir := discoveredSessionGitDirectory(session, projectPath)
-			if dir != "" {
-				gitCtx, ok := resolvedGit[dir]
-				if !ok {
-					if remote, err := f.git.RemoteURL(ctx, dir); err == nil {
-						gitCtx.remote = remote
-					}
-					if resolvedBranch, err := f.git.Branch(ctx, dir); err == nil {
-						gitCtx.branch = resolvedBranch
-					}
-					resolvedGit[dir] = gitCtx
+		if (f.projectHarnesses[session.Harness] || f.matcher.DiscoveryNeedsGit(session.Harness, session.SessionID)) && git != nil {
+			if dir := discoveredSessionGitDirectory(session, projectPath); dir != "" {
+				if remote, err := git.RemoteURL(ctx, dir); err == nil {
+					gitRemote = remote
 				}
-				gitRemote = gitCtx.remote
-				if gitCtx.branch != "" {
-					branch = gitCtx.branch
-				}
+				// The branch the session recorded is the one the tree grouped it
+				// under; the checkout only answers for a session that recorded none.
+				branch = ingest.ResolveGitBranch(ctx, git, dir, session.Branch)
 			}
 		}
 		inputs[index] = CandidateInput{
@@ -169,6 +165,48 @@ func (f *Filter) Match(session ingest.DiscoveredSession) bool {
 		}
 	}
 	return false
+}
+
+type gitAnswer struct {
+	value string
+	err   error
+}
+
+// memoizedGit answers each directory's remote and checked-out branch once for a
+// Prepare call. Only the two questions selection asks are remembered; the rest
+// of the resolver is the embedded one.
+type memoizedGit struct {
+	ingest.GitResolver
+	remotes  map[string]gitAnswer
+	branches map[string]gitAnswer
+}
+
+var _ ingest.GitResolver = (*memoizedGit)(nil)
+
+func newMemoizedGit(git ingest.GitResolver) *memoizedGit {
+	return &memoizedGit{
+		GitResolver: git,
+		remotes:     make(map[string]gitAnswer),
+		branches:    make(map[string]gitAnswer),
+	}
+}
+
+func (m *memoizedGit) RemoteURL(ctx context.Context, dir string) (string, error) {
+	if answer, ok := m.remotes[dir]; ok {
+		return answer.value, answer.err
+	}
+	value, err := m.GitResolver.RemoteURL(ctx, dir)
+	m.remotes[dir] = gitAnswer{value: value, err: err}
+	return value, err
+}
+
+func (m *memoizedGit) Branch(ctx context.Context, dir string) (string, error) {
+	if answer, ok := m.branches[dir]; ok {
+		return answer.value, answer.err
+	}
+	value, err := m.GitResolver.Branch(ctx, dir)
+	m.branches[dir] = gitAnswer{value: value, err: err}
+	return value, err
 }
 
 func discoveredSessionProjectPath(session ingest.DiscoveredSession) string {
