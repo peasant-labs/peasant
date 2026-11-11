@@ -90,21 +90,34 @@ cases:
   - name: unknown-close-reason-refused
     frame: {kind: closed, sessionId: ses-full, revision: 1, reason: replaced}
     refuses: reason
+# The forest is read through the contract's own schema: a body it accepts comes
+# out as it went in, and one it refuses is refused whole, with the error that
+# says where. `tree` names a forest in src/test/fixtures/kickstart/trees.yaml;
+# `body` states one. `refuses` is text the actionable error must contain.
 trees:
   requiredNames:
-    - unknown-kind-and-state-are-counted-not-relabelled
+    - the-forest-comes-out-as-the-contract-served-it
+    - an-unknown-kind-or-state-refuses-the-whole-forest
     - a-total-or-a-cursor-is-refused
-    - rows-without-an-id-are-counted
+    - a-row-without-an-id-is-refused
+    - a-row-without-a-label-is-refused
   cases:
-    - name: unknown-kind-and-state-are-counted-not-relabelled
+    - name: the-forest-comes-out-as-the-contract-served-it
+      tree: forest
+    - name: an-unknown-kind-or-state-refuses-the-whole-forest
       tree: unknown-kind-and-state
-      expect: {kept: [p-ledger], unknownKind: 1, unknownState: 1, unreadable: 0}
+      refuses: [nodes.1.kind, nodes.2.state, breaks the Local API contract, nothing was changed, reload]
     - name: a-total-or-a-cursor-is-refused
       body: {nodes: [], total: 0}
-      refuses: no page, cursor or total
-    - name: rows-without-an-id-are-counted
+      refuses: [total, breaks the Local API contract]
+    - name: a-row-without-an-id-is-refused
       body:
         nodes:
           - {kind: project, state: none, label: no id}
           - {id: p-ok, kind: project, state: none, label: ok}
-      expect: {kept: [p-ok], unknownKind: 0, unknownState: 0, unreadable: 1}
+      refuses: [nodes.0.id]
+    - name: a-row-without-a-label-is-refused
+      body:
+        nodes:
+          - {id: p-ok, kind: project, state: none}
+      refuses: [nodes.0.label]

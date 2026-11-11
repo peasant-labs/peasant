@@ -10,6 +10,7 @@ requiredNames:
   - boundary-parser-fails-closed
   - drift-both-ways-against-schema
   - no-literal-comparison-in-consumers
+  - forest-values-are-the-trees-own-and-match-the-schema
 cases:
   - name: one-definition-site-per-set
   - name: all-coverage
@@ -17,13 +18,12 @@ cases:
   - name: boundary-parser-fails-closed
   - name: drift-both-ways-against-schema
   - name: no-literal-comparison-in-consumers
+  - name: forest-values-are-the-trees-own-and-match-the-schema
 sets:
   - {name: scope, all: ALL_KICKSTART_SCOPES, parse: parseKickstartScope, schemaAll: AllLocalKickstartScopes, wires: [full, selection], refuses: ["", FULL, kickstart, 1, null]}
   - {name: stop-kind, all: ALL_KICKSTART_STOP_KINDS, parse: parseKickstartStopKind, schemaAll: AllLocalKickstartStopKinds, wires: [connection, config, review, ingest], refuses: ["", section, Config, 0, null]}
   - {name: field-kind, all: ALL_KICKSTART_FIELD_KINDS, parse: parseKickstartFieldKind, schemaAll: AllLocalKickstartFieldKinds, wires: [toggle, choice, action, tree, notice], refuses: ["", radio, TREE, false, null]}
   - {name: line-kind, all: ALL_KICKSTART_LINE_KINDS, parse: parseKickstartLineKind, schemaAll: AllLocalKickstartLineKinds, wires: [text, label, before, after, spacer], refuses: ["", heading, After, 2, null]}
-  - {name: node-kind, all: ALL_KICKSTART_NODE_KINDS, parse: parseKickstartNodeKind, schemaAll: AllLocalKickstartNodeKinds, wires: [project, group, branch, session], refuses: ["", folder, Project, 4, null]}
-  - {name: node-state, all: ALL_KICKSTART_NODE_STATES, parse: parseKickstartNodeState, schemaAll: AllLocalKickstartNodeStates, wires: [none, some, all], refuses: ["", partial, locked, 1, null]}
   - {name: scan-state, all: ALL_KICKSTART_SCAN_STATES, parse: parseKickstartScanState, schemaAll: AllLocalKickstartScanStates, wires: [idle, running, done, error], refuses: ["", finished, Done, true, null]}
   - {name: ingest-state, all: ALL_KICKSTART_INGEST_STATES, parse: parseKickstartIngestState, schemaAll: AllLocalKickstartIngestStates, wires: [idle, running, busy, failed], refuses: ["", done, Busy, 5, null]}
   - {name: resolution, all: ALL_KICKSTART_RESOLUTIONS, parse: parseKickstartResolution, schemaAll: AllLocalKickstartResolutions, wires: [mine, theirs], refuses: ["", keep-mine, take-theirs, Mine, null]}
@@ -32,6 +32,14 @@ sets:
   - {name: diff-line-type, all: ALL_KICKSTART_DIFF_LINE_TYPES, parse: parseKickstartDiffLineType, schemaAll: AllLocalKickstartDiffLineTypes, wires: [add, del, ctx], refuses: ["", delete, context, Add, null]}
   - {name: event-kind, all: ALL_KICKSTART_EVENT_KINDS, parse: parseKickstartEventKind, schemaAll: AllLocalKickstartEventKinds, wires: [session, answers, conflicts, scan, ingest, closed], refuses: ["", replaced, took-over, Closed, null]}
   - {name: close-reason, all: ALL_KICKSTART_CLOSE_REASONS, parse: parseKickstartCloseReason, schemaAll: AllLocalKickstartCloseReasons, wires: [committed, expired], refuses: ["", replaced, Committed, 3, null]}
+# The kind and the state of a forest row are not a set of this module: the
+# selection tree owns them and is handed the rows as the contract served them.
+# What this module must hold is that the tree's own sets equal the contract's,
+# in both directions, so a kind or a state that the contract adds, renames or
+# removes fails here instead of drawing a row wrongly.
+forestValues:
+  - {name: node-kind, fairtrade: ALL_SELECTION_NODE_KINDS, schemaAll: AllLocalKickstartNodeKinds, wires: [project, group, branch, session]}
+  - {name: node-state, fairtrade: ALL_SELECTION_NODE_STATES, schemaAll: AllLocalKickstartNodeStates, wires: [none, some, all]}
 consumerScan:
   # Production code that reads these sets must compare members, never tokens.
   roots:

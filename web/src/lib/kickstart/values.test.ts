@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import * as fairtrade from '@peasant-labs/fairtrade/ui';
 import * as schema from '@peasant-labs/schema';
 import * as values from './values';
 import { KickstartValueError } from './values';
@@ -34,6 +35,7 @@ function rows(): SetRow[] {
 type Member = { wire: string; label: string; String(): string; toString(): string; toJSON(): string };
 
 const exported = values as unknown as Record<string, unknown>;
+const fairtradeExports = fairtrade as unknown as Record<string, unknown>;
 const schemaExports = schema as unknown as Record<string, unknown>;
 
 function members(row: SetRow): readonly Member[] {
@@ -143,6 +145,24 @@ const CHECKS: Record<string, () => void> = {
     }
   },
 
+  'forest-values-are-the-trees-own-and-match-the-schema': () => {
+    const root = requireRecord(readFixture(PATH), PATH);
+    if (!Array.isArray(root.forestValues)) throw new Error(`${PATH}.forestValues must be a list`);
+    for (const entry of root.forestValues) {
+      const row = requireRecord(entry, `${PATH}.forestValues`) as { name: string; fairtrade: string; schemaAll: string; wires: string[] };
+      const own = fairtradeExports[row.fairtrade];
+      if (!Array.isArray(own)) throw new Error(`${PATH}: @peasant-labs/fairtrade/ui exports no list named ${row.fairtrade}`);
+      const fromSchema = schemaExports[row.schemaAll];
+      if (!Array.isArray(fromSchema)) throw new Error(`${PATH}: @peasant-labs/schema exports no list named ${row.schemaAll}`);
+      const treeWires = (own as { wire: string }[]).map((member) => member.wire);
+      expect(treeWires, `${row.name}: the tree's own list`).toEqual(row.wires);
+      expect(treeWires.filter((wire) => !fromSchema.includes(wire)), `${row.name}: tree tokens the schema does not publish`).toEqual([]);
+      expect(fromSchema.filter((wire) => !treeWires.includes(wire as string)), `${row.name}: schema tokens the tree does not know`).toEqual([]);
+    }
+    // And this module defines none of them: the sets are not its own.
+    expect(Object.keys(exported).filter((key) => /NODE_(KINDS|STATES)$|^Kickstart(NodeKind|NodeState)$/.test(key))).toEqual([]);
+  },
+
   'no-literal-comparison-in-consumers': () => {
     const root = requireRecord(readFixture(PATH), PATH);
     const scan = requireRecord(root.consumerScan, `${PATH}.consumerScan`);
@@ -167,7 +187,7 @@ describe('kickstart closed sets', () => {
     const named = new Set(rows().map((row) => row.all));
     const exportedLists = Object.keys(exported).filter((key) => /^ALL_KICKSTART_/.test(key));
     expect(exportedLists.filter((key) => !named.has(key))).toEqual([]);
-    expect(rows().map((row) => row.name)).toEqual(expect.arrayContaining(['scope', 'event-kind', 'node-kind', 'node-state', 'diff-line-type', 'field-kind', 'stop-kind']));
+    expect(rows().map((row) => row.name)).toEqual(expect.arrayContaining(['scope', 'event-kind', 'diff-line-type', 'field-kind', 'stop-kind']));
   });
 
   for (const entry of cases) {

@@ -10,8 +10,8 @@ import { expandRefs, loadCases, loadModels, loadTrees } from '@/test/fixtures/ki
 
 /**
  * The boundary of the kickstart model, played from fixtures: which topic
- * messages become events, which the contract refuses and why, and how a forest
- * with rows the page cannot name is counted rather than relabelled.
+ * messages become events, which the contract refuses and why, and that a forest
+ * with a row the contract does not list is refused whole rather than relabelled.
  */
 
 const PATH = 'src/lib/kickstart/testdata/model.yaml';
@@ -65,14 +65,20 @@ describe('the forest', () => {
   for (const entry of loadCases(PATH, 'trees')) {
     it(entry.name, () => {
       const body = typeof entry.tree === 'string' ? trees[entry.tree] : entry.body;
-      if (typeof entry.refuses === 'string') {
-        expect(() => parseKickstartTree(body)).toThrow(entry.refuses);
+      if (!Array.isArray(entry.refuses)) {
+        // The rows are the contract's own: nothing is added, dropped or renamed.
+        expect(parseKickstartTree(body)).toEqual(body);
         return;
       }
-      const tree = parseKickstartTree(body);
-      const expected = entry.expect as { kept: string[]; unknownKind: number; unknownState: number; unreadable: number };
-      expect(tree.nodes.map((node) => node.id)).toEqual(expected.kept);
-      expect(tree.dropped).toEqual({ unknownKind: expected.unknownKind, unknownState: expected.unknownState, unreadable: expected.unreadable });
+      let failure: unknown;
+      try {
+        parseKickstartTree(body);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure, 'the contract must refuse this forest').toBeInstanceOf(KickstartContractError);
+      for (const text of entry.refuses as string[]) expect((failure as Error).message).toContain(text);
+      expect((failure as Error).message).toContain('GET /api/v1/kickstart/sessions/{id}/tree');
     });
   }
 });

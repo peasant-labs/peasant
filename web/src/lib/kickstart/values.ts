@@ -28,8 +28,6 @@ import type {
   LocalKickstartIngestState,
   LocalKickstartLineKind,
   LocalKickstartNextStep,
-  LocalKickstartNodeKind,
-  LocalKickstartNodeState,
   LocalKickstartResolution,
   LocalKickstartScanState,
   LocalKickstartScope,
@@ -153,43 +151,6 @@ export const ALL_KICKSTART_LINE_KINDS = Object.freeze([
 ] as const);
 export const parseKickstartLineKind = parserFor('a kickstart line kind', ALL_KICKSTART_LINE_KINDS);
 const _lineKind: Same<LocalKickstartLineKind, WireOf<typeof ALL_KICKSTART_LINE_KINDS>> = true;
-
-// ── node kind and state ──────────────────────────────────────────────────
-
-/** One row of the selection forest. */
-export const KickstartNodeKind = Object.freeze({
-  Project: closed('project', 'project'),
-  Group: closed('group', 'group'),
-  Branch: closed('branch', 'branch'),
-  Session: closed('session', 'session'),
-} as const);
-export type KickstartNodeKind = (typeof KickstartNodeKind)[keyof typeof KickstartNodeKind];
-export const ALL_KICKSTART_NODE_KINDS = Object.freeze([
-  KickstartNodeKind.Project,
-  KickstartNodeKind.Group,
-  KickstartNodeKind.Branch,
-  KickstartNodeKind.Session,
-] as const);
-export const parseKickstartNodeKind = parserFor('a kickstart node kind', ALL_KICKSTART_NODE_KINDS);
-const _nodeKind: Same<LocalKickstartNodeKind, WireOf<typeof ALL_KICKSTART_NODE_KINDS>> = true;
-
-/**
- * The tri-state the server computed for a row. Ambiguity is the node's
- * `locked` flag, never a fourth state.
- */
-export const KickstartNodeState = Object.freeze({
-  None: closed('none', 'none'),
-  Some: closed('some', 'some'),
-  All: closed('all', 'all'),
-} as const);
-export type KickstartNodeState = (typeof KickstartNodeState)[keyof typeof KickstartNodeState];
-export const ALL_KICKSTART_NODE_STATES = Object.freeze([
-  KickstartNodeState.None,
-  KickstartNodeState.Some,
-  KickstartNodeState.All,
-] as const);
-export const parseKickstartNodeState = parserFor('a kickstart node state', ALL_KICKSTART_NODE_STATES);
-const _nodeState: Same<LocalKickstartNodeState, WireOf<typeof ALL_KICKSTART_NODE_STATES>> = true;
 
 // ── scan and ingest ──────────────────────────────────────────────────────
 
@@ -342,6 +303,6 @@ const _closeReason: Same<LocalKickstartCloseReason, WireOf<typeof ALL_KICKSTART_
 // The proofs above are compile-time only; naming them keeps them from being
 // reported as unused without emitting any runtime work.
 void [
-  _scope, _stopKind, _fieldKind, _lineKind, _nodeKind, _nodeState, _scanState, _ingestState,
+  _scope, _stopKind, _fieldKind, _lineKind, _scanState, _ingestState,
   _resolution, _connectAnswer, _nextStep, _diffLineType, _eventKind, _closeReason,
 ];

@@ -1,12 +1,12 @@
 'use client';
 
 import { useCallback, useMemo, useState, type MouseEvent, type FocusEvent } from 'react';
-import { Button, FeedbackPanel, Progress, SelectionTree, Skeleton } from '@/lib/ft-ui';
+import { Button, FeedbackPanel, Progress, SelectionNodeKind, SelectionTree, Skeleton } from '@/lib/ft-ui';
 import type { KickstartField } from '@/lib/kickstart/model';
 import type { KickstartSessionApi } from '@/lib/kickstart/useKickstartSession';
 import { useKickstartPreview } from '@/lib/kickstart/usePreview';
-import { droppedRowsNotice, scanPercent, selectedIds, treeRows } from '@/lib/kickstart/view';
-import { KickstartNodeKind, KickstartScanState } from '@/lib/kickstart/values';
+import { scanPercent, selectedIds } from '@/lib/kickstart/view';
+import { KickstartScanState } from '@/lib/kickstart/values';
 import { ExampleLines } from './PrivacyStep';
 
 /**
@@ -19,6 +19,9 @@ import { ExampleLines } from './PrivacyStep';
  */
 
 const countFormat = new Intl.NumberFormat('en-US');
+
+/** The rows of a forest that has not been read: one array, so the tree is not handed a new list each render. */
+const NO_ROWS: readonly never[] = [];
 
 /** The id of the forest row an event came from, read from the row the tree draws. */
 function rowOf(target: EventTarget | null): string | null {
@@ -65,7 +68,9 @@ export function SelectionStep({ field, api }: { field: KickstartField; api: Kick
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const preview = useKickstartPreview(session?.id ?? null, highlighted);
 
-  const rows = useMemo(() => (tree === null ? [] : treeRows(tree)), [tree]);
+  // The rows are the contract's own, validated where they were read; the tree
+  // draws their kind and state, so the page names neither.
+  const rows = tree === null ? NO_ROWS : tree.nodes;
   const selection = useMemo(() => {
     try {
       return { ids: selectedIds(field), error: null };
@@ -80,8 +85,7 @@ export function SelectionStep({ field, api }: { field: KickstartField; api: Kick
     if (id !== null) setHighlighted(id);
   }, []);
 
-  const sessions = tree === null ? 0 : tree.nodes.filter((node) => node.kind === KickstartNodeKind.Session).length;
-  const dropped = tree === null ? null : droppedRowsNotice(tree);
+  const sessions = rows.filter((node) => node.kind === SelectionNodeKind.Session.wire).length;
 
   return (
     <div className="ks-field">
@@ -146,7 +150,6 @@ export function SelectionStep({ field, api }: { field: KickstartField; api: Kick
           )}
         </p>
       )}
-      {dropped !== null && <p className="ks-help" role="status">{dropped}</p>}
       {(scan === null || scan.state !== KickstartScanState.Error) && (
         <div className="ks-answers">
           <Button variant="ghost" size="sm" onClick={() => void api.rescan()}>
