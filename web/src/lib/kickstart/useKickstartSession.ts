@@ -352,7 +352,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
         if (!alive.current || mine !== generation.current) return;
         // The server forgot the session while this tab was away: it ended, and
         // the page can say so and offer a new one.
-        if (failure instanceof KickstartRequestError && failure.status === 404) finish(KickstartCloseReason.Expired, null);
+        if (sessionIsGone(failure)) finish(KickstartCloseReason.Expired, null);
         else setAnswerError(asError(failure));
       });
   }, [connected, finish, loadTree, takeSession]);
