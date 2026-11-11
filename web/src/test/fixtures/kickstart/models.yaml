@@ -25,6 +25,7 @@ requiredNames:
   - no-example
   - selected-two
   - selected-two-licensed
+  - selection-scope-two-selected
 cases:
   - name: fresh
     session:
@@ -451,3 +452,12 @@ cases:
     set:
       revision: 3
       stops[license].fields[content-license].value: CC0-1.0
+
+  # The selection page's session after the reader added a second session.
+  # Its revision is its own: a scope keeps its own count, so it never equals
+  # the wizard's by sharing it.
+  - name: selection-scope-two-selected
+    extends: selection-scope
+    set:
+      revision: 4
+      stops[selection].fields[transcripts].value: [s-one, s-two]
