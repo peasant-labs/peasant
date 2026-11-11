@@ -85,6 +85,9 @@ type kickstartSpec struct {
 	Recordings []string `yaml:"recordings"`
 	// HoldIngest holds each import until a releaseIngest step.
 	HoldIngest bool `yaml:"holdIngest"`
+	// NextSteps replaces the finish menu a save answers with, to reach a menu the
+	// contract refuses.
+	NextSteps []string `yaml:"nextSteps"`
 }
 
 // kickstartStep is one thing a case does or checks. Exactly one of Call,
@@ -158,7 +161,8 @@ type kickstartStep struct {
 type kickstartCommitStep struct {
 	// Session is the saved name of the session id.
 	Session string `yaml:"session"`
-	// Action is begin, abort, or close.
+	// Action is begin or abort: the two ends of a save under way, which the
+	// commit route runs inside one request.
 	Action string `yaml:"action"`
 	// Error is a substring the action's refusal must contain.
 	Error string `yaml:"error"`
@@ -167,8 +171,6 @@ type kickstartCommitStep struct {
 	Resolutions map[string]string `yaml:"resolutions"`
 	// Seen is the file value a resolution must carry as the one the user saw.
 	Seen map[string]any `yaml:"seen"`
-	// Ingest publishes an ingest state after a close.
-	Ingest string `yaml:"ingest"`
 }
 
 type kickstartConflictsStep struct {
@@ -184,13 +186,21 @@ type kickstartConflict struct {
 	Theirs any    `yaml:"theirs"`
 }
 
+// kickstartRevisionFrom names a revision relative to one a step saved: the saved
+// value plus Plus.
+type kickstartRevisionFrom struct {
+	Saved string `yaml:"saved"`
+	Plus  uint64 `yaml:"plus"`
+}
+
 type kickstartEventSpec struct {
-	Kind     string         `yaml:"kind"`
-	Session  string         `yaml:"session"`
-	Revision *uint64        `yaml:"revision"`
-	JSON     map[string]any `yaml:"json"`
-	Absent   []string       `yaml:"absent"`
-	Len      map[string]int `yaml:"len"`
+	Kind         string                 `yaml:"kind"`
+	Session      string                 `yaml:"session"`
+	Revision     *uint64                `yaml:"revision"`
+	RevisionFrom *kickstartRevisionFrom `yaml:"revisionFrom"`
+	JSON         map[string]any         `yaml:"json"`
+	Absent       []string               `yaml:"absent"`
+	Len          map[string]int         `yaml:"len"`
 }
 
 type kickstartWSStep struct {
@@ -399,6 +409,7 @@ func (w *kickstartWorld) tune(env *kickstartEnv) {
 	}
 	env.scan = w.scan
 	env.writeRetention = w.saving.writeRetention(w.configPath)
+	w.saving.tuneEnv(env)
 	env.stored = func(context.Context) ([]store.IngestedSessionRow, error) {
 		if message := *w.storedError.Load(); message != "" {
 			return nil, errors.New(message)
@@ -645,8 +656,7 @@ func (w *kickstartWorld) call(index int, step kickstartStep) {
 	}
 	for path, substring := range step.Contains {
 		got, found := jsonPath(decoded, path)
-		text, _ := got.(string)
-		if !found || !strings.Contains(text, substring) {
+		if !found || !containsText(got, substring) {
 			w.fail(index, "%s should contain %q; got %v", path, substring, got)
 		}
 	}
@@ -707,11 +717,48 @@ func normalizeJSON(value any) any {
 	return out
 }
 
+// containsText reports whether a string holds part, or whether any string of an
+// array does.
+func containsText(value any, part string) bool {
+	switch typed := value.(type) {
+	case string:
+		return strings.Contains(typed, part)
+	case []any:
+		for _, element := range typed {
+			if text, ok := element.(string); ok && strings.Contains(text, part) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// splitPath splits a dotted path at every dot outside brackets, so a selector
+// value may hold a dotted key such as key[key=selection.mode].
+func splitPath(path string) []string {
+	var segments []string
+	depth, start := 0, 0
+	for i, r := range path {
+		switch r {
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case '.':
+			if depth == 0 {
+				segments = append(segments, path[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(segments, path[start:])
+}
+
 // jsonPath reads a dotted path. A segment is a key, an array index, or
 // key[field=value], which selects the array element whose field equals value.
 func jsonPath(root any, path string) (any, bool) {
 	current := root
-	for _, segment := range strings.Split(path, ".") {
+	for _, segment := range splitPath(path) {
 		name, selector, hasSelector := strings.Cut(segment, "[")
 		if name != "" {
 			switch typed := current.(type) {
@@ -770,6 +817,15 @@ func (w *kickstartWorld) eventMatches(event schema.LocalKickstartEvent, spec kic
 	if spec.Revision != nil && event.Revision != *spec.Revision {
 		return false, fmt.Sprintf("revision %d, want %d", event.Revision, *spec.Revision)
 	}
+	if from := spec.RevisionFrom; from != nil {
+		saved, ok := w.vars[from.Saved].(float64)
+		if !ok {
+			return false, fmt.Sprintf("revisionFrom names %q, which no step saved as a number", from.Saved)
+		}
+		if want := uint64(saved) + from.Plus; event.Revision != want {
+			return false, fmt.Sprintf("revision %d, want %d (%s %d plus %d)", event.Revision, want, from.Saved, uint64(saved), from.Plus)
+		}
+	}
 	for path, want := range spec.JSON {
 		got, found := jsonPath(decoded, path)
 		if !found || !reflect.DeepEqual(normalizeJSON(got), normalizeJSON(w.substitute(want))) {
@@ -807,6 +863,8 @@ func (w *kickstartWorld) await(index int, spec kickstartEventSpec) {
 		position += len(events)
 		select {
 		case <-wake:
+		case <-w.saving.broken:
+			w.breached(index)
 		case <-ctx.Done():
 			w.fail(index, "no published event matched %+v before the deadline; saw %d events since the cursor", spec, position-w.cursor)
 		}
@@ -833,6 +891,8 @@ func (w *kickstartWorld) events(index int, specs []kickstartEventSpec) {
 		}
 		select {
 		case <-wake:
+		case <-w.saving.broken:
+			w.breached(index)
 		case <-ctx.Done():
 			w.fail(index, "only %d of %d events were published: %s", len(events), len(specs), describeEvents(events))
 		}
@@ -984,24 +1044,8 @@ func (w *kickstartWorld) commit(index int, step kickstartCommitStep) {
 		}
 	case "abort":
 		sessions.abortCommit(id)
-	case "close":
-		var body schema.LocalKickstartCommitted
-		for _, next := range onboarding.NextStepsWeb() {
-			body.NextSteps = append(body.NextSteps, schema.LocalKickstartNextStep(next))
-		}
-		body.Saved, body.ConfigPath, body.Ingest = true, w.configPath, schema.LocalKickstartIngest{State: schema.LocalKickstartIngestIdle}
-		var finish *kickstartFinish
-		finish, err = sessions.closeCommitted(id, body)
-		if err == nil {
-			if step.Ingest != "" {
-				finish.publishIngest(schema.LocalKickstartIngest{State: schema.LocalKickstartIngestState(step.Ingest)})
-			}
-		}
-	case "ingest":
-		// An import started after the session is gone publishes under its id.
-		sessions.finishFor(id).publishIngest(schema.LocalKickstartIngest{State: schema.LocalKickstartIngestState(step.Ingest)})
 	default:
-		w.fail(index, "commit action %q is not begin, abort, close, or ingest", step.Action)
+		w.fail(index, "commit action %q is not begin or abort; the commit route itself ends a session", step.Action)
 	}
 	switch {
 	case step.Error == "" && err != nil:

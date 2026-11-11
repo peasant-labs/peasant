@@ -15,6 +15,8 @@ requiredNames:
   - review-writes-nothing-and-takes-no-lock
   - review-refuses-an-answer-the-scope-does-not-have
   - review-one-field-rerun-is-a-one-line-change
+  - take-theirs-summary-shows-the-file-value
+  - take-theirs-summary-shows-the-file-value-and-the-shown-retention
 cases:
   - name: review-lists-rows-and-diffs-an-existing-file
     opened: &opened |
@@ -125,3 +127,25 @@ cases:
         - "ctx:  method: all"
         - "ctx:selection:"
         - "ctx:  mode: all"
+  # The summary explains the save, so it reads the configuration the save would
+  # produce, which starts from the file as it is now. Keeping theirs gives the
+  # answer up: the draft's snapshot of the file at open time (license none) and
+  # the answer (CC0-1.0) are both wrong for it.
+  - name: take-theirs-summary-shows-the-file-value
+    opened: *opened
+    onDisk: *theirs
+    answers: {content-license: '"CC0-1.0"'}
+    resolutions: {content-license: {choice: theirs, seen: '"CC-BY-4.0"'}}
+    want:
+      unresolved: []
+      saved: {license: CC-BY-4.0}
+    # The same review carries the period the save applies: it is not in the file.
+  - name: take-theirs-summary-shows-the-file-value-and-the-shown-retention
+    opened: *opened
+    onDisk: *theirs
+    retentionSeed: 99999
+    answers: {content-license: '"CC0-1.0"'}
+    resolutions: {content-license: {choice: theirs, seen: '"CC-BY-4.0"'}}
+    want:
+      unresolved: []
+      saved: {license: CC-BY-4.0, retentionDays: 99999}

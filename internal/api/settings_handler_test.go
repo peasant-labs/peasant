@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -74,6 +75,16 @@ type settingUpdateCase struct {
 	FileContains  []string           `yaml:"fileContains"`
 	FileOmits     []string           `yaml:"fileOmits"`
 	ErrorContains []string           `yaml:"errorContains"`
+	// Interleave lists what another writer leaves in the file between the
+	// update's read and its swap, one entry for each time the update gets there.
+	Interleave []string `yaml:"interleave"`
+	// HoldLock has another writer hold the configuration lock for the whole
+	// request.
+	HoldLock bool `yaml:"holdLock"`
+	// FileEquals is the exact file a refusal leaves, for a case whose other
+	// writer changed the file under it. Without it a refusal leaves the file as
+	// it was.
+	FileEquals string `yaml:"fileEquals"`
 }
 
 // TestSettingsServeEveryConfigKey reads testdata/settings-keys.yaml. Every
@@ -183,6 +194,23 @@ func TestSettingsUpdateFixtures(t *testing.T) {
 			handler := newTestSettingsHandler(t, path)
 			running := config.BaseConfig()
 			handler.live = newLiveConfig(running)
+			writes := 0
+			handler.afterRead = func() {
+				if writes < len(c.Interleave) {
+					if err := os.WriteFile(path, []byte(c.Interleave[writes]), defaults.PublicFilePerm); err != nil {
+						t.Error(err)
+					}
+					writes++
+				}
+			}
+			if c.HoldLock {
+				handler.lockWait = 50 * time.Millisecond
+				holder, err := config.OpenConfigFile(path, time.Now().Add(5*time.Second))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = holder.Close() })
+			}
 
 			recorder := httptest.NewRecorder()
 			handler.handleUpdateSetting(recorder, httptest.NewRequest(http.MethodPatch, defaults.RouteSettings.String(), strings.NewReader(c.Body)))
@@ -203,7 +231,11 @@ func TestSettingsUpdateFixtures(t *testing.T) {
 						t.Errorf("refusal %q does not say %q", refusal.Error, text)
 					}
 				}
-				if after := snapshotConfigPath(t, path); after != before {
+				if c.FileEquals != "" {
+					if written, err := os.ReadFile(path); err != nil || string(written) != c.FileEquals {
+						t.Errorf("a refused update left %q (%v), want exactly the other writer's %q", written, err, c.FileEquals)
+					}
+				} else if after := snapshotConfigPath(t, path); after != before {
 					t.Errorf("a refused update changed the configuration path:\nbefore: %s\nafter:  %s", before, after)
 				}
 				if handler.live.load() != running {

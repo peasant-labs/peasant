@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/schema"
 )
@@ -23,13 +24,15 @@ func (st *kickstartSessions) viewLocked(sess *kickstartSession) (schema.LocalKic
 	// session's own save.
 	review, reviewed := st.reviewLocked(sess, facts)
 	conflicts := append([]schema.LocalKickstartConflict{}, sess.conflicts...)
+	var saved *config.Config
 	if reviewed {
 		conflicts = reviewRows(sess.conflicts, review)
+		saved = review.Saved
 	}
 
 	stops := make([]schema.LocalKickstartStop, 0, len(sess.model.Stops))
 	for _, stop := range sess.model.Stops {
-		row, err := sess.stopView(stop, w)
+		row, err := sess.stopView(stop, w, saved)
 		if err != nil {
 			return schema.LocalKickstartSession{}, err
 		}
@@ -65,7 +68,12 @@ func (st *kickstartSessions) viewLocked(sess *kickstartSession) (schema.LocalKic
 	}, nil
 }
 
-func (s *kickstartSession) stopView(stop onboarding.Stop, w onboarding.WriteContext) (schema.LocalKickstartStop, error) {
+// stopView projects one stop. saved, when it is set, is the configuration the
+// save would produce (the review's own), which the review stop's summary
+// explains; the working copy is the snapshot the file had when the session
+// opened, with the answers on top, and says nothing of a value the file took
+// since or of an answer a "theirs" choice gave up.
+func (s *kickstartSession) stopView(stop onboarding.Stop, w onboarding.WriteContext, saved *config.Config) (schema.LocalKickstartStop, error) {
 	kind, err := schema.NewLocalKickstartStopKind(stop.Key.Kind().String())
 	if err != nil {
 		return schema.LocalKickstartStop{}, err
@@ -98,7 +106,11 @@ func (s *kickstartSession) stopView(stop onboarding.Stop, w onboarding.WriteCont
 		row.Fields = append(row.Fields, fieldRow)
 	}
 	if stop.Key == onboarding.FlowReview {
-		summary, err := onboarding.BuildConsentSummary(s.model, w)
+		explained := w
+		if saved != nil {
+			explained.Config = saved
+		}
+		summary, err := onboarding.BuildConsentSummary(s.model, explained)
 		if err != nil {
 			return schema.LocalKickstartStop{}, fmt.Errorf("build the review summary: %w", err)
 		}

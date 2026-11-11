@@ -126,6 +126,31 @@ func configValueAtPath(cfg *config.Config, path []string) (any, error) {
 	return current.Interface(), nil
 }
 
+// restoreConfigValueAtPath copies the value src holds at a YAML path into dst,
+// found through the struct's own yaml tags. It is how "theirs" keeps the file's
+// value for a field an answer's side effect had moved.
+func restoreConfigValueAtPath(dst, src *config.Config, path []string) error {
+	to := reflect.ValueOf(dst).Elem()
+	from := reflect.ValueOf(src).Elem()
+	for depth, segment := range path {
+		nextTo, okTo := yamlStructField(to, segment)
+		nextFrom, okFrom := yamlStructField(from, segment)
+		if !okTo || !okFrom {
+			return documentPathError(
+				fmt.Sprintf("the configuration has no value at %s (stopped at %q, segment %d)", joinPath(path), segment, depth+1),
+				"give the field a YAML path the configuration declares")
+		}
+		to, from = nextTo, nextFrom
+	}
+	if !to.CanSet() {
+		return documentPathError(
+			fmt.Sprintf("the configuration value at %s cannot be set", joinPath(path)),
+			"give the field a YAML path that names an exported configuration field")
+	}
+	to.Set(from)
+	return nil
+}
+
 // yamlStructField finds the field of struct v that the YAML key name maps to,
 // looking through inline structs. yaml.v3 names an untagged field by its
 // lowercased Go name.

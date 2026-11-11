@@ -62,6 +62,7 @@ type commitWant struct {
 	ErrorContains      string               `yaml:"errorContains"`
 	Conflicts          []commitConflictWant `yaml:"conflicts"`
 	FileUnchanged      bool                 `yaml:"fileUnchanged"`
+	FileAbsent         bool                 `yaml:"fileAbsent"`
 	FileEquals         string               `yaml:"fileEquals"`
 	LockReleased       bool                 `yaml:"lockReleased"`
 	Parsed             commitParsedWant     `yaml:"parsed"`
@@ -97,13 +98,17 @@ type commitScenario struct {
 	Interleave       commitInterleave            `yaml:"interleave"`
 	Answers          map[string]string           `yaml:"answers"`
 	Resolutions      map[string]commitResolution `yaml:"resolutions"`
+	Scope            string                      `yaml:"scope"`
 	ClaudeSessions   bool                        `yaml:"claudeSessions"`
 	VillageConnected bool                        `yaml:"villageConnected"`
-	RetentionError   string                      `yaml:"retentionError"`
-	GitEmail         string                      `yaml:"gitEmail"`
-	VillageServer    bool                        `yaml:"villageServer"`
-	SelectionCorpus  string                      `yaml:"selectionCorpus"`
-	Want             commitWant                  `yaml:"want"`
+	// RetentionSeed is the period the session showed on the retention stop; it is
+	// not in the file.
+	RetentionSeed   int        `yaml:"retentionSeed"`
+	RetentionError  string     `yaml:"retentionError"`
+	GitEmail        string     `yaml:"gitEmail"`
+	VillageServer   bool       `yaml:"villageServer"`
+	SelectionCorpus string     `yaml:"selectionCorpus"`
+	Want            commitWant `yaml:"want"`
 }
 
 type commitCase struct {
@@ -240,6 +245,12 @@ func runCommitScenario(t *testing.T, s commitScenario, golden *config.SelectionC
 	if err != nil {
 		t.Fatal(err)
 	}
+	if s.RetentionSeed > 0 {
+		days := s.RetentionSeed
+		if err := draft.SeedTransient(func(cfg *config.Config) { cfg.ClaudeRetentionDays = days }); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if s.OnDisk != "" {
 		writeFixtureFile(t, path, fill(s.OnDisk))
 	}
@@ -254,6 +265,13 @@ func runCommitScenario(t *testing.T, s commitScenario, golden *config.SelectionC
 			writes++
 		}
 	})
+	if s.Scope != "" {
+		scope, err := onboarding.NewModelScope(s.Scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		model = onboarding.BuildModel(onboarding.Options{Scope: scope})
+	}
 
 	answers := onboarding.Answers{}
 	for key, text := range s.Answers {
@@ -323,6 +341,9 @@ func runCommitScenario(t *testing.T, s commitScenario, golden *config.SelectionC
 	after, readErr := os.ReadFile(path)
 	if want.FileUnchanged && (!bytes.Equal(before, after) || readErr != nil) {
 		t.Errorf("the file changed:\nbefore: %q\n after: %q", before, after)
+	}
+	if want.FileAbsent && !errors.Is(readErr, os.ErrNotExist) {
+		t.Errorf("the configuration file should not exist, read it: %q, %v", after, readErr)
 	}
 	if want.FileEquals != "" && string(after) != want.FileEquals {
 		t.Errorf("file = %q, want %q", after, want.FileEquals)
@@ -408,9 +429,6 @@ func assertCommitOutcome(t *testing.T, s commitScenario, want commitWant, result
 	}
 	if !result.Saved && len(result.Conflicts) == 0 {
 		t.Errorf("a refused commit carries no row; a refusal always names at least one")
-	}
-	if result.Saved && result.Config == nil {
-		t.Errorf("a saved commit returned no configuration")
 	}
 	if want.Retention.Status != "" {
 		got := result.Retention

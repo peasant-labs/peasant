@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -22,7 +23,8 @@ import (
 //	freeze the session            kickstartSessions.beginCommit
 //	lock, read, compare, swap,
 //	retention, live publish       onboarding.Draft.Commit (releases the lock)
-//	start the import              syncHandler.StartIngest
+//	claim the import              syncHandler.reserveIngest, and launch it once
+//	                              the session's closed event is out
 //	end the session               kickstartSessions.closeCommitted
 //	push the import's progress    kickstartImportFeed, after the closed event
 //
@@ -41,11 +43,23 @@ type kickstartCommitter struct {
 	feed     *kickstartImportFeed
 }
 
-// ownsSetting reports the read-only settings keys a commit may change in the live
-// configuration: the saved selection. The settings routes cannot change them; a
-// setup session can.
-func ownsSetting(key string) bool {
-	return key == "selection" || strings.HasPrefix(key, "selection.")
+// ownedSettings reports the read-only settings keys a commit of this model may
+// change in the live configuration: the keys at or under a path one of the
+// model's fields writes (the saved selection, for the selection field). The
+// settings routes cannot change them; a setup session can. The model owns the
+// paths, so a field it gains is owned here without a second list.
+func ownedSettings(model onboarding.Model) func(key string) bool {
+	var written []string
+	for _, field := range model.FieldPaths() {
+		if field.Destination == onboarding.DestConfig && len(field.Path) > 0 {
+			written = append(written, strings.Join(field.Path, "."))
+		}
+	}
+	return func(key string) bool {
+		return slices.ContainsFunc(written, func(path string) bool {
+			return key == path || strings.HasPrefix(key, path+".")
+		})
+	}
 }
 
 // handleCommit answers POST /api/v1/kickstart/sessions/{id}/commit.
@@ -63,12 +77,21 @@ func (h *kickstartHandler) handleCommit(w http.ResponseWriter, r *http.Request) 
 }
 
 func (c *kickstartCommitter) serve(w http.ResponseWriter, r *http.Request, id string) {
+	env := c.sessions.env
+	// The finish menu is checked against the contract before anything is written,
+	// so a menu the contract refuses leaves the session and the file as they were.
+	steps, err := webNextSteps(env.nextSteps())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError,
+			fmt.Sprintf("The setup was not saved because its finish menu breaks the Local API contract in internal/api.kickstartCommitter.serve: %v. Nothing was written. Report this defect.", err),
+			publishingContractBreachCode)
+		return
+	}
 	draft, err := c.sessions.beginCommit(id)
 	if err != nil {
 		writeKickstartError(w, err)
 		return
 	}
-	env := c.sessions.env
 	result, err := draft.Draft.Commit(r.Context(), onboarding.CommitInput{
 		Model:        draft.Model,
 		Answers:      draft.ConfigAnswers,
@@ -78,7 +101,7 @@ func (c *kickstartCommitter) serve(w http.ResponseWriter, r *http.Request, id st
 		Hooks: onboarding.CommitHooks{
 			Retention: env.writeRetention,
 			Publish: func(saved *config.Config) {
-				c.live.applyOwning(c.catalog, saved, ownsSetting)
+				c.live.applyOwning(c.catalog, saved, ownedSettings(draft.Model))
 			},
 		},
 	})
@@ -91,7 +114,7 @@ func (c *kickstartCommitter) serve(w http.ResponseWriter, r *http.Request, id st
 		c.refuse(w, id, result.Conflicts)
 		return
 	}
-	c.finish(w, id, draft, result)
+	c.finish(w, id, result, steps)
 }
 
 // refuse answers 409 with the rows and publishes them to every tab, then lets the
@@ -106,11 +129,16 @@ func (c *kickstartCommitter) refuse(w http.ResponseWriter, id string, rows []sch
 		Error:     fmt.Sprintf("The setup was not saved because %d answered setting(s) changed in the configuration file since this session opened, in internal/api.kickstartHandler.handleCommit. Nothing was written. Choose mine or theirs for each row, then save again.", len(rows)),
 		Conflicts: append([]schema.LocalKickstartConflict{}, rows...),
 	}
-	writeContractStatus(w, http.StatusConflict, &refusal)
+	writeContractStatus(w, http.StatusConflict, &refusal, "Nothing was written. Retry; if it repeats, report it.")
 }
 
 // finish runs the steps that follow a swap. None of them can undo the save.
-func (c *kickstartCommitter) finish(w http.ResponseWriter, id string, draft kickstartDraft, result onboarding.CommitResult) {
+func (c *kickstartCommitter) finish(w http.ResponseWriter, id string, result onboarding.CommitResult, steps []schema.LocalKickstartNextStep) {
+	if result.ReleaseErr != nil {
+		// The save stands. The next writer waits for the lock until this process
+		// exits, so the operator needs to know.
+		slog.Warn("kickstart: the configuration lock was not released after a save", "session", id, "path", result.ConfigPath, "error", result.ReleaseErr)
+	}
 	// The import is claimed after Commit returned, so after the lock was released
 	// and after the live configuration was published. It does not run until the
 	// session's closed event is out, so a tab never hears an import state for a
@@ -121,13 +149,10 @@ func (c *kickstartCommitter) finish(w http.ResponseWriter, id string, draft kick
 		Saved:      true,
 		ConfigPath: result.ConfigPath,
 		Ingest:     ingestResponse(start, startErr),
-		NextSteps:  webNextSteps(),
+		NextSteps:  steps,
 	}
 	if result.Retention.Status == onboarding.RetentionFailed {
 		body.Diagnostics = []string{result.Retention.Note}
-	}
-	if err := body.Validate(); err != nil {
-		slog.Error("kickstart: a saved commit's body breaks the Local API contract", "session", id, "error", err)
 	}
 
 	finish, closeErr := c.sessions.closeCommitted(id, body)
@@ -144,20 +169,27 @@ func (c *kickstartCommitter) finish(w http.ResponseWriter, id string, draft kick
 		c.feed.announce(schema.LocalKickstartIngest{State: schema.LocalKickstartIngestRunning})
 	}
 
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	_ = json.NewEncoder(w).Encode(&body)
+	// The same gate every answer passes, with the same refusal a refused save gets:
+	// a body that breaks the contract is not sent. The save stands either way.
+	writeContractStatus(w, http.StatusOK, &body,
+		"The setup was saved and the import was handled; only this answer was withheld. Open the dashboard to see the result, then report this defect.")
 }
 
-// webNextSteps is the finish menu of the web: the terminal's four and the link
-// to the settings section where an automatic-publishing rule is chosen. The
-// neutral model owns the set.
-func webNextSteps() []schema.LocalKickstartNextStep {
-	steps := onboarding.NextStepsWeb()
-	out := make([]schema.LocalKickstartNextStep, len(steps))
-	for i, step := range steps {
-		out[i] = schema.LocalKickstartNextStep(step)
+// webNextSteps is the finish menu of the web as the contract names it: the
+// neutral model owns the set (the terminal's four and the link to the settings
+// section where an automatic-publishing rule is chosen), and each step is read
+// back through the contract's closed set, so a step the contract does not know
+// is refused here and never cast.
+func webNextSteps(menu []onboarding.NextStep) ([]schema.LocalKickstartNextStep, error) {
+	out := make([]schema.LocalKickstartNextStep, len(menu))
+	for i, step := range menu {
+		wire, err := schema.NewLocalKickstartNextStep(string(step))
+		if err != nil {
+			return nil, fmt.Errorf("finish step %d: %w", i+1, err)
+		}
+		out[i] = wire
 	}
-	return out
+	return out, nil
 }
 
 // ingestResponse is the import's state in the commit body.
@@ -203,10 +235,12 @@ func commitFailureResponse(err error) error {
 }
 
 // writeContractStatus answers status with a contract value, after checking it
-// the way a client does.
-func writeContractStatus(w http.ResponseWriter, status int, value contractValue) {
+// the way a client does. A value that breaks the contract is not sent: the answer
+// is a 500 that carries breach, the sentence that says what the breach means for
+// what the request did.
+func writeContractStatus(w http.ResponseWriter, status int, value contractValue, breach string) {
 	if err := value.Validate(); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "The answer breaks the Local API contract, so it is not sent: "+err.Error()+". Retry; if it repeats, report it.", publishingContractBreachCode)
+		writeAPIError(w, http.StatusInternalServerError, "The answer breaks the Local API contract, so it is not sent: "+err.Error()+". "+breach, publishingContractBreachCode)
 		return
 	}
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
