@@ -250,7 +250,11 @@ cases:
       - await: {kind: answers, session: "{full}"}
       - call: POST /api/v1/kickstart/sessions/{full}/commit
         json: {saved: true, ingest.state: running}
-      - await: {kind: ingest, session: "{full}", json: {ingest.state: idle, ingest.new: 1, ingest.updated: 0}}
+      # the session ends, then the import ends with the counts the finish panel
+      # shows: one session was chosen, so one is new, and nothing was updated
+      - events:
+          - {kind: closed, session: "{full}", json: {reason: committed}}
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle, ingest.new: 1, ingest.updated: 0}}
       - ingest:
           runs: 1
           selectionMode: selected
