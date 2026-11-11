@@ -1,0 +1,390 @@
+# Commit rows. Every scenario runs the real Draft.Commit against a real file in a
+# temporary directory, with the real configuration lock. One row can hold
+# several scenarios; each scenario gets its own directory.
+#
+# A scenario is:
+#   opened         config.yaml as it was when the session opened (the draft's baseline)
+#   openedAbsent   there was no config.yaml when the session opened
+#   onDisk         what a second writer left in the file before the commit started
+#   interleave     file contents a second writer leaves while the commit runs: the
+#                  Nth write happens inside the Nth validation pass, between the
+#                  commit's read and its swap
+#   answers        field key -> the JSON text of the answer
+#   resolutions    field key -> {choice, seen}
+#   claudeSessions the session found Claude Code sessions (the retention stop is shown)
+#   villageConnected this machine is signed in (the sharing stop is shown)
+#   retentionError the injected retention writer fails with this message
+#   gitEmail       the email git supplied when a missing file was defaulted
+#   villageServer  point village.url at a counting server ({{villageURL}} in a document)
+#   selectionCorpus a captured corpus of expected selections to commit one by one
+#
+# "want" is what must hold afterwards. The lock must be free after every
+# scenario; "lockReleased" states it where a row is about that exit path.
+requiredNames:
+  - untouched-field-change-survives-without-a-row
+  - answered-field-change-yields-409-with-rows
+  - empty-recompute-continues
+  - err-config-changed-re-enters-once
+  - lock-released-on-409
+  - lock-released-on-parse-error
+  - lock-released-on-swap-refusal
+  - first-run-document-field-equivalent-to-cli
+  - rerun-preserves-keys-comments-and-order
+  - retention-written-after-config-and-before-ingest
+  - retention-failure-copy
+  - no-hooks-write
+  - no-village-call
+cases:
+  - name: untouched-field-change-survives-without-a-row
+    scenarios:
+      - note: another writer changed a field the user never answered
+        opened: &licenseOpened |
+          version: 1
+          push:
+            visibility: private
+            license: ""
+        onDisk: |
+          version: 1
+          push:
+            visibility: group
+            license: ""
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: true
+          conflicts: []
+          parsed: {visibility: group, license: CC0-1.0}
+  - name: answered-field-change-yields-409-with-rows
+    scenarios:
+      - note: a plain conflict returns the row and writes nothing
+        opened: *licenseOpened
+        onDisk: &licenseTheirs |
+          version: 1
+          push:
+            visibility: private
+            license: CC-BY-4.0
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: false
+          conflicts:
+            - field: content-license
+              stop: license
+              label: default license attached to pushed transcripts
+              mine: '"CC0-1.0"'
+              theirs: '"CC-BY-4.0"'
+          fileUnchanged: true
+          effects: []
+      - note: the same value landed by the other writer is not a row
+        opened: *licenseOpened
+        onDisk: |
+          version: 1
+          push:
+            visibility: private
+            license: CC0-1.0
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: true
+          conflicts: []
+          parsed: {license: CC0-1.0}
+      - note: keeping theirs gives up that answer and saves the rest
+        opened: *licenseOpened
+        onDisk: *licenseTheirs
+        answers: {content-license: '"CC0-1.0"', publication-preference: '"share-later"'}
+        resolutions: {content-license: {choice: theirs, seen: '"CC-BY-4.0"'}}
+        want:
+          saved: true
+          conflicts: []
+          parsed: {license: CC-BY-4.0, sharePreference: share-later}
+      - note: keeping mine overwrites the value the user was shown
+        opened: *licenseOpened
+        onDisk: *licenseTheirs
+        answers: {content-license: '"CC0-1.0"'}
+        resolutions: {content-license: {choice: mine, seen: '"CC-BY-4.0"'}}
+        want:
+          saved: true
+          conflicts: []
+          parsed: {license: CC0-1.0}
+      - note: a choice made against a value the file no longer holds raises the row again
+        opened: *licenseOpened
+        onDisk: *licenseTheirs
+        answers: {content-license: '"CC0-1.0"'}
+        resolutions: {content-license: {choice: mine, seen: '"CC-BY-SA-4.0"'}}
+        want:
+          saved: false
+          conflicts:
+            - field: content-license
+              stop: license
+              label: default license attached to pushed transcripts
+              mine: '"CC0-1.0"'
+              theirs: '"CC-BY-4.0"'
+          fileUnchanged: true
+      - note: the tree takes its stop's title as the row label
+        opened: |
+          version: 1
+          selection:
+            mode: all
+        onDisk: |
+          version: 1
+          selection:
+            mode: selected
+            harnesses:
+              claude-code:
+                sessions: [their-session]
+        answers:
+          transcripts: '{"mode":"selected","harnesses":{"claude-code":{"Sessions":["my-session"]}}}'
+        want:
+          saved: false
+          conflicts:
+            - field: transcripts
+              stop: selection
+              label: choose sessions to import
+              mineContains: [my-session]
+              theirsContains: [their-session]
+          fileUnchanged: true
+  - name: empty-recompute-continues
+    scenarios:
+      - note: the file changed under the swap but only in a field the user did not answer
+        opened: *licenseOpened
+        answers: {content-license: '"CC0-1.0"'}
+        interleave:
+          writes:
+            - |
+              version: 1
+              push:
+                visibility: group
+                license: ""
+        want:
+          saved: true
+          conflicts: []
+          parsed: {visibility: group, license: CC0-1.0}
+          validatorCalls: 2
+  - name: err-config-changed-re-enters-once
+    scenarios:
+      - note: one change under the swap is recomputed against once and the recompute finds a row
+        opened: *licenseOpened
+        answers: {content-license: '"CC0-1.0"'}
+        interleave:
+          writes:
+            - *licenseTheirs
+        want:
+          saved: false
+          conflicts:
+            - field: content-license
+              stop: license
+              label: default license attached to pushed transcripts
+              mine: '"CC0-1.0"'
+              theirs: '"CC-BY-4.0"'
+          fileEquals: *licenseTheirs
+          validatorCalls: 2
+      - note: a second change is refused, never recomputed a third time
+        opened: *licenseOpened
+        answers: {content-license: '"CC0-1.0"'}
+        interleave: &twoWrites
+          writes:
+            - |
+              version: 1
+              push:
+                visibility: group
+                license: ""
+            - |
+              version: 1
+              push:
+                visibility: public
+                license: ""
+        want:
+          saved: false
+          failure: changed
+          errorContains: changed again
+          fileEquals: |
+            version: 1
+            push:
+              visibility: public
+              license: ""
+          validatorCalls: 2
+  - name: lock-released-on-409
+    scenarios:
+      - note: a refusal with rows frees the lock
+        opened: *licenseOpened
+        onDisk: *licenseTheirs
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: false
+          conflicts:
+            - field: content-license
+              stop: license
+              label: default license attached to pushed transcripts
+              mine: '"CC0-1.0"'
+              theirs: '"CC-BY-4.0"'
+          lockReleased: true
+  - name: lock-released-on-parse-error
+    scenarios:
+      - note: a file on disk that does not parse frees the lock
+        opened: *licenseOpened
+        onDisk: |
+          version: 1
+          redaction:
+            level: bogus
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: false
+          failure: read
+          errorContains: unknown redaction level
+          lockReleased: true
+          fileUnchanged: true
+      - note: an answer the field does not offer frees the lock
+        opened: *licenseOpened
+        answers: {content-license: '"WTFPL"'}
+        want:
+          saved: false
+          failure: invalid
+          errorContains: is not one of the field's options
+          lockReleased: true
+          fileUnchanged: true
+  - name: lock-released-on-swap-refusal
+    scenarios:
+      - note: a swap refused twice frees the lock
+        opened: *licenseOpened
+        answers: {content-license: '"CC0-1.0"'}
+        interleave: *twoWrites
+        want:
+          saved: false
+          failure: changed
+          lockReleased: true
+  - name: first-run-document-field-equivalent-to-cli
+    scenarios:
+      - note: a first save with several answers matches the terminal's first save
+        openedAbsent: true
+        gitEmail: dev@example.com
+        answers:
+          content-license: '"CC0-1.0"'
+          publication-preference: '"share-later"'
+          publish-automatically: '"true"'
+          redaction-level: '"standard"'
+        want:
+          saved: true
+          conflicts: []
+          parsed: {license: CC0-1.0, sharePreference: share-later, email: dev@example.com}
+          cliEquivalent: true
+      - note: every captured selection scenario matches its golden and the terminal
+        openedAbsent: true
+        gitEmail: dev@example.com
+        selectionCorpus: ../tui/ftue/testdata/equivalence/legacy_goldens.yaml
+        want:
+          saved: true
+          cliEquivalent: true
+  # The YAML encoder keeps keys, their order and every comment. It normalises the
+  # spacing before a trailing comment to one space and drops blank lines; the
+  # expectations below state the normalised lines.
+  - name: rerun-preserves-keys-comments-and-order
+    scenarios:
+      - note: only the answered keys change and the rest of the document is kept
+        opened: &handWritten |
+          # peasant configuration, edited by hand
+          version: 1
+
+          # where transcripts go
+          output:
+            basePath: /data/peasant   # keep this comment
+            stalenessThresholdSec: 90
+
+          village:
+            url: https://village.example   # self-hosted
+
+          push:
+            # who may read a push
+            visibility: private
+            license: ""
+            method: all
+          selection:
+            mode: all
+            autoIngestNewBranches: true
+        answers: {content-license: '"CC0-1.0"', default-visibility: '"group"'}
+        villageConnected: true
+        want:
+          saved: true
+          conflicts: []
+          parsed: {license: CC0-1.0, visibility: group}
+          keyOrder: [version, output, village, push, selection]
+          keepsLines:
+            - "# peasant configuration, edited by hand"
+            - "# where transcripts go"
+            - "  basePath: /data/peasant # keep this comment"
+            - "  stalenessThresholdSec: 90"
+            - "  url: https://village.example # self-hosted"
+            - "  # who may read a push"
+            - "  method: all"
+          lacksLines:
+            - "  license: \"\""
+      - note: an existing file is never rewritten whole
+        opened: *handWritten
+        answers: {publication-preference: '"share-later"'}
+        want:
+          saved: true
+          parsed: {sharePreference: share-later}
+          keepsLines:
+            - "  basePath: /data/peasant # keep this comment"
+          lacksLines:
+            - "daemon:"
+            - "sources:"
+  - name: retention-written-after-config-and-before-ingest
+    scenarios:
+      - note: retention sees the saved file and the held lock, publish follows, ingest follows both
+        opened: *licenseOpened
+        claudeSessions: true
+        answers: {content-license: '"CC0-1.0"', claude-retention-days: '"90"'}
+        want:
+          saved: true
+          parsed: {license: CC0-1.0}
+          effects: [retention, publish]
+          retention: {status: applied, days: 90}
+          effectSawSavedFile: [retention, publish]
+          effectSawHeldLock: [retention, publish]
+          lockReleased: true
+      - note: a retention answer on a machine with no Claude sessions is hidden and not written
+        opened: *licenseOpened
+        claudeSessions: false
+        answers: {content-license: '"CC0-1.0"', claude-retention-days: '"90"'}
+        want:
+          saved: true
+          effects: [publish]
+          retention: {status: not-requested}
+  - name: retention-failure-copy
+    scenarios:
+      - note: a refused retention write keeps the save and says so
+        opened: *licenseOpened
+        claudeSessions: true
+        retentionError: settings.json is read-only
+        answers: {content-license: '"CC0-1.0"', claude-retention-days: '"90"'}
+        want:
+          saved: true
+          parsed: {license: CC0-1.0}
+          effects: [retention, publish]
+          retention:
+            status: failed
+            days: 90
+            noteStarts: "config saved, retention not applied"
+            noteContains: settings.json is read-only
+  - name: no-hooks-write
+    scenarios:
+      - note: choosing to publish automatically installs no hook and writes no rules file
+        openedAbsent: true
+        answers: {publish-automatically: '"true"', publication-preference: '"share-later"'}
+        want:
+          saved: true
+          parsed: {sharePreference: share-later}
+          dirEntries: [config.yaml, config.yaml.lock]
+  - name: no-village-call
+    scenarios:
+      - note: a saved configuration that names a village contacts nothing
+        opened: |
+          version: 1
+          village:
+            url: "{{villageURL}}"
+          push:
+            visibility: private
+            license: ""
+        villageServer: true
+        answers: {content-license: '"CC0-1.0"', publication-preference: '"share-later"'}
+        want:
+          saved: true
+          parsed: {license: CC0-1.0}
+          villageRequests: 0

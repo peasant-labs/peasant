@@ -48,10 +48,14 @@ func OpenDraft(path string, loaded *config.Config) (*Draft, error) {
 	return &Draft{path: path, baseline: baseline, working: working}, nil
 }
 
+// memoryDraftPath is the destination of a draft that has no file. A commit
+// refuses it, so an in-memory draft can never write a file named for it.
+const memoryDraftPath = "memory"
+
 // DraftFrom builds a draft over two already-copied configurations. It is the
 // in-memory form used when a caller probes field writes without a file.
 func DraftFrom(baseline, working config.Config) *Draft {
-	return &Draft{path: "memory", baseline: baseline, working: working}
+	return &Draft{path: memoryDraftPath, baseline: baseline, working: working}
 }
 
 // Path is the destination recorded for the draft.
