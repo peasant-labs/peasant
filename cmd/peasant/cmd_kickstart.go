@@ -558,6 +558,14 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()),
 		)
 
+		// Automatically assign ownership of the sessions onboarding writes when
+		// this computer is already signed in. The wizard asks no ownership
+		// question: it runs in an alt-screen, so the one-time prompt belongs to
+		// the standalone sign-in command only.
+		if snapshot, claimErr := auth.CaptureCredentials(ctx, configDirOverride(cmd)); claimErr == nil {
+			pipelineOpts = append(pipelineOpts, ingest.WithSessionClaimer(db.AutomaticSessionClaimer(snapshot)))
+		}
+
 		pipelineOpts = append(pipelineOpts, ingest.WithRunLock(filepath.Join(string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd))), ingest.RunLockFileName)))
 		pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg, pipelineOpts...)
 		if err != nil {

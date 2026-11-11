@@ -68,6 +68,7 @@ var builderByName = map[string]func() *cobra.Command{
 	"Metrics":      BuildMetricsCommand,
 	"Models":       BuildModelsCommand,
 	"Sessions":     BuildSessionsCommand,
+	"User":         BuildUserCommand,
 	"TUI":          BuildTUICommand,
 	"Version":      BuildVersionCommand,
 	"Upgrade":      BuildUpgradeCommand,

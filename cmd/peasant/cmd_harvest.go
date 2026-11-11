@@ -574,6 +574,18 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 				fmt.Fprintln(cmd.ErrOrStderr(), "notice: The database is empty, but peasant-sync/ already holds saved sessions. Run `peasant harvest index --all` first to rebuild the database from them. A harvest now reads the harness sources again and overwrites the saved copies.")
 			}
 		}
+		// Automatic ownership follows the signed-in account. It is drawn from
+		// the same store the run writes, and it claims only what this run
+		// wrote at the end. A signed-out run and the logs-only path attach
+		// nothing; a dry run never reaches the claim.
+		if !flags.dryRun {
+			claimer, claimErr := automaticSessionClaimer(ctx, configDirOverride(cmd), db)
+			if claimErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: local ownership claim is off for this run: %v\n", claimErr)
+			} else if claimer != nil {
+				pipelineOpts = append(pipelineOpts, ingest.WithSessionClaimer(claimer))
+			}
+		}
 	}
 
 	// 6d. Saved selection scopes native discovery, not stored maintenance.

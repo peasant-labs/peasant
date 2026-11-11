@@ -362,6 +362,13 @@ type Pipeline struct {
 	// or stale. Both are reported once at the end of the rebuild.
 	rebuiltFromFiles int
 	rebuildStale     []SessionID
+	// rebuiltSessionIDs names the saved-pair rows this run recorded from files,
+	// so the automatic claim can cover a rebuild even when indexing needs no
+	// further work.
+	rebuiltSessionIDs []SessionID
+	// claimer assigns local ownership of this run's written sessions. Nil keeps
+	// automatic claiming off (signed out, dry run, or a file-only run).
+	claimer SessionClaimer
 
 	// locationCache is pre-populated before the DIFF stage via BulkLookupSessionLocations.
 	// It maps SessionID → SessionLocation (host_slug + parent_id) for sessions already
@@ -767,6 +774,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	p.resetDiagnostics()
 	p.resetUnavailableSettledThisRun()
 	p.resetUnroutedRepairs()
+	p.rebuiltSessionIDs = nil
 	p.locationCache = nil
 	p.seqCursorCache = nil
 	defer func() {
@@ -4781,6 +4789,11 @@ func (p *Pipeline) indexComputeAndFinalize(
 		}
 	}
 	p.recordIndexProfileStage(StageAudit, auditProfileStart, 1, 1)
+
+	// CLAIM — assign local ownership of the sessions this run wrote. Local,
+	// best-effort, and never fatal: the artifacts are already stored and a
+	// later claim can retry.
+	p.claimRunSessions(ctx, logPrefix, sessionResults)
 
 	return pipelineResult, nil
 }

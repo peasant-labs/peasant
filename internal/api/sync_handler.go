@@ -1644,7 +1644,9 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		}
 	}
 
-	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg,
+	// Automatic ownership follows the signed-in account, from the same store
+	// this run writes. A signed-out server keeps working and claims nothing.
+	pipelineOptions := []ingest.PipelineOption{
 		ingest.WithRunLock(filepath.Join(string(h.dataDir()), ingest.RunLockFileName)),
 		ingest.WithRunLockNoWait(),
 		ingest.WithStore(db),
@@ -1660,7 +1662,13 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		// the transcript it publishes can never match the pull requests its own
 		// commits are in.
 		ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()),
-	)
+	}
+	if snapshot, claimErr := auth.CaptureCredentials(context.Background(), h.configHome); claimErr == nil {
+		pipelineOptions = append(pipelineOptions, ingest.WithSessionClaimer(db.AutomaticSessionClaimer(snapshot)))
+	} else if !errors.Is(claimErr, auth.ErrSignedOut) {
+		slog.Warn("web ingest: local ownership claim is off for this run", "error", claimErr)
+	}
+	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg, pipelineOptions...)
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create pipeline: %w", err)
