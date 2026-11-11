@@ -191,6 +191,7 @@ func (f *Filter) Match(session ingest.DiscoveredSession) bool {
 // ingest.ResolveSessionBranch decide.
 func (f *Filter) sessionBranch(ctx context.Context, git ingest.GitResolver, session ingest.DiscoveredSession) string {
 	evidence := ingest.SessionBranchEvidence{
+		Harness:   session.Harness,
 		Recorded:  session.Branch,
 		Directory: ingest.SessionProjectDirectory(session),
 	}

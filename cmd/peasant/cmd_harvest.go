@@ -552,7 +552,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 				return fmt.Errorf("heal the flagged search index: %w", err)
 			}
 		}
-		storedSessions = knownLookup{index: loadKnownSessionsFrom(ctx, db)}
+		storedSessions = loadKnownSessionsFrom(ctx, db)
 		pipelineOpts = append(pipelineOpts,
 			ingest.WithStore(db),
 			ingest.WithMetricsStore(db),

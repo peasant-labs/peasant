@@ -2,9 +2,95 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 )
+
+// BranchSource says where a harness's sessions can get a branch from.
+type BranchSource uint8
+
+const (
+	// BranchSourceUnknown is the zero value; no harness declares it.
+	BranchSourceUnknown BranchSource = iota
+	// BranchSourceRecordingOrCheckout is the general rule: the branch the
+	// session recorded, and for a session that recorded none the branch checked
+	// out in its directory.
+	BranchSourceRecordingOrCheckout
+	// BranchSourceRecordingOnly is for a harness that takes a session's branch
+	// only from its own recording. A session that recorded none has no branch;
+	// the checkout never answers for it.
+	BranchSourceRecordingOnly
+)
+
+// AllBranchSources is the closed set, excluding the unknown zero value.
+var AllBranchSources = []BranchSource{BranchSourceRecordingOrCheckout, BranchSourceRecordingOnly}
+
+// NewBranchSource accepts the String form of a declared branch source.
+func NewBranchSource(raw string) (BranchSource, error) {
+	for _, source := range AllBranchSources {
+		if source.String() == raw {
+			return source, nil
+		}
+	}
+	return BranchSourceUnknown, fmt.Errorf(
+		"read branch source %q.\n"+
+			"what: %q is not a branch source.\n"+
+			"why: the closed set is recording-or-checkout and recording-only.\n"+
+			"where: ingest.NewBranchSource.\n"+
+			"when: a caller named where a harness takes a session's branch from.\n"+
+			"means: the branch source was not accepted.\n"+
+			"fix: use recording-or-checkout or recording-only.",
+		raw, raw)
+}
+
+// IsValid reports whether s is a declared branch source.
+func (s BranchSource) IsValid() bool { return slices.Contains(AllBranchSources, s) }
+
+// String returns the declaration token, or "unknown".
+func (s BranchSource) String() string {
+	switch s {
+	case BranchSourceRecordingOrCheckout:
+		return "recording-or-checkout"
+	case BranchSourceRecordingOnly:
+		return "recording-only"
+	default:
+		return "unknown"
+	}
+}
+
+// AsksCheckout reports whether a session that recorded no branch may be placed
+// by the branch checked out in its directory.
+func (s BranchSource) AsksCheckout() bool { return s != BranchSourceRecordingOnly }
+
+// HarnessBranchSources declares, once per registered harness, where its
+// sessions get a branch from. It is keyed like DefaultAdapterRegistry and
+// HarvesterVersionRegistry, and a test holds the three key sets equal.
+// ResolveSessionBranch reads it, so the tree, the import filter and the store
+// cannot disagree about a harness.
+//
+// Codex records its git context once in session_meta and Strike keeps its branch
+// in a sidecar. Neither extractor ever asks the checkout, so a session of theirs
+// that recorded no branch has none, in the store and everywhere else.
+var HarnessBranchSources = map[Harness]BranchSource{
+	HarnessClaudeCode: BranchSourceRecordingOrCheckout,
+	HarnessCursor:     BranchSourceRecordingOrCheckout,
+	HarnessOpenCode:   BranchSourceRecordingOrCheckout,
+	HarnessPi:         BranchSourceRecordingOrCheckout,
+	HarnessCodex:      BranchSourceRecordingOnly,
+	HarnessStrike:     BranchSourceRecordingOnly,
+}
+
+// BranchSourceOf returns where a harness's sessions get a branch from. A
+// harness with no declaration gets the general rule, which is what every
+// harness had before the declarations existed.
+func BranchSourceOf(harness Harness) BranchSource {
+	if source, declared := HarnessBranchSources[harness]; declared {
+		return source
+	}
+	return BranchSourceRecordingOrCheckout
+}
 
 // KnownSession is what a previous ingest recorded for one session. A scan
 // reuses it instead of walking git again when the source has not changed.
@@ -66,6 +152,9 @@ func SessionProjectDirectory(session DiscoveredSession) string {
 // belongs to. Both the tree and the import filter build it from the same
 // discovered session and the same known-session index.
 type SessionBranchEvidence struct {
+	// Harness is the harness that recorded the session; HarnessBranchSources
+	// says whether the checkout may answer for it.
+	Harness Harness
 	// Recorded is the branch the session's transcript recorded.
 	Recorded string
 	// StoredBranch is the branch an earlier import stored for the session. It
@@ -84,7 +173,9 @@ type SessionBranchEvidence struct {
 //  1. the branch the transcript recorded;
 //  2. the branch the store holds for a session that is already stored and whose
 //     source has not changed since, even when that import found no branch;
-//  3. the branch checked out in Directory now (ResolveGitBranch).
+//  3. the branch checked out in Directory now (ResolveGitBranch), unless the
+//     harness takes its branch only from its own recording
+//     (BranchSourceRecordingOnly), in which case the session has no branch.
 //
 // A stored session is not asked about again: the earlier import already looked
 // at git for it, and walking git for every such session on every scan is the
@@ -93,6 +184,9 @@ type SessionBranchEvidence struct {
 func ResolveSessionBranch(ctx context.Context, git GitResolver, evidence SessionBranchEvidence) string {
 	if evidence.Recorded == "" && evidence.StoredKnown {
 		return evidence.StoredBranch
+	}
+	if evidence.Recorded == "" && !BranchSourceOf(evidence.Harness).AsksCheckout() {
+		return ""
 	}
 	return ResolveGitBranch(ctx, git, evidence.Directory, evidence.Recorded)
 }
