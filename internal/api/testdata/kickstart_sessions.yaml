@@ -1,0 +1,439 @@
+# One live setup session per scope: opening and joining, the revision clocks,
+# stale writes, the live topic, how a session ends, and the origin guard.
+#
+# Every case runs against the mounted server. Its steps call the routes, wait for
+# published events, and check the events published so far. A world that sets
+# gate holds each scan until a release step, so the state between two steps is
+# exactly the state the step before left. Ids are ses-1, ses-2, ... in the order
+# sessions open. See kickstart_script_test.go for the step vocabulary.
+requiredNames:
+  - post-full-scope-opens-session
+  - post-same-scope-joins-same-id-and-revision
+  - post-other-scope-opens-different-session
+  - other-scope-does-not-touch-first
+  - reconnect-get-snapshot
+  - no-410-for-a-dropped-session
+  - scope-token-invalid-refused
+  - status-only-configured
+  - status-active-session-id
+  - subscribe-yields-one-snapshot-per-session-id
+  - revision-bumped-on-accepted-mutation
+  - stale-patch-applied-and-reported
+  - current-patch-not-stale
+  - overwritten-names-only-fields-changed-after-request-revision
+  - delta-is-per-changed-field
+  - closed-committed-reason
+  - closed-expired-reason
+  - origin-guard-403-on-every-unsafe-route
+  - no-reset-control-in-any-payload
+cases:
+  - name: post-full-scope-opens-session
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+        json:
+          id: ses-1
+          scope: full
+          revision: 1
+          scan.state: running
+          village.connected: false
+          connect.offered: true
+          connect.afterStop: license
+          stops.0.key: village
+          stops.1.key: selection
+          stops[key=selection].kind: config
+          # the tree's value is the array of selected session ids, empty before the scan
+          "stops[key=selection].fields[key=transcripts].value": []
+          stops[key=review].kind: review
+          stops[key=destination].visible: false
+          stops[key=destination].hiddenBecause: village-connected
+        len: {stops: 11, conflicts: 0}
+        absent: [nodes, tree, forest]
+      - call: GET /api/v1/kickstart/status
+        json: {configured: false, activeSessionId: "{full}"}
+      - events: []
+
+  - name: post-same-scope-joins-same-id-and-revision
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        json: {id: ses-1, revision: 1}
+        same: {id: full}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        json: {id: ses-2}
+      - events: []
+
+  - name: post-other-scope-opens-different-session
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+        json:
+          id: ses-2
+          scope: selection
+          revision: 1
+          connect.offered: false
+          stops.0.key: selection
+          stops.1.key: review
+          stops.2.key: ingest
+        len: {stops: 3}
+      - call: GET /api/v1/kickstart/status
+        json: {activeSessionId: "{full}"}
+
+  - name: other-scope-does-not-touch-first
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {publication-preference: share-later}}
+        json: {revision: 2, stale: false}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json:
+          revision: 2
+          stops[key=publication].fields[key=publication-preference].value: share-later
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        json: {revision: 1, scope: selection}
+      - events:
+          - {kind: answers, session: "{full}", revision: 2}
+
+  - name: reconnect-get-snapshot
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: CC0-1.0}}
+        json: {revision: 2}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json:
+          id: "{full}"
+          revision: 2
+          scope: full
+          stops[key=license].fields[key=content-license].value: CC0-1.0
+        len: {stops: 11}
+        absent: [nodes]
+      - call: GET /api/v1/kickstart/sessions/nope
+        status: 404
+        json: {code: kickstart_session_not_found}
+
+  - name: no-410-for-a-dropped-session
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - expire: full
+      - call: GET /api/v1/kickstart/sessions/{full}
+        status: 404
+        json: {code: kickstart_session_not_found}
+        contains: {error: "No setup session has the id"}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: CC0-1.0}}
+        status: 404
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        json: {id: ses-2, revision: 1}
+
+  - name: scope-token-invalid-refused
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: kickstart}
+        status: 400
+        contains: {error: "outside the closed set"}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: ""}
+        status: 400
+      - call: POST /api/v1/kickstart/sessions
+        body: {}
+        status: 400
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full, reset: true}
+        status: 400
+      - call: GET /api/v1/kickstart/status
+        absent: [activeSessionId]
+      - events: []
+
+  - name: status-only-configured
+    world:
+      listings: two-projects
+      gate: true
+      config: |
+        version: 1
+    steps:
+      - call: GET /api/v1/kickstart/status
+        json: {configured: true}
+        keys: [configured]
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+      - call: GET /api/v1/kickstart/status
+        json: {configured: true}
+        keys: [configured]
+
+  - name: status-active-session-id
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: GET /api/v1/kickstart/status
+        json: {configured: false}
+        keys: [configured]
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: GET /api/v1/kickstart/status
+        json: {configured: false, activeSessionId: "{full}"}
+        keys: [configured, activeSessionId]
+      - expire: full
+      - call: GET /api/v1/kickstart/status
+        keys: [configured]
+
+  - name: subscribe-yields-one-snapshot-per-session-id
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - ws: {client: tab, subscribe: true}
+      - wsEvents:
+          client: tab
+          events:
+            - {kind: session, session: "{full}", revision: 1, json: {view.id: "{full}", view.scope: full}}
+            - {kind: session, session: "{selection}", revision: 1, json: {view.id: "{selection}", view.scope: selection}}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: CC0-1.0}}
+      - wsEvents:
+          client: tab
+          events:
+            - {kind: answers, session: "{full}", revision: 2}
+
+  - name: revision-bumped-on-accepted-mutation
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: CC0-1.0}}
+        json: {revision: 2, view.revision: 2}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {publication-preference: share-later}}
+        json: {revision: 3, view.revision: 3}
+      - events:
+          - {kind: answers, session: "{full}", revision: 2, json: {view.revision: 2}}
+          - {kind: answers, session: "{full}", revision: 3, json: {view.revision: 3}}
+
+  - name: stale-patch-applied-and-reported
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {publication-preference: share-later}}
+        json: {revision: 2, stale: false}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {publication-preference: ""}}
+        json:
+          revision: 3
+          stale: true
+          overwritten.0.key: publication-preference
+          overwritten.0.previous: share-later
+          overwritten.0.revision: 2
+          view.revision: 3
+          view.stops[key=publication].fields[key=publication-preference].value: ""
+        len: {overwritten: 1}
+      - events:
+          - {kind: answers, revision: 2}
+          - kind: answers
+            revision: 3
+            json:
+              "view.stops[key=publication].fields[key=publication-preference].value": ""
+
+  - name: current-patch-not-stale
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {publication-preference: share-later}}
+        json: {revision: 2, stale: false}
+        absent: [overwritten]
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {publication-preference: ""}}
+        json: {revision: 3, stale: false}
+        absent: [overwritten]
+
+  - name: overwritten-names-only-fields-changed-after-request-revision
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {publication-preference: share-later}}
+        json: {revision: 2}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {content-license: CC0-1.0}}
+        json: {revision: 3}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {publication-preference: "", content-license: CC-BY-4.0}}
+        json:
+          revision: 4
+          stale: true
+          overwritten.0.key: content-license
+          overwritten.0.previous: CC0-1.0
+          overwritten.0.revision: 3
+        len: {overwritten: 1}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {publication-preference: share-later, content-license: CC0-1.0}}
+        json: {revision: 5, stale: true}
+        len: {overwritten: 2}
+
+  - name: delta-is-per-changed-field
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {publication-preference: share-later, content-license: CC0-1.0}}
+        json: {revision: 2}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {publication-preference: share-later, content-license: CC-BY-4.0}}
+        json: {revision: 3}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {publication-preference: ""}}
+        json: {revision: 4, stale: true}
+        len: {overwritten: 0}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 4, values: {publication-preference: ""}}
+        json: {revision: 4, stale: false}
+        absent: [overwritten]
+      - events:
+          - {kind: answers, revision: 2}
+          - {kind: answers, revision: 3}
+          - {kind: answers, revision: 4}
+
+  - name: closed-committed-reason
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - commit: {session: full, action: begin}
+      - commit: {session: full, action: begin, error: "already being saved"}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: CC0-1.0}}
+        status: 400
+        json: {code: kickstart_session_committing}
+      - commit: {session: full, action: close, ingest: running}
+      - commit: {session: full, action: ingest, ingest: idle}
+      - events:
+          - kind: closed
+            session: "{full}"
+            revision: 2
+            json: {reason: committed, committed.saved: true, committed.nextSteps.0: config}
+            len: {committed.nextSteps: 5}
+            absent: [view, scan, ingest]
+          - {kind: ingest, session: "{full}", revision: 3, json: {ingest.state: running}, absent: [view, committed]}
+          - {kind: ingest, session: "{full}", revision: 4, json: {ingest.state: idle}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        status: 404
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        json: {scope: selection, revision: 1}
+      - call: GET /api/v1/kickstart/status
+        absent: [activeSessionId]
+
+  - name: closed-expired-reason
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - idle: 30m
+      - expire: full
+      - events:
+          - kind: closed
+            session: "{full}"
+            revision: 2
+            json: {reason: expired}
+            absent: [view, committed, scan, ingest]
+      - call: GET /api/v1/kickstart/sessions/{full}
+        status: 404
+
+  - name: origin-guard-403-on-every-unsafe-route
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: POST /api/v1/kickstart/sessions
+        foreign: true
+        body: {scope: selection}
+        status: 403
+        json: {code: request_origin_not_local}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        foreign: true
+        body: {revision: 1, values: {content-license: CC0-1.0}}
+        status: 403
+        json: {code: request_origin_not_local}
+      - call: POST /api/v1/kickstart/sessions/{full}/scan
+        foreign: true
+        status: 403
+        json: {code: request_origin_not_local}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        foreign: true
+        status: 403
+        json: {code: request_origin_not_local}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {revision: 1}
+        absent: [overwritten]
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        json: {id: ses-2}
+      - events: []
+
+  - name: no-reset-control-in-any-payload
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: GET /api/v1/kickstart/status
+        noReset: true
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+        noReset: true
+      - call: GET /api/v1/kickstart/sessions/{full}
+        noReset: true
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: CC0-1.0}}
+        noReset: true
+      - call: GET /api/v1/kickstart/sessions/{full}/tree
+        noReset: true
+      - call: POST /api/v1/kickstart/sessions/{full}/scan
+        noReset: true
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        noReset: true

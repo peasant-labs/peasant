@@ -1,0 +1,32 @@
+# Named sets of discovered sessions that the kickstart fixtures' scan finds.
+# Each row is the listing shape discovery returns. Working directories are
+# fixture identities; the case world resolves each one to itself, so no
+# directory has to exist. {dir} in a source path is the case's temporary
+# directory, where a world that names a transcript writes it.
+#
+# two-projects: acme/tool has two sessions on main and one on feature/x; acme/site
+#   has one session on main. The first session of acme/tool has a transcript
+#   and two subagent sessions.
+# after-rescan: the same machine after a rescan. The feature/x session is gone
+#   and a new session appeared on acme/tool main.
+# five-sessions: one project with five sessions on main.
+# other-project: a machine that holds none of the sessions above.
+sets:
+  two-projects:
+    - {harness: claude-code, projectName: acme/tool, gitRemote: "git@github.com:acme/tool.git", branch: main, workingDir: /work/tool, title: fix the gate, sessionId: 11111111-1111-4111-8111-111111111111, subagentIds: [aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1, aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2], source: {origin: file, path: "{dir}/11111111-1111-4111-8111-111111111111.jsonl"}}
+    - {harness: claude-code, projectName: acme/tool, gitRemote: "git@github.com:acme/tool.git", branch: main, workingDir: /work/tool, title: add tests, sessionId: 22222222-2222-4222-8222-222222222222}
+    - {harness: claude-code, projectName: acme/tool, gitRemote: "git@github.com:acme/tool.git", branch: feature/x, workingDir: /work/tool, title: wip, sessionId: 33333333-3333-4333-8333-333333333333}
+    - {harness: claude-code, projectName: acme/site, gitRemote: "git@github.com:acme/site.git", branch: main, workingDir: /work/site, title: landing page, sessionId: 44444444-4444-4444-8444-444444444444}
+  after-rescan:
+    - {harness: claude-code, projectName: acme/tool, gitRemote: "git@github.com:acme/tool.git", branch: main, workingDir: /work/tool, title: fix the gate, sessionId: 11111111-1111-4111-8111-111111111111}
+    - {harness: claude-code, projectName: acme/tool, gitRemote: "git@github.com:acme/tool.git", branch: main, workingDir: /work/tool, title: add tests, sessionId: 22222222-2222-4222-8222-222222222222}
+    - {harness: claude-code, projectName: acme/tool, gitRemote: "git@github.com:acme/tool.git", branch: main, workingDir: /work/tool, title: new work, sessionId: 55555555-5555-4555-8555-555555555555}
+    - {harness: claude-code, projectName: acme/site, gitRemote: "git@github.com:acme/site.git", branch: main, workingDir: /work/site, title: landing page, sessionId: 44444444-4444-4444-8444-444444444444}
+  five-sessions:
+    - {harness: claude-code, projectName: acme/big, gitRemote: "git@github.com:acme/big.git", branch: main, workingDir: /work/big, title: first, sessionId: b1111111-1111-4111-8111-111111111111}
+    - {harness: claude-code, projectName: acme/big, gitRemote: "git@github.com:acme/big.git", branch: main, workingDir: /work/big, title: second, sessionId: b2222222-2222-4222-8222-222222222222}
+    - {harness: claude-code, projectName: acme/big, gitRemote: "git@github.com:acme/big.git", branch: main, workingDir: /work/big, title: third, sessionId: b3333333-3333-4333-8333-333333333333}
+    - {harness: claude-code, projectName: acme/big, gitRemote: "git@github.com:acme/big.git", branch: main, workingDir: /work/big, title: fourth, sessionId: b4444444-4444-4444-8444-444444444444}
+    - {harness: claude-code, projectName: acme/big, gitRemote: "git@github.com:acme/big.git", branch: main, workingDir: /work/big, title: fifth, sessionId: b5555555-5555-4555-8555-555555555555}
+  other-project:
+    - {harness: claude-code, projectName: acme/else, gitRemote: "git@github.com:acme/else.git", branch: main, workingDir: /work/else, title: something else, sessionId: c1111111-1111-4111-8111-111111111111}

@@ -135,6 +135,25 @@ const (
 	// RouteSettings reads every configuration key (GET) and changes one editable
 	// key in config.yaml (PATCH).
 	RouteSettings Route = "/api/v1/settings"
+
+	// The kickstart routes are the local setup session. A session is one live
+	// draft per scope; the page opens or joins it, answers it with PATCH, and
+	// reads the forest and a row's preview from the routes under it. The commit
+	// route is declared by the commit owner.
+	//
+	// RouteKickstartStatus reads the first-run redirect hook.
+	RouteKickstartStatus Route = "/api/v1/kickstart/status"
+	// RouteKickstartSessions opens or joins the session for a scope (POST).
+	RouteKickstartSessions Route = "/api/v1/kickstart/sessions"
+	// RouteKickstartSession reads the reconnect snapshot (GET) and answers the
+	// session (PATCH).
+	RouteKickstartSession Route = "/api/v1/kickstart/sessions/{id}"
+	// RouteKickstartTree reads the whole selection forest of a session.
+	RouteKickstartTree Route = "/api/v1/kickstart/sessions/{id}/tree"
+	// RouteKickstartPreview reads the bounded preview lines of one forest row.
+	RouteKickstartPreview Route = "/api/v1/kickstart/sessions/{id}/tree/{nodeId}/preview"
+	// RouteKickstartScan restarts the discovery scan of a session (POST).
+	RouteKickstartScan Route = "/api/v1/kickstart/sessions/{id}/scan"
 )
 
 // DevProxy is the default dev-mode proxy address for the Next.js dev server.

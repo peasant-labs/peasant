@@ -1,0 +1,67 @@
+# A forest read under an answered set of node ids. The forest is one project with
+# two branches: main holds s1 and s2, feature holds s3, and a second project
+# holds s4. Each case lists the ids it answers, the session rows that read as
+# selected, and the state of any row it names. `locked` names rows the forest
+# marks locked before the answer is applied.
+requiredNames:
+  - session-id-selects-that-session
+  - branch-id-selects-its-sessions-and-names-sessions-only
+  - project-id-selects-every-session-beneath-it
+  - unknown-id-selects-nothing
+  - empty-answer-clears-every-unlocked-row
+  - nil-answer-reads-as-empty
+  - locked-session-is-never-selected
+  - parent-of-a-locked-session-reads-some
+forest:
+  - {id: p1, kind: project, label: tool}
+  - {id: b1, parent: p1, kind: branch, label: main}
+  - {id: s1, parent: b1, kind: session, label: one}
+  - {id: s2, parent: b1, kind: session, label: two}
+  - {id: b2, parent: p1, kind: branch, label: feature}
+  - {id: s3, parent: b2, kind: session, label: three}
+  - {id: p2, kind: project, label: site}
+  - {id: b3, parent: p2, kind: branch, label: main}
+  - {id: s4, parent: b3, kind: session, label: four}
+cases:
+  - name: session-id-selects-that-session
+    ids: [s3]
+    selected: [s3]
+    states: {s3: all, b2: all, p1: some, s1: none, p2: none}
+
+  - name: branch-id-selects-its-sessions-and-names-sessions-only
+    ids: [b1]
+    selected: [s1, s2]
+    states: {b1: all, p1: some, b2: none}
+
+  - name: project-id-selects-every-session-beneath-it
+    ids: [p1]
+    selected: [s1, s2, s3]
+    states: {p1: all, b1: all, b2: all, p2: none}
+
+  - name: unknown-id-selects-nothing
+    ids: [not-a-row, s4]
+    selected: [s4]
+    states: {s4: all, p2: all, p1: none}
+
+  - name: empty-answer-clears-every-unlocked-row
+    ids: []
+    selected: []
+    states: {s1: none, p1: none, p2: none}
+
+  - name: nil-answer-reads-as-empty
+    selected: []
+    states: {s1: none, p1: none}
+
+  - name: locked-session-is-never-selected
+    locked: [s2]
+    ids: [b1]
+    selected: [s1]
+    states: {s2: none, s1: all}
+    lockedRows: [s2]
+
+  - name: parent-of-a-locked-session-reads-some
+    locked: [s3]
+    ids: [p1]
+    selected: [s1, s2]
+    states: {b2: some, p1: some, b1: all}
+    lockedRows: [s3]

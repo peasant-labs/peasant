@@ -25,6 +25,7 @@ const (
 	MsgProjectFamiliarity = schema.MsgProjectFamiliarity
 	MsgConnected          = schema.MsgConnected
 	MsgError              = schema.MsgError
+	MsgKickstart          = schema.MsgKickstart
 )
 
 // ChannelTopic identifies a subscribable data stream.
@@ -38,6 +39,7 @@ const (
 	TopicQuality            = schema.TopicQuality
 	TopicAnnotations        = schema.TopicAnnotations
 	TopicProjectFamiliarity = schema.TopicProjectFamiliarity
+	TopicKickstart          = schema.TopicKickstart
 )
 
 // AnnotationAxis is the subscription dimension for annotation channels.
@@ -61,6 +63,7 @@ var ValidChannels = map[ChannelTopic]bool{
 	TopicQuality:            true,
 	TopicAnnotations:        true,
 	TopicProjectFamiliarity: true,
+	TopicKickstart:          true,
 }
 
 // ValidateSubscription returns true if sub.Topic is known and all required
