@@ -1,0 +1,88 @@
+# Review rows. Draft.Review runs the commit chain up to the swap on a real file:
+# it returns the conflict rows and the structured diff, and writes nothing.
+#
+# A row is:
+#   opened / openedAbsent / onDisk   as in commit.yaml
+#   scope          the setup scope of the model (full by default)
+#   answers        field key -> the JSON text of the answer
+#   resolutions    field key -> {choice, seen}
+#   holdLock       another writer holds the configuration lock during the review
+# "diffLines" lists the diff as "type:text", one entry per line, hunks in order.
+requiredNames:
+  - review-lists-rows-and-diffs-an-existing-file
+  - review-keeps-a-settled-row-listed-and-not-unresolved
+  - review-absent-file-is-all-add
+  - review-writes-nothing-and-takes-no-lock
+  - review-refuses-an-answer-the-scope-does-not-have
+cases:
+  - name: review-lists-rows-and-diffs-an-existing-file
+    opened: &opened |
+      version: 1
+      push:
+        visibility: private
+        license: ""
+    onDisk: &theirs |
+      version: 1
+      push:
+        visibility: private
+        license: CC-BY-4.0
+    answers: {content-license: '"CC0-1.0"', publication-preference: '"share-later"'}
+    want:
+      conflicts:
+        - field: content-license
+          stop: license
+          label: default license attached to pushed transcripts
+          mine: '"CC0-1.0"'
+          theirs: '"CC-BY-4.0"'
+      unresolved: [content-license]
+      diffFile: config.yaml
+      hunkHeaders: ["-1,4 +1,5"]
+      diffLines:
+        - "ctx:version: 1"
+        - "ctx:push:"
+        - "ctx:  visibility: private"
+        - "del:  license: CC-BY-4.0"
+        - "add:  license: CC0-1.0"
+        - "add:  sharePreference: share-later"
+  - name: review-keeps-a-settled-row-listed-and-not-unresolved
+    opened: *opened
+    onDisk: *theirs
+    answers: {content-license: '"CC0-1.0"'}
+    resolutions: {content-license: {choice: theirs, seen: '"CC-BY-4.0"'}}
+    want:
+      conflicts:
+        - field: content-license
+          stop: license
+          label: default license attached to pushed transcripts
+          mine: '"CC0-1.0"'
+          theirs: '"CC-BY-4.0"'
+      unresolved: []
+      diffFile: config.yaml
+      # Keeping theirs gives the answer up, so the file would not change.
+      hunkHeaders: []
+      diffLines: []
+  - name: review-absent-file-is-all-add
+    openedAbsent: true
+    answers: {content-license: '"CC0-1.0"'}
+    want:
+      conflicts: []
+      unresolved: []
+      diffFile: config.yaml
+      firstHunkHeaderStarts: "-0,0 +1,"
+      firstDiffLineStarts: "add:version: 1"
+  - name: review-writes-nothing-and-takes-no-lock
+    opened: *opened
+    onDisk: *theirs
+    holdLock: true
+    answers: {content-license: '"CC0-1.0"'}
+    want:
+      unresolved: [content-license]
+      fileUnchanged: true
+  - name: review-refuses-an-answer-the-scope-does-not-have
+    opened: *opened
+    scope: selection
+    answers: {redaction-level: '"standard"'}
+    want:
+      failure: invalid
+      errorContains: is not a field of the selection setup
+      fileUnchanged: true

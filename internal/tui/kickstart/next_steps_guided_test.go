@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
@@ -22,20 +23,20 @@ const (
 	fixtureNextStepVillagePush  nextStepFixtureKind = "village-push"
 )
 
-func (k nextStepFixtureKind) programKind() (kickstart.NextStepKind, bool) {
+func (k nextStepFixtureKind) programKind() (onboarding.NextStep, bool) {
 	switch k {
 	case fixtureNextStepUnknown:
-		return kickstart.NextStepUnknown, true
+		return onboarding.NextStepUnknown, true
 	case fixtureNextStepConfig:
-		return kickstart.NextStepConfig, true
+		return onboarding.NextStepConfig, true
 	case fixtureNextStepWebStart:
-		return kickstart.NextStepWebStart, true
+		return onboarding.NextStepWebStart, true
 	case fixtureNextStepVillageLogin:
-		return kickstart.NextStepVillageLogin, true
+		return onboarding.NextStepVillageLogin, true
 	case fixtureNextStepVillagePush:
-		return kickstart.NextStepVillagePush, true
+		return onboarding.NextStepVillagePush, true
 	default:
-		return kickstart.NextStepUnknown, false
+		return onboarding.NextStepUnknown, false
 	}
 }
 
@@ -89,22 +90,22 @@ func loadNextStepDocument(t *testing.T) nextStepDocument {
 func TestProgramValidatesTypedNextStepProvider(t *testing.T) {
 	t.Parallel()
 	providerType := reflect.TypeOf(kickstart.NextStepsFunc(nil))
-	if providerType.NumOut() != 1 || providerType.Out(0) != reflect.TypeOf([]kickstart.NextStepKind{}) {
-		t.Fatalf("NextStepsFunc output = %v, want []kickstart.NextStepKind", providerType.Out(0))
+	if providerType.NumOut() != 1 || providerType.Out(0) != reflect.TypeOf([]onboarding.NextStep{}) {
+		t.Fatalf("NextStepsFunc output = %v, want []onboarding.NextStep", providerType.Out(0))
 	}
 
 	for _, row := range loadNextStepDocument(t).Rows {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {
-			kinds := make([]kickstart.NextStepKind, 0, len(row.Kinds))
+			kinds := make([]onboarding.NextStep, 0, len(row.Kinds))
 			for _, fixtureKind := range row.Kinds {
 				kind, _ := fixtureKind.programKind()
 				kinds = append(kinds, kind)
 			}
 			program, _ := newTestProgram(t, kickstart.ProgramDeps{
 				AlreadyConnected: true,
-				NextSteps: func(*ftue.IngestResult) []kickstart.NextStepKind {
-					return append([]kickstart.NextStepKind(nil), kinds...)
+				NextSteps: func(*ftue.IngestResult) []onboarding.NextStep {
+					return append([]onboarding.NextStep(nil), kinds...)
 				},
 			})
 			program = drainProgram(program, program.Init())

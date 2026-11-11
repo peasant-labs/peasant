@@ -741,6 +741,16 @@ func writeValueError(key FieldKey, err error) error {
 // NeverExpireDays is the Claude Code cleanup period that keeps transcripts.
 const NeverExpireDays = 99999
 
+// neverExpireFloor is the smallest stored cleanup period that reads as "keeps
+// transcripts forever". Claude Code accepts any large number, so a value that a
+// person or another tool wrote below NeverExpireDays still means never expire.
+const neverExpireFloor = 9999
+
+// NeverExpires reports whether a stored cleanup period keeps transcripts
+// forever. A presentation uses it to read an existing value. It writes
+// NeverExpireDays.
+func NeverExpires(days int) bool { return days >= neverExpireFloor }
+
 // RecommendedRetentionDays is the retention choice a first run starts on when
 // Claude Code has no cleanup period set.
 const RecommendedRetentionDays = NeverExpireDays

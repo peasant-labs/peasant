@@ -388,7 +388,7 @@ func TestIngestPage_TickStops_WhenNotRunning(t *testing.T) {
 func TestPrivacyPreferencePage_DefaultsToTheRecommendedLevel(t *testing.T) {
 	t.Parallel()
 	p := NewPrivacyPreferencePage("Privacy")
-	want := recommendedPrivacyOption()
+	want := recommendedPrivacyOption(privacyMenu())
 	if p.cursor != want {
 		t.Errorf("default cursor = %d, want %d (the recommended option)", p.cursor, want)
 	}
@@ -414,8 +414,9 @@ func TestPrivacyPreferencePage_DefaultsToTheRecommendedLevel(t *testing.T) {
 // directions.
 func TestPrivacyPreferencePage_OffersOnlyLevelsTheProductOffers(t *testing.T) {
 	t.Parallel()
-	offered := make([]redact.RedactionLevel, 0, len(privacyOptions))
-	for _, option := range privacyOptions {
+	menu := privacyMenu()
+	offered := make([]redact.RedactionLevel, 0, len(menu))
+	for _, option := range menu {
 		if !config.RedactionLevelOffered(option.level) {
 			t.Errorf("the privacy page offers %q, which this version does not offer; a user selecting it would write a "+
 				"configuration the next command refuses", option.level)
@@ -456,7 +457,7 @@ func TestPrivacyPreferencePage_CursorNavigation(t *testing.T) {
 	if p.cursor < 0 {
 		t.Errorf("after up: cursor = %d, want a valid index", p.cursor)
 	}
-	for range privacyOptions {
+	for range p.options {
 		p.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	}
 	if p.cursor != 0 {
@@ -466,15 +467,15 @@ func TestPrivacyPreferencePage_CursorNavigation(t *testing.T) {
 	// Move down to the last offered level. The bound is derived from the option
 	// list rather than hardcoded, because the list holds only the levels the
 	// product will actually run - maximum is not offered at all.
-	last := len(privacyOptions) - 1
-	for range privacyOptions {
+	last := len(p.options) - 1
+	for range p.options {
 		p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	if p.cursor != last {
 		t.Errorf("after walking down the whole list: cursor = %d, want %d", p.cursor, last)
 	}
-	if p.SelectedLevel() != string(privacyOptions[last].level) {
-		t.Errorf("at cursor %d: SelectedLevel() = %q, want %q", last, p.SelectedLevel(), privacyOptions[last].level)
+	if p.SelectedLevel() != string(p.options[last].level) {
+		t.Errorf("at cursor %d: SelectedLevel() = %q, want %q", last, p.SelectedLevel(), p.options[last].level)
 	}
 
 	// Can't go past the end.
@@ -505,7 +506,7 @@ func TestPrivacyPreferencePage_EnterConfirms(t *testing.T) {
 // digit pointing at the wrong one.
 func TestPrivacyPreferencePage_NumberKeySelectsAndConfirms(t *testing.T) {
 	t.Parallel()
-	for index, option := range privacyOptions {
+	for index, option := range privacyMenu() {
 		key := rune('1' + index)
 		t.Run(string(key), func(t *testing.T) {
 			p := NewPrivacyPreferencePage("Privacy")
@@ -527,7 +528,7 @@ func TestPrivacyPreferencePage_NumberKeySelectsAndConfirms(t *testing.T) {
 func TestPrivacyPreferencePage_DoesNotOfferAnUnsupportedLevel(t *testing.T) {
 	t.Parallel()
 	p := NewPrivacyPreferencePage("Privacy")
-	for index := range privacyOptions {
+	for index := range p.options {
 		key := rune('1' + index)
 		p.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
 		if !config.RedactionLevelSupported(redact.RedactionLevel(p.SelectedLevel())) {
@@ -537,7 +538,7 @@ func TestPrivacyPreferencePage_DoesNotOfferAnUnsupportedLevel(t *testing.T) {
 	// A digit past the end must not select anything, rather than wrapping onto a
 	// level that is not offered.
 	p = NewPrivacyPreferencePage("Privacy")
-	past := rune('1' + len(privacyOptions))
+	past := rune('1' + len(p.options))
 	p.Update(tea.KeyPressMsg{Code: past, Text: string(past)})
 	if p.IsComplete() {
 		t.Errorf("pressing %q, past the end of the list, must not confirm a selection", string(past))
@@ -577,7 +578,7 @@ func TestPrivacyPreferencePage_StatesRatherThanOffersWhenOneLevelIsOffered(t *te
 	view := NewPrivacyPreferencePage("Privacy").View(80, 24)
 
 	// It states what will happen, naming the level.
-	for _, want := range []string{"before they leave your machine", privacyLevelLabel(privacyOptions[0].level), "enter: continue"} {
+	for _, want := range []string{"before they leave your machine", privacyLevelLabel(privacyMenu()[0].level), "enter: continue"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the screen must state what will be applied; missing %q in:\n%s", want, view)
 		}
@@ -649,22 +650,15 @@ func TestPrivacyPreferencePage_ChoosesWhenMoreThanOneLevelIsOffered(t *testing.T
 	// Not parallel: this temporarily widens package-level state that other tests
 	// in this package read.
 	restoreOffered := config.OfferedRedactionLevels
-	restoreOptions := privacyOptions
-	t.Cleanup(func() {
-		config.OfferedRedactionLevels = restoreOffered
-		privacyOptions = restoreOptions
-	})
+	t.Cleanup(func() { config.OfferedRedactionLevels = restoreOffered })
 
 	// The widening the disposition table exists to absorb: a second level becomes
-	// offered, and the wizard grows the option that goes with it.
+	// offered. The wizard's menu is the shared model's, which follows the policy,
+	// so widening the policy alone must grow the wizard's menu - no edit here.
 	config.OfferedRedactionLevels = []redact.RedactionLevel{redact.Minimal, redact.Standard}
-	privacyOptions = []privacyOption{
-		{level: redact.Minimal, label: "Minimal", description: "A second level, offered.", keeps: "Keeps: less."},
-		{level: redact.Standard, label: "Standard", recommended: true, description: restoreOptions[0].description, keeps: restoreOptions[0].keeps},
-	}
 
 	view := NewPrivacyPreferencePage("Privacy").View(80, 24)
-	for _, want := range []string{"Choose your default", "●", "↑/↓", "(recommended)", "Minimal", "Standard"} {
+	for _, want := range []string{"Choose your default", "●", "↑/↓", "(recommended)", "minimal", "standard"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("with two levels offered the screen must present them as a CHOICE and come back to the chooser on "+
 				"its own; missing %q in:\n%s", want, view)
@@ -711,7 +705,7 @@ func TestPrivacyPreferencePage_DerivesItsExamplesFromTheRedactor(t *testing.T) {
 		t.Errorf("the path example no longer shows the surviving directory. Path rules replace the USERNAME SEGMENT and "+
 			"keep the rest, so hiding the whole path here would over-claim the protection:\n%s", view)
 	}
-	redactor, err := redact.NewRedactor(privacyOptions[0].level, nil, redact.XDGPaths{})
+	redactor, err := redact.NewRedactor(privacyMenu()[0].level, nil, redact.XDGPaths{})
 	if err != nil {
 		t.Fatalf("build a redactor to check the screen against: %v", err)
 	}
@@ -758,9 +752,9 @@ func TestLicensePage_DefaultsToCC0(t *testing.T) {
 	}
 	// Invariant: every menu entry is a real license, so the page can never yield an
 	// empty selection — a contributor who reaches it must pick one.
-	for _, opt := range licenseOptions {
+	for _, opt := range p.options {
 		if opt.license == "" {
-			t.Error("licenseOptions contains an empty (none) entry; kickstart must offer only real licenses")
+			t.Error("the license menu contains an empty (none) entry; kickstart must offer only real licenses")
 		}
 	}
 }
