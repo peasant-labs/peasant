@@ -14,9 +14,8 @@ import { Harness, StopReason, ToolCallKind } from "@/types/messages";
  * which the visual-harness route feeds straight into the shared
  * `@peasant-labs/fairtrade` `<TranscriptViewer>` composite, exactly the
  * payload village's real `/transcripts/[id]` page hands it, minus the REST fetch.
- * Rendering the SAME data the demo renders lets the side-by-side capture stitch a
- * true height-matched, same-data comparison of the canonical demo vs the
- * assembled village frontend.
+ * The conversation is based on that demo; local-only image and control fixtures
+ * below make this payload unsuitable for a same-data demo comparison.
  *
  * WIRE FAITHFULNESS (the reason tool outputs render): on the real wire a tool
  * call's `arguments` AND `result` are JSON-ENCODED STRINGS — so a plain-text
@@ -313,6 +312,14 @@ function toolToWire(tool: ToolFixture): ToolCallDetail {
 const TS_BASE = Date.parse("2026-06-17T09:12:00Z");
 const turnTimestamp = (id: number) => new Date(TS_BASE + id * 60_000).toISOString();
 
+// Recorded Claude control kinds are open strings on the shared wire. These
+// three values are recognized by the local Claude control-record parser.
+const controlTurns: TurnDetail[] = [
+  { index: 9, role: 'system', depth: 0, timestamp: turnTimestamp(9), controlKind: 'mode', content: 'mode: normal' },
+  { index: 10, role: 'system', depth: 0, timestamp: turnTimestamp(10), controlKind: 'permission-mode', content: 'permission mode: auto' },
+  { index: 11, role: 'system', depth: 0, timestamp: turnTimestamp(11), controlKind: 'attachment', content: 'environment snapshot' },
+];
+
 /** A demo turn fixture → canonical `TurnDetail`. */
 function turnToWire(t: TurnFixture): TurnDetail {
   // Fold tool-sibling thinking into the turn content as a <thinking>…</thinking>
@@ -387,6 +394,6 @@ export const sampleSession: SessionDetailPayload = {
   gitBranch: "lift/transcript-canvas",
   gitRemote: "https://example.com/peasant-labs/transcript-canvas.git",
   outcome: "resolved",
-  turns: TURNS.map(turnToWire),
+  turns: [...TURNS.map(turnToWire), ...controlTurns],
   scorecard: sampleScorecard,
 };
