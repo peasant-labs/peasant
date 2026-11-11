@@ -49,6 +49,8 @@ export interface Step {
   check?: string;
   /** Answer the next calls of a route differently from here on. */
   script?: { route: string; answers: RouteAnswer | RouteAnswer[] };
+  /** Send the answers a route has been holding (`held: true`), and let its later calls through at once. */
+  release?: string;
   socket?: 'close' | 'open';
   advance?: number;
   /** Let pending promises settle. */
@@ -117,6 +119,7 @@ const STEP_KEYS = Object.freeze({
   choose: true,
   check: true,
   script: true,
+  release: true,
   socket: true,
   advance: true,
   settle: true,
@@ -192,12 +195,25 @@ export class KickstartServer {
   readonly trees = loadTrees();
   private readonly scripts = new Map<string, RouteAnswer[]>();
   private readonly used = new Map<string, number>();
+  private readonly holding = new Map<string, (() => void)[]>();
+  private readonly released = new Set<string>();
 
   script(route: string, answers: RouteAnswer | RouteAnswer[]): void {
     const expanded = (Array.isArray(answers) ? answers : [answers]).map((answer) => expandRefs(answer, this.models, this.trees) as RouteAnswer);
     for (const answer of expanded) checkScriptedAnswer(route, answer);
     this.scripts.set(route, expanded);
     this.used.set(route, 0);
+    this.released.delete(route);
+  }
+
+  /** Send what a route holds and stop holding it. Releasing a route nothing holds is an error. */
+  release(route: string): void {
+    if (!(this.scripts.get(route) ?? []).some((answer) => answer.held === true)) {
+      throw new Error(`a step releases ${route}, which no scripted answer holds; script it with held: true`);
+    }
+    this.released.add(route);
+    for (const send of this.holding.get(route) ?? []) send();
+    this.holding.delete(route);
   }
 
   model(name: string): Record<string, Json> {
@@ -229,6 +245,11 @@ export class KickstartServer {
       const index = Math.min(this.used.get(route) ?? 0, answers.length - 1);
       this.used.set(route, (this.used.get(route) ?? 0) + 1);
       const answer = answers[index];
+      if (answer.held === true && !this.released.has(route)) {
+        await new Promise<void>((send) => {
+          this.holding.set(route, [...(this.holding.get(route) ?? []), send]);
+        });
+      }
       return new Response(answer.text ?? JSON.stringify(answer.body ?? {}), { status: answer.status ?? 200 });
     });
   }
@@ -424,6 +445,12 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
       });
     }
     if (step.script) server.script(step.script.route, step.script.answers);
+    if (step.release !== undefined) {
+      server.release(step.release);
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
     if (step.click) {
       await act(async () => {
         fireEvent.click(control(q, 'button', step.click!));

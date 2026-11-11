@@ -99,7 +99,7 @@ function assertKnownSection(id: string): asserts id is LocalSectionId {
 /**
  * Every registry section this app has a page for, in fairtrade's order.
  *
- * The first-run redirect (hooks/useFirstRun.ts) reads this list for the pages
+ * The first-run redirect (hooks/useFirstRun.tsx) reads this list for the pages
  * it covers, nav and route-only sections alike, so a section added to the
  * registry is redirected from with no second edit.
  */

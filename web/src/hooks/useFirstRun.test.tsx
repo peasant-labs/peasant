@@ -1,6 +1,6 @@
 import { cleanup, render, act, type RenderResult } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { firstRunRoutes, isFirstRunRoute, useFirstRunRedirect } from './useFirstRun';
+import { firstRunRoutes, isFirstRunRoute, useFirstRunDecision, type FirstRunDecision } from './useFirstRun';
 import { LOCAL_SECTIONS } from '@/lib/nav/sections';
 import { loadCases } from '@/test/fixtures/kickstart';
 import { KickstartServer } from '@/test/kickstartHarness';
@@ -28,8 +28,11 @@ vi.mock('next/navigation', () => ({
 const STATUS = 'GET /api/v1/kickstart/status';
 const PATH = 'src/app/kickstart/testdata/redirect_routes.yaml';
 
+// What the page on screen is told, read off the real hook.
+let told: FirstRunDecision | null = null;
+
 function Probe() {
-  useFirstRunRedirect();
+  told = useFirstRunDecision();
   return null;
 }
 
@@ -39,6 +42,8 @@ interface RedirectStep {
   pages: string[];
   deriveFromRegistry?: boolean;
   redirects: boolean;
+  /** The decision the page is told once the status answer has been taken: its wire token. */
+  decision: string;
   statusReads?: number;
   then?: RedirectStep;
 }
@@ -66,6 +71,7 @@ async function play(server: KickstartServer, step: RedirectStep): Promise<void> 
     } else {
       expect(nav.replace, `${page} should not be redirected`).not.toHaveBeenCalled();
     }
+    expect(told?.wire, `${page}: what the page is told`).toBe(step.decision);
   }
 }
 
@@ -75,6 +81,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   shell = null;
+  told = null;
   vi.unstubAllGlobals();
 });
 

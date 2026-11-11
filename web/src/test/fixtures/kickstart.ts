@@ -196,9 +196,11 @@ export interface ScriptedAnswer {
   text?: string;
   /** A deliberate breach of the contract: the one answer that is not checked. */
   malformed?: boolean;
+  /** The answer is not sent until a step releases its route; the request is recorded at once. */
+  held?: boolean;
 }
 
-const ANSWER_KEYS: readonly string[] = ['status', 'body', 'text', 'malformed'];
+const ANSWER_KEYS: readonly string[] = ['status', 'body', 'text', 'malformed', 'held'];
 
 /**
  * Refuse a scripted answer that the contract forbids, unless the fixture says

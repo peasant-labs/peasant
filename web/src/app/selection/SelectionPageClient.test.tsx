@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { ReactNode } from 'react';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import SettingsPageClient from '@/app/settings/SettingsPageClient';
 import { WizardClient } from '@/app/kickstart/WizardClient';
-import { firstRunRoutes, isFirstRunRoute } from '@/hooks/useFirstRun';
+import { FirstRunProvider, firstRunRoutes, isFirstRunRoute } from '@/hooks/useFirstRun';
 import { kickstartCopy } from '@/lib/kickstart/copy';
 import { ALL_KICKSTART_SCOPES, KickstartScope } from '@/lib/kickstart/values';
 import { LOCAL_SECTIONS } from '@/lib/nav/sections';
@@ -13,10 +14,16 @@ import { loadSettingsResponse } from '@/test/fixtures/settings';
 import { playCase, playTabs, teardown } from '@/test/kickstartHarness';
 import SelectionPage from './page';
 
+// One router for the life of the shell, as the app's router is; `replace` is
+// where a redirect to setup shows.
+const nav = vi.hoisted(() => {
+  const replace = vi.fn();
+  return { replace, router: { push: vi.fn(), replace } };
+});
 vi.mock('next/navigation', () => ({
   usePathname: () => '/selection',
   useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => nav.router,
 }));
 
 /**
@@ -24,14 +31,34 @@ vi.mock('next/navigation', () => ({
  * with the HTTP and WebSocket boundary played from fixtures. The wizard is
  * mounted beside it where a case needs it, from its own route entry too: the
  * isolation these cases prove is between two real pages.
+ *
+ * The page is drawn inside the shell's first-run decision, as it is in the app:
+ * its body waits for the status answer. Every case but the gate's own is played
+ * on a computer whose setup is saved.
  */
 
-afterEach(teardown);
+afterEach(() => {
+  teardown();
+  nav.replace.mockReset();
+});
+
+const STATUS = 'GET /api/v1/kickstart/status';
+
+/** The shell's first-run decision around a page, the production provider. */
+function Shell({ children }: { children: ReactNode }) {
+  return <FirstRunProvider>{children}</FirstRunProvider>;
+}
+
+/** A case on a computer whose setup is saved, unless the case scripts the status itself. */
+function onSavedSetup(entry: FixtureCase): FixtureCase {
+  const server = (entry.server ?? {}) as Record<string, unknown>;
+  return { ...entry, server: { [STATUS]: { body: { configured: true } }, ...server } };
+}
 
 const PATH = 'src/app/selection/testdata/selection_page.yaml';
 
 /** What the fixture says about how a case is played. */
-const CASE_KINDS = ['page', 'tabs', 'parity', 'settings', 'copy'] as const;
+const CASE_KINDS = ['page', 'tabs', 'parity', 'settings', 'copy', 'gate'] as const;
 type CaseKind = (typeof CASE_KINDS)[number];
 
 function kindOf(entry: FixtureCase): CaseKind {
@@ -44,9 +71,9 @@ function kindOf(entry: FixtureCase): CaseKind {
 
 const PAGES = {
   wizard: <WizardClient />,
-  selection: <SelectionPage />,
-  first: <SelectionPage />,
-  second: <SelectionPage />,
+  selection: <Shell><SelectionPage /></Shell>,
+  first: <Shell><SelectionPage /></Shell>,
+  second: <Shell><SelectionPage /></Shell>,
 } as const;
 
 /** The `{name}` placeholders of a parity case, filled in for one page. */
@@ -60,7 +87,7 @@ describe('/selection', () => {
     const kind = kindOf(entry);
     if (kind === 'page') {
       it(entry.name, async () => {
-        await playCase(entry, <SelectionPage />, ['kind', 'scopeToken']);
+        await playCase(onSavedSetup(entry), <Shell><SelectionPage /></Shell>, ['kind', 'scopeToken']);
         if (typeof entry.scopeToken === 'string') {
           // The token the page opens its session with is the closed set's own.
           expect(KickstartScope.Selection.wire).toBe(entry.scopeToken);
@@ -69,7 +96,7 @@ describe('/selection', () => {
     }
     if (kind === 'tabs') {
       it(entry.name, async () => {
-        await playTabs(entry, PAGES, ['kind']);
+        await playTabs(onSavedSetup(entry), PAGES, ['kind']);
       });
     }
     if (kind === 'parity') {
@@ -88,7 +115,7 @@ describe('/selection', () => {
           const values = sides[side];
           const played = fill(entry, { session: values.session, model: values.model, answered: values.answered });
           const steps = [...values.before, ...(played.steps as unknown[])];
-          const mounted = await playCase({ ...played, steps }, side === 'wizard' ? <WizardClient /> : <SelectionPage />, ['kind', 'rows', 'selectedIds', 'wizard', 'selection']);
+          const mounted = await playCase(onSavedSetup({ ...played, steps }), side === 'wizard' ? <WizardClient /> : <Shell><SelectionPage /></Shell>, ['kind', 'rows', 'selectedIds', 'wizard', 'selection']);
           seen[side] = {
             rows: [...mounted.container.querySelectorAll('[data-node-id]')].map((row) => row.getAttribute('data-node-id')),
             selected: mounted.server
@@ -103,6 +130,17 @@ describe('/selection', () => {
         expect(seen.wizard.rows).toEqual(seen.selection.rows);
         expect(seen.wizard.selected).toEqual([sides.selectedIds]);
         expect(seen.selection.selected).toEqual(seen.wizard.selected);
+      });
+    }
+    if (kind === 'gate') {
+      it(entry.name, async () => {
+        // The gate's own cases script the status themselves: what the shell is
+        // told decides whether the page draws, and the request log says what
+        // the page started before that.
+        await playCase(entry, <Shell><SelectionPage /></Shell>, ['kind', 'redirects']);
+        const redirects = (entry as unknown as { redirects: boolean }).redirects;
+        if (redirects) await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/kickstart'));
+        else expect(nav.replace).not.toHaveBeenCalled();
       });
     }
     if (kind === 'copy') {
