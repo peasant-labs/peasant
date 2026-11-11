@@ -3,7 +3,7 @@
 # and the real selection filter over it, with the same stored-session index and
 # a git double that answers headBranch for every directory it is asked about.
 #
-#   cwd            the working directory the recording names ("" = none)
+#   harness        the harness that recorded the session (claude-code when absent)
 #   subfolder      a folder inside the case's temporary clone, used as the cwd
 #   folderOnly     the recording names no cwd; its project folder decodes to the clone
 #   recordedBranch the gitBranch the recording names
@@ -12,6 +12,9 @@
 #   chosenBranch   the saved selection names this branch of the project
 #   treeBranch     the branch the scan lists the session under
 #   matched        whether the filter admits the session
+#   extractsNoBranch  the harness's own metadata extraction, run over the same
+#                  recording, stores no branch and never asks git for one: the
+#                  store agrees with the tree and the filter
 #   branchDirs     the directories git was asked for the checked-out branch, by
 #                  the scan and by the filter alike ({clone} and {subfolder} name
 #                  the case's own directories)
@@ -23,6 +26,7 @@ requiredNames:
   - recorded-branch-tree-and-filter-ask-no-directory
   - no-recorded-branch-uses-stored-branch
   - changed-source-falls-back-to-the-checkout-in-both
+  - recording-only-harness-tree-filter-and-store-all-say-no-branch
 cases:
   # The working directory is a subfolder of the clone. Both ask that folder, not
   # the clone root: a linked worktree's branch is its own.
@@ -71,3 +75,16 @@ cases:
     treeBranch: develop
     matched: false
     branchDirs: ["{subfolder}"]
+  # Codex records its git context once in session_meta, and this rollout names
+  # none. The clone sits on the chosen branch, but a Codex session that recorded
+  # no branch has none: the tree lists it branchless, the filter does not admit
+  # it, and the metadata extraction stores no branch. Nobody asks git.
+  - name: recording-only-harness-tree-filter-and-store-all-say-no-branch
+    harness: codex
+    subfolder: packages/web
+    headBranch: main
+    chosenBranch: main
+    treeBranch: ""
+    matched: false
+    extractsNoBranch: true
+    branchDirs: []

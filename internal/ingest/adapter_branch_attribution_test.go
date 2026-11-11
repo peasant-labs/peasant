@@ -3,7 +3,10 @@ package ingest_test
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -17,6 +20,7 @@ var adapterBranchAttributionData []byte
 type adapterBranchCase struct {
 	Name              string `yaml:"name"`
 	Harness           string `yaml:"harness"`
+	Declared          string `yaml:"declared"`
 	RecordedBranch    string `yaml:"recordedBranch"`
 	Checkout          string `yaml:"checkout"`
 	WantBranch        string `yaml:"wantBranch"`
@@ -48,6 +52,9 @@ func TestAdapterMetadataBranchAttribution(t *testing.T) {
 			stub := testutil.DefaultGitResolver()
 			stub.BranchName = c.Checkout
 			git := &checkoutCountingGit{StubGitResolver: stub}
+			if declared := ingest.BranchSourceOf(ingest.Harness(c.Harness)).String(); declared != c.Declared {
+				t.Fatalf("the harness declares branch source %q, but the case expects %q", declared, c.Declared)
+			}
 			var stored *string
 			switch ingest.Harness(c.Harness) {
 			case ingest.HarnessClaudeCode:
@@ -58,6 +65,10 @@ func TestAdapterMetadataBranchAttribution(t *testing.T) {
 				stored = extractOpenCodeBranch(t, git, c)
 			case ingest.HarnessPi:
 				stored = extractPiBranch(t, git, c)
+			case ingest.HarnessCodex:
+				stored = extractCodexBranch(t, git, c)
+			case ingest.HarnessStrike:
+				stored = extractStrikeBranch(t, git, c)
 			default:
 				t.Fatalf("fixture case %q names the harness %q, which this test does not drive", c.Name, c.Harness)
 			}
@@ -72,6 +83,28 @@ func TestAdapterMetadataBranchAttribution(t *testing.T) {
 				t.Fatalf("checked-out branch asked %d times, want %d", git.calls, c.WantCheckoutCalls)
 			}
 		})
+	}
+}
+
+// TestAdapterBranchAttributionCoversEveryRegisteredHarness keeps a harness from
+// being added without a row that holds its extractor to its declaration.
+func TestAdapterBranchAttributionCoversEveryRegisteredHarness(t *testing.T) {
+	t.Parallel()
+	var fixtures struct {
+		RequiredNames []string            `yaml:"requiredNames"`
+		Cases         []adapterBranchCase `yaml:"cases"`
+	}
+	if err := testutil.DecodeFixtureYAML(adapterBranchAttributionData, &fixtures); err != nil {
+		t.Fatalf("decode adapter branch attribution fixture: %v", err)
+	}
+	covered := make(map[ingest.Harness]bool)
+	for _, c := range fixtures.Cases {
+		covered[ingest.Harness(c.Harness)] = true
+	}
+	for harness := range ingest.DefaultAdapterRegistry {
+		if !covered[harness] {
+			t.Errorf("registered harness %q has no row in adapter_branch_attribution.yaml; add one for its extractor", harness)
+		}
 	}
 }
 
@@ -173,6 +206,76 @@ func extractPiBranch(t *testing.T, git ingest.GitResolver, c adapterBranchCase) 
 		DebugPaths:    []ingest.ResolvedPath{},
 	}
 	meta, err := ingest.NewPiAdapter(fs, git, salt.Salt{}).ExtractMetadata(context.Background(), session)
+	if err != nil {
+		t.Fatalf("ExtractMetadata: %v", err)
+	}
+	return meta.Git.Branch
+}
+
+func extractCodexBranch(t *testing.T, git ingest.GitResolver, c adapterBranchCase) *string {
+	t.Helper()
+	const base = "/home/test/.codex/sessions"
+	opts := defaultCodexFixtureOpts()
+	opts.branch = c.RecordedBranch
+	// A session_meta with no git block records no branch at all.
+	opts.omitGit = c.RecordedBranch == ""
+	mfs := testutil.NewMemFS()
+	rollout := codexRolloutPath(base, "2026", "05", "29", "2026-05-29T21-14-24", opts.sessionID)
+	if err := mfs.WriteFile(rollout, codexRolloutJSONL(opts), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := ingest.NewSessionID(opts.sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := ingest.DiscoveredSession{
+		SessionID:    sid,
+		Harness:      ingest.HarnessCodex,
+		SourcePath:   ingest.ResolvedPath(rollout),
+		SourceFormat: ingest.SourceFormatJSONL,
+	}
+	meta, err := ingest.NewCodexAdapter(mfs, git, salt.Salt{}).ExtractMetadata(context.Background(), session)
+	if err != nil {
+		t.Fatalf("ExtractMetadata: %v", err)
+	}
+	return meta.Git.Branch
+}
+
+func extractStrikeBranch(t *testing.T, git ingest.GitResolver, c adapterBranchCase) *string {
+	t.Helper()
+	transcript, err := os.ReadFile(filepath.Join("testdata", "strike_protocol.jsonl"))
+	if err != nil {
+		t.Fatalf("read the Strike transcript fixture: %v", err)
+	}
+	sidecar := map[string]string{
+		"projectKey": "/tmp/strike-canonical-project",
+		"title":      "branch attribution",
+		"createdAt":  "2026-07-28T14:00:00Z",
+	}
+	if c.RecordedBranch != "" {
+		sidecar["worktreeBranch"] = c.RecordedBranch
+	}
+	sidecarBytes, err := json.Marshal(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, testutil.TestSessionUUID+".jsonl"), transcript, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, testutil.TestSessionUUID+".meta.json"), sidecarBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ingest.NewResolvedPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := ingest.NewStrikeAdapter(&ingest.OSFileSystem{}, git, salt.Salt{})
+	discovered, err := adapter.Discover(context.Background(), ingest.SourceConfig{Paths: []ingest.ResolvedPath{resolved}, Enabled: true})
+	if err != nil || len(discovered) != 1 {
+		t.Fatalf("Discover returned %d sessions, error %v", len(discovered), err)
+	}
+	meta, err := adapter.ExtractMetadata(context.Background(), discovered[0])
 	if err != nil {
 		t.Fatalf("ExtractMetadata: %v", err)
 	}

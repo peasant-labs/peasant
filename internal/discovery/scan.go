@@ -117,6 +117,7 @@ func Scan(
 			// The import filter builds the same evidence from the same index, so
 			// the branch a session is listed under is the branch it is judged by.
 			branchName = ingest.ResolveSessionBranch(ctx, git, ingest.SessionBranchEvidence{
+				Harness:      d.Harness,
 				Recorded:     branchName,
 				StoredBranch: record.Branch,
 				StoredKnown:  stored,

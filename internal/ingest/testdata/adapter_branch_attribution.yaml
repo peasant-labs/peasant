@@ -4,6 +4,9 @@
 # only when none was recorded. The checked-out branch is main in every case, so a
 # recorded feature/recorded can only come from the recording; wantCheckoutCalls
 # is how many times the extractor asked git for the checked-out branch.
+# declared is the harness's entry in ingest.HarnessBranchSources: the tree and the
+# import filter place a session by that declaration, so the extractor must behave
+# as it says. A recording-only harness never has the checkout answer.
 # requiredNames is the deletion guard: every name below must still be present.
 requiredNames:
   - claude-recorded-branch-wins-over-checkout
@@ -13,43 +16,82 @@ requiredNames:
   - opencode-recorded-branch-wins-over-checkout
   - opencode-checkout-answers-when-nothing-recorded
   - pi-checkout-answers-because-pi-records-no-branch
+  - codex-recorded-branch-is-stored
+  - codex-never-asks-the-checkout
+  - strike-recorded-branch-is-stored
+  - strike-never-asks-the-checkout
 cases:
   - name: claude-recorded-branch-wins-over-checkout
     harness: claude-code
+    declared: recording-or-checkout
     recordedBranch: feature/recorded
     checkout: main
     wantBranch: feature/recorded
     wantCheckoutCalls: 0
   - name: claude-checkout-answers-when-nothing-recorded
     harness: claude-code
+    declared: recording-or-checkout
     checkout: main
     wantBranch: main
     wantCheckoutCalls: 1
   - name: cursor-recorded-branch-wins-over-checkout
     harness: cursor
+    declared: recording-or-checkout
     recordedBranch: feature/recorded
     checkout: main
     wantBranch: feature/recorded
     wantCheckoutCalls: 0
   - name: cursor-checkout-answers-when-nothing-recorded
     harness: cursor
+    declared: recording-or-checkout
     checkout: main
     wantBranch: main
     wantCheckoutCalls: 1
   - name: opencode-recorded-branch-wins-over-checkout
     harness: opencode
+    declared: recording-or-checkout
     recordedBranch: feature/recorded
     checkout: main
     wantBranch: feature/recorded
     wantCheckoutCalls: 0
   - name: opencode-checkout-answers-when-nothing-recorded
     harness: opencode
+    declared: recording-or-checkout
     checkout: main
     wantBranch: main
     wantCheckoutCalls: 1
   # Pi's recording carries no branch, so the checkout is the only evidence.
   - name: pi-checkout-answers-because-pi-records-no-branch
     harness: pi
+    declared: recording-or-checkout
     checkout: main
     wantBranch: main
     wantCheckoutCalls: 1
+  # Codex keeps the branch its session_meta names and nothing else.
+  - name: codex-recorded-branch-is-stored
+    harness: codex
+    declared: recording-only
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: codex-never-asks-the-checkout
+    harness: codex
+    declared: recording-only
+    checkout: main
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  # Strike keeps the branch its sidecar names and nothing else.
+  - name: strike-recorded-branch-is-stored
+    harness: strike
+    declared: recording-only
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: strike-never-asks-the-checkout
+    harness: strike
+    declared: recording-only
+    checkout: main
+    wantBranch: ""
+    wantCheckoutCalls: 0

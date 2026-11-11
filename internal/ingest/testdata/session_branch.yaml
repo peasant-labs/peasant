@@ -1,7 +1,9 @@
 # The one precedence for which branch a session belongs to, for the tree and
 # for the import filter: the branch it recorded, then the branch the store holds
 # for an unchanged stored session, then the branch checked out in its project
-# directory. wantCheckoutCalls is how many times git was asked.
+# directory. wantCheckoutCalls is how many times git was asked. harnesses names
+# the harnesses a case runs for (claude-code when absent): a harness that takes
+# its branch only from its own recording never has the checkout answer for it.
 # requiredNames is the deletion guard: every name below must still be present.
 requiredNames:
   - recorded-branch-beats-stored-branch
@@ -11,6 +13,10 @@ requiredNames:
   - changed-source-is-not-stored-evidence
   - stored-branch-needs-no-directory
   - nothing-known-is-empty
+  - recording-only-harness-never-asks-the-checkout
+  - recording-only-harness-keeps-its-recorded-branch
+  - recording-only-harness-keeps-the-stored-branch
+  - recording-only-harness-with-a-changed-source-still-has-no-branch
 cases:
   - name: recorded-branch-beats-stored-branch
     directory: /work/tool
@@ -56,5 +62,38 @@ cases:
     wantBranch: main
     wantCheckoutCalls: 0
   - name: nothing-known-is-empty
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  # Codex and Strike take their branch only from their own recording. A session
+  # of theirs that recorded none has none, whatever the clone has checked out.
+  - name: recording-only-harness-never-asks-the-checkout
+    harnesses: [codex, strike]
+    directory: /work/tool
+    checkout: develop
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  - name: recording-only-harness-keeps-its-recorded-branch
+    harnesses: [codex, strike]
+    directory: /work/tool
+    recordedBranch: feature/recorded
+    checkout: develop
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: recording-only-harness-keeps-the-stored-branch
+    harnesses: [codex, strike]
+    directory: /work/tool
+    storedBranch: feature/recorded
+    storedKnown: true
+    checkout: develop
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  # A source that changed since the import is not stored evidence, and for these
+  # harnesses the checkout is not evidence either.
+  - name: recording-only-harness-with-a-changed-source-still-has-no-branch
+    harnesses: [codex, strike]
+    directory: /work/tool
+    storedBranch: feature/recorded
+    storedKnown: false
+    checkout: develop
     wantBranch: ""
     wantCheckoutCalls: 0

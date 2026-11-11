@@ -384,11 +384,11 @@ func ftueDiscoverWith(
 	cfg *config.Config,
 	fs ingest.FileSystem,
 	git ingest.GitResolver,
-	known knownSessionIndex,
+	known discovery.KnownSessionIndex,
 	evidence ingest.ClaudeEvidenceCache,
 	spinner *discoverySpinner,
 ) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
-	return discovery.Scan(ctx, cfg, fs, git, knownLookup{index: known}, evidence, spinner)
+	return discovery.Scan(ctx, cfg, fs, git, known, evidence, spinner)
 }
 
 // resolveListingOrigin turns discovery's typed origin evidence into the menu

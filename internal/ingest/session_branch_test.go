@@ -21,14 +21,15 @@ func TestResolveSessionBranchPrecedence(t *testing.T) {
 	var fixtures struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
-			Name              string `yaml:"name"`
-			Directory         string `yaml:"directory"`
-			RecordedBranch    string `yaml:"recordedBranch"`
-			StoredBranch      string `yaml:"storedBranch"`
-			StoredKnown       bool   `yaml:"storedKnown"`
-			Checkout          string `yaml:"checkout"`
-			WantBranch        string `yaml:"wantBranch"`
-			WantCheckoutCalls int    `yaml:"wantCheckoutCalls"`
+			Name              string   `yaml:"name"`
+			Harnesses         []string `yaml:"harnesses"`
+			Directory         string   `yaml:"directory"`
+			RecordedBranch    string   `yaml:"recordedBranch"`
+			StoredBranch      string   `yaml:"storedBranch"`
+			StoredKnown       bool     `yaml:"storedKnown"`
+			Checkout          string   `yaml:"checkout"`
+			WantBranch        string   `yaml:"wantBranch"`
+			WantCheckoutCalls int      `yaml:"wantCheckoutCalls"`
 		} `yaml:"cases"`
 	}
 	if err := testutil.DecodeFixtureYAML(sessionBranchData, &fixtures); err != nil {
@@ -42,22 +43,59 @@ func TestResolveSessionBranchPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range fixtures.Cases {
-		t.Run(c.Name, func(t *testing.T) {
-			t.Parallel()
-			git := &checkoutCountingGit{StubGitResolver: &testutil.StubGitResolver{BranchName: c.Checkout}}
-			got := ingest.ResolveSessionBranch(t.Context(), git, ingest.SessionBranchEvidence{
-				Recorded:     c.RecordedBranch,
-				StoredBranch: c.StoredBranch,
-				StoredKnown:  c.StoredKnown,
-				Directory:    c.Directory,
+		harnesses := c.Harnesses
+		if len(harnesses) == 0 {
+			harnesses = []string{ingest.HarnessClaudeCode.String()}
+		}
+		for _, harness := range harnesses {
+			t.Run(c.Name+"/"+harness, func(t *testing.T) {
+				t.Parallel()
+				git := &checkoutCountingGit{StubGitResolver: &testutil.StubGitResolver{BranchName: c.Checkout}}
+				got := ingest.ResolveSessionBranch(t.Context(), git, ingest.SessionBranchEvidence{
+					Harness:      ingest.Harness(harness),
+					Recorded:     c.RecordedBranch,
+					StoredBranch: c.StoredBranch,
+					StoredKnown:  c.StoredKnown,
+					Directory:    c.Directory,
+				})
+				if got != c.WantBranch {
+					t.Fatalf("branch = %q, want %q", got, c.WantBranch)
+				}
+				if git.calls != c.WantCheckoutCalls {
+					t.Fatalf("checked-out branch asked %d times, want %d", git.calls, c.WantCheckoutCalls)
+				}
 			})
-			if got != c.WantBranch {
-				t.Fatalf("branch = %q, want %q", got, c.WantBranch)
-			}
-			if git.calls != c.WantCheckoutCalls {
-				t.Fatalf("checked-out branch asked %d times, want %d", git.calls, c.WantCheckoutCalls)
-			}
-		})
+		}
+	}
+}
+
+// TestHarnessBranchSourcesCoverTheAdapterRegistry holds the declaration to the
+// registry it hangs off: every registered harness declares where its branch
+// comes from, nothing else does, and the declarations are members of the closed
+// set. A harness added without a declaration fails here instead of silently
+// getting the general rule.
+func TestHarnessBranchSourcesCoverTheAdapterRegistry(t *testing.T) {
+	t.Parallel()
+	for harness := range ingest.DefaultAdapterRegistry {
+		source, declared := ingest.HarnessBranchSources[harness]
+		if !declared {
+			t.Errorf("registered harness %q declares no branch source; add it to ingest.HarnessBranchSources", harness)
+			continue
+		}
+		if !source.IsValid() {
+			t.Errorf("harness %q declares the invalid branch source %d", harness, source)
+		}
+		if parsed, err := ingest.NewBranchSource(source.String()); err != nil || parsed != source {
+			t.Errorf("harness %q branch source %q does not round-trip: got %v, error %v", harness, source, parsed, err)
+		}
+	}
+	for harness := range ingest.HarnessBranchSources {
+		if _, registered := ingest.DefaultAdapterRegistry[harness]; !registered {
+			t.Errorf("branch source declared for %q, which has no registered adapter", harness)
+		}
+	}
+	if _, err := ingest.NewBranchSource("guess"); err == nil {
+		t.Error("an unknown branch source was accepted")
 	}
 }
 

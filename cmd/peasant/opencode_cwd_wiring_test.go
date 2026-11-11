@@ -15,6 +15,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/selectionfilter"
@@ -223,7 +224,7 @@ func TestKickstartReuseFallsBackToRecordedOpenCodeDirectories(t *testing.T) {
 	writeMountedOpenCodeSession(t, root, "recorded-canonical", canonicalSession, "", "recorded canonical cwd")
 
 	ingestedMs := time.Now().Add(time.Hour).UnixMilli()
-	known := knownSessionIndex{
+	known := discovery.StoreKnownSessions{
 		worktreeSession: {
 			GitRemote:     mountedOpenCodeRemote,
 			Branch:        "main",
