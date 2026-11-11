@@ -20,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
@@ -1548,16 +1549,6 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		Write:              cfg.Write,
 		Progress:           progState,
 	}
-	// A full import applies the saved selection. An explicit session re-index
-	// keeps the allowlist scope of `peasant harvest --session` and does not.
-	var selectionConflicts *selectionfilter.ConflictRecorder
-	if scope == nil && cfg.Selection.Mode == config.SelectionModeSelected {
-		filter, recorder := selectionfilter.New(cfg, git, ingest.NewPhysicalPathResolver())
-		pipelineCfg.PrepareSessionFilter = filter.Prepare
-		pipelineCfg.SessionFilter = filter.Match
-		pipelineCfg.SessionExclusionFilter = filter.Excludes
-		selectionConflicts = recorder
-	}
 	if scope != nil {
 		// The same scope as `peasant harvest --session <id> --force`: related
 		// sessions are included by default, the harness narrows the source, and
@@ -1589,6 +1580,25 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	db, err := store.Open(string(h.dbPath()), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open analytics store: %w", err)
+	}
+
+	// A full import applies the saved selection. An explicit session re-index
+	// keeps the allowlist scope of `peasant harvest --session` and does not. The
+	// filter reads the index the setup tree's scan reads, so a session that is
+	// already stored is judged by the branch the tree lists it under.
+	var selectionConflicts *selectionfilter.ConflictRecorder
+	if scope == nil && cfg.Selection.Mode == config.SelectionModeSelected {
+		stored, readErr := db.AllIngestedSessions(context.Background())
+		if readErr != nil {
+			_ = db.Close()
+			return nil, nil, nil, fmt.Errorf("read the sessions the local store already holds: %w; the import did not start and nothing was changed; fix the store error above and retry", readErr)
+		}
+		filter, recorder := selectionfilter.New(cfg, git, ingest.NewPhysicalPathResolver(),
+			selectionfilter.WithKnownSessions(discovery.NewStoreKnownSessions(stored), staleness))
+		pipelineCfg.PrepareSessionFilter = filter.Prepare
+		pipelineCfg.SessionFilter = filter.Match
+		pipelineCfg.SessionExclusionFilter = filter.Excludes
+		selectionConflicts = recorder
 	}
 
 	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg,

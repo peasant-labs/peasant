@@ -1171,17 +1171,14 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 				remoteErr = nil
 			}
 		}
-		branchStr, branchErr := a.git.Branch(ctx, cwd)
 		worktreeStr, worktreeErr := a.git.Worktree(ctx, cwd)
 
 		// Build GitContext — all fields are nullable.
 		gitInfo := GitContext{}
 
-		// Prefer gitBranch from JSONL over resolved branch.
-		branch := firstLine.GitBranch
-		if branch == "" && branchErr == nil && branchStr != "" {
-			branch = branchStr
-		}
+		// The recorded gitBranch wins; the checkout answers only when the
+		// transcript recorded none.
+		branch := ResolveGitBranch(ctx, a.git, cwd, firstLine.GitBranch)
 		if branch != "" {
 			b := branch
 			gitInfo.Branch = &b

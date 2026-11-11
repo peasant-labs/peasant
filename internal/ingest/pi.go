@@ -336,7 +336,7 @@ func (a *PiAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSessi
 		return nil, err
 	}
 	remote, _ := a.git.RemoteURL(ctx, doc.header.CWD)
-	branch, _ := a.git.Branch(ctx, doc.header.CWD)
+	branch := ResolveGitBranch(ctx, a.git, doc.header.CWD, session.Branch)
 	worktree, _ := a.git.Worktree(ctx, doc.header.CWD)
 	if worktree == "" {
 		worktree = doc.header.CWD

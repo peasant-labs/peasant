@@ -1,0 +1,60 @@
+# The one precedence for which branch a session belongs to, for the tree and
+# for the import filter: the branch it recorded, then the branch the store holds
+# for an unchanged stored session, then the branch checked out in its project
+# directory. wantCheckoutCalls is how many times git was asked.
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - recorded-branch-beats-stored-branch
+  - stored-branch-beats-checkout
+  - stored-session-with-no-branch-is-not-asked-again
+  - unstored-session-uses-checkout
+  - changed-source-is-not-stored-evidence
+  - stored-branch-needs-no-directory
+  - nothing-known-is-empty
+cases:
+  - name: recorded-branch-beats-stored-branch
+    directory: /work/tool
+    recordedBranch: feature/recorded
+    storedBranch: main
+    storedKnown: true
+    checkout: develop
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: stored-branch-beats-checkout
+    directory: /work/tool
+    storedBranch: main
+    storedKnown: true
+    checkout: develop
+    wantBranch: main
+    wantCheckoutCalls: 0
+  # The earlier import already looked at git and found no branch; a scan does not
+  # walk git again for every such session.
+  - name: stored-session-with-no-branch-is-not-asked-again
+    directory: /work/tool
+    storedKnown: true
+    checkout: develop
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  - name: unstored-session-uses-checkout
+    directory: /work/tool
+    checkout: develop
+    wantBranch: develop
+    wantCheckoutCalls: 1
+  # A session whose source changed since its import is not stored evidence: the
+  # index reports it as not reusable, and the branch may have moved with it.
+  - name: changed-source-is-not-stored-evidence
+    directory: /work/tool
+    storedBranch: main
+    storedKnown: false
+    checkout: develop
+    wantBranch: develop
+    wantCheckoutCalls: 1
+  - name: stored-branch-needs-no-directory
+    storedBranch: main
+    storedKnown: true
+    checkout: develop
+    wantBranch: main
+    wantCheckoutCalls: 0
+  - name: nothing-known-is-empty
+    wantBranch: ""
+    wantCheckoutCalls: 0

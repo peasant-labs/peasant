@@ -1483,14 +1483,8 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 
 	var gitBranch, gitRemote, gitWorktree *string
 
-	branch, err := a.git.Branch(ctx, workDir)
-	if session.Branch != "" {
-		branch = session.Branch
-		err = nil
-	}
-	if err == nil && branch != "" {
-		b := branch
-		gitBranch = &b
+	if branch := ResolveGitBranch(ctx, a.git, workDir, session.Branch); branch != "" {
+		gitBranch = &branch
 	}
 
 	remote, tracking := ResolveGitRemote(ctx, a.git, workDir, session.Branch, "")

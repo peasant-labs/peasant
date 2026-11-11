@@ -391,20 +391,6 @@ func ftueDiscoverWith(
 	return discovery.Scan(ctx, cfg, fs, git, knownLookup{index: known}, evidence, spinner)
 }
 
-// resolveSessionGit walks git for one discovered session's remote and branch.
-// This is the multi-second part of a scan: one process per lookup, per session.
-// claudeProjectDir is the decoded Claude project directory when there is one,
-// and branchName is the branch the session data already carries.
-func resolveSessionGit(
-	ctx context.Context,
-	git ingest.GitResolver,
-	d ingest.DiscoveredSession,
-	claudeProjectDir string,
-	branchName string,
-) (string, string) {
-	return discovery.ResolveSessionGit(ctx, git, d, claudeProjectDir, branchName)
-}
-
 // resolveListingOrigin turns discovery's typed origin evidence into the menu
 // value the kickstart listing carries, re-validated through
 // sessionorigin.Parse at this boundary rather than forwarded as a bare
