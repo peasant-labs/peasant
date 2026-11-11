@@ -120,6 +120,12 @@ type Server struct {
 	// saved through the settings routes since the server started.
 	live *liveConfig
 
+	// kickstart holds the live setup sessions, one per scope. Listen creates it.
+	kickstart *kickstartSessions
+	// kickstartTune lets a test replace members of the session environment
+	// before the sessions are created. Production leaves it nil.
+	kickstartTune func(*kickstartEnv)
+
 	// bg tracks background tasks spawned by request handlers (WebSocket
 	// broadcasts after a mutation). Shutdown drains it so no task can touch
 	// the store after the owner closes it.
@@ -304,6 +310,17 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteSettings.String(), settingsRoutes.handleGetSettings)
 	mux.HandleFunc("PATCH "+defaults.RouteSettings.String(), settingsRoutes.handleUpdateSetting)
 
+	// Kickstart routes: the local setup sessions and their live topic.
+	sessionEnv := s.kickstartEnv(ctx)
+	if s.kickstartTune != nil {
+		s.kickstartTune(&sessionEnv)
+	}
+	s.kickstart = newKickstartSessions(sessionEnv)
+	if s.hub != nil {
+		s.hub.attachKickstart(s.kickstart)
+	}
+	registerKickstartRoutes(mux, &kickstartHandler{sessions: s.kickstart, configPath: s.cfg.ConfigPath})
+
 	// Static assets or dev proxy
 	if s.cfg.DevMode && s.cfg.DevProxyAddr != "" {
 		proxyURL, err := url.Parse("http://" + s.cfg.DevProxyAddr)
@@ -387,6 +404,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	var err error
 	if s.server != nil {
 		err = s.server.Shutdown(ctx)
+	}
+	if s.kickstart != nil {
+		s.kickstart.shutdown()
 	}
 	s.bg.Wait()
 	return err
