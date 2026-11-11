@@ -8,7 +8,9 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// viewLocked projects a session onto the wire. The setup model decides the
+// viewLocked projects a session onto the wire. The session must not change
+// while the view is built: the caller holds the store lock, or passes a frozen
+// copy and holds nothing. The setup model decides the
 // stops, their order, visibility, fields, option menus, copy, and values; this
 // function copies those decisions and adds none. The forest is not in the view:
 // the page loads it from the tree route.

@@ -478,15 +478,22 @@ func (st *kickstartSessions) createLocked(ctx context.Context, scope onboarding.
 	return sess, nil
 }
 
-// get returns the reconnect snapshot of a session.
+// get returns the reconnect snapshot of a session. The view reads the
+// configuration file and runs the redactor, so it is built from a frozen copy
+// after the store lock is released: a tab that reconnects never holds up a scan
+// tick or an answer from another tab.
 func (st *kickstartSessions) get(id string) (schema.LocalKickstartSession, error) {
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	sess, err := st.liveLocked(id)
+	var frozen *kickstartSession
+	if err == nil {
+		frozen = sess.frozen()
+	}
+	st.mu.Unlock()
 	if err != nil {
 		return schema.LocalKickstartSession{}, err
 	}
-	return st.viewLocked(sess)
+	return st.viewLocked(frozen)
 }
 
 // activeFullSessionID is the id of the live full-scope session, or empty.
@@ -631,6 +638,18 @@ func (s *kickstartSession) snapshot() kickstartMutableState {
 		forest: s.forest, residual: s.residual, prepared: s.preparedSelection,
 		listings: s.listings, claude: s.claudeSessions, scan: scan, tree: s.tree, working: s.working,
 	}
+}
+
+// frozen returns a copy of the session that a view can be built from after the
+// store lock is released. What a view reads and a later change could edit in
+// place is copied; the rest is replaced whole by a change, never edited, so the
+// copy and the session share it.
+func (s *kickstartSession) frozen() *kickstartSession {
+	state := s.snapshot()
+	copied := *s
+	copied.fieldClock, copied.answers, copied.resolutions = state.fieldClock, state.answers, state.resolutions
+	copied.conflicts, copied.scan = state.conflicts, state.scan
+	return &copied
 }
 
 func (s *kickstartSession) restore(state kickstartMutableState) {

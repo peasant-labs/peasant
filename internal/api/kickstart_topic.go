@@ -31,8 +31,7 @@ import (
 // every live session.
 func (st *kickstartSessions) snapshotEvents(sessionID string) []schema.LocalKickstartEvent {
 	st.mu.Lock()
-	defer st.mu.Unlock()
-	var events []schema.LocalKickstartEvent
+	var frozen []*kickstartSession
 	for _, scope := range onboarding.AllModelScopes {
 		sess, ok := st.byScope[scope]
 		if !ok || sess.closed {
@@ -41,6 +40,14 @@ func (st *kickstartSessions) snapshotEvents(sessionID string) []schema.LocalKick
 		if sessionID != "" && sess.id != sessionID {
 			continue
 		}
+		frozen = append(frozen, sess.frozen())
+	}
+	st.mu.Unlock()
+
+	// The views read the configuration file and run the redactor, so they are
+	// built after the store lock is released.
+	var events []schema.LocalKickstartEvent
+	for _, sess := range frozen {
 		view, err := st.viewLocked(sess)
 		if err != nil {
 			slog.Error("kickstart: a session snapshot could not be built for a subscription", "session", sess.id, "error", err)

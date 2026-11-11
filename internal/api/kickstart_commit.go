@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -312,7 +311,7 @@ func (st *kickstartSessions) reviewLocked(sess *kickstartSession, facts kickstar
 		return onboarding.ReviewResult{}, false
 	}
 	answers := sess.configAnswers()
-	review, err := draft.Review(context.Background(), onboarding.ReviewInput{
+	review, err := draft.Review(st.env.ctx, onboarding.ReviewInput{
 		Model:       sess.model,
 		Answers:     answers,
 		Resolutions: sess.resolutions,
