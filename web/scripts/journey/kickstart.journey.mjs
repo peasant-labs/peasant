@@ -476,7 +476,7 @@ test('save-finish-and-ingest-end', async () => {
   // The import reports its end: idle with counts, never a stream of ticks.
   ingestCounts = await finishCounts(pageA);
   // Every chosen session is new to a fresh store, and nothing is updated. A panel
-  // that reports 0 new after the sessions were stored is a finding, not a count.
+  // that reports 0 new after the sessions were stored is wrong, not a count.
   expect(ingestCounts, 'the import brought in exactly the chosen sessions').toEqual({ new: fixture.chosen.imported, updated: 0 });
   const ingests = frames.filter((frame) => frame.tab === 'A' && frame.kind === 'ingest');
   expect(ingests.filter((frame) => frame.ingest.state === 'idle'), 'one end event').toHaveLength(1);
