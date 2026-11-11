@@ -129,50 +129,82 @@ func SanitizeSelectionPlaceholders(forest Forest, sel config.SelectionConfig) (c
 	return sanitizePlaceholderSelection(sel, availableProjects(selectionTree(forest)))
 }
 
+// DroppedLabelsMax is how many vanished choices a rescan names. The count
+// carries the rest.
+const DroppedLabelsMax = 3
+
 // DroppedSelections is what a rescan removed from an answered id set.
-// Labels holds at most three names. Count is the full number removed.
+// Labels holds at most DroppedLabelsMax names. Count is the full number removed.
 type DroppedSelections struct {
 	Count  int
 	Labels []string
 }
 
-// RescanIDs keeps answered ids that still exist in the forest and drops the
-// rest. It never adds an id. Vanished ids are reported by count and at most
-// three labels; a vanished id is its own label because the new forest no
-// longer has the row.
-func RescanIDs(ids []string, forest Forest) ([]string, DroppedSelections) {
-	present := map[string]string{}
-	for _, node := range forest.Nodes {
-		if node.ID == "" {
-			continue
-		}
-		label := node.Label
-		if label == "" {
-			label = node.ID
-		}
-		present[node.ID] = label
-		if node.SessionID != "" {
-			present[node.SessionID] = label
-		}
-	}
+// RescanIDs keeps the answered ids that still exist in the forest the rescan
+// found (current) and drops the rest. It never adds an id. Vanished ids are
+// reported by count and at most DroppedLabelsMax labels. A vanished row is
+// gone from current, so its label is read from the forest the answer was given
+// over (previous); an id that forest does not hold either is its own label.
+func RescanIDs(ids []string, previous, current Forest) ([]string, DroppedSelections) {
+	present := forestRowIDs(current)
 	kept := make([]string, 0, len(ids))
 	seen := map[string]bool{}
 	var dropped DroppedSelections
+	var labels map[string]string
 	for _, id := range ids {
 		if id == "" || seen[id] {
 			continue
 		}
 		seen[id] = true
-		if _, ok := present[id]; ok {
+		if present[id] {
 			kept = append(kept, id)
 			continue
 		}
 		dropped.Count++
-		if len(dropped.Labels) < 3 {
-			dropped.Labels = append(dropped.Labels, id)
+		if len(dropped.Labels) >= DroppedLabelsMax {
+			continue
 		}
+		if labels == nil {
+			labels = forestRowLabels(previous)
+		}
+		label := labels[id]
+		if label == "" {
+			label = id
+		}
+		dropped.Labels = append(dropped.Labels, label)
 	}
 	return kept, dropped
+}
+
+// forestRowIDs is every id a forest answers to: a row's id and, for a session
+// row, its session id.
+func forestRowIDs(forest Forest) map[string]bool {
+	ids := make(map[string]bool, len(forest.Nodes))
+	for _, node := range forest.Nodes {
+		if node.ID == "" {
+			continue
+		}
+		ids[node.ID] = true
+		if node.SessionID != "" {
+			ids[node.SessionID] = true
+		}
+	}
+	return ids
+}
+
+// forestRowLabels maps every id a forest answers to onto the row's label.
+func forestRowLabels(forest Forest) map[string]string {
+	labels := make(map[string]string, len(forest.Nodes))
+	for _, node := range forest.Nodes {
+		if node.ID == "" || node.Label == "" {
+			continue
+		}
+		labels[node.ID] = node.Label
+		if node.SessionID != "" {
+			labels[node.SessionID] = node.Label
+		}
+	}
+	return labels
 }
 
 // Rollup recomputes parent tri-states from their children. A locked child

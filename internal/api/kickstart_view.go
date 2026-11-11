@@ -156,7 +156,7 @@ func (s *kickstartSession) fieldView(stop onboarding.Stop, field onboarding.Fiel
 // page passes that array to the picker as it is.
 func (s *kickstartSession) fieldValue(field onboarding.Field, w onboarding.WriteContext) (schema.LocalSettingValue, error) {
 	if field.Kind() == onboarding.FieldKindTree {
-		return kickstartTreeWireValue(s.tree.SessionIDs)
+		return onboarding.SelectionIDsListValue(s.tree.SessionIDs)
 	}
 	if answer, ok := s.answers[field.Key()]; ok {
 		return append(schema.LocalSettingValue(nil), answer...), nil

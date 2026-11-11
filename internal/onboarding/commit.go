@@ -3,7 +3,6 @@ package onboarding
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -35,7 +34,7 @@ type Resolutions map[FieldKey]Resolution
 
 // applies reports whether the choice still stands against the file's value now.
 func (r Resolution) applies(theirs schema.LocalSettingValue) bool {
-	return r.Choice.IsValid() && (len(r.Seen) == 0 || sameSettingValue(r.Seen, theirs))
+	return r.Choice.IsValid() && (len(r.Seen) == 0 || SameSettingValue(r.Seen, theirs))
 }
 
 // RetentionWriter writes Claude Code's cleanupPeriodDays. The Claude settings
@@ -582,7 +581,7 @@ func (d *Draft) conflictRows(model Model, base *config.Config, answers Answers, 
 		if err != nil {
 			return nil, err
 		}
-		if sameSettingValue(theirs, baseline) || sameSettingValue(theirs, mine[key]) {
+		if SameSettingValue(theirs, baseline) || SameSettingValue(theirs, mine[key]) {
 			continue
 		}
 		stop, label := fieldPlace(model, field)
@@ -674,13 +673,4 @@ func documentIndent(data []byte) int {
 		}
 	}
 	return 4
-}
-
-// sameSettingValue compares two setting values as JSON, ignoring whitespace.
-func sameSettingValue(a, b schema.LocalSettingValue) bool {
-	var left, right bytes.Buffer
-	if json.Compact(&left, a) != nil || json.Compact(&right, b) != nil {
-		return bytes.Equal(a, b)
-	}
-	return bytes.Equal(left.Bytes(), right.Bytes())
 }

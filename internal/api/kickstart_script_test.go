@@ -974,7 +974,7 @@ func (w *kickstartWorld) commit(index int, step kickstartCommitStep) {
 			for field, want := range step.Seen {
 				got := draft.Resolutions[onboarding.FieldKey(field)].Seen
 				wantJSON, _ := json.Marshal(want)
-				if !equalSettingValue(got, wantJSON) {
+				if !onboarding.SameSettingValue(got, wantJSON) {
 					w.fail(index, "the draft's resolution for %s saw %s, want %s", field, got, wantJSON)
 				}
 			}

@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -11,6 +12,16 @@ import (
 
 // Answers is the ordered-apply input. Keys absent from the map are untouched.
 type Answers map[FieldKey]schema.LocalSettingValue
+
+// SameSettingValue compares two setting values as JSON, ignoring whitespace.
+// Values that are not valid JSON are compared byte for byte.
+func SameSettingValue(a, b schema.LocalSettingValue) bool {
+	var left, right bytes.Buffer
+	if json.Compact(&left, a) != nil || json.Compact(&right, b) != nil {
+		return bytes.Equal(a, b)
+	}
+	return bytes.Equal(left.Bytes(), right.Bytes())
+}
 
 // StringValue encodes a wire token as a JSON string.
 func StringValue(token string) schema.LocalSettingValue {

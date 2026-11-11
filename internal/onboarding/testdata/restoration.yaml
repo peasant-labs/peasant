@@ -430,8 +430,22 @@ cases:
 
   - name: rescan-keeps-ids-only
     check: rescan
+    # The answer was given over previousListings. The rescan found listings: four
+    # of the answered sessions are gone, and one answered id was never a row.
+    # The labels of the vanished rows come from the machine the answer was given
+    # over, at most three, and an id no row held is its own label.
+    previousListings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, title: kept one, sessionId: kept-session}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, title: first vanished, sessionId: vanished-a}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, title: second vanished, sessionId: vanished-b}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, title: third vanished, sessionId: vanished-c}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, title: fourth vanished, sessionId: vanished-d}
+    answered: [kept-session, vanished-a, never-a-row, vanished-b, vanished-c, vanished-d]
+    expectKept: [kept-session]
+    expectDroppedCount: 5
+    expectDroppedLabels: [first vanished, never-a-row, second vanished]
     listings:
-      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: kept-session}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, title: kept one, sessionId: kept-session}
     saved:
       mode: selected
       autoIngestNewBranches: false

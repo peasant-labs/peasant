@@ -1,11 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -557,7 +555,7 @@ func (s *kickstartSession) writeContext(cfg *config.Config, answers onboarding.A
 // answer, the answers that a later answer hid, and the working copy. A hidden
 // answer is dropped and its clock moves to the current revision.
 func (st *kickstartSessions) rebuildLocked(sess *kickstartSession) error {
-	if ids, answered := kickstartTreeIDs(sess.answers); answered {
+	if ids, answered := onboarding.SelectionIDs(sess.answers[onboarding.FieldSelection]); answered {
 		sess.tree = onboarding.ApplyTreeAnswer(sess.forest, ids)
 	} else {
 		sess.tree = onboarding.TreeAnswer{Forest: sess.forest, SessionIDs: onboarding.SelectedSessionIDs(sess.forest)}
@@ -588,57 +586,6 @@ func (st *kickstartSessions) rebuildLocked(sess *kickstartSession) error {
 	}
 	sess.working = working
 	return nil
-}
-
-// kickstartTreeIDs decodes the session ids of a tree answer. The second result
-// is false when the tree is unanswered.
-func kickstartTreeIDs(answers onboarding.Answers) ([]string, bool) {
-	value, ok := answers[onboarding.FieldSelection]
-	if !ok {
-		return nil, false
-	}
-	var answer struct {
-		IDs []string `json:"ids"`
-	}
-	if err := json.Unmarshal(value, &answer); err != nil || answer.IDs == nil {
-		return []string{}, true
-	}
-	return answer.IDs, true
-}
-
-// kickstartTreeAnswer encodes a tree answer. The ids key is always present: the
-// neutral selection field reads an absent key as a mapping answer, not an empty
-// list.
-func kickstartTreeAnswer(ids []string) (schema.LocalSettingValue, error) {
-	if ids == nil {
-		ids = []string{}
-	}
-	data, err := json.Marshal(map[string][]string{"ids": ids})
-	if err != nil {
-		return nil, fmt.Errorf("encode the tree answer: %w", err)
-	}
-	return schema.LocalSettingValue(data), nil
-}
-
-// kickstartTreeWireValue is the tree field's value on the wire: the selected
-// session ids as a JSON array, never null and never an object.
-func kickstartTreeWireValue(ids []string) (schema.LocalSettingValue, error) {
-	if ids == nil {
-		ids = []string{}
-	}
-	data, err := json.Marshal(ids)
-	if err != nil {
-		return nil, fmt.Errorf("encode the tree value: %w", err)
-	}
-	return schema.LocalSettingValue(data), nil
-}
-
-func equalSettingValue(a, b schema.LocalSettingValue) bool {
-	var left, right bytes.Buffer
-	if json.Compact(&left, a) != nil || json.Compact(&right, b) != nil {
-		return bytes.Equal(a, b)
-	}
-	return bytes.Equal(left.Bytes(), right.Bytes())
 }
 
 // kickstartMutableState is what an answer can change, kept so a refused change
@@ -824,7 +771,7 @@ func (st *kickstartSessions) planLocked(sess *kickstartSession, request schema.L
 				"The selected sessions were not applied because the discovery scan has not finished (it is %s) in internal/api.kickstartSessions.patch. Nothing was changed. Answer the tree after the scan reports done, or rescan.", sess.scan.state)
 		}
 		answer := onboarding.ApplyTreeAnswer(sess.forest, request.SelectedIDs)
-		value, err := kickstartTreeAnswer(answer.SessionIDs)
+		value, err := onboarding.SelectionIDsValue(answer.SessionIDs)
 		if err != nil {
 			return plan, newKickstartError(http.StatusInternalServerError, "kickstart_answer_unencodable", "%v in internal/api.kickstartSessions.patch. Nothing was changed. Report this defect.", err)
 		}
@@ -933,7 +880,7 @@ func (st *kickstartSessions) connectPlanLocked(sess *kickstartSession, answer sc
 func (st *kickstartSessions) changedKeysLocked(sess *kickstartSession, plan kickstartPlan) []string {
 	changed := map[string]struct{}{}
 	for key, value := range plan.answers {
-		if current, ok := sess.answers[key]; ok && equalSettingValue(current, value) {
+		if current, ok := sess.answers[key]; ok && onboarding.SameSettingValue(current, value) {
 			continue
 		}
 		changed[key.String()] = struct{}{}
@@ -982,8 +929,8 @@ func (st *kickstartSessions) overwrittenLocked(sess *kickstartSession, changed [
 			previous = onboarding.StringValue(connectToken(sess.connect))
 		case onboarding.FieldKey(key) == onboarding.FieldSelection:
 			// The tree is shown as its array of ids, so that is what it replaced.
-			if ids, answered := kickstartTreeIDs(sess.answers); answered {
-				if value, err := kickstartTreeWireValue(ids); err == nil {
+			if ids, answered := onboarding.SelectionIDs(sess.answers[onboarding.FieldSelection]); answered {
+				if value, err := onboarding.SelectionIDsListValue(ids); err == nil {
 					previous = value
 				}
 			}
