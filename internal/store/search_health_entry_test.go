@@ -5,8 +5,11 @@ import (
 	_ "embed"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,6 +27,31 @@ type searchHealthEntryCase struct {
 	NeedsRebuild      bool   `yaml:"needsRebuild"`
 	CancelAtPreflight bool   `yaml:"cancelAtPreflight"`
 	Rebuilt           bool   `yaml:"rebuilt"`
+}
+
+// assertHealthEntryTriggersUnion proves a refused or cancelled migrate left
+// the search schema untouched: the union index stands and the session_entries
+// triggers still point at it. V76 retired the legacy index at open, so the
+// retired-index presence the old assertion pinned no longer exists to check.
+func assertHealthEntryTriggersUnion(t *testing.T, s *Store) {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	for _, trigger := range []string{"session_entries_ai", "session_entries_ad", "session_entries_au"} {
+		var sql string
+		if err := sqlitex.ExecuteTransient(conn, `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?`, &sqlitex.ExecOptions{
+			Args:       []any{trigger},
+			ResultFunc: func(stmt *sqlite.Stmt) error { sql = stmt.ColumnText(0); return nil },
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "session_search_fts") {
+			t.Fatalf("trigger %s points away from the union index after a refused migrate: %q", trigger, sql)
+		}
+	}
 }
 
 func TestSearchHealthEntry(t *testing.T) {
@@ -86,9 +114,10 @@ func TestSearchHealthEntry(t *testing.T) {
 				if c.CancelAtPreflight && !errors.Is(err, context.Canceled) {
 					t.Fatalf("cancel = %v", err)
 				}
-				if queryMigrateInt(t, s, `SELECT count(*) FROM sqlite_master WHERE name='session_entries_fts'`) != 1 {
-					t.Fatal("migration wrote consolidation before refusal/cancellation")
+				if queryMigrateInt(t, s, `SELECT count(*) FROM sqlite_master WHERE name='session_search_fts'`) != 1 {
+					t.Fatal("migration dropped the consolidated index before refusal/cancellation")
 				}
+				assertHealthEntryTriggersUnion(t, s)
 			case "reclaim":
 				_, err = s.ReclaimSupersededGenerations(ctx, 0)
 			case "verify":

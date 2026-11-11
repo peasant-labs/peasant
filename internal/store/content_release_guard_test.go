@@ -145,6 +145,11 @@ func runReleaseGuardCase(t *testing.T, c contentReleaseGuardCase) {
 	t.Helper()
 	ctx := context.Background()
 	s, root := openGenerationStore(t)
+	// V76 drops the retired index at open, so rebuild the pre-consolidation
+	// dual-index state the guard fixtures model: consolidation, the
+	// fts-absent precondition, and the dual-index probe keep their exact
+	// pre-V76 meaning.
+	seedLegacySearchIndex(t, s)
 	sid := migrateCaseSessionID(t, c.Name, 0)
 	seedGenerationSession(t, s, string(sid))
 	switch c.Seed {
@@ -388,6 +393,9 @@ func TestEvaluateRetirementPreconditionsOnConn(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s, _ := openGenerationStore(t)
+	// V76 drops the retired index at open, so rebuild the pre-consolidation
+	// dual-index state this evaluation pins.
+	seedLegacySearchIndex(t, s)
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		t.Fatal(err)
