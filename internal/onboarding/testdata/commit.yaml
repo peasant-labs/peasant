@@ -35,6 +35,9 @@ requiredNames:
   - no-hooks-write
   - no-village-call
   - existing-file-projects-typed-values-and-side-effects
+  - rerun-preserves-blank-lines-and-comment-spacing
+  - changed-line-takes-encoder-output
+  - blank-line-preservation-never-changes-meaning
 cases:
   - name: untouched-field-change-survives-without-a-row
     scenarios:
@@ -272,9 +275,9 @@ cases:
         want:
           saved: true
           cliEquivalent: true
-  # The YAML encoder keeps keys, their order and every comment. It normalises the
-  # spacing before a trailing comment to one space and drops blank lines; the
-  # expectations below state the normalised lines.
+  # The YAML encoder keeps keys, their order and every comment. The save then
+  # gives unchanged lines their original text back, so blank lines and the
+  # spacing before a trailing comment survive too.
   - name: rerun-preserves-keys-comments-and-order
     scenarios:
       - note: only the answered keys change and the rest of the document is kept
@@ -308,9 +311,9 @@ cases:
           keepsLines:
             - "# peasant configuration, edited by hand"
             - "# where transcripts go"
-            - "  basePath: /data/peasant # keep this comment"
+            - "  basePath: /data/peasant   # keep this comment"
             - "  stalenessThresholdSec: 90"
-            - "  url: https://village.example # self-hosted"
+            - "  url: https://village.example   # self-hosted"
             - "  # who may read a push"
             - "  method: all"
           lacksLines:
@@ -330,7 +333,7 @@ cases:
           saved: true
           parsed: {sharePreference: share-later}
           keepsLines:
-            - "  basePath: /data/peasant # keep this comment"
+            - "  basePath: /data/peasant   # keep this comment"
           lacksLines:
             - "daemon:"
             - "sources:"
@@ -442,3 +445,103 @@ cases:
           saved: true
           parsed: {autoIngest: true}
           cliEquivalent: true
+  # The encoder drops blank lines and squeezes the spacing before a trailing
+  # comment. Lines the save did not change are written back as the file had them,
+  # so the saved file differs from the original on the changed lines only.
+  - name: rerun-preserves-blank-lines-and-comment-spacing
+    scenarios:
+      - note: two answered keys change two lines and nothing else
+        opened: *handWritten
+        answers: {content-license: '"CC0-1.0"', default-visibility: '"group"'}
+        villageConnected: true
+        want:
+          saved: true
+          parsed: {license: CC0-1.0, visibility: group}
+          fileEquals: |
+            # peasant configuration, edited by hand
+            version: 1
+
+            # where transcripts go
+            output:
+              basePath: /data/peasant   # keep this comment
+              stalenessThresholdSec: 90
+
+            village:
+              url: https://village.example   # self-hosted
+
+            push:
+              # who may read a push
+              visibility: group
+              license: CC0-1.0
+              method: all
+            selection:
+              mode: all
+              autoIngestNewBranches: true
+      - note: blank lines at the top and trailing spaces survive in a four-space file
+        opened: "\n\nversion: 1\n\npush:\n    visibility: private  \n\n    license: \"\"\n"
+        answers: {content-license: '"CC-BY-4.0"'}
+        want:
+          saved: true
+          parsed: {license: CC-BY-4.0, visibility: private}
+          fileEquals: "\n\nversion: 1\n\npush:\n    visibility: private  \n\n    license: CC-BY-4.0\n"
+  - name: changed-line-takes-encoder-output
+    scenarios:
+      - note: a changed line is the encoder's, its neighbours keep their text, a new key is added
+        opened: |
+          version: 1
+          push:
+            visibility: private    # who sees it
+
+            license: ""   # keep none
+            method: all
+        answers: {content-license: '"CC0-1.0"', publication-preference: '"share-later"'}
+        want:
+          saved: true
+          parsed: {license: CC0-1.0, sharePreference: share-later}
+          fileEquals: |
+            version: 1
+            push:
+              visibility: private    # who sees it
+
+              license: CC0-1.0 # keep none
+              method: all
+              sharePreference: share-later
+  - name: blank-line-preservation-never-changes-meaning
+    scenarios:
+      - note: spaces before a hash inside a quoted value are not a comment gap
+        opened: |
+          version: 1
+
+          output:
+            basePath: "/data/a   #b"   # real comment
+
+          push:
+            license: ""
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: true
+          parsed: {license: CC0-1.0, outputBasePath: "/data/a   #b"}
+          keepsLines:
+            - '  basePath: "/data/a   #b"   # real comment'
+      - note: a block scalar with a blank line inside keeps its content
+        opened: |
+          version: 1
+          notes: |
+            first
+
+            second
+          push:
+            license: ""
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: true
+          parsed: {license: CC0-1.0}
+          keepsText:
+            - "notes: |\n  first\n\n  second\n"
+      - note: a file with carriage returns is not mixed with bare line feeds
+        opened: "version: 1\r\n\r\npush:\r\n  license: \"\"\r\n"
+        answers: {content-license: '"CC0-1.0"'}
+        want:
+          saved: true
+          parsed: {license: CC0-1.0}
+          lacksText: ["\r"]

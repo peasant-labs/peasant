@@ -626,7 +626,8 @@ func fieldPlace(model Model, field Field) (FlowKey, string) {
 // written whole, from the working configuration, as the terminal's first save
 // writes it. A file that exists is edited in place: each answered path, and each
 // path the answers moved, is set in its own document, so the keys the file does
-// not name stay unnamed and its comments and key order survive.
+// not name stay unnamed and its comments, key order, blank lines and comment
+// spacing survive.
 func (d *Draft) document(model Model, snap snapshot, base, working *config.Config, answers Answers) ([]byte, error) {
 	if snap.data == nil {
 		out, err := yaml.Marshal(working)
@@ -656,7 +657,7 @@ func (d *Draft) document(model Model, snap snapshot, base, working *config.Confi
 	if err := encoder.Close(); err != nil {
 		return nil, fmt.Errorf("encode the edited configuration document: %w", err)
 	}
-	return buf.Bytes(), nil
+	return restoreDocumentFormat(snap.data, buf.Bytes()), nil
 }
 
 // documentIndent is the indentation the file already uses, so an edit does not

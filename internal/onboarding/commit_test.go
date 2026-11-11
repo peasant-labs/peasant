@@ -46,6 +46,7 @@ type commitParsedWant struct {
 	AutoPublishIntent   *bool  `yaml:"autoPublishIntent"`
 	AutoPublishIntended *bool  `yaml:"autoPublishIntended"`
 	AutoIngest          *bool  `yaml:"autoIngest"`
+	OutputBasePath      string `yaml:"outputBasePath"`
 }
 
 type commitRetentionWant struct {
@@ -73,6 +74,8 @@ type commitWant struct {
 	KeyOrder           []string             `yaml:"keyOrder"`
 	KeepsLines         []string             `yaml:"keepsLines"`
 	LacksLines         []string             `yaml:"lacksLines"`
+	KeepsText          []string             `yaml:"keepsText"`
+	LacksText          []string             `yaml:"lacksText"`
 	DirEntries         []string             `yaml:"dirEntries"`
 	VillageRequests    *int                 `yaml:"villageRequests"`
 }
@@ -512,6 +515,9 @@ func assertSavedFile(t *testing.T, s commitScenario, want commitWant, written []
 	if p.AutoPublishIntended != nil && parsed.Push.AutoPublishIntended() != *p.AutoPublishIntended {
 		t.Errorf("auto-publish intended = %t, want %t", parsed.Push.AutoPublishIntended(), *p.AutoPublishIntended)
 	}
+	if p.OutputBasePath != "" && parsed.Output.BasePath != p.OutputBasePath {
+		t.Errorf("output.basePath = %q, want %q", parsed.Output.BasePath, p.OutputBasePath)
+	}
 	if p.AutoIngest != nil && parsed.Selection.AutoIngestNewBranches != *p.AutoIngest {
 		t.Errorf("autoIngestNewBranches = %t, want %t", parsed.Selection.AutoIngestNewBranches, *p.AutoIngest)
 	}
@@ -544,6 +550,16 @@ func assertSavedFile(t *testing.T, s commitScenario, want commitWant, written []
 	for _, line := range want.LacksLines {
 		if slices.Contains(lines, line) {
 			t.Errorf("the saved file still holds the line %q:\n%s", line, text)
+		}
+	}
+	for _, part := range want.KeepsText {
+		if !strings.Contains(text, part) {
+			t.Errorf("the saved file lost the text %q:\n%s", part, text)
+		}
+	}
+	for _, part := range want.LacksText {
+		if strings.Contains(text, part) {
+			t.Errorf("the saved file holds the text %q:\n%s", part, text)
 		}
 	}
 }

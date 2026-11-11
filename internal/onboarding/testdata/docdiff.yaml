@@ -21,6 +21,7 @@ requiredNames:
   - over-limit-truncated
   - exact-hunk-headers-and-line-numbers
   - output-is-hunks-never-rendered-text
+  - one-field-rerun-is-a-one-line-hunk
 cases:
   - name: changed-scalar
     before: |
@@ -393,3 +394,59 @@ cases:
             - {type: ctx, oldNo: 2, newNo: 2, text: "  - a"}
             - {type: del, oldNo: 3, text: "  - b"}
             - {type: add, newNo: 3, text: "  - c"}
+  # A rerun that changes one field of a hand-written file: because the save keeps
+  # the file's blank lines and comment spacing, the diff is the one changed line
+  # with its context and no whitespace-only change anywhere else.
+  - name: one-field-rerun-is-a-one-line-hunk
+    before: |
+      # peasant configuration, edited by hand
+      version: 1
+
+      # where transcripts go
+      output:
+        basePath: /data/peasant   # keep this comment
+        stalenessThresholdSec: 90
+
+      village:
+        url: https://village.example   # self-hosted
+
+      push:
+        # who may read a push
+        visibility: private
+        license: ""
+        method: all
+      selection:
+        mode: all
+        autoIngestNewBranches: true
+    after: |
+      # peasant configuration, edited by hand
+      version: 1
+
+      # where transcripts go
+      output:
+        basePath: /data/peasant   # keep this comment
+        stalenessThresholdSec: 90
+
+      village:
+        url: https://village.example   # self-hosted
+
+      push:
+        # who may read a push
+        visibility: private
+        license: CC0-1.0
+        method: all
+      selection:
+        mode: all
+        autoIngestNewBranches: true
+    want:
+      hunks:
+        - header: "-12,7 +12,7"
+          lines:
+            - {type: ctx, oldNo: 12, newNo: 12, text: "push:"}
+            - {type: ctx, oldNo: 13, newNo: 13, text: "  # who may read a push"}
+            - {type: ctx, oldNo: 14, newNo: 14, text: "  visibility: private"}
+            - {type: del, oldNo: 15, text: "  license: \"\""}
+            - {type: add, newNo: 15, text: "  license: CC0-1.0"}
+            - {type: ctx, oldNo: 16, newNo: 16, text: "  method: all"}
+            - {type: ctx, oldNo: 17, newNo: 17, text: "selection:"}
+            - {type: ctx, oldNo: 18, newNo: 18, text: "  mode: all"}
