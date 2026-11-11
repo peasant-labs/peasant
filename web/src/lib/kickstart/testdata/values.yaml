@@ -1,0 +1,39 @@
+# The kickstart closed sets. `wires` is the oracle: the tokens the contract
+# publishes, in the order the page lists them. `schemaAll` names the schema
+# package's own runtime list of the same set, so drift is caught in both
+# directions at run time as well as at compile time. `refuses` are inputs a
+# parser must reject, never relabel.
+requiredNames:
+  - one-definition-site-per-set
+  - all-coverage
+  - boundary-parser-accepts-every-wire
+  - boundary-parser-fails-closed
+  - drift-both-ways-against-schema
+  - no-literal-comparison-in-consumers
+cases:
+  - name: one-definition-site-per-set
+  - name: all-coverage
+  - name: boundary-parser-accepts-every-wire
+  - name: boundary-parser-fails-closed
+  - name: drift-both-ways-against-schema
+  - name: no-literal-comparison-in-consumers
+sets:
+  - {name: scope, all: ALL_KICKSTART_SCOPES, parse: parseKickstartScope, schemaAll: AllLocalKickstartScopes, wires: [full, selection], refuses: ["", FULL, kickstart, 1, null]}
+  - {name: stop-kind, all: ALL_KICKSTART_STOP_KINDS, parse: parseKickstartStopKind, schemaAll: AllLocalKickstartStopKinds, wires: [connection, config, review, ingest], refuses: ["", section, Config, 0, null]}
+  - {name: field-kind, all: ALL_KICKSTART_FIELD_KINDS, parse: parseKickstartFieldKind, schemaAll: AllLocalKickstartFieldKinds, wires: [toggle, choice, action, tree, notice], refuses: ["", radio, TREE, false, null]}
+  - {name: line-kind, all: ALL_KICKSTART_LINE_KINDS, parse: parseKickstartLineKind, schemaAll: AllLocalKickstartLineKinds, wires: [text, label, before, after, spacer], refuses: ["", heading, After, 2, null]}
+  - {name: node-kind, all: ALL_KICKSTART_NODE_KINDS, parse: parseKickstartNodeKind, schemaAll: AllLocalKickstartNodeKinds, wires: [project, group, branch, session], refuses: ["", folder, Project, 4, null]}
+  - {name: node-state, all: ALL_KICKSTART_NODE_STATES, parse: parseKickstartNodeState, schemaAll: AllLocalKickstartNodeStates, wires: [none, some, all], refuses: ["", partial, locked, 1, null]}
+  - {name: scan-state, all: ALL_KICKSTART_SCAN_STATES, parse: parseKickstartScanState, schemaAll: AllLocalKickstartScanStates, wires: [idle, running, done, error], refuses: ["", finished, Done, true, null]}
+  - {name: ingest-state, all: ALL_KICKSTART_INGEST_STATES, parse: parseKickstartIngestState, schemaAll: AllLocalKickstartIngestStates, wires: [idle, running, busy, failed], refuses: ["", done, Busy, 5, null]}
+  - {name: resolution, all: ALL_KICKSTART_RESOLUTIONS, parse: parseKickstartResolution, schemaAll: AllLocalKickstartResolutions, wires: [mine, theirs], refuses: ["", keep-mine, take-theirs, Mine, null]}
+  - {name: connect-answer, all: ALL_KICKSTART_CONNECT_ANSWERS, parse: parseKickstartConnectAnswer, schemaAll: AllLocalKickstartConnectAnswers, wires: [accept, skip], refuses: ["", yes, "no", Accept, null]}
+  - {name: next-step, all: ALL_KICKSTART_NEXT_STEPS, parse: parseKickstartNextStep, schemaAll: AllLocalKickstartNextSteps, wires: [config, web-start, village-login, village-push, auto-publish-settings], refuses: ["", reset, install-hook, Config, null]}
+  - {name: diff-line-type, all: ALL_KICKSTART_DIFF_LINE_TYPES, parse: parseKickstartDiffLineType, schemaAll: AllLocalKickstartDiffLineTypes, wires: [add, del, ctx], refuses: ["", delete, context, Add, null]}
+  - {name: event-kind, all: ALL_KICKSTART_EVENT_KINDS, parse: parseKickstartEventKind, schemaAll: AllLocalKickstartEventKinds, wires: [session, answers, conflicts, scan, ingest, closed], refuses: ["", replaced, took-over, Closed, null]}
+  - {name: close-reason, all: ALL_KICKSTART_CLOSE_REASONS, parse: parseKickstartCloseReason, schemaAll: AllLocalKickstartCloseReasons, wires: [committed, expired], refuses: ["", replaced, Committed, 3, null]}
+consumerScan:
+  # Production code that reads these sets must compare members, never tokens.
+  roots:
+    - src/lib/kickstart
+  definitionSite: src/lib/kickstart/values.ts

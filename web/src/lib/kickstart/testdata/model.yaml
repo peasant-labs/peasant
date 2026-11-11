@@ -1,0 +1,110 @@
+# What the model accepts and refuses at the boundary. `frame` is the data of a
+# kickstart topic message; `{$model: name}` is a served session from
+# src/test/fixtures/kickstart/models.yaml. `accepts` names the event class the
+# visitor reaches; `refuses` is text the actionable error must contain.
+requiredNames:
+  - session-event-is-a-snapshot
+  - answers-event-is-a-snapshot
+  - conflicts-event-is-a-snapshot
+  - scan-event-carries-only-scan
+  - ingest-event-carries-only-ingest
+  - closed-committed-carries-the-finish-body
+  - closed-expired-carries-none
+  - snapshot-without-view-refused
+  - scan-event-with-view-refused
+  - view-of-another-session-refused
+  - view-revision-mismatch-refused
+  - committed-closure-without-finish-body-refused
+  - expired-closure-with-finish-body-refused
+  - unknown-event-kind-refused
+  - unknown-scope-in-view-refused
+  - unknown-node-state-in-view-refused
+  - unknown-close-reason-refused
+cases:
+  - name: session-event-is-a-snapshot
+    frame: {kind: session, sessionId: ses-full, revision: 1, view: {$model: fresh}}
+    accepts: snapshot
+  - name: answers-event-is-a-snapshot
+    frame: {kind: answers, sessionId: ses-full, revision: 2, view: {$model: second-tab-answer}}
+    accepts: snapshot
+  - name: conflicts-event-is-a-snapshot
+    frame: {kind: conflicts, sessionId: ses-full, revision: 3, view: {$model: conflicted}}
+    accepts: snapshot
+  - name: scan-event-carries-only-scan
+    frame: {kind: scan, sessionId: ses-full, revision: 2, scan: {state: running, phase: reading, done: 2, total: 4}}
+    accepts: scan
+  - name: ingest-event-carries-only-ingest
+    frame: {kind: ingest, sessionId: ses-full, revision: 4, ingest: {state: running, new: 3, updated: 1}}
+    accepts: ingest
+  - name: closed-committed-carries-the-finish-body
+    frame:
+      kind: closed
+      sessionId: ses-full
+      revision: 4
+      reason: committed
+      committed:
+        saved: true
+        configPath: /home/ada/.config/peasant/config.yaml
+        ingest: {state: running, new: 0, updated: 0}
+        nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+    accepts: closed
+  - name: closed-expired-carries-none
+    frame: {kind: closed, sessionId: ses-full, revision: 4, reason: expired}
+    accepts: closed
+  - name: snapshot-without-view-refused
+    frame: {kind: session, sessionId: ses-full, revision: 1}
+    refuses: carries no view
+  - name: scan-event-with-view-refused
+    frame: {kind: scan, sessionId: ses-full, revision: 1, view: {$model: fresh}, scan: {state: done, done: 4, total: 4}}
+    refuses: belongs to another kind of event
+  - name: view-of-another-session-refused
+    frame: {kind: session, sessionId: ses-selection, revision: 1, view: {$model: fresh}}
+    refuses: one event carries one session
+  - name: view-revision-mismatch-refused
+    frame: {kind: session, sessionId: ses-full, revision: 9, view: {$model: fresh}}
+    refuses: revision
+  - name: committed-closure-without-finish-body-refused
+    frame: {kind: closed, sessionId: ses-full, revision: 4, reason: committed}
+    refuses: finish body
+  - name: expired-closure-with-finish-body-refused
+    frame:
+      kind: closed
+      sessionId: ses-full
+      revision: 4
+      reason: expired
+      committed:
+        saved: true
+        configPath: config.yaml
+        ingest: {state: idle, new: 0, updated: 0}
+        nextSteps: [config]
+    refuses: finish body
+  - name: unknown-event-kind-refused
+    frame: {kind: replaced, sessionId: ses-full, revision: 1}
+    refuses: kind
+  - name: unknown-scope-in-view-refused
+    frame: {kind: session, sessionId: ses-full, revision: 1, view: {$model: fresh, scope: everything}}
+    refuses: scope
+  - name: unknown-node-state-in-view-refused
+    frame: {kind: scan, sessionId: ses-full, revision: 1, scan: {state: finished, done: 1, total: 1}}
+    refuses: state
+  - name: unknown-close-reason-refused
+    frame: {kind: closed, sessionId: ses-full, revision: 1, reason: replaced}
+    refuses: reason
+trees:
+  requiredNames:
+    - unknown-kind-and-state-are-counted-not-relabelled
+    - a-total-or-a-cursor-is-refused
+    - rows-without-an-id-are-counted
+  cases:
+    - name: unknown-kind-and-state-are-counted-not-relabelled
+      tree: unknown-kind-and-state
+      expect: {kept: [p-ledger], unknownKind: 1, unknownState: 1, unreadable: 0}
+    - name: a-total-or-a-cursor-is-refused
+      body: {nodes: [], total: 0}
+      refuses: no page, cursor or total
+    - name: rows-without-an-id-are-counted
+      body:
+        nodes:
+          - {kind: project, state: none, label: no id}
+          - {id: p-ok, kind: project, state: none, label: ok}
+      expect: {kept: [p-ok], unknownKind: 0, unknownState: 0, unreadable: 1}

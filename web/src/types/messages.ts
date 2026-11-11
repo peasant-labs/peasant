@@ -86,6 +86,14 @@ export type ProjectFamiliaritySubscription = SubscriptionBase & {
   readonly id: string;
 };
 
+/**
+ * The live setup topic. It carries no id: every event names its own
+ * `sessionId`, so one subscription serves the wizard and the selection page.
+ */
+export type KickstartSubscription = SubscriptionBase & {
+  readonly topic: typeof ChannelTopic.Kickstart;
+};
+
 /** Every subscription shape accepted by the Peasant WebSocket client. */
 export type SubscriptionMessage =
   | DashboardSubscription
@@ -94,7 +102,8 @@ export type SubscriptionMessage =
   | QualitySubscription
   | SessionDetailSubscription
   | AnnotationsSubscription
-  | ProjectFamiliaritySubscription;
+  | ProjectFamiliaritySubscription
+  | KickstartSubscription;
 
 /** Visitor over the locally refined subscription union. */
 export interface SubscriptionVisitor<R> {
@@ -105,6 +114,7 @@ export interface SubscriptionVisitor<R> {
   sessionDetail(sub: SessionDetailSubscription): R;
   annotations(sub: AnnotationsSubscription): R;
   projectFamiliarity(sub: ProjectFamiliaritySubscription): R;
+  kickstart(sub: KickstartSubscription): R;
 }
 
 /**
@@ -141,6 +151,8 @@ export function acceptSubscription<R>(
       return visitor.annotations(sub as AnnotationsSubscription);
     case ChannelTopic.ProjectFamiliarity:
       return visitor.projectFamiliarity(sub as ProjectFamiliaritySubscription);
+    case ChannelTopic.Kickstart:
+      return visitor.kickstart(sub as KickstartSubscription);
     default:
       // Unreachable for any subscription built via `subscribe.*` or decoded
       // from a valid wire ChannelSubscription — the switch above covers
@@ -172,6 +184,7 @@ export const subscribe = {
     topic: ChannelTopic.ProjectFamiliarity,
     id,
   }),
+  kickstart: (): KickstartSubscription => ({ topic: ChannelTopic.Kickstart }),
 };
 
 /** Stable ChannelStore key for a typed subscription. */
@@ -186,6 +199,7 @@ export function subscriptionKey(sub: SubscriptionMessage): string {
       `${ChannelTopic.Annotations}:${value.axis}:${value.id}`,
     projectFamiliarity: (value) =>
       `${ChannelTopic.ProjectFamiliarity}:${value.id}`,
+    kickstart: () => ChannelTopic.Kickstart,
   });
 }
 
