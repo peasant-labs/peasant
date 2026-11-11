@@ -38,11 +38,14 @@ type commitConflictWant struct {
 }
 
 type commitParsedWant struct {
-	RedactionLevel  string `yaml:"redactionLevel"`
-	License         string `yaml:"license"`
-	Visibility      string `yaml:"visibility"`
-	SharePreference string `yaml:"sharePreference"`
-	Email           string `yaml:"email"`
+	RedactionLevel      string `yaml:"redactionLevel"`
+	License             string `yaml:"license"`
+	Visibility          string `yaml:"visibility"`
+	SharePreference     string `yaml:"sharePreference"`
+	Email               string `yaml:"email"`
+	AutoPublishIntent   *bool  `yaml:"autoPublishIntent"`
+	AutoPublishIntended *bool  `yaml:"autoPublishIntended"`
+	AutoIngest          *bool  `yaml:"autoIngest"`
 }
 
 type commitRetentionWant struct {
@@ -502,6 +505,15 @@ func assertSavedFile(t *testing.T, s commitScenario, want commitWant, written []
 	}
 	if p.Email != "" && parsed.User.Email != p.Email {
 		t.Errorf("user email = %q, want %q", parsed.User.Email, p.Email)
+	}
+	if p.AutoPublishIntent != nil && parsed.Push.AutoPublishIntent != *p.AutoPublishIntent {
+		t.Errorf("autoPublishIntent = %t, want %t", parsed.Push.AutoPublishIntent, *p.AutoPublishIntent)
+	}
+	if p.AutoPublishIntended != nil && parsed.Push.AutoPublishIntended() != *p.AutoPublishIntended {
+		t.Errorf("auto-publish intended = %t, want %t", parsed.Push.AutoPublishIntended(), *p.AutoPublishIntended)
+	}
+	if p.AutoIngest != nil && parsed.Selection.AutoIngestNewBranches != *p.AutoIngest {
+		t.Errorf("autoIngestNewBranches = %t, want %t", parsed.Selection.AutoIngestNewBranches, *p.AutoIngest)
 	}
 	if golden != nil {
 		if got, want := normalizedSelection(t, parsed.Selection), normalizedSelection(t, *golden); got != want {

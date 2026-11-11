@@ -1,6 +1,8 @@
 # Every field and option writes, reads back, and lands at its document path.
-# Selection is one mapping. Empty license is not the sentinel label. Retention
-# never enters config.yaml.
+# The document value has the type the configuration gives that key (yamlType),
+# and the document parses back to the value that was written, so a boolean key
+# never holds the string "true". Selection is one mapping. Empty license is not
+# the sentinel label. Retention never enters config.yaml.
 requiredNames:
   - transcripts
   - auto-ingest-new-branches
@@ -17,30 +19,37 @@ fields:
   - key: transcripts
     path: [selection]
     destination: config
+    yamlType: map
     selection: true
   - key: auto-ingest-new-branches
     path: [selection, autoIngestNewBranches]
     destination: config
+    yamlType: bool
     bools: [true, false]
   - key: publication-preference
     path: [push, sharePreference]
     destination: config
+    yamlType: str
     options: ["", share-later]
   - key: publish-automatically
     path: [push, autoPublishIntent]
     destination: config
+    yamlType: bool
     options: ["true", "false"]
   - key: redaction-level
     path: [redaction, level]
     destination: config
+    yamlType: str
     options: [standard]
   - key: content-license
     path: [push, license]
     destination: config
+    yamlType: str
     options: ["", CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0]
   - key: default-visibility
     path: [push, visibility]
     destination: config
+    yamlType: str
     options: [private, group, public]
   - key: claude-retention-days
     destination: claude-settings
