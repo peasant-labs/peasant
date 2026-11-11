@@ -47,7 +47,7 @@ export function FinishPanel({
             {ingest.error}
           </p>
         )}
-        <div className="ks-actions">
+        <div className="ks-answers">
           <Button variant="secondary" size="sm" disabled={running} onClick={importNow}>
             import now
           </Button>

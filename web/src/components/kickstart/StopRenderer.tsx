@@ -31,7 +31,9 @@ export function StopRenderer({
   answeredConnection: () => void;
 }) {
   const answer = (key: string, value: Parameters<KickstartSessionApi['answer']>[1]) => void api.answer(key, value);
-  const wide = stop.kind === KickstartStopKind.Review || stop.fields.some((field) => field.kind === KickstartFieldKind.Tree);
+  const wide =
+    stop.kind === KickstartStopKind.Review ||
+    stop.fields.some((field) => field.kind === KickstartFieldKind.Tree || field.example.length > 0);
 
   return (
     <div className={wide ? 'ks-stop ks-stop-wide' : 'ks-stop'}>

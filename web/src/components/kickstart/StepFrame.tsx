@@ -3,6 +3,9 @@
 import type { ReactNode } from 'react';
 import { Button, StepIndicator } from '@/lib/ft-ui';
 
+/** The most steps whose labels fit under the rail's markers. */
+const LABELLED_RAIL_MAX = 4;
+
 export interface FrameStep {
   id: string;
   label: string;
@@ -45,8 +48,12 @@ export function StepFrame({
   children: ReactNode;
 }) {
   const index = steps.findIndex((step) => step.id === current);
+  // A rail of many steps cannot fit its labels under the markers, so past this
+  // many it shows numbers only. Every label stays in the accessible name, and
+  // the stop's own title heads the body.
+  const labelled = steps.length <= LABELLED_RAIL_MAX;
   return (
-    <section className="swz ks-wizard" aria-label={ariaLabel}>
+    <section className={labelled ? 'swz ks-wizard ks-wizard-labelled' : 'swz ks-wizard'} aria-label={ariaLabel}>
       <div className="swz-head">
         <StepIndicator
           steps={[...steps]}

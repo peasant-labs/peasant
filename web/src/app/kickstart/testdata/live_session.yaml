@@ -13,6 +13,8 @@ requiredNames:
   - no-poll-loop
   - scan-running-progress
   - scan-error-offers-a-rescan
+  - selection-change-rereads-the-forest
+  - another-tabs-selection-rereads-the-forest
   - events-of-another-session-are-ignored
   - unknown-event-kind-is-refused-and-the-page-stays
 cases:
@@ -177,6 +179,37 @@ cases:
       - click: scan again
       - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-full/scan", count: 1}
       - expectText: [reading projects]
+
+  - name: selection-change-rereads-the-forest
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "GET /api/v1/kickstart/sessions/ses-full/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: selected-two}}}
+    steps:
+      - click: continue
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 1}
+      - expectControl: {role: checkbox, name: add a CSV export, checked: false}
+      # The toggle sends the ids the tree reports; node states are the server's,
+      # so the forest is read again to draw the new ones.
+      - check: add a CSV export
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-full", subset: {revision: 1, selectedIds: [s-one, s-two]}}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 2}
+      - expectControl: {role: checkbox, name: add a CSV export, checked: true}
+      - expectNoReload: true
+
+  - name: another-tabs-selection-rereads-the-forest
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "GET /api/v1/kickstart/sessions/ses-full/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
+    steps:
+      - click: continue
+      - expectControl: {role: checkbox, name: add a CSV export, checked: false}
+      - push: {kind: answers, model: selected-two}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 2}
+      - expectControl: {role: checkbox, name: add a CSV export, checked: true}
+      # An answer that leaves the selection where it was does not read the forest.
+      - push: {kind: answers, model: selected-two-licensed}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 2}
 
   - name: events-of-another-session-are-ignored
     server:

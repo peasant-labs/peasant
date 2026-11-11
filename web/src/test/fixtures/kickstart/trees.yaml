@@ -6,6 +6,7 @@ requiredNames:
   - forest-rescanned
   - empty
   - unknown-kind-and-state
+  - forest-two-selected
 cases:
   - name: forest
     tree:
@@ -29,3 +30,11 @@ cases:
         - {id: p-ledger, kind: project, state: none, label: ledger}
         - {id: x-folder, kind: folder, state: none, label: not a kind}
         - {id: x-partial, kind: session, state: partial, label: not a state}
+  - name: forest-two-selected
+    tree:
+      nodes:
+        - {id: p-ledger, kind: project, state: all, label: ledger, harness: claude, childCount: 2}
+        - {id: g-main, parentId: p-ledger, kind: group, state: all, label: main branch, childCount: 2}
+        - {id: s-one, parentId: g-main, kind: session, state: all, label: fix the ledger rounding, sessionId: s-one}
+        - {id: s-two, parentId: g-main, kind: session, state: all, label: add a CSV export, sessionId: s-two}
+        - {id: p-locked, kind: project, state: none, label: ambiguous-rule, locked: true}

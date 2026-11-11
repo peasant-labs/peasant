@@ -54,6 +54,7 @@ import {
   type KickstartTree,
   type LocalSettingValue,
 } from './model';
+import { treeField } from './view';
 import {
   KickstartCloseReason,
   KickstartIngestState,
@@ -118,6 +119,19 @@ function asError(failure: unknown): Error {
   return failure instanceof Error ? failure : new Error(String(failure));
 }
 
+/**
+ * The tree field's answer as text, to tell when it changed between snapshots.
+ * Node states are computed by the server and only the tree route carries them,
+ * so the forest is read again when the answer moves.
+ */
+function selectionOf(view: KickstartSession): string | null {
+  for (const stop of view.stops) {
+    const field = treeField(stop);
+    if (field !== undefined) return JSON.stringify(field.value);
+  }
+  return null;
+}
+
 export function useKickstartSession(scope: KickstartScope): KickstartSessionApi {
   const [session, setSession] = useState<KickstartSession | null>(null);
   const [opening, setOpening] = useState(true);
@@ -141,6 +155,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
   const viewRevision = useRef(-1);
   const scanRevision = useRef(-1);
   const scanState = useRef<KickstartScan | null>(null);
+  const selection = useRef<string | null>(null);
   const ingestSeen = useRef(false);
   const ended = useRef(false);
   const alive = useRef(true);
@@ -206,8 +221,13 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     if (view.id !== sessionId.current || view.revision < viewRevision.current) return false;
     viewRevision.current = view.revision;
     setSession(view);
-    return takeScan(view.scan, view.revision);
-  }, [takeScan]);
+    const answer = selectionOf(view);
+    const moved = selection.current !== null && answer !== selection.current;
+    selection.current = answer;
+    const reloaded = takeScan(view.scan, view.revision);
+    if (moved && !reloaded) void loadTree();
+    return reloaded || moved;
+  }, [loadTree, takeScan]);
 
   const takeIngest = useCallback((next: KickstartIngest): void => {
     ingestSeen.current = true;
@@ -261,6 +281,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     viewRevision.current = -1;
     scanRevision.current = -1;
     scanState.current = null;
+    selection.current = null;
     ingestSeen.current = false;
     ended.current = false;
     buffered.current = [];

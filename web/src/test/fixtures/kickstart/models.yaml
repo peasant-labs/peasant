@@ -23,6 +23,8 @@ requiredNames:
   - connected-with-answer
   - redacted-differently
   - no-example
+  - selected-two
+  - selected-two-licensed
 cases:
   - name: fresh
     session:
@@ -437,3 +439,15 @@ cases:
     set:
       revision: 2
       stops[privacy].fields[redaction-level].example: []
+
+  - name: selected-two
+    extends: fresh
+    set:
+      revision: 2
+      stops[selection].fields[transcripts].value: [s-one, s-two]
+
+  - name: selected-two-licensed
+    extends: selected-two
+    set:
+      revision: 3
+      stops[license].fields[content-license].value: CC0-1.0

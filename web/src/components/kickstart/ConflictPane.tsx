@@ -45,7 +45,7 @@ export function ConflictPane({
                   <dd>{sides.theirs}</dd>
                 </div>
               </dl>
-              <div className="ks-actions">
+              <div className="ks-answers">
                 {ALL_KICKSTART_RESOLUTIONS.map((resolution) => (
                   <Button
                     key={resolution.wire}

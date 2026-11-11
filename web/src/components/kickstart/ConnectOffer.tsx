@@ -26,11 +26,11 @@ export function ConnectOffer({
   };
   return (
     <section className="ks-field" aria-labelledby="ks-connect-offer">
-      <h3 className="ks-field-label" id="ks-connect-offer">
+      <h2 className="ks-title" id="ks-connect-offer">
         {connect.prompt ?? 'connect to peasant online now?'}
-      </h3>
+      </h2>
       <p className="ks-help">connecting signs this computer in. it publishes nothing.</p>
-      <div className="ks-actions">
+      <div className="ks-answers">
         <Button variant="primary" loading={signIn.waiting} disabled={signIn.waiting} onClick={() => void accept()}>
           {KickstartConnectAnswer.Accept.label}
         </Button>

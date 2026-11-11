@@ -31,7 +31,7 @@ export function ConnectionStep({
         {field.label}
       </span>
       {field.description !== null && <p className="ks-help">{field.description}</p>}
-      <div className="ks-actions" role="group" aria-labelledby={`${field.key}-label`}>
+      <div className="ks-answers" role="group" aria-labelledby={`${field.key}-label`}>
         {field.options.map((option) => (
           <Button
             key={option.value}

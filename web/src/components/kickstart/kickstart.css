@@ -38,12 +38,32 @@
   position: static;
   flex: 0 0 auto;
 }
+/* Where the stop's primary action sits, in the footer. */
 .ks-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: var(--sp-2);
   flex-wrap: wrap;
+}
+/* The answers a stop asks for, in its body. */
+.ks-answers {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* With many steps the rail shows its numbers; the labels stay for assistive
+   technology and the stop's title heads the body. */
+.ks-wizard:not(.ks-wizard-labelled) .swz-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* One stop. */
@@ -94,6 +114,9 @@
   margin: 0;
   padding: 0;
   border: 0;
+}
+.ks-field > legend {
+  margin-bottom: var(--sp-2);
 }
 .ks-field > legend,
 .ks-field-label {

@@ -82,7 +82,6 @@ export function SelectionStep({ field, api }: { field: KickstartField; api: Kick
 
   const sessions = tree === null ? 0 : tree.nodes.filter((node) => node.kind === KickstartNodeKind.Session).length;
   const dropped = tree === null ? null : droppedRowsNotice(tree);
-  const highlightedLabel = highlighted === null ? null : tree?.nodes.find((node) => node.id === highlighted)?.label ?? null;
 
   return (
     <div className="ks-field">
@@ -127,9 +126,7 @@ export function SelectionStep({ field, api }: { field: KickstartField; api: Kick
             </div>
           )}
           <aside className="ks-preview" aria-label="preview">
-            <p className="ks-preview-title">
-              {highlightedLabel === null ? 'preview' : `preview of ${highlightedLabel}`}
-            </p>
+            <p className="ks-preview-title">preview</p>
             {highlighted === null && <p className="ks-help">choose a row to read the start of it before you import it.</p>}
             {preview.loading && <Skeleton label="reading the preview" avatar={false} lines={2} />}
             {preview.error !== null && <p className="ks-refusal" role="alert">{preview.error.message}</p>}
@@ -151,7 +148,7 @@ export function SelectionStep({ field, api }: { field: KickstartField; api: Kick
       )}
       {dropped !== null && <p className="ks-help" role="status">{dropped}</p>}
       {(scan === null || scan.state !== KickstartScanState.Error) && (
-        <div className="ks-actions">
+        <div className="ks-answers">
           <Button variant="ghost" size="sm" onClick={() => void api.rescan()}>
             scan again
           </Button>
