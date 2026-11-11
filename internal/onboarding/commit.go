@@ -48,7 +48,8 @@ type RetentionStatus uint8
 
 const (
 	RetentionUnknown RetentionStatus = iota
-	// RetentionNotRequested means no retention choice was answered and visible.
+	// RetentionNotRequested means no retention period was shown, so none was
+	// written.
 	RetentionNotRequested
 	// RetentionApplied means the writer stored the chosen period.
 	RetentionApplied
@@ -89,8 +90,10 @@ type RetentionOutcome struct {
 // caller cannot reorder them or run one before the file is saved.
 type CommitHooks struct {
 	// Retention writes the Claude retention period after the configuration is
-	// saved. It is called only when a visible retention answer chose a period.
-	// A failure never retracts the save; it is reported in the result.
+	// saved. It is called when the retention field is shown and holds a period,
+	// the period the user chose or, when they left it alone, the period they were
+	// shown (Model.RetentionDays). A failure never retracts the save; it is
+	// reported in the result.
 	Retention RetentionWriter
 	// Publish hands the saved configuration to the running server. It is called
 	// after retention, with the configuration the saved bytes parse to.
@@ -124,12 +127,10 @@ type CommitResult struct {
 	ConfigPath string
 	// Conflicts are the unresolved mine/theirs rows of a refused commit.
 	Conflicts []schema.LocalKickstartConflict
-	// Config is the saved configuration as the saved bytes parse, which is what
-	// Publish received.
-	Config    *config.Config
 	Retention RetentionOutcome
 	// ReleaseErr reports a failure to release the lock after the save. The save
-	// stands; the lock is released when the process exits.
+	// stands; the lock is released when the process exits. A caller reports it,
+	// because the next writer waits for the lock until then.
 	ReleaseErr error
 }
 
@@ -204,10 +205,12 @@ func commitFailure(kind CommitFailure, err error) *CommitError {
 //	     -> refuse with rows, or apply the answers -> validate -> swap
 //	     -> retention -> publish -> release
 //
-// The comparison looks only at answered fields. A field the user did not answer
-// is never written, never shown, and a change to it on disk survives untouched.
-// An answered field whose file value moved since the draft opened, and that no
-// resolution settles, is returned as a conflict row; nothing is written. When
+// The comparison looks at the fields the save writes: the answered ones and the
+// ones an answer moves as a side effect (publishing automatically sets the share
+// preference). A field the save does not write is never shown, and a change to
+// it on disk survives untouched. A written field whose file value moved since
+// the draft opened, and that no resolution settles, is returned as a conflict
+// row; nothing is written. When
 // the swap finds the file changed it recomputes once against the fresh bytes
 // under the same lock, and either returns rows or saves; a second change fails
 // with CommitFailureChanged.
@@ -247,6 +250,18 @@ func (d *Draft) Commit(ctx context.Context, in CommitInput) (result CommitResult
 	}
 	snap := snapshot{data: data, doc: doc, cfg: cfg}
 	for attempt := 0; ; attempt++ {
+		if in.Model.Scope == ScopeSelection && snap.data == nil {
+			// The selection page edits a configuration that setup wrote. With no
+			// file, saving would write the whole default document, which ends
+			// first-run setup without the user having answered it.
+			return CommitResult{}, commitFailure(CommitFailureInvalid, actionable(
+				"save the selection",
+				"there is no configuration file yet, and the selection page only edits one that setup wrote",
+				"onboarding.Draft.Commit",
+				"after the configuration lock was taken and the file was read",
+				"nothing was written, and first-run setup is still ahead of you",
+				"run setup first at /kickstart, then choose the sessions to import"))
+		}
 		p, err := d.plan(in.Model, in.Answers, in.Resolutions, in.Context, snap, true)
 		if err != nil {
 			return CommitResult{}, err
@@ -294,7 +309,7 @@ func (d *Draft) Commit(ctx context.Context, in CommitInput) (result CommitResult
 
 // finish runs the effects that follow a successful swap, in their fixed order.
 func (d *Draft) finish(in CommitInput, p *commitPlan) CommitResult {
-	result := CommitResult{Saved: true, ConfigPath: d.path, Config: p.saved, Retention: RetentionOutcome{Status: RetentionNotRequested}}
+	result := CommitResult{Saved: true, ConfigPath: d.path, Retention: RetentionOutcome{Status: RetentionNotRequested}}
 	if p.retentionDays > 0 {
 		result.Retention = RetentionOutcome{Status: RetentionApplied, Days: p.retentionDays}
 		if err := in.Hooks.Retention(p.retentionDays); err != nil {
@@ -357,6 +372,13 @@ type ReviewResult struct {
 	// Diff is the file as it is now against the file as it would be saved, with
 	// every unresolved row kept as the user's value.
 	Diff schema.LocalKickstartDiff
+	// Saved is the configuration the save would produce: what the bytes it would
+	// write parse to, plus the Claude retention period it would apply, which
+	// config.yaml does not hold. It starts from the file as it is now and carries
+	// the choices that stand ("theirs" gives an answer up), so a presentation
+	// explains the save from this value and never from the draft's snapshot of
+	// the file at open time.
+	Saved *config.Config
 }
 
 // ReviewInput is a review's inputs. Hooks and the lock deadline are not part of
@@ -412,6 +434,7 @@ func (d *Draft) Review(ctx context.Context, in ReviewInput) (ReviewResult, error
 	review := ReviewResult{
 		Conflicts: []schema.LocalKickstartConflict{},
 		Diff:      schema.LocalKickstartDiff{File: filepath.Base(d.path), Hunks: hunks, Truncated: truncated},
+		Saved:     p.shown,
 	}
 	for _, row := range p.rows {
 		review.Conflicts = append(review.Conflicts, row.wire)
@@ -436,14 +459,22 @@ type conflictRow struct {
 	// settled is true when a resolution that still stands covers the row.
 	settled bool
 	choice  schema.LocalKickstartResolution
+	// coupled is true when the user did not answer the field: another answer
+	// moves it as a side effect, so "theirs" keeps the file's value in place
+	// rather than giving an answer up.
+	coupled bool
 }
 
 // commitPlan is one pass of the chain: the answers that will be written, the
 // rows found, and the document they produce.
 type commitPlan struct {
-	rows          []conflictRow
-	out           []byte
-	saved         *config.Config
+	rows []conflictRow
+	out  []byte
+	// saved is the configuration the bytes in out parse to, which is what the
+	// running server receives.
+	saved *config.Config
+	// shown is saved plus the retention period the save applies, for the review.
+	shown         *config.Config
 	retentionDays int
 }
 
@@ -494,16 +525,16 @@ func (d *Draft) plan(model Model, input Answers, resolutions Resolutions, w Writ
 		}
 		answers = kept
 		w.Answers = answers
-		mine, err := model.DiffValues(base, answers, w)
+		applied, err := model.AppliedCopy(base, answers, w)
 		if err != nil {
 			return nil, commitFailure(CommitFailureInvalid, err)
 		}
-		if rows, err = d.conflictRows(model, base, answers, mine, resolutions); err != nil {
+		if rows, err = d.conflictRows(model, base, applied, answers, resolutions); err != nil {
 			return nil, commitFailure(CommitFailureInvalid, err)
 		}
 		gaveUp := false
 		for _, row := range rows {
-			if row.settled && row.choice == schema.LocalKickstartResolutionTheirs {
+			if row.settled && row.choice == schema.LocalKickstartResolutionTheirs && !row.coupled {
 				givenUp[row.key] = row
 				delete(answers, row.key)
 				gaveUp = true
@@ -516,7 +547,9 @@ func (d *Draft) plan(model Model, input Answers, resolutions Resolutions, w Writ
 	// A row whose answer was given up is no longer an answered field, yet it stays
 	// listed so the user can still see it and change the choice.
 	for _, row := range givenUp {
-		rows = append(rows, row)
+		if !hasRow(rows, row.key) {
+			rows = append(rows, row)
+		}
 	}
 	order := map[FieldKey]int{}
 	for i, field := range model.Fields() {
@@ -528,9 +561,26 @@ func (d *Draft) plan(model Model, input Answers, resolutions Resolutions, w Writ
 	if err != nil {
 		return nil, commitFailure(CommitFailureInvalid, err)
 	}
+	// A transient value, such as the retention period the session showed, is not
+	// in the file: it comes from the draft, as it does when the terminal's draft
+	// is rebuilt.
+	for _, seed := range d.seeds {
+		seed(&working)
+	}
 	w.Config, w.Answers = &working, answers
 	if err := model.ApplyAnswers(&working, answers, w); err != nil {
 		return nil, commitFailure(CommitFailureInvalid, err)
+	}
+	// "Theirs" on a field the user did not answer keeps the file's value where an
+	// answer's side effect would have replaced it.
+	for _, row := range rows {
+		if !row.coupled || !row.settled || row.choice != schema.LocalKickstartResolutionTheirs {
+			continue
+		}
+		field, _ := model.Field(row.key)
+		if err := restoreConfigValueAtPath(&working, base, field.YAMLPath()); err != nil {
+			return nil, commitFailure(CommitFailureInvalid, err)
+		}
 	}
 	if validate {
 		if err := model.Validate(w); err != nil {
@@ -551,27 +601,34 @@ func (d *Draft) plan(model Model, input Answers, resolutions Resolutions, w Writ
 			"nothing was written",
 			"correct the answer the message names and save again"))
 	}
-	plan := &commitPlan{rows: rows, out: out, saved: saved}
-	if _, answered := answers[FieldRetention]; answered && working.ClaudeRetentionDays > 0 {
-		plan.retentionDays = working.ClaudeRetentionDays
-	}
-	return plan, nil
+	shown := *saved
+	shown.ClaudeRetentionDays = working.ClaudeRetentionDays
+	return &commitPlan{rows: rows, out: out, saved: saved, shown: &shown, retentionDays: model.RetentionDays(w)}, nil
 }
 
-// conflictRows compares every answered configuration field against the file and
-// the baseline:
+func hasRow(rows []conflictRow, key FieldKey) bool {
+	return slices.ContainsFunc(rows, func(row conflictRow) bool { return row.key == key })
+}
+
+// conflictRows compares every configuration field the save writes against the
+// file and the baseline. applied is the file with the answers applied, so it
+// holds the value the save would write for each field, an answered one or one an
+// answer moves as a side effect:
 //
 //	theirs == baseline  -> no row (the file did not move)
-//	theirs == mine      -> no row (someone landed the same choice)
+//	theirs == mine      -> no row (someone landed the same choice, or the
+//	                       save does not write the field at all)
 //	otherwise           -> a row
 //
-// Fields stored outside config.yaml, and fields that store nothing, never
-// conflict with the file. Rows follow declaration order.
-func (d *Draft) conflictRows(model Model, base *config.Config, answers Answers, mine map[FieldKey]schema.LocalSettingValue, resolutions Resolutions) ([]conflictRow, error) {
+// A field the user did not answer is a row only when an answer moves it, so a
+// change to a field the save leaves alone never raises one. Fields stored
+// outside config.yaml, and fields that store nothing, never conflict with the
+// file. Rows follow declaration order.
+func (d *Draft) conflictRows(model Model, base, applied *config.Config, answers Answers, resolutions Resolutions) ([]conflictRow, error) {
 	var rows []conflictRow
 	for _, field := range model.Fields() {
 		key := field.Key()
-		if _, answered := answers[key]; !answered || field.Destination() != DestConfig {
+		if field.Destination() != DestConfig {
 			continue
 		}
 		theirs, err := field.Read(base)
@@ -582,15 +639,20 @@ func (d *Draft) conflictRows(model Model, base *config.Config, answers Answers, 
 		if err != nil {
 			return nil, err
 		}
-		if sameSettingValue(theirs, baseline) || sameSettingValue(theirs, mine[key]) {
+		mine, err := field.Read(applied)
+		if err != nil {
+			return nil, err
+		}
+		if sameSettingValue(theirs, baseline) || sameSettingValue(theirs, mine) {
 			continue
 		}
 		stop, label := fieldPlace(model, field)
-		row := conflictRow{key: key, wire: schema.LocalKickstartConflict{
+		_, answered := answers[key]
+		row := conflictRow{key: key, coupled: !answered, wire: schema.LocalKickstartConflict{
 			Field:  key.String(),
 			Stop:   stop.String(),
 			Label:  label,
-			Mine:   mine[key],
+			Mine:   mine,
 			Theirs: theirs,
 		}}
 		if resolution, ok := resolutions[key]; ok && resolution.applies(theirs) {

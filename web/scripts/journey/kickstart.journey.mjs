@@ -510,9 +510,12 @@ test('config-holds-only-the-chosen-selection', async () => {
   expect(config.push.sharePreference).toBe('share-later');
   expect(config.push.license).toBe('CC-BY-4.0');
 
-  // Nothing else was written: no hook, no rule, no retention change.
+  // Nothing else was written: no hook, no rule. The retention stop showed a
+  // period and the review promised to apply it, so the save applied exactly that
+  // one, which is the terminal's behaviour too.
   expect(existsSync(join(dirname(configPath), 'hooks.yaml')), 'no auto-publish rule was saved').toBe(false);
-  expect(existsSync(join(home, '.claude', 'settings.json')), 'the retention answer was never given, so it was not applied').toBe(false);
+  const claudeSettings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  expect(claudeSettings.cleanupPeriodDays, 'the retention period the review promised was applied').toBe(99999);
   for (const repo of fixture.recordings.repositories) {
     const hooks = join(root, 'repos', repo.name, '.git', 'hooks');
     const installed = existsSync(hooks) ? readdirSync(hooks).filter((name) => !name.endsWith('.sample')) : [];

@@ -31,18 +31,29 @@ type reviewWant struct {
 	FileUnchanged         bool                 `yaml:"fileUnchanged"`
 	Failure               string               `yaml:"failure"`
 	ErrorContains         string               `yaml:"errorContains"`
+	Saved                 *reviewSavedWant     `yaml:"saved"`
+}
+
+// reviewSavedWant is what ReviewResult.Saved must hold: the configuration the
+// save would produce.
+type reviewSavedWant struct {
+	License         string `yaml:"license"`
+	SharePreference string `yaml:"sharePreference"`
+	RetentionDays   int    `yaml:"retentionDays"`
 }
 
 type reviewCase struct {
-	Name         string                      `yaml:"name"`
-	Opened       string                      `yaml:"opened"`
-	OpenedAbsent bool                        `yaml:"openedAbsent"`
-	OnDisk       string                      `yaml:"onDisk"`
-	Scope        string                      `yaml:"scope"`
-	Answers      map[string]string           `yaml:"answers"`
-	Resolutions  map[string]commitResolution `yaml:"resolutions"`
-	HoldLock     bool                        `yaml:"holdLock"`
-	Want         reviewWant                  `yaml:"want"`
+	Name         string `yaml:"name"`
+	Opened       string `yaml:"opened"`
+	OpenedAbsent bool   `yaml:"openedAbsent"`
+	OnDisk       string `yaml:"onDisk"`
+	Scope        string `yaml:"scope"`
+	// RetentionSeed is the period the session showed on its retention stop.
+	RetentionSeed int                         `yaml:"retentionSeed"`
+	Answers       map[string]string           `yaml:"answers"`
+	Resolutions   map[string]commitResolution `yaml:"resolutions"`
+	HoldLock      bool                        `yaml:"holdLock"`
+	Want          reviewWant                  `yaml:"want"`
 }
 
 type reviewDocument struct {
@@ -83,6 +94,12 @@ func runReviewCase(t *testing.T, row reviewCase) {
 	draft, err := onboarding.OpenDraft(path, loaded)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if row.RetentionSeed > 0 {
+		days := row.RetentionSeed
+		if err := draft.SeedTransient(func(cfg *config.Config) { cfg.ClaudeRetentionDays = days }); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if row.OnDisk != "" {
 		writeFixtureFile(t, path, row.OnDisk)
@@ -126,7 +143,7 @@ func runReviewCase(t *testing.T, row reviewCase) {
 		Model:       onboarding.BuildModel(onboarding.Options{Scope: scope}),
 		Answers:     answers,
 		Resolutions: resolutions,
-		Context:     onboarding.WriteContext{ScanState: onboarding.ScanDone},
+		Context:     onboarding.WriteContext{ScanState: onboarding.ScanDone, ClaudeSessions: row.RetentionSeed > 0},
 	})
 
 	want := row.Want
@@ -159,6 +176,20 @@ func runReviewCase(t *testing.T, row reviewCase) {
 	}
 	if want.Unresolved != nil && !slices.Equal(unresolved, want.Unresolved) {
 		t.Errorf("unresolved = %v, want %v", unresolved, want.Unresolved)
+	}
+	if saved := want.Saved; saved != nil {
+		if review.Saved == nil {
+			t.Fatal("the review returned no saved configuration")
+		}
+		if saved.License != "" && string(review.Saved.Push.License) != saved.License {
+			t.Errorf("saved license = %q, want %q", review.Saved.Push.License, saved.License)
+		}
+		if saved.SharePreference != "" && string(review.Saved.Push.SharePreference) != saved.SharePreference {
+			t.Errorf("saved share preference = %q, want %q", review.Saved.Push.SharePreference, saved.SharePreference)
+		}
+		if review.Saved.ClaudeRetentionDays != saved.RetentionDays {
+			t.Errorf("saved retention = %d days, want %d", review.Saved.ClaudeRetentionDays, saved.RetentionDays)
+		}
 	}
 	if want.DiffFile != "" {
 		if err := review.Diff.Validate(); err != nil {
