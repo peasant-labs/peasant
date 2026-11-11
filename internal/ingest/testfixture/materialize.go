@@ -229,6 +229,15 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 	if err := sqlitex.Execute(conn, journalSQL, nil); err != nil {
 		return fmt.Errorf("set %s journal mode during setup: %w", fixtureCase.JournalMode, err)
 	}
+	// The fixture is discarded after the test, so durability is irrelevant.
+	// The catalog overflow cases create hundreds of tables and indexes, and the
+	// default synchronous=FULL fsyncs every DDL, which dominates the test wall.
+	if err := sqlitex.Execute(conn, "PRAGMA synchronous=OFF;", nil); err != nil {
+		return fmt.Errorf("disable synchronous durability during setup: %w", err)
+	}
+	if err := sqlitex.Execute(conn, "PRAGMA temp_store=MEMORY;", nil); err != nil {
+		return fmt.Errorf("keep setup temp objects in memory: %w", err)
+	}
 
 	if err := createSchema(conn, fixtureCase.Schema, fixtureCase.SessionClock, len(fixtureCase.SessionAttribution) > 0, fixtureCase.SessionExtended); err != nil {
 		return err
