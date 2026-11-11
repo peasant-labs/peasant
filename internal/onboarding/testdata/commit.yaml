@@ -314,6 +314,14 @@ cases:
             - "  method: all"
           lacksLines:
             - "  license: \"\""
+      - note: a save with no answers leaves the file byte for byte
+        opened: *handWritten
+        answers: {}
+        want:
+          saved: true
+          conflicts: []
+          fileUnchanged: true
+          effects: [publish]
       - note: an existing file is never rewritten whole
         opened: *handWritten
         answers: {publication-preference: '"share-later"'}

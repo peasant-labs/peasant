@@ -216,6 +216,10 @@ func commitFailure(kind CommitFailure, err error) *CommitError {
 // validation error, a swap refusal and a success. A caller starts anything that
 // reads the saved file after Commit returns.
 //
+// A save with nothing to change leaves the file byte for byte as it is and still
+// runs the effects. A Draft is not safe for concurrent use: the session that
+// owns it serialises its calls.
+//
 // The draft's baseline must be the configuration the file parsed to when the
 // draft opened, not a converted copy: a converted selection is a working edit,
 // and a converted baseline reads as a change the user never made.
@@ -258,6 +262,10 @@ func (d *Draft) Commit(ctx context.Context, in CommitInput) (result CommitResult
 				"before the configuration was written",
 				"nothing was written, so the saved file and the retention preference stay in step",
 				"set CommitHooks.Retention to the Claude settings writer"))
+		}
+		if snap.data != nil && bytes.Equal(p.out, snap.data) {
+			// Nothing to change: leave the file byte for byte as it is.
+			return d.finish(in, p), nil
 		}
 		swapErr := handle.Swap(snap.data, p.out)
 		if swapErr == nil {
@@ -468,6 +476,7 @@ func (d *Draft) plan(model Model, input Answers, resolutions Resolutions, w Writ
 	}
 	answers := copyAnswers(input)
 	var rows []conflictRow
+	givenUp := map[FieldKey]conflictRow{}
 	for pass := 0; ; pass++ {
 		if pass > len(model.Fields()) {
 			return nil, commitFailure(CommitFailureInvalid, actionable(
@@ -495,6 +504,7 @@ func (d *Draft) plan(model Model, input Answers, resolutions Resolutions, w Writ
 		gaveUp := false
 		for _, row := range rows {
 			if row.settled && row.choice == schema.LocalKickstartResolutionTheirs {
+				givenUp[row.key] = row
 				delete(answers, row.key)
 				gaveUp = true
 			}
@@ -503,6 +513,16 @@ func (d *Draft) plan(model Model, input Answers, resolutions Resolutions, w Writ
 			break
 		}
 	}
+	// A row whose answer was given up is no longer an answered field, yet it stays
+	// listed so the user can still see it and change the choice.
+	for _, row := range givenUp {
+		rows = append(rows, row)
+	}
+	order := map[FieldKey]int{}
+	for i, field := range model.Fields() {
+		order[field.Key()] = i
+	}
+	slices.SortFunc(rows, func(a, b conflictRow) int { return order[a.key] - order[b.key] })
 
 	working, err := cloneConfig(base)
 	if err != nil {
@@ -614,6 +634,11 @@ func (d *Draft) document(model Model, snap snapshot, working *config.Config, ans
 			return nil, fmt.Errorf("marshal the first-run configuration: %w", err)
 		}
 		return out, nil
+	}
+	if len(answers) == 0 {
+		// No answer to write: the file stays exactly as it is, including the
+		// spacing and blank lines a re-encoding would normalise.
+		return snap.data, nil
 	}
 	keys := make([]FieldKey, 0, len(answers))
 	for key := range answers {
