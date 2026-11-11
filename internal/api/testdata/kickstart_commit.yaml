@@ -23,6 +23,13 @@ requiredNames:
   - other-scope-commit-creates-mine-theirs-rows-on-next-diff
   - no-reset-in-any-response
   - failed-save-keeps-the-session
+  - retention-shown-unanswered-writes-the-shown-value
+  - take-theirs-summary-shows-the-file-value
+  - coupled-field-change-yields-a-row
+  - selection-scope-commit-without-a-config-file-is-refused
+  - commit-owns-the-selection-keys-its-model-writes
+  - finish-step-outside-the-contract-is-refused-before-any-write
+  - finish-body-breach-after-a-save-is-withheld-like-a-refusal
 cases:
   - name: saved-true-with-running
     world:
@@ -243,7 +250,7 @@ cases:
       - await: {kind: answers, session: "{full}"}
       - call: POST /api/v1/kickstart/sessions/{full}/commit
         json: {saved: true, ingest.state: running}
-      - await: {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+      - await: {kind: ingest, session: "{full}", json: {ingest.state: idle, ingest.new: 1, ingest.updated: 0}}
       - ingest:
           runs: 1
           selectionMode: selected
@@ -497,4 +504,222 @@ cases:
       - writeConfig: *licenseConfig
       - call: POST /api/v1/kickstart/sessions/{full}/commit
         json: {saved: true}
+      - configHas: ["license: CC0-1.0"]
+
+  # The retention stop shows a period (the one Claude Code already has, or the
+  # recommended one) and the review promises to apply it. The save applies the
+  # period that was shown, answered or not, as the terminal's finish step does.
+  - name: retention-shown-unanswered-writes-the-shown-value
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      # the retention question was never answered, and the review says what the save does
+      - call: GET /api/v1/kickstart/sessions/{full}
+        contains:
+          "stops[key=review].summary.values": "claude code source retention: 90 days"
+          "stops[key=review].summary.effects": "apply claude code retention after config saves"
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      - retention: {calls: [90], sawSavedFile: true}
+
+  # The review summary explains what the save will write. After the user takes the
+  # file's side of a row, that is the value the file holds now, not the answer the
+  # user gave up and not the file as it was when the session opened.
+  - name: take-theirs-summary-shows-the-file-value
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        contains: {"stops[key=review].summary.values": "later publish license: CC0-1.0"}
+      # another writer lands a different license, and the user keeps it
+      - editConfig: {from: 'license: ""', to: "license: CC-BY-4.0"}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        len: {conflicts: 1}
+        json: {conflicts.0.field: content-license}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {content-license: theirs}}
+        len: {view.conflicts: 0}
+        contains: {"view.stops[key=review].summary.values": "later publish license: CC-BY-4.0"}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        contains: {"stops[key=review].summary.values": "later publish license: CC-BY-4.0"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      - configHas: ["license: CC-BY-4.0"]
+
+  # An answer can move a field the user did not answer: publishing automatically
+  # sets the share preference. If another writer changed that field since the
+  # session opened, the save would replace their change silently, so the review
+  # shows a row for it and the save is refused until the user chooses.
+  - name: coupled-field-change-yields-a-row
+    world:
+      listings: two-projects
+      gate: true
+      config: |
+        version: 1
+        push:
+          sharePreference: share-later
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {publish-automatically: "true"}}
+      - editConfig: {from: "sharePreference: share-later", to: 'sharePreference: ""'}
+      # the review finds the row before any save is tried
+      - call: GET /api/v1/kickstart/sessions/{full}
+        len: {conflicts: 1}
+        json:
+          conflicts.0.field: publication-preference
+          conflicts.0.stop: publication
+        save: {rev: revision}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 409
+        len: {conflicts: 1}
+        json: {conflicts.0.field: publication-preference}
+        noReset: true
+      - configHas: ['sharePreference: ""']
+      # the user keeps the other writer's value; the answer they gave still saves
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {publication-preference: theirs}}
+        len: {view.conflicts: 0}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {publication-preference: theirs}}
+        json: {stale: true}
+        len: {view.conflicts: 0}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      - configHas: ['sharePreference: ""', "autoPublishIntent: true"]
+
+  # The selection page edits a configuration that setup wrote. With none, saving
+  # would write the whole default document and end first-run setup unanswered.
+  - name: selection-scope-commit-without-a-config-file-is-refused
+    world:
+      listings: two-projects
+      gate: true
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - release: true
+      - await: {kind: session, session: "{selection}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{selection}
+        body: {revision: "{rev}", selectedIds: [11111111-1111-4111-8111-111111111111]}
+      - call: POST /api/v1/kickstart/sessions/{selection}/commit
+        status: 400
+        json: {code: kickstart_commit_refused}
+        contains: {error: "run setup first at /kickstart"}
+        noReset: true
+      - configFile: absent
+      # the session stays, so the answers are not lost
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        json: {scope: selection}
+
+  # The live configuration takes the read-only keys a commit's model writes. The
+  # model names its own paths, so the selection page's save reaches the running
+  # server without a second list of keys.
+  - name: commit-owns-the-selection-keys-its-model-writes
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - release: true
+      - await: {kind: session, session: "{selection}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{selection}
+        body: {revision: "{rev}", selectedIds: [11111111-1111-4111-8111-111111111111]}
+      - call: POST /api/v1/kickstart/sessions/{selection}/commit
+        json: {saved: true, ingest.state: running}
+      - ingest:
+          runs: 1
+          selectionMode: selected
+          sessions: [11111111-1111-4111-8111-111111111111]
+
+  # The finish menu is read through the contract's closed set before anything is
+  # written, so a step the contract does not know leaves the file and the session
+  # exactly as they were.
+  - name: finish-step-outside-the-contract-is-refused-before-any-write
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+      nextSteps: [config, web-resume]
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 500
+        json: {code: publishing_contract_breach}
+        contains: {error: "web-resume"}
+      - configFile: unchanged
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {scope: full}
+
+  # A body the contract refuses after the save is withheld the way a refused
+  # save's body is, with the same status and code, and its text says the save
+  # stands. A step listed twice passes the closed set and fails the contract.
+  - name: finish-body-breach-after-a-save-is-withheld-like-a-refusal
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+      nextSteps: [config, config]
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 500
+        json: {code: publishing_contract_breach}
+        contains: {error: "The setup was saved"}
       - configHas: ["license: CC0-1.0"]

@@ -15,6 +15,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 )
@@ -84,6 +85,14 @@ type kickstartCommitWorld struct {
 	finished   int
 	retention  []kickstartRetentionCall
 	wake       chan struct{}
+	// violation is the first way an import broke the case's boundary. The import
+	// runs on the server's goroutine, where a test cannot fail, so it records the
+	// breach and the case fails from its next wait or, at the latest, at its end.
+	violation string
+	// broken is closed when violation is first set, so a step that waits on an
+	// event stops waiting for one an import that was refused will never publish.
+	broken    chan struct{}
+	nextSteps []onboarding.NextStep
 }
 
 func (c *kickstartCommitWorld) prepare(t *testing.T, dir string, homes testXDGHomes, spec kickstartSpec) {
@@ -92,6 +101,17 @@ func (c *kickstartCommitWorld) prepare(t *testing.T, dir string, homes testXDGHo
 	c.recordings = filepath.Join(dir, "recordings")
 	c.output = filepath.Join(dir, "managed")
 	c.wake = make(chan struct{})
+	c.broken = make(chan struct{})
+	for _, step := range spec.NextSteps {
+		c.nextSteps = append(c.nextSteps, onboarding.NextStep(step))
+	}
+	t.Cleanup(func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.violation != "" {
+			t.Errorf("an import broke the case's boundary: %s", c.violation)
+		}
+	})
 	if spec.HoldIngest {
 		c.gate = make(chan struct{}, 16)
 		// A held import must not outlive the case.
@@ -116,7 +136,19 @@ func (c *kickstartCommitWorld) prepare(t *testing.T, dir string, homes testXDGHo
 		}
 	}
 	for _, id := range spec.Recordings {
+		// writeClaudeSession backdates the recording by two hours. A recording
+		// modified moments ago is still being written, so the import counts it as
+		// active and leaves it out of the new and updated counts the finish panel
+		// reports.
 		writeClaudeSession(t, filepath.Join(project, id+".jsonl"), id, cwd, "main")
+	}
+}
+
+// tuneEnv replaces the parts of the session environment a case varies.
+func (c *kickstartCommitWorld) tuneEnv(env *kickstartEnv) {
+	if c.nextSteps != nil {
+		steps := append([]onboarding.NextStep(nil), c.nextSteps...)
+		env.nextSteps = func() []onboarding.NextStep { return steps }
 	}
 }
 
@@ -164,8 +196,7 @@ func (c *kickstartCommitWorld) tuneSync(sh *syncHandler) {
 		if c.gate != nil {
 			<-c.gate
 		}
-		if c.real {
-			c.guardSources(cfg)
+		if c.real && c.guardSources(cfg) {
 			real(progress)
 		} else {
 			sh.mu.Lock()
@@ -180,8 +211,10 @@ func (c *kickstartCommitWorld) tuneSync(sh *syncHandler) {
 	}
 }
 
-// guardSources fails a case whose import would read outside the case directory.
-func (c *kickstartCommitWorld) guardSources(cfg *config.Config) {
+// guardSources reports whether the import may run: it may not when it would read
+// outside the case directory. It records the breach for the case to fail on and
+// never panics, because it runs on the server's goroutine.
+func (c *kickstartCommitWorld) guardSources(cfg *config.Config) bool {
 	for harness := range ingest.DefaultAdapterRegistry {
 		provider, ok := cfg.Sources.Provider(harness)
 		if !ok || !provider.Enabled {
@@ -189,10 +222,18 @@ func (c *kickstartCommitWorld) guardSources(cfg *config.Config) {
 		}
 		for _, path := range provider.Paths {
 			if !strings.HasPrefix(path, c.dir) {
-				panic("kickstart fixture: the import would read " + path + ", outside the case directory " + c.dir + "; name {sources} in the case's configuration")
+				c.mu.Lock()
+				if c.violation == "" {
+					c.violation = "the import would read " + path + ", outside the case directory " + c.dir + "; name {sources} in the case's configuration"
+					close(c.broken)
+				}
+				c.changed()
+				c.mu.Unlock()
+				return false
 			}
 		}
 	}
+	return true
 }
 
 // writeRetention records each Claude retention write and the configuration at
@@ -205,6 +246,15 @@ func (c *kickstartCommitWorld) writeRetention(configPath string) func(int) error
 		c.retention = append(c.retention, kickstartRetentionCall{days: days, file: string(file)})
 		return nil
 	}
+}
+
+// breached fails the step when an import broke the case's boundary.
+func (w *kickstartWorld) breached(index int) {
+	w.t.Helper()
+	w.saving.mu.Lock()
+	violation := w.saving.violation
+	w.saving.mu.Unlock()
+	w.fail(index, "an import broke the case's boundary: %s", violation)
 }
 
 func (w *kickstartWorld) releaseIngest() {
@@ -228,6 +278,8 @@ func (w *kickstartWorld) waitFor(index int, what string, ready func() bool) {
 		}
 		select {
 		case <-wake:
+		case <-w.saving.broken:
+			w.breached(index)
 		case <-ctx.Done():
 			w.fail(index, "waited for %s and it did not happen", what)
 		}

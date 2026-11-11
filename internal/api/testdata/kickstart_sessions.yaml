@@ -335,31 +335,45 @@ cases:
           - {kind: answers, revision: 4}
 
   - name: closed-committed-reason
-    world: {listings: two-projects, gate: true}
+    world:
+      listings: two-projects
+      gate: true
+      config: |
+        version: 1
+        push:
+          license: ""
     steps:
       - call: POST /api/v1/kickstart/sessions
         body: {scope: full}
         save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      # the other scope opens after the wizard's scan, so its held scan says nothing
       - call: POST /api/v1/kickstart/sessions
         body: {scope: selection}
         save: {selection: id}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      # a save under way holds its session: a second save and an answer are refused
       - commit: {session: full, action: begin}
       - commit: {session: full, action: begin, error: "already being saved"}
       - call: PATCH /api/v1/kickstart/sessions/{full}
-        body: {revision: 1, values: {content-license: CC0-1.0}}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
         status: 400
         json: {code: kickstart_session_committing}
-      - commit: {session: full, action: close, ingest: running}
-      - commit: {session: full, action: ingest, ingest: idle}
+      - commit: {session: full, action: abort}
+      # the commit route saves it: the session ends as committed, and the import's
+      # end follows under the same id with the next revision
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
       - events:
           - kind: closed
             session: "{full}"
-            revision: 2
+            revisionFrom: {saved: rev, plus: 1}
             json: {reason: committed, committed.saved: true, committed.nextSteps.0: config}
             len: {committed.nextSteps: 5}
             absent: [view, scan, ingest]
-          - {kind: ingest, session: "{full}", revision: 3, json: {ingest.state: running}, absent: [view, committed]}
-          - {kind: ingest, session: "{full}", revision: 4, json: {ingest.state: idle}}
+          - {kind: ingest, session: "{full}", revisionFrom: {saved: rev, plus: 2}, json: {ingest.state: idle}, absent: [view, committed]}
       - call: GET /api/v1/kickstart/sessions/{full}
         status: 404
       - call: GET /api/v1/kickstart/sessions/{selection}
