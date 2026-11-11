@@ -226,18 +226,8 @@ func (m Model) Validate(w WriteContext) error {
 }
 
 func (m Model) fieldShown(field Field, w WriteContext) bool {
-	for _, stop := range m.Stops {
-		for _, candidate := range stop.Fields {
-			if candidate == nil || candidate.Key() != field.Key() {
-				continue
-			}
-			if !stop.Shown(w) {
-				return false
-			}
-			return Visible(field, w)
-		}
-	}
-	return Visible(field, w)
+	_, hidden := m.HiddenBecause(field, w)
+	return !hidden
 }
 
 func copyAnswers(answers Answers) Answers {

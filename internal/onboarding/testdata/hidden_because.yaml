@@ -1,0 +1,50 @@
+# Whether a field is shown, and the condition that hides it. The reason is the
+# first condition that does not hold, the stop's before the field's, written as
+# Condition.String writes it. A shown field has no reason.
+requiredNames:
+  - field-in-a-stop-shown-only-when-connected-names-village-connected
+  - field-in-a-stop-shown-only-when-disconnected-names-village-disconnected
+  - field-in-a-stop-shown-only-when-narrowed-names-selection-narrowed
+  - field-in-a-stop-shown-only-with-claude-sessions-names-them
+  - connected-field-is-shown-when-connected
+  - field-in-an-unconditional-stop-is-shown
+  - selection-mode-answered-in-the-same-answers-shows-the-narrowed-field
+cases:
+  - name: field-in-a-stop-shown-only-when-connected-names-village-connected
+    field: default-visibility
+    villageConnected: false
+    wantHidden: true
+    wantBecause: village-connected
+
+  - name: field-in-a-stop-shown-only-when-disconnected-names-village-disconnected
+    field: village-connect
+    villageConnected: true
+    wantHidden: true
+    wantBecause: village-disconnected
+
+  - name: field-in-a-stop-shown-only-when-narrowed-names-selection-narrowed
+    field: auto-ingest-new-branches
+    selectionMode: all
+    wantHidden: true
+    wantBecause: selection-narrowed
+
+  - name: field-in-a-stop-shown-only-with-claude-sessions-names-them
+    field: claude-retention-days
+    claudeSessions: false
+    wantHidden: true
+    wantBecause: claude-sessions-present
+
+  - name: connected-field-is-shown-when-connected
+    field: default-visibility
+    villageConnected: true
+    wantHidden: false
+
+  - name: field-in-an-unconditional-stop-is-shown
+    field: content-license
+    wantHidden: false
+
+  - name: selection-mode-answered-in-the-same-answers-shows-the-narrowed-field
+    field: auto-ingest-new-branches
+    selectionMode: all
+    answerSelection: '{"mode":"selected"}'
+    wantHidden: false

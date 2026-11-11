@@ -700,7 +700,10 @@ func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.
 	}
 	conflictsBefore := len(sess.conflicts)
 	before := sess.snapshot()
-	revision := st.bumpLocked(sess)
+	// The revision moves now, so the rebuild stamps dropped answers with it; the
+	// idle timer restarts only once the change is accepted, below.
+	sess.revision++
+	revision := sess.revision
 	for key, value := range plan.answers {
 		sess.answers[key] = value
 		delete(sess.resolutions, key)
@@ -729,11 +732,16 @@ func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.
 		return schema.LocalKickstartPatchResult{}, nil, newKickstartError(http.StatusBadRequest, "kickstart_answer_refused",
 			"The answer was refused when the draft was rebuilt in internal/api.kickstartSessions.patch: %v. Nothing was changed. Send an answer the setup model accepts.", err)
 	}
+	if err := st.refuseHiddenAnswerLocked(sess, plan, facts); err != nil {
+		sess.restore(before)
+		return schema.LocalKickstartPatchResult{}, nil, err
+	}
 	view, err := st.viewLocked(sess)
 	if err != nil {
 		sess.restore(before)
 		return schema.LocalKickstartPatchResult{}, nil, err
 	}
+	st.touchLocked(sess)
 	kind := schema.LocalKickstartEventAnswers
 	if len(sess.conflicts) != conflictsBefore {
 		kind = schema.LocalKickstartEventConflicts
@@ -744,6 +752,26 @@ func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.
 		result.Overwritten = append([]schema.LocalKickstartOverwrite{}, overwritten...)
 	}
 	return result, []schema.LocalKickstartEvent{event}, nil
+}
+
+// refuseHiddenAnswerLocked refuses a request that answers a field the setup
+// does not show. It judges the session as the request leaves it, so a request
+// that answers a field together with the answer that reveals it is accepted,
+// and one that answers a field its own other answers hide is not. The condition
+// is the one the page's own view reads.
+func (st *kickstartSessions) refuseHiddenAnswerLocked(sess *kickstartSession, plan kickstartPlan, facts kickstartFacts) error {
+	write := sess.writeContext(sess.working, sess.configAnswers(), facts)
+	for _, field := range sess.model.Fields() {
+		if _, answered := plan.answers[field.Key()]; !answered {
+			continue
+		}
+		if condition, hidden := sess.model.HiddenBecause(field, write); hidden {
+			return newKickstartError(http.StatusBadRequest, "kickstart_field_hidden",
+				"The answer for a hidden field was refused in internal/api.kickstartSessions.patch: %s is shown only when %s, and the %s setup session does not meet that now. Nothing was changed. Answer a field the setup shows, or send the answer that reveals this one in the same request.",
+				field.Key(), condition, sess.scope)
+		}
+	}
+	return nil
 }
 
 // planLocked checks a request against the model and returns the changes it asks

@@ -9,6 +9,7 @@ requiredNames:
   - connect-skip-records-session-only
   - resolutions-echo
   - stale-tree-answer-names-the-array-it-replaced
+  - hidden-field-answer-refused
 cases:
   - name: one-answer-per-field
     world: {listings: two-projects, gate: true}
@@ -285,3 +286,56 @@ cases:
           overwritten.0.revision: "{first}"
           "view.stops[key=selection].fields[key=transcripts].value.0": 22222222-2222-4222-8222-222222222222
         len: {overwritten: 1, overwritten.0.previous: 1}
+
+  # A field the setup does not show takes no answer. The refusal names the field
+  # and the condition that hides it, changes nothing, and publishes nothing.
+  - name: hidden-field-answer-refused
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      # the sharing stop is shown only while this computer is connected to online
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {default-visibility: private}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+        contains: {error: "default-visibility is shown only when village-connected"}
+      # a request with one hidden answer applies none of its shown ones
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: CC0-1.0, default-visibility: private}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json:
+          revision: 1
+          "stops[key=license].fields[key=content-license].value": ""
+      - events: []
+      # the refusal follows the sign-in: once connected the same answer is taken
+      - setVillage: connected
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {default-visibility: private}}
+        json:
+          revision: 2
+          "view.stops[key=destination].fields[key=default-visibility].value": private
+      - events:
+          - {kind: answers, revision: 2}
+      # the sign-in is lost again, and the stop is hidden again
+      - setVillage: disconnected
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {default-visibility: group}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+      # the retention stop is shown only once the scan found Claude sessions
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {claude-retention-days: 365}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+        contains: {error: "claude-retention-days is shown only when claude-sessions-present"}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {claude-retention-days: 365}}
+        json: {"view.stops[key=retention].fields[key=claude-retention-days].value": 365}
