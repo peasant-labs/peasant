@@ -361,21 +361,21 @@ settings:
       - selected
     editable: false
     inPeasantConfig: true
-    description: the saved selection; change it with peasant kickstart or peasant config
+    description: the saved selection; change it on the selection page
   - key: selection.autoIngestNewBranches
     kind: boolean
     value: null
     effective: true
     editable: false
     inPeasantConfig: true
-    description: the saved selection; change it with peasant kickstart or peasant config
+    description: the saved selection; change it on the selection page
   - key: selection.harnesses
     kind: structured
     value: null
     effective: {}
     editable: false
     inPeasantConfig: true
-    description: the saved selection; change it with peasant kickstart or peasant config
+    description: the saved selection; change it on the selection page
   - key: selection.providers
     kind: structured
     value: null
