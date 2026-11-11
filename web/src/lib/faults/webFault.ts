@@ -14,6 +14,7 @@ import {
   HttpEvidence,
   PayloadEvidence,
   TopicEvidence,
+  TranscriptWindowEvidence,
   type FaultEvidence,
 } from './evidence';
 
@@ -78,6 +79,11 @@ function buildMessage(
     }
     case FaultCause.HttpError:
       return `the ${operation.label} page request failed with status ${(evidence as HttpEvidence).status}: ${detailOf(evidence)}. the page kept its last data. try again.`;
+    case FaultCause.TranscriptReadFailed:
+      if (evidence instanceof TranscriptWindowEvidence) {
+        return `the ${operation.label} around turn ${evidence.anchor} (span ${evidence.span}) could not load: ${evidence.detail}. the surrounding transcript remains available. ${remedy.label}.`;
+      }
+      return `the ${operation.label} could not load: ${detailOf(evidence)}. the transcript is unavailable. ${remedy.label}.`;
     case FaultCause.ConnectFailed:
       return 'peasant is not answering on this computer. the page kept its last data. start it with peasant web start, then try again.';
     case FaultCause.SocketClosed:
@@ -152,6 +158,14 @@ export class WebFault {
       new HttpEvidence(status, detail, code),
       FaultRemedy.Retry,
     );
+  }
+
+  static transcriptInitialRead(detail: string): WebFault {
+    return new WebFault(FaultOperation.TranscriptInitialRead, FaultCause.TranscriptReadFailed, new DetailEvidence(detail), FaultRemedy.Retry);
+  }
+
+  static transcriptWindowRead(anchor: number, span: number, detail: string): WebFault {
+    return new WebFault(FaultOperation.TranscriptWindowRead, FaultCause.TranscriptReadFailed, new TranscriptWindowEvidence(anchor, span, detail), FaultRemedy.Retry);
   }
 
   static connection(cause: FaultCause, detail: string): WebFault {

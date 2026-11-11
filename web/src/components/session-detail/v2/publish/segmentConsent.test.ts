@@ -1,12 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import type { LocalPublication } from '@peasant-labs/schema';
+import { PublishStateLabel } from '@/lib/ft-ui';
 import { describe, expect, it } from 'vitest';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
-import { changesSummary, compareLoadedTurns, pushRequest, scanVersion } from './publishModel';
+import { barModel, changesSummary, compareLoadedTurns, pushRequest, scanVersion } from './publishModel';
 
 type ConsentCase = {
   name: string;
-  kind: 'scan' | 'comparison' | 'push';
+  kind: 'scan' | 'comparison' | 'push' | 'bar';
   revision?: string;
   previousRevision?: string;
   loadedSegments?: number;
@@ -19,6 +23,7 @@ type ConsentCase = {
   expectedReason?: string;
   expectedNewTurns?: number;
   expectedSummary?: string;
+  publication?: LocalPublication;
   sessionId?: string;
   level?: 'standard';
   expectedRequest?: unknown;
@@ -57,6 +62,23 @@ describe('segment publish consent', () => {
         expect(comparison).toEqual({ comparable: true, newTurns: entry.expectedNewTurns });
         if (comparison.comparable) expect(changesSummary(comparison.newTurns)).toBe(entry.expectedSummary);
       }
+      return;
+    }
+    if (entry.kind === 'bar') {
+      expect(Number(entry.revision)).toBeGreaterThan(Number(entry.previousRevision));
+      expect(scanVersion(entry.revision ?? '')).not.toBe(scanVersion(entry.previousRevision ?? ''));
+      const comparison = compareLoadedTurns({
+        loadedSegments: entry.loadedSegments ?? 0,
+        totalSegments: entry.totalSegments ?? 0,
+        turns: entry.turns ?? [],
+        publishedAt: entry.publishedAt,
+      });
+      expect(comparison).toEqual({ comparable: true, newTurns: entry.expectedNewTurns });
+      if (!comparison.comparable || !entry.publication) throw new Error('the complete comparison and publication are required');
+      expect(changesSummary(comparison.newTurns)).toBe(entry.expectedSummary);
+      const model = barModel({ publication: entry.publication, audienceKnown: true, newTurns: comparison.newTurns });
+      expect(model).toEqual({ state: 'new-turns', collectives: undefined, newTurns: entry.expectedNewTurns });
+      expect(renderToStaticMarkup(createElement(PublishStateLabel, model))).toContain('needs update');
       return;
     }
     expect(pushRequest(entry.sessionId ?? '', entry.level ?? 'standard', { add: [], remove: [] }, { listed: [], readers: [] })).toEqual(entry.expectedRequest);

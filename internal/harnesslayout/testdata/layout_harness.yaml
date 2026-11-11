@@ -1,0 +1,12 @@
+# The tool-to-harness mapping for every declared layout. A tool that is its own
+# product names its own known harness value; a tool that is one more store of a
+# product already known names that product.
+cases:
+  - {name: grok-build, tool: grok-build, harness: grok-build}
+  - {name: devin-desktop, tool: devin-desktop, harness: devin-desktop}
+  - {name: cline, tool: cline, harness: cline}
+  - {name: kiro, tool: kiro, harness: kiro}
+  - {name: kiro-cli, tool: kiro-cli, harness: kiro-cli}
+  - {name: kiro-crew, tool: kiro-crew, harness: kiro-crew}
+  - {name: cursor-cli, tool: cursor-cli, harness: cursor}
+  - {name: cursor-ide-state, tool: cursor-ide-state, harness: cursor}

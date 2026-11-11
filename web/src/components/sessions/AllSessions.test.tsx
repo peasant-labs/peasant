@@ -4,6 +4,9 @@ import { Harness } from '@peasant-labs/schema';
 import type { SessionSummary } from '@/types/messages';
 import type { ProjectHash } from '@/lib/navigation/projectRoutes';
 import { AllSessions } from './AllSessions';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { parse } from 'yaml';
 
 /** A syntactically valid ProjectHash (64 chars) — parseProjectHash rejects
  *  anything shorter, which is what makes a row unopenable. */
@@ -93,26 +96,36 @@ describe('AllSessions', () => {
     expect(screen.getByText(/no sessions match/)).toBeInTheDocument();
   });
 
-  it('renders the complete list with no pager and narrows on search', () => {
-    // 60 sessions: a complete list renders every row because there is no
-    // server page to page through.
-    const many = Array.from({ length: 60 }, (_, i) =>
-      session({
-        id: `id${String(i).padStart(6, '0')}`,
-        projectHash: hash(String(i % 10)),
-        project: i === 59 ? 'needle' : 'haystack',
-      }),
-    );
-    render(<AllSessions sessions={many} />);
+  it('bounds rendered rows while searching the complete scope', () => {
+    const fixture = parse(readFileSync(resolve('src/app/testdata/all-sessions-bounds.yaml'), 'utf8')) as {
+      requiredNames: string[];
+      cases: { name: string; total: number; maximum: number; matchIndex: number; query: string; notice: boolean; hidden: boolean }[];
+    };
+    const manifest = parse(readFileSync(resolve('src/app/testdata/all-sessions-bounds.manifest.yaml'), 'utf8')) as { requiredNames: string[] };
+    expect(fixture.cases.map((row) => row.name).sort()).toEqual([...manifest.requiredNames].sort());
+    expect(fixture.requiredNames.sort()).toEqual([...manifest.requiredNames].sort());
+    for (const { total, maximum, matchIndex, query, notice, hidden } of fixture.cases) {
+      const many = Array.from({ length: total }, (_, i) =>
+        session({
+          id: `id${String(i).padStart(6, '0')}`,
+          projectHash: hash(String(i % 10)),
+          project: i === matchIndex ? query : 'haystack',
+        }),
+      );
+      render(<AllSessions sessions={many} />);
 
-    expect(screen.queryByRole('button', { name: 'next' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'next page' })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('link')).toHaveLength(60);
+      expect(screen.getAllByRole('link')).toHaveLength(maximum);
+      if (notice) expect(screen.getByRole('status')).toHaveTextContent(`showing the newest ${maximum} of ${total}`);
+      else expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      if (hidden) expect(screen.queryByText(`id${String(matchIndex).padStart(6, '0')}`)).not.toBeInTheDocument();
+      else expect(screen.getByText(`id${String(matchIndex).padStart(6, '0')}`)).toBeInTheDocument();
 
-    // Narrowing to a single match leaves only that row.
-    fireEvent.change(screen.getByLabelText('search sessions'), { target: { value: 'needle' } });
-    expect(screen.getByText('id000059')).toBeInTheDocument();
-    expect(screen.getAllByRole('link')).toHaveLength(1);
+      fireEvent.change(screen.getByLabelText('search sessions'), { target: { value: query } });
+      expect(screen.getByText(`id${String(matchIndex).padStart(6, '0')}`)).toBeInTheDocument();
+      expect(screen.getAllByRole('link')).toHaveLength(1);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      cleanup();
+    }
   });
 
   it('shows the filtered count against the total while searching', () => {

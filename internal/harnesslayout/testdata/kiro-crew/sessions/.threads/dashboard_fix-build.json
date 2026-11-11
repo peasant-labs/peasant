@@ -1,0 +1,1 @@
+{"version": 1, "threads": {"b2c3d4e5f60718293a4b5c6d7e8f90a1": [{"id": "c3d4e5f60718293a4b5c6d7e8f90a1b2", "role": "user", "content": "SENTINEL-KIROCREW-THREAD why the cache?", "ts": "2026-09-20T10:30:00+00:00"}, {"id": "d4e5f60718293a4b5c6d7e8f90a1b2c3", "role": "assistant", "content": "It survives between runs.", "ts": "2026-09-20T10:30:10+00:00"}]}}

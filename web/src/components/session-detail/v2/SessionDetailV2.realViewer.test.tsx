@@ -293,7 +293,7 @@ describe('transcript host preferences and attachments', () => {
     view.unmount();
   });
 
-  it('renders retained images via the local route and leaves published images omitted', async () => {
+  it('renders retained images via the local route and does not request missing images', async () => {
     const fixture = requireRecord(parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/transcript_host_content.yaml'), 'utf8'), 'transcript host content'), 'transcript host content');
     const manifest = requireRecord(parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/transcript_host_content.manifest.yaml'), 'utf8'), 'transcript host manifest'), 'transcript host manifest');
     expect(fixture.requiredNames).toEqual(manifest.requiredNames);
@@ -304,7 +304,7 @@ describe('transcript host preferences and attachments', () => {
     const view = render(<TestDetail />);
     const image = await screen.findByRole('img', { name: /image 1/i });
     expect(image).toHaveAttribute('src', `/api/v1/attachments/${row.ref}`);
-    expect(view.container.querySelector('[data-image-omitted="not_published"]')).toBeInTheDocument();
+    expect(view.container.querySelector('[data-image-omitted="missing"]')).toBeInTheDocument();
     expect(view.container.querySelectorAll('img[src*="/api/v1/attachments/"]')).toHaveLength(1);
   });
 });

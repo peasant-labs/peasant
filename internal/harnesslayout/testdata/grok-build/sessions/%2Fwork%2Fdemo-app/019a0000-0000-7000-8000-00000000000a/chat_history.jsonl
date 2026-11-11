@@ -1,0 +1,11 @@
+{"type":"system","content":"You are a coding agent."}
+{"type":"user","content":[{"type":"text","text":"SECRET-PROMPT-7f3a do not leak this sentence"}],"prompt_index":0}
+{"type":"reasoning","id":"rs-1","summary":[]}
+{"type":"assistant","content":"","tool_calls":[{"id":"call-1","name":"read_file","arguments":"{\"path\":\"src/app.go\"}"}],"model_id":"grok-build-demo"}
+{"type":"tool_result","tool_call_id":"call-1","content":"package main"}
+{"type":"backend_tool_call","kind":{"tool_type":"web_search","id":"ws-1","status":"completed","action":{"type":"search","query":"go http handler"}}}
+{"type":"assistant","content":"Adding the endpoint now.","model_id":"grok-build-demo"}
+{"type":"user","content":[{"type":"text","text":"reminder text"}],"synthetic_reason":"system_reminder"}
+{"type":"user","content":[{"type":"text","text":"Now add a test."}],"prompt_index":1}
+{"type":"assistant","content":"Added.","model_id":"grok-build-demo-fast"}
+{"type":"assistant","content":"partial wri

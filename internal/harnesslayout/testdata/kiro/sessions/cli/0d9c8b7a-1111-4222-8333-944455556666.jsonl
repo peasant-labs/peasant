@@ -1,0 +1,7 @@
+{"version":"1","kind":"Prompt","data":{"message_id":"m1","content":[{"kind":"text","data":"kiro-cli fixture prompt that must never leak"}],"meta":{"timestamp":1772442000}}}
+{"version":"1","kind":"AssistantMessage","data":{"message_id":"m2","content":[{"kind":"thinking","data":{"text":"fixture thinking"}},{"kind":"text","data":"fixture answer"},{"kind":"toolUse","data":{"toolUseId":"t1","name":"read","input":{"path":"fixture.txt"}}}]}}
+{"version":"1","kind":"ToolResults","data":{"message_id":"m3","content":[{"kind":"toolResult","data":{"toolUseId":"t1","content":[{"kind":"text","data":"fixture tool output"}],"status":"success"}}]}}
+{"version":"1","kind":"AssistantMessage","data":{"message_id":"m4","content":[{"kind":"text","data":"fixture follow-up"}]}}
+{"version":"1","kind":"Prompt","data":{"message_id":"m5","content":[{"kind":"text","data":"second fixture prompt"}],"meta":{"timestamp":1772442240}}}
+{"version":"1","kind":"AssistantMessage","data":{"message_id":"m6","content":[{"kind":"text","data":"second fixture answer"}]}}
+{"version":"1","kind":"Clear","data":{}}

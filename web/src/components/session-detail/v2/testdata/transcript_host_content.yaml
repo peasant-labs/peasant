@@ -13,4 +13,5 @@ cases:
           byteSize: 2048
       - type: image
         image:
-          omittedReason: not_published
+          mediaType: image/png
+          omittedReason: missing

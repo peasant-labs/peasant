@@ -35,7 +35,14 @@ files, Pi capture and native-v3 structure cases, and the named index-completion
 and OpenCode native fixture families.
 Existing required-name manifests remain enforced. The OpenCode SQLite builder
 is copied identically into both temporary trees so builder changes cannot be
-mistaken for parser changes. A newly registered harness without observations
+mistaken for parser changes. Each case directory is cleared before a capture, so
+a `-wal`/`-shm` sidecar left by the first capture of a pass cannot be read with
+the second capture's main file.
+
+The base corpus is read with the current strict loader: any base whose corpus
+uses only today's case fields loads, but removing a field -- or adding a required
+one -- makes older bases fail the guard rather than the comparison, so that
+change needs a guard-side migration. A newly registered harness without observations
 fails; add it to the probe using an existing synthetic corpus.
 Historical revisions without Pi do not simulate a Pi parser. When a corpus
 predates Pi, registered Pi parsers use the candidate's first native corpus;
