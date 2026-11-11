@@ -35,7 +35,10 @@ func (st *kickstartSessions) snapshotEvents(sessionID string) []schema.LocalKick
 	var events []schema.LocalKickstartEvent
 	for _, scope := range onboarding.AllModelScopes {
 		sess, ok := st.byScope[scope]
-		if !ok || sess.closed || (sessionID != "" && sess.id != sessionID) {
+		if !ok || sess.closed {
+			continue
+		}
+		if sessionID != "" && sess.id != sessionID {
 			continue
 		}
 		view, err := st.viewLocked(sess)

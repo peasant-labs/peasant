@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/claudesettings"
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
@@ -95,7 +96,7 @@ func newKickstartError(status int, code, format string, args ...any) *kickstartE
 func errKickstartNoSession(id string) *kickstartError {
 	return newKickstartError(http.StatusNotFound, "kickstart_session_not_found",
 		"No setup session has the id %q in internal/api.kickstartSessions. It was never opened, it was saved, or it expired after %s without a change, and a server restart drops every session. Nothing was changed. Open a session again with POST %s.",
-		id, defaultKickstartIdle, "/api/v1/kickstart/sessions")
+		id, defaultKickstartIdle, defaults.RouteKickstartSessions)
 }
 
 func errKickstartCommitting(id string) *kickstartError {
@@ -385,7 +386,10 @@ func (st *kickstartSessions) bumpLocked(sess *kickstartSession) uint64 {
 func (st *kickstartSessions) expire(id string, gen uint64) {
 	st.mutate(func() []schema.LocalKickstartEvent {
 		sess, ok := st.byID[id]
-		if !ok || sess.closed || sess.idleGen != gen || sess.committing {
+		if !ok || sess.closed {
+			return nil
+		}
+		if sess.idleGen != gen || sess.committing {
 			return nil
 		}
 		return []schema.LocalKickstartEvent{st.closeLocked(sess, schema.LocalKickstartClosedExpired, nil)}

@@ -86,7 +86,11 @@ func TestStoreKnownSessions(t *testing.T) {
 			if !reusable {
 				return
 			}
-			if got.GitRemote != row.Want.GitRemote || got.Branch != row.Want.Branch || got.WorkingDirectory() != row.Want.WorkingDirectory || got.Title != row.Want.Title {
+			sameRecord := got.GitRemote == row.Want.GitRemote &&
+				got.Branch == row.Want.Branch &&
+				got.WorkingDirectory() == row.Want.WorkingDirectory &&
+				got.Title == row.Want.Title
+			if !sameRecord {
 				t.Fatalf("recorded values = %+v, want %+v", got, row.Want)
 			}
 		})

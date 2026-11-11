@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -253,21 +254,17 @@ func (st *kickstartSessions) failScanLocked(sess *kickstartSession, cause error)
 // listed fewer sessions than expected explains itself. It is empty when every
 // configured harness was inspected.
 func providerNote(inventory discovery.ProviderInventory) string {
-	harnesses := make([]string, 0, len(inventory))
-	for harness, found := range inventory {
-		if !found.State.IsOperational() {
-			harnesses = append(harnesses, string(harness))
+	notes := make([]string, 0, len(inventory))
+	for _, harness := range slices.Sorted(maps.Keys(inventory)) {
+		found := inventory[harness]
+		if found.State.IsOperational() {
+			continue
 		}
-	}
-	sort.Strings(harnesses)
-	notes := make([]string, 0, len(harnesses))
-	for _, name := range harnesses {
-		found := inventory[defaults.Harness(name)]
 		detail := found.Detail
 		if detail == "" {
 			detail = string(found.State)
 		}
-		notes = append(notes, fmt.Sprintf("%s could not be read: %s", schema.HarnessDisplayName(defaults.Harness(name)), detail))
+		notes = append(notes, fmt.Sprintf("%s could not be read: %s", schema.HarnessDisplayName(harness), detail))
 	}
 	return strings.Join(notes, "; ")
 }
