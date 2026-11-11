@@ -6,6 +6,9 @@ requiredNames:
   - diagnostics-render
   - import-now-disabled-while-running
   - no-hook-install
+  - no-mid-run-ticks-keep-the-running-state-until-the-end-event
+  - the-end-event-with-a-failure-shows-its-error
+  - import-now-refused-shows-its-reason-on-the-panel
 cases:
   - name: auto-publish-link-navigates-to-real-section
     # The href is a section the settings page has; the test checks that against
@@ -112,3 +115,84 @@ cases:
       - expectNoControlMatching: {role: link, pattern: "install a hook|publish now"}
       # The save and the import are the only writes: no hook, no rule, no village call.
       - expectNoCalls: "hooks|auto-publish|/sync/push|/sync/login|/village/"
+
+  # The server pushes only the end of an import: `idle` with counts, or `failed`.
+  # Until then the panel must say the import is running, not that it is stuck.
+  - name: no-mid-run-ticks-keep-the-running-state-until-the-end-event
+    fakeTimers: true
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config]
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [importing, reading your selected sessions]
+      - expectControl: {role: button, name: import now, disabled: true}
+      # Two idle minutes, no event: still running, and nothing was fetched to find out.
+      - advance: 120000
+      - expectText: [importing, reading your selected sessions]
+      - expectNoText: [import finished, import failed]
+      - expectNoCalls: "GET /api/v1/sync/ingest"
+      - push: {kind: ingest, sessionId: ses-full, revision: 3, ingest: {state: idle, new: 12, updated: 3}}
+      - expectText: [import finished]
+      - expectNoText: [reading your selected sessions]
+      - expectControl: {role: button, name: import now, disabled: false}
+
+  - name: the-end-event-with-a-failure-shows-its-error
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config]
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [importing]
+      - push: {kind: ingest, sessionId: ses-full, revision: 3, ingest: {state: failed, error: the store is locked by another process, new: 0, updated: 0}}
+      - expectText: [import failed, the store is locked by another process]
+      - expectNoText: [reading your selected sessions, your setup is not saved]
+      # The save stands: the panel still says so.
+      - expectText: [your setup is saved]
+
+  - name: import-now-refused-shows-its-reason-on-the-panel
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: failed, error: the import could not start, new: 0, updated: 0}
+          nextSteps: [config]
+      "POST /api/v1/sync/ingest": {status: 503, body: {error: config not available}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [import failed, the import could not start]
+      - click: import now
+      - expectCalls: {route: "POST /api/v1/sync/ingest", count: 1}
+      - expectText: [config not available]
+      # It is shown once, on the panel, not also as a page notice.
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-full/commit", count: 1}

@@ -162,7 +162,7 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
         committed={ending.committed}
         ingest={api.ingest ?? ending.committed.ingest}
         importNow={() => void api.importNow()}
-        error={api.commitError}
+        error={api.importError}
       />
     );
   } else if (offerHere) {

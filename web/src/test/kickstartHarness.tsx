@@ -21,6 +21,8 @@ type Json = unknown;
 export interface RouteAnswer {
   status?: number;
   body?: Json;
+  /** A body that is not JSON, sent as written (a proxy's page, a crash's text). */
+  text?: string;
 }
 
 export interface Call {
@@ -131,7 +133,7 @@ export class KickstartServer {
       const index = Math.min(this.used.get(route) ?? 0, answers.length - 1);
       this.used.set(route, (this.used.get(route) ?? 0) + 1);
       const answer = answers[index];
-      return new Response(JSON.stringify(answer.body ?? {}), { status: answer.status ?? 200 });
+      return new Response(answer.text ?? JSON.stringify(answer.body ?? {}), { status: answer.status ?? 200 });
     });
   }
 

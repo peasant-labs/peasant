@@ -1,0 +1,212 @@
+# A save the server did not make, and a session the server no longer has. The
+# server answers with `{error, code}`: what happened, why, and what to do. The
+# page shows that text as sent, stays on the review so the save can be tried
+# again, and moves to the finish panel only for a save that happened. Bodies
+# below are the server's own words for each code.
+requiredNames:
+  - invalid-answer-is-shown-and-nothing-moves
+  - unreadable-config-is-shown-and-the-save-can-be-retried
+  - unwritable-config-is-shown
+  - busy-config-is-shown-and-the-save-can-be-retried
+  - changing-config-is-shown
+  - a-body-that-is-not-json-is-shown-as-text
+  - an-envelope-with-no-reason-gets-a-sentence-that-says-what-to-do
+  - saving-a-session-the-server-forgot-ends-it
+  - answering-a-session-the-server-forgot-ends-it
+  - a-retry-after-a-refused-save-saves
+cases:
+  - name: invalid-answer-is-shown-and-nothing-moves
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        status: 400
+        body:
+          code: kickstart_commit_refused
+          error: "The setup was not saved in internal/api.kickstartHandler.handleCommit: the selection names no session. Nothing was changed. Correct the answer the message names, then save again."
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText:
+          - The setup was not saved
+          - the selection names no session
+          - Correct the answer the message names, then save again.
+      # Nothing moved: still the review, still savable, no finish panel, no conflict notice.
+      - expectNoText: [your setup is saved, nothing was saved]
+      - expectControl: {role: button, name: save and import, disabled: false}
+
+  - name: unreadable-config-is-shown-and-the-save-can-be-retried
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        status: 500
+        body:
+          code: kickstart_config_unreadable
+          error: "The setup was not saved because the configuration file could not be read in internal/api.kickstartHandler.handleCommit: yaml: line 3: mapping values are not allowed here. Nothing was changed. Fix or restore the file, then save again."
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [the configuration file could not be read, Fix or restore the file, then save again.]
+      - expectNoText: [your setup is saved]
+      - expectControl: {role: button, name: save and import, disabled: false}
+
+  - name: unwritable-config-is-shown
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        status: 500
+        body:
+          code: kickstart_config_unwritable
+          error: "The setup was not saved because the configuration file could not be written in internal/api.kickstartHandler.handleCommit: permission denied. The previous file is unchanged. Fix the directory's permissions or free space, then save again."
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [the configuration file could not be written, The previous file is unchanged, Fix the directory's permissions or free space]
+      - expectNoText: [your setup is saved]
+
+  - name: busy-config-is-shown-and-the-save-can-be-retried
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        status: 503
+        body:
+          code: kickstart_config_busy
+          error: "The setup was not saved because another change holds the configuration file in internal/api.kickstartHandler.handleCommit: lock timeout. Nothing was changed. Wait for it to finish, then save again."
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [another change holds the configuration file, Wait for it to finish, then save again.]
+      - expectNoText: [your setup is saved]
+      - expectControl: {role: button, name: save and import, disabled: false}
+
+  - name: changing-config-is-shown
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        status: 503
+        body:
+          code: kickstart_config_changing
+          error: "The setup was not saved because the configuration file kept changing in internal/api.kickstartHandler.handleCommit: changed 3 times. Nothing was written. Stop the other program that edits it, then save again."
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [the configuration file kept changing, Stop the other program that edits it, then save again.]
+      - expectNoText: [your setup is saved]
+
+  - name: a-body-that-is-not-json-is-shown-as-text
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit": {status: 502, text: "bad gateway: the upstream refused the save"}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: ["bad gateway: the upstream refused the save"]
+      - expectNoText: [your setup is saved]
+
+  - name: an-envelope-with-no-reason-gets-a-sentence-that-says-what-to-do
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit": {status: 500, body: {error: "   "}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: ["the server gave no reason; retry, then check the peasant server log"]
+      - expectNoText: [your setup is saved]
+
+  - name: saving-a-session-the-server-forgot-ends-it
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        status: 404
+        body:
+          code: kickstart_session_not_found
+          error: "No setup session has the id \"ses-full\" in internal/api.kickstartSessions. It was never opened, it was saved, or it expired after 30m0s without a change, and a server restart drops every session. Nothing was changed. Open a session again with POST /api/v1/kickstart/sessions."
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      # The session is gone: the page says so and offers a new one, not a retry.
+      - expectText: [this setup session timed out]
+      - expectControl: {role: button, name: open a new setup}
+      - expectControl: {role: button, name: save and import, present: false}
+
+  - name: answering-a-session-the-server-forgot-ends-it
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full":
+        status: 404
+        body:
+          code: kickstart_session_not_found
+          error: "No setup session has the id \"ses-full\" in internal/api.kickstartSessions. Nothing was changed. Open a session again with POST /api/v1/kickstart/sessions."
+    steps:
+      - click: continue
+      - click: continue
+      - choose: plan to publish later
+      - expectText: [this setup session timed out]
+      - expectControl: {role: button, name: open a new setup}
+
+  - name: a-retry-after-a-refused-save-saves
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        - status: 503
+          body:
+            code: kickstart_config_busy
+            error: "The setup was not saved because another change holds the configuration file in internal/api.kickstartHandler.handleCommit: lock timeout. Nothing was changed. Wait for it to finish, then save again."
+        - body:
+            saved: true
+            configPath: /home/ada/.config/peasant/config.yaml
+            ingest: {state: running, new: 0, updated: 0}
+            nextSteps: [config, web-start]
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [another change holds the configuration file]
+      - click: save and import
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-full/commit", count: 2}
+      - expectText: [your setup is saved]
+      # The error of the refused save is gone with the refused save.
+      - expectNoText: [another change holds the configuration file]

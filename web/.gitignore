@@ -56,3 +56,7 @@ package-lock.json
 # Persistent inode and immutable ownership record for the focused binary journey.
 /.collective-observations-owner/
 /.collective-observations-owner.gate
+
+# The same, for the setup journey.
+/.kickstart-journey-owner/
+/.kickstart-journey-owner.gate

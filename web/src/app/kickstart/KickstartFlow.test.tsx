@@ -21,6 +21,7 @@ afterEach(teardown);
 const FILES = {
   'the live session': 'src/app/kickstart/testdata/live_session.yaml',
   'the finish panel': 'src/app/kickstart/testdata/finish.yaml',
+  'a save that was refused': 'src/app/kickstart/testdata/commit_failures.yaml',
   'the village sign-in': 'src/app/kickstart/testdata/village.yaml',
   'the privacy example': 'src/app/kickstart/testdata/privacy.yaml',
 } as const;

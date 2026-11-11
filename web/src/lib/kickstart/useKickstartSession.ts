@@ -93,6 +93,8 @@ export interface KickstartSessionApi {
   readonly refusal: readonly KickstartConflict[];
   readonly committing: boolean;
   readonly commitError: Error | null;
+  /** Why "import now" did not start an import, until the next try. */
+  readonly importError: Error | null;
   /** Why the last answer was refused, until the next answer. */
   readonly answerError: Error | null;
   /** Answers sent and not yet settled. */
@@ -117,6 +119,14 @@ export interface KickstartSessionApi {
 
 function asError(failure: unknown): Error {
   return failure instanceof Error ? failure : new Error(String(failure));
+}
+
+/**
+ * Whether a refusal says the server no longer has this session: it timed out,
+ * was saved elsewhere, or the server restarted. Every such request is a 404.
+ */
+function sessionIsGone(failure: unknown): boolean {
+  return failure instanceof KickstartRequestError && failure.status === 404;
 }
 
 /**
@@ -146,6 +156,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
   const [refusal, setRefusal] = useState<readonly KickstartConflict[]>([]);
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<Error | null>(null);
+  const [importError, setImportError] = useState<Error | null>(null);
   const [answerError, setAnswerError] = useState<Error | null>(null);
   const [pending, setPending] = useState(0);
 
@@ -291,6 +302,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     setOverwritten([]);
     setRefusal([]);
     setCommitError(null);
+    setImportError(null);
     setAnswerError(null);
     setIngest(null);
     setTree(null);
@@ -363,7 +375,10 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
         if (result.view !== null) takeSession(result.view);
         return true;
       } catch (failure) {
-        if (alive.current && mine === generation.current) setAnswerError(asError(failure));
+        if (alive.current && mine === generation.current) {
+          if (sessionIsGone(failure)) finish(KickstartCloseReason.Expired, null);
+          else setAnswerError(asError(failure));
+        }
         return false;
       } finally {
         if (alive.current) setPending((count) => count - 1);
@@ -371,7 +386,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     });
     writes.current = run.then(() => undefined);
     return run;
-  }, [takeSession]);
+  }, [finish, takeSession]);
 
   const answer = useCallback(
     (key: string, value: LocalSettingValue) => write((revision) => ({ revision, values: { [key]: value } })),
@@ -404,6 +419,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     } catch (failure) {
       if (!alive.current || mine !== generation.current) return;
       if (failure instanceof KickstartCommitRefused) setRefusal(failure.conflicts);
+      else if (sessionIsGone(failure)) finish(KickstartCloseReason.Expired, null);
       else setCommitError(asError(failure));
     } finally {
       if (alive.current) setCommitting(false);
@@ -418,11 +434,15 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
       const accepted = await scanKickstartSession(id);
       if (alive.current && mine === generation.current) takeScan(accepted, Math.max(scanRevision.current, viewRevision.current));
     } catch (failure) {
-      if (alive.current && mine === generation.current) setAnswerError(asError(failure));
+      if (alive.current && mine === generation.current) {
+        if (sessionIsGone(failure)) finish(KickstartCloseReason.Expired, null);
+        else setAnswerError(asError(failure));
+      }
     }
-  }, [takeScan]);
+  }, [finish, takeScan]);
 
   const importNow = useCallback(async (): Promise<void> => {
+    setImportError(null);
     try {
       await startKickstartImport();
       if (!alive.current) return;
@@ -430,7 +450,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
       // pushes every change after this.
       takeIngest({ state: KickstartIngestState.Running, note: null, error: null, new: 0, updated: 0 });
     } catch (failure) {
-      if (alive.current) setCommitError(asError(failure));
+      if (alive.current) setImportError(asError(failure));
     }
   }, [takeIngest]);
 
@@ -450,6 +470,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     refusal,
     committing,
     commitError,
+    importError,
     answerError,
     pending,
     answer,
