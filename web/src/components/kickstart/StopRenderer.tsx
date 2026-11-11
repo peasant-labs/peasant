@@ -1,5 +1,6 @@
 'use client';
 
+import type { KickstartCopy } from '@/lib/kickstart/copy';
 import type { KickstartSession, KickstartStop } from '@/lib/kickstart/model';
 import type { KickstartSessionApi } from '@/lib/kickstart/useKickstartSession';
 import type { VillageSignIn } from '@/lib/kickstart/useVillageSignIn';
@@ -20,12 +21,15 @@ export function StopRenderer({
   stop,
   session,
   api,
+  copy,
   signIn,
   answeredConnection,
 }: {
   stop: KickstartStop;
   session: KickstartSession;
   api: KickstartSessionApi;
+  /** The words this scope uses for the review's conflict rows. */
+  copy: KickstartCopy;
   signIn: VillageSignIn;
   /** Called once the connection question's answer has been recorded. */
   answeredConnection: () => void;
@@ -50,7 +54,7 @@ export function StopRenderer({
       )}
 
       {stop.kind === KickstartStopKind.Review ? (
-        <ReviewStep stop={stop} session={session} api={api} />
+        <ReviewStep stop={stop} session={session} api={api} copy={copy} />
       ) : (
         stop.fields.map((field) => {
           if (field.kind === KickstartFieldKind.Tree) return <SelectionStep key={field.key} field={field} api={api} />;

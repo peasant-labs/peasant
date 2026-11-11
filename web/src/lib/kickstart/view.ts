@@ -146,10 +146,94 @@ export function describeValue(value: LocalSettingValue, field?: KickstartField):
   return JSON.stringify(value);
 }
 
-/** One conflict row's two sides, labelled for the page. */
-export function conflictSides(session: KickstartSession, row: KickstartConflict): { mine: string; theirs: string } {
+/**
+ * One side of a conflict row, ready to draw. A scalar is a phrase; an object or
+ * an array is the server's value written out as indented key and value lines.
+ * Exactly one of the two is set.
+ */
+export interface ConflictValue {
+  /** The phrase for a scalar, or null for a structured value. */
+  readonly phrase: string | null;
+  /** The structured value as YAML-style lines, in the order the server sent it; empty for a scalar. */
+  readonly lines: readonly string[];
+}
+
+/** A structured value longer than this many lines is drawn collapsed. */
+export const CONFLICT_BLOCK_OPEN_LINES = 8;
+
+const PLAIN_KEY = /^[A-Za-z0-9_][A-Za-z0-9_./@-]*$/;
+// A string that would read as another type, or that needs its quotes to be read as it is.
+const AMBIGUOUS_STRING = /^(?:true|false|null|~|[-+]?\d+(?:\.\d+)?)$|^\s|\s$|[\n\r\t]|: | #|^[-?:,[\]{}#&*!|>'"%@`]/i;
+
+function scalarText(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return value === '' || AMBIGUOUS_STRING.test(value) ? JSON.stringify(value) : value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value) ?? String(value);
+}
+
+function isStructured(value: unknown): value is Record<string, unknown> | readonly unknown[] {
+  return value !== null && typeof value === 'object';
+}
+
+function isEmpty(value: Record<string, unknown> | readonly unknown[]): boolean {
+  return Array.isArray(value) ? value.length === 0 : Object.keys(value).length === 0;
+}
+
+/** A scalar's text, or `{}` or `[]` for an empty structure: what stands after `key:` or `-` on one line. */
+function inlineText(value: unknown): string {
+  if (!isStructured(value)) return scalarText(value);
+  return Array.isArray(value) ? '[]' : '{}';
+}
+
+function emit(value: Record<string, unknown> | readonly unknown[], indent: string, out: string[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (!isStructured(item) || isEmpty(item)) {
+        out.push(`${indent}- ${inlineText(item)}`);
+        continue;
+      }
+      // The first line of a nested structure shares the dash line, as YAML writes it.
+      const nested: string[] = [];
+      emit(item, `${indent}  `, nested);
+      out.push(`${indent}- ${nested[0].slice(indent.length + 2)}`, ...nested.slice(1));
+    }
+    return;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    const name = PLAIN_KEY.test(key) ? key : JSON.stringify(key);
+    if (!isStructured(entry) || isEmpty(entry)) {
+      out.push(`${indent}${name}: ${inlineText(entry)}`);
+      continue;
+    }
+    out.push(`${indent}${name}:`);
+    emit(entry, `${indent}  `, out);
+  }
+}
+
+/**
+ * An object or an array as readable lines, in the order the server sent it:
+ * `key: value`, nested keys indented two spaces, list items led by `- `. It is
+ * display formatting only. Nothing is counted, reordered, merged or reread as a
+ * selection rule.
+ */
+export function structuredLines(value: Record<string, unknown> | readonly unknown[]): readonly string[] {
+  if (isEmpty(value)) return [inlineText(value)];
+  const out: string[] = [];
+  emit(value, '', out);
+  return out;
+}
+
+/** How one side of a conflict row is drawn: a scalar as a phrase, a structure as lines. */
+export function conflictValue(value: LocalSettingValue, field?: KickstartField): ConflictValue {
+  if (isStructured(value)) return { phrase: null, lines: structuredLines(value) };
+  return { phrase: describeValue(value, field), lines: [] };
+}
+
+/** One conflict row's two sides, ready to draw. */
+export function conflictSides(session: KickstartSession, row: KickstartConflict): { mine: ConflictValue; theirs: ConflictValue } {
   const field = fieldByKey(session, row.field)?.field;
-  return { mine: describeValue(row.mine, field), theirs: describeValue(row.theirs, field) };
+  return { mine: conflictValue(row.mine, field), theirs: conflictValue(row.theirs, field) };
 }
 
 /**

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { Button, Spinner } from '@/lib/ft-ui';
+import type { KickstartCopy } from '@/lib/kickstart/copy';
 import type { KickstartCommitted, KickstartIngest } from '@/lib/kickstart/model';
 import { KickstartIngestState } from '@/lib/kickstart/values';
 
@@ -14,11 +15,13 @@ const countFormat = new Intl.NumberFormat('en-US');
  * installs a hook, none publishes, and no control here does either.
  */
 export function FinishPanel({
+  copy,
   committed,
   ingest,
   importNow,
   error,
 }: {
+  copy: KickstartCopy;
   committed: KickstartCommitted;
   ingest: KickstartIngest;
   importNow: () => void;
@@ -28,7 +31,7 @@ export function FinishPanel({
   return (
     <section className="ks-finish" aria-labelledby="ks-finish-title">
       <h2 className="ks-title" id="ks-finish-title">
-        your setup is saved
+        {copy.saved}
       </h2>
       <p className="ks-intro">
         saved to <code>{committed.configPath}</code>. nothing was published and no hook was installed.
