@@ -125,6 +125,9 @@ type Server struct {
 	// kickstartTune lets a test replace members of the session environment
 	// before the sessions are created. Production leaves it nil.
 	kickstartTune func(*kickstartEnv)
+	// syncTune lets a test replace members of the sync handler before its routes
+	// are mounted. Production leaves it nil.
+	syncTune func(*syncHandler)
 
 	// bg tracks background tasks spawned by request handlers (WebSocket
 	// broadcasts after a mutation). Shutdown drains it so no task can touch
@@ -255,6 +258,12 @@ func (s *Server) Listen(ctx context.Context) error {
 		dataHome:    s.cfg.DataHome,
 		stateHome:   s.cfg.StateHome,
 	}
+	// The import reports its state to the saved setup sessions that wait for it.
+	kickstartFeed := newKickstartImportFeed()
+	sh.kickstartFeed = kickstartFeed
+	if s.syncTune != nil {
+		s.syncTune(sh)
+	}
 	// The grouped sync chooser view registers the exact sync predicate on the
 	// same member seam the sessions and search routes use, so expanding a sync
 	// helper group replays the sync route rather than another route's set.
@@ -319,7 +328,11 @@ func (s *Server) Listen(ctx context.Context) error {
 	if s.hub != nil {
 		s.hub.attachKickstart(s.kickstart)
 	}
-	registerKickstartRoutes(mux, &kickstartHandler{sessions: s.kickstart, configPath: s.cfg.ConfigPath})
+	registerKickstartRoutes(mux, &kickstartHandler{
+		sessions:   s.kickstart,
+		configPath: s.cfg.ConfigPath,
+		commit:     &kickstartCommitter{sessions: s.kickstart, ingest: sh, live: s.live, catalog: catalog, feed: kickstartFeed},
+	})
 
 	// Static assets or dev proxy
 	if s.cfg.DevMode && s.cfg.DevProxyAddr != "" {

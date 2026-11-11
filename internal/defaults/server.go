@@ -154,6 +154,8 @@ const (
 	RouteKickstartPreview Route = "/api/v1/kickstart/sessions/{id}/tree/{nodeId}/preview"
 	// RouteKickstartScan restarts the discovery scan of a session (POST).
 	RouteKickstartScan Route = "/api/v1/kickstart/sessions/{id}/scan"
+	// RouteKickstartCommit saves a session's answers and starts the import (POST).
+	RouteKickstartCommit Route = "/api/v1/kickstart/sessions/{id}/commit"
 )
 
 // DevProxy is the default dev-mode proxy address for the Next.js dev server.

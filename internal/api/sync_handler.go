@@ -67,6 +67,13 @@ type syncHandler struct {
 	// sessionIngest is set while a one-session re-index runs, so it and the
 	// whole-machine ingest never run at once in this process.
 	sessionIngest bool
+
+	// kickstartFeed carries the import's state to the finish panels of saved
+	// setup sessions. Nil publishes nothing.
+	kickstartFeed *kickstartImportFeed
+	// ingestRun runs one whole-machine import. Nil runs the pipeline. A test
+	// replaces it to hold a run or to observe what it starts with.
+	ingestRun func(*ingest.ProgressState)
 }
 
 // configDir resolves the config directory this handler reads and writes under,
@@ -1109,16 +1116,75 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
-	if h.currentConfig() == nil {
+	start, launch, err := h.reserveIngest(false)
+	switch {
+	case errors.Is(err, errIngestNoConfig):
 		writeJSONError(w, http.StatusServiceUnavailable, "config not available")
 		return
+	case err != nil:
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	case start.AlreadyRunning:
+		writeJSONError(w, http.StatusConflict, "ingest already running")
+		return
+	}
+	// A saved setup session whose finish panel is waiting for an import (it was
+	// told one was already running, or could not start) watches this run too.
+	launch(h.kickstartFeed.observer(nil))
+	h.kickstartFeed.announce(schema.LocalKickstartIngest{State: schema.LocalKickstartIngestRunning})
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "running"})
+}
+
+// errIngestNoConfig is the refusal to import without a configuration.
+var errIngestNoConfig = errors.New("config not available")
+
+// IngestStart is what StartIngest did. Exactly one of Started and AlreadyRunning
+// is true when the error is nil. State is the import's status then: running.
+type IngestStart struct {
+	Started        bool
+	AlreadyRunning bool
+	State          string
+}
+
+// StartIngest begins the whole-machine import POST /api/v1/sync/ingest runs, or
+// reports that one is already running. It refuses to begin, with the reason, when
+// the configuration it would import under cannot be applied: an invalid saved
+// selection or a redaction level this version cannot apply. observe, when it is
+// not nil, receives the import's final state from the run's goroutine: idle with
+// the counts of sessions written, or failed with the reason.
+func (h *syncHandler) StartIngest(observe func(schema.LocalKickstartIngest)) (IngestStart, error) {
+	start, launch, err := h.reserveIngest(true)
+	if launch != nil {
+		launch(observe)
+	}
+	return start, err
+}
+
+// reserveIngest claims the import. It does what StartIngest does except run it:
+// the claim is made (a request that arrives now finds an import running) and the
+// returned launch starts the run. launch is nil unless the import was started.
+// A caller that must publish something before the import can speak, such as the
+// end of a saved setup session, launches after it has.
+//
+// preflight false keeps the route's long-standing behavior: a configuration that
+// cannot be applied is reported by the run, in the status route, not by the
+// request that started it.
+func (h *syncHandler) reserveIngest(preflight bool) (IngestStart, func(observe func(schema.LocalKickstartIngest)), error) {
+	cfg := h.currentConfig()
+	if cfg == nil {
+		return IngestStart{}, nil, errIngestNoConfig
+	}
+	if preflight {
+		if err := checkIngestable(cfg); err != nil {
+			return IngestStart{}, nil, err
+		}
 	}
 
 	h.mu.Lock()
 	if h.ingestStatus == "running" || h.sessionIngest {
 		h.mu.Unlock()
-		writeJSONError(w, http.StatusConflict, "ingest already running")
-		return
+		return IngestStart{AlreadyRunning: true, State: "running"}, nil, nil
 	}
 
 	progState := ingest.NewProgressState()
@@ -1128,9 +1194,61 @@ func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 	h.ingestError = nil
 	h.mu.Unlock()
 
-	go h.runIngestPipeline(progState)
+	launch := func(observe func(schema.LocalKickstartIngest)) {
+		run := h.ingestRun
+		if run == nil {
+			run = h.runIngestPipeline
+		}
+		go func() {
+			run(progState)
+			if observe != nil {
+				observe(h.ingestWire())
+			}
+		}()
+	}
+	return IngestStart{Started: true, State: "running"}, launch, nil
+}
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "running"})
+// ingestWire is the finished import as the kickstart topic reports it: idle with
+// the counts of sessions written, or failed with the reason.
+func (h *syncHandler) ingestWire() schema.LocalKickstartIngest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.ingestStatus == "error" || h.ingestError != nil {
+		message := "the import ended without a reason"
+		if h.ingestError != nil {
+			message = h.ingestError.Error()
+		}
+		return schema.LocalKickstartIngest{State: schema.LocalKickstartIngestFailed, Error: message}
+	}
+	wire := schema.LocalKickstartIngest{State: schema.LocalKickstartIngestIdle}
+	if h.ingestResult != nil {
+		wire.New, wire.Updated = h.ingestResult.Summary.New, h.ingestResult.Summary.Updated
+	}
+	return wire
+}
+
+// checkIngestable refuses a configuration the import cannot apply, before any
+// source is read: an invalid saved selection, or a redaction level this version
+// cannot apply.
+func checkIngestable(cfg *config.Config) error {
+	if err := config.ValidateSelection(cfg.Selection); err != nil {
+		return fmt.Errorf("web ingest: invalid saved selection while preparing the pipeline in internal/api.newIngestPipeline: %w; no source was read or imported; run `peasant kickstart` to repair the saved selection, then retry", err)
+	}
+	// Refuse an import under a level this version cannot apply, rather than
+	// storing transcripts the user believes were anonymised at import time. No
+	// supported level redacts while ingest writes: that is the deferred redaction
+	// model, and redaction happens on the way out.
+	if !config.RedactionLevelSupported(cfg.Redaction.Level) {
+		return &config.UnsupportedRedactionLevelError{
+			Level:     cfg.Redaction.Level,
+			Source:    "the loaded configuration",
+			Operation: "the web ingest",
+			Step:      "before any transcript was read or written",
+			Impact:    "Nothing was imported and nothing already imported was changed.",
+		}
+	}
+	return nil
 }
 
 // --------------------------------------------------------------------------
@@ -1393,8 +1511,8 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	if cfg == nil {
 		return nil, nil, nil, fmt.Errorf("config not available")
 	}
-	if err := config.ValidateSelection(cfg.Selection); err != nil {
-		return nil, nil, nil, fmt.Errorf("web ingest: invalid saved selection while preparing the pipeline in internal/api.newIngestPipeline: %w; no source was read or imported; run `peasant kickstart` to repair the saved selection, then retry", err)
+	if err := checkIngestable(cfg); err != nil {
+		return nil, nil, nil, err
 	}
 	fs := &ingest.OSFileSystem{}
 	git := &ingest.ExecGitResolver{}
@@ -1455,20 +1573,6 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		pipelineCfg.CommandPrefix = githooks.CommandPrefix(githooks.Binding{DataDir: string(h.dataDir())})
 		pipelineCfg.Harness = &scope.harness
 		pipelineCfg.Force = true
-	}
-
-	// Refuse an import under a level this version cannot apply, rather than
-	// storing transcripts the user believes were anonymised at import time. No
-	// supported level redacts while ingest writes: that is the deferred redaction
-	// model, and redaction happens on the way out.
-	if !config.RedactionLevelSupported(cfg.Redaction.Level) {
-		return nil, nil, nil, &config.UnsupportedRedactionLevelError{
-			Level:     cfg.Redaction.Level,
-			Source:    "the loaded configuration",
-			Operation: "the web ingest",
-			Step:      "before any transcript was read or written",
-			Impact:    "Nothing was imported and nothing already imported was changed.",
-		}
 	}
 
 	// Open DB and wire analytics stages.
