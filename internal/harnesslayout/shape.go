@@ -63,6 +63,9 @@ type ArtifactShape struct {
 	Truncated bool `json:"truncated,omitempty"`
 	// Malformed counts records that did not decode.
 	Malformed int `json:"malformed,omitempty"`
+	// Bytes is the total size of the files of an artifact that the probe
+	// sizes without reading. Records then counts those files.
+	Bytes int64 `json:"bytes,omitempty"`
 }
 
 // ShapeRecorder accumulates an ArtifactShape. The zero value is not usable;
