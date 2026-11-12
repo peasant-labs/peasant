@@ -364,7 +364,9 @@ func checkInputs(model Model, answers Answers, resolutions Resolutions, refuse f
 // ReviewResult is the preview of a save: the conflict rows and the structured
 // diff of what the file would become, computed with the same chain a commit runs.
 type ReviewResult struct {
-	// Conflicts are every answered field whose file value moved, resolved or not.
+	// Conflicts are every field the save writes whose file value moved, resolved
+	// or not: the fields the draft answered, and the ones another answer moves as
+	// a side effect.
 	Conflicts []schema.LocalKickstartConflict
 	// Unresolved are the fields among Conflicts that still need a choice.
 	Unresolved []FieldKey

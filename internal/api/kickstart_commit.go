@@ -123,7 +123,7 @@ func (c *kickstartCommitter) refuse(w http.ResponseWriter, id string, rows []sch
 		slog.Warn("kickstart: the conflict rows of a refused save were not published", "session", id, "error", publishErr)
 	}
 	refusal := schema.LocalKickstartCommitRefusal{
-		Error:     fmt.Sprintf("The setup was not saved because %d answered setting(s) changed in the configuration file since this session opened, in internal/api.kickstartHandler.handleCommit. Nothing was written. Choose mine or theirs for each row, then save again.", len(rows)),
+		Error:     fmt.Sprintf("The setup was not saved because %d setting(s) the save writes changed in the configuration file since this session opened, in internal/api.kickstartHandler.handleCommit. Nothing was written. Choose mine or theirs for each row, then save again.", len(rows)),
 		Conflicts: append([]schema.LocalKickstartConflict{}, rows...),
 	}
 	writeContractStatus(w, http.StatusConflict, &refusal, "Nothing was written. Retry; if it repeats, report it.")
