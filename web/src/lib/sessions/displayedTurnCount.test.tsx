@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Harness } from '@peasant-labs/schema';
 import type { SessionSummary } from '@/types/messages';
 import type { QualitySession } from '@/lib/quality/types';
@@ -11,6 +12,8 @@ import { QualityFixtureName, qualityFixture } from '@/test/fixtures/quality';
 import { adaptAnalytics } from '@/lib/adapters/analytics';
 import { AllSessions } from '@/components/sessions/AllSessions';
 import { GroupedSessionsSection } from '@/components/sessions/GroupedSessionsSection';
+import { ProjectRail } from '@/app/map/[[...segments]]/MapRail';
+import type { ProjectHash } from '@/lib/navigation/projectRoutes';
 import { displayedTurnCount } from './displayedTurnCount';
 
 const DIR = 'src/lib/sessions/testdata';
@@ -58,6 +61,9 @@ function summary(row: CountCase): SessionSummary {
   } as SessionSummary;
 }
 
+/** A count beside its unit, as the helper rows and the code-map rail print it. */
+const turnsLabel = (count: number) => `${count} ${count === 1 ? 'turn' : 'turns'}`;
+
 function cellTexts(): string[] {
   const row = screen.getAllByRole('row').find((candidate) => within(candidate).queryAllByRole('cell').length > 0);
   if (!row) throw new Error('the session list rendered no body row');
@@ -99,6 +105,49 @@ describe('the turn count a session list prints', () => {
       const cells = cellTexts();
       expect(cells).toContain(row.printed);
       if (row.notPrinted != null) expect(cells).not.toContain(row.notPrinted);
+    });
+
+    it('prints it on a grouped helper row', async () => {
+      // The owner's own counts are equal and unlike every fixture count, so
+      // only the helper member can print the number under test.
+      const owner = { ...summary(row), id: 'count-owner', turnCount: 3, conversationTurnCount: 3 };
+      const list = {
+        page: 1, perPage: 25, total: 1, nextItems: [], revision: '0', ordinarySessionTotal: 1, helperThreadTotal: 1,
+        items: [{
+          kind: 'transcript',
+          transcript: { session: owner },
+          helperGroups: [{ groupId: 'hg_count', purpose: 'helper_review', helperThreadCount: 1, memberScope: 'scope-count' }],
+        }],
+      };
+      const members = { members: [{ kind: 'transcript', transcript: { session: summary(row) } }], nextItems: [], page: 1, perPage: 25, total: 1, revision: '0' };
+      vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => Promise.resolve({
+        ok: true,
+        json: async () => (new URL(String(input)).pathname.endsWith('/members') ? members : list),
+      } as Response)));
+      render(<GroupedSessionsSection variant="sessions" heading="all sessions" />);
+      await userEvent.click(await screen.findByText('1 helper thread'));
+      await waitFor(() => expect(document.querySelector('[data-thread-id="count-r1"]')).not.toBeNull());
+      const facts = [...document.querySelectorAll('[data-thread-id="count-r1"] .helper-thread-facts > span')].map((fact) => fact.textContent?.trim() ?? '');
+      expect(facts).toContain(turnsLabel(row.want));
+      if (row.notPrinted != null) expect(facts).not.toContain(turnsLabel(row.turnCount));
+    });
+
+    it('prints it in the code-map conversation list', () => {
+      render(
+        <ProjectRail
+          projectHash={PROJECT_HASH as ProjectHash}
+          projectName="tmp"
+          sessions={[summary(row)]}
+          coverage={null}
+          recentTasks={[]}
+          recentTasksError={null}
+          nowMs={Date.parse('2026-08-12T15:00:00.000Z')}
+        />,
+      );
+      const link = screen.getByRole('link', { name: 'Open the conversation count-r1' });
+      const facts = [...link.querySelectorAll('span > span')].map((fact) => fact.textContent?.trim() ?? '');
+      expect(facts).toContain(turnsLabel(row.want));
+      if (row.notPrinted != null) expect(facts).not.toContain(turnsLabel(row.turnCount));
     });
 
     it('feeds it to the analytics record', () => {

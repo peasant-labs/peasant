@@ -35,6 +35,8 @@ export interface GroupedSyncSessionSpec {
   durationMins: number;
   totalTokens: number;
   turnCount: number;
+  /** Measured conversation turns; left off the wire when absent. */
+  conversationTurnCount?: number;
   toolCallCount?: number;
   project?: string;
   /** Symbolic project key, or an already-canonical 64-character digest. */
@@ -99,6 +101,7 @@ function transcriptItem(session: GroupedSyncSessionSpec) {
         durationMins: session.durationMins,
         totalTokens: session.totalTokens,
         turnCount: session.turnCount,
+        ...(session.conversationTurnCount === undefined ? {} : { conversationTurnCount: session.conversationTurnCount }),
         toolCallCount: session.toolCallCount ?? 0,
         project: session.project,
         projectHash,
@@ -116,6 +119,8 @@ function transcriptItem(session: GroupedSyncSessionSpec) {
         durationMs: Math.round(session.durationMins * 60000),
         totalTokens: session.totalTokens,
         turnCount: session.turnCount,
+        // The sync mirror states the same counts as the session row.
+        ...(session.conversationTurnCount === undefined ? {} : { conversationTurnCount: session.conversationTurnCount }),
         model: session.model ?? 'fixture-model',
         inputSubmissionCount: session.inputSubmissionCount,
         syncStatus: session.syncStatus ?? 'new',
