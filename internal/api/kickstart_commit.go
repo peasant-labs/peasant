@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -163,12 +162,10 @@ func (c *kickstartCommitter) finish(w http.ResponseWriter, id string, result onb
 		slog.Warn("kickstart: the saved session could not be closed", "session", id, "error", closeErr)
 		finish = c.sessions.finishFor(id)
 	}
-	switch body.Ingest.State {
-	case schema.LocalKickstartIngestBusy, schema.LocalKickstartIngestFailed:
-		c.feed.wait(finish)
-	case schema.LocalKickstartIngestRunning:
-		launch(c.feed.observer(finish))
-		c.feed.announce(schema.LocalKickstartIngest{State: schema.LocalKickstartIngestRunning})
+	// The session is committed, so every import from here on reports to it: this
+	// one, and the ones "import now" starts after a busy or failed start.
+	if body.Ingest.State == schema.LocalKickstartIngestRunning {
+		c.feed.run(launch, finish)
 	}
 
 	// The same gate every answer passes, with the same refusal a refused save gets:
@@ -254,91 +251,53 @@ func writeContractStatus(w http.ResponseWriter, status int, value contractValue,
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-// kickstartImportFeed carries an import's state to the saved sessions that wait
-// for one. A session waits when its commit found an import already running, or
-// could not start one: its finish panel offers "import now", and the import that
-// answers it (or any import that starts meanwhile) imports the selection this
-// session saved. The import's events are published under the session id, so they
-// need no open session.
+// kickstartImportFeed carries an import's state to every saved setup session
+// that can still hear it. One rule: a run that starts while a committed
+// session's finish publisher exists reports its start and its end on the topic
+// under that session's id. The commit's own import, an import the finish panel's
+// "import now" starts, and an import any other caller starts all take the same
+// path, so a panel never waits for an end that only one of them would push. The
+// publishers are the session store's own, kept for the most recent
+// kickstartFinishedKept committed sessions, so the set is bounded and ages out
+// with them. A run reports to the sessions that exist when it starts and to no
+// others: an import that began before a session saved says nothing about the
+// selection that session saved.
 type kickstartImportFeed struct {
-	mu      sync.Mutex
-	waiting map[string]*kickstartFinish
-	order   []string
+	sessions *kickstartSessions
 }
 
-func newKickstartImportFeed() *kickstartImportFeed {
-	return &kickstartImportFeed{waiting: map[string]*kickstartFinish{}}
+func newKickstartImportFeed() *kickstartImportFeed { return &kickstartImportFeed{} }
+
+// attach gives the feed the session store whose committed sessions it reports to.
+func (f *kickstartImportFeed) attach(sessions *kickstartSessions) {
+	if f != nil {
+		f.sessions = sessions
+	}
 }
 
-// wait records a saved session whose import has not started for it.
-func (f *kickstartImportFeed) wait(finish *kickstartFinish) {
-	if f == nil || finish == nil {
-		return
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if _, ok := f.waiting[finish.SessionID()]; !ok {
-		f.order = append(f.order, finish.SessionID())
-		for len(f.order) > kickstartFinishedKept {
-			delete(f.waiting, f.order[0])
-			f.order = f.order[1:]
-		}
-	}
-	f.waiting[finish.SessionID()] = finish
-}
-
-// snapshot is the sessions waiting now.
-func (f *kickstartImportFeed) snapshot() []*kickstartFinish {
-	if f == nil {
-		return nil
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	targets := make([]*kickstartFinish, 0, len(f.waiting))
-	for _, id := range f.order {
-		if finish, ok := f.waiting[id]; ok {
-			targets = append(targets, finish)
-		}
-	}
-	return targets
-}
-
-// publish sends one import state to the given sessions. A finished import (idle)
-// ends their wait; a failed one leaves it, so the panel can try again.
-func (f *kickstartImportFeed) publish(targets []*kickstartFinish, ingest schema.LocalKickstartIngest) {
-	if f != nil && ingest.State == schema.LocalKickstartIngestIdle {
-		f.mu.Lock()
-		for _, finish := range targets {
-			delete(f.waiting, finish.SessionID())
-		}
-		f.mu.Unlock()
+// run reports a claimed import to the saved sessions. Their start is published
+// before the run is launched, so an end can never be published ahead of it. quiet,
+// when it is not nil, is the session whose own answer already said the import was
+// running: it hears the end and not a second start.
+func (f *kickstartImportFeed) run(launch func(observe func(schema.LocalKickstartIngest)), quiet *kickstartFinish) {
+	var targets []*kickstartFinish
+	if f != nil && f.sessions != nil {
+		targets = f.sessions.finishedSnapshot()
 	}
 	for _, finish := range targets {
-		finish.publishIngest(ingest)
+		if finish != quiet {
+			finish.publishIngest(schema.LocalKickstartIngest{State: schema.LocalKickstartIngestRunning})
+		}
 	}
-}
-
-// announce publishes one import state to every session waiting now.
-func (f *kickstartImportFeed) announce(ingest schema.LocalKickstartIngest) {
-	f.publish(f.snapshot(), ingest)
-}
-
-// observer returns what a run reports its final state to. The run reports to the
-// sessions that wait when it starts, and no others: an import that began before a
-// session saved says nothing about the selection that session saved. own, when it
-// is not nil, is the session whose commit started the run. A nil result means
-// nobody watches.
-func (f *kickstartImportFeed) observer(own *kickstartFinish) func(schema.LocalKickstartIngest) {
-	targets := f.snapshot()
-	if own != nil {
-		targets = append([]*kickstartFinish{own}, targets...)
+	var observe func(schema.LocalKickstartIngest)
+	if len(targets) > 0 {
+		observe = func(ingest schema.LocalKickstartIngest) {
+			for _, finish := range targets {
+				finish.publishIngest(ingest)
+			}
+		}
 	}
-	if len(targets) == 0 {
-		return nil
-	}
-	return func(ingest schema.LocalKickstartIngest) {
-		f.publish(targets, ingest)
-	}
+	launch(observe)
 }
 
 // reviewOf previews a session's save with the commit's own chain: the moved

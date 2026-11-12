@@ -309,7 +309,8 @@ type kickstartSessions struct {
 	byScope map[onboarding.ModelScope]*kickstartSession
 	byID    map[string]*kickstartSession
 	// finished keeps the publishers of sessions a commit ended, so an import
-	// started after the session is gone still publishes under its id.
+	// started after the session is gone still publishes under its id. Every
+	// import that starts while a publisher is kept reports to it.
 	finished      map[string]*kickstartFinish
 	finishedOrder []string
 }
@@ -1318,6 +1319,20 @@ func (st *kickstartSessions) rememberFinishLocked(finish *kickstartFinish) *kick
 	}
 	st.finished[finish.sessionID] = finish
 	return finish
+}
+
+// finishedSnapshot is the publishers of the committed sessions kept now, oldest
+// first.
+func (st *kickstartSessions) finishedSnapshot() []*kickstartFinish {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := make([]*kickstartFinish, 0, len(st.finishedOrder))
+	for _, id := range st.finishedOrder {
+		if finish, ok := st.finished[id]; ok {
+			out = append(out, finish)
+		}
+	}
+	return out
 }
 
 // finishFor returns the publisher of the ingest events of a session id. A

@@ -258,7 +258,7 @@ func (s *Server) Listen(ctx context.Context) error {
 		dataHome:    s.cfg.DataHome,
 		stateHome:   s.cfg.StateHome,
 	}
-	// The import reports its state to the saved setup sessions that wait for it.
+	// The import reports its state to every saved setup session that is kept.
 	kickstartFeed := newKickstartImportFeed()
 	sh.kickstartFeed = kickstartFeed
 	if s.syncTune != nil {
@@ -325,6 +325,7 @@ func (s *Server) Listen(ctx context.Context) error {
 		s.kickstartTune(&sessionEnv)
 	}
 	s.kickstart = newKickstartSessions(sessionEnv)
+	kickstartFeed.attach(s.kickstart)
 	if s.hub != nil {
 		s.hub.attachKickstart(s.kickstart)
 	}

@@ -1136,10 +1136,9 @@ func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusConflict, "ingest already running")
 		return
 	}
-	// A saved setup session whose finish panel is waiting for an import (it was
-	// told one was already running, or could not start) watches this run too.
-	launch(h.kickstartFeed.observer(nil))
-	h.kickstartFeed.announce(schema.LocalKickstartIngest{State: schema.LocalKickstartIngestRunning})
+	// Every saved setup session whose finish panel is still open watches this run
+	// too: the run reports its start and its end under each session's id.
+	h.kickstartFeed.run(launch, nil)
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "running"})
 }
