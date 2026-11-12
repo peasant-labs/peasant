@@ -539,13 +539,17 @@ test('config-holds-only-the-chosen-selection', async () => {
   expect(config.selection.autoIngestNewBranches, 'the answer that was given').toBe(false);
   const projects = config.selection.harnesses['claude-code'].projects;
   expect(projects).toHaveLength(1);
-  expect(projects[0].gitRemote).toBe(ledger.remote);
-  // The chosen branch lives in one checkout, so the selection names that clone
-  // and no other: the other branch's checkout is not in it.
-  expect(projects[0].clonePaths).toEqual([...new Set(chosenSessions.map((entry) => entry.cwd))]);
-  // Only one of the project's branches was chosen, so the selection names that
-  // branch rather than the whole project.
-  expect(projects[0].branches, 'the selection names the chosen branch and no other').toEqual([fixture.chosen.branch]);
+  // The setup draws one rule per checkout. The chosen branch is the only one in
+  // its checkout (the other branch of this project lives in a checkout of its
+  // own), so the whole checkout is chosen and the rule is that checkout's: the
+  // project and its clone path, with no branch list and nothing else. A rule
+  // names branches only where one checkout holds several, which the selection
+  // page's branch case checks. The whole rule is compared, so a branch list, a
+  // second clone or an extra key fails here.
+  expect(projects[0], 'the selection is the chosen branch\'s checkout and nothing more').toEqual({
+    gitRemote: ledger.remote,
+    clonePaths: [...new Set(chosenSessions.map((entry) => entry.cwd))],
+  });
   const text = JSON.stringify(config.selection);
   for (const other of ['marketing-site', 'filler-', 'tax-report', 'stray']) expect(text, `the selection names nothing of ${other}`).not.toContain(other);
   for (const entry of seeded.filter((candidate) => !chosenIds.has(candidate.sessionId))) expect(text).not.toContain(entry.sessionId);
