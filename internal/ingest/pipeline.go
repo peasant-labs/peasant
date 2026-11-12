@@ -4705,6 +4705,9 @@ func (p *Pipeline) indexComputeAndFinalize(
 	// Best-effort: non-fatal; projects from deleted/pruned sessions are removed
 	// so that daily_summary_by_project and the session viewer remain consistent.
 	p.cleanupOrphanProjects(ctx, logPrefix)
+	// Collect unreferenced image files once, after the last activation of the
+	// run. A run that never reaches this stage leaves them for the next one.
+	p.collectUnreferencedImages(ctx, logPrefix)
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageCleanup})
 	p.recordIndexProfileStage(StageCleanup, cleanupProfileStart, 1, 1)
 

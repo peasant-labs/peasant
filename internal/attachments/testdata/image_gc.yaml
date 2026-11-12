@@ -1,0 +1,24 @@
+# Image collection cases. A "run" is one real ingest pipeline run over the
+# store; its cleanup stage is the only place a run collects.
+#
+# action:
+#   once_per_run -> install images for `sessions` sessions, then run once. The
+#                   collector starts `wantCollections` times in total: none
+#                   while the sessions install, one in the run's cleanup stage.
+#   end_of_run   -> leave one file unreferenced by replacing a session's image
+#                   set; it stays until the run ends, then is removed.
+#   stopped_run  -> the same garbage survives a run cancelled before its
+#                   cleanup stage, and the next run removes it.
+#   concurrent   -> a collection that starts while a Put holds the shared lock
+#                   waits for it and keeps the file the Put just wrote.
+cases:
+  - name: gc-reads-the-directory-once-per-run
+    action: once_per_run
+    sessions: 50
+    wantCollections: 1
+  - name: unreferenced-file-is-collected-at-the-end-of-the-run
+    action: end_of_run
+  - name: stopped-run-leaves-garbage-the-next-run-collects
+    action: stopped_run
+  - name: gc-does-not-remove-a-file-a-concurrent-put-just-wrote
+    action: concurrent
