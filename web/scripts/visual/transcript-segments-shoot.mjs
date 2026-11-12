@@ -30,6 +30,10 @@ const HOST_MARKER = 'opened the nearest user turn'
 // checkout's directory parser; the second is the boundary copy of the pinned
 // design-system release, so a build on the earlier pin fails here.
 const POSITION_MARKERS = ['carries a conversation turn position this page cannot use', 'no conversation turns']
+// The viewer fills the viewport. Capturing beyond the viewport lays the page out
+// again at another size for the shot, which starts the outline rail's width
+// transition, so the image shows a rail the page never rests at.
+const IN_VIEWPORT = { captureBeyondViewport: false }
 const RANGE = /^turns? ([\d,]+)(?:–([\d,]+))? of ([\d,]+)$/
 const integer = (text) => Number(String(text).replaceAll(',', ''))
 
@@ -212,6 +216,11 @@ try {
         } catch (error) {
           throw fail(`capturing ${theme} ${step}`, `the outline rails did not settle within 10s: ${error.message}`)
         }
+        const outside = await viewer.evaluate((node) => {
+          const box = node.getBoundingClientRect()
+          return box.left < 0 || box.top < 0 || box.right > innerWidth || box.bottom > innerHeight
+        })
+        if (outside) throw fail(`capturing ${theme} ${step}`, 'the transcript viewer does not fit the viewport, so a shot would lay the page out again')
         railWidths[step] = await page.$$eval('.txn-app .txn-rail, .txn-app .txn-rail-strip', (rails) => rails.map((rail) => ({
           rail: rail.className,
           width: Math.round(rail.getBoundingClientRect().width),
@@ -240,7 +249,7 @@ try {
         positions = await assertPositions()
         await settle(name)
         const path = resolve(OUT, `transcript-segments-${theme}-${name}.png`)
-        await viewer.screenshot({ path })
+        await viewer.screenshot({ path, ...IN_VIEWPORT })
         return path
       }
       const older = await edge('older')
@@ -268,7 +277,7 @@ try {
       await pause(200)
       await settle('actions')
       const actions = resolve(OUT, `transcript-segments-${theme}-actions.png`)
-      await viewer.screenshot({ path: actions })
+      await viewer.screenshot({ path: actions, ...IN_VIEWPORT })
       const path = resolve(OUT, `transcript-segments-${theme}.png`)
       await run('magick', [older, newer, '-append', path])
       const boundaries = await page.$$eval('[data-segment-boundary]', (nodes) => nodes.map((node) => node.getAttribute('data-segment-boundary')))
