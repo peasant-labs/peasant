@@ -1,11 +1,13 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -24,75 +26,181 @@ type installedPair struct {
 	sourceCapture  []byte
 	metadataName   string
 	metadata       []byte
+	// transcriptReadFromInstalled reports that transcript IS the installed
+	// file's content: readArtifactPair read it from the session directory in
+	// this run and verified it against the checksum its metadata records,
+	// refusing a torn or mixed pair. The install then keeps the file without
+	// reading it a second time. Only the stored-copy lane sets it; bytes that
+	// come from anywhere else must be compared with the installed file.
+	transcriptReadFromInstalled bool
 }
 
-// installManagedPair writes the session's files into a temporary directory on
-// the same filesystem and installs them into sessionDir by rename, metadata
-// last. It replaces only files this session's naming owns, prunes owned files
+// pairInstallResult reports which halves of a pair an install replaced. A half
+// that was not replaced is the installed file itself: same inode, same mtime.
+type pairInstallResult struct {
+	TranscriptReplaced bool
+	MetadataReplaced   bool
+}
+
+// keptFiles names the files an install owns but did not stage, because the
+// installed bytes already equal the candidate's. The keys are paths relative
+// to the session directory, in the form the prune walk produces, and include
+// the debug directory when a file below it is kept. transcript reports that
+// the transcript is among them: the index input proof names the transcript
+// bytes, so it is cleared only when the transcript is replaced.
+type keptFiles struct {
+	names      map[string]bool
+	transcript bool
+}
+
+func (k *keptFiles) keep(rel string) {
+	if k.names == nil {
+		k.names = make(map[string]bool)
+	}
+	k.names[rel] = true
+}
+
+// installedFileEquals reports whether the installed file at path holds exactly
+// data. It reads the installed bytes and never trusts a recorded hash, so a
+// torn pair compares unequal and is replaced. A file that is absent or cannot
+// be read is reported unequal: the install then stages and renames it, and a
+// real filesystem fault surfaces there.
+func (p *Pipeline) installedFileEquals(path string, data []byte) bool {
+	if info, err := p.fs.Stat(path); err != nil || info.IsDir() || info.Size() != int64(len(data)) {
+		return false
+	}
+	installed, err := p.fs.ReadFile(path)
+	return err == nil && bytes.Equal(installed, data)
+}
+
+// installManagedPair installs the session's files into sessionDir, metadata
+// last. A file whose installed bytes already equal the candidate's is kept in
+// place and never renamed over; the remaining files are written into a
+// temporary directory on the same filesystem and installed by rename. When the
+// transcript is replaced the metadata is always replaced with it, so the
+// metadata rename stays the commit point of the pair. An install that changes
+// no file creates no temporary directory and sends nothing to the writer
+// lane. It replaces only files this session's naming owns, prunes owned files
 // this install no longer writes, and never touches the child subagents
 // subtree. There is no sync and no lock: the database transaction is the
 // durability point, and a torn install is detected on the next pair read by
 // its hash. It refuses to replace a pair a newer adapter than this build
 // produced.
-func (p *Pipeline) installManagedPair(ctx context.Context, sessionDir, sessionID string, pair installedPair, session DiscoveredSession, writeLane *storeWriteLane) error {
+func (p *Pipeline) installManagedPair(ctx context.Context, sessionDir, sessionID string, pair installedPair, session DiscoveredSession, writeLane *storeWriteLane) (pairInstallResult, error) {
+	var result pairInstallResult
 	if err := ctx.Err(); err != nil {
-		return err
+		return result, err
 	}
-	if existing, err := p.fs.ReadFile(filepath.Join(sessionDir, pair.metadataName)); err == nil {
+	existing, err := p.fs.ReadFile(filepath.Join(sessionDir, pair.metadataName))
+	if err == nil {
 		if headerErr := checkReplacementHeader(existing, session, p.versionTargets()); headerErr != nil {
-			return headerErr
+			return result, headerErr
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return managedInputIOError(filepath.Join(sessionDir, pair.metadataName), err)
+		return result, managedInputIOError(filepath.Join(sessionDir, pair.metadataName), err)
+	}
+	type stagedFile struct {
+		rel  string
+		data []byte
+		what string
+	}
+	var staged []stagedFile
+	var kept keptFiles
+	// Bytes a verified pair read just took from the installed file are that
+	// file: a second read could learn nothing the first did not, and a torn
+	// pair never reaches here because that read refuses one by its checksum.
+	// Every other candidate is compared with the installed bytes.
+	kept.transcript = pair.transcriptReadFromInstalled ||
+		p.installedFileEquals(filepath.Join(sessionDir, pair.transcriptName), pair.transcript)
+	if kept.transcript {
+		kept.keep(pair.transcriptName)
+	} else {
+		staged = append(staged, stagedFile{pair.transcriptName, pair.transcript, "transcript"})
+	}
+	debugDir := defaults.DirDebug.String()
+	debugNames := make([]string, 0, len(pair.debug))
+	for name := range pair.debug {
+		debugNames = append(debugNames, name)
+	}
+	sort.Strings(debugNames)
+	for _, name := range debugNames {
+		rel := filepath.Join(debugDir, name)
+		if p.installedFileEquals(filepath.Join(sessionDir, rel), pair.debug[name]) {
+			kept.keep(debugDir)
+			kept.keep(rel)
+			continue
+		}
+		staged = append(staged, stagedFile{rel, pair.debug[name], "debug output " + name})
+	}
+	if len(pair.sourceCapture) > 0 {
+		rel := fileCaptureEvidenceName(session.SessionID)
+		if p.installedFileEquals(filepath.Join(sessionDir, rel), pair.sourceCapture) {
+			kept.keep(rel)
+		} else {
+			staged = append(staged, stagedFile{rel, pair.sourceCapture, "source-capture marker"})
+		}
+	}
+	// The metadata is kept only beside a kept transcript. Beside a replaced
+	// transcript it is always renamed last, even when its bytes are equal, so
+	// a reader never needs more than the metadata rename to see a whole pair.
+	if kept.transcript && err == nil && bytes.Equal(existing, pair.metadata) {
+		kept.keep(pair.metadataName)
+	} else {
+		staged = append(staged, stagedFile{pair.metadataName, pair.metadata, "metadata"})
+		result.MetadataReplaced = true
+	}
+	result.TranscriptReplaced = !kept.transcript
+	if len(staged) == 0 {
+		// Nothing differs: no temporary directory and no writer-lane job. An
+		// owned file this install no longer writes is still pruned.
+		return result, p.pruneObsoleteOwned(sessionDir, sessionID, kept.names)
 	}
 	tmpSuffix, err := randomHex(defaults.TempSuffixLen)
 	if err != nil {
-		return fmt.Errorf("generate temp suffix for %s: %w", sessionID, err)
+		return result, fmt.Errorf("generate temp suffix for %s: %w", sessionID, err)
 	}
 	// NOTE (M14): the temporary directory is {outputDir}/.tmp-{sessionId}-{random};
 	// cleanOrphans() scans {outputDir} for .tmp-* prefixes, so both must agree.
 	tmpDir := fmt.Sprintf("%s/%s%s-%s", string(p.config.OutputDir), defaults.TempDirPrefix, sessionID, tmpSuffix)
 	if err := p.fs.MkdirAll(tmpDir, defaults.PrivateDirPerm); err != nil {
-		return fmt.Errorf("create temp dir for %s: %w", sessionID, err)
+		return result, fmt.Errorf("create temp dir for %s: %w", sessionID, err)
 	}
-	fail := func(err error) error { return errors.Join(err, p.fs.RemoveAll(tmpDir)) }
-	if err := p.fs.WriteFile(filepath.Join(tmpDir, pair.transcriptName), pair.transcript, defaults.PrivateFilePerm); err != nil {
-		return fail(fmt.Errorf("write transcript for %s: %w", sessionID, err))
+	fail := func(err error) (pairInstallResult, error) {
+		return pairInstallResult{}, errors.Join(err, p.fs.RemoveAll(tmpDir))
 	}
-	if len(pair.debug) > 0 {
-		debugDir := filepath.Join(tmpDir, defaults.DirDebug.String())
-		if err := p.fs.MkdirAll(debugDir, defaults.PrivateDirPerm); err != nil {
-			return fail(fmt.Errorf("create debug dir for %s: %w", sessionID, err))
-		}
-		for name, data := range pair.debug {
-			if err := p.fs.WriteFile(filepath.Join(debugDir, name), data, defaults.PrivateFilePerm); err != nil {
-				return fail(fmt.Errorf("write debug output %s for %s: %w", name, sessionID, err))
+	madeDebugDir := false
+	for _, file := range staged {
+		if filepath.Dir(file.rel) == debugDir && !madeDebugDir {
+			if err := p.fs.MkdirAll(filepath.Join(tmpDir, debugDir), defaults.PrivateDirPerm); err != nil {
+				return fail(fmt.Errorf("create debug dir for %s: %w", sessionID, err))
 			}
+			madeDebugDir = true
+		}
+		if err := p.fs.WriteFile(filepath.Join(tmpDir, file.rel), file.data, defaults.PrivateFilePerm); err != nil {
+			return fail(fmt.Errorf("write %s for %s: %w", file.what, sessionID, err))
 		}
 	}
-	if len(pair.sourceCapture) > 0 {
-		if err := p.fs.WriteFile(filepath.Join(tmpDir, fileCaptureEvidenceName(session.SessionID)), pair.sourceCapture, defaults.PrivateFilePerm); err != nil {
-			return fail(fmt.Errorf("write source-capture marker for %s: %w", sessionID, err))
-		}
-	}
-	if err := p.fs.WriteFile(filepath.Join(tmpDir, pair.metadataName), pair.metadata, defaults.PrivateFilePerm); err != nil {
-		return fail(fmt.Errorf("write metadata for %s: %w", sessionID, err))
-	}
-	if err := p.replaceSessionDir(ctx, tmpDir, sessionDir, sessionID, pair.metadataName, writeLane); err != nil {
+	if err := p.replaceSessionDir(ctx, tmpDir, sessionDir, sessionID, pair.metadataName, kept, writeLane); err != nil {
 		return fail(err)
 	}
-	return p.fs.RemoveAll(tmpDir)
+	return result, p.fs.RemoveAll(tmpDir)
 }
 
 // replaceSessionDir installs every file staged under src into dst by rename,
-// installing metadataName LAST so the metadata is the commit point. It then
-// prunes obsolete parent-owned files, preserving the child-owned subagents
-// subtree. Rename is atomic on the same filesystem; there is no sync, no lock
-// and no rollback, because the database transaction is the durability point
-// and a mixed pair is refused on the next read by its hash.
-func (p *Pipeline) replaceSessionDir(ctx context.Context, src, dst, sessionID, metadataName string, writeLane *storeWriteLane) error {
+// installing metadataName LAST so the metadata is the commit point. Files in
+// kept were not staged because the installed bytes already equal the
+// candidate's; they stay in place and are not pruned. The index input proof is
+// cleared before any rename unless the transcript is among the kept files. It
+// then prunes obsolete parent-owned files, preserving the child-owned
+// subagents subtree. Rename is atomic on the same filesystem; there is no
+// sync, no lock and no rollback, because the database transaction is the
+// durability point and a mixed pair is refused on the next read by its hash.
+func (p *Pipeline) replaceSessionDir(ctx context.Context, src, dst, sessionID, metadataName string, kept keptFiles, writeLane *storeWriteLane) error {
 	var ordered, metadata []string
-	wanted := make(map[string]bool)
+	wanted := make(map[string]bool, len(kept.names))
+	for rel := range kept.names {
+		wanted[rel] = true
+	}
 	err := p.fs.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -118,27 +226,38 @@ func (p *Pipeline) replaceSessionDir(ctx context.Context, src, dst, sessionID, m
 	if err != nil {
 		return fmt.Errorf("install parent files at %s: %w; existing child output remains in place; fix filesystem access or free disk space and rerun ingest", dst, err)
 	}
-	mirror, err := p.mirrorArtifactStore()
-	if err == nil && mirror != nil {
-		var sid SessionID
-		sid, err = NewSessionID(sessionID)
-		if err == nil {
-			p.runStoreWrite(writeLane, StageExtract, func() { err = mirror.PrepareArtifactInstall(ctx, sid) })
+	// The proof names the transcript bytes. An install that keeps the
+	// installed transcript leaves them untouched, so the proof stays true and
+	// no writer-lane job is sent; the metadata is then replaced by one atomic
+	// rename and the pair is whole before and after it.
+	if !kept.transcript {
+		mirror, err := p.mirrorArtifactStore()
+		if err == nil && mirror != nil {
+			var sid SessionID
+			sid, err = NewSessionID(sessionID)
+			if err == nil {
+				p.runStoreWrite(writeLane, StageExtract, func() { err = mirror.PrepareArtifactInstall(ctx, sid) })
+			}
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("prepare artifact install for session %s at %s before replacing files: %w; existing installed pair and database entries were preserved; restore database access and retry harvest", sessionID, dst, err)
+		if err != nil {
+			return fmt.Errorf("prepare artifact install for session %s at %s before replacing files: %w; existing installed pair and database entries were preserved; restore database access and retry harvest", sessionID, dst, err)
+		}
 	}
 	for _, rel := range append(ordered, metadata...) {
 		if err := p.fs.Rename(filepath.Join(src, rel), filepath.Join(dst, rel)); err != nil {
 			return fmt.Errorf("install parent files at %s: %w; existing child output remains in place; fix filesystem access or free disk space and rerun ingest", dst, err)
 		}
 	}
+	return p.pruneObsoleteOwned(dst, sessionID, wanted)
+}
 
-	// Prune obsolete parent-owned files only after every new file is installed.
-	// Skip the entire child-owned tree, including children excluded by FILTER.
+// pruneObsoleteOwned removes the parent-owned files under dst that the current
+// install neither staged nor kept. It skips the entire child-owned tree,
+// including children excluded by FILTER.
+func (p *Pipeline) pruneObsoleteOwned(dst, sessionID string, wanted map[string]bool) error {
+// Prune obsolete parent-owned files only after every new file is installed.
 	var stale []string
-	err = p.fs.WalkDir(dst, func(path string, entry fs.DirEntry, err error) error {
+	err := p.fs.WalkDir(dst, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -165,7 +284,7 @@ func (p *Pipeline) replaceSessionDir(ctx context.Context, src, dst, sessionID, m
 			}
 			return nil
 		}
-		if !wanted[rel] {
+		if rel != "." && !wanted[rel] {
 			stale = append(stale, path)
 			if entry.IsDir() {
 				return fs.SkipDir
@@ -410,5 +529,6 @@ func mirrorRequestFor(wr *workerResult) ArtifactMirrorRequest {
 		CommitCaptureComplete:    wr.commitCaptureComplete,
 		SchedulingParentResolved: wr.schedulingResolved,
 		SchedulingParentID:       wr.schedulingParentID,
+		TranscriptKept:           wr.transcriptKept,
 	}
 }

@@ -225,6 +225,12 @@ type ArtifactMirrorRequest struct {
 	// serialized semantic provenance; the managed metadata keeps the logical
 	// ParentUUID.
 	SchedulingParentID *SessionID
+	// TranscriptKept reports that the install which produced this pair left the
+	// installed transcript file in place, because its bytes equal the
+	// candidate's. The pair identity still moves with the metadata, but the
+	// index input proof names the transcript bytes and is kept. False keeps
+	// the conservative rule: a changed pair identity clears the proof.
+	TranscriptKept bool
 }
 
 // ArtifactMirrorResult reports committed success for one session, including
@@ -239,7 +245,9 @@ type ArtifactMirrorResult struct {
 // acquired native evidence in one transaction per page. That transaction is
 // the durability point of the write path.
 type ArtifactMirrorStore interface {
-	// PrepareArtifactInstall commits repair eligibility before any installed file changes.
+	// PrepareArtifactInstall commits repair eligibility before the installed
+	// transcript is replaced. An install that keeps the transcript does not
+	// call it.
 	PrepareArtifactInstall(context.Context, SessionID) error
 	MirrorArtifacts(context.Context, []ArtifactMirrorRequest) []ArtifactMirrorResult
 }

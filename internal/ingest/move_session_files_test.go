@@ -152,7 +152,7 @@ func TestPipeline_replaceSessionDir_PrunesObsoleteDebugFiles(t *testing.T) {
 	}
 
 	p := &Pipeline{fs: &OSFileSystem{}}
-	if err := p.replaceSessionDir(context.Background(), src, dst, sessionID, metadataName, nil); err != nil {
+	if err := p.replaceSessionDir(context.Background(), src, dst, sessionID, metadataName, keptFiles{}, nil); err != nil {
 		t.Fatalf("replaceSessionDir: %v", err)
 	}
 

@@ -152,6 +152,10 @@ func drainHeap(h *sessionSizeHeap) []sessionSize {
 
 // workerResult is the output of a single processSession call.
 type workerResult struct {
+	// transcriptKept reports that the install left the installed transcript in
+	// place because its bytes equal the candidate's. The mirror then keeps the
+	// index input proof, which names those bytes.
+	transcriptKept bool
 	commitCaptureComplete bool
 	capturedSource        *captureFileSystem
 	cwdProvenance         CWDProvenanceKind

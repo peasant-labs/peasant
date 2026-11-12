@@ -478,6 +478,26 @@ type sessionImageReplacer interface {
 	ReplaceSessionImages(ctx context.Context, sessionID string, pending []attachments.Pending) error
 }
 
+// unreferencedImageCollector removes image files no attachment row references.
+type unreferencedImageCollector interface {
+	CollectUnreferencedImages(ctx context.Context) error
+}
+
+// collectUnreferencedImages runs the image collection once per run, from the
+// cleanup stage. Installing a session's images does not collect, so the cost
+// is one directory listing per run instead of one per session. It is
+// best-effort: a failed or skipped collection removes nothing, and the next
+// run collects the same files.
+func (p *Pipeline) collectUnreferencedImages(ctx context.Context, logPrefix string) {
+	collector, ok := p.store.(unreferencedImageCollector)
+	if !ok || p.config.DryRun || ctx.Err() != nil {
+		return
+	}
+	if err := collector.CollectUnreferencedImages(ctx); err != nil {
+		slog.Warn(logPrefix+": collect unreferenced images", "error", err)
+	}
+}
+
 // commitStagedImages installs the parse-time image batch. The caller decides
 // whether the attempt was accepted. This function does not consult activation
 // outcome itself.
