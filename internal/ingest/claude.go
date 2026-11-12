@@ -32,6 +32,7 @@ type ClaudeAdapter struct {
 	git                 GitResolver
 	salt                salt.Salt
 	evidence            ClaudeEvidenceCache
+	progress            DiscoveryProgress
 	locationLookup      SessionLocationLookup
 	logicalParentLookup LogicalParentReader
 	// derivedLookup is the store's indexed identity reader. A scoped build uses
@@ -52,6 +53,7 @@ var _ ClaudeEvidenceCaching = (*ClaudeAdapter)(nil)
 var _ ClaudeSessionLocationLookupCapable = (*ClaudeAdapter)(nil)
 var _ ClaudeLogicalParentLookupCapable = (*ClaudeAdapter)(nil)
 var _ DiscoveryStatistics = (*ClaudeAdapter)(nil)
+var _ DiscoveryProgressReporting = (*ClaudeAdapter)(nil)
 var _ OriginEvidenceMiner = (*ClaudeAdapter)(nil)
 
 // NewClaudeAdapter creates a ClaudeAdapter with injected dependencies.
@@ -63,6 +65,11 @@ func NewClaudeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *ClaudeAdapte
 // earlier run. Without a cache the adapter mines every transcript again.
 func (a *ClaudeAdapter) SetClaudeEvidenceCache(cache ClaudeEvidenceCache) {
 	a.evidence = cache
+}
+
+// SetDiscoveryProgress attaches an optional reporter for full discovery.
+func (a *ClaudeAdapter) SetDiscoveryProgress(progress DiscoveryProgress) {
+	a.progress = progress
 }
 
 // SetSessionLocationLookup gives the adapter a way to confirm whether a
@@ -209,6 +216,7 @@ type claudeFileOpener interface {
 // Per RFC Section 6.4, symlinks are skipped silently.
 func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	a.diagnostics = nil
+	a.reminedCount = 0
 	enumerated := make([]claudeEnumeratedRoot, 0, len(cfg.Paths))
 	for _, basePath := range cfg.Paths {
 		root, err := a.enumerateClaudeRoot(ctx, basePath)
@@ -346,6 +354,15 @@ func (a *ClaudeAdapter) enumerateClaudeRoot(ctx context.Context, basePath Resolv
 // ReminedCount reports how many cached evidence records the most recent Discover
 // had to mine again. See DiscoveryStatistics for the scoping rule.
 func (a *ClaudeAdapter) ReminedCount() int { return a.reminedCount }
+
+// advanceClaudeDiscovery reports a finished source after exposing the current
+// re-mine count to a progress consumer. Scoped discovery emits no events.
+func (a *ClaudeAdapter) advanceClaudeDiscovery(mode ClaudeBuildMode, state *claudeBuildEvidence) {
+	if mode == ClaudeBuildFullWalk && a.progress != nil {
+		a.reminedCount = len(state.remined)
+		a.progress.DiscoveryAdvance(HarnessClaudeCode, 1)
+	}
+}
 
 // claudeSubagentLocation splits a root-relative Claude path into the parent
 // session directory and the file name of the subagent transcript it holds. A
@@ -1609,6 +1626,9 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 		// cached evidence row is still this run's to prune.
 		memberPaths = append(memberPaths, locatedMissing...)
 	}
+	if mode == ClaudeBuildFullWalk && a.progress != nil {
+		a.progress.DiscoveryTotal(HarnessClaudeCode, len(memberPaths))
+	}
 
 	state := claudeBuildEvidence{mined: make(map[ResolvedPath]ClaudeTranscriptEvidence), missing: make(map[ResolvedPath]struct{})}
 	cacheComplete := false
@@ -1701,7 +1721,11 @@ func (a *ClaudeAdapter) buildClaudeRootEntries(root claudeEnumeratedRoot, mode C
 	var sessions []DiscoveredSession
 	rootIndex := make(map[string]int, len(root.roots))
 
-	for _, entry := range root.roots {
+	for i, entry := range root.roots {
+		// The preceding source has finished, including any skipped source.
+		if i > 0 {
+			a.advanceClaudeDiscovery(mode, state)
+		}
 		info := entry.info
 		if info == nil {
 			observed, err := a.fs.Stat(entry.path)
@@ -1747,6 +1771,9 @@ func (a *ClaudeAdapter) buildClaudeRootEntries(root claudeEnumeratedRoot, mode C
 		rootIndex[entry.sessionID] = len(sessions)
 		sessions = append(sessions, ds)
 	}
+	if len(root.roots) > 0 {
+		a.advanceClaudeDiscovery(mode, state)
+	}
 
 	// admitted maps each subagent id admitted under this source root to its
 	// transcript. Workflow transcripts come first, and a workflow child keeps
@@ -1757,7 +1784,10 @@ func (a *ClaudeAdapter) buildClaudeRootEntries(root claudeEnumeratedRoot, mode C
 	ordered := make([]claudeSubagentEntry, 0, len(root.workflows)+len(root.subagents))
 	ordered = append(ordered, root.workflows...)
 	ordered = append(ordered, root.subagents...)
-	for _, entry := range ordered {
+	for i, entry := range ordered {
+		if i > 0 {
+			a.advanceClaudeDiscovery(mode, state)
+		}
 		if kept, taken := admitted[entry.subagentID]; taken {
 			slog.Debug("claude discovery: transcript left out, another transcript holds its agent id",
 				"session_id", entry.subagentID.String(), "left_out", entry.path, "kept", kept.String())
@@ -1822,6 +1852,9 @@ func (a *ClaudeAdapter) buildClaudeRootEntries(root claudeEnumeratedRoot, mode C
 		admitted[entry.subagentID] = rp
 		admittedParent[entry.subagentID] = parentSID
 		sessions = append(sessions, ds)
+	}
+	if len(ordered) > 0 {
+		a.advanceClaudeDiscovery(mode, state)
 	}
 	return sessions
 }

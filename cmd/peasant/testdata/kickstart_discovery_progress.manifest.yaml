@@ -1,0 +1,3 @@
+requiredNames:
+  - spinner-shows-done-and-total-during-discovery
+  - spinner-clears-counts-before-a-phase-only-harness

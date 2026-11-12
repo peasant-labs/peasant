@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"golang.org/x/term"
 )
 
@@ -14,15 +15,20 @@ import (
 // discovery. It shows the current phase and counts, overwriting the same line.
 // In non-TTY environments (pipes, CI), it is a no-op.
 type discoverySpinner struct {
-	w     io.Writer
-	isTTY bool
-	mu    sync.Mutex
-	phase string
-	count int
-	total int
-	done  bool
-	wg    sync.WaitGroup
+	w           io.Writer
+	isTTY       bool
+	mu          sync.Mutex
+	phase       string
+	count       int
+	total       int
+	remined     int
+	showRemined bool
+	done        bool
+	wg          sync.WaitGroup
 }
+
+var _ discovery.ScanProgress = (*discoverySpinner)(nil)
+var _ discovery.ScanStatisticsProgress = (*discoverySpinner)(nil)
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -49,6 +55,20 @@ func (s *discoverySpinner) SetPhase(phase string) {
 	s.phase = phase
 	s.count = 0
 	s.total = 0
+	s.remined = 0
+	s.showRemined = false
+	s.mu.Unlock()
+}
+
+// SetDiscoveryReminedCount adds the evidence re-read count to a discovery
+// phase without changing progress for phases that do not report it.
+func (s *discoverySpinner) SetDiscoveryReminedCount(count int) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.remined = count
+	s.showRemined = true
 	s.mu.Unlock()
 }
 
@@ -104,6 +124,9 @@ func (s *discoverySpinner) run() {
 		var line string
 		if s.total > 0 {
 			line = fmt.Sprintf("\r\x1b[2K%s %s (%d/%d)", ch, s.phase, s.count, s.total)
+			if s.showRemined {
+				line += fmt.Sprintf(" · %d re-read", s.remined)
+			}
 		} else if s.count > 0 {
 			line = fmt.Sprintf("\r\x1b[2K%s %s (%d found)", ch, s.phase, s.count)
 		} else {

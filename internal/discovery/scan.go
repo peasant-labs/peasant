@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -60,6 +61,10 @@ func Scan(
 		setPhase(progress, fmt.Sprintf("Discovering %s sessions...", schema.HarnessDisplayName(provider)))
 		adapter := factory(fs, git, salt.Salt{})
 		ingest.AttachClaudeEvidenceCache(adapter, evidence)
+		if progress != nil {
+			statistics, _ := adapter.(ingest.DiscoveryStatistics)
+			ingest.AttachDiscoveryProgress(adapter, &scanDiscoveryProgress{harness: provider, progress: progress, statistics: statistics})
+		}
 		discovered, err := adapter.Discover(ctx, src)
 		if err != nil {
 			discovery.State = DiscoveryFailed
@@ -145,6 +150,48 @@ func Scan(
 		inventory[provider] = discovery
 	}
 	return inventory, sessions, subagents
+}
+
+// scanDiscoveryProgress translates a single adapter's source counts into the
+// current scan phase. Every adapter gets a fresh instance, so counts never leak
+// from one harness into another.
+type scanDiscoveryProgress struct {
+	mu         sync.Mutex
+	harness    ingest.Harness
+	progress   ScanProgress
+	statistics ingest.DiscoveryStatistics
+	done       int
+	total      int
+}
+
+var _ ingest.DiscoveryProgress = (*scanDiscoveryProgress)(nil)
+
+func (p *scanDiscoveryProgress) DiscoveryTotal(harness ingest.Harness, total int) {
+	if harness != p.harness {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.done, p.total = 0, total
+	p.progress.SetProgress(p.done, p.total)
+	p.reportStatistics()
+}
+
+func (p *scanDiscoveryProgress) DiscoveryAdvance(harness ingest.Harness, delta int) {
+	if harness != p.harness {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.done += delta
+	p.progress.SetProgress(p.done, p.total)
+	p.reportStatistics()
+}
+
+func (p *scanDiscoveryProgress) reportStatistics() {
+	if sink, ok := p.progress.(ScanStatisticsProgress); ok && p.statistics != nil {
+		sink.SetDiscoveryReminedCount(p.statistics.ReminedCount())
+	}
 }
 
 func reusable(known KnownSessionIndex, session ingest.DiscoveredSession, staleness time.Duration) (KnownSession, bool) {

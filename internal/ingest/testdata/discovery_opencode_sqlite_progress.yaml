@@ -1,0 +1,5 @@
+cases:
+  - name: opencode-sqlite-file-counted-once
+    source: current-session-message
+    total: 1
+    opens: 2

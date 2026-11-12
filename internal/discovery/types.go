@@ -96,3 +96,9 @@ type ScanProgress interface {
 	SetPhase(phase string)
 	SetProgress(done, total int)
 }
+
+// ScanStatisticsProgress is an optional extension for a progress display that
+// can name how many discovery evidence records have been re-mined so far.
+type ScanStatisticsProgress interface {
+	SetDiscoveryReminedCount(int)
+}

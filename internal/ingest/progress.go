@@ -214,3 +214,38 @@ func emitAdvance(ps *ProgressState, stage Stage, delta, total int) {
 	}
 	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Delta: delta, Total: total})
 }
+
+// pipelineDiscoveryProgress accumulates source-file counts across the adapters
+// that can report them. Discovery visits adapters sequentially; each newly
+// enumerated harness raises the known total without restarting the stage or
+// discarding earlier advances.
+type pipelineDiscoveryProgress struct {
+	mu       sync.Mutex
+	state    *ProgressState
+	done     int
+	total    int
+	reported bool
+}
+
+var _ DiscoveryProgress = (*pipelineDiscoveryProgress)(nil)
+
+func (p *pipelineDiscoveryProgress) DiscoveryTotal(_ Harness, total int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.total += total
+	if !p.reported {
+		// The stage began before enumeration, with no known total. Its first
+		// source count starts the measured work before any source advances.
+		p.reported = true
+		emitProgress(p.state, ProgressEvent{Kind: KindStart, Stage: StageDiscover, Total: p.total})
+		return
+	}
+	emitAdvance(p.state, StageDiscover, 0, p.total)
+}
+
+func (p *pipelineDiscoveryProgress) DiscoveryAdvance(_ Harness, delta int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.done += delta
+	emitAdvance(p.state, StageDiscover, delta, p.total)
+}
