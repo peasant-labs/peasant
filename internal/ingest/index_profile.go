@@ -122,18 +122,28 @@ func FoldProfileStages(segments []IndexProfileStage) []IndexProfileStage {
 		totals[at].Done = segment.Done
 		totals[at].Total = segment.Total
 	}
-	order := make(map[Stage]int, len(IndexProfileStageOrder))
-	for i, stage := range IndexProfileStageOrder {
-		order[stage] = i
-	}
-	rank := func(stage Stage) int {
-		if i, ok := order[stage]; ok {
-			return i
-		}
-		return len(order)
-	}
-	sort.SliceStable(totals, func(i, j int) bool { return rank(totals[i].Stage) < rank(totals[j].Stage) })
+	sort.SliceStable(totals, func(i, j int) bool {
+		return indexProfileStageRank(totals[i].Stage) < indexProfileStageRank(totals[j].Stage)
+	})
 	return totals
+}
+
+// indexProfileStagePosition is IndexProfileStageOrder as a lookup, built once.
+var indexProfileStagePosition = func() map[Stage]int {
+	position := make(map[Stage]int, len(IndexProfileStageOrder))
+	for i, stage := range IndexProfileStageOrder {
+		position[stage] = i
+	}
+	return position
+}()
+
+// indexProfileStageRank is a stage's display position; a stage outside
+// IndexProfileStageOrder sorts after every listed one.
+func indexProfileStageRank(stage Stage) int {
+	if i, ok := indexProfileStagePosition[stage]; ok {
+		return i
+	}
+	return len(indexProfileStagePosition)
 }
 
 // Observations returns how many times the profiler was called, plus one for
