@@ -370,8 +370,8 @@ cases:
       - expectText:
           - "nothing was saved: a value changed in your saved settings while you chose sessions. settle it on this page, then save again."
           - saved values that changed while you chose sessions
-          - these were changed in your saved settings after you chose them here
-      - expectNoText: [while you set up, after you answered them here, your setup is saved]
+          - "these saved values changed while you chose sessions; some move because of another choice you made. choose which value to keep for each one."
+      - expectNoText: [while you set up, after you answered them here, after you chose them here, your setup is saved]
       - click: keep mine for sessions to import
       - click: save and import
       - expectText: [your selection is saved, /home/ada/.config/peasant/config.yaml]
@@ -413,7 +413,7 @@ cases:
         expiredBody: nothing was saved, and the answers you had not saved are gone. open a new one to start again from your saved settings.
         reopen: open a new setup
         conflictsTitle: saved values that changed while you set up
-        conflictsHelp: these were changed in your saved settings after you answered them here. choose which value to keep for each one.
+        conflictsHelp: these saved values changed while you set up; some move because of another answer you gave. choose which value to keep for each one.
         saved: your setup is saved
       selection:
         opening: opening the selection
@@ -424,7 +424,7 @@ cases:
         expiredBody: nothing was saved, and the choices you had not saved are gone. reopen it to start again from your saved selection.
         reopen: reopen the selection
         conflictsTitle: saved values that changed while you chose sessions
-        conflictsHelp: these were changed in your saved settings after you chose them here. choose which value to keep for each one.
+        conflictsHelp: these saved values changed while you chose sessions; some move because of another choice you made. choose which value to keep for each one.
         saved: your selection is saved
 
   # A row whose saved value is an object or a list is shown as the server sent

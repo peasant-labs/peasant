@@ -1,9 +1,10 @@
 # The finish panel after a save: the server's next steps, the import's pushed
-# progress, the notes from reading sessions. It never installs a hook and
-# never publishes. Each case reaches the review stop and saves.
+# progress, the notes the server sends with the save. It never installs a hook
+# and never publishes. Each case reaches the review stop and saves.
 requiredNames:
   - auto-publish-link-navigates-to-real-section
   - diagnostics-render
+  - a-retention-failure-is-listed-as-a-note-from-the-save
   - import-now-disabled-while-running
   - no-hook-install
   - no-mid-run-ticks-keep-the-running-state-until-the-end-event
@@ -58,9 +59,35 @@ cases:
       - click: continue
       - click: save and import
       - expectText:
-          - notes from reading your sessions
+          - notes from the save
           - "withheld one session: two saved rules both match the branch feature/x"
           - "withheld one session: its project path is not on this computer"
+      - expectNoText: [notes from reading your sessions]
+
+  # The save stood but the Claude retention period was not applied: the server's
+  # note is about the save, so it is listed under a heading that says so, and not
+  # as if reading the sessions had gone wrong.
+  - name: a-retention-failure-is-listed-as-a-note-from-the-save
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config]
+          diagnostics:
+            - "config saved, retention not applied: permission denied"
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [your setup is saved, notes from the save, "config saved, retention not applied: permission denied"]
+      - expectNoText: [reading your sessions]
 
   - name: import-now-disabled-while-running
     server:

@@ -50,7 +50,7 @@ const WIZARD: KickstartCopy = Object.freeze({
   }),
   conflicts: Object.freeze({
     title: 'saved values that changed while you set up',
-    help: 'these were changed in your saved settings after you answered them here. choose which value to keep for each one.',
+    help: 'these saved values changed while you set up; some move because of another answer you gave. choose which value to keep for each one.',
   }),
   saved: 'your setup is saved',
 });
@@ -67,7 +67,7 @@ const SELECTION: KickstartCopy = Object.freeze({
   }),
   conflicts: Object.freeze({
     title: 'saved values that changed while you chose sessions',
-    help: 'these were changed in your saved settings after you chose them here. choose which value to keep for each one.',
+    help: 'these saved values changed while you chose sessions; some move because of another choice you made. choose which value to keep for each one.',
   }),
   saved: 'your selection is saved',
 });

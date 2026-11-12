@@ -30,10 +30,11 @@ function Side({ value, name }: { value: ConflictValue; name: string }) {
 }
 
 /**
- * Answered fields whose saved value changed while the wizard was open. Each
- * row shows both sides and the two ways to settle it; the draft is saved only
- * after every row is settled, and the server says which rows remain. Fields
- * the person never answered are never listed.
+ * Fields whose saved value changed while the page was open: the ones the
+ * person answered, and the ones that move because of another answer they gave.
+ * Each row shows both sides and the two ways to settle it; the draft is saved
+ * only after every row is settled, and the server says which rows remain. The
+ * server chooses the rows; a field it does not list is never settled here.
  */
 export function ConflictPane({
   copy,
