@@ -1,0 +1,10 @@
+# Required-name manifest for search_residue_gate: deletion protection by
+# NAME, never by count.
+requiredNames:
+  - version-74-never-migrated
+  - version-75-clean-no-window
+  - version-75-delete-leaves-residue
+  - version-75-reused-rowid-leaves-residue
+  - version-75-insert-only-window-clean
+  - version-76-already-migrated
+  - missing-file-fresh-install
