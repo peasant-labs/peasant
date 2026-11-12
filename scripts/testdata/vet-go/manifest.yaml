@@ -1,0 +1,10 @@
+requiredNames:
+  - tagged-packages-and-tests-are-vetted-only
+  - new-untracked-tag-type-error
+  - tagged-test-only-type-error
+  - disjunction-vets-each-tag
+  - positive-conjunction-fails-closed
+  - toolchain-conjunction-fails-closed
+  - compound-negation-fails-closed
+  - double-negation-fails-closed
+  - platform-and-ignore-are-not-opt-ins

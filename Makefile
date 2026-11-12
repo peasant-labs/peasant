@@ -215,8 +215,8 @@ guided-screenshots-test:
 # history. Runs the production sessionorigin.Classify rule over the
 # operator's OWN ~/.claude/projects and reports counts per deciding signal.
 # It writes nothing anywhere. The build tag keeps it, and its tests, out of
-# `go build ./...`, `make check`, and the shipped peasant binary -- same
-# footing as guided-screenshots above.
+# `go build ./...`, default tests, and the shipped peasant binary. The lint
+# step of `make check` vets it with its opt-in tag; it does not run its tests.
 origin-audit:
 	go run -tags=origin_audit ./cmd/peasant-origin-audit
 
