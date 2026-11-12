@@ -2,17 +2,20 @@ package defaults
 
 import "time"
 
-// The store upgrade's free-disk factors. A factor is the share of the
-// database file's size a step asks to be free before it may run. Every step
-// in the upgrade step catalog names one of these; the preflight asks for the
-// largest factor among the steps planned for a store, times the database
-// size, because each step commits and its log space is reused before the
-// next one starts. Tests assert the invariant (refuse when free is below
-// required) and the catalog's shape, never a factor's exact value.
+// The store upgrade's free-disk factors. A factor is the share of a basis
+// a step asks to be free before it may run. The basis is named by the
+// step's catalog entry: the whole database file, or the tables the step
+// rewrites, measured on the store. Every step in the upgrade step catalog
+// names one factor and one basis; the preflight asks for the largest need
+// (factor times basis) among the steps planned for a store, because each
+// step commits and its log space is reused before the next one starts.
+// Tests assert the invariant (refuse when free is below required), the
+// catalog's shape, and the need against dbstat on synthetic stores; never a
+// factor's exact value.
 //
-// Sandbox measurement, 2026-11-12, store code at revision 323abcf9b,
-// synthetic schema-69 store with 268,477,563 bytes of text held in the entry
-// rows (485,289,984-byte database):
+// Sandbox measurement of the light steps, 2026-11-12, store code at
+// revision 323abcf9b, synthetic schema-69 store with 268,477,563 bytes of
+// text held in the entry rows (485,289,984-byte database):
 //
 //	PEASANT_SANDBOX_UPGRADE_DIR=/tmp/opencode/<dir> PEASANT_SANDBOX_UPGRADE_TEXT_MB=256 \
 //	  go test ./internal/store -run TestSandboxStoreUpgradeMeasure -v -timeout 0
@@ -24,18 +27,44 @@ import "time"
 //	step 74  491ms      181,280           (0.0004)
 //	step 75  1m43s  654,091,232 high-water (1.348), database grew by 165,154,816 (0.340)
 //	step 76  310ms            0
+//
+// Sandbox measurement of step 75 by layout, 2026-11-12, two synthetic
+// schema-74 stores with about 256 MiB of entry text each (65,500 entries,
+// exponential sizes with a heavy tail), the estimate's sample bound 2,048:
+//
+//	PEASANT_SANDBOX_UPGRADE_DIR=/tmp/opencode/<dir> PEASANT_SANDBOX_UPGRADE_TEXT_MB=256 \
+//	  go test ./internal/store -run TestSandboxStoreUpgradeDiskBasisMeasure -v -timeout 0
+//
+//	                                   text in the entry rows   text in the bodies
+//	database                                  522,498,048           757,714,944
+//	entry table + indexes (dbstat)            321,654,784             2,744,320
+//	search indexes (dbstat)                   197,386,240           163,635,200
+//	basis estimate                            623,550,266           166,070,158
+//	estimate time (rows read)              7.3 ms (2,050)       12.0 ms (2,050)
+//	dbstat time, entry table + search         259 ms               535 ms
+//	step 75 log high-water                    719,393,232           169,035,392
+//	step 75 database growth                   194,281,472               602,112
+//	used (high-water + growth)                913,674,704           169,637,504
+//	used / dbstat basis                             1.760                 1.020
+//	used / database                                 1.749                 0.224
+//	plan asked for                    966,621,389 (1.06x used)  307,229,793 (1.81x used)
+//
+// The rows-layout estimate exceeds the database and is capped at it.
 const (
 	// StoreUpgradeEntryTableRebuildDiskFactor is for a step that copies the
-	// entry table and rebuilds the search index over it. Measured on step 75:
-	// the write-ahead log peaked at 1.348 times the database and the
-	// database grew by 0.340 times, 1.688 together, rounded up. The measured
-	// store kept all its text in the entry rows, the worst layout for this
-	// step. A store that keeps its text in the body table needs far less
-	// (the 43 GB store measured on 2026-11-11 left a log of 0.10 times the
-	// database), but the plan cannot tell the two layouts apart without
-	// reading the entry table, which on the heavy layout is the whole store.
-	// So the plan uses the conservative value for every store.
-	StoreUpgradeEntryTableRebuildDiskFactor = 1.69
+	// entry table and rebuilds the search indexes. Its basis is the entry
+	// table with its indexes plus the search indexes the step rebuilds
+	// (step 75), or the entry table alone (step 11, which predates search).
+	// Measured on step 75: what the step used, the log's high-water mark plus
+	// the database's growth, was 1.760 times dbstat's size of that basis on
+	// the store with its text in the entry rows (1.828 on a 16 MiB store of
+	// the same layout) and 1.020 times on the store with its text in the
+	// bodies. 1.85 covers the largest. A store whose text is in the bodies
+	// asks for 1.85 times its search index and small entry table, not for
+	// 1.85 times its database: the 43 GB store measured on 2026-11-11, with
+	// a 39 MiB entry table and 16.4 GiB of text in the bodies, left a log of
+	// 4.31 GB, about the size of its search index.
+	StoreUpgradeEntryTableRebuildDiskFactor = 1.85
 
 	// StoreUpgradeSearchRebuildDiskFactor is for a step that builds or
 	// rebuilds a search index without copying a table. Not measured in the
@@ -58,6 +87,30 @@ const (
 	// zero, so every planned step states a need and a full disk is still
 	// refused before the first step: 0.001 is one megabyte per gigabyte.
 	StoreUpgradeQuickStepDiskFactor = 0.001
+
+	// StoreUpgradeEstimateSampleRows bounds the rows the free-disk estimate
+	// reads from the entry table: the smallest and the largest rowid, then at
+	// most this many rows at evenly spaced rowids, each measured from its
+	// record header with octet_length, which loads no value and no overflow
+	// page. A table with no more rowids is read in full. Measured: 2,050
+	// rows read and 7 to 12 ms for the whole estimate on 522 MB and 758 MB
+	// stores, where dbstat took 259 and 535 ms to walk the same objects and
+	// walks every page, so its cost grows with the store (a 40 GB entry
+	// table would take tens of seconds). The cost of the sample does not.
+	StoreUpgradeEstimateSampleRows = 2048
+
+	// StoreUpgradeEstimateRowOverheadBytes is what one entry row costs beyond
+	// its leaf share and overflow pages: the record header, the rowid and
+	// its entries in the table's six indexes. Measured 236 to 362 bytes per
+	// row on synthetic stores of 256-, 1,024- and 4,096-byte entries.
+	StoreUpgradeEstimateRowOverheadBytes = 384
+
+	// StoreUpgradeEstimateSampleMargin multiplies a sampled table estimate,
+	// so a sample that misses the heavy tail of entry sizes still errs high.
+	// The sample's error on the 256 MiB store with heavy-tailed entries was
+	// within 10 percent; sampled estimates came out 1.28 to 1.48 times
+	// dbstat's size.
+	StoreUpgradeEstimateSampleMargin = 1.25
 
 	// StoreUpgradeTightDiskMultiple defines "tight": free space is known and
 	// below this multiple of the required bytes. A terminal upgrade asks

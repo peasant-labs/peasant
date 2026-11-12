@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -155,8 +156,23 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 		return plan, nil, nil
 	}
 
+	if isStoreFilePath(dbPath) {
+		if info, statErr := os.Stat(dbPath); statErr == nil {
+			plan.StoreBytes = info.Size()
+		}
+		if free, ok := migrateFreeBytes(filepath.Dir(dbPath)); ok {
+			plan.FreeBytesKnown = true
+			if free > math.MaxInt64 {
+				free = math.MaxInt64
+			}
+			plan.FreeBytes = int64(free)
+		}
+	}
+
 	var notices []string
-	largestFactor := 0.0
+	// basisBytes holds each basis the plan has measured, so a basis shared
+	// by several steps is estimated once.
+	basisBytes := map[upgradeDiskBasis]int64{}
 	for produced := plan.From + 1; produced <= head; produced++ {
 		entry, ok := upgradeStepCatalog[produced]
 		if !ok {
@@ -173,40 +189,35 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 				notices = append(notices, notice)
 			}
 		}
-		factor := entry.diskFactor
+		factor, basis := entry.diskFactor, entry.diskBasis
 		if produced == searchRepairSchemaVersion && step.Cost.Long() {
 			// The repair rebuilds the whole search index on this store.
-			factor = defaults.StoreUpgradeSearchRebuildDiskFactor
+			factor, basis = defaults.StoreUpgradeSearchRebuildDiskFactor, upgradeDiskBasisDatabase
 		}
-		if factor > largestFactor {
-			largestFactor = factor
+		size, measured := basisBytes[basis]
+		if !measured {
+			var notice string
+			size, notice = diskBasisBytes(conn, basis, plan.StoreBytes)
+			basisBytes[basis] = size
+			if notice != "" {
+				notices = append(notices, notice)
+			}
+		}
+		// Each step commits before the next starts, so the log space of one
+		// step is reused by the next: the plan needs room for its hungriest
+		// step, not for the sum.
+		if need := int64(math.Ceil(float64(size) * factor)); need > plan.RequiredFreeBytes {
+			plan.RequiredFreeBytes = need
 		}
 		plan.Steps = append(plan.Steps, step)
 	}
-
-	if isStoreFilePath(dbPath) {
-		if info, statErr := os.Stat(dbPath); statErr == nil {
-			plan.StoreBytes = info.Size()
-		}
-		if free, ok := migrateFreeBytes(filepath.Dir(dbPath)); ok {
-			plan.FreeBytesKnown = true
-			if free > math.MaxInt64 {
-				free = math.MaxInt64
-			}
-			plan.FreeBytes = int64(free)
-		}
-	}
-	// Each step commits before the next starts, so the log space of one
-	// step is reused by the next: the plan needs room for its hungriest
-	// step, not for the sum.
-	plan.RequiredFreeBytes = int64(math.Ceil(float64(plan.StoreBytes) * largestFactor))
 	return plan, notices, nil
 }
 
 // missingCatalogEntryFix says exactly what to add for a migration that has
 // no catalog entry.
 func missingCatalogEntryFix(version int) string {
-	return fmt.Sprintf("add `%d: {title: \"<lowercase phrase>\", cost: <UpgradeCost...>, diskFactor: defaults.StoreUpgrade<...>DiskFactor}` to upgradeStepCatalog in internal/store/upgrade_catalog.go (and `counts:` when the step reports a count), and add `- \"%d\"` to requiredNames in internal/store/testdata/upgrade_step_catalog.manifest.yaml", version, version)
+	return fmt.Sprintf("add `%d: {title: \"<lowercase phrase>\", cost: <UpgradeCost...>, diskFactor: defaults.StoreUpgrade<...>DiskFactor, diskBasis: upgradeDiskBasis<...>}` to upgradeStepCatalog in internal/store/upgrade_catalog.go (and `counts:` when the step reports a count), and add `- \"%d\"` to requiredNames in internal/store/testdata/upgrade_step_catalog.manifest.yaml", version, version)
 }
 
 // searchRepairStep resolves the cost of the search trigger repair for a
@@ -351,7 +362,8 @@ func (p *upgradeStepProgress) count(done, of int64) {
 // The upgrade holds the data directory's run lock for its whole run, so a
 // harvest or a second upgrade waits. It refuses before the first step when
 // the filesystem reports less free space than the plan asks for (the
-// database size times the largest disk factor among the planned steps);
+// largest need among the planned steps, each its disk factor times its
+// basis);
 // unknown free space warns before a long step and continues. Each step is one transaction:
 // the migration's script, any data fill the step needs, and the version
 // stamp commit together. Cancelling ctx interrupts the running step, which
@@ -448,8 +460,10 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 	if len(plan.Steps) == 0 {
 		return report, nil
 	}
+	searchWarned := false
 	for _, notice := range notices {
 		writeUpgradeNotice(opts.Notices, notice)
+		searchWarned = searchWarned || strings.HasPrefix(notice, searchIndexPrecheckWarning)
 	}
 	if plan.RequiredFreeBytes > 0 {
 		switch {
@@ -474,7 +488,7 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 		}
 		// A plan that already warned about the search tables said that the
 		// repair rebuilds; the rebuild notice would repeat it.
-		if step.Version == searchRepairSchemaVersion && step.Cost.Long() && len(notices) == 0 {
+		if step.Version == searchRepairSchemaVersion && step.Cost.Long() && !searchWarned {
 			writeUpgradeNotice(opts.Notices, searchIndexRebuildNotice)
 		}
 		progress := &upgradeStepProgress{emit: opts.Progress, dbPath: dbPath, step: step, index: i + 1, total: len(plan.Steps), started: time.Now(), walStart: walFileBytes(dbPath)}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
@@ -29,10 +30,10 @@ func TestSandboxStoreUpgradeMeasure(t *testing.T) {
 	if dir == "" {
 		t.Skip("sandbox measurement only: set PEASANT_SANDBOX_UPGRADE_DIR to a directory under /tmp/opencode")
 	}
-	rel, err := filepath.Rel("/tmp/opencode", dir)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !sandboxDirUnderTmpOpencode(dir) {
 		t.Fatal("the upgrade measurement refuses a directory outside /tmp/opencode")
 	}
+	var err error
 	textMB := 64
 	if raw := os.Getenv("PEASANT_SANDBOX_UPGRADE_TEXT_MB"); raw != "" {
 		textMB, err = strconv.Atoi(raw)
@@ -126,4 +127,161 @@ VALUES(?, ?, 'claude-code', 'text', 'assistant', 0, ?)`,
 	if freeKnown {
 		t.Logf("free space changed by %d bytes", int64(freeAfter)-int64(freeBefore))
 	}
+}
+
+// TestSandboxStoreUpgradeDiskBasisMeasure builds one synthetic schema-74
+// store per entry text layout, compares the free-disk estimate of the entry
+// table rebuild with dbstat's page count, times both, then upgrades the
+// store and logs what step 75 really used: the write-ahead log's high-water
+// mark plus the database's growth. It is the measurement behind the entry
+// table rebuild factor and the estimate's bounds. It never runs in the gate
+// and builds its stores under /tmp/opencode.
+//
+//	PEASANT_SANDBOX_UPGRADE_DIR=/tmp/opencode/<dir> \
+//	PEASANT_SANDBOX_UPGRADE_TEXT_MB=256 \
+//	go test ./internal/store -run TestSandboxStoreUpgradeDiskBasisMeasure -v -timeout 0
+func TestSandboxStoreUpgradeDiskBasisMeasure(t *testing.T) {
+	dir := os.Getenv("PEASANT_SANDBOX_UPGRADE_DIR")
+	if dir == "" {
+		t.Skip("sandbox measurement only: set PEASANT_SANDBOX_UPGRADE_DIR to a directory under /tmp/opencode")
+	}
+	if !sandboxDirUnderTmpOpencode(dir) {
+		t.Fatal("the upgrade measurement refuses a directory outside /tmp/opencode")
+	}
+	var err error
+	textMB := 64
+	if raw := os.Getenv("PEASANT_SANDBOX_UPGRADE_TEXT_MB"); raw != "" {
+		textMB, err = strconv.Atoi(raw)
+		if err != nil || textMB <= 0 {
+			t.Fatalf("PEASANT_SANDBOX_UPGRADE_TEXT_MB = %q, want a positive whole number of megabytes", raw)
+		}
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const entriesPerSession, meanEntryBytes = 50, 4096
+	sessions := textMB * 1024 * 1024 / (entriesPerSession * meanEntryBytes)
+	sizeOf := func(p string) int64 {
+		info, err := os.Stat(p)
+		if err != nil {
+			return 0
+		}
+		return info.Size()
+	}
+	for _, layout := range allEntryTextLayouts {
+		t.Run(string(layout), func(t *testing.T) {
+			path := filepath.Join(dir, string(layout)+".db")
+			for _, stale := range []string{path, path + "-wal", path + "-shm"} {
+				_ = os.Remove(stale)
+			}
+			spec := layoutStoreSpec{Layout: layout, Sessions: sessions, TextEntriesPerSession: entriesPerSession, MeanEntryBytes: meanEntryBytes}
+			if layout == entryTextInBodies {
+				spec.RowEntriesPerSession = 2
+				spec.ContentBytesPerSession = entriesPerSession * meanEntryBytes
+			}
+			totals := buildLayoutStore(t, path, spec)
+			storeBefore := sizeOf(path)
+
+			conn, err := openReadOnlyNoSidecars(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			timed := func(f func()) time.Duration {
+				started := time.Now()
+				f()
+				return time.Since(started)
+			}
+			var entriesTruth, searchTruth, bodiesTruth int64
+			entriesTime := timed(func() { entriesTruth = dbstatBytesOnConn(t, conn, `tbl_name = 'session_entries'`) })
+			searchTime := timed(func() {
+				searchTruth = dbstatBytesOnConn(t, conn, `name LIKE 'session_entries_fts%' OR name LIKE 'session_search_fts%'`)
+			})
+			bodiesTime := timed(func() { bodiesTruth = dbstatBytesOnConn(t, conn, `tbl_name = 'session_entry_bodies'`) })
+			// The exact entry table, read in full: every row's octet sum,
+			// from the record headers only.
+			var fullRows, fullOctets int64
+			fullTime := timed(func() {
+				columns, colErr := tableColumnsOnConn(conn, entryTableName)
+				if colErr != nil {
+					t.Fatal(colErr)
+				}
+				if err := sqlitex.ExecuteTransient(conn, `SELECT count(*), sum(`+octetSumExpr(columns)+`) FROM session_entries`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+					fullRows, fullOctets = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+					return nil
+				}}); err != nil {
+					t.Fatal(err)
+				}
+			})
+			// The same rows with their text loaded: what reading the values,
+			// overflow pages included, costs.
+			var loaded int64
+			loadedTime := timed(func() {
+				if err := sqlitex.ExecuteTransient(conn, `SELECT sum(length(CAST(content_preview AS BLOB)) + coalesce(length(CAST(tool_output AS BLOB)), 0)) FROM session_entries`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+					loaded = stmt.ColumnInt64(0)
+					return nil
+				}}); err != nil {
+					t.Fatal(err)
+				}
+			})
+			t.Logf("entry table in full: %d rows, %d octets from the record headers in %s; %d text bytes loaded in %s",
+				fullRows, fullOctets, fullTime.Round(time.Millisecond), loaded, loadedTime.Round(time.Millisecond))
+			entries, err := estimateTableBytesOnConn(conn, entryTableName, defaults.StoreUpgradeEstimateSampleRows)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var searchEstimate, basis int64
+			for _, index := range entryRebuildSearchIndexes {
+				size, err := fts5IndexBytesOnConn(conn, index)
+				if err != nil {
+					t.Fatal(err)
+				}
+				searchEstimate += size
+			}
+			estimateTime := timed(func() {
+				if basis, err = estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if err := conn.Close(); err != nil {
+				t.Fatal(err)
+			}
+			plan := mustPlan(t, path)
+			t.Logf("%s: %d sessions; entry rows %d (text %d), body rows %d (text %d), content %d; database %d bytes",
+				layout, sessions, totals.EntryRows, totals.EntryText, totals.BodyRows, totals.BodyText, totals.ContentBytes, storeBefore)
+			t.Logf("dbstat: entry table and indexes %d bytes in %s; search indexes %d in %s; bodies %d in %s",
+				entriesTruth, entriesTime.Round(time.Millisecond), searchTruth, searchTime.Round(time.Millisecond), bodiesTruth, bodiesTime.Round(time.Millisecond))
+			t.Logf("estimate: entry table %d bytes (%d rows read, exact %v); search indexes %d bytes; basis %d, measured in %s",
+				entries.StoredBytes, entries.RowsRead, entries.Exact, searchEstimate, basis, estimateTime.Round(time.Microsecond))
+			t.Logf("plan asks for %d bytes free (%.3f of the database, %.3f of the basis estimate, %.3f of the dbstat entry table and search indexes)",
+				plan.RequiredFreeBytes, float64(plan.RequiredFreeBytes)/float64(storeBefore), float64(plan.RequiredFreeBytes)/float64(basis), float64(plan.RequiredFreeBytes)/float64(entriesTruth+searchTruth))
+
+			var walHighWater int64
+			started := time.Now()
+			report, err := Upgrade(t.Context(), path, UpgradeOptions{Progress: func(UpgradeEvent) {
+				if size := sizeOf(path + "-wal"); size > walHighWater {
+					walHighWater = size
+				}
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, step := range report.Steps {
+				t.Logf("step %d  %12s  wal +%d bytes  %s", step.Step.Version, step.Duration.Round(time.Millisecond), step.WALBytes, step.Step.Title)
+			}
+			growth := sizeOf(path) - storeBefore
+			used := walHighWater + growth
+			t.Logf("upgrade %s: log high-water %d, database grew %d, together %d: %.3f of the database, %.3f of the basis estimate, %.3f of the dbstat entry table and search indexes; the plan asked for %.2f times what was used",
+				time.Since(started).Round(time.Millisecond), walHighWater, growth, used, float64(used)/float64(storeBefore), float64(used)/float64(basis), float64(used)/float64(entriesTruth+searchTruth), float64(plan.RequiredFreeBytes)/float64(used))
+		})
+	}
+}
+
+// sandboxDirUnderTmpOpencode reports whether dir lies strictly inside
+// /tmp/opencode, the only place a sandbox measurement may build a store.
+func sandboxDirUnderTmpOpencode(dir string) bool {
+	rel, err := filepath.Rel("/tmp/opencode", dir)
+	if err != nil || rel == "." {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

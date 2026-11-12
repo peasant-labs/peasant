@@ -150,9 +150,10 @@ type UpgradePlan struct {
 	// meaningful only when FreeBytesKnown is true.
 	FreeBytes      int64
 	FreeBytesKnown bool
-	// RequiredFreeBytes is the free space the plan asks for: the database
-	// size times the largest disk factor among the planned steps. It is zero
-	// only when the plan has no steps.
+	// RequiredFreeBytes is the free space the plan asks for: the largest
+	// need among the planned steps, each its disk factor times its basis
+	// (the database size, or the tables the step rewrites, measured on the
+	// store). It is zero only when the plan has no steps.
 	RequiredFreeBytes int64
 }
 
