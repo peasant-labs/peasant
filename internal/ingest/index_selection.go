@@ -88,21 +88,31 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 			!permanentRefusalIsSettled(expected, target)) && !settled
 }
 
-// capturedInputBindsWithoutParse reports that the stored index already
-// describes a captured input and only its bookkeeping is behind. That is the
-// state a metadata-only install leaves: the transcript file was kept, so the
-// stored input proof still equals the captured input, and the producer that
-// built the index is still current. Re-parsing would reproduce the stored
-// entries, so the write is one constant-size settle: it advances the index
-// time past the save and binds the index to the newer metadata capture.
+// capturedInputBindsWithoutReparse is the rule "bind without a re-parse". It
+// is stated here and nowhere else: the store's half,
+// Store.BindPublicationIndex, cites it and re-decides none of it, keeping only
+// its compare-and-swap.
 //
-// It applies when the pair was saved this run or the index is unbound from a
-// capture the input can vouch for. Every other pending term keeps the
-// ordinary parse: an explicit rebuild, a behind producer or index format, a
-// missing or different input proof, content this build could still certify,
-// and a latest attempt held beside the active authority, whose retry is the
-// parse's to make.
-func (p *Pipeline) capturedInputBindsWithoutParse(input *CapturedIndexInput) bool {
+// A session binds without a re-parse when a parse would reproduce the stored
+// entries exactly and only the index bookkeeping is behind. That is the state a
+// metadata-only install leaves: the transcript file was kept, so the stored
+// input proof still equals the captured input. The write is then one
+// constant-size settle: it advances the index time past the save and binds the
+// index to the newer metadata capture. Every term below is required.
+//
+//   - The parse would read the same input: the stored input proof equals the
+//     captured input digest.
+//   - The same producer would parse it: the stored indexer revision and index
+//     format are this build's target.
+//   - Nothing else is owed: no explicit rebuild (force or reindex), no latest
+//     attempt held beside the active authority (its retry is the parse's to
+//     make), and no incomplete content this build could still certify.
+//   - Something is behind: the pair was saved this run, so the index time must
+//     pass the save, or the index is unbound from a capture the input can
+//     vouch for.
+//
+// A store that cannot bind is served by the ordinary parse and write.
+func (p *Pipeline) capturedInputBindsWithoutReparse(input *CapturedIndexInput) bool {
 	if _, ok := p.metricsStore.(PublicationIndexBinder); !ok {
 		return false
 	}

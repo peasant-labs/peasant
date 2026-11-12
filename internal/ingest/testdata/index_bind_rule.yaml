@@ -1,0 +1,77 @@
+# The rule "bind without a re-parse" (capturedInputBindsWithoutReparse), one
+# case per term. Every case starts from the same settled Claude session: a
+# file input whose digest equals the stored input proof, the current producer
+# and index format, complete content, no latest attempt, and metadata
+# capture revision 2. Each case changes only the fields it names.
+#
+# published:          the pair was saved this run.
+# bound:              the stored index is bound to the current capture.
+# inputProof:         same | different | missing, against the captured digest.
+# directoryInput:     the input is a native directory tree, which the capture
+#                     vouches for only when this run saved it.
+# want:               the session binds without a re-parse.
+required_names:
+  - pair-saved-this-run-binds
+  - index-unbound-from-a-vouched-capture-binds
+  - bound-index-with-nothing-saved-does-not-bind
+  - forced-rebuild-parses
+  - reindex-parses
+  - held-latest-attempt-parses
+  - behind-producer-parses
+  - missing-index-format-parses
+  - different-input-proof-parses
+  - missing-input-proof-parses
+  - certifiable-incomplete-content-parses
+  - store-without-a-binder-parses
+  - unvouched-directory-tree-does-not-bind
+cases:
+  - name: pair-saved-this-run-binds
+    published: true
+    bound: false
+    want: true
+  - name: index-unbound-from-a-vouched-capture-binds
+    bound: false
+    want: true
+  - name: bound-index-with-nothing-saved-does-not-bind
+    bound: true
+    want: false
+  - name: forced-rebuild-parses
+    published: true
+    force: true
+    want: false
+  - name: reindex-parses
+    published: true
+    reindex: true
+    want: false
+  - name: held-latest-attempt-parses
+    published: true
+    latestAttempt: true
+    want: false
+  - name: behind-producer-parses
+    published: true
+    producerBehind: true
+    want: false
+  - name: missing-index-format-parses
+    published: true
+    indexFormatMissing: true
+    want: false
+  - name: different-input-proof-parses
+    published: true
+    inputProof: different
+    want: false
+  - name: missing-input-proof-parses
+    published: true
+    inputProof: missing
+    want: false
+  - name: certifiable-incomplete-content-parses
+    published: true
+    contentIncomplete: true
+    want: false
+  - name: store-without-a-binder-parses
+    published: true
+    noBinder: true
+    want: false
+  - name: unvouched-directory-tree-does-not-bind
+    bound: false
+    directoryInput: true
+    want: false
