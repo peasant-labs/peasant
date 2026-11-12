@@ -42,6 +42,16 @@ type storeUpgradeCase struct {
 	Residue       bool    `yaml:"residue,omitempty"`
 	WantFactorMin float64 `yaml:"wantFactorMin,omitempty"`
 	WantFactorMax float64 `yaml:"wantFactorMax,omitempty"`
+	// The synthetic schema-74 store of a layout case, and the bounds of its
+	// need over the factor times its measured basis.
+	Layout         string  `yaml:"layout,omitempty"`
+	Sessions       int     `yaml:"sessions,omitempty"`
+	TextEntries    int     `yaml:"textEntries,omitempty"`
+	MeanEntryBytes int     `yaml:"meanEntryBytes,omitempty"`
+	RowEntries     int     `yaml:"rowEntries,omitempty"`
+	ContentBytes   int     `yaml:"contentBytes,omitempty"`
+	WantBasisMin   float64 `yaml:"wantBasisMin,omitempty"`
+	WantBasisMax   float64 `yaml:"wantBasisMax,omitempty"`
 }
 
 // LoadStoreUpgradeFixtures decodes the store upgrade cases and checks them
@@ -139,6 +149,9 @@ func TestStoreUpgrade(t *testing.T) {
 		"disk-unknown":             runUpgradeDiskUnknownCase,
 		"disk-need":                runUpgradeDiskNeedCase,
 		"disk-need-largest":        runUpgradeDiskNeedLargestCase,
+		"disk-layout-need":         runUpgradeDiskLayoutNeedCase,
+		"disk-estimate-bound":      runUpgradeDiskEstimateBoundCase,
+		"disk-basis-fallback":      runUpgradeDiskBasisFallbackCase,
 		"wal-truncated":            runUpgradeWALTruncatedCase,
 		"run-lock":                 runUpgradeRunLockCase,
 		"catalog":                  runUpgradeCatalogCase,
@@ -646,6 +659,9 @@ func runUpgradeCatalogCase(t *testing.T, _ storeUpgradeCase) {
 		if entry.diskFactor <= 0 {
 			t.Errorf("the catalog entry for migration %d has no disk factor; set `diskFactor:` on entry %d of upgradeStepCatalog in internal/store/upgrade_catalog.go to one of the named factors in internal/defaults/store_upgrade.go (StoreUpgradeQuickStepDiskFactor, StoreUpgradeRowsStepDiskFactor, StoreUpgradeSearchRebuildDiskFactor, StoreUpgradeEntryTableRebuildDiskFactor)", version, version)
 		}
+		if _, err := newUpgradeDiskBasis(string(entry.diskBasis)); err != nil {
+			t.Errorf("the catalog entry for migration %d has no valid disk basis (%v); set `diskBasis:` on entry %d of upgradeStepCatalog in internal/store/upgrade_catalog.go to upgradeDiskBasisDatabase, or to the basis naming the tables the step rewrites (upgradeDiskBasisEntryTable, upgradeDiskBasisEntryTableAndSearchIndex)", version, err, version)
+		}
 		if entry.cost.Long() && entry.diskFactor > 0 && entry.diskFactor <= defaults.StoreUpgradeQuickStepDiskFactor {
 			t.Errorf("the catalog entry for migration %d is long (%s) but carries the quick disk factor; a long step rewrites rows or text and needs the rows factor or more", version, entry.cost)
 		}
@@ -943,19 +959,172 @@ func runUpgradeDiskNeedLargestCase(t *testing.T, c storeUpgradeCase) {
 	path := filepath.Join(t.TempDir(), "behind.db")
 	buildBehindStore(t, path, c.From, nil)
 	plan := mustPlan(t, path)
-	largest, sum := 0.0, 0.0
+	conn, err := openReadOnlyNoSidecars(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	var largest, sum int64
 	for _, step := range plan.Steps {
-		factor := upgradeStepCatalog[step.Version].diskFactor
-		sum += factor
-		if factor > largest {
-			largest = factor
+		entry := upgradeStepCatalog[step.Version]
+		size, notice := diskBasisBytes(conn, entry.diskBasis, plan.StoreBytes)
+		if notice != "" {
+			t.Fatalf("basis %s of step %d: %s", entry.diskBasis, step.Version, notice)
 		}
+		need := int64(math.Ceil(float64(size) * entry.diskFactor))
+		sum += need
+		largest = max(largest, need)
 	}
 	if sum <= largest {
-		t.Fatalf("the plan from %d has one step with a disk factor; the case needs several", c.From)
+		t.Fatalf("the plan from %d has one step with a disk need; the case needs several", c.From)
 	}
-	want := int64(math.Ceil(float64(plan.StoreBytes) * largest))
+	if plan.RequiredFreeBytes != largest {
+		t.Errorf("the plan asks for %d bytes, want %d: the largest need among its steps (each its factor times its basis), not their sum (%d)", plan.RequiredFreeBytes, largest, sum)
+	}
+}
+
+// layoutSpecOf is the synthetic store a layout case describes.
+func layoutSpecOf(t *testing.T, c storeUpgradeCase) layoutStoreSpec {
+	t.Helper()
+	layout, err := newEntryTextLayout(c.Layout)
+	if err != nil {
+		t.Fatalf("store_upgrade.yaml case %q: %v", c.Name, err)
+	}
+	return layoutStoreSpec{Layout: layout, Sessions: c.Sessions, TextEntriesPerSession: c.TextEntries, MeanEntryBytes: c.MeanEntryBytes, RowEntriesPerSession: c.RowEntries, ContentBytesPerSession: c.ContentBytes}
+}
+
+// entryRebuildTruthOnConn is dbstat's page count of what schema 75
+// rewrites: the entry table with its indexes, and the search indexes with
+// every shadow table.
+func entryRebuildTruthOnConn(t *testing.T, conn *sqlite.Conn) (entries, search int64) {
+	t.Helper()
+	return dbstatBytesOnConn(t, conn, `tbl_name = 'session_entries'`),
+		dbstatBytesOnConn(t, conn, `name LIKE 'session_entries_fts%' OR name LIKE 'session_search_fts%'`)
+}
+
+func runUpgradeDiskLayoutNeedCase(t *testing.T, c storeUpgradeCase) {
+	path := filepath.Join(t.TempDir(), c.Layout+".db")
+	buildLayoutStore(t, path, layoutSpecOf(t, c))
+	conn, err := openReadOnlyNoSidecars(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entriesTruth, searchTruth := entryRebuildTruthOnConn(t, conn)
+	var searchEstimate int64
+	for _, index := range entryRebuildSearchIndexes {
+		size, err := fts5IndexBytesOnConn(conn, index)
+		if err != nil {
+			t.Fatal(err)
+		}
+		searchEstimate += size
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// The two records of each search index measure it to within a few
+	// percent of its pages, erring high.
+	if searchEstimate < searchTruth || searchEstimate > searchTruth*5/4 {
+		t.Errorf("the search indexes' records estimate %d bytes; dbstat counts %d bytes of their pages; want at least that and at most a quarter more", searchEstimate, searchTruth)
+	}
+
+	plan, notices, err := planUpgrade(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notices) != 0 {
+		t.Errorf("the plan of a measurable store raised notices %q", notices)
+	}
+	if plan.From != 74 || plan.StoreBytes <= 0 {
+		t.Fatalf("plan = %+v, want steps from schema 74 and a known database size", plan)
+	}
+	factor := upgradeStepCatalog[75].diskFactor
+	truth := float64(entriesTruth+searchTruth) * factor
+	basisShare := float64(plan.RequiredFreeBytes) / truth
+	dbShare := float64(plan.RequiredFreeBytes) / float64(plan.StoreBytes)
+	t.Logf("%s: database %d; entry table %d and search indexes %d by dbstat; the plan asks for %d (%.3f of the factor times them, %.3f of the database)",
+		c.Layout, plan.StoreBytes, entriesTruth, searchTruth, plan.RequiredFreeBytes, basisShare, dbShare)
+	if basisShare < c.WantBasisMin || basisShare > c.WantBasisMax {
+		t.Errorf("the plan asks for %d bytes, %.3f times the factor %.2f times the entry table and search indexes (%d bytes by dbstat); want between %.2f and %.2f", plan.RequiredFreeBytes, basisShare, factor, entriesTruth+searchTruth, c.WantBasisMin, c.WantBasisMax)
+	}
+	if dbShare < c.WantFactorMin || dbShare > c.WantFactorMax {
+		t.Errorf("the plan asks for %d bytes for a %d-byte database, %.3f times its size; want between %.3f and %.3f", plan.RequiredFreeBytes, plan.StoreBytes, dbShare, c.WantFactorMin, c.WantFactorMax)
+	}
+}
+
+func runUpgradeDiskEstimateBoundCase(t *testing.T, c storeUpgradeCase) {
+	path := filepath.Join(t.TempDir(), c.Layout+".db")
+	totals := buildLayoutStore(t, path, layoutSpecOf(t, c))
+	bound := int64(defaults.StoreUpgradeEstimateSampleRows)
+	if totals.EntryRows <= 2*bound {
+		t.Fatalf("the case's entry table has %d rows; it needs more than twice the sample bound %d", totals.EntryRows, bound)
+	}
+	conn, err := openReadOnlyNoSidecars(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	est, err := estimateTableBytesOnConn(conn, entryTableName, bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if est.Exact || est.RowsRead > bound+2 {
+		t.Errorf("the estimate of a %d-row table read %d rows (exact %v); want a sample of at most %d rows plus the two rowid bounds", totals.EntryRows, est.RowsRead, est.Exact, bound)
+	}
+	if est.Rows < totals.EntryRows {
+		t.Errorf("the estimate counts %d rows for a table of %d; the rowid span never counts fewer", est.Rows, totals.EntryRows)
+	}
+	truth := dbstatBytesOnConn(t, conn, `tbl_name = 'session_entries'`)
+	share := float64(est.StoredBytes) / float64(truth)
+	if share < c.WantBasisMin || share > c.WantBasisMax {
+		t.Errorf("the sampled estimate is %d bytes, %.3f times dbstat's %d; want between %.2f and %.2f: it errs high, never low", est.StoredBytes, share, truth, c.WantBasisMin, c.WantBasisMax)
+	}
+
+	// The same table read under a bound above its size is read in full.
+	full, err := estimateTableBytesOnConn(conn, entryTableName, totals.EntryRows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !full.Exact || full.Rows != totals.EntryRows || full.RowsRead != totals.EntryRows+2 {
+		t.Errorf("the estimate under a bound of %d rows = %+v; want an exact read of all %d rows", totals.EntryRows, full, totals.EntryRows)
+	}
+}
+
+func runUpgradeDiskBasisFallbackCase(t *testing.T, c storeUpgradeCase) {
+	path := filepath.Join(t.TempDir(), c.Layout+".db")
+	buildLayoutStore(t, path, layoutSpecOf(t, c))
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two levels and no segments behind them: the record does not decode.
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_fts_data SET block = x'0000000002' || x'0000' WHERE id = 10`, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	plan, notices, err := planUpgrade(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := int64(math.Ceil(float64(plan.StoreBytes) * upgradeStepCatalog[75].diskFactor))
 	if plan.RequiredFreeBytes != want {
-		t.Errorf("the plan asks for %d bytes, want %d: the database size times the largest factor among its steps (%.4f), not their sum (%.4f)", plan.RequiredFreeBytes, want, largest, sum)
+		t.Errorf("the plan asks for %d bytes, want %d: the factor times the whole %d-byte database", plan.RequiredFreeBytes, want, plan.StoreBytes)
+	}
+	if len(notices) != 1 {
+		t.Fatalf("notices = %q, want one warning naming the basis, the index and the whole-database fallback", notices)
+	}
+	for _, part := range []string{"could not measure the entry table and search index", "session_search_fts", "whole database"} {
+		if !strings.Contains(notices[0], part) {
+			t.Errorf("the fallback warning misses %q: %s", part, notices[0])
+		}
+	}
+	var out bytes.Buffer
+	stubFreeBytes(t, uint64(want), true)
+	if _, err := Upgrade(t.Context(), path, UpgradeOptions{Notices: &out}); err != nil {
+		t.Fatalf("Upgrade after the fallback: %v", err)
+	}
+	if !strings.Contains(out.String(), "could not measure the entry table and search index") {
+		t.Errorf("upgrade notices = %q, want the fallback warning", out.String())
 	}
 }

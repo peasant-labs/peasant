@@ -69,15 +69,11 @@ cases:
   - name: events-arrive-in-order-for-every-step
     kind: events
     from: 69
-  # Disk need. The plan asks for the database size times the largest disk
-  # factor among the steps planned for this store. wantFactorMin and
-  # wantFactorMax bound RequiredFreeBytes / StoreBytes. residue seeds stale
-  # search results into a schema-75 store, so its repair rebuilds the index.
-  - name: plan-with-the-entry-table-rebuild-asks-for-about-1.7-times-the-database
-    kind: disk-need
-    from: 69
-    wantFactorMin: 1.6
-    wantFactorMax: 1.8
+  # Disk need. Each step's need is its disk factor times its basis: the
+  # whole database, or the tables the step rewrites. The plan asks for the
+  # largest need among its steps. wantFactorMin and wantFactorMax bound
+  # RequiredFreeBytes / StoreBytes. residue seeds stale search results into a
+  # schema-75 store, so its repair rebuilds the index.
   - name: plan-of-light-steps-asks-for-the-small-share
     kind: disk-need
     from: 75
@@ -95,5 +91,56 @@ cases:
   - name: too-little-free-disk-for-light-steps-refuses-and-names-needed-and-free-bytes
     kind: disk-insufficient
     from: 75
-  - name: every-catalog-entry-has-a-disk-factor
+  - name: every-catalog-entry-has-a-disk-factor-and-a-basis
     kind: catalog
+  # The entry table rebuild (schema 75) asks for its factor times the entry
+  # table and the search indexes it rebuilds, measured on the store: the
+  # entry table by a bounded row sample, each search index by its structure
+  # record. wantBasisMin and wantBasisMax bound the need over the factor
+  # times dbstat's page count of those objects (the estimate errs high,
+  # never low); wantFactorMin and wantFactorMax bound it over the database
+  # size. sessions, textEntries (per session), meanEntryBytes, rowEntries
+  # (short rows a converted session keeps) and contentBytes (stored
+  # transcript per session) size the synthetic schema-74 store.
+  - name: entry-text-in-bodies-store-asks-for-the-factor-times-its-small-entry-table-and-search-index
+    kind: disk-layout-need
+    layout: entry-text-in-bodies
+    sessions: 40
+    textEntries: 25
+    meanEntryBytes: 1024
+    rowEntries: 2
+    contentBytes: 131072
+    wantBasisMin: 1.0
+    wantBasisMax: 1.6
+    wantFactorMin: 0.05
+    wantFactorMax: 0.5
+  - name: entry-text-in-rows-store-asks-for-the-factor-times-its-large-entry-table-and-search-index
+    kind: disk-layout-need
+    layout: entry-text-in-rows
+    sessions: 40
+    textEntries: 25
+    meanEntryBytes: 1024
+    wantBasisMin: 1.0
+    wantBasisMax: 1.8
+    wantFactorMin: 1.2
+    wantFactorMax: 1.9
+  # The estimate reads at most its sample bound of rows from a table larger
+  # than the bound, never the table, and still errs high.
+  - name: entry-table-estimate-reads-no-more-than-its-sample-bound
+    kind: disk-estimate-bound
+    layout: entry-text-in-rows
+    sessions: 120
+    textEntries: 50
+    meanEntryBytes: 256
+    wantBasisMin: 1.0
+    wantBasisMax: 1.8
+  # A search index whose structure record does not decode cannot be
+  # measured: the plan asks for the factor times the whole database and
+  # says why in one notice.
+  - name: unmeasurable-search-index-falls-back-to-the-whole-database-with-a-notice
+    kind: disk-basis-fallback
+    layout: entry-text-in-bodies
+    sessions: 4
+    textEntries: 5
+    meanEntryBytes: 512
+    rowEntries: 1
