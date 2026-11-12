@@ -685,10 +685,12 @@ test('computed-styles-and-themes', async () => {
     expect(entry.tabularOffenders, `${entry.name}: counts without tabular numbers`).toEqual([]);
     expect(railProblems(entry.rail), `${entry.name}: the step rail's labels sit inside the frame`).toEqual([]);
   }
-  // The rail check must have looked at labels: a rail with few steps shows them,
-  // so the screens named in the fixture are the ones that prove it.
+  // The rail check must have looked at labels: a rail the frame draws as numbers
+  // alone has none to judge, so the screens named in the fixture, every one of
+  // them, must have drawn and measured one label per step.
   for (const [name, count] of Object.entries(fixture.railScreens)) {
     const entry = probes.find((candidate) => candidate.name === name);
+    expect(entry, `${name} is a captured screen`).toBeDefined();
     expect(entry.rail.labelled, `${name}: the rail shows its labels`).toBe(true);
     expect(entry.rail.labels.map((label) => label.text), `${name}: the rail measured one label per step`).toHaveLength(count);
   }

@@ -35,12 +35,24 @@ expectedRefusals:
   - "400 GET /api/v1/sync/sessions"
   - "404 GET /api/v1/projects/resolve"
   - "409 POST /api/v1/kickstart/sessions/<id>/commit"
-# The screens whose step rail shows its labels (the frame shows them when its
-# first and last labels have room for five characters; a three-step rail in a
-# desktop frame does), with how many labels each has. The rail check fails on
-# these if the labels were not measured, so it cannot pass by looking at nothing.
+# The screens whose step rail shows its labels, with how many labels each has.
+# Fairtrade's frame draws them when its first and last labels have room for five
+# characters, and falls back to numbers alone otherwise; at the journey's desktop
+# width every screen of the wizard (ten stops) and the selection page (three)
+# has room. The rail check fails on these if the labels were not drawn or not
+# measured, so it cannot pass by looking at nothing or at a rail of numbers.
 railScreens:
+  01-village: 10
+  02-scan-progress: 10
+  03-selection-tree: 10
+  04-second-tab: 10
+  05-privacy: 10
+  06-offer: 10
+  07-review-diff: 10
+  08-review-conflict: 10
+  09-finish: 10
   10-selection-page: 3
+  11-rerun-prefilled: 10
 # Every screen that is captured and probed, in both themes (one file per theme
 # and name: <theme>-<name>.png under review-capture/).
 screens:
