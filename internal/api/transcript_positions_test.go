@@ -314,7 +314,10 @@ func TestSegmentProducerDefaultsAreWired(t *testing.T) {
 	turns := []ingest.Turn{{Index: 4, Role: schema.RoleUser, EntryType: schema.EntryTypeText, Content: "hello"}}
 	refs, total := producer.cut(turns, producer.budget)
 	want, wantTotal := transcript.CutSegments(turns, producer.budget)
-	if total != wantTotal || len(refs) != len(want) || len(refs) != 1 || refs[0].ConversationTurns == nil || *refs[0].ConversationTurns != *want[0].ConversationTurns {
+	if total != wantTotal || len(refs) != 1 || len(want) != 1 {
+		t.Fatalf("the default cut returned %d ref(s) over %d turns, want the production cut's %d over %d", len(refs), total, len(want), wantTotal)
+	}
+	if refs[0].ConversationTurns == nil || *refs[0].ConversationTurns != *want[0].ConversationTurns {
 		t.Fatalf("the default cut returned %+v (%d turns), want the production cut's %+v (%d turns)", refs, total, want, wantTotal)
 	}
 }

@@ -121,9 +121,14 @@ func (want segmentRefExpectation) refMatches(ref schema.TranscriptSegmentRef) bo
 	if ref.ConversationTurns == nil {
 		return false
 	}
-	return ref.Index == want.Index && ref.FirstTurn == want.FirstTurn && ref.LastTurn == want.LastTurn &&
-		ref.ByteLength == want.ByteLength &&
-		ref.ConversationTurns.Before == want.ConversationTurns.Before && ref.ConversationTurns.Count == want.ConversationTurns.Count
+	got := segmentRefExpectation{
+		Index:             ref.Index,
+		FirstTurn:         ref.FirstTurn,
+		LastTurn:          ref.LastTurn,
+		ByteLength:        ref.ByteLength,
+		ConversationTurns: segmentSpanExpectation{Before: ref.ConversationTurns.Before, Count: ref.ConversationTurns.Count},
+	}
+	return got == want
 }
 
 type segmentCutCase struct {
@@ -250,7 +255,9 @@ func TestSegmentCutFixtureCases(t *testing.T) {
 				holding := 0
 				for _, ref := range refs {
 					for _, turn := range turns {
-						if turn.Index >= ref.FirstTurn && turn.Index <= ref.LastTurn && (turn.Role == schema.RoleSystem || turn.Role == schema.RoleTool) {
+						inSegment := turn.Index >= ref.FirstTurn && turn.Index <= ref.LastTurn
+						uncounted := turn.Role == schema.RoleSystem || turn.Role == schema.RoleTool
+						if inSegment && uncounted {
 							holding++
 							break
 						}
@@ -544,8 +551,9 @@ func TestCheckConversationTurnsFixtureCases(t *testing.T) {
 			if fault == nil {
 				t.Fatalf("the check passed a cut that breaks the %s rule", want.Rule)
 			}
-			if string(fault.Rule) != want.Rule || fault.Segment != want.Segment || fault.Want != want.Want || fault.Got != want.Got {
-				t.Fatalf("fault = %+v, want rule %s at segment %d (want %d, got %d)", *fault, want.Rule, want.Segment, want.Want, want.Got)
+			wantFault := ConversationTurnsFault{Rule: ConversationTurnsRule(want.Rule), Segment: want.Segment, Want: want.Want, Got: want.Got}
+			if *fault != wantFault {
+				t.Fatalf("fault = %+v, want %+v", *fault, wantFault)
 			}
 			if len(want.MessageContains) == 0 {
 				t.Fatal("a fault row must state the message fragments it expects")
