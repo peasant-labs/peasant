@@ -43,16 +43,22 @@ function TreeProbe() {
   return <p>{text}</p>;
 }
 
-/** A page that reads the status once it is drawn and redirects to setup when it is told setup is not saved. */
+/**
+ * A page that reads the status once it is drawn, redirects to setup when it is
+ * told setup is not saved, and shows what it was told only after it has decided,
+ * so a case can wait for the decision before it says the page did not redirect.
+ */
 function RedirectProbe() {
+  const [text, setText] = useState('waiting');
   useEffect(() => {
     void fetch('/api/v1/kickstart/status')
       .then((response) => response.json())
       .then((body: { configured: boolean }) => {
         if (!body.configured) redirect('/kickstart');
+        setText(`configured: ${body.configured ? 'yes' : 'no'}`);
       });
   }, []);
-  return <p>hello</p>;
+  return <p>{text}</p>;
 }
 
 /** The pages a fixture case may name with `page`. */
