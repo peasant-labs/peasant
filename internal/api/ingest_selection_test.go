@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -57,12 +58,19 @@ type ingestSelectionCase struct {
 	// MovedClone runs the case on a clone that has since moved to ChosenBranch:
 	// the Selected session recorded ChosenBranch, the Other session recorded
 	// OtherRecordedBranch, and both ran in that one clone.
-	MovedClone          bool     `yaml:"movedClone"`
-	ChosenBranch        string   `yaml:"chosenBranch"`
-	OtherRecordedBranch string   `yaml:"otherRecordedBranch"`
-	ExpectImported      []string `yaml:"expectImported"`
-	ExpectExcluded      []string `yaml:"expectExcluded"`
-	ExpectDiagnostic    bool     `yaml:"expectDiagnostic"`
+	MovedClone          bool   `yaml:"movedClone"`
+	ChosenBranch        string `yaml:"chosenBranch"`
+	OtherRecordedBranch string `yaml:"otherRecordedBranch"`
+	// DerivedBranchRule runs the case on a single-branch clone whose selection is
+	// derived from the real tree by choosing its one branch, then adds a session
+	// recorded on LaterBranch to that clone. AutoIngestNewBranches is the answer
+	// the person gave for new branches.
+	DerivedBranchRule     bool     `yaml:"derivedBranchRule"`
+	LaterBranch           string   `yaml:"laterBranch"`
+	AutoIngestNewBranches bool     `yaml:"autoIngestNewBranches"`
+	ExpectImported        []string `yaml:"expectImported"`
+	ExpectExcluded        []string `yaml:"expectExcluded"`
+	ExpectDiagnostic      bool     `yaml:"expectDiagnostic"`
 	// ExpectWritten is what the finish panel and the status route report for
 	// the run: the sessions written new and the sessions written again.
 	ExpectWritten *ingestSelectionWritten `yaml:"expectWritten"`
@@ -140,6 +148,10 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	}
 	if item.MovedClone {
 		runMovedCloneTreeAndImportAgree(t, ids, item)
+		return
+	}
+	if item.DerivedBranchRule {
+		runDerivedBranchRuleAdmitsOnlyTheChosenBranch(t, ids, item)
 		return
 	}
 	root := t.TempDir()
@@ -424,20 +436,6 @@ func runMovedCloneTreeAndImportAgree(t *testing.T, ids ingestSelectionIDs, item 
 		slices.Sort(chosen)
 		return listedUnder, chosen
 	}
-	// importedAndLeftOut is what the web import did with each session.
-	importedAndLeftOut := func(result *ingest.PipelineResult) (imported, leftOut []string) {
-		for _, session := range result.Sessions {
-			switch {
-			case session.ExcludedBySelection:
-				leftOut = append(leftOut, session.SessionID.String())
-			case session.Error == nil && session.OutputPath != "":
-				imported = append(imported, session.SessionID.String())
-			}
-		}
-		slices.Sort(imported)
-		slices.Sort(leftOut)
-		return imported, leftOut
-	}
 	assertTreeShows := func(phase string, listedUnder map[string]string, wantUnrecorded string) {
 		t.Helper()
 		want := map[string]string{ids.Selected: item.ChosenBranch, ids.Other: item.OtherRecordedBranch, ids.Unrecorded: wantUnrecorded}
@@ -493,6 +491,106 @@ func runMovedCloneTreeAndImportAgree(t *testing.T, ids ingestSelectionIDs, item 
 	slices.Sort(treeUnchosen)
 	if !slices.Equal(leftOut, treeUnchosen) {
 		t.Fatalf("clone moved on: the import left out %v but the tree showed %v as unchosen", leftOut, treeUnchosen)
+	}
+}
+
+// importedAndLeftOut is what the web import did with each session: the ones it
+// wrote, and the ones the saved selection left out.
+func importedAndLeftOut(result *ingest.PipelineResult) (imported, leftOut []string) {
+	for _, session := range result.Sessions {
+		switch {
+		case session.ExcludedBySelection:
+			leftOut = append(leftOut, session.SessionID.String())
+		case session.Error == nil && session.OutputPath != "":
+			imported = append(imported, session.SessionID.String())
+		}
+	}
+	slices.Sort(imported)
+	slices.Sort(leftOut)
+	return imported, leftOut
+}
+
+// runDerivedBranchRuleAdmitsOnlyTheChosenBranch proves that choosing the one
+// branch of a checkout saves that branch, and that the saved rule then decides
+// what the import admits. The selection is not written by hand: the real scan
+// builds the tree, the person's answer is the chosen session, and the shared
+// derivation writes the rule. A session recorded in the clone later, on a branch
+// that did not exist when the choice was made, is admitted only by the
+// new-branch setting, in the tree and in the import alike.
+func runDerivedBranchRuleAdmitsOnlyTheChosenBranch(t *testing.T, ids ingestSelectionIDs, item ingestSelectionCase) {
+	t.Helper()
+	root := t.TempDir()
+	source := filepath.Join(root, "recordings")
+	output := filepath.Join(root, "managed")
+	project := filepath.Join(source, "-workspace")
+	clone := filepath.Join(root, "clone")
+	for _, dir := range []string{project, clone} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	physicalClone, err := filepath.EvalSymlinks(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const remote = "https://github.com/example-org/demo.git"
+	initSelectionRepo(t, clone, remote, item.ChosenBranch)
+	writeClaudeSession(t, filepath.Join(project, ids.Selected+".jsonl"), ids.Selected, clone, item.ChosenBranch)
+
+	cfg := webIngestConfig(t, source, output, ingestSelectionCase{Mode: "selected", EmptyHarnesses: true}, "", "")
+	cfg.Selection.AutoIngestNewBranches = item.AutoIngestNewBranches
+	scanForest := func() onboarding.Forest {
+		_, listings, relation := discovery.Scan(t.Context(), cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, nil, nil, nil)
+		prepared := discovery.PrepareSessionListings(listings, ingest.NewPhysicalPathResolver())
+		return discovery.BuildForest(prepared, nil, relation)
+	}
+	chosenInTree := func() []string {
+		restored, _, restoreErr := onboarding.RestoreSelection(scanForest(), cfg.Selection)
+		if restoreErr != nil {
+			t.Fatalf("restore the saved selection onto the tree: %v", restoreErr)
+		}
+		chosen := onboarding.SelectedSessionIDs(restored)
+		slices.Sort(chosen)
+		return chosen
+	}
+
+	// The person chooses the branch: the answer is its session, as the setup tree
+	// reports it, and the shared derivation writes the rule.
+	value, err := onboarding.SelectionIDsValue([]string{ids.Selected})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answers := onboarding.Answers{onboarding.FieldSelection: value}
+	model := onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeSelection})
+	if err := model.ApplyAnswers(cfg, answers, onboarding.WriteContext{Config: cfg, Forest: scanForest(), Answers: answers}); err != nil {
+		t.Fatalf("derive the selection from the chosen branch: %v", err)
+	}
+	wantRule := []config.ProjectSelection{{GitRemote: remote, ClonePaths: []string{physicalClone}, Branches: []string{item.ChosenBranch}}}
+	if got := cfg.Selection.Harnesses[ingest.HarnessClaudeCode.String()].Projects; !reflect.DeepEqual(got, wantRule) {
+		t.Fatalf("the saved rule for the chosen branch is %+v, want %+v", got, wantRule)
+	}
+	hs := newTestXDGHomes(t)
+	first := runWebIngest(t, hs.handler(nil, cfg), false)
+	assertIngestMembership(t, first, []string{ids.Selected}, nil)
+
+	// A session recorded in the clone later, on a branch that did not exist when
+	// the choice was made.
+	writeClaudeSession(t, filepath.Join(project, ids.Other+".jsonl"), ids.Other, clone, item.LaterBranch)
+	wantChosen := []string{ids.Selected}
+	if item.AutoIngestNewBranches {
+		wantChosen = append(wantChosen, ids.Other)
+	}
+	slices.Sort(wantChosen)
+	if got := chosenInTree(); !slices.Equal(got, wantChosen) {
+		t.Fatalf("with new branches %t the tree shows %v as chosen, want %v", item.AutoIngestNewBranches, got, wantChosen)
+	}
+	second := runWebIngest(t, hs.handler(nil, cfg), false)
+	imported, leftOut := importedAndLeftOut(second)
+	if slices.Contains(imported, ids.Other) != item.AutoIngestNewBranches || slices.Contains(leftOut, ids.Other) == item.AutoIngestNewBranches {
+		t.Fatalf("with new branches %t the import wrote %v and left out %v, but the tree shows %v as chosen", item.AutoIngestNewBranches, imported, leftOut, wantChosen)
+	}
+	if slices.Contains(leftOut, ids.Selected) {
+		t.Fatalf("the import left out the chosen branch's session: %v", leftOut)
 	}
 }
 

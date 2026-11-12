@@ -214,6 +214,12 @@ A new branch in a selected project follows the saved `autoIngestNewBranches` val
 - `false` keeps discovery on the saved branch list. A project choice with no branch list still means
   all branches in that selected project.
 
+Choosing a branch saves that branch, even when it is the only branch in its clone. A session
+recorded later on another branch of that clone is then imported only when `autoIngestNewBranches` is
+`true`. **Select all projects** and the web setup page report the sessions you chose, so they read a
+project that offers one branch the same way. A project chosen across several branches is saved with
+no branch list.
+
 An exact branch exclusion still wins when `autoIngestNewBranches` is `true`. Clearing one available
 branch records a denial for that physical clone and branch. It does not disable automatic discovery
 for another branch or a sibling clone.

@@ -911,6 +911,52 @@ func unmatchedSelection(sel config.SelectionConfig, projects []availProject) Res
 	return residual
 }
 
+// chosenWholeProjects names the project rows chosen as a whole: a row that is
+// fully chosen and offers more than one branch. Ticking such a row selects every
+// one of its branches, so each of its checkouts is saved whole and a branch that
+// appears later is still theirs.
+func chosenWholeProjects(projects []availProject) map[*sNode]bool {
+	branches := map[*sNode]map[string]struct{}{}
+	for _, project := range projects {
+		if project.node == nil {
+			continue
+		}
+		seen := branches[project.node]
+		if seen == nil {
+			seen = map[string]struct{}{}
+			branches[project.node] = seen
+		}
+		for branch := range project.branches {
+			seen[branch] = struct{}{}
+		}
+	}
+	whole := map[*sNode]bool{}
+	for node, seen := range branches {
+		if node.state == triAll && len(seen) > 1 {
+			whole[node] = true
+		}
+	}
+	return whole
+}
+
+// choseOnlyBranch reports whether a fully chosen checkout was chosen as its one
+// named branch. Choosing a branch saves that branch, even when it is the only
+// branch in its checkout, so a session recorded in the checkout on another
+// branch later is admitted only by the new-branch setting.
+//
+// The answer carries session ids only, so ticking a project and ticking its only
+// branch select the same sessions. A project with a single branch is therefore
+// read as that branch: the saved rule never admits a branch the person did not
+// see. The checkout is saved whole instead when its project row was chosen
+// across several branches, and when it holds several branches or no named
+// branch to save.
+func choseOnlyBranch(project availProject, branchOrder []string, wholeProjects map[*sNode]bool) bool {
+	if len(branchOrder) != 1 || branchOrder[0] == "" {
+		return false
+	}
+	return !wholeProjects[project.node]
+}
+
 func deriveProjectFirst(projects []availProject) config.SelectionConfig {
 	type build struct {
 		projects []config.ProjectSelection
@@ -927,6 +973,7 @@ func deriveProjectFirst(projects []availProject) config.SelectionConfig {
 		}
 		return row
 	}
+	wholeProjects := chosenWholeProjects(projects)
 	for _, project := range projects {
 		if len(project.sessions) == 0 {
 			continue
@@ -965,7 +1012,7 @@ func deriveProjectFirst(projects []availProject) config.SelectionConfig {
 			}
 			continue
 		}
-		if allChecked && !explicitBranch {
+		if allChecked && !explicitBranch && !choseOnlyBranch(project, branchOrder, wholeProjects) {
 			row.projects = appendEquivalent(row.projects, projectSelection(project, nil))
 			continue
 		}

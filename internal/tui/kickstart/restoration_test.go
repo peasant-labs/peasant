@@ -31,6 +31,7 @@ type restorationCase struct {
 	ClearProjectPaths      []string               `yaml:"clearProjectPaths"`
 	SelectProjectPaths     []string               `yaml:"selectProjectPaths"`
 	ClearBranches          []restorationBranch    `yaml:"clearBranches"`
+	SelectBranches         []restorationBranch    `yaml:"selectBranches"`
 	SelectAll              bool                   `yaml:"selectAll"`
 	LaterListings          []ftue.SessionListing  `yaml:"laterListings"`
 	ExpectLaterChecked     []string               `yaml:"expectLaterChecked"`
@@ -117,6 +118,9 @@ func TestPrepopulateSelection_RestorationAndMergeMatrix(t *testing.T) {
 			}
 			for _, branch := range testCase.ClearBranches {
 				setBranchState(t, roots, branch, kit.Unchecked)
+			}
+			for _, branch := range testCase.SelectBranches {
+				setBranchState(t, roots, branch, kit.Checked)
 			}
 			if testCase.SelectAll {
 				for _, root := range roots {

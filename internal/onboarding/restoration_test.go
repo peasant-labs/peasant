@@ -48,6 +48,7 @@ type restorationCase struct {
 	ClearProjectPaths      []string               `yaml:"clearProjectPaths"`
 	SelectProjectPaths     []string               `yaml:"selectProjectPaths"`
 	ClearBranches          []restorationBranch    `yaml:"clearBranches"`
+	SelectBranches         []restorationBranch    `yaml:"selectBranches"`
 	SelectAll              bool                   `yaml:"selectAll"`
 	LaterListings          []restorationListing   `yaml:"laterListings"`
 	// PreviousListings is the machine the answer was given over; Listings is
@@ -135,6 +136,9 @@ func restoreAndDerive(t *testing.T, row restorationCase) (config.SelectionConfig
 	}
 	for _, branch := range row.ClearBranches {
 		setBranchState(t, roots, branch, kit.Unchecked)
+	}
+	for _, branch := range row.SelectBranches {
+		setBranchState(t, roots, branch, kit.Checked)
 	}
 	if row.SelectAll {
 		for _, root := range roots {

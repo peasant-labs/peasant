@@ -1,6 +1,11 @@
 # Repository grouping is transient. Every expected selection keeps exact
 # worktree paths, while repositoryPath only controls scanner roots and remote or
 # name multiplicity.
+#
+# A repository that offers one branch saves that branch: ticking its row and
+# ticking its only branch select the same sessions, and choosing a branch saves
+# that branch. A repository row chosen across several branches saves its
+# checkouts whole.
 expectedCaseCount: 7
 expectedTopologyFailureCount: 6
 expectedNames:
@@ -86,10 +91,10 @@ cases:
       harnesses:
         claude-code:
           projects:
-            - {gitRemote: "git@github.com:acme/pasture.git", clonePaths: [/fixtures/super-a/pasture]}
+            - {gitRemote: "git@github.com:acme/pasture.git", clonePaths: [/fixtures/super-a/pasture], branches: [main]}
         codex:
           projects:
-            - {gitRemote: "https://github.com/acme/pasture.git", clonePaths: [/fixtures/super-b/pasture]}
+            - {gitRemote: "https://github.com/acme/pasture.git", clonePaths: [/fixtures/super-b/pasture], branches: [main]}
     expectedChecked:
       - 10101010-1010-4010-8010-101010101010
       - 20202020-2020-4020-8020-202020202020
@@ -129,7 +134,7 @@ cases:
       harnesses:
         claude-code:
           projects:
-            - {gitRemote: "git@github.com:acme/pasture.git", clonePaths: [/fixtures/super/modules/pasture-a]}
+            - {gitRemote: "git@github.com:acme/pasture.git", clonePaths: [/fixtures/super/modules/pasture-a], branches: [main]}
     expectedChecked: [30303030-3030-4030-8030-303030303030]
     expectedUnchecked: [40404040-4040-4040-8040-404040404040]
 
@@ -158,10 +163,10 @@ cases:
       harnesses:
         claude-code:
           projects:
-            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-main]}
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-main], branches: [main]}
         codex:
           projects:
-            - {gitRemote: "https://github.com/acme/tool.git", clonePaths: [/fixtures/tool-linked]}
+            - {gitRemote: "https://github.com/acme/tool.git", clonePaths: [/fixtures/tool-linked], branches: [main]}
     expectedChecked:
       - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
       - bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
@@ -251,7 +256,7 @@ cases:
       harnesses:
         claude-code:
           projects:
-            - {name: app, clonePaths: [/fixtures/team-a/app]}
+            - {name: app, clonePaths: [/fixtures/team-a/app], branches: [main]}
     expectedChecked: [44444444-4444-4444-8444-444444444444]
     expectedUnchecked: [55555555-5555-4555-8555-555555555555]
 

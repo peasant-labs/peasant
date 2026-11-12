@@ -5,6 +5,9 @@
 #
 # Both flows enumerate today's projects in mode:selected. The rebuilt flow also
 # persists each exact current clone path. A project discovered later stays clear.
+# A project that offers one branch is saved as that branch: choosing a branch
+# saves that branch, even when it is the only one in its checkout. A project that
+# offers several, all chosen, is saved whole.
 #
 # `golden` here records what the current wizard ACTUALLY writes today so the
 # divergence is concrete and testable: the test drives the wizard, asserts it
@@ -63,3 +66,4 @@ scenarios:
           projects:
             - gitRemote: "https://github.com/acme/tool.git"
               clonePaths: [/fixtures/opencode/acme-tool]
+              branches: [main]

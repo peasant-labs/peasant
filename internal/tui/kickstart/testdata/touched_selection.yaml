@@ -178,11 +178,13 @@ cases:
     refresh: true
     expectedCheckedSessions: [66666666-6666-4666-8666-666666666666]
     expectedUncheckedSessions: [77777777-7777-4777-8777-777777777777]
+    # Select-all chooses what is on screen; the clone holds one branch, so the
+    # rule is that branch's.
     expected:
       mode: selected
       autoIngestNewBranches: false
       projects:
-        - {harness: claude-code, gitRemote: "git@github.com:acme/claude.git", pathKeys: [claude-project]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/claude.git", pathKeys: [claude-project], branches: [main]}
 
   - name: exact-project-clear-preserves-sibling-clone
     paths:
@@ -379,8 +381,8 @@ cases:
       mode: selected
       autoIngestNewBranches: false
       projects:
-        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a]}
-        - {harness: acme-agent, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-b]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+        - {harness: acme-agent, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-b], branches: [main]}
 
   # A plain non-Git directory whose discovery carries no project name, no
   # remote, and no branch. The scanner has no Git cohort for it, so the
