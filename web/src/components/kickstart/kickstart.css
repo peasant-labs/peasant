@@ -2,38 +2,13 @@
  * The setup wizard and the selection page. Tokens only (fairtrade's
  * components.css declares them for both themes), radius 0, lowercase chrome,
  * tabular numbers on counts. The shell is fairtrade's step-wizard frame (rail,
- * body, footer); this file only makes it own the viewport and adds what a
+ * body, footer), sized by the shared host classes; this file adds only what a
  * served stop needs inside it.
  */
 
-/* The page owns the viewport below the chrome, as the publish wizard does:
-   the body scrolls between a rail and a footer that stay in place. */
-.ks-page {
-  height: var(--app-body-height);
-  min-height: 0;
-}
-.ks-page > .crumb,
-.ks-page > .page-title {
-  flex: none;
-}
-.ks-wizard {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  width: 100%;
-  max-width: 100%;
-}
-.ks-wizard .swz-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
-.ks-wizard .swz-foot {
-  position: static;
-  flex: 0 0 auto;
-}
+/* The page owns the viewport and the frame fills it through the shared
+   `wizard-page` and `wizard-host` classes (app/globals.css). */
+
 /* The answers a stop asks for, in its body. */
 .ks-answers {
   display: flex;

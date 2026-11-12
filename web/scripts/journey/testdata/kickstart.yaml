@@ -76,7 +76,7 @@ baseCommit: 15cf2d0be79715b8e91e96c314c33ac619cdb16f
 provenance:
   # Strings only this branch introduces, found in the bundle the binary serves.
   markers:
-    - ks-wizard
+    - wizard-host
     - set up peasant
     - your selection is saved
   routes: [/kickstart/, /selection/]

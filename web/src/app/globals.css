@@ -801,20 +801,24 @@ textarea::placeholder {
   }
 }
 
-/* Share owns the viewport below the chrome (and the offline notice while it
-   shows). The page and wizard form one unbroken flex chain, so the body
-   receives the actual remaining space after breadcrumbs, title, rail, and
-   footer without guessed offsets. */
-.share-page {
+/* A wizard page owns the viewport below the chrome (and the offline notice
+   while it shows). The page and the wizard frame form one unbroken flex chain,
+   so the body receives the actual remaining space after breadcrumbs, title,
+   rail, and footer without guessed offsets, and the body scrolls between a rail
+   and a footer that stay in place. This is the one place that says so: the setup
+   wizard, the selection page and the publish wizard each put `wizard-page` on
+   their page and `wizard-host` on fairtrade's step-wizard frame, and none of
+   them restyles the frame's own regions a second time. */
+.wizard-page {
   height: var(--app-body-height);
   min-height: 0;
 }
 /* The trail and the title keep their own height; only the wizard gives way. */
-.share-page > .crumb,
-.share-page > .page-title {
+.wizard-page > .crumb,
+.wizard-page > .page-title {
   flex: none;
 }
-.share-wizard {
+.wizard-host {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -822,22 +826,21 @@ textarea::placeholder {
   min-width: 0;
   width: 100%;
   max-width: 100%;
-  padding-left: 0;
-  padding-right: 0;
 }
-.share-wizard .swz-head,
-.share-wizard .swz-body,
-.share-wizard .swz-foot {
-  min-width: 0;
-}
-.share-wizard .swz-body {
+.wizard-host .swz-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
 }
-.share-wizard .swz-foot {
+.wizard-host .swz-foot {
   position: static;
   flex: 0 0 auto;
+}
+
+/* What only the publish wizard adds to that. */
+.share-wizard {
+  padding-left: 0;
+  padding-right: 0;
 }
 @media (max-width: 40rem) {
   /* A phone scrolls the page, not a short box between the rail and the

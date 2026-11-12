@@ -179,7 +179,7 @@ async function probe(page) {
   return page.evaluate(() => {
     const family = /^"?atkinsonHyperlegible(Mono)?"?(,|$)/i;
     const corners = ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius'];
-    const surface = document.querySelector('.ks-page');
+    const surface = document.querySelector('.wizard-page');
     const offenders = { font: [], radius: [] };
     let textElements = 0;
     let drawn = 0;
@@ -200,7 +200,7 @@ async function probe(page) {
     // The step rail: where each label and its text were laid out, against the frame they sit in.
     // The frame decides whether the rail shows its labels (a rail too narrow for them keeps them
     // in the accessible name and draws the numbers), so a rail is labelled when any label is drawn.
-    const frame = document.querySelector('.ks-wizard');
+    const frame = document.querySelector('.wizard-host');
     const frameBox = frame ? frame.getBoundingClientRect() : null;
     const railLabels = [...(frame ? frame.querySelectorAll('.swz-rail .swz-label') : [])].map((element) => {
       const box = element.getBoundingClientRect();
@@ -582,7 +582,7 @@ test('selection-page-saves-only-selection', async () => {
 
   // A wizard is open with an answer that is not saved.
   const pageC = await openPage('C', '/kickstart/?from=settings');
-  await expect(pageC.locator('.ks-page').getByRole('link', { name: 'settings', exact: true }), 'the trail says setup was opened from settings').toBeVisible();
+  await expect(pageC.locator('.wizard-page').getByRole('link', { name: 'settings', exact: true }), 'the trail says setup was opened from settings').toBeVisible();
   await expect(title(pageC)).toHaveText('peasant online');
   await pageC.getByRole('button', { name: 'no', exact: true }).click();
   await expect(title(pageC)).toHaveText('choose sessions to import');
