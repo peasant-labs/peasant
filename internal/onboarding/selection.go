@@ -911,50 +911,104 @@ func unmatchedSelection(sel config.SelectionConfig, projects []availProject) Res
 	return residual
 }
 
-// chosenWholeProjects names the project rows chosen as a whole: a row that is
-// fully chosen and offers more than one branch. Ticking such a row selects every
-// one of its branches, so each of its checkouts is saved whole and a branch that
-// appears later is still theirs.
-func chosenWholeProjects(projects []availProject) map[*sNode]bool {
-	branches := map[*sNode]map[string]struct{}{}
-	for _, project := range projects {
-		if project.node == nil {
-			continue
-		}
-		seen := branches[project.node]
-		if seen == nil {
-			seen = map[string]struct{}{}
-			branches[project.node] = seen
-		}
-		for branch := range project.branches {
-			seen[branch] = struct{}{}
-		}
-	}
-	whole := map[*sNode]bool{}
-	for node, seen := range branches {
-		if node.state == triAll && len(seen) > 1 {
-			whole[node] = true
-		}
-	}
-	return whole
+// CheckoutSession is one session of a checkout as the derivation reads it.
+type CheckoutSession struct {
+	// ID is the session id.
+	ID string
+	// Branch is the branch the session is listed under. It is empty for a
+	// session that recorded none.
+	Branch string
+	// Chosen reports whether the person chose the session.
+	Chosen bool
+	// ExplicitSession is provenance: a saved rule named this session by id, so
+	// a derivation that finds every session of the checkout chosen keeps naming
+	// them instead of widening the rule to a branch.
+	ExplicitSession bool
 }
 
-// choseOnlyBranch reports whether a fully chosen checkout was chosen as its one
-// named branch. Choosing a branch saves that branch, even when it is the only
-// branch in its checkout, so a session recorded in the checkout on another
-// branch later is admitted only by the new-branch setting.
+// CheckoutRule is how a checkout's chosen sessions are saved.
+type CheckoutRule struct {
+	// Whole is the checkout's own rule with no branch list. It is saved only for
+	// a checkout with no named branch, where there is no branch to name.
+	Whole bool
+	// Branches are the named branches every one of whose sessions is chosen,
+	// sorted. A branch that appears later is admitted by the new-branch setting,
+	// not by this rule.
+	Branches []string
+	// Sessions are the chosen sessions that no rule above covers, in the order
+	// given: sessions named explicitly, and the chosen sessions of a group with
+	// no branch to name.
+	Sessions []string
+}
+
+// DeriveCheckout is the one derivation of the rule that saves a checkout's
+// chosen sessions. The setup page, the terminal's select-all and the terminal's
+// project row all call it, so the same sessions chosen give the same rule
+// whichever row was ticked.
 //
-// The answer carries session ids only, so ticking a project and ticking its only
-// branch select the same sessions. A project with a single branch is therefore
-// read as that branch: the saved rule never admits a branch the person did not
-// see. The checkout is saved whole instead when its project row was chosen
-// across several branches, and when it holds several branches or no named
-// branch to save.
-func choseOnlyBranch(project availProject, branchOrder []string, wholeProjects map[*sNode]bool) bool {
-	if len(branchOrder) != 1 || branchOrder[0] == "" {
-		return false
+// Choosing a branch saves that branch, even when it is the only branch in its
+// checkout and even when every branch of the checkout is chosen. The
+// whole-checkout rule is saved only when the checkout has no named branch.
+func DeriveCheckout(sessions []CheckoutSession) CheckoutRule {
+	allChosen, allExplicit, chosen := true, true, 0
+	var branchOrder []string
+	byBranch := map[string][]CheckoutSession{}
+	named := false
+	for _, session := range sessions {
+		if _, known := byBranch[session.Branch]; !known {
+			branchOrder = append(branchOrder, session.Branch)
+		}
+		byBranch[session.Branch] = append(byBranch[session.Branch], session)
+		if session.Branch != "" {
+			named = true
+		}
+		if !session.Chosen {
+			allChosen = false
+			continue
+		}
+		chosen++
+		if !session.ExplicitSession {
+			allExplicit = false
+		}
 	}
-	return !wholeProjects[project.node]
+	var rule CheckoutRule
+	if chosen == 0 {
+		return rule
+	}
+	if allChosen && allExplicit {
+		for _, session := range sessions {
+			rule.Sessions = appendUnique(rule.Sessions, session.ID)
+		}
+		return rule
+	}
+	if allChosen && !named {
+		rule.Whole = true
+		return rule
+	}
+	for _, branch := range branchOrder {
+		group := byBranch[branch]
+		branchChosen, branchExplicit := len(group) > 0, true
+		for _, session := range group {
+			if !session.Chosen {
+				branchChosen = false
+				continue
+			}
+			if !session.ExplicitSession {
+				branchExplicit = false
+			}
+		}
+		if branch != "" && branchChosen && !branchExplicit {
+			rule.Branches = appendUnique(rule.Branches, branch)
+			continue
+		}
+		for _, session := range group {
+			if session.Chosen {
+				rule.Sessions = appendUnique(rule.Sessions, session.ID)
+			}
+		}
+	}
+	sort.Strings(rule.Branches)
+	return rule
 }
 
 func deriveProjectFirst(projects []availProject) config.SelectionConfig {
@@ -973,76 +1027,29 @@ func deriveProjectFirst(projects []availProject) config.SelectionConfig {
 		}
 		return row
 	}
-	wholeProjects := chosenWholeProjects(projects)
 	for _, project := range projects {
 		if len(project.sessions) == 0 {
 			continue
 		}
 		row := get(project.harness.String())
-		allChecked := true
-		allExplicit := true
-		checked := 0
-		explicitBranch := false
-		var branchOrder []string
-		branchSessions := map[string][]availSession{}
-		for _, session := range project.sessions {
-			branch := session.candidate.Branch
-			if _, known := branchSessions[branch]; !known {
-				branchOrder = append(branchOrder, branch)
-			}
-			branchSessions[branch] = append(branchSessions[branch], session)
-			if session.node.state != triAll {
-				allChecked = false
-				continue
-			}
-			checked++
-			if !session.node.explicitSession {
-				allExplicit = false
-			}
-			if session.node.explicitBranch {
-				explicitBranch = true
+		sessions := make([]CheckoutSession, len(project.sessions))
+		for index, session := range project.sessions {
+			sessions[index] = CheckoutSession{
+				ID:              session.candidate.SessionID.String(),
+				Branch:          session.candidate.Branch,
+				Chosen:          session.node.state == triAll,
+				ExplicitSession: session.node.explicitSession,
 			}
 		}
-		if checked == 0 {
-			continue
+		rule := DeriveCheckout(sessions)
+		for _, sessionID := range rule.Sessions {
+			row.sessions = appendUnique(row.sessions, sessionID)
 		}
-		if allChecked && allExplicit {
-			for _, session := range project.sessions {
-				row.sessions = appendUnique(row.sessions, session.candidate.SessionID.String())
-			}
-			continue
-		}
-		if allChecked && !explicitBranch && !choseOnlyBranch(project, branchOrder, wholeProjects) {
+		switch {
+		case rule.Whole:
 			row.projects = appendEquivalent(row.projects, projectSelection(project, nil))
-			continue
-		}
-		var branches []string
-		for _, branch := range branchOrder {
-			sessions := branchSessions[branch]
-			branchChecked := len(sessions) > 0
-			branchExplicit := true
-			for _, session := range sessions {
-				if session.node.state != triAll {
-					branchChecked = false
-					continue
-				}
-				if !session.node.explicitSession {
-					branchExplicit = false
-				}
-			}
-			if branch != "" && branchChecked && !branchExplicit {
-				branches = appendUnique(branches, branch)
-				continue
-			}
-			for _, session := range sessions {
-				if session.node.state == triAll {
-					row.sessions = appendUnique(row.sessions, session.candidate.SessionID.String())
-				}
-			}
-		}
-		if len(branches) > 0 {
-			sort.Strings(branches)
-			row.projects = appendEquivalent(row.projects, projectSelection(project, branches))
+		case len(rule.Branches) > 0:
+			row.projects = appendEquivalent(row.projects, projectSelection(project, rule.Branches))
 		}
 	}
 	cfg := config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{}}

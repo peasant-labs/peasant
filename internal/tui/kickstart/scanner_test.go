@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -165,8 +166,11 @@ func TestScannerTreeSource_MetaRoundTripsToProjectSelection(t *testing.T) {
 		t.Fatalf("project git remote = %q, want %q (from node meta)",
 			hc.Projects[0].GitRemote, project.Meta[settings.MetaRemote])
 	}
-	if hc.Projects[0].Branches != nil {
-		t.Fatalf("a wholly-checked project must carry nil Branches (all branches), got %v", hc.Projects[0].Branches)
+	// Choosing every branch of a project saves each of them; a branch that
+	// appears later is admitted by the new-branch setting, not by a rule with no
+	// branch list.
+	if want := []string{"feature/x", "main"}; !reflect.DeepEqual(hc.Projects[0].Branches, want) {
+		t.Fatalf("a wholly-checked project must carry every branch it shows, got %v, want %v", hc.Projects[0].Branches, want)
 	}
 }
 

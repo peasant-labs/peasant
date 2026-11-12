@@ -2,10 +2,10 @@
 # worktree paths, while repositoryPath only controls scanner roots and remote or
 # name multiplicity.
 #
-# A repository that offers one branch saves that branch: ticking its row and
-# ticking its only branch select the same sessions, and choosing a branch saves
-# that branch. A repository row chosen across several branches saves its
-# checkouts whole.
+# A repository row saves the branches it shows: ticking the row and ticking each
+# of its branches select the same sessions, and choosing a branch saves that
+# branch. A checkout is saved whole only when it has no named branch. A branch
+# that appears later is admitted by autoIngestNewBranches.
 expectedCaseCount: 7
 expectedTopologyFailureCount: 6
 expectedNames:
@@ -59,7 +59,10 @@ cases:
       harnesses:
         claude-code:
           projects:
-            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-linked, /fixtures/tool-main]}
+            # Each linked checkout holds one branch, so each keeps its own rule;
+            # the row does not merge them into one rule that names no branch.
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-main], branches: [main]}
+            - {gitRemote: "https://github.com/acme/tool.git", clonePaths: [/fixtures/tool-linked], branches: [review]}
     expectedChecked:
       - 11111111-1111-4111-8111-111111111111
       - 22222222-2222-4222-8222-222222222222
