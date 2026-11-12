@@ -6,8 +6,13 @@
 #
 # want.entries is every depth-0 stored entry in order: role, entry type and
 # the two flags. want.turns is the full folded turn list in order: role,
-# entry type, content and tool calls as literals. The count columns belong to
-# the counts slice and are added to these rows later.
+# entry type, content and tool calls as literals. want.turnCount is the number
+# of folded turns and want.conversationTurnCount is the folded turns the
+# contract's allowed list admits (top-level user or assistant, text or image).
+# The allowed list reads no content, but the indexer-path fold drops a record
+# with no content before it becomes a turn, so blank-text-counts folds to no
+# turn on that path; on the managed path a blank text block keeps its turn
+# (opencode-managed-blank-text-then-tool).
 #
 # requiredNames names the rows that must stay present. Removing one goes red
 # by name; adding a row need not appear here. The list, not a count, guards.
@@ -45,6 +50,8 @@ cases:
       - '{"type":"assistant","uuid":"a1","timestamp":"2026-01-02T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"I will list the project files."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}],"usage":{"input_tokens":10,"output_tokens":20}}}'
       - '{"type":"user","uuid":"t1","timestamp":"2026-01-02T10:00:10Z","message":{"role":"tool","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"main.go\nstore.go"}]}}'
     want:
+      turnCount: 2
+      conversationTurnCount: 2
       entries:
         - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
         - {role: assistant, entry_type: text, has_tool_use: true, has_thinking: false}
@@ -62,6 +69,8 @@ cases:
     # tool-use flag of its own: only the stored indexer record names the
     # tool calls it holds.
     want_managed:
+      turnCount: 2
+      conversationTurnCount: 2
       entries:
         - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
         - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
@@ -82,6 +91,8 @@ cases:
     jsonl:
       - '{"type":"assistant","uuid":"a2","timestamp":"2026-01-02T10:01:00Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"let me think about the layout"},{"type":"text","text":"Here is the layout."}]}}'
     want:
+      turnCount: 2
+      conversationTurnCount: 1
       entries:
         - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: true}
       turns:
@@ -98,6 +109,8 @@ cases:
     jsonl:
       - '{"type":"assistant","uuid":"a3","timestamp":"2026-01-02T10:02:00Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"only thinking here"}]}}'
     want:
+      turnCount: 1
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: true}
       turns:
@@ -107,6 +120,8 @@ cases:
     # The managed build keeps the carrier and its thinking child as two
     # turns; the stored indexer folds the record to one.
     want_managed:
+      turnCount: 2
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: true}
       turns:
@@ -123,6 +138,8 @@ cases:
     jsonl:
       - '{"type":"assistant","uuid":"a4","timestamp":"2026-01-02T10:03:00Z","message":{"role":"assistant","content":[{"type":"text","text":""},{"type":"tool_use","id":"toolu_2","name":"Read","input":{"path":"a.go"}}]}}'
     want:
+      turnCount: 1
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
       turns:
@@ -132,6 +149,8 @@ cases:
           tools:
             - {name: Read, input: '{"path":"a.go"}', output: ''}
     want_managed:
+      turnCount: 2
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
       turns:
@@ -155,6 +174,8 @@ cases:
       - '{"type":"assistant","uuid":"a3","timestamp":"2026-01-02T10:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"The diff looks good."}]}}'
       - '{"type":"system","uuid":"s1","timestamp":"2026-01-02T10:00:05Z","content":"context compacted"}'
     want:
+      turnCount: 5
+      conversationTurnCount: 2
       entries:
         - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
         - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: true}
@@ -181,6 +202,8 @@ cases:
           entry_type: system
           content: 'context compacted'
     want_managed:
+      turnCount: 6
+      conversationTurnCount: 2
       entries:
         - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
         - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: true}
@@ -216,6 +239,8 @@ cases:
     jsonl:
       - '{"type":"user","uuid":"u2","timestamp":"2026-01-02T10:02:00Z","message":{"role":"user","content":[{"type":"text","text":"look at this diagram"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]}}'
     want:
+      turnCount: 1
+      conversationTurnCount: 1
       entries:
         - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
       turns:
@@ -235,6 +260,8 @@ cases:
           - id: part_tool
             data: '{"id":"part_tool","messageID":"msg_1","type":"tool","name":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"a.go"}}'
     want:
+      turnCount: 1
+      conversationTurnCount: 1
       entries:
         - {role: assistant, entry_type: text, has_tool_use: true, has_thinking: false}
       turns:
@@ -254,6 +281,8 @@ cases:
           - id: part_tool
             data: '{"id":"part_tool","messageID":"msg_1","type":"tool","name":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"a.go"}}'
     want:
+      turnCount: 1
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
       turns:
@@ -273,6 +302,8 @@ cases:
           - id: part_reason
             data: '{"id":"part_reason","messageID":"msg_1","type":"reasoning","text":"weighing the options"}'
     want:
+      turnCount: 2
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: false}
       turns:
@@ -290,6 +321,8 @@ cases:
       - '{"role":"user","timestamp":"2026-06-04T10:00:00Z","message":{"content":[{"type":"text","text":"read the config"}]}}'
       - '{"role":"assistant","timestamp":"2026-06-04T10:00:05Z","message":{"model":"cursor-agent","content":[{"type":"text","text":"I will read the config."},{"type":"tool_use","id":"tool-1","name":"ReadFile","input":{"path":"cfg"}}],"usage":{"input_tokens":10,"output_tokens":20}}}'
     want:
+      turnCount: 2
+      conversationTurnCount: 2
       entries:
         - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
         - {role: assistant, entry_type: text, has_tool_use: true, has_thinking: false}
@@ -309,6 +342,8 @@ cases:
     jsonl:
       - '{"role":"assistant","timestamp":"2026-06-04T10:00:05Z","message":{"content":[{"type":"tool_use","id":"tool-1","name":"ReadFile","input":{"path":"cfg"}}]}}'
     want:
+      turnCount: 1
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
       turns:
@@ -331,6 +366,8 @@ cases:
         data: '{"id":"msg_tool","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"prt_tool","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"a.go"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
     allocator: {entries: [e_carrier, e_call, e_result], submissions: []}
     want:
+      turnCount: 1
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: tool_use, has_tool_use: false, has_thinking: false}
       turns:
@@ -353,6 +390,8 @@ cases:
         data: '{"id":"msg_sh","type":"shell","shellID":"sh_1","command":"ls","status":"exited","exit":0,"output":{"output":"a.go","cursor":4,"size":4,"truncated":false},"time":{"created":1000,"completed":2000}}'
     allocator: {entries: [e_carrier, e_call, e_result], submissions: []}
     want:
+      turnCount: 1
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: tool_use, has_tool_use: false, has_thinking: false}
       turns:
@@ -375,6 +414,8 @@ cases:
         data: '{"id":"msg_tt","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_text","text":"Checking now."},{"type":"tool","id":"prt_tool","name":"read","state":{"status":"completed","input":{"path":"a.go"},"content":[{"type":"text","text":"body"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
     allocator: {entries: [e_text, e_call, e_result], submissions: []}
     want:
+      turnCount: 1
+      conversationTurnCount: 1
       entries:
         - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
       turns:
@@ -397,6 +438,8 @@ cases:
         data: '{"id":"msg_rt","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"reasoning","id":"prt_reason","text":"Weighing it."},{"type":"tool","id":"prt_tool","name":"read","state":{"status":"completed","input":{"path":"a.go"},"content":[{"type":"text","text":"body"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
     allocator: {entries: [e_reason, e_call, e_result], submissions: []}
     want:
+      turnCount: 1
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: false}
       turns:
@@ -419,6 +462,8 @@ cases:
         data: '{"id":"msg_bt","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_blank","text":""},{"type":"tool","id":"prt_tool","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"a.go"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
     allocator: {entries: [e_blank, e_call, e_result], submissions: []}
     want:
+      turnCount: 1
+      conversationTurnCount: 1
       entries:
         - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
       turns:
@@ -438,6 +483,8 @@ cases:
       - '{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"file body"}}'
     allocator: {entries: [e_carrier, e_call, e_result], submissions: []}
     want:
+      turnCount: 1
+      conversationTurnCount: 0
       entries:
         - {role: assistant, entry_type: tool_use, has_tool_use: false, has_thinking: false}
       turns:
@@ -458,6 +505,8 @@ cases:
       - '{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"file body"}}'
     allocator: {entries: [e_text, e_call, e_result], submissions: []}
     want:
+      turnCount: 1
+      conversationTurnCount: 1
       entries:
         - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
       turns:
@@ -473,6 +522,8 @@ cases:
     jsonl:
       - '{"type":"user","uuid":"u3","timestamp":"2026-01-02T10:04:00Z","message":{"role":"user","content":""}}'
     want:
+      turnCount: 0
+      conversationTurnCount: 0
       entries:
         - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
       turns: []
@@ -483,6 +534,8 @@ cases:
     jsonl:
       - '{"type":"user","uuid":"u4","timestamp":"2026-01-02T10:05:00Z","message":{"role":"user","content":"Reminder: standup at 10"}}'
     want:
+      turnCount: 1
+      conversationTurnCount: 1
       entries:
         - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
       turns:
@@ -496,6 +549,8 @@ cases:
     jsonl:
       - '{"type":"user","uuid":"u5","timestamp":"2026-01-02T10:06:00Z","message":{"role":"user","content":"<command-name>/compact</command-name>"}}'
     want:
+      turnCount: 1
+      conversationTurnCount: 0
       entries:
         - {role: system, entry_type: system, has_tool_use: false, has_thinking: false}
       turns:
@@ -513,6 +568,8 @@ cases:
       - '{"type":"message","id":"m3","parentId":"m2","timestamp":"2026-01-02T00:00:03Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","content":"a.go"}}'
       - '{"type":"message","id":"m4","parentId":"m3","timestamp":"2026-01-02T00:00:04Z","message":{"role":"toolResult","toolCallId":"c2","toolName":"read","content":"body"}}'
     want:
+      turnCount: 2
+      conversationTurnCount: 2
       entries:
         - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
         - {role: assistant, entry_type: text, has_tool_use: true, has_thinking: false}
@@ -532,5 +589,7 @@ cases:
     harness: cursor
     generated: {user_text: 45, assistant_text: 33, prose_tool_replies: 248}
     want:
+      turnCount: 326
+      conversationTurnCount: 326
       entries: []
       turns: []

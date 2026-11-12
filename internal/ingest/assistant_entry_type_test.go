@@ -83,6 +83,10 @@ type assistantEntryGenerated struct {
 type assistantEntryWant struct {
 	Entries []assistantEntryExpectation `yaml:"entries"`
 	Turns   []assistantEntryTurn        `yaml:"turns"`
+	// TurnCount is the number of folded turns and ConversationTurnCount is the
+	// folded turns on the contract's allowed list. Both are required literals.
+	TurnCount             *int `yaml:"turnCount"`
+	ConversationTurnCount *int `yaml:"conversationTurnCount"`
 }
 
 type assistantEntryCase struct {
@@ -157,6 +161,7 @@ func TestAssistantEntryType(t *testing.T) {
 				turns := ingest.EntriesToTurns(entries)
 				assertAssistantEntryLiterals(t, row, path, turns)
 				assertAssistantEntryTyping(t, row, path, entries)
+				assertAssistantEntryCounts(t, row, path, turns)
 			})
 		}
 	}
@@ -583,6 +588,24 @@ func assertAssistantEntryLiterals(t *testing.T, row assistantEntryCase, path str
 				t.Errorf("case %q turn[%d] tool[%d] output = %q, want %q", row.Name, i, j, gotCall.Result, wantCall.Output)
 			}
 		}
+	}
+}
+
+// assertAssistantEntryCounts compares both session counts of the folded turns
+// with the row's literals: turnCount is every folded turn, and
+// conversationTurnCount is the folded turns the allowed list admits.
+func assertAssistantEntryCounts(t *testing.T, row assistantEntryCase, path string, turns []ingest.Turn) {
+	t.Helper()
+	want := assistantEntryWantFor(t, row, path)
+	gotTurns, gotConversation := len(turns), ingest.ConversationTurnCount(turns)
+	if want.TurnCount == nil || want.ConversationTurnCount == nil {
+		t.Fatalf("case %q path %s states no turnCount or conversationTurnCount literal; the fold gives %d and %d", row.Name, path, gotTurns, gotConversation)
+	}
+	if gotTurns != *want.TurnCount {
+		t.Errorf("case %q path %s turnCount = %d, want %d", row.Name, path, gotTurns, *want.TurnCount)
+	}
+	if gotConversation != *want.ConversationTurnCount {
+		t.Errorf("case %q path %s conversationTurnCount = %d, want %d", row.Name, path, gotConversation, *want.ConversationTurnCount)
 	}
 }
 
