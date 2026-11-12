@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { firstRunRoutes, isFirstRunRoute, useFirstRunDecision, type FirstRunDecision } from './useFirstRun';
 import { LOCAL_SECTIONS } from '@/lib/nav/sections';
 import { loadCases } from '@/test/fixtures/kickstart';
-import { KickstartServer } from '@/test/kickstartHarness';
+import { KickstartServer, teardown } from '@/test/kickstartHarness';
 
 const nav = vi.hoisted(() => {
   const replace = vi.fn();
@@ -79,10 +79,11 @@ beforeEach(() => {
   nav.replace.mockReset();
 });
 afterEach(() => {
-  cleanup();
   shell = null;
   told = null;
-  vi.unstubAllGlobals();
+  // The harness's own teardown: it unmounts, undoes the stubs, and fails the case
+  // if the hook called a kickstart route that the case did not script.
+  teardown();
 });
 
 describe('the first-run redirect', () => {
