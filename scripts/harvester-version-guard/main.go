@@ -21,6 +21,32 @@ import (
 //go:embed probe_test.go.txt
 var probe []byte
 
+// The probe's parserVersions, in the form for a revision with per-harness
+// registration (internal/ingest/harvester_versions.go) and in the form for an
+// older revision without it; versionProbe picks one per archived tree.
+var (
+	//go:embed versions_test.go.txt
+	versionsProbe []byte
+	//go:embed versions_legacy_test.go.txt
+	legacyVersionsProbe []byte
+)
+
+// versionProbe returns the parserVersions source for the revision archived at
+// tree. This is the sole historical bridge: before per-harness registration,
+// adapter baseline 1 and CurrentIndexVersion described these same parsers.
+func versionProbe(tree string) ([]byte, error) {
+	registry := filepath.Join(tree, "internal", "ingest", "harvester_versions.go")
+	_, err := os.Stat(registry)
+	switch {
+	case err == nil:
+		return versionsProbe, nil
+	case os.IsNotExist(err):
+		return legacyVersionsProbe, nil
+	default:
+		return nil, fmt.Errorf("cannot tell which version registry the archived revision at %s uses: stat %s: %w; the guard compares nothing until it can read the archive, so check the temporary directory's permissions and retry", tree, registry, err)
+	}
+}
+
 type versions struct{ AdapterVersion, IndexerVersion int }
 type snapshot struct {
 	Versions       map[string]versions
@@ -365,23 +391,11 @@ func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []
 	if err := os.WriteFile(filepath.Join(probeDir, "harvester_guard_probe_test.go"), probe, 0600); err != nil {
 		return result, err
 	}
-	// This is the sole historical bridge: before per-harness registration,
-	// adapter baseline 1 and CurrentIndexVersion described these same parsers.
-	versionSource := `package ingest_test
-import "github.com/peasant-labs/peasant/internal/ingest"
-func parserVersions() map[string]versions {
- result := make(map[string]versions)
- for harness := range ingest.DefaultAdapterRegistry {
-  target := ingest.HarvesterVersionRegistry[harness]
-  result[string(harness)] = versions{target.AdapterVersion, target.IndexerVersion}
- }
- return result
-}`
-	if _, err := os.Stat(filepath.Join(tree, "internal/ingest/harvester_versions.go")); os.IsNotExist(err) {
-		versionSource = strings.Replace(versionSource, "target := ingest.HarvesterVersionRegistry[harness]", "", 1)
-		versionSource = strings.Replace(versionSource, "target.AdapterVersion, target.IndexerVersion", "1, ingest.CurrentIndexVersion", 1)
+	versionSource, err := versionProbe(tree)
+	if err != nil {
+		return result, err
 	}
-	if err := os.WriteFile(filepath.Join(probeDir, "harvester_guard_versions_test.go"), []byte(versionSource), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(probeDir, "harvester_guard_versions_test.go"), versionSource, 0600); err != nil {
 		return result, err
 	}
 	output := filepath.Join(temp, "snapshot.json")
