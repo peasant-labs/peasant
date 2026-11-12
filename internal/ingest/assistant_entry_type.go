@@ -24,3 +24,9 @@ func assistantEntryType(hasProse, hasToolUse, hasThinking bool) schema.EntryType
 		return schema.EntryTypeText
 	}
 }
+
+// toolOnlyCarrierEntryType types the carrier of an assistant message that
+// holds tool calls and no prose or thinking. The carrier is a tool_use turn
+// with no countable tool use of its own: no call key, no tool name, no
+// content.
+var toolOnlyCarrierEntryType = assistantEntryType(false, true, false)
