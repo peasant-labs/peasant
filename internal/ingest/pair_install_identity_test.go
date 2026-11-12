@@ -558,7 +558,7 @@ func runHarvestCase(t *testing.T, document pairInstallDocument, c pairInstallCas
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state == nil || state.IndexedInputHash == nil || state.IndexedAt == nil || state.ArtifactHash == nil {
+		if state == nil || !state.Completed() || state.IndexedInputHash == nil {
 			t.Fatalf("%s: the session is not indexed: %+v", label, state)
 		}
 		if state.PublicationCaptureRevision != want.CaptureRevision || state.PublicationBound != want.Bound {

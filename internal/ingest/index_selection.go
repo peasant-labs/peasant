@@ -128,7 +128,8 @@ func (p *Pipeline) capturedInputBindsWithoutReparse(input *CapturedIndexInput) b
 	}
 	target := p.sessionVersionTarget(input.session)
 	state := input.expected
-	if state == nil || p.config.Force || p.config.Reindex || state.LatestAttemptArtifactHash != nil {
+	rebuild := p.config.Force || p.config.Reindex
+	if state == nil || rebuild || state.LatestAttemptArtifactHash != nil {
 		return false
 	}
 	if target.IndexVersion != strictIndexFormat {
@@ -140,10 +141,12 @@ func (p *Pipeline) capturedInputBindsWithoutReparse(input *CapturedIndexInput) b
 	if state.IndexedInputHash == nil || *state.IndexedInputHash != input.inputHash {
 		return false
 	}
-	if state.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness) && !permanentRefusalIsSettled(state, target) {
+	certifiable := state.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness)
+	if certifiable && !permanentRefusalIsSettled(state, target) {
 		return false
 	}
-	return input.published || (state.PublicationCaptureRevision > 0 && !state.PublicationBound && input.bindsPublication())
+	unbound := state.PublicationCaptureRevision > 0 && !state.PublicationBound
+	return input.published || (unbound && input.bindsPublication())
 }
 
 // latestAttemptPreviewSettles reports whether a stored latest attempt has
