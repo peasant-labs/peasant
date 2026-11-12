@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	expectedConsentRows = 3
+	expectedConsentRows = 5
 	expectedLoginRows   = 3
 )
 

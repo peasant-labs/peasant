@@ -1,5 +1,11 @@
 # Captured from the terminal review summary before the explanation moved.
 # A hidden choice is absent. The summary never prints "because".
+#
+# The selection line is written from the selection the save would write, in the
+# words of the person who chose: it counts the projects, branches and sessions
+# the selection names ("selection: 1 project, 1 branch, 2 sessions you chose")
+# and carries no word of the implementation (internalWords). The retention line
+# names the never-expire period "never expire", not its stored number of days.
 requiredNames:
   - selection-scope-omits-unasked-fields
   - first-run-disconnected-all
@@ -9,6 +15,17 @@ requiredNames:
   - keep-local
   - zero-effective-selection
   - review-summary-never-prints-hidden-because
+  - summary-names-never-expire-for-the-sentinel
+  - summary-names-days-below-the-never-expire-floor
+  - summary-selection-line-has-no-internal-words
+  - summary-selection-line-counts-projects-branches-and-sessions
+  - summary-selection-line-counts-a-project-once-across-clones-and-tools
+  - summary-selection-line-says-one-of-each-in-the-singular
+  - summary-selection-line-names-a-tool-chosen-whole
+  - summary-selection-line-counts-a-whole-project-without-branches
+internalWords:
+  - buffered
+  - 99999
 cases:
   - name: selection-scope-omits-unasked-fields
     scope: selection
@@ -18,7 +35,7 @@ cases:
     retentionDays: 30
     autoPublishIntent: true
     values:
-      - "selection: only the buffered projects, branches, and sessions"
+      - "selection: nothing chosen"
     effects:
       - save the visible choices to peasant configuration
       - import the selected transcripts into the local peasant store
@@ -46,7 +63,7 @@ cases:
       claude-code:
         sessions: ["one"]
     values:
-      - "selection: only the buffered projects, branches, and sessions"
+      - "selection: 1 session you chose"
       - "auto-ingest future branches in fully-selected projects: on"
       - "publication preference: keep local; nothing is published now or when kickstart finishes"
       - "publish automatically: not now"
@@ -112,7 +129,7 @@ cases:
     villageConnected: false
     claudeSessions: false
     values:
-      - "selection: only the buffered projects, branches, and sessions"
+      - "selection: nothing chosen"
       - "auto-ingest future branches in fully-selected projects: on"
       - "publication preference: keep local; nothing is published now or when kickstart finishes"
       - "publish automatically: not now"
@@ -139,6 +156,154 @@ cases:
       - "publish automatically: not now"
       - "publication privacy: standard redaction; local imports remain original unless you run `peasant redact`"
       - "later publish license: none; all rights remain and reuse requires permission"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  # The never-expire period is stored as 99999 days. The review says what it
+  # means, and never prints the number.
+  - name: summary-names-never-expire-for-the-sentinel
+    selectionMode: all
+    villageConnected: false
+    claudeSessions: true
+    retentionDays: 99999
+    forbidden:
+      - "99999"
+      - "days"
+    values:
+      - "selection: all discovered sessions"
+      - "publication preference: keep local; nothing is published now or when kickstart finishes"
+      - "publish automatically: not now"
+      - "publication privacy: standard redaction; local imports remain original unless you run `peasant redact`"
+      - "later publish license: none; all rights remain and reuse requires permission"
+      - "claude code source retention: never expire"
+    effects:
+      - save the visible choices to peasant configuration
+      - apply claude code retention after config saves
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  # A period another tool wrote just below the stored sentinel is still a real
+  # number of days; the floor is where "never" starts.
+  - name: summary-names-days-below-the-never-expire-floor
+    selectionMode: all
+    villageConnected: false
+    claudeSessions: true
+    retentionDays: 9998
+    forbidden:
+      - never expire
+    values:
+      - "selection: all discovered sessions"
+      - "publication preference: keep local; nothing is published now or when kickstart finishes"
+      - "publish automatically: not now"
+      - "publication privacy: standard redaction; local imports remain original unless you run `peasant redact`"
+      - "later publish license: none; all rights remain and reuse requires permission"
+      - "claude code source retention: 9998 days"
+    effects:
+      - save the visible choices to peasant configuration
+      - apply claude code retention after config saves
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  # A chosen selection says what was chosen, in plain words. Nothing here is a
+  # word of the implementation; internalWords holds that for every case.
+  - name: summary-selection-line-has-no-internal-words
+    scope: selection
+    selectionMode: selected
+    villageConnected: false
+    claudeSessions: false
+    harnesses:
+      claude-code:
+        sessions: ["one"]
+    forbidden:
+      - buffered
+      - "only the"
+    values:
+      - "selection: 1 session you chose"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  - name: summary-selection-line-counts-projects-branches-and-sessions
+    scope: selection
+    selectionMode: selected
+    villageConnected: false
+    claudeSessions: false
+    harnesses:
+      claude-code:
+        projects:
+          - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/work/tool], branches: [main, release]}
+          - {gitRemote: "git@github.com:acme/other.git", clonePaths: [/work/other], branches: [dev]}
+        sessions: ["one", "two", "three"]
+    values:
+      - "selection: 2 projects, 3 branches, 3 sessions you chose"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  # One repository chosen from two clones and under two tools is one project, and
+  # its branch is one branch.
+  - name: summary-selection-line-counts-a-project-once-across-clones-and-tools
+    scope: selection
+    selectionMode: selected
+    villageConnected: false
+    claudeSessions: false
+    harnesses:
+      claude-code:
+        projects:
+          - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/work/tool, /work/tool-linked], branches: [main]}
+      codex:
+        projects:
+          - {gitRemote: "https://github.com/acme/tool.git", clonePaths: [/work/tool], branches: [main]}
+    values:
+      - "selection: 1 project, 1 branch you chose"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  - name: summary-selection-line-says-one-of-each-in-the-singular
+    scope: selection
+    selectionMode: selected
+    villageConnected: false
+    claudeSessions: false
+    harnesses:
+      claude-code:
+        projects:
+          - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/work/tool], branches: [main]}
+        sessions: ["one", "two"]
+    values:
+      - "selection: 1 project, 1 branch, 2 sessions you chose"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  # A tool the selection names with nothing under it is every session it has.
+  - name: summary-selection-line-names-a-tool-chosen-whole
+    scope: selection
+    selectionMode: selected
+    villageConnected: false
+    claudeSessions: false
+    harnesses:
+      codex: {}
+      claude-code:
+        sessions: ["one"]
+    values:
+      - "selection: every codex session, 1 session you chose"
+    effects:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - "publish nothing; sharing requires a later explicit push"
+  # A project chosen with every branch has no branch list; it counts as a project
+  # and no branches.
+  - name: summary-selection-line-counts-a-whole-project-without-branches
+    scope: selection
+    selectionMode: selected
+    villageConnected: false
+    claudeSessions: false
+    harnesses:
+      claude-code:
+        projects:
+          - {name: notes, clonePaths: [/work/notes]}
+    values:
+      - "selection: 1 project you chose"
     effects:
       - save the visible choices to peasant configuration
       - import the selected transcripts into the local peasant store

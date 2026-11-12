@@ -24,6 +24,7 @@ requiredNames:
   - no-reset-in-any-response
   - failed-save-keeps-the-session
   - retention-shown-unanswered-writes-the-shown-value
+  - summary-names-never-expire-for-the-sentinel
   - retention-failure-is-told-as-a-note-about-the-save
   - take-theirs-summary-shows-the-file-value
   - coupled-field-change-yields-a-row
@@ -546,6 +547,28 @@ cases:
       - call: POST /api/v1/kickstart/sessions/{full}/commit
         json: {saved: true}
       - retention: {calls: [90], sawSavedFile: true}
+
+  # The never-expire period is stored as 99999 days. The review says "never
+  # expire" in the words of the retention stop, and never prints the number.
+  - name: summary-names-never-expire-for-the-sentinel
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+      retentionDays: 99999
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        contains:
+          "stops[key=review].summary.values": "claude code source retention: never expire"
 
   # Claude Code's retention period is written after the configuration is saved. A
   # refusal to write it never retracts the save; it travels in the committed
