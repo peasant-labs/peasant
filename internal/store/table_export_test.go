@@ -39,7 +39,7 @@ func TestExportTableRowsCoversEveryOrdinaryTable(t *testing.T) {
 	for _, table := range exported {
 		byName[table.Name] = table
 	}
-	for _, required := range []string{"sessions", "session_entries", "projects", "ingest_log", "session_entries_fts_data"} {
+	for _, required := range []string{"sessions", "session_entries", "projects", "ingest_log", "session_search_fts_data"} {
 		if _, ok := byName[required]; !ok {
 			t.Fatalf("export has no %q table; exported %d tables", required, len(exported))
 		}

@@ -405,6 +405,12 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 
 				db, err := openRunStore(cmd, dryRun, string(resolvedOutput), cfg.Write)
 				if err != nil {
+					// A store whose open would run the one-time search index
+					// repair is refused here, before any village request, so the
+					// run-level nothing-attempted wrap below marks it for every
+					// caller: a generated hook with or without a rule reports
+					// that nothing reached peasant online, and a script gets
+					// the nothing-attempted status.
 					return fmt.Errorf("open analytics store: %w", err)
 				}
 				defer db.Close()

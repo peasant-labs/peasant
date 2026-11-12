@@ -341,6 +341,11 @@ func openKickstartStoreWithError(cmd *cobra.Command, ownedRoot string) (*store.S
 	if err != nil {
 		return nil, func() {}, err
 	}
+	// A non-interactive caller never runs migration v76's whole-index
+	// rebuild invisibly: refuse on residue instead of opening.
+	if err := refuseStaleSearchIndex(dbPath); err != nil {
+		return nil, func() {}, err
+	}
 	db, err := store.Open(dbPath, options...)
 	if err != nil {
 		return nil, func() {}, err

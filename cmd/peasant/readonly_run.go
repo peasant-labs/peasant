@@ -127,6 +127,11 @@ func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string, write inges
 		return nil, err
 	}
 	options = append(options, store.WithWriteConfig(write))
+	// A non-interactive caller never runs migration v76's whole-index
+	// rebuild invisibly: refuse on residue instead of opening.
+	if err := refuseStaleSearchIndex(path); err != nil {
+		return nil, err
+	}
 	return store.Open(path, options...)
 }
 
