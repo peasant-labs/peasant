@@ -30,6 +30,7 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { seedConfiguredSandbox } from '../journey/lib/configured-sandbox.mjs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -158,6 +159,8 @@ function assertProvenance() {
 function boot(port, mock) {
   const home = mkdtempSync(join(tmpdir(), 'peasant-root-page-'))
   const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, 'config'), XDG_DATA_HOME: join(home, 'data'), XDG_STATE_HOME: join(home, 'state'), XDG_CACHE_HOME: join(home, 'cache') }
+  // These are pages of an installed dashboard. A computer with no configuration file is sent to setup instead.
+  seedConfiguredSandbox(env)
   const server = spawn(BIN, ['web', 'start', '--port', String(port), '--foreground', '--no-browser', `--mock-data-store=${mock}`], { cwd: REPO, env, stdio: ['ignore', 'ignore', 'pipe'] })
   let stderr = ''
   server.stderr.on('data', (data) => { stderr += data.toString() })
