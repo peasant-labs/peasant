@@ -1,0 +1,24 @@
+# Required-name manifest for search_residue_entrypoints: deletion
+# protection by NAME, never by count.
+requiredNames:
+  - opendb-affected-refuses
+  - opendb-clean-proceeds
+  - opendb-current-proceeds
+  - openrunstore-affected-refuses
+  - openrunstore-clean-proceeds
+  - openrunstore-current-proceeds
+  - verifystore-affected-refuses
+  - verifystore-clean-proceeds
+  - verifystore-current-proceeds
+  - kickstartstore-affected-refuses
+  - kickstartstore-clean-proceeds
+  - kickstartstore-current-proceeds
+  - webpreopen-affected-refuses
+  - webpreopen-clean-proceeds
+  - webpreopen-current-proceeds
+  - webforeground-affected-refuses
+  - webforeground-clean-passes-gate
+  - ftuereunner-affected-refuses
+  - ftuereunner-clean-passes-gate
+  - runverify-affected-refuses
+  - runverify-clean-passes-gate

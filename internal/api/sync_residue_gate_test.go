@@ -21,11 +21,11 @@ import (
 // store tests pin.
 func seedSyncResidueDB(t *testing.T, dbPath string, affected bool) {
 	t.Helper()
-	union := []storetest.ResidueTerm{{ID: 1, Text: "keep me"}, {ID: 2, Text: "steady state"}}
-	legacy := []storetest.ResidueTerm{{ID: 1, Text: "keep me"}, {ID: 2, Text: "steady state"}}
+	union := storetest.CleanUnion
+	legacy := storetest.CleanLegacy
 	if affected {
-		union = []storetest.ResidueTerm{{ID: 1, Text: "kangaroo ghost"}, {ID: 2, Text: "keep me"}}
-		legacy = []storetest.ResidueTerm{{ID: 2, Text: "keep me"}}
+		union = storetest.AffectedUnion
+		legacy = storetest.AffectedLegacy
 	}
 	storetest.SeedResidueDB(t, string(dbPath), 75, union, legacy)
 }

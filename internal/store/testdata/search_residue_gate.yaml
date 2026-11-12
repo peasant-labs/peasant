@@ -54,11 +54,12 @@ cases:
     missing: true
     wantResidue: false
 messageMustContain:
-  - "would rebuild the whole search index"
+  - "a one-time search index repair would rebuild the whole search index"
   - "schema version 75"
   - "session_entries reuses rowids"
-  - "internal/store/search_residue_gate.go"
+  - "before opening the local store"
   - "was not migrated and no files were changed"
+  - "the requested command did not run"
   - "stored sessions and history are unchanged"
   - "`peasant harvest` in a terminal"
   - "`peasant web start` in a terminal"

@@ -15,6 +15,18 @@ type ResidueTerm struct {
 	Text string
 }
 
+// AffectedUnion, AffectedLegacy, CleanUnion, and CleanLegacy are the one
+// shared affected/clean term sets every residue test seeds: affected carries
+// union residue (a deleted row's stale posting), clean carries identical
+// postings. Sharing them keeps the gate, push, web, sync, and entry-point
+// tests pinned to the same predicate.
+var (
+	AffectedUnion  = []ResidueTerm{{ID: 1, Text: "kangaroo ghost"}, {ID: 2, Text: "keep me"}}
+	AffectedLegacy = []ResidueTerm{{ID: 2, Text: "keep me"}}
+	CleanUnion     = []ResidueTerm{{ID: 1, Text: "keep me"}, {ID: 2, Text: "steady state"}}
+	CleanLegacy    = []ResidueTerm{{ID: 1, Text: "keep me"}, {ID: 2, Text: "steady state"}}
+)
+
 // SeedResidueDB builds the minimal store the residue gate reads: a stamped
 // user_version plus the two FTS docsize tables seeded from the given rows.
 // Only what store.NeedsSearchResidueRebuild inspects exists, so cases pin

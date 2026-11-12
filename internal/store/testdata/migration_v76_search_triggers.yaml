@@ -71,8 +71,9 @@ cases:
 # Residue predicate cases: each builds a V74 store, simulates consolidation,
 # seeds, migrates to V75, applies its window, and evaluates the Go predicate
 # against the vendored SQLite. The window shapes pin the gate: silence on a
-# clean store and on inserts alone (no residue to expunge), residue on a
-# delete and on a reused rowid.
+# clean store, on inserts alone, and on token-count-preserving updates (the
+# documented blind spot — no docsize comparison can see them); residue on a
+# delete, on a token-count-changing update, and on a reused rowid.
 predicateCases:
   - name: predicate-clean-no-window-writes
     window: none
@@ -86,15 +87,21 @@ predicateCases:
   - name: predicate-insert-only-window-clean
     window: insert
     wantResidue: false
+  - name: predicate-update-same-count-clean
+    window: update-same-count
+    wantResidue: false
+  - name: predicate-update-count-changed-residue
+    window: update-count-changed
+    wantResidue: true
 
 # Open-driven cases: the window is applied to a v75 store on a raw
 # connection, the store is closed, and Open runs the chain while the notice
 # writer is captured. The affected path prints the one-line rebuild notice
-# and heals the window (a deleted-in-window term no longer matches the
-# reused-rowid row); the crossing path stays silent and takes the cheap
-# re-sync. The notice is the cheap-path probe: it fires exactly when the
-# pre-chain predicate holds, and the in-migration gate re-evaluates the same
-# predicate at v76's transactional point.
+# and heals the window; the crossing and insert paths stay silent and take
+# the targeted insert; the same-count path stays silent (predicate blind) and
+# keeps the stale term. The notice only warns. A body-half sentinel posting
+# probes the SQL gate: it survives the targeted insert and is gone only after
+# a whole-index rebuild.
 openCases:
   - name: open-affected-window-rebuilds-with-notice
     window: affected
@@ -104,4 +111,10 @@ openCases:
     wantNotice: false
   - name: open-insert-only-window-silent-resync
     window: insert
+    wantNotice: false
+  - name: open-update-same-count-silent-stale-matches
+    window: update-same-count
+    wantNotice: false
+  - name: open-consolidated-after-v75-silent
+    window: consolidated
     wantNotice: false

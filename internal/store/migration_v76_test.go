@@ -78,7 +78,7 @@ func loadMigrationV76Fixtures(t *testing.T) migrationV76Fixtures {
 	for _, c := range fixtures.PredicateCases {
 		actual = append(actual, c.Name)
 		switch c.Window {
-		case "none", "delete", "reuse", "insert":
+		case "none", "delete", "reuse", "insert", "update-same-count", "update-count-changed":
 		default:
 			t.Fatalf("migration_v76_search_triggers.yaml: predicate case %q pins window %q; add it to the runner", c.Name, c.Window)
 		}
@@ -86,7 +86,7 @@ func loadMigrationV76Fixtures(t *testing.T) migrationV76Fixtures {
 	for _, c := range fixtures.OpenCases {
 		actual = append(actual, c.Name)
 		switch c.Window {
-		case "affected", "none", "insert":
+		case "affected", "none", "insert", "update-same-count", "consolidated":
 		default:
 			t.Fatalf("migration_v76_search_triggers.yaml: open case %q pins window %q; add it to the runner", c.Name, c.Window)
 		}
@@ -115,10 +115,10 @@ type migrationV76PredicateCase struct {
 // migrationV76OpenCase is one Open-driven v76 case: the window applied to a
 // v75 store, then a real Open runs the chain while the notice writer is
 // captured. The affected path prints the one-line rebuild notice and heals
-// the window; the crossing path stays silent and takes the cheap re-sync.
-// The notice is the cheap-path probe: it fires exactly when the pre-chain
-// predicate holds, and the in-migration gate re-evaluates the same predicate
-// at v76's transactional point.
+// the window; the crossing path stays silent and takes the targeted insert.
+// The notice only warns — it is not the cheap-path probe. A sentinel posting
+// in the body half probes the SQL gate: it survives the targeted insert and
+// is gone only after a whole-index rebuild.
 type migrationV76OpenCase struct {
 	Name       string `yaml:"name"`
 	Window     string `yaml:"window"`
@@ -348,24 +348,38 @@ func assertMigrationV76SearchCase(t *testing.T, conn *sqlite.Conn, c migrationV7
 	if got := matchInFTS(t, conn, "session_search_fts", "turnip"); got != c.WantLegBGhostInUnion {
 		t.Errorf("union match %q = %v, want %v (leg B ghost)", "turnip", got, c.WantLegBGhostInUnion)
 	}
-	// Invariants: the untouched seed and both body terms stay searchable, and
-	// the range resync leaves a sound index (integrity-check returns no rows).
+	// Invariants: the untouched seed, both body terms, and the sentinel body
+	// term stay searchable, and the content-aware integrity check returns no
+	// rows (a corrupt index would match the probe). The integrity check runs
+	// content-aware on every chain: INSERT ... (session_search_fts, rank)
+	// VALUES('integrity-check', 1) only matches when the index is corrupt.
 	for _, term := range []string{"photosynthesis", "bodyseedterm", "postbodyterm"} {
 		if !matchInFTS(t, conn, "session_search_fts", term) {
 			t.Errorf("union match %q = false, want the invariant term searchable", term)
 		}
 	}
 	integrity := false
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts) VALUES('integrity-check')`, &sqlitex.ExecOptions{
+	integrityErr := false
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts, rank) VALUES('integrity-check', 1)`, &sqlitex.ExecOptions{
 		ResultFunc: func(*sqlite.Stmt) error {
 			integrity = true
 			return nil
 		},
 	}); err != nil {
-		t.Fatalf("union integrity-check: %v", err)
+		integrityErr = true
+		if c.Chain == "full" {
+			t.Fatalf("union integrity-check: %v", err)
+		}
+		// On the capped v75 chain the union is stale by design (the defect
+		// V76 repairs): the content-aware probe reports it instead of
+		// passing clean. That failure is the pinned defect.
 	}
-	if integrity {
-		t.Error("union integrity-check returned rows; the resync left a corrupt index")
+	if c.Chain == "full" {
+		if integrity {
+			t.Error("union integrity-check returned rows; the rebuild left a corrupt index")
+		}
+	} else if !integrity && !integrityErr {
+		t.Error("union integrity-check passed clean on the capped v75 chain; want it to report the stale union the defect leaves")
 	}
 
 	// The capped chain proves the defect mechanism: post-V75 entries writes
@@ -472,8 +486,11 @@ func assertMigrationV76ProductionReads(t *testing.T, conn *sqlite.Conn, c migrat
 // (ghost in the union), reuse deletes a row and reinserts its rowid with
 // different-token-count content (the stale term then matches the new,
 // unrelated row), insert adds a row only (legacy carries it; the union lacks
-// it, which needs no rebuild), and affected combines an update, a delete,
-// and a rowid reuse for the Open-driven end-to-end case.
+// it, which needs no rebuild), update-same-count swaps a term keeping the
+// token count (the documented blind spot: the predicate stays silent while
+// the stale term still matches), update-count-changed swaps a term changing
+// the token count (residue), and affected combines an update, a delete, and
+// a rowid reuse for the Open-driven end-to-end case.
 func applyMigrationV76Window(t *testing.T, conn *sqlite.Conn, window string) {
 	t.Helper()
 	seedRowid := func(entryIndex int) int64 {
@@ -530,26 +547,102 @@ func applyMigrationV76Window(t *testing.T, conn *sqlite.Conn, window string) {
 		}); err != nil {
 			t.Fatalf("reuse window reinsert: %v", err)
 		}
+	case "update-same-count":
+		// Token-count-preserving swap: 'photosynthesis kept seed' (3 tokens)
+		// becomes 'sunflower kept seed' (3 tokens). The union keeps the stale
+		// 'photosynthesis' posting while the legacy moves to 'sunflower', so
+		// the docsize rows compare equal and the predicate stays silent — the
+		// documented blind spot.
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE session_entries SET content_preview = 'sunflower kept seed' WHERE session_id = ? AND entry_index = 0`, &sqlitex.ExecOptions{
+			Args: []any{v76EntriesSession},
+		}); err != nil {
+			t.Fatalf("update-same-count window: %v", err)
+		}
+	case "update-count-changed":
+		// Token-count-changing update: the new text carries more tokens, so
+		// the union/legacy docsize rows differ and the predicate fires.
+		if err := sqlitex.ExecuteTransient(conn, `UPDATE session_entries SET content_preview = 'nebula count changed here with extra words' WHERE session_id = ? AND entry_index = 0`, &sqlitex.ExecOptions{
+			Args: []any{v76EntriesSession},
+		}); err != nil {
+			t.Fatalf("update-count-changed window: %v", err)
+		}
+	case "consolidated":
+		// A 0.16.1 store consolidated after reaching v75: the retired index
+		// is gone and the triggers already target the union index. v76 must
+		// open it with no error, no notice, and no residue.
+		consolidate := "DROP TRIGGER IF EXISTS session_entries_ai;\n" +
+			"DROP TRIGGER IF EXISTS session_entries_ad;\n" +
+			"DROP TRIGGER IF EXISTS session_entries_au;\n" +
+			migrateSearchTriggerAI + ";\n" +
+			migrateSearchTriggerAD + ";\n" +
+			migrateSearchTriggerAU + ";\n" +
+			"INSERT INTO session_search_fts(session_search_fts) VALUES('rebuild');\n" +
+			"DROP TABLE session_entries_fts;\n" +
+			"UPDATE session_search_state SET needs_rebuild = 0 WHERE id = 1;"
+		if err := sqlitex.ExecuteScript(conn, consolidate, nil); err != nil {
+			t.Fatalf("consolidate after v75: %v", err)
+		}
 	default:
 		t.Fatalf("unknown v76 window %q", window)
 	}
 }
 
+// v76SentinelRID is the fixed body-half rid of the gate-probe sentinel: far
+// above any allocated body_id, so it never collides with a stored row. The
+// sentinel is an orphan posting (indexed text with no content-view
+// counterpart): a whole-index rebuild drops it while the entries-only
+// targeted insert leaves it. An orphan trips the content-aware integrity
+// check, so the healed asserts delete it (with its exact planted values)
+// before running the check.
+const v76SentinelRID = BodyRowIDBase + 777777
+
+// plantBodySentinel plants a stale body-half posting with no stored row: an
+// orphan rid whose indexed text has no content-view counterpart. A
+// whole-index rebuild re-indexes from the union view (orphan gone); the
+// targeted insert touches only the entries half (orphan survives). The
+// sentinel therefore probes the SQL gate directly: gone means rebuilt,
+// surviving means the clean path ran. Planting touches no live posting.
+func plantBodySentinel(t *testing.T, conn *sqlite.Conn) {
+	t.Helper()
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index) VALUES(?, 'sentinelbody stale', NULL, NULL, ?, 9)`, &sqlitex.ExecOptions{
+		Args: []any{v76SentinelRID, v76BodiesSession},
+	}); err != nil {
+		t.Fatalf("plant stale sentinel posting: %v", err)
+	}
+}
+
+// removeBodySentinel deletes the gate-probe sentinel with its exact planted
+// values, restoring the index to a content-consistent state before the
+// integrity check runs.
+func removeBodySentinel(t *testing.T, conn *sqlite.Conn) {
+	t.Helper()
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index) VALUES('delete', ?, 'sentinelbody stale', NULL, NULL, ?, 9)`, &sqlitex.ExecOptions{
+		Args: []any{v76SentinelRID, v76BodiesSession},
+	}); err != nil {
+		t.Fatalf("remove sentinel posting: %v", err)
+	}
+}
+
 // openMigrationV76Store builds the v75 state every v76 window case starts
-// from and applies the caller's window writes. The caller owns the
+// from, applies the caller's window writes, and plants the body-half
+// sentinel that probes the SQL gate. The caller owns the
 // connection and must close it.
 func openMigrationV76Store(t *testing.T, path, window string) *sqlite.Conn {
 	t.Helper()
 	conn := buildV75Store(t, path, false)
 	applyMigrationV76Window(t, conn, window)
+	plantBodySentinel(t, conn)
 	return conn
 }
 
 // TestMigrationV76ResiduePredicate pins the residue gate against the vendored
-// SQLite: silence on a clean store and on inserts alone, residue on a delete
-// and on a reused rowid. The reused-rowid case also pins the defect the
-// rebuild exists for: the deleted row's stale term matches the new,
-// unrelated row that reused its rowid.
+// SQLite: silence on a clean store, on inserts alone, and on
+// token-count-preserving updates (the blind spot); residue on a delete, on a
+// token-count-changing update, and on a reused rowid. The reused-rowid case
+// also pins the defect the rebuild exists for: the deleted row's stale term
+// matches the new, unrelated row that reused its rowid. The same-count case
+// pins the blind spot from the other side: the predicate stays silent while
+// the stale term still matches.
 func TestMigrationV76ResiduePredicate(t *testing.T) {
 	t.Parallel()
 	for _, c := range loadMigrationV76PredicateCases(t) {
@@ -566,6 +659,17 @@ func TestMigrationV76ResiduePredicate(t *testing.T) {
 			if c.Window == "reuse" && !matchInFTS(t, conn, "session_search_fts", "kangaroo") {
 				t.Fatal("stale kangaroo term does not match the row reusing its rowid; the defect repro is broken")
 			}
+			if c.Window == "update-same-count" {
+				if !matchInFTS(t, conn, "session_search_fts", "photosynthesis") {
+					t.Fatal("stale photosynthesis term does not match after the same-count swap; the blind-spot repro is broken")
+				}
+				if matchInFTS(t, conn, "session_search_fts", "sunflower") {
+					t.Fatal("new sunflower term already in the union before any repair; the blind-spot repro is broken")
+				}
+			}
+			if c.Window == "update-count-changed" && !matchInFTS(t, conn, "session_search_fts", "photosynthesis") {
+				t.Fatal("stale photosynthesis term does not match after the count-changed update; the repro is broken")
+			}
 			got, err := searchIndexResiduePresent(conn)
 			if err != nil {
 				t.Fatal(err)
@@ -581,8 +685,9 @@ func TestMigrationV76ResiduePredicate(t *testing.T) {
 // captured. It runs sequentially (no t.Parallel): the writer swap is
 // process-global, and sequential tests never run concurrently with parallel
 // ones. The affected window prints the one-line rebuild notice and heals the
-// window — a deleted-in-window term no longer matches the reused-rowid row —
-// while the crossing store stays silent and takes the cheap re-sync.
+// window; the crossing, insert, and same-count windows stay silent. The
+// notice only warns. The body-half sentinel probes the gate: it is gone after
+// a rebuild and survives the targeted insert.
 func TestMigrationV76OpenNotice(t *testing.T) {
 	for _, c := range loadMigrationV76OpenCases(t) {
 		c := c
@@ -600,7 +705,18 @@ func TestMigrationV76OpenNotice(t *testing.T) {
 				t.Fatal("stale kangaroo term does not match the reused rowid row before Open; the defect repro is broken")
 			}
 			if c.Window == "insert" && matchInFTS(t, conn, "session_search_fts", "quasar") {
-				t.Fatal("inserted term already in the union before Open; the re-sync would prove nothing")
+				t.Fatal("inserted term already in the union before Open; the targeted insert would prove nothing")
+			}
+			if c.Window == "update-same-count" {
+				if !matchInFTS(t, conn, "session_search_fts", "photosynthesis") {
+					t.Fatal("stale photosynthesis term does not match before Open; the blind-spot repro is broken")
+				}
+				if matchInFTS(t, conn, "session_search_fts", "sunflower") {
+					t.Fatal("new sunflower term already in the union before Open; the blind-spot repro is broken")
+				}
+			}
+			if !matchInFTS(t, conn, "session_search_fts", "sentinelbody stale") {
+				t.Fatal("stale sentinel posting missing before Open; the gate probe is broken")
 			}
 			if err := conn.Close(); err != nil {
 				t.Fatal(err)
@@ -630,10 +746,28 @@ func TestMigrationV76OpenNotice(t *testing.T) {
 	}
 }
 
+// assertPostOpenBodyIndexed proves the bodies triggers live after Open: a
+// body row inserted post-migration is indexed and findable. It reuses the
+// caller's pooled connection: the Open tests run with pool size 1, so taking
+// a second connection would deadlock.
+func assertPostOpenBodyIndexed(t *testing.T, conn *sqlite.Conn) {
+	t.Helper()
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_entry_bodies(body_id, session_id, body_digest, entry_index, harness, entry_type, role, content_preview, has_tool_use, has_thinking, is_error, depth)
+VALUES((SELECT coalesce(max(body_id), `+fmt.Sprintf("%d", BodyRowIDBase-1)+`) + 1 FROM session_entry_bodies), '`+v76BodiesSession+`', '`+strings.Repeat("de", 32)+`', 10, 'claude-code', 'text', 'user', 'postopenbody fresh', 0, 0, 0, 0)`, nil); err != nil {
+		t.Fatalf("insert post-open body row: %v", err)
+	}
+	if !matchInFTS(t, conn, "session_search_fts", "postopenbody") {
+		t.Error("union lost the body term added after Open; the bodies triggers must index it")
+	}
+}
+
 // assertMigrationV76OpenHealed proves the Open-driven end state: union
-// triggers live, the retired index gone, every live term findable, and no
-// removed term or ghost matching — on the affected path only the rebuild
-// expunges them, on the crossing path there was never residue.
+// triggers live, the retired index gone, every live term findable, and the
+// body-half sentinel resolved by the branch taken — gone after a rebuild,
+// surviving after the targeted insert. The content-aware integrity check runs
+// on every Open: it only matches when the index is corrupt. On the affected
+// path only the rebuild expunges ghosts; on the crossing path there was never
+// residue; on the same-count path the blind spot keeps the stale term.
 func assertMigrationV76OpenHealed(t *testing.T, s *Store, c migrationV76OpenCase) {
 	t.Helper()
 	conn, err := s.pool.Take(context.Background())
@@ -675,8 +809,11 @@ func assertMigrationV76OpenHealed(t *testing.T, s *Store, c migrationV76OpenCase
 		t.Error("union lost the untouched seed term across Open")
 	}
 	if !matchInFTS(t, conn, "session_search_fts", "bodyseedterm") {
-		t.Error("union lost the seeded body term across Open; body search must survive the rebuild path")
+		t.Error("union lost the seeded body term across Open; body search must survive both branches")
 	}
+	// The sentinel probes the branch taken: gone after a rebuild, surviving
+	// after the targeted insert. Assert first, then remove the orphan before
+	// the content-aware integrity check (an orphan trips it by design).
 	if c.Window == "affected" {
 		for _, term := range []string{"kangaroo", "mitochondria"} {
 			if matchInFTS(t, conn, "session_search_fts", term) {
@@ -688,15 +825,97 @@ func assertMigrationV76OpenHealed(t *testing.T, s *Store, c migrationV76OpenCase
 				t.Errorf("union lost live term %q across Open on the affected path", term)
 			}
 		}
+		// The rebuild drops the orphan sentinel: it re-indexes from the union
+		// view, which has no such row.
+		if matchInFTS(t, conn, "session_search_fts", "sentinelbody stale") {
+			t.Error("stale sentinel posting survived Open on the affected path; only the rebuild removes it")
+		}
 	}
 	if c.Window == "insert" {
-		// The re-sync indexed the insert-only window without a rebuild:
+		// The targeted insert indexed the insert-only window without a rebuild:
 		// the row is findable, and the untouched rows are undisturbed.
 		if !matchInFTS(t, conn, "session_search_fts", "quasar") {
-			t.Error("union lost the inserted term across Open; the cheap re-sync must index it")
+			t.Error("union lost the inserted term across Open; the targeted insert must index it")
 		}
 		if !matchInFTS(t, conn, "session_search_fts", "kangaroo") {
 			t.Error("union lost the untouched seed term across Open on the insert path")
 		}
+		// The targeted insert touches only the entries half: the orphan
+		// sentinel survives it.
+		if !matchInFTS(t, conn, "session_search_fts", "sentinelbody stale") {
+			t.Error("stale sentinel posting missing after Open on the insert path; the targeted insert must leave it")
+		}
+		removeBodySentinel(t, conn)
+		// A body term added after Open is indexed: the bodies triggers live.
+		assertPostOpenBodyIndexed(t, conn)
+	}
+	if c.Window == "none" {
+		// Crossing path: nothing to heal, sentinel still stale, and a body
+		// term added after Open is indexed.
+		if !matchInFTS(t, conn, "session_search_fts", "sentinelbody stale") {
+			t.Error("stale sentinel posting missing after Open on the crossing path")
+		}
+		removeBodySentinel(t, conn)
+		assertPostOpenBodyIndexed(t, conn)
+	}
+	if c.Window == "consolidated" {
+		// A 0.16.1 store consolidated after v75 opens with no error and no
+		// notice: the latch records consolidated, skips the rebuild, and the
+		// targeted insert is a no-op over the already-current union. The
+		// orphan sentinel survives (entries-only repair), and new bodies index.
+		if !matchInFTS(t, conn, "session_search_fts", "sentinelbody stale") {
+			t.Error("stale sentinel posting missing after Open on the consolidated path")
+		}
+		removeBodySentinel(t, conn)
+		assertPostOpenBodyIndexed(t, conn)
+	}
+	if c.Window == "update-same-count" {
+		// Blind spot: the predicate stays silent, so no rebuild runs and the
+		// stale term still matches after Open.
+		if !matchInFTS(t, conn, "session_search_fts", "photosynthesis") {
+			t.Error("stale photosynthesis term missing after Open on the same-count path; the blind spot keeps it")
+		}
+		if matchInFTS(t, conn, "session_search_fts", "sunflower") {
+			t.Error("new sunflower term indexed after Open on the same-count path; no repair ran")
+		}
+		if !matchInFTS(t, conn, "session_search_fts", "sentinelbody stale") {
+			t.Error("stale sentinel posting missing after Open on the same-count path")
+		}
+		removeBodySentinel(t, conn)
+		assertPostOpenBodyIndexed(t, conn)
+		// The content-aware probe sees the blind spot: the union still
+		// indexes the pre-swap term while the stored row carries the new
+		// text, so the check fails (error or matching rows) instead of
+		// passing clean. That failure IS the pinned outcome: the swap is
+		// invisible to the residue gate but visible to the content-aware
+		// probe. No other Open path may fail this check.
+		integrityFailed := false
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts, rank) VALUES('integrity-check', 1)`, &sqlitex.ExecOptions{
+			ResultFunc: func(*sqlite.Stmt) error {
+				integrityFailed = true
+				return nil
+			},
+		}); err != nil {
+			integrityFailed = true
+		}
+		if !integrityFailed {
+			t.Error("content-aware integrity check passed on the same-count path; want it to report the stale posting the blind spot leaves")
+		}
+		return
+	}
+	// Content-aware integrity check on every other Open, after the orphan
+	// probe is removed: only a corrupt index matches. It runs last so the
+	// sentinel — an intentional orphan — never trips it.
+	integrity := false
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts, rank) VALUES('integrity-check', 1)`, &sqlitex.ExecOptions{
+		ResultFunc: func(*sqlite.Stmt) error {
+			integrity = true
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("open integrity-check: %v", err)
+	}
+	if integrity {
+		t.Error("union integrity-check returned rows after Open; the index is corrupt")
 	}
 }

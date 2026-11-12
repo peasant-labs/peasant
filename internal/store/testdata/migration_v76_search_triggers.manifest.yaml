@@ -8,6 +8,10 @@ requiredNames:
   - predicate-delete-leaves-residue
   - predicate-reused-rowid-leaves-residue
   - predicate-insert-only-window-clean
+  - predicate-update-same-count-clean
+  - predicate-update-count-changed-residue
   - open-affected-window-rebuilds-with-notice
   - open-crossing-in-one-run-silent
   - open-insert-only-window-silent-resync
+  - open-update-same-count-silent-stale-matches
+  - open-consolidated-after-v75-silent

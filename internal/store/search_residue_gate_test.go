@@ -119,7 +119,8 @@ func fileHash(t *testing.T, path string) []byte {
 // vendored SQLite: the version gate first (74, 76, and missing files proceed
 // without touching the predicate), then the residue verdict per window. Every
 // case also proves the helper never writes: the database file hashes
-// identically before and after.
+// identically before and after, and no -wal/-shm sidecars appear (the minimal
+// fixtures use rollback journals).
 func TestNeedsSearchResidueRebuild(t *testing.T) {
 	t.Parallel()
 	fixtures := loadSearchResidueGateFixtures(t)
@@ -151,7 +152,80 @@ func TestNeedsSearchResidueRebuild(t *testing.T) {
 			if after := fileHash(t, path); string(after) != string(before) {
 				t.Error("the residue check modified the database file; the read-only probe must never write")
 			}
+			for _, sidecar := range []string{path + "-wal", path + "-shm"} {
+				if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+					t.Errorf("read-only check left %s behind; immutable=1 must prevent sidecars", sidecar)
+				}
+			}
 		})
+	}
+}
+
+// TestNeedsSearchResidueRebuildWALMode proves the read-only check leaves WAL
+// sidecars untouched: real stores run in WAL mode, so the fixture switches a
+// seeded affected store to WAL, records both sidecars, runs the check, and
+// asserts residue true with byte-identical file and sidecars.
+func TestNeedsSearchResidueRebuildWALMode(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "residue-wal.db")
+	seedSearchResidueDB(t, path, searchResidueGateCase{
+		Name:        "wal-affected",
+		Version:     75,
+		UnionTerms:  []searchResidueGateTerm{{ID: 1, Text: "kangaroo ghost"}, {ID: 2, Text: "keep me"}},
+		LegacyTerms: []searchResidueGateTerm{{ID: 2, Text: "keep me"}},
+		WantResidue: true,
+	})
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `PRAGMA journal_mode=WAL`, nil); err != nil {
+		_ = conn.Close()
+		t.Fatalf("switch fixture to WAL: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before := fileHash(t, path)
+	var walBefore, shmBefore []byte
+	walPresent, shmPresent := false, false
+	if data, err := os.ReadFile(path + "-wal"); err == nil {
+		walBefore, walPresent = data, true
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(path + "-shm"); err == nil {
+		shmBefore, shmPresent = data, true
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	got, err := NeedsSearchResidueRebuild(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Error("WAL affected store reports no residue; want true")
+	}
+	if after := fileHash(t, path); string(after) != string(before) {
+		t.Error("WAL check modified the database file")
+	}
+	if data, err := os.ReadFile(path + "-wal"); err == nil {
+		if !walPresent || string(data) != string(walBefore) {
+			t.Error("WAL check modified the -wal sidecar")
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	} else if walPresent {
+		t.Error("WAL check removed the -wal sidecar")
+	}
+	if data, err := os.ReadFile(path + "-shm"); err == nil {
+		if !shmPresent || string(data) != string(shmBefore) {
+			t.Error("WAL check modified the -shm sidecar")
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	} else if shmPresent {
+		t.Error("WAL check removed the -shm sidecar")
 	}
 }
 

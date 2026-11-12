@@ -56,16 +56,21 @@ func TestTUINamesAnUnreadableDatabase(t *testing.T) {
 // tui` fails on the terminal check before opening the store: on an affected
 // store it must not migrate (and rebuild) invisibly on the way to the same
 // refusal. The database file is byte-identical and still at version 75
-// afterwards.
+// afterwards. Both TTY detectors are stubbed false so the test is
+// TTY-independent.
 func TestTUISkipsResidueRebuildWithoutTerminal(t *testing.T) {
+	previousTTY := tuiTerminalAvailable
+	tuiTerminalAvailable = func() bool { return false }
+	t.Cleanup(func() { tuiTerminalAvailable = previousTTY })
+	previousStdin := stdinIsTerminal
+	stdinIsTerminal = func() bool { return false }
+	t.Cleanup(func() { stdinIsTerminal = previousStdin })
 	dir := t.TempDir()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	union := []storetest.ResidueTerm{{ID: 1, Text: "kangaroo ghost"}, {ID: 2, Text: "keep me"}}
-	legacy := []storetest.ResidueTerm{{ID: 2, Text: "keep me"}}
-	storetest.SeedResidueDB(t, dbPath, 75, union, legacy)
+	storetest.SeedResidueDB(t, dbPath, 75, storetest.AffectedUnion, storetest.AffectedLegacy)
 	before, err := os.ReadFile(dbPath)
 	if err != nil {
 		t.Fatal(err)
