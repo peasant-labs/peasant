@@ -91,17 +91,23 @@ cases:
   - name: too-little-free-disk-for-light-steps-refuses-and-names-needed-and-free-bytes
     kind: disk-insufficient
     from: 75
-  - name: every-catalog-entry-has-a-disk-factor-and-a-basis
+  # Every cost class implies a disk need; a catalog entry overrides it only
+  # when the step copies a table, and an override that restates the need
+  # its cost implies fails.
+  - name: every-cost-class-has-a-disk-need-and-no-override-restates-it
     kind: catalog
   # The entry table rebuild (schema 75) asks for its factor times the entry
-  # table and the search indexes it rebuilds, measured on the store: the
-  # entry table by a bounded row sample, each search index by its structure
-  # record. wantBasisMin and wantBasisMax bound the need over the factor
-  # times dbstat's page count of those objects (the estimate errs high,
-  # never low); wantFactorMin and wantFactorMax bound it over the database
-  # size. sessions, textEntries (per session), meanEntryBytes, rowEntries
-  # (short rows a converted session keeps) and contentBytes (stored
-  # transcript per session) size the synthetic schema-74 store.
+  # table and the search indexes it rebuilds. Where the store keeps its text
+  # in the bodies, the entry table is read in full, row by row from the
+  # record headers, and each search index is sized by its structure record.
+  # Where the text is in the entry rows, that table dominates the database
+  # and the basis is the whole database. wantBasisMin and wantBasisMax bound
+  # the need over the factor times dbstat's page count of those objects;
+  # wantFactorMin and wantFactorMax bound it over the database size.
+  # sessions, textEntries (per session), meanEntryBytes, rowEntries (entry
+  # rows a converted store keeps, of sessions never converted) and
+  # contentBytes (stored transcript per session) size the synthetic
+  # schema-74 store.
   - name: entry-text-in-bodies-store-asks-for-the-factor-times-its-small-entry-table-and-search-index
     kind: disk-layout-need
     layout: entry-text-in-bodies
@@ -114,7 +120,7 @@ cases:
     wantBasisMax: 1.6
     wantFactorMin: 0.05
     wantFactorMax: 0.5
-  - name: entry-text-in-rows-store-asks-for-the-factor-times-its-large-entry-table-and-search-index
+  - name: entry-text-in-rows-store-asks-for-the-factor-times-its-database
     kind: disk-layout-need
     layout: entry-text-in-rows
     sessions: 40
@@ -122,18 +128,77 @@ cases:
     meanEntryBytes: 1024
     wantBasisMin: 1.0
     wantBasisMax: 1.8
-    wantFactorMin: 1.2
-    wantFactorMax: 1.9
-  # The estimate reads at most its sample bound of rows from a table larger
-  # than the bound, never the table, and still errs high.
-  - name: entry-table-estimate-reads-no-more-than-its-sample-bound
+    wantFactorMin: 1.84
+    wantFactorMax: 1.86
+  # An entry table with more rows than the read bound (maxEntryRows) stops
+  # the read one row past the bound and takes the whole database.
+  - name: entry-table-estimate-reads-no-more-than-its-row-bound
     kind: disk-estimate-bound
-    layout: entry-text-in-rows
-    sessions: 120
-    textEntries: 50
+    layout: entry-text-in-bodies
+    sessions: 20
+    textEntries: 2
     meanEntryBytes: 256
-    wantBasisMin: 1.0
-    wantBasisMax: 1.8
+    rowEntries: 10
+    maxEntryRows: 64
+  # A heavy tail of entry sizes never makes the basis come in low: the
+  # estimate is at least dbstat's page count of the entry table and search
+  # indexes, and the plan at least the factor times that. entryShape
+  # distributes the entry row sizes: one-percent-hundredfold makes every
+  # hundredth row a hundred times the mean, rising-with-rowid grows each row
+  # from near zero to twice the mean. In the bodies layout the shaped rows
+  # are the entry rows of never-converted sessions (rowEntries of mean
+  # rowEntryBytes, the text in their tool output). wantMeasured: the bodies
+  # layout is read in full; the rows layout takes the whole database.
+  - name: heavy-tail-in-entry-rows-of-a-bodies-store-is-counted-in-full
+    kind: disk-estimate-never-low
+    layout: entry-text-in-bodies
+    entryShape: one-percent-hundredfold
+    sessions: 40
+    textEntries: 5
+    meanEntryBytes: 512
+    rowEntries: 25
+    rowEntryBytes: 1024
+    wantMeasured: true
+    wantBasisMax: 1.6
+  - name: entry-rows-rising-with-rowid-in-a-bodies-store-are-counted-in-full
+    kind: disk-estimate-never-low
+    layout: entry-text-in-bodies
+    entryShape: rising-with-rowid
+    sessions: 40
+    textEntries: 5
+    meanEntryBytes: 512
+    rowEntries: 25
+    rowEntryBytes: 4096
+    wantMeasured: true
+    wantBasisMax: 1.6
+  # Rows whose payload sits at the size where SQLite moves it to an overflow
+  # page: the record header in front of the values decides the side, so the
+  # measure counts it.
+  - name: entry-rows-at-the-overflow-size-are-counted-on-the-right-side
+    kind: disk-estimate-never-low
+    layout: entry-text-in-bodies
+    entryShape: one-percent-hundredfold
+    sessions: 40
+    textEntries: 5
+    meanEntryBytes: 512
+    rowEntries: 25
+    rowEntryBytes: 3800
+    wantMeasured: true
+    wantBasisMax: 1.6
+  - name: heavy-tail-in-a-rows-store-takes-the-whole-database
+    kind: disk-estimate-never-low
+    layout: entry-text-in-rows
+    entryShape: one-percent-hundredfold
+    sessions: 40
+    textEntries: 25
+    meanEntryBytes: 1024
+  - name: entry-rows-rising-with-rowid-in-a-rows-store-take-the-whole-database
+    kind: disk-estimate-never-low
+    layout: entry-text-in-rows
+    entryShape: rising-with-rowid
+    sessions: 40
+    textEntries: 25
+    meanEntryBytes: 1024
   # A search index whose structure record does not decode cannot be
   # measured: the plan asks for the factor times the whole database and
   # says why in one notice.

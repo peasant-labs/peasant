@@ -38,6 +38,40 @@ func newEntryTextLayout(raw string) (entryTextLayout, error) {
 	return "", fmt.Errorf("layout %q is outside the closed entry text layout set %q; use one of the listed layouts", raw, allEntryTextLayouts)
 }
 
+// entrySizeShape names how the sizes of the entry rows a layout store
+// writes are distributed. The set is closed.
+type entrySizeShape string
+
+const (
+	// entrySizeExponential draws sizes from an exponential distribution
+	// with one entry in fifty sixteen times larger: a heavy tail, like tool
+	// output. It is the shape when a fixture names none.
+	entrySizeExponential entrySizeShape = "exponential"
+	// entrySizeOnePercentHundredfold makes every hundredth row a hundred
+	// times the mean and every other row the mean.
+	entrySizeOnePercentHundredfold entrySizeShape = "one-percent-hundredfold"
+	// entrySizeRisingWithRowid makes each row larger than the one before:
+	// from near zero at the first rowid to twice the mean at the last.
+	entrySizeRisingWithRowid entrySizeShape = "rising-with-rowid"
+)
+
+// allEntrySizeShapes is the closed shape set.
+var allEntrySizeShapes = []entrySizeShape{entrySizeExponential, entrySizeOnePercentHundredfold, entrySizeRisingWithRowid}
+
+// newEntrySizeShape validates a fixture's shape name; empty is the
+// exponential default.
+func newEntrySizeShape(raw string) (entrySizeShape, error) {
+	if raw == "" {
+		return entrySizeExponential, nil
+	}
+	for _, shape := range allEntrySizeShapes {
+		if string(shape) == raw {
+			return shape, nil
+		}
+	}
+	return "", fmt.Errorf("entry size shape %q is outside the closed set %q; use one of the listed shapes", raw, allEntrySizeShapes)
+}
+
 // layoutStoreSpec sizes a synthetic schema-74 store.
 type layoutStoreSpec struct {
 	Layout   entryTextLayout
@@ -49,9 +83,16 @@ type layoutStoreSpec struct {
 	// exponential distribution with one entry in fifty sixteen times larger,
 	// so the tail is heavy, like tool output.
 	MeanEntryBytes int
-	// RowEntriesPerSession is how many short rows a converted session keeps
-	// in the entry table.
+	// EntryShape distributes the sizes of the entry rows: the text entries
+	// of the rows layout, and the entry rows of the bodies layout when
+	// RowEntryBytes is set.
+	EntryShape entrySizeShape
+	// RowEntriesPerSession is how many entry rows a converted store keeps
+	// in the entry table: the rows of sessions that were never converted.
 	RowEntriesPerSession int
+	// RowEntryBytes is the mean size of those rows, distributed by
+	// EntryShape. Zero writes 600-byte rows.
+	RowEntryBytes int
 	// ContentBytesPerSession is the stored transcript size per session in
 	// the content store (converted layout only).
 	ContentBytesPerSession int
@@ -77,13 +118,28 @@ func buildLayoutStore(t testing.TB, path string, spec layoutStoreSpec) layoutSto
 		}
 		return text.String()[:size]
 	}
-	entrySize := func() int {
-		size := int(rng.ExpFloat64() * float64(spec.MeanEntryBytes) * 0.75)
-		if rng.IntN(50) == 0 {
-			size *= 16
+	// sizeOf is the size of the row-th of rows entry rows of the given mean.
+	sizeOf := func(row, rows, mean int) int {
+		var size int
+		switch spec.EntryShape {
+		case entrySizeOnePercentHundredfold:
+			size = mean
+			if row%100 == 99 {
+				size = 100 * mean
+			}
+		case entrySizeRisingWithRowid:
+			size = 2 * mean * (row + 1) / max(rows, 1)
+		default:
+			size = int(rng.ExpFloat64() * float64(mean) * 0.75)
+			if rng.IntN(50) == 0 {
+				size *= 16
+			}
 		}
 		return max(size, 16)
 	}
+	textRows := spec.Sessions * spec.TextEntriesPerSession
+	shortRows := spec.Sessions * spec.RowEntriesPerSession
+	rowsWritten, shortWritten := 0, 0
 	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite, sqlite.OpenCreate)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +186,8 @@ VALUES(?, 'claude-code', 'layout-model', 'layout-host', 'layout-project', 1, 2, 
 		switch spec.Layout {
 		case entryTextInRows:
 			for e := 0; e < spec.TextEntriesPerSession; e++ {
-				preview, output := textOf(entrySize()), ""
+				preview, output := textOf(sizeOf(rowsWritten, textRows, spec.MeanEntryBytes)), ""
+				rowsWritten++
 				if e%2 == 1 {
 					preview, output = textOf(min(len(preview), 200)), preview
 				}
@@ -141,7 +198,7 @@ VALUES(?, ?, 'claude-code', 'text', 'assistant', 0, ?, nullif(?, ''))`, sessionI
 			}
 		case entryTextInBodies:
 			for e := 0; e < spec.TextEntriesPerSession; e++ {
-				text := textOf(entrySize())
+				text := textOf(sizeOf(e, spec.TextEntriesPerSession, spec.MeanEntryBytes))
 				totals.BodyText += int64(len(text))
 				totals.BodyRows++
 				step(`INSERT INTO session_entry_bodies(body_id, session_id, body_digest, entry_index, harness, entry_type, role, content_preview, has_tool_use, has_thinking, is_error, depth)
@@ -149,11 +206,18 @@ VALUES(?, ?, printf('%064x', ?), ?, 'claude-code', 'text', 'assistant', ?, 0, 0,
 				nextBody++
 			}
 			for e := 0; e < spec.RowEntriesPerSession; e++ {
-				preview := textOf(600)
-				totals.EntryText += int64(len(preview))
+				// A never-converted session's row: a bounded preview and,
+				// when the fixture sizes them, tool output of any length.
+				preview, output := textOf(600), ""
+				if spec.RowEntryBytes > 0 {
+					size := sizeOf(shortWritten, shortRows, spec.RowEntryBytes)
+					preview, output = textOf(min(size, 200)), textOf(size)
+				}
+				shortWritten++
+				totals.EntryText += int64(len(preview) + len(output))
 				totals.EntryRows++
-				step(`INSERT INTO session_entries(session_id, entry_index, provider, entry_type, role, depth, content_preview)
-VALUES(?, ?, 'claude-code', 'text', 'user', 0, ?)`, sessionID, spec.TextEntriesPerSession+e, preview)
+				step(`INSERT INTO session_entries(session_id, entry_index, provider, entry_type, role, depth, content_preview, tool_output)
+VALUES(?, ?, 'claude-code', 'text', 'user', 0, ?, nullif(?, ''))`, sessionID, spec.TextEntriesPerSession+e, preview, output)
 			}
 			if spec.ContentBytesPerSession > 0 {
 				digest := fmt.Sprintf("%064x", s)

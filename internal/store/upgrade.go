@@ -189,16 +189,12 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 				notices = append(notices, notice)
 			}
 		}
-		factor, basis := entry.diskFactor, entry.diskBasis
-		if produced == searchRepairSchemaVersion && step.Cost.Long() {
-			// The repair rebuilds the whole search index on this store.
-			factor, basis = defaults.StoreUpgradeSearchRebuildDiskFactor, upgradeDiskBasisDatabase
-		}
-		size, measured := basisBytes[basis]
+		need := entry.diskNeedFor(step.Cost)
+		size, measured := basisBytes[need.basis]
 		if !measured {
 			var notice string
-			size, notice = diskBasisBytes(conn, basis, plan.StoreBytes)
-			basisBytes[basis] = size
+			size, notice = diskBasisBytes(conn, need.basis, plan.StoreBytes)
+			basisBytes[need.basis] = size
 			if notice != "" {
 				notices = append(notices, notice)
 			}
@@ -206,8 +202,8 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 		// Each step commits before the next starts, so the log space of one
 		// step is reused by the next: the plan needs room for its hungriest
 		// step, not for the sum.
-		if need := int64(math.Ceil(float64(size) * factor)); need > plan.RequiredFreeBytes {
-			plan.RequiredFreeBytes = need
+		if asked := int64(math.Ceil(float64(size) * need.factor)); asked > plan.RequiredFreeBytes {
+			plan.RequiredFreeBytes = asked
 		}
 		plan.Steps = append(plan.Steps, step)
 	}
@@ -217,7 +213,7 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 // missingCatalogEntryFix says exactly what to add for a migration that has
 // no catalog entry.
 func missingCatalogEntryFix(version int) string {
-	return fmt.Sprintf("add `%d: {title: \"<lowercase phrase>\", cost: <UpgradeCost...>, diskFactor: defaults.StoreUpgrade<...>DiskFactor, diskBasis: upgradeDiskBasis<...>}` to upgradeStepCatalog in internal/store/upgrade_catalog.go (and `counts:` when the step reports a count), and add `- \"%d\"` to requiredNames in internal/store/testdata/upgrade_step_catalog.manifest.yaml", version, version)
+	return fmt.Sprintf("add `%d: {title: \"<lowercase phrase>\", cost: <UpgradeCost...>}` to upgradeStepCatalog in internal/store/upgrade_catalog.go, in version order (with `counts:` when the step reports a count, and `disk:` only when the step copies a table), and add `- \"%d\"` to requiredNames in internal/store/testdata/upgrade_step_catalog.manifest.yaml", version, version)
 }
 
 // searchRepairStep resolves the cost of the search trigger repair for a
