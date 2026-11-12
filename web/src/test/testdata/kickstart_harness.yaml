@@ -274,7 +274,9 @@ cases:
       server:
         "GET /api/v1/kickstart/status": {body: {configured: true}}
       steps:
-        - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+        # The probe shows what it was told only after it has decided, so the
+        # wait is for the decision, not for the request to be sent.
+        - expectText: ["configured: yes"]
         - expectNoRedirect: true
   - name: a-redirect-the-page-never-takes-is-refused
     page: redirect-probe

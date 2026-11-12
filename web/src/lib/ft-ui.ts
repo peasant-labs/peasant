@@ -452,7 +452,6 @@ export interface StepIndicatorProps {
 }
 export const StepIndicator = FtStepIndicator as unknown as ComponentType<StepIndicatorProps>;
 
-
 // -- Consent dialog: ConsentDialog / ConsentSummary -------------------------
 
 /** One row in a ConsentSummary or ConsentDialog axes grid. */
