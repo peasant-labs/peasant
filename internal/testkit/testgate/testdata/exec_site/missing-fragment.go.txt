@@ -1,0 +1,7 @@
+package p
+
+import "os/exec"
+
+func build() {
+	exec.Command("go", "build")
+}
