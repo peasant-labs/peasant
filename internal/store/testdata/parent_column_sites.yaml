@@ -285,6 +285,14 @@ residual:
     reason: >-
       Frozen migration DDL copied from slot-70 sqlite_master at authoring time, not a live raw-column
       read path; it must not be rewritten to LogicalParentSQL.
+  - name: store-migration-v78
+    file: internal/store/schema_v78.go
+    declaration: migrationV78
+    literals: 1
+    class: ddl
+    reason: >-
+      Frozen migration DDL copied from slot-77 sqlite_master at authoring time, not a live raw-column
+      read path; it must not be rewritten to LogicalParentSQL.
   - name: store-offset-page-child-filter
     file: internal/store/offset_page_reader.go
     declaration: offsetPageWhere
