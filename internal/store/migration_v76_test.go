@@ -1,6 +1,8 @@
 package store
 
 import (
+	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"path/filepath"
@@ -23,16 +25,13 @@ var migrationV76SearchTriggersManifestYAML []byte
 // runs V75 then V76, v75 caps the chain at V75 to pin the defect V76 repairs),
 // the needs_rebuild preset the migration must preserve, and the observable
 // union postings after the post-leg writes. Leg A writes land between V75
-// and V76; leg B writes land after the final leg. wantLegAUpdatedOldInUnion
-// and wantLegAGhostInUnion stay true even on the full chain: FTS5 un-indexes
-// by value, so removed terms of rows updated after V75 and ghosts of rows
-// deleted after V75 survive any non-rebuild resync (see schema_v76.go). Leg
-// B writes go through live union triggers with exact old values and leave no
-// residue. The runner hardcodes the invariants: the untouched seed, both body
-// terms, and a clean FTS integrity-check on every chain; the legacy-side
-// landing of the capped chain's writes (the defect mechanism); and the
-// production-path reads, which prove ghosts return no hit while removed terms
-// of live rows still return theirs.
+// and V76; leg B writes land after the final leg. On the full chain the
+// residue predicate fires on the leg A window, so V76 rebuilds whole and
+// every removed term and ghost is gone; leg B writes go through live union
+// triggers with exact old values. The runner hardcodes the invariants: the
+// untouched seed, both body terms, and a clean FTS integrity-check on every
+// chain; the legacy-side landing of the capped chain's writes (the defect
+// mechanism); and the production-path reads.
 type migrationV76SearchCase struct {
 	Name                      string `yaml:"name"`
 	Chain                     string `yaml:"chain"`
@@ -48,11 +47,15 @@ type migrationV76SearchCase struct {
 	WantNeedsRebuild          bool   `yaml:"wantNeedsRebuild"`
 }
 
-func loadMigrationV76SearchCases(t *testing.T) []migrationV76SearchCase {
+type migrationV76Fixtures struct {
+	Cases          []migrationV76SearchCase    `yaml:"cases"`
+	PredicateCases []migrationV76PredicateCase `yaml:"predicateCases"`
+	OpenCases      []migrationV76OpenCase      `yaml:"openCases"`
+}
+
+func loadMigrationV76Fixtures(t *testing.T) migrationV76Fixtures {
 	t.Helper()
-	var fixtures struct {
-		Cases []migrationV76SearchCase `yaml:"cases"`
-	}
+	var fixtures migrationV76Fixtures
 	decoder := yaml.NewDecoder(strings.NewReader(string(migrationV76SearchTriggersYAML)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixtures); err != nil {
@@ -62,7 +65,7 @@ func loadMigrationV76SearchCases(t *testing.T) []migrationV76SearchCase {
 	if err != nil {
 		t.Fatalf("decode migration_v76_search_triggers manifest: %v", err)
 	}
-	actual := make([]string, 0, len(fixtures.Cases))
+	actual := make([]string, 0, len(fixtures.Cases)+len(fixtures.PredicateCases)+len(fixtures.OpenCases))
 	for _, c := range fixtures.Cases {
 		actual = append(actual, c.Name)
 		if c.Chain != "full" && c.Chain != "v75" {
@@ -72,10 +75,64 @@ func loadMigrationV76SearchCases(t *testing.T) []migrationV76SearchCase {
 			t.Fatalf("migration_v76_search_triggers.yaml: case %q pins trigger target %q; add it to the runner", c.Name, c.WantTriggersTarget)
 		}
 	}
+	for _, c := range fixtures.PredicateCases {
+		actual = append(actual, c.Name)
+		switch c.Window {
+		case "none", "delete", "reuse", "insert":
+		default:
+			t.Fatalf("migration_v76_search_triggers.yaml: predicate case %q pins window %q; add it to the runner", c.Name, c.Window)
+		}
+	}
+	for _, c := range fixtures.OpenCases {
+		actual = append(actual, c.Name)
+		switch c.Window {
+		case "affected", "none", "insert":
+		default:
+			t.Fatalf("migration_v76_search_triggers.yaml: open case %q pins window %q; add it to the runner", c.Name, c.Window)
+		}
+	}
 	if err := validateRecoveryRequiredNames(manifest, actual, "v76 search triggers"); err != nil {
 		t.Fatal(err)
 	}
-	return fixtures.Cases
+	return fixtures
+}
+
+func loadMigrationV76SearchCases(t *testing.T) []migrationV76SearchCase {
+	t.Helper()
+	return loadMigrationV76Fixtures(t).Cases
+}
+
+// migrationV76PredicateCase is one residue-predicate case: the window applied
+// to a v75 store and the predicate's verdict, evaluated against the vendored
+// SQLite. The windows pin the gate: silence on a clean store and on inserts
+// alone, residue on a delete and on a reused rowid.
+type migrationV76PredicateCase struct {
+	Name        string `yaml:"name"`
+	Window      string `yaml:"window"`
+	WantResidue bool   `yaml:"wantResidue"`
+}
+
+// migrationV76OpenCase is one Open-driven v76 case: the window applied to a
+// v75 store, then a real Open runs the chain while the notice writer is
+// captured. The affected path prints the one-line rebuild notice and heals
+// the window; the crossing path stays silent and takes the cheap re-sync.
+// The notice is the cheap-path probe: it fires exactly when the pre-chain
+// predicate holds, and the in-migration gate re-evaluates the same predicate
+// at v76's transactional point.
+type migrationV76OpenCase struct {
+	Name       string `yaml:"name"`
+	Window     string `yaml:"window"`
+	WantNotice bool   `yaml:"wantNotice"`
+}
+
+func loadMigrationV76PredicateCases(t *testing.T) []migrationV76PredicateCase {
+	t.Helper()
+	return loadMigrationV76Fixtures(t).PredicateCases
+}
+
+func loadMigrationV76OpenCases(t *testing.T) []migrationV76OpenCase {
+	t.Helper()
+	return loadMigrationV76Fixtures(t).OpenCases
 }
 
 // v76EntriesSession and v76BodiesSession seed two sessions: the entries
@@ -92,11 +149,9 @@ const (
 // and no retired index, while the rebuild flag and body search survive. The
 // capped v75 case pins the defect (post-V75 entries writes land in the
 // legacy index only), so removing V76 from the chain fails the healed cases.
-// Removed terms of rows updated after V75 and ghosts of rows deleted after
-// V75 still match raw union MATCH — FTS5 cannot un-index values that no
-// longer exist in the table — and the test pins that residue beside the
-// production reads, which stay correct for ghosts and noisy for removed
-// terms until a future whole-index rebuild.
+// The residue predicate fires on the leg A window, so the full chain takes
+// the rebuild path and every removed term and ghost is gone; the cheap
+// re-sync path is pinned by the open-driven crossing case below.
 func TestMigrationV76RepairsSearchTriggers(t *testing.T) {
 	t.Parallel()
 	for _, c := range loadMigrationV76SearchCases(t) {
@@ -108,19 +163,17 @@ func TestMigrationV76RepairsSearchTriggers(t *testing.T) {
 	}
 }
 
-func runMigrationV76SearchCase(t *testing.T, c migrationV76SearchCase) {
+// buildV75Store opens a scratch database, migrates it to v74, simulates the
+// production consolidation a pre-v75 store ran, seeds it, presets the search
+// rebuild flag, and migrates it to v75. The caller owns the connection.
+func buildV75Store(t *testing.T, path string, presetNeedsRebuild bool) *sqlite.Conn {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "v76.db")
 	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite, sqlite.OpenCreate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if err := conn.Close(); err != nil {
-			t.Errorf("close v76 case database: %v", err)
-		}
-	}()
 	if err := sqlitemigration.Migrate(t.Context(), conn, frozenSchema(74)); err != nil {
+		_ = conn.Close()
 		t.Fatal(err)
 	}
 	// Simulate the production consolidation a pre-V75 store ran (Phase 3 in
@@ -142,13 +195,26 @@ func runMigrationV76SearchCase(t *testing.T, c migrationV76SearchCase) {
 	}
 	seedMigrationV76Store(t, conn)
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_search_state SET needs_rebuild = ? WHERE id = 1`, &sqlitex.ExecOptions{
-		Args: []any{boolToInt(c.PresetNeedsRebuild)},
+		Args: []any{boolToInt(presetNeedsRebuild)},
 	}); err != nil {
 		t.Fatalf("preset needs_rebuild: %v", err)
 	}
 	if err := sqlitemigration.Migrate(t.Context(), conn, frozenSchema(75)); err != nil {
+		_ = conn.Close()
 		t.Fatal(err)
 	}
+	return conn
+}
+
+func runMigrationV76SearchCase(t *testing.T, c migrationV76SearchCase) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "v76.db")
+	conn := buildV75Store(t, path, c.PresetNeedsRebuild)
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close v76 case database: %v", err)
+		}
+	}()
 	// Post-V75-leg writes: V75 routes these to the legacy index only. On the
 	// full chain V76 must catch them up; on the capped chain they pin the
 	// defect.
@@ -352,15 +418,12 @@ func assertMigrationV76SearchCase(t *testing.T, conn *sqlite.Conn, c migrationV7
 
 // assertMigrationV76ProductionReads proves the production transition-window
 // read serves the healed state correctly: every live entries row is findable,
-// ghosts of deleted rows return no hit (the unified read filters rows absent
-// from session_entries), leg B removed terms are gone (exact triggers), and
-// leg A removed terms of live rows still return their row — the documented
-// resync residue, relevance noise with current snippets until a future
-// whole-index rebuild. Body terms stay out of production asserts: production
-// body search is generation-gated (the unified read requires an active
-// generation mapping) and this seed carries none, by design. On the capped
-// chain the merged read still serves the fresh legacy postings, which is why
-// the defect was union-only.
+// and no removed term or ghost returns a hit — the rebuild expunged them.
+// Body terms stay out of production asserts: production body search is
+// generation-gated (the unified read requires an active generation mapping)
+// and this seed carries none, by design. On the capped chain the merged read
+// still serves the fresh legacy postings, which is why the defect was
+// union-only.
 func assertMigrationV76ProductionReads(t *testing.T, conn *sqlite.Conn, c migrationV76SearchCase) {
 	t.Helper()
 	productionHits := func(term string) int {
@@ -382,11 +445,10 @@ func assertMigrationV76ProductionReads(t *testing.T, conn *sqlite.Conn, c migrat
 				t.Errorf("production search for %q returned %d hits, want none for the deleted ghost", term, got)
 			}
 		}
-		if got := productionHits("chlorophyll"); got != 0 {
-			t.Errorf("production search for %q returned %d hits, want none (live triggers un-index exactly)", "chlorophyll", got)
-		}
-		if got := productionHits("mitochondria"); got == 0 {
-			t.Errorf("production search for %q returned no hit, want the resync residue documented", "mitochondria")
+		for _, term := range []string{"mitochondria", "chlorophyll"} {
+			if got := productionHits(term); got != 0 {
+				t.Errorf("production search for %q returned %d hits, want none (rebuild expunged the residue)", term, got)
+			}
 		}
 		return
 	}
@@ -401,6 +463,240 @@ func assertMigrationV76ProductionReads(t *testing.T, conn *sqlite.Conn, c migrat
 	for _, term := range []string{"mitochondria", "chlorophyll"} {
 		if got := productionHits(term); got == 0 {
 			t.Errorf("production search for capped-chain %q returned no hit, want the stale posting", term)
+		}
+	}
+}
+
+// applyMigrationV76Window applies one predicate-case window to a v75 store:
+// none leaves the freshly rebuilt indexes alone, delete removes a seeded row
+// (ghost in the union), reuse deletes a row and reinserts its rowid with
+// different-token-count content (the stale term then matches the new,
+// unrelated row), insert adds a row only (legacy carries it; the union lacks
+// it, which needs no rebuild), and affected combines an update, a delete,
+// and a rowid reuse for the Open-driven end-to-end case.
+func applyMigrationV76Window(t *testing.T, conn *sqlite.Conn, window string) {
+	t.Helper()
+	seedRowid := func(entryIndex int) int64 {
+		t.Helper()
+		var rowid int64
+		if err := sqlitex.ExecuteTransient(conn, `SELECT rowid FROM session_entries WHERE session_id = ? AND entry_index = ?`, &sqlitex.ExecOptions{
+			Args: []any{v76EntriesSession, entryIndex},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				rowid = stmt.ColumnInt64(0)
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("read seed rowid: %v", err)
+		}
+		if rowid == 0 {
+			t.Fatalf("seed row %d has no rowid; the window needs a live row", entryIndex)
+		}
+		return rowid
+	}
+	switch window {
+	case "none":
+		return
+	case "delete":
+		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_entries WHERE session_id = ? AND entry_index = 3`, &sqlitex.ExecOptions{
+			Args: []any{v76EntriesSession},
+		}); err != nil {
+			t.Fatalf("window delete: %v", err)
+		}
+	case "insert":
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_entries(session_id, entry_index, provider, entry_type, role, depth, content_preview) VALUES(?, 5, 'claude-code', 'text', 'user', 0, 'quasar lonely insert')`, &sqlitex.ExecOptions{
+			Args: []any{v76EntriesSession},
+		}); err != nil {
+			t.Fatalf("window insert: %v", err)
+		}
+	case "reuse", "affected":
+		if window == "affected" {
+			if err := sqlitex.ExecuteTransient(conn, `UPDATE session_entries SET content_preview = 'nebula count changed here' WHERE session_id = ? AND entry_index = 1`, &sqlitex.ExecOptions{
+				Args: []any{v76EntriesSession},
+			}); err != nil {
+				t.Fatalf("affected window update: %v", err)
+			}
+		}
+		rowid := seedRowid(3)
+		if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_entries WHERE session_id = ? AND entry_index = 3`, &sqlitex.ExecOptions{
+			Args: []any{v76EntriesSession},
+		}); err != nil {
+			t.Fatalf("reuse window delete: %v", err)
+		}
+		// Explicit rowid reuse, mirroring SQLite max(rowid)+1 reuse on a
+		// store without AUTOINCREMENT: the stale union posting for the
+		// deleted row now names a live, unrelated row.
+		if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_entries(rowid, session_id, entry_index, provider, entry_type, role, depth, content_preview) VALUES(?, ?, 5, 'claude-code', 'text', 'user', 0, 'quasar')`, &sqlitex.ExecOptions{
+			Args: []any{rowid, v76EntriesSession},
+		}); err != nil {
+			t.Fatalf("reuse window reinsert: %v", err)
+		}
+	default:
+		t.Fatalf("unknown v76 window %q", window)
+	}
+}
+
+// openMigrationV76Store builds the v75 state every v76 window case starts
+// from and applies the caller's window writes. The caller owns the
+// connection and must close it.
+func openMigrationV76Store(t *testing.T, path, window string) *sqlite.Conn {
+	t.Helper()
+	conn := buildV75Store(t, path, false)
+	applyMigrationV76Window(t, conn, window)
+	return conn
+}
+
+// TestMigrationV76ResiduePredicate pins the residue gate against the vendored
+// SQLite: silence on a clean store and on inserts alone, residue on a delete
+// and on a reused rowid. The reused-rowid case also pins the defect the
+// rebuild exists for: the deleted row's stale term matches the new,
+// unrelated row that reused its rowid.
+func TestMigrationV76ResiduePredicate(t *testing.T) {
+	t.Parallel()
+	for _, c := range loadMigrationV76PredicateCases(t) {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "v76pred.db")
+			conn := openMigrationV76Store(t, path, c.Window)
+			defer func() {
+				if err := conn.Close(); err != nil {
+					t.Errorf("close predicate database: %v", err)
+				}
+			}()
+			if c.Window == "reuse" && !matchInFTS(t, conn, "session_search_fts", "kangaroo") {
+				t.Fatal("stale kangaroo term does not match the row reusing its rowid; the defect repro is broken")
+			}
+			got, err := searchIndexResiduePresent(conn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != c.WantResidue {
+				t.Errorf("residue predicate = %v, want %v for window %q", got, c.WantResidue, c.Window)
+			}
+		})
+	}
+}
+
+// TestMigrationV76OpenNotice drives real Opens with the notice writer
+// captured. It runs sequentially (no t.Parallel): the writer swap is
+// process-global, and sequential tests never run concurrently with parallel
+// ones. The affected window prints the one-line rebuild notice and heals the
+// window — a deleted-in-window term no longer matches the reused-rowid row —
+// while the crossing store stays silent and takes the cheap re-sync.
+func TestMigrationV76OpenNotice(t *testing.T) {
+	for _, c := range loadMigrationV76OpenCases(t) {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "v76open.db")
+			conn := openMigrationV76Store(t, path, c.Window)
+			before, err := searchIndexResiduePresent(conn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before != c.WantNotice {
+				t.Fatalf("pre-open residue = %v, want %v (the notice follows the predicate)", before, c.WantNotice)
+			}
+			if c.Window == "affected" && !matchInFTS(t, conn, "session_search_fts", "kangaroo") {
+				t.Fatal("stale kangaroo term does not match the reused rowid row before Open; the defect repro is broken")
+			}
+			if c.Window == "insert" && matchInFTS(t, conn, "session_search_fts", "quasar") {
+				t.Fatal("inserted term already in the union before Open; the re-sync would prove nothing")
+			}
+			if err := conn.Close(); err != nil {
+				t.Fatal(err)
+			}
+			previous := searchIndexRebuildNoticeWriter
+			var notice bytes.Buffer
+			searchIndexRebuildNoticeWriter = &notice
+			s, err := Open(path, WithPoolSize(1))
+			searchIndexRebuildNoticeWriter = previous
+			if err != nil {
+				t.Fatalf("Open with v75 residue: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := s.Close(); err != nil {
+					t.Errorf("close migrated store: %v", err)
+				}
+			})
+			if c.WantNotice {
+				if notice.String() != searchIndexRebuildNotice+"\n" {
+					t.Errorf("notice = %q, want the one-line rebuild warning", notice.String())
+				}
+			} else if notice.Len() != 0 {
+				t.Errorf("notice = %q, want silence on the clean crossing path", notice.String())
+			}
+			assertMigrationV76OpenHealed(t, s, c)
+		})
+	}
+}
+
+// assertMigrationV76OpenHealed proves the Open-driven end state: union
+// triggers live, the retired index gone, every live term findable, and no
+// removed term or ghost matching — on the affected path only the rebuild
+// expunges them, on the crossing path there was never residue.
+func assertMigrationV76OpenHealed(t *testing.T, s *Store, c migrationV76OpenCase) {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	var version int
+	if err := sqlitex.ExecuteTransient(conn, `PRAGMA user_version`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error { version = int(stmt.ColumnInt64(0)); return nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if version != CurrentSchemaVersion() {
+		t.Fatalf("user_version = %d, want the build schema %d", version, CurrentSchemaVersion())
+	}
+	var legacy int
+	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM sqlite_master WHERE name = 'session_entries_fts'`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error { legacy = int(stmt.ColumnInt64(0)); return nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if legacy != 0 {
+		t.Fatal("the retired search index survives Open")
+	}
+	for _, trigger := range []string{"session_entries_ai", "session_entries_ad", "session_entries_au"} {
+		var sql string
+		if err := sqlitex.ExecuteTransient(conn, `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?`, &sqlitex.ExecOptions{
+			Args:       []any{trigger},
+			ResultFunc: func(stmt *sqlite.Stmt) error { sql = stmt.ColumnText(0); return nil },
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "session_search_fts") {
+			t.Fatalf("trigger %s points away from the union index after Open: %q", trigger, sql)
+		}
+	}
+	if !matchInFTS(t, conn, "session_search_fts", "photosynthesis") {
+		t.Error("union lost the untouched seed term across Open")
+	}
+	if !matchInFTS(t, conn, "session_search_fts", "bodyseedterm") {
+		t.Error("union lost the seeded body term across Open; body search must survive the rebuild path")
+	}
+	if c.Window == "affected" {
+		for _, term := range []string{"kangaroo", "mitochondria"} {
+			if matchInFTS(t, conn, "session_search_fts", term) {
+				t.Errorf("union match %q survived Open on the affected path; only the rebuild expunges it", term)
+			}
+		}
+		for _, term := range []string{"quasar", "nebula"} {
+			if !matchInFTS(t, conn, "session_search_fts", term) {
+				t.Errorf("union lost live term %q across Open on the affected path", term)
+			}
+		}
+	}
+	if c.Window == "insert" {
+		// The re-sync indexed the insert-only window without a rebuild:
+		// the row is findable, and the untouched rows are undisturbed.
+		if !matchInFTS(t, conn, "session_search_fts", "quasar") {
+			t.Error("union lost the inserted term across Open; the cheap re-sync must index it")
+		}
+		if !matchInFTS(t, conn, "session_search_fts", "kangaroo") {
+			t.Error("union lost the untouched seed term across Open on the insert path")
 		}
 	}
 }

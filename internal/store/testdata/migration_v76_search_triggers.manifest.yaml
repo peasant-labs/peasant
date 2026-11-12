@@ -4,3 +4,10 @@ requiredNames:
   - healed-entries-writes-reach-union
   - healed-rebuild-flag-preserved
   - v75-defect-union-misses-new-entries-writes
+  - predicate-clean-no-window-writes
+  - predicate-delete-leaves-residue
+  - predicate-reused-rowid-leaves-residue
+  - predicate-insert-only-window-clean
+  - open-affected-window-rebuilds-with-notice
+  - open-crossing-in-one-run-silent
+  - open-insert-only-window-silent-resync

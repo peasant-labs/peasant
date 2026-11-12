@@ -1,41 +1,44 @@
-# Migration V76 search-trigger repair: a store consolidated before V75 ends up
-# with its session_entries triggers pointed at the retired session_entries_fts
-# (V75 re-creates it) while session_search_fts goes stale for every
-# session_entries write. V76 re-points the triggers at session_search_fts,
-# restores findability for the union's entries half without a rebuild, and
-# drops the retired index. Each case builds a V74 store, simulates the
+# Migration V76 search-trigger repair with residue detection: a store
+# consolidated before V75 ends up with its session_entries triggers pointed
+# at the retired session_entries_fts (V75 re-creates it) while
+# session_search_fts goes stale for every session_entries write. External
+# content FTS5 removes postings by value, so deleted rows leave ghosts and
+# updated rows leave removed terms; session_entries reuses rowids (no
+# AUTOINCREMENT), so a stale term can match a new, unrelated row and pass
+# the unified read. V76 re-points the triggers at session_search_fts, then
+# either rebuilds the whole union index (residue predicate true) or brings
+# the entries half current with the cheap re-sync (predicate false), and
+# drops the retired index. Each chain case builds a V74 store, simulates the
 # production consolidation, seeds entries and bodies, migrates, writes after
-# the migration legs, and asserts what the union index serves.
+# the migration legs, and asserts what the union index serves. Leg A writes
+# land between V75 and V76; leg B writes land after the final leg.
 #
-# chain selects the migration under test: full runs V75 then V76, v75 caps the
-# chain at V75 to pin the defect V76 repairs (the capped case stays red until
-# V76 heals it, so removing V76 fails the full-chain cases). Leg A writes land
-# between V75 and V76 (V75 routes them to the legacy index only); leg B writes
-# land after the final leg (through whatever triggers the chain left live).
-# The want fields name the observable union postings per leg; the runner
-# hardcodes the invariants (untouched seeds and both body terms stay
-# searchable, the FTS integrity-check stays clean, post-leg writes land in
-# the legacy index on the capped chain) and the production-path reads.
+# chain selects the migration under test: full runs V75 then V76, v75 caps
+# the chain at V75 to pin the defect V76 repairs (the capped case stays red
+# until V76 heals it, so removing V76 fails the healed cases). On the full
+# chain the residue predicate fires on the leg A window, so V76 rebuilds and
+# every removed term and ghost is gone; leg B writes go through live union
+# triggers with exact old values. The runner hardcodes the invariants: the
+# untouched seed, both body terms, and a clean FTS integrity-check on every
+# chain; the legacy-side landing of the capped chain's writes (the defect
+# mechanism); and the production-path reads.
 #
-# Residual, pinned honestly: FTS5 un-indexes by value, so postings whose
-# indexed values no longer exist in the table survive any non-rebuild resync.
-# Leg A residue (wantLegAUpdatedOldInUnion, wantLegAGhostInUnion) stays true
-# on the full chain: removed terms of rows updated after V75 still match, and
-# ghosts of rows deleted after V75 still match raw union MATCH. Leg B writes
-# go through live union triggers, which carry exact old values, so they leave
-# no residue. The runner proves the production impact beside each: ghosts
-# return no production hit (the unified read filters rows absent from
-# session_entries), while removed terms of live rows still return their row
-# (relevance noise with current snippets until a future whole-index rebuild).
+# The residue predicate compares union entries-half docsize against the
+# retired index, which the window keeps trigger-current. docsize sz is the
+# token count, so the predicate fires on deleted rows, on updates that
+# change the token count, and on reused rowids whose new content differs in
+# count — and stays silent on clean stores, insert-only windows, and stores
+# that cross v75 and v76 in one run. It is blind to token-count-preserving
+# swaps, which no docsize comparison can see.
 cases:
   - name: healed-entries-writes-reach-union
     chain: full
     presetNeedsRebuild: false
     wantInsertedInUnion: true
     wantUpdatedNewInUnion: true
-    wantLegAUpdatedOldInUnion: true
+    wantLegAUpdatedOldInUnion: false
     wantLegBUpdatedOldInUnion: false
-    wantLegAGhostInUnion: true
+    wantLegAGhostInUnion: false
     wantLegBGhostInUnion: false
     wantLegacyAbsent: true
     wantTriggersTarget: union
@@ -45,9 +48,9 @@ cases:
     presetNeedsRebuild: true
     wantInsertedInUnion: true
     wantUpdatedNewInUnion: true
-    wantLegAUpdatedOldInUnion: true
+    wantLegAUpdatedOldInUnion: false
     wantLegBUpdatedOldInUnion: false
-    wantLegAGhostInUnion: true
+    wantLegAGhostInUnion: false
     wantLegBGhostInUnion: false
     wantLegacyAbsent: true
     wantTriggersTarget: union
@@ -64,3 +67,41 @@ cases:
     wantLegacyAbsent: false
     wantTriggersTarget: legacy
     wantNeedsRebuild: false
+
+# Residue predicate cases: each builds a V74 store, simulates consolidation,
+# seeds, migrates to V75, applies its window, and evaluates the Go predicate
+# against the vendored SQLite. The window shapes pin the gate: silence on a
+# clean store and on inserts alone (no residue to expunge), residue on a
+# delete and on a reused rowid.
+predicateCases:
+  - name: predicate-clean-no-window-writes
+    window: none
+    wantResidue: false
+  - name: predicate-delete-leaves-residue
+    window: delete
+    wantResidue: true
+  - name: predicate-reused-rowid-leaves-residue
+    window: reuse
+    wantResidue: true
+  - name: predicate-insert-only-window-clean
+    window: insert
+    wantResidue: false
+
+# Open-driven cases: the window is applied to a v75 store on a raw
+# connection, the store is closed, and Open runs the chain while the notice
+# writer is captured. The affected path prints the one-line rebuild notice
+# and heals the window (a deleted-in-window term no longer matches the
+# reused-rowid row); the crossing path stays silent and takes the cheap
+# re-sync. The notice is the cheap-path probe: it fires exactly when the
+# pre-chain predicate holds, and the in-migration gate re-evaluates the same
+# predicate at v76's transactional point.
+openCases:
+  - name: open-affected-window-rebuilds-with-notice
+    window: affected
+    wantNotice: true
+  - name: open-crossing-in-one-run-silent
+    window: none
+    wantNotice: false
+  - name: open-insert-only-window-silent-resync
+    window: insert
+    wantNotice: false
