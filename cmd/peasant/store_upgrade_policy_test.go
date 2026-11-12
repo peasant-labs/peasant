@@ -398,17 +398,21 @@ func TestStoreUpgradeStep76Cost(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(long.Steps) != 1 || long.Steps[0].Version != 76 {
-				t.Fatalf("long store plan = %+v, want the one step that produces schema 76", long.Steps)
+			// Later migrations join both plans as quick steps; step 76 alone
+			// decides whether either plan is long.
+			longRepair, ok := planStepProducing(long, 76)
+			if !ok {
+				t.Fatalf("long store plan = %+v, want a step that produces schema 76", long.Steps)
 			}
-			if len(quick.Steps) != 1 || quick.Steps[0].Version != 76 {
-				t.Fatalf("quick store plan = %+v, want the one step that produces schema 76", quick.Steps)
+			quickRepair, ok := planStepProducing(quick, 76)
+			if !ok {
+				t.Fatalf("quick store plan = %+v, want a step that produces schema 76", quick.Steps)
 			}
-			if long.Steps[0].Cost != store.UpgradeCostScalesWithText || !long.HasLongStep() {
-				t.Errorf("step 76 on a store with stale search results costs %q, want scales_with_text", long.Steps[0].Cost)
+			if longRepair.Cost != store.UpgradeCostScalesWithText || !long.HasLongStep() {
+				t.Errorf("step 76 on a store with stale search results costs %q, want scales_with_text", longRepair.Cost)
 			}
-			if quick.Steps[0].Cost != store.UpgradeCostQuick || quick.HasLongStep() {
-				t.Errorf("step 76 on a store without stale search results costs %q, want quick", quick.Steps[0].Cost)
+			if quickRepair.Cost != store.UpgradeCostQuick || quick.HasLongStep() {
+				t.Errorf("step 76 on a store without stale search results costs %q, want quick", quickRepair.Cost)
 			}
 			if got := decideStoreUpgrade(storeEntryPiped, long, false); got != storeUpgradeRefuse {
 				t.Errorf("piped policy on the long plan = %q, want refused", got)
@@ -882,4 +886,14 @@ func TestStoreEntryModeClosedSet(t *testing.T) {
 	if _, err := newStoreUpgradeAction("deferred"); err == nil {
 		t.Error("newStoreUpgradeAction accepted an action outside the set")
 	}
+}
+
+// planStepProducing returns the planned step that produces version.
+func planStepProducing(plan store.UpgradePlan, version int) (store.UpgradeStep, bool) {
+	for _, step := range plan.Steps {
+		if step.Version == version {
+			return step, true
+		}
+	}
+	return store.UpgradeStep{}, false
 }

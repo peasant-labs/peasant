@@ -108,7 +108,7 @@ var upgradeStepCatalog = map[int]upgradeCatalogEntry{
 	75: {title: "add image entries and rebuild the search index", cost: UpgradeCostScalesWithText, diskFactor: defaults.StoreUpgradeEntryTableRebuildDiskFactor},
 	74: {title: "add the conversation turn count and fill it for stored sessions", cost: UpgradeCostScalesWithRows, diskFactor: defaults.StoreUpgradeRowsStepDiskFactor, counts: UpgradeUnitSessions},
 	76: {title: searchRepairQuickTitle, cost: UpgradeCostQuick, diskFactor: defaults.StoreUpgradeQuickStepDiskFactor},
-	77: {title: "store the import profile and give run outcomes stable ids", cost: UpgradeCostScalesWithRows, diskFactor: defaults.StoreUpgradeRowsStepDiskFactor},
+	77: {title: "store the import profile and give run outcomes stable ids", cost: UpgradeCostQuick, diskFactor: defaults.StoreUpgradeQuickStepDiskFactor},
 }
 
 const (
