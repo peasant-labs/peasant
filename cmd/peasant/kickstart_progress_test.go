@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	_ "embed"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/discovery"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -21,6 +24,29 @@ var kickstartDiscoveryProgressYAML []byte
 var kickstartDiscoveryProgressManifest []byte
 
 type spinnerTestWriter struct{ lines chan string }
+
+// Wrapping the narrow interface hides the underlying adapter's optional
+// capability, as with any adapter that has not implemented progress reporting.
+type adapterWithoutDiscoveryProgress struct{ ingest.SourceAdapter }
+
+type spinnerDiscoveryEvents struct {
+	spinner *discoverySpinner
+	done    int
+	total   int
+	calls   int
+}
+
+func (p *spinnerDiscoveryEvents) DiscoveryTotal(_ ingest.Harness, total int) {
+	p.total = total
+	p.calls++
+	p.spinner.SetProgress(p.done, p.total)
+}
+
+func (p *spinnerDiscoveryEvents) DiscoveryAdvance(_ ingest.Harness, delta int) {
+	p.done += delta
+	p.calls++
+	p.spinner.SetProgress(p.done, p.total)
+}
 
 func (w *spinnerTestWriter) Write(p []byte) (int, error) {
 	select {
@@ -61,6 +87,35 @@ func TestKickstartDiscoverySpinnerProgress(t *testing.T) {
 	}
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
+			if c.Mode == "unsupported-adapter" {
+				fs := testutil.NewMemFS()
+				for _, file := range c.Files {
+					if err := fs.WriteFile(c.Root+"/"+file.Path, []byte(file.Body+"\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				root, err := ingest.NewResolvedPath(c.Root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				adapter := adapterWithoutDiscoveryProgress{SourceAdapter: ingest.NewClaudeAdapter(fs, nil, salt.Salt{})}
+				spinner := discoveryprogress.New(io.Discard, false)
+				spinner.SetPhase("previous")
+				spinner.SetProgress(1, 2)
+				spinner.SetDiscoveryReminedCount(1)
+				spinner.SetPhase(c.Phase)
+				events := &spinnerDiscoveryEvents{spinner: spinner}
+				ingest.AttachDiscoveryProgress(adapter, events)
+				sessions, err := adapter.Discover(context.Background(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
+				if err != nil || len(sessions) != len(c.Files) || events.calls != 0 {
+					t.Fatalf("unsupported adapter discovery: sessions=%d events=%d err=%v", len(sessions), events.calls, err)
+				}
+				line := spinner.View()
+				if !strings.Contains(line, c.Want) || strings.Contains(line, "(") || strings.Contains(line, "re-read") {
+					t.Fatalf("unsupported adapter spinner = %q; want %q with no inherited count", line, c.Want)
+				}
+				return
+			}
 			if c.Mode == "phase-reset" {
 				writer := &spinnerTestWriter{lines: make(chan string, 16)}
 				spinner := discoveryprogress.New(writer, true)

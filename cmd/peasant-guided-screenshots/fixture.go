@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -25,6 +26,7 @@ const (
 	sheetPush        sheetName = "push"
 	sheetIngest      sheetName = "ingest-progress"
 	sheetCompletion  sheetName = "ingest-completion"
+	sheetDiscovery   sheetName = "discovery-progress"
 	// sheetPullProgress is the bulk collective-pull progress bar: the
 	// running bar, the canceling acknowledgment, and the canceled final,
 	// in both themes at both terminal sizes.
@@ -39,6 +41,7 @@ const (
 	sheetKindPush         sheetKind = "push"
 	sheetKindIngest       sheetKind = "ingest-progress"
 	sheetKindCompletion   sheetKind = "ingest-completion"
+	sheetKindDiscovery    sheetKind = "discovery-progress"
 	sheetKindPullProgress sheetKind = "pull-progress"
 )
 
@@ -64,6 +67,36 @@ const (
 
 func (s ingestProgressState) valid() bool {
 	return s == ingestProgressStateRunning || s == ingestProgressStateHarvestInline || s == ingestProgressStateHarvestCanceling || s == ingestProgressStateHarvestCanceled
+}
+
+type discoveryProgressState string
+
+const (
+	discoveryProgressMidRun    discoveryProgressState = "mid-run"
+	discoveryProgressComplete  discoveryProgressState = "complete"
+	discoveryProgressPhaseOnly discoveryProgressState = "phase-only"
+)
+
+func (s discoveryProgressState) valid() bool {
+	return s == discoveryProgressMidRun || s == discoveryProgressComplete || s == discoveryProgressPhaseOnly
+}
+
+type discoveryProgressStateFixture struct {
+	Key          discoveryProgressState `yaml:"key"`
+	Phase        string                 `yaml:"phase"`
+	Done         int                    `yaml:"done"`
+	Total        int                    `yaml:"total"`
+	Remined      *int                   `yaml:"remined"`
+	WantContains []string               `yaml:"wantContains"`
+	WantAbsent   []string               `yaml:"wantAbsent"`
+}
+
+type discoveryProgressCaptureFixture struct {
+	Name   string                 `yaml:"name"`
+	State  discoveryProgressState `yaml:"state"`
+	Theme  captureTheme           `yaml:"theme"`
+	Width  int                    `yaml:"width"`
+	Height int                    `yaml:"height"`
 }
 
 type guidedSection = onboarding.FlowKey
@@ -397,20 +430,22 @@ type captureDocument struct {
 	// RequiredPushSessionNames is a deletion-protection manifest: every
 	// listed session id must be present in Push.Sessions. It does not bound
 	// how many push sessions exist.
-	RequiredPushSessionNames []string                       `yaml:"requiredPushSessionNames"`
-	PushStates               []pushStateFixture             `yaml:"pushStates"`
-	PushCaptures             []pushCaptureFixture           `yaml:"pushCaptures"`
-	IngestProgressStates     []ingestProgressStateFixture   `yaml:"ingestProgressStates"`
-	IngestProgressCaptures   []ingestProgressCaptureFixture `yaml:"ingestProgressCaptures"`
-	PullProgressStates       []pullProgressStateFixture     `yaml:"pullProgressStates"`
-	PullProgressCaptures     []pullProgressCaptureFixture   `yaml:"pullProgressCaptures"`
-	Push                     pushFixture                    `yaml:"push"`
-	Sheets                   []sheetFixture                 `yaml:"sheets"`
-	GuidedSections           []guidedSectionFixture         `yaml:"guidedSections"`
-	SelectionStates          []selectionStateFixture        `yaml:"selectionStates"`
-	Selection                selectionFixture               `yaml:"selection"`
-	GuidedCaptures           []guidedCaptureFixture         `yaml:"guidedCaptures"`
-	SelectionCaptures        []selectionCaptureFixture      `yaml:"selectionCaptures"`
+	RequiredPushSessionNames  []string                          `yaml:"requiredPushSessionNames"`
+	PushStates                []pushStateFixture                `yaml:"pushStates"`
+	PushCaptures              []pushCaptureFixture              `yaml:"pushCaptures"`
+	IngestProgressStates      []ingestProgressStateFixture      `yaml:"ingestProgressStates"`
+	IngestProgressCaptures    []ingestProgressCaptureFixture    `yaml:"ingestProgressCaptures"`
+	PullProgressStates        []pullProgressStateFixture        `yaml:"pullProgressStates"`
+	PullProgressCaptures      []pullProgressCaptureFixture      `yaml:"pullProgressCaptures"`
+	DiscoveryProgressStates   []discoveryProgressStateFixture   `yaml:"discoveryProgressStates"`
+	DiscoveryProgressCaptures []discoveryProgressCaptureFixture `yaml:"discoveryProgressCaptures"`
+	Push                      pushFixture                       `yaml:"push"`
+	Sheets                    []sheetFixture                    `yaml:"sheets"`
+	GuidedSections            []guidedSectionFixture            `yaml:"guidedSections"`
+	SelectionStates           []selectionStateFixture           `yaml:"selectionStates"`
+	Selection                 selectionFixture                  `yaml:"selection"`
+	GuidedCaptures            []guidedCaptureFixture            `yaml:"guidedCaptures"`
+	SelectionCaptures         []selectionCaptureFixture         `yaml:"selectionCaptures"`
 }
 
 //go:embed testdata/captures.yaml
@@ -454,10 +489,91 @@ func decodeCaptureDocument(data []byte) (captureDocument, error) {
 	if err := validatePullProgressMatrix(document.PullProgressStates, document.PullProgressCaptures); err != nil {
 		return document, err
 	}
+	if err := validateDiscoveryProgressMatrix(document.DiscoveryProgressStates, document.DiscoveryProgressCaptures); err != nil {
+		return document, err
+	}
 	if err := validateCompletionMatrix(document.Completion); err != nil {
 		return document, err
 	}
 	return document, nil
+}
+
+func validateDiscoveryProgressMatrix(states []discoveryProgressStateFixture, captures []discoveryProgressCaptureFixture) error {
+	stateRows := make(map[discoveryProgressState]discoveryProgressStateFixture, len(states))
+	for _, state := range states {
+		if !state.Key.valid() ||
+			stateRows[state.Key].Key != "" ||
+			strings.TrimSpace(state.Phase) == "" ||
+			!nonEmptyStrings(state.WantContains) ||
+			(len(state.WantAbsent) > 0 && !nonEmptyStrings(state.WantAbsent)) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate discovery progress state: %#v", state)
+		}
+		if !slices.Contains(state.WantContains, state.Phase) {
+			return fmt.Errorf("screenshot fixture discovery progress %q must assert its complete phase label", state.Key)
+		}
+		if !slices.Contains(state.WantContains, "⠋") {
+			return fmt.Errorf("screenshot fixture discovery progress %q must assert the mounted spinner frame", state.Key)
+		}
+		switch state.Key {
+		case discoveryProgressMidRun:
+			if state.Done <= 0 ||
+				state.Done >= state.Total ||
+				state.Remined == nil ||
+				*state.Remined < 0 ||
+				*state.Remined > state.Done {
+				return fmt.Errorf("screenshot fixture discovery progress %q needs an incomplete count and a re-read count", state.Key)
+			}
+		case discoveryProgressComplete:
+			if state.Done <= 0 ||
+				state.Done != state.Total ||
+				state.Remined == nil ||
+				*state.Remined < 0 ||
+				*state.Remined > state.Done {
+				return fmt.Errorf("screenshot fixture discovery progress %q needs equal positive counts and a re-read count", state.Key)
+			}
+		case discoveryProgressPhaseOnly:
+			if state.Done != 0 ||
+				state.Total != 0 ||
+				state.Remined != nil ||
+				!slices.Contains(state.WantAbsent, "(") ||
+				!slices.Contains(state.WantAbsent, "re-read") {
+				return fmt.Errorf("screenshot fixture discovery progress %q must forbid inherited counts", state.Key)
+			}
+		}
+		if state.Remined != nil && (!slices.Contains(state.WantContains, fmt.Sprintf("(%d/%d)", state.Done, state.Total)) ||
+			!slices.Contains(state.WantContains, fmt.Sprintf("%d re-read", *state.Remined))) {
+			return fmt.Errorf("screenshot fixture discovery progress %q must assert its exact file and re-read counts", state.Key)
+		}
+		stateRows[state.Key] = state
+	}
+	for _, required := range []discoveryProgressState{discoveryProgressMidRun, discoveryProgressComplete, discoveryProgressPhaseOnly} {
+		if stateRows[required].Key == "" {
+			return fmt.Errorf("screenshot fixture omits discovery progress state %q", required)
+		}
+	}
+	seen := make(map[string]bool, len(captures))
+	for _, capture := range captures {
+		name := fmt.Sprintf("discovery-progress-%s-%s-%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)
+		if capture.Name != name ||
+			seen[name] ||
+			stateRows[capture.State].Key == "" ||
+			!capture.Theme.valid() ||
+			!validCaptureSize(capture.Width, capture.Height) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate discovery progress capture: %#v", capture)
+		}
+		seen[name] = true
+	}
+	for state := range stateRows {
+		for _, name := range []captureTheme{captureThemeDark, captureThemeLight} {
+			for _, viewport := range []viewportFixture{{Width: 80, Height: 24}, {Width: 120, Height: 40}} {
+				captureName := fmt.Sprintf("discovery-progress-%s-%s-%dx%d", state, name, viewport.Width, viewport.Height)
+				if !seen[captureName] {
+					return fmt.Errorf("screenshot fixture omits discovery progress capture %q", captureName)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func validateIngestProgressMatrix(states []ingestProgressStateFixture, captures []ingestProgressCaptureFixture) error {
@@ -663,9 +779,10 @@ func validateSheets(sheets []sheetFixture) error {
 		sheetGuidedDark:   {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3980},
 		sheetGuidedLight:  {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3980},
 		sheetSelection:    {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 11170},
-		sheetPush:         {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7840},
+		sheetPush:         {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7900},
 		sheetIngest:       {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
 		sheetCompletion:   {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 3420},
+		sheetDiscovery:    {kind: sheetKindDiscovery, theme: captureThemeDark, width: 1800, height: 3600},
 		sheetPullProgress: {kind: sheetKindPullProgress, theme: captureThemeDark, width: 1800, height: 3600},
 	}
 	seen := make(map[sheetName]bool, len(sheets))

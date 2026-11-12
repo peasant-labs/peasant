@@ -1,8 +1,8 @@
 # Guided TUI screenshot harness
 
 This manually invoked harness renders deterministic visual evidence for Peasant's guided setup UI.
-It mounts the real `settings.Flow`, `kickstart.Program`, `push.PushWizardModel`, and
-`pullprogress.Model` production paths
+It mounts the real `settings.Flow`, `kickstart.Program`, `push.PushWizardModel`,
+`pullprogress.Model`, and `discoveryprogress.Spinner` production paths
 over synthetic fixture data, composes their ANSI output into labeled contact sheets with Lip Gloss, and asks
 [Freeze](https://github.com/charmbracelet/freeze) to rasterize the sheets.
 
@@ -31,7 +31,7 @@ Run the opt-in fixture and mounted-render tests with:
 make guided-screenshots-test
 ```
 
-The seven PNGs are written to:
+The eight PNGs are written to:
 
 ```text
 out/test/screenshots/peasant-guided-final-<commit>/guided-dark.png
@@ -41,6 +41,7 @@ out/test/screenshots/peasant-guided-final-<commit>/push.png
 out/test/screenshots/peasant-guided-final-<commit>/ingest-progress.png
 out/test/screenshots/peasant-guided-final-<commit>/ingest-completion.png
 out/test/screenshots/peasant-guided-final-<commit>/pull-progress.png
+out/test/screenshots/peasant-guided-final-<commit>/discovery-progress.png
 ```
 
 An explicit dirty capture uses `peasant-guided-final-<commit>-dirty` instead. Generated evidence is
@@ -50,7 +51,7 @@ local and gitignored.
 
 `testdata/captures.yaml` is the strict source of capture scenarios. It pins:
 
-- all six guided sections in dark and light themes at `80x24` and `120x40`;
+- all seven guided sections in dark and light themes at `80x24` and `120x40`;
 - the default and retained global-search selection states at both sizes;
 - project, branch, and scrubbed transcript preview states in both themes at both sizes;
 - the start, selection, consent, receipt, and keyboard help screens of the push wizard, in both
@@ -60,13 +61,20 @@ local and gitignored.
   and next steps, and a no-warning control, in both themes and both sizes;
 - the bulk collective-pull progress bar — running, canceling, and canceled — mounted from the real
   `pullprogress.Model` over scrubbed synthetic counts, in both themes and both sizes;
-- synthetic discovery data, row-count guards, required text, and exact matrix coverage; and
-- the seven accepted contact-sheet names and pixel dimensions.
+- the inline discovery spinner — mid-run and complete file counts with re-reads, and an adapter
+  that does not report progress — in both themes and both sizes;
+- synthetic discovery data, required names and text, and exact matrix coverage; and
+- the eight accepted contact-sheet names and pixel dimensions.
 
-Unknown fields, trailing YAML documents, duplicate rows, missing matrix entries, and changed count
-declarations fail before any PNG is published. No local config, transcript, repository, or credential
+Unknown fields, trailing YAML documents, duplicate rows, and missing required names or matrix entries
+fail before any PNG is published. No local config, transcript, repository, or credential
 data enters the screenshots.
 
-Freeze's bundled JetBrains Mono is deliberate. Peasant emits terminal cells and ANSI styling but does
-not control an end user's terminal font; the bundled face gives this evidence a pinned cell geometry
-without adding a browser or a host-font dependency.
+Peasant emits terminal cells and ANSI styling but does not control an end user's terminal font.
+Freeze's bundled JetBrains Mono gives the fallback renderer a pinned cell geometry, but the version
+bundled with Freeze 0.2.2 has no Braille spinner glyphs and renders them as missing-glyph boxes.
+For a spinner review, use Freeze's optional `rsvg-convert` backend with a Braille-capable monospaced
+font configured through fontconfig, and record the backend and font with the evidence. The font's
+cell advance must match the bundled face (0.6 em); a narrower face overlaps the capture columns.
+Inspect the glyph itself; the ANSI text assertion alone cannot prove that the PNG rendered it. The font and
+optional backend are not pinned by this harness, so their exact paths or versions must be recorded.
