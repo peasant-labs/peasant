@@ -1,0 +1,6 @@
+cases:
+  - {name: known, owner: schema-harnesses}
+  - {name: declared, owner: schema-declared}
+  - {name: harvestable, owner: adapter-registry}
+  - {name: layout-only, owner: layout-minus-adapters}
+  - {name: archived, owner: archived-gemini}
