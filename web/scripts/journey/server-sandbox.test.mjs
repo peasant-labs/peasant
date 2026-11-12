@@ -13,12 +13,34 @@ import { startOwnedServer } from '../visual/lib/owned-server-start.mjs';
 
 const f = parse(readFileSync(new URL('./testdata/server-sandbox.yaml', import.meta.url), 'utf8'));
 const WEB = fileURLToPath(new URL('../..', import.meta.url));
-const library = (name) => new URL(`../visual/lib/${name}`, import.meta.url).href;
 assert.deepEqual(new Set([...f.cases.map(c => c.name), 'every-script-that-starts-the-binary-is-sandboxed-or-exempt']), new Set(f.requiredNames));
 
-// A process that answers the health route on `port`, as a running server does.
-const ANSWERS = `require('node:http').createServer((q, s) => s.end('{}')).listen(Number(process.argv[1]), 'localhost')`;
-const ANSWERS_AND_NOTIFIES = `process.once('disconnect', () => process.exit(0)); require('node:http').createServer((q, s) => { s.end('{}'); process.send('answered'); }).listen(Number(process.argv[1]), 'localhost')`;
+// The child programs the cases launch; each reads its case's values from its arguments.
+const FAKE_SERVER = fileURLToPath(new URL('./lib/fake-server.mjs', import.meta.url));
+const OWNED_SANDBOX_SCRIPT = fileURLToPath(new URL('./lib/owned-sandbox-script.mjs', import.meta.url));
+
+// Starts `program` with `args` and kills it when the case ends, if it is still running.
+function launch(cleanups, program, args, { ipc = false } = {}) {
+  const child = spawn(process.execPath, [program, ...args.map(String)], { stdio: ['ignore', 'ignore', 'pipe', ...(ipc ? ['ipc'] : [])] });
+  cleanups.push(() => { if (!gone(child)) child.kill('SIGKILL'); });
+  return child;
+}
+
+// Runs the sandbox script to its end in the case's temporary directory: its status, its output and its errors.
+function runOwnedSandboxScript(root, args) {
+  try {
+    return { status: 0, stdout: execFileSync(process.execPath, [OWNED_SANDBOX_SCRIPT, ...args.map(String)], { env: { ...process.env, TMPDIR: root }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), stderr: '' };
+  } catch (error) {
+    return { status: error.status, stdout: error.stdout, stderr: error.stderr };
+  }
+}
+
+// The sandbox script's arguments for the directories a case names.
+const namedArgs = (named) => [
+  ...(named.configDir === undefined ? [] : ['--config-dir', named.configDir]),
+  ...(named.dataDir === undefined ? [] : ['--data-dir', named.dataDir]),
+];
+
 const freePort = () => new Promise((done) => { const s = createServer(); s.listen(0, 'localhost', () => { const { port } = s.address(); s.close(() => done(port)); }); });
 const gone = (child) => child.exitCode !== null || child.signalCode !== null;
 
@@ -52,16 +74,11 @@ const modes = {
     const named = Object.fromEntries(Object.entries(row.named ?? {}).map(([key, path]) => [key, path.replace('$OTHER', other)]));
     for (const directory of Object.values(named)) { mkdirSync(directory, { recursive: true }); writeFileSync(join(directory, 'marker'), 'theirs'); }
     for (const end of row.ends) {
-      const leave = typeof end === 'number' ? `process.exit(${end});` : end === 'uncaught-error' ? `throw new Error('the script failed');` : '';
-      const source = `import { ownedServerSandbox } from ${JSON.stringify(library('owned-server-sandbox.mjs'))}; import { mkdirSync, writeFileSync, existsSync } from 'node:fs'; import { join } from 'node:path';`
-        + `const sandbox = ownedServerSandbox(${JSON.stringify(row.script)}, ${JSON.stringify(named)}); mkdirSync(join(sandbox.dataDir, 'peasant'), { recursive: true }); writeFileSync(join(sandbox.dataDir, 'peasant', 'peasant.db'), 'x');`
-        + `console.log(JSON.stringify({ root: sandbox.root, dataDir: sandbox.dataDir, configDir: sandbox.configDir, home: sandbox.env.HOME, existed: existsSync(sandbox.root) })); ${leave}`;
+      const how = typeof end === 'number' ? ['--end', 'exit', '--status', end] : ['--end', end];
       const wantStatus = typeof end === 'number' ? end : end === 'uncaught-error' ? 1 : 0;
-      let out, status = 0;
-      try { out = execFileSync(process.execPath, ['--input-type=module', '-e', source], { env: { ...process.env, TMPDIR: root }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
-      catch (error) { status = error.status; out = error.stdout; }
-      assert.equal(status, wantStatus, `the script that ends by ${end}`);
-      const said = JSON.parse(out);
+      const { status, stdout, stderr } = runOwnedSandboxScript(root, ['--name', row.script, ...namedArgs(named), ...how]);
+      assert.equal(status, wantStatus, `the script that ends by ${end}: ${stderr}`);
+      const said = JSON.parse(stdout);
       assert.equal(said.existed, true);
       assert.ok(said.root.startsWith(join(root, `peasant-${row.script}-`)), `${said.root} is in the temporary directory and named for the script`);
       assert.equal(said.home, join(said.root, 'home'));
@@ -73,11 +90,9 @@ const modes = {
     }
   },
   'owned-refused'(row, root) {
-    const source = `import { ownedServerSandbox } from ${JSON.stringify(library('owned-server-sandbox.mjs'))}; ownedServerSandbox(${JSON.stringify(row.script)}, ${JSON.stringify(row.named)});`;
-    assert.throws(
-      () => execFileSync(process.execPath, ['--input-type=module', '-e', source], { env: { ...process.env, TMPDIR: root }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
-      (error) => error.status === 1 && error.stderr.includes(row.error),
-    );
+    const { status, stdout, stderr } = runOwnedSandboxScript(root, ['--name', row.script, ...namedArgs(row.named), '--end', 'last-line']);
+    assert.equal(status, 1, `the refused layout ends the script with an error: ${stdout}`);
+    assert.ok(stderr.includes(row.error), stderr);
     assert.deepEqual(readdirSync(root), [], 'no root is left in the temporary directory');
   },
   'owned-name'(row) {
@@ -91,21 +106,27 @@ const modes = {
   },
   async start(row, root, cleanups) {
     const port = await freePort();
-    const run = (code, ipc = false) => { const child = spawn(process.execPath, ['-e', code, String(port)], { stdio: ['ignore', 'ignore', 'pipe', ...(ipc ? ['ipc'] : [])] }); cleanups.push(() => { if (!gone(child)) child.kill('SIGKILL'); }); return child; };
     if (row.occupied) {
-      const other = run(ANSWERS);
+      const other = launch(cleanups, FAKE_SERVER, ['answers', '--port', port]);
       for (let i = 0; i < 100 && !(await fetch(`http://localhost:${port}/api/v1/health`).catch(() => null))?.ok; i++) await new Promise((done) => setTimeout(done, 50));
       assert.equal(gone(other), false, 'the other process holds the port');
     }
-    const code = { answers: ANSWERS, exits: `process.exit(${row.status})`, silent: 'setInterval(() => {}, 1000)', 'answers-elsewhere': `process.on('message', () => setTimeout(() => process.exit(${row.status}), ${row.exitAfterAnswerMs}))` }[row.server];
+    // What the script's own start launches, by the case's `server`.
+    const serverArgs = {
+      answers: () => ['answers', '--port', port],
+      exits: () => ['exits', '--status', row.status],
+      silent: () => ['silent'],
+      'answers-elsewhere': () => ['exits-when-told', '--status', row.status, '--after-ms', row.exitAfterAnswerMs],
+    }[row.server];
+    assert.ok(serverArgs, `case ${row.name} has the unknown server ${row.server}`);
     let started = null;
     let answeredElsewhere = false;
     const options = { port, portVariable: 'PEASANT_EXAMPLE_PORT', start: () => {
       if (row.server === 'answers-elsewhere') {
-        const other = run(ANSWERS_AND_NOTIFIES, true);
+        const other = launch(cleanups, FAKE_SERVER, ['answers-and-notifies', '--port', port], { ipc: true });
         other.once('message', () => { answeredElsewhere = true; started.send('exit'); });
       }
-      return (started = run(code, row.server === 'answers-elsewhere'));
+      return (started = launch(cleanups, FAKE_SERVER, serverArgs(), { ipc: row.server === 'answers-elsewhere' }));
     }, ...(row.withinMs ? { withinMs: row.withinMs } : {}) };
     const before = Date.now();
     if (row.error) {
