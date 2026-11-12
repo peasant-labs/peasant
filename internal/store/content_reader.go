@@ -250,9 +250,9 @@ func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, a
 			// selected row is parseable. That list is a SUBSET of what this
 			// parser accepts, not the same set, and it must not be widened
 			// here: a harness this build recognises but does not bind is one it
-			// does not recover content for. Reaching this branch means a BOUND harness cannot be
-			// parsed at all, which no stored data can express and which
-			// silently skipping would hide.
+			// does not recover content for. Reaching this branch means a BOUND
+			// harness cannot be parsed at all, which no stored data can express
+			// and which silently skipping would hide.
 			return fmt.Errorf("store content recovery targets: session %s passed the bound known-harness filter but its harness %q cannot be parsed; the bound harness list and the harness parser disagree inside this build, so no target list can be trusted; upgrade Peasant to a build whose harness list and parser agree", id, st.ColumnText(1))
 		}
 		targets = append(targets, ingest.ContentCaptureIncompleteSession{SessionID: id, Harness: harness, StartMs: st.ColumnInt64(2)})
