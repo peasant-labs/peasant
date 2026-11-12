@@ -681,7 +681,7 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		fmt.Fprintf(os.Stderr, "warning: %s discovery skipped %s: %s; %s\n", string(diagnostic.Provider), diagnostic.Location, diagnostic.Summary, diagnostic.Detail)
 	}
 	if options.printIndexProfile && options.indexProfiler != nil {
-		printIndexProfile(os.Stderr, options.indexProfiler.Snapshot())
+		printIndexProfile(cmd.ErrOrStderr(), options.indexProfiler.Snapshot())
 	}
 	if options.flags.jsonOutput {
 		if err := printJSON(cmd.OutOrStdout(), result); err != nil {
