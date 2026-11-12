@@ -23,10 +23,6 @@ const (
 	kickstartPreviewMaxLineRunes = 400
 )
 
-// kickstartPreviewShortened closes a preview that filled its line bound, or
-// that stopped where the source did not say how large it is.
-const kickstartPreviewShortened = "preview shortened here. the full session ingests normally."
-
 // kickstartPreviewReader reads the first page of a discovered session.
 type kickstartPreviewReader interface {
 	Previewable(sessionID string) bool
@@ -100,18 +96,21 @@ func (st *kickstartSessions) sessionPreviewLines(ctx context.Context, target kic
 	}
 	page, err := reader.Read(ctx, sessionID)
 	if errors.Is(err, discovery.ErrPreviewUnavailable) {
-		lines.text("no transcript preview is available for this session; it still ingests normally.")
+		lines.text(discovery.PreviewUnavailableNote)
 		return nil
 	}
 	if err != nil {
 		return newKickstartError(schema.LocalKickstartErrorPreviewUnreadable,
-			"The preview of session %q could not be read in internal/api.kickstartSessions.preview: %v. Nothing was changed. The session still imports normally; check that its transcript is readable, then preview it again.", sessionID, err)
+			"The preview of session %q could not be read in internal/api.kickstartSessions.preview: %v. Nothing was changed. The session still ingests normally; check that its transcript is readable, then preview it again.", sessionID, err)
 	}
 	if len(page.Turns) == 0 {
 		lines.text(discovery.PreviewNoTurnsNote)
 	}
 	for _, turn := range page.Turns {
 		if !lines.hasRoom() {
+			// A turn is left that the bound has no room for, so the preview
+			// says it stopped.
+			lines.overflow()
 			break
 		}
 		lines.spacer()
@@ -129,7 +128,7 @@ func (st *kickstartSessions) sessionPreviewLines(ctx context.Context, target kic
 	if page.More {
 		notice := discovery.PreviewCutNotice(page.ConsumedBytes, page.TotalBytes, page.More, false)
 		if notice == "" {
-			notice = kickstartPreviewShortened
+			notice = discovery.PreviewShortenedNote
 		}
 		lines.cut(notice)
 	}
@@ -145,6 +144,10 @@ type previewLines struct {
 }
 
 func newPreviewLines() *previewLines { return &previewLines{} }
+
+// overflow records that the source holds more than the bounds let the preview
+// show, so finish closes the preview with a notice.
+func (p *previewLines) overflow() { p.full = true }
 
 func (p *previewLines) hasRoom() bool { return !p.full && len(p.lines) < kickstartPreviewMaxLines-1 }
 
@@ -181,7 +184,7 @@ func (p *previewLines) cut(note string) {
 // notice is the last line.
 func (p *previewLines) finish() []schema.LocalKickstartLine {
 	if p.full && !p.closed {
-		p.cut(kickstartPreviewShortened)
+		p.cut(discovery.PreviewShortenedNote)
 	}
 	if p.lines == nil {
 		return []schema.LocalKickstartLine{}

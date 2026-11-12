@@ -184,6 +184,9 @@ cases:
           lines.2.text: user
           lines.3.kind: text
           lines.3.text: please refactor the ingest pipeline so a failed write leaves nothing behind.
+          # the bound is 200 lines, the closing notice included
+          lines.199.kind: text
+          lines.199.text: "preview shortened here. the full session ingests normally."
         noReset: true
       # a session discovery found no transcript for is described, not refused
       - call: GET /api/v1/kickstart/sessions/{full}/tree/22222222-2222-4222-8222-222222222222/preview
@@ -191,7 +194,7 @@ cases:
           lines.0.kind: label
           lines.0.text: add tests
           lines.1.kind: text
-        contains: {lines.1.text: "no transcript preview is available"}
+          lines.1.text: "no transcript preview is available for this session; it still ingests normally."
       # a project row and a branch row are described from the forest's own
       # metadata, in the words the terminal pane uses; their ids carry slashes,
       # so the page percent-encodes them
@@ -435,7 +438,7 @@ cases:
       - call: GET /api/v1/kickstart/sessions/{full}/tree/11111111-1111-4111-8111-111111111111/preview
         status: 500
         json: {code: kickstart_preview_unreadable}
-        contains: {error: "still imports normally"}
+        contains: {error: "still ingests normally"}
 
   - name: scan-progress-ticks-are-coalesced
     world: {listings: two-projects, scanPush: 1h}

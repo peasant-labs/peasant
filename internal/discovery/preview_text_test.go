@@ -41,6 +41,7 @@ type previewTextCase struct {
 	More        bool               `yaml:"more"`
 	CanLoadMore bool               `yaml:"canLoadMore"`
 	Sizes       []previewTextSize  `yaml:"sizes"`
+	Note        string             `yaml:"note"`
 }
 
 type previewTextDocument struct {
@@ -97,6 +98,19 @@ func TestPreviewText(t *testing.T) {
 				if got := discovery.PreviewCutNotice(row.Consumed, row.Total, row.More, row.CanLoadMore); got != row.Want {
 					t.Fatalf("PreviewCutNotice = %q, want %q", got, row.Want)
 				}
+			case "note":
+				notes := map[string]string{
+					"no-turns":    discovery.PreviewNoTurnsNote,
+					"unavailable": discovery.PreviewUnavailableNote,
+					"shortened":   discovery.PreviewShortenedNote,
+				}
+				got, ok := notes[row.Note]
+				if !ok {
+					t.Fatalf("fixture case %q names note %q, want no-turns, unavailable, or shortened", row.Name, row.Note)
+				}
+				if got != row.Want {
+					t.Fatalf("preview note %q = %q, want %q", row.Note, got, row.Want)
+				}
 			case "size":
 				for _, size := range row.Sizes {
 					if got := discovery.PreviewByteSize(size.Bytes); got != size.Want {
@@ -104,7 +118,7 @@ func TestPreviewText(t *testing.T) {
 					}
 				}
 			default:
-				t.Fatalf("fixture case %q has op %q, want repository, clean, cut, or size", row.Name, row.Op)
+				t.Fatalf("fixture case %q has op %q, want repository, clean, cut, note, or size", row.Name, row.Op)
 			}
 		})
 	}
