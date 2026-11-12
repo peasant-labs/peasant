@@ -221,6 +221,7 @@ func policyTestCmd(t *testing.T, dir string, nonInteractive bool, stdin string) 
 		if err := cmd.Flags().Set("non-interactive", "true"); err != nil {
 			t.Fatal(err)
 		}
+		declareStoreEntryHookFlag(cmd, "non-interactive")
 	}
 	cmd.SetContext(context.Background())
 	cmd.SetIn(strings.NewReader(stdin))
@@ -312,6 +313,11 @@ func TestStoreUpgradePolicy(t *testing.T) {
 				}
 				if !strings.Contains(stderr.String(), "needs an upgrade: schema 75 to") {
 					t.Errorf("the steps were not named before the upgrade ran; stderr:\n%s", stderr.String())
+				}
+				// Tight disk is said in every mode the upgrade runs in, a
+				// pipe and a hook included, not only where it asks.
+				if tight := strings.Contains(stderr.String(), storeUpgradeTightDiskLine); tight != c.TightDisk {
+					t.Errorf("the tight-disk line shown = %v, want %v; stderr:\n%s", tight, c.TightDisk, stderr.String())
 				}
 			}
 			var refusal *storeUpgradeRefusal
@@ -785,8 +791,9 @@ func runKickstartMountOpensReadOnly(t *testing.T) {
 // review of the 0.16.2 search-repair gate.
 func TestStoreUpgradeSeams(t *testing.T) {
 	drivers := map[string]func(*testing.T){
-		"web-start-parent-and-child-share-open-options": runWebStartSharesOpenOptions,
-		"terminal-check-is-one-stubbable-function":      runTerminalCheckIsOneFunction,
+		"web-start-parent-and-child-share-open-options":          runWebStartSharesOpenOptions,
+		"terminal-check-is-one-stubbable-function":               runTerminalCheckIsOneFunction,
+		"only-the-command-that-declares-the-hook-flag-is-a-hook": runOnlyDeclaredHookFlagIsAHook,
 	}
 	for _, c := range loadStoreUpgradePolicyFixtures(t).SeamCases {
 		driver, ok := drivers[c.Name]
@@ -860,6 +867,33 @@ func runTerminalCheckIsOneFunction(t *testing.T) {
 	}
 	if err := requireTerminal("tui"); err != nil {
 		t.Errorf("the TUI check with a terminal = %v, want nil from the same stub", err)
+	}
+}
+
+// runOnlyDeclaredHookFlagIsAHook pins where hook mode comes from: the real
+// push command declares --non-interactive as the flag generated hooks pass,
+// so a push with it is a hook; any other command with a flag of that name
+// is piped or terminal like every other command.
+func runOnlyDeclaredHookFlagIsAHook(t *testing.T) {
+	stubTerminal(t, false)
+	push := BuildPushCommand()
+	if err := push.ParseFlags([]string{"--non-interactive"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := storeEntryModeFor(push); got != storeEntryHook {
+		t.Errorf("village push --non-interactive resolved to mode %q, want hook", got)
+	}
+	other := &cobra.Command{Use: "other"}
+	other.Flags().Bool("non-interactive", false, "")
+	if err := other.ParseFlags([]string{"--non-interactive"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := storeEntryModeFor(other); got != storeEntryPiped {
+		t.Errorf("a command that did not declare a hook flag, run with --non-interactive and no terminal, resolved to mode %q, want piped", got)
+	}
+	stubTerminal(t, true)
+	if got := storeEntryModeFor(other); got != storeEntryTerminal {
+		t.Errorf("the same command at a terminal resolved to mode %q, want terminal", got)
 	}
 }
 

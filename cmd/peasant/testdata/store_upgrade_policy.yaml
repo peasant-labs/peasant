@@ -5,7 +5,8 @@
 # (ensureStoreCurrent) with the upgrade itself replaced by a recorder, so a
 # case states the policy and nothing else. mode is how the entry point is
 # classed: terminal and piped come from the one terminal check, hook from
-# --non-interactive, server is fixed. store names the fixture: quick is a
+# the flag `village push` declares for generated hooks (--non-interactive),
+# server is fixed. store names the fixture: quick is a
 # schema-75 store with no stale search results (one quick step), long is a
 # schema-75 store with stale search results (one long step), current is at
 # the head schema, missing has no file. want is the policy outcome: ran,
@@ -14,8 +15,9 @@
 # generated hook turns into exit 0), refused, or none. exit is peasant's
 # process status. A skip and a refusal assert that no byte of the database
 # changed and that the upgrade never started. tightDisk makes the plan report
-# free disk below twice what it asks for. confirm is --confirm on a command
-# that owns the upgrade.
+# free disk below twice what it asks for; every case whose upgrade runs
+# asserts the tight-disk line is printed exactly when tightDisk is set, in
+# every mode. confirm is --confirm on a command that owns the upgrade.
 #
 # One case per row and column of the entry-point table is named
 # <entry>-<terminal|piped|hook|server>-<quick|long>. The named rulings and
@@ -349,6 +351,13 @@ policyCases:
     tightDisk: true
     want: ran
     exit: 0
+  - name: hook-tight-disk-quick-runs-and-says-so
+    entry: village-push
+    mode: hook
+    store: quick
+    tightDisk: true
+    want: ran
+    exit: 0
   - name: terminal-affected-proceeds
     entry: harvest
     mode: terminal
@@ -563,3 +572,4 @@ kickstartCases:
 seamCases:
   - name: web-start-parent-and-child-share-open-options
   - name: terminal-check-is-one-stubbable-function
+  - name: only-the-command-that-declares-the-hook-flag-is-a-hook
