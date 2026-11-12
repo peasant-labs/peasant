@@ -661,6 +661,10 @@ func (w *kickstartWorld) call(index int, step kickstartStep) {
 			w.fail(index, "%s %s: %s", method, path, fault)
 		}
 	}
+	// Every answer is JSON, said once, whoever wrote it.
+	if got := response.Header.Values(defaults.HeaderContentType); len(got) != 1 || got[0] != defaults.ContentJSON.String() {
+		w.fail(index, "%s %s: Content-Type = %q, want exactly [%q]", method, path, got, defaults.ContentJSON.String())
+	}
 	var decoded any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		w.fail(index, "%s %s: the body is not JSON: %v; body: %s", method, path, err, raw)

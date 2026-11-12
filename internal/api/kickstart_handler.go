@@ -55,7 +55,6 @@ func (h *kickstartHandler) handleStatus(w http.ResponseWriter, _ *http.Request) 
 		configured = false
 	}
 	status := schema.LocalKickstartStatus{Configured: configured, ActiveSessionID: h.sessions.activeFullSessionID()}
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	writeKickstartContract(w, &status)
 }
 
@@ -86,7 +85,6 @@ func (h *kickstartHandler) handleOpen(w http.ResponseWriter, r *http.Request) {
 		writeKickstartError(w, err)
 		return
 	}
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	writeKickstartContract(w, &view)
 }
 
@@ -100,7 +98,6 @@ func (h *kickstartHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 		writeKickstartError(w, err)
 		return
 	}
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	writeKickstartContract(w, &view)
 }
 
@@ -126,7 +123,6 @@ func (h *kickstartHandler) handlePatch(w http.ResponseWriter, r *http.Request) {
 		writeKickstartError(w, err)
 		return
 	}
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	writeKickstartContract(w, &result)
 }
 
@@ -140,7 +136,6 @@ func (h *kickstartHandler) handleTree(w http.ResponseWriter, r *http.Request) {
 		writeKickstartError(w, err)
 		return
 	}
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	writeKickstartContract(w, &tree)
 }
 
@@ -154,7 +149,6 @@ func (h *kickstartHandler) handlePreview(w http.ResponseWriter, r *http.Request)
 		writeKickstartError(w, err)
 		return
 	}
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	writeKickstartContract(w, &preview)
 }
 
@@ -169,7 +163,6 @@ func (h *kickstartHandler) handleScan(w http.ResponseWriter, r *http.Request) {
 		writeKickstartError(w, err)
 		return
 	}
-	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	writeKickstartContract(w, &scan)
 }
 
