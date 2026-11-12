@@ -29,6 +29,8 @@ type branchAgreementCase struct {
 	ExtractsNoBranch bool     `yaml:"extractsNoBranch"`
 	Subfolder        string   `yaml:"subfolder"`
 	FolderOnly       bool     `yaml:"folderOnly"`
+	NoDirectory      bool     `yaml:"noDirectory"`
+	ChosenSession    bool     `yaml:"chosenSession"`
 	RecordedBranch   string   `yaml:"recordedBranch"`
 	Stored           bool     `yaml:"stored"`
 	StoredBranch     string   `yaml:"storedBranch"`
@@ -39,7 +41,7 @@ type branchAgreementCase struct {
 	ChosenBranch     string   `yaml:"chosenBranch"`
 	ChosenRemote     string   `yaml:"chosenRemote"`
 	TreeBranch       string   `yaml:"treeBranch"`
-	TreeRemote       string   `yaml:"treeRemote"`
+	TreeRemote       *string  `yaml:"treeRemote"`
 	Matched          bool     `yaml:"matched"`
 	BranchDirs       []string `yaml:"branchDirs"`
 	RemoteDirs       []string `yaml:"remoteDirs"`
@@ -106,7 +108,11 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 		}
 		return value
 	}
-	storedRemote, headRemote, chosenRemote, treeRemote := orDefault(c.StoredRemote), orDefault(c.HeadRemote), orDefault(c.ChosenRemote), orDefault(c.TreeRemote)
+	storedRemote, headRemote, chosenRemote := orDefault(c.StoredRemote), orDefault(c.HeadRemote), orDefault(c.ChosenRemote)
+	treeRemote := remote
+	if c.TreeRemote != nil {
+		treeRemote = *c.TreeRemote
+	}
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -158,13 +164,15 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 	}
 	under.Enabled = true
 	under.Paths = []string{source}
+	chosen := config.SelectionHarnessConfig{Projects: []config.ProjectSelection{
+		{GitRemote: chosenRemote, Branches: []string{c.ChosenBranch}},
+	}}
+	if c.ChosenSession {
+		chosen = config.SelectionHarnessConfig{Sessions: []string{sessionID}}
+	}
 	cfg.Selection = config.SelectionConfig{
-		Mode: config.SelectionModeSelected,
-		Harnesses: map[string]config.SelectionHarnessConfig{
-			harness.String(): {Projects: []config.ProjectSelection{
-				{GitRemote: chosenRemote, Branches: []string{c.ChosenBranch}},
-			}},
-		},
+		Mode:      config.SelectionModeSelected,
+		Harnesses: map[string]config.SelectionHarnessConfig{harness.String(): chosen},
 	}
 
 	var known ingest.KnownSessionIndex
@@ -268,7 +276,7 @@ func writeBranchAgreementRecording(t *testing.T, harness ingest.Harness, path, i
 		return
 	}
 	fields := fmt.Sprintf(`"sessionId":%q,"type":"user","uuid":"%s-user","timestamp":"2026-01-01T00:00:00Z"`, id, id)
-	if !c.FolderOnly {
+	if !c.FolderOnly && !c.NoDirectory {
 		fields += fmt.Sprintf(`,"cwd":%q`, cwd)
 	}
 	if c.RecordedBranch != "" {

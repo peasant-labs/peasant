@@ -6,6 +6,9 @@
 #   harness        the harness that recorded the session (claude-code when absent)
 #   subfolder      a folder inside the case's temporary clone, used as the cwd
 #   folderOnly     the recording names no cwd; its project folder decodes to the clone
+#   noDirectory    the recording names no cwd and its project folder decodes to no
+#                  directory: the session has no project directory at all
+#   chosenSession  the saved selection names the session by id, not its project
 #   recordedBranch the gitBranch the recording names
 #   stored         the store holds the session (branch storedBranch)
 #   sourceChanged  the recording changed after the store imported it
@@ -15,7 +18,7 @@
 #                  absent); headRemote is what git answers for every directory,
 #                  chosenRemote the remote of the saved selection, and treeRemote
 #                  the remote the scan lists the session under; each is the shared
-#                  remote when absent
+#                  remote when absent (treeRemote: "" is a session listed with none)
 #   matched        whether the filter admits the session
 #   extractsNoBranch  the harness's own metadata extraction, run over the same
 #                  recording, stores no branch and never asks git for one: the
@@ -35,6 +38,8 @@ requiredNames:
   - recording-only-harness-tree-filter-and-store-all-say-no-branch
   - stored-remote-changed-tree-and-filter-agree
   - changed-source-remote-falls-back-to-the-directory-in-both
+  - no-project-directory-tree-and-filter-ask-git-for-nothing
+  - no-project-directory-session-chosen-by-id-is-still-admitted
 cases:
   # The working directory is a subfolder of the clone. Both ask that folder, not
   # the clone root: a linked worktree's branch is its own.
@@ -137,3 +142,30 @@ cases:
     matched: true
     branchDirs: ["{subfolder}"]
     remoteDirs: ["{subfolder}"]
+  # The recording names no directory and its project folder decodes to none. The
+  # harness's storage folder is never asked, because it can sit inside an
+  # unrelated repository, so the session has no remote and no branch: the scan
+  # lists it with neither, git is asked nothing by either surface, and a choice
+  # of its project does not reach it.
+  - name: no-project-directory-tree-and-filter-ask-git-for-nothing
+    noDirectory: true
+    headBranch: main
+    headRemote: https://github.com/example-org/dotfiles.git
+    chosenBranch: main
+    treeBranch: ""
+    treeRemote: ""
+    matched: false
+    branchDirs: []
+    remoteDirs: []
+  # The same session is still selected by its id, as before.
+  - name: no-project-directory-session-chosen-by-id-is-still-admitted
+    noDirectory: true
+    chosenSession: true
+    headBranch: main
+    headRemote: https://github.com/example-org/dotfiles.git
+    chosenBranch: main
+    treeBranch: ""
+    treeRemote: ""
+    matched: true
+    branchDirs: []
+    remoteDirs: []

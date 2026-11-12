@@ -1,9 +1,6 @@
 package ingest
 
-import (
-	"context"
-	"path/filepath"
-)
+import "context"
 
 // sessionRemoteEvidence is everything that can say which git remote a session
 // belongs to. SessionRemoteFor builds it from the discovered session and the
@@ -16,7 +13,7 @@ type sessionRemoteEvidence struct {
 	StoredRemote string
 	StoredKnown  bool
 	// Directory is the one directory whose remote answers otherwise;
-	// sessionRemoteDirectory names it.
+	// SessionProjectDirectory names it.
 	Directory string
 }
 
@@ -30,7 +27,7 @@ func SessionRemoteFor(ctx context.Context, git GitResolver, session DiscoveredSe
 	return resolveSessionRemote(ctx, git, sessionRemoteEvidence{
 		StoredRemote: record.GitRemote,
 		StoredKnown:  stored,
-		Directory:    sessionRemoteDirectory(session),
+		Directory:    SessionProjectDirectory(session),
 	})
 }
 
@@ -39,11 +36,15 @@ func SessionRemoteFor(ctx context.Context, git GitResolver, session DiscoveredSe
 //
 //  1. the remote the store holds for a session that is already stored and whose
 //     source has not changed since, even when that import found no remote;
-//  2. the remote of the one directory sessionRemoteDirectory names.
+//  2. the remote of the one directory SessionProjectDirectory names, the same
+//     directory the branch is read from.
 //
 // A stored session is not asked about again: the earlier import already looked
 // at git for it. A session whose source changed is not stored evidence, so it
-// falls through to the directory.
+// falls through to the directory. A session with no project directory has no
+// remote: the harness's storage directory is never asked, because it can sit
+// inside an unrelated repository such as a dotfiles checkout. Such a session is
+// still selected by its name, its path or its session id.
 func resolveSessionRemote(ctx context.Context, git GitResolver, evidence sessionRemoteEvidence) string {
 	if evidence.StoredKnown {
 		return evidence.StoredRemote
@@ -56,20 +57,4 @@ func resolveSessionRemote(ctx context.Context, git GitResolver, evidence session
 		return ""
 	}
 	return remote
-}
-
-// sessionRemoteDirectory is the one directory a session's remote is read from:
-// its project directory (SessionProjectDirectory) or, for a session with none,
-// the directory the harness found the recording in.
-func sessionRemoteDirectory(session DiscoveredSession) string {
-	if dir := SessionProjectDirectory(session); dir != "" {
-		return dir
-	}
-	if root := string(session.OriginalRoot); root != "" {
-		return root
-	}
-	if session.SourcePath != "" {
-		return filepath.Dir(string(session.SourcePath))
-	}
-	return ""
 }

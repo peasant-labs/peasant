@@ -1,9 +1,10 @@
 # The one precedence for which git remote a session belongs to, for the tree and
 # for the import filter: the remote the store holds for an unchanged stored
-# session, then the remote of the one directory the session names. remote is what
-# git answers for any directory. askedDirs is every directory git was asked for a
-# remote. sourcePath and originalRoot name where the harness found the recording;
-# they answer only for a session with no project directory.
+# session, then the remote of the one directory the session names, its project
+# directory. remote is what git answers for any directory. askedDirs is every
+# directory git was asked for a remote. sourcePath and originalRoot name where the
+# harness found the recording; they never answer, because a storage folder can sit
+# inside an unrelated repository.
 # requiredNames is the deletion guard: every name below must still be present.
 requiredNames:
   - stored-remote-beats-the-directory
@@ -13,8 +14,7 @@ requiredNames:
   - unreadable-remote-is-empty
   - no-resolver-and-nothing-stored-is-empty
   - stored-remote-needs-no-resolver
-  - no-project-directory-asks-the-original-root
-  - no-project-directory-or-original-root-asks-the-source-folder
+  - no-project-directory-asks-git-for-no-remote
   - nothing-to-ask-is-empty
 cases:
   - name: stored-remote-beats-the-directory
@@ -65,17 +65,15 @@ cases:
     storedKnown: true
     wantRemote: https://github.com/example-org/stored.git
     askedDirs: []
-  - name: no-project-directory-asks-the-original-root
+  # The recording sits in a storage folder that could be inside any repository,
+  # a dotfiles checkout say, and the session recorded no directory of its own.
+  # Git is not asked about the storage folder, so the session has no remote.
+  - name: no-project-directory-asks-git-for-no-remote
     sourcePath: /sessions/-gone/one.jsonl
     originalRoot: /sessions
-    remote: https://github.com/example-org/demo.git
-    wantRemote: https://github.com/example-org/demo.git
-    askedDirs: [/sessions]
-  - name: no-project-directory-or-original-root-asks-the-source-folder
-    sourcePath: /sessions/-gone/one.jsonl
-    remote: https://github.com/example-org/demo.git
-    wantRemote: https://github.com/example-org/demo.git
-    askedDirs: [/sessions/-gone]
+    remote: https://github.com/example-org/dotfiles.git
+    wantRemote: ""
+    askedDirs: []
   - name: nothing-to-ask-is-empty
     remote: https://github.com/example-org/demo.git
     wantRemote: ""
