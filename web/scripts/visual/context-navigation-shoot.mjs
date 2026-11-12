@@ -45,7 +45,7 @@
  *       PEASANT_CONTEXT_NAV_CAPTURE_DIR     output root (default /tmp/opencode/context-navigation-captures)
  *       PUPPETEER_CORE                      explicit puppeteer-core module path
  */
-import { execSync, spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -611,7 +611,7 @@ async function runTheme(browser, theme, chunkPath, gate, evidence) {
 
 if (!process.env.PEASANT_CONTEXT_NAV_SKIP_BUILD) {
   console.log('[context-navigation-shoot] make build (user canonical path) …')
-  execSync('make build', { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  execFileSync('make', ['build'], { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 } else {
   console.log('[context-navigation-shoot] PEASANT_CONTEXT_NAV_SKIP_BUILD=1 — reusing existing ./peasant')
 }

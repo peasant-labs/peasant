@@ -36,7 +36,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
 import { SurfaceGate } from './surface-gate.mjs'
-import { applyDeterminism } from './determinism.mjs'
+import { applyPlaywrightDeterminism } from './determinism.mjs'
 import { loadContextNavigationFixture } from './context-navigation-fixture.mjs'
 import { chromeFailures, loadShellChromeManifest, shippedItems } from './shell-chrome-manifest.mjs'
 
@@ -311,12 +311,8 @@ async function installRoutes(page, { answers, summary, diagnostics }) {
 
 async function openPage(browser, origin, theme, viewport, routes) {
   const page = await browser.newPage()
-  // Reuse the existing deterministic fixture; only its two browser calls
-  // need translation to Playwright's media/init-script API.
-  await applyDeterminism({
-    emulateMediaFeatures: () => page.emulateMedia({ reducedMotion: 'reduce' }),
-    evaluateOnNewDocument: (fn, ...args) => page.addInitScript(`(${fn.toString()})(...${JSON.stringify(args)})`),
-  }, { epochMs: Date.now() })
+  // The shared deterministic fixture, through Playwright's media and init-script API.
+  await applyPlaywrightDeterminism(page, { epochMs: Date.now() })
   await page.setViewportSize({ width: viewport.width, height: viewport.height })
   await page.addInitScript((value) => {
     localStorage.setItem('peasant-theme', value)
@@ -718,7 +714,7 @@ async function runPopulated(browser, gate, theme, viewport, answers) {
     const childTurns = childSync.turnCount.toLocaleString('en-US')
     const childMinutes = Math.max(0, Math.round(childSync.durationMs / 60_000))
     const childDuration = childMinutes < 60 ? `${childMinutes}m` : `${Math.floor(childMinutes / 60)}h ${String(childMinutes % 60).padStart(2, '0')}m`
-    // The page renders `when` from its own clock, which applyDeterminism freezes
+    // The page renders `when` from its own clock, which the determinism fixture freezes
     // per document at open time. Read that same instant here; node's live clock
     // is tens of seconds later, so a capture spanning a day boundary would fail
     // spuriously with a message that mimics the regression this checks for.

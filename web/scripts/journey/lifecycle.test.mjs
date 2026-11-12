@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, existsSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { acquireLifecycle, bounded, ownedGroups, start } from './lib/owned-lifecycle.mjs';
 import { seedConfiguredConfigHome, seedConfiguredSandbox } from './lib/configured-sandbox.mjs';
 
+const LIFECYCLE_CHILD = fileURLToPath(new URL('./lib/lifecycle-child.mjs', import.meta.url));
 const f = parse(readFileSync(new URL('./testdata/lifecycle.yaml', import.meta.url), 'utf8'));
 assert.deepEqual(new Set(f.cases.map(c => c.name)), new Set(f.requiredNames));
 for (const row of f.cases) test(row.name, { timeout: 20000 }, async t => {
@@ -46,7 +48,7 @@ for (const row of f.cases) test(row.name, { timeout: 20000 }, async t => {
     const immutable = readFileSync(join(directory, 'owner.json'), 'utf8');
     const child = row.mode === 'missing'
       ? life.launch('/no-such-peasant-journey-command', [], { stdio: 'ignore' })
-      : life.launch(process.execPath, ['-e', "process.on('SIGTERM',()=>{});process.stdout.write('ready\\n');setTimeout(()=>process.exit(3),20000)"], { stdio: ['ignore', 'pipe', 'inherit'] });
+      : life.launch(process.execPath, [LIFECYCLE_CHILD, 'ignores-term', '--exit-after-ms', '20000', '--status', '3'], { stdio: ['ignore', 'pipe', 'inherit'] });
     if (row.mode !== 'missing') await bounded(new Promise(done => child.child.stdout.once('data', done)), 3000, 'test child readiness');
     else await assert.rejects(child.done);
     if (row.mode === 'timeout') await assert.rejects(bounded(child.done, 50, 'test compile deadline'), /test compile deadline exceeded/);
@@ -64,7 +66,7 @@ for (const row of f.cases) test(row.name, { timeout: 20000 }, async t => {
   cleanups.push(async () => { const life = await acquire(); await life.cleanup(); });
   if (row.mode === 'stale' || row.mode === 'changed-temp') {
     const other = await acquireLifecycle(join(root, 'unrelated'), row); cleanups.push(() => other.cleanup());
-    const child = other.launch(process.execPath, ['-e', 'setTimeout(()=>{},15000)'], { stdio: 'ignore' });
+    const child = other.launch(process.execPath, [LIFECYCLE_CHILD, 'waits', '--exit-after-ms', '15000'], { stdio: 'ignore' });
     const next = await acquire(); cleanups.push(() => next.cleanup());
     assert.equal(ownedGroups(oldIdentity.owner).size, 0); assert.equal(existsSync(oldIdentity.stateRoot), false);
     assert.equal(child.child.exitCode, null); await next.cleanup();
