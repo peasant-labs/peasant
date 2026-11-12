@@ -1482,7 +1482,7 @@ func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
 	h.ingestStatus = "done"
 	h.ingestResult = result
 	h.ingestWritten = written
-	h.ingestNote = selectionConflictNote(built.conflicts.Recorded(), h.selectionConfigPath())
+	h.ingestNote = built.conflicts.Summary(h.selectionConfigPath())
 	h.mu.Unlock()
 }
 
