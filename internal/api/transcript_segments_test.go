@@ -576,6 +576,7 @@ type segmentDirectoryCase struct {
 type segmentReadFixture struct {
 	DirectoryCases []segmentDirectoryCase `yaml:"directory_cases"`
 	SegmentCases   []segmentReadCase      `yaml:"segment_cases"`
+	PositionCases  []segmentPositionCase  `yaml:"position_cases"`
 }
 
 func loadSegmentReadFixture(t *testing.T) segmentReadFixture {
@@ -595,6 +596,9 @@ func loadSegmentReadFixture(t *testing.T) segmentReadFixture {
 		names = append(names, fixtureCase.Name)
 	}
 	for _, fixtureCase := range fixture.SegmentCases {
+		names = append(names, fixtureCase.Name)
+	}
+	for _, fixtureCase := range fixture.PositionCases {
 		names = append(names, fixtureCase.Name)
 	}
 	if err := testutil.ValidateRequiredNames(manifest, names, "transcript segments"); err != nil {
