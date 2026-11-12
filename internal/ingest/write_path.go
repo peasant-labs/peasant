@@ -255,7 +255,7 @@ func (p *Pipeline) replaceSessionDir(ctx context.Context, src, dst, sessionID, m
 // install neither staged nor kept. It skips the entire child-owned tree,
 // including children excluded by FILTER.
 func (p *Pipeline) pruneObsoleteOwned(dst, sessionID string, wanted map[string]bool) error {
-// Prune obsolete parent-owned files only after every new file is installed.
+	// Prune obsolete parent-owned files only after every new file is installed.
 	var stale []string
 	err := p.fs.WalkDir(dst, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
