@@ -1,0 +1,7 @@
+# Required case names for stored_harness_check.yaml. Exact membership in both
+# directions: a case missing from the fixture fails, and a fixture case with no
+# listed name fails.
+requiredNames:
+  - v72-eight-values
+  - v73-fourteen-values
+  - v78-sixteen-values

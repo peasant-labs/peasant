@@ -29,24 +29,40 @@ These sets describe different properties. The block below is a snapshot; a test
 compares its membership with the owners:
 
 <!-- harness-sets:begin -->
-known: claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike, pi, grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew
+known: claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike, pi, grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew, antigravity-cli, antigravity-ide
 declared: claude-code, gemini-cli, codex, opencode, cursor, strike, pi
 harvestable: claude-code, codex, opencode, cursor, strike, pi
-layout-only: grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew
-archived: gemini-cli
+layout-only: grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew, antigravity-cli, antigravity-ide
+archived: gemini-cli, antigravity
 <!-- harness-sets:end -->
 
 The known set comes from `bestiary.Harnesses()` through `schema.Harnesses()`;
 `schema.AllHarnesses` owns the declared set. The adapter registry owns what this
 build can harvest. Layout-only combines the layout registry with that adapter
-registry: a harness is in it when it has a layout but no adapter. The archived
-entry is the retained `gemini-cli` contract value. Do not restate the membership
-elsewhere.
+registry: a harness is in it when it has a layout but no adapter.
+`bestiary.ArchivedHarnesses()` owns the archived set: known values kept so that
+sessions and records which already carry them stay valid, with no current
+product behind them. Do not restate the membership elsewhere.
 
 `gemini-cli` is archived: retained for history, never removed. It was replaced
 by the Antigravity products; this build refuses it by name and no adapter is
 planned. It stays known and declared for wire compatibility with existing
 sessions; stored rows are not rewritten.
+
+`antigravity` is archived, and its removal is planned. It named the Antigravity
+products as one harness before the command-line agent and the desktop
+application got their own values, `antigravity-cli` and `antigravity-ide`. It
+stays known, and the stored harness CHECK keeps it, so anything that already
+carries it stays valid. The conditions and the window for removing it are
+tracked in [peasant-labs/schema#232](https://github.com/peasant-labs/schema/issues/232).
+
+The two Antigravity products are separate harness values because they ship and
+evolve separately, so a session keeps the product that produced it, even though
+the two applications share one conversation index. Each keeps its sessions under
+its own root, and each has a layout (see
+[`harness-layouts/antigravity.md`](harness-layouts/antigravity.md)) and no
+adapter. The evidence and the decision are in
+[peasant-labs/polyrepo#77](https://github.com/peasant-labs/polyrepo/issues/77).
 
 Being known makes a value a legal wire value and lets the CLI refuse it by
 name; it does not make it harvestable, and it stores nothing. A known value may
@@ -101,7 +117,7 @@ them.
 |---------|----------|
 | CLI `--source-harness` | Legacy `claude`/`gemini` → "renamed to X, rerun with X"; the `defaults.LegacyHarnessClaude`/`LegacyHarnessGemini` constants exist solely for this (`resolveHarnessFlag`, `cmd/peasant/cmd_harvest.go`). |
 | config YAML | Deprecated keys are **rejected with remediation, never silently mapped**: `sources.claude:` (→ `claude-code:`) and `selection.providers:` (→ `selection.harnesses:`). Implemented via `Deprecated*` capture fields + `validate()` in `internal/config/config.go`. |
-| CLI + adapters | Every known harness is recognized; `cursor` is ingested. Layout-only harnesses have no adapter; `gemini-cli` is declared and archived. See the [roster](#known-harnesses-declared-support-and-this-build). |
+| CLI + adapters | Every known harness is recognized; `cursor` is ingested. Layout-only harnesses, including `antigravity-cli` and `antigravity-ide`, have no adapter; `gemini-cli` is declared and archived; `antigravity` is archived. See the [roster](#known-harnesses-declared-support-and-this-build). |
 
 ## OpenAPI enum exposure
 

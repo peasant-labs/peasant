@@ -8,9 +8,9 @@ import (
 
 // These versions identify the contract generations exposed by Peasant's schema
 // module pin. Update them with the pin after reviewing compatibility surfaces.
-const wantVillageAPIVersion = "0.39.0"
-const wantPeasantLocalAPIVersion = "0.37.0"
-const wantTypesVersion = "0.49.0"
+const wantVillageAPIVersion = "0.40.0"
+const wantPeasantLocalAPIVersion = "0.38.0"
+const wantTypesVersion = "0.50.0"
 
 // TestPinnedContractVersion_MatchesExpected fails if the schema module peasant
 // depends on reports a different contract version than expected.

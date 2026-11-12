@@ -1,0 +1,196 @@
+# The two registered Antigravity probes, run through harnesslayout.Run as
+# `peasant layout capture` runs them. Each case builds the store roots it names
+# from antigravity_store.yaml under t.TempDir() and checks the reports.
+#
+# A root:
+#   tool          antigravity-cli or antigravity-ide; the root is captured by that tool
+#   state         store (the default), missing (the path does not exist), or empty
+#   bodies        conversations with a full session tree: body, brain files, annotation, lock
+#   brainOnly     conversations with brain/<id>/ files and no body
+#   indexed       conversations with a row in this root's conversation index
+#   foreignFiles  also write the other product's root entries and session extras
+#   walFiles      also write -wal and -shm files beside every body, and an orphan -wal
+# A store root always holds its product's root entries, the shared root entries,
+# a conversation index, and its product's credential files (mode 0000).
+#
+# check is one of:
+#   sessions        each tool captures exactly want.sessions, with no failure and no root error
+#   capture-tool    every capture and report of a root carries that root's tool
+#   same-core-shape both tools give equal shapes (paths aside) for want.artifacts
+#   artifacts       want.present artifacts are in every capture of the tool; want.absent are in none
+#   body-shape      the body shape has exactly the fields of want.tables and the counts of want.kinds
+#   no-sentinel     no report holds the sentinel, by default and with metadata
+#   title-empty     Metadata.Title is empty in every capture with metadata
+#   fields          each artifact of want.fields holds those field paths and types; no sentinel
+#   sized           each artifact of want.sized has a size, a file count, no field and no malformed
+#                   record, and no file of it was opened
+#   credentials     capture succeeds, no credential file was opened, and no sentinel is reported
+#   workspace-path  Metadata.ProjectPath is empty by default and the store's workspacePath with metadata
+cases:
+  - name: session-is-discovered-from-its-body-under-this-root
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], brainOnly: [conv-b]}
+    check: sessions
+    want:
+      sessions: {antigravity-cli: [conv-a, conv-b]}
+  - name: index-row-without-a-body-under-this-root-is-not-a-session
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a, conv-b]}
+    check: sessions
+    want:
+      sessions: {antigravity-cli: [conv-a]}
+  - name: one-conversation-is-captured-by-exactly-one-tool
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a, conv-b]}
+      - {tool: antigravity-ide, bodies: [conv-b], indexed: [conv-a, conv-b]}
+    check: sessions
+    want:
+      sessions: {antigravity-cli: [conv-a], antigravity-ide: [conv-b]}
+  - name: capture-carries-the-tool-of-its-root
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a, conv-b]}
+      - {tool: antigravity-ide, bodies: [conv-b], indexed: [conv-a, conv-b]}
+    check: capture-tool
+  - name: both-tools-report-the-same-core-shape-for-the-same-session-tree
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a]}
+      - {tool: antigravity-ide, bodies: [conv-a], indexed: [conv-a]}
+    check: same-core-shape
+    want:
+      artifacts:
+        - conversation-body
+        - transcript-log
+        - transcript-full-log
+        - transcript-chunks
+        - step-output
+        - annotation
+        - presence-lock
+        - conversation-index
+        - crash-logs
+  - name: ide-messages-directory-is-reported-for-the-ide-only
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a], foreignFiles: true}
+      - {tool: antigravity-ide, bodies: [conv-a], indexed: [conv-a], foreignFiles: true}
+    check: artifacts
+    want:
+      present: {antigravity-ide: [agent-messages, undelivered-messages]}
+      absent: {antigravity-cli: [agent-messages, undelivered-messages]}
+  - name: cli-root-entries-are-reported-for-the-cli-only
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a], foreignFiles: true}
+      - {tool: antigravity-ide, bodies: [conv-a], indexed: [conv-a], foreignFiles: true}
+    check: artifacts
+    want:
+      present:
+        antigravity-cli: [prompt-history, implicit-context, knowledge, cli-logs, persistent-terminals, cli-settings, cli-state, cli-summaries]
+      absent:
+        antigravity-ide: [prompt-history, implicit-context, knowledge, cli-logs, persistent-terminals, cli-settings, cli-state, cli-summaries]
+  - name: ide-root-entries-are-reported-for-the-ide-only
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a], foreignFiles: true}
+      - {tool: antigravity-ide, bodies: [conv-a], indexed: [conv-a], foreignFiles: true}
+    check: artifacts
+    want:
+      present: {antigravity-ide: [daemon-hub, ide-state, ide-summaries]}
+      absent: {antigravity-cli: [daemon-hub, ide-state, ide-summaries]}
+  - name: body-shape-holds-tables-columns-and-counts
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a]}
+    check: body-shape
+    want:
+      tables:
+        battle_mode_infos: [idx, data]
+        executor_metadata: [idx, data]
+        gen_metadata: [idx, data, size]
+        parent_references: [idx, data]
+        steps: [idx, step_type, status, has_subtrajectory, metadata, error_details, permissions, task_details, render_info, step_payload, step_format]
+        trajectory_meta: [trajectory_id, cascade_id, trajectory_type, source]
+        trajectory_metadata_blob: [id, data]
+      kinds:
+        rows:battle_mode_infos: 1
+        rows:executor_metadata: 1
+        rows:gen_metadata: 1
+        rows:parent_references: 1
+        rows:steps: 3
+        rows:trajectory_meta: 1
+        rows:trajectory_metadata_blob: 1
+        step_type:14: 1
+        step_type:15: 2
+        status:3: 2
+        status:4: 1
+  - name: no-sentinel-reaches-the-report
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a, conv-b], foreignFiles: true}
+      - {tool: antigravity-ide, bodies: [conv-b], indexed: [conv-a, conv-b], foreignFiles: true}
+    check: no-sentinel
+  - name: title-is-never-set
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a]}
+      - {tool: antigravity-ide, bodies: [conv-b], indexed: [conv-b]}
+    check: title-empty
+  - name: jsonl-values-never-reach-the-report
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a]}
+    check: fields
+    want:
+      fields:
+        transcript-log:
+          - {path: "$.type", types: [string]}
+          - {path: "$.source", types: [string]}
+          - {path: "$.content", types: [string]}
+          - {path: "$.created_at", types: [string]}
+          - {path: "$.truncated_fields[]", types: [string]}
+          - {path: "$.tool_calls[].name", types: [string]}
+          - {path: "$.tool_calls[].args.CommandLine", types: [string]}
+          - {path: "$.input_tokens", types: [number]}
+        prompt-history:
+          - {path: "$.display", types: [string]}
+          - {path: "$.timestamp", types: [number]}
+        annotation:
+          - {path: "$.title", types: [string]}
+        cli-state:
+          - {path: "$.installation_uuid", types: [string]}
+          - {path: "$.migrations", types: [object]}
+          - {path: "$.migrations.key", types: [string]}
+          - {path: "$.migrations.value", types: [boolean]}
+  - name: text-and-protobuf-files-are-sized-not-read
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a]}
+      - {tool: antigravity-ide, bodies: [conv-a], indexed: [conv-a]}
+    check: sized
+    want:
+      sized:
+        antigravity-cli: [step-output, presence-lock, crash-logs, implicit-context, knowledge, cli-logs, persistent-terminals, cli-summaries]
+        antigravity-ide: [step-output, presence-lock, crash-logs, undelivered-messages, ide-summaries]
+  - name: a-record-split-across-chunk-files-is-not-malformed
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a]}
+      - {tool: antigravity-ide, bodies: [conv-a], indexed: [conv-a]}
+    check: sized
+    want:
+      sized:
+        antigravity-cli: [transcript-chunks]
+        antigravity-ide: [transcript-chunks]
+  - name: credential-files-are-never-opened
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a]}
+      - {tool: antigravity-ide, bodies: [conv-b], indexed: [conv-b]}
+    check: credentials
+  - name: workspace-path-is-removed-from-the-default-report
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a]}
+    check: workspace-path
+  - name: wal-and-shm-files-are-not-sessions
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a], walFiles: true}
+    check: sessions
+    want:
+      sessions: {antigravity-cli: [conv-a]}
+  - name: missing-root-empty-root-and-index-without-bodies-give-no-sessions-and-no-error
+    roots:
+      - {tool: antigravity-cli, state: missing}
+      - {tool: antigravity-ide, state: empty}
+      - {tool: antigravity-cli, indexed: [conv-a, conv-b]}
+    check: sessions
+    want:
+      sessions: {antigravity-cli: [], antigravity-ide: []}

@@ -139,7 +139,7 @@ func cursorIDEWorkspaceValues(conn *sqlite.Conn, visit func(key string, raw []by
 	for _, key := range cursorIDEWorkspaceKeys {
 		err := sqlitex.ExecuteTransient(conn,
 			`SELECT CASE WHEN length(value) <= ? THEN CAST(value AS TEXT) END FROM ItemTable WHERE key = ?`,
-			&sqlitex.ExecOptions{Args: []any{cursorMaxValueBytes, key}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			&sqlitex.ExecOptions{Args: []any{sqliteProbeMaxValueBytes, key}, ResultFunc: func(stmt *sqlite.Stmt) error {
 				if raw, ok := cursorBoundedValue(stmt, 0); ok {
 					visit(key, raw)
 				}
@@ -216,7 +216,7 @@ func cursorIDEShapeGlobal(ctx context.Context, src Source, ref SessionRef, meta 
 	var inline []any
 	err = sqlitex.ExecuteTransient(conn,
 		`SELECT CASE WHEN length(value) <= ? THEN CAST(value AS TEXT) END FROM cursorDiskKV WHERE key = ?`,
-		&sqlitex.ExecOptions{Args: []any{cursorMaxValueBytes, cursorIDEComposerPrefix + ref.ID}, ResultFunc: func(stmt *sqlite.Stmt) error {
+		&sqlitex.ExecOptions{Args: []any{sqliteProbeMaxValueBytes, cursorIDEComposerPrefix + ref.ID}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			raw, ok := cursorBoundedValue(stmt, 0)
 			if !ok {
 				rec.shape.Malformed++
@@ -240,7 +240,7 @@ func cursorIDEShapeGlobal(ctx context.Context, src Source, ref SessionRef, meta 
 
 	bubbles := 0
 	err = cursorKeyRange(conn, `SELECT CASE WHEN length(value) <= ? THEN CAST(value AS TEXT) END FROM cursorDiskKV WHERE key >= ? AND key < ? ORDER BY key LIMIT ?`,
-		[]any{cursorMaxValueBytes}, cursorIDEBubblePrefix+ref.ID+":", func(stmt *sqlite.Stmt) {
+		[]any{sqliteProbeMaxValueBytes}, cursorIDEBubblePrefix+ref.ID+":", func(stmt *sqlite.Stmt) {
 			bubbles++
 			raw, ok := cursorBoundedValue(stmt, 0)
 			if !ok {
@@ -285,7 +285,7 @@ func cursorIDEShapeGlobal(ctx context.Context, src Source, ref SessionRef, meta 
 		// cursorShapeTables and otherwise skipped.
 		_ = sqlitex.ExecuteTransient(conn,
 			`SELECT workspaceId, CASE WHEN length(value) <= ? THEN CAST(value AS TEXT) END FROM composerHeaders WHERE composerId = ?`,
-			&sqlitex.ExecOptions{Args: []any{cursorMaxValueBytes, ref.ID}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			&sqlitex.ExecOptions{Args: []any{sqliteProbeMaxValueBytes, ref.ID}, ResultFunc: func(stmt *sqlite.Stmt) error {
 				hints.workspaceID = stmt.ColumnText(0)
 				raw, ok := cursorBoundedValue(stmt, 1)
 				if !ok {
@@ -423,7 +423,7 @@ func cursorHasTable(conn *sqlite.Conn, table string) bool {
 // limit.
 func cursorKeyRange(conn *sqlite.Conn, query string, args []any, prefix string, visit func(*sqlite.Stmt)) error {
 	upper := strings.TrimSuffix(prefix, ":") + ";"
-	all := append(append([]any{}, args...), prefix, upper, cursorMaxRows)
+	all := append(append([]any{}, args...), prefix, upper, sqliteProbeMaxRows)
 	return sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: all, ResultFunc: func(stmt *sqlite.Stmt) error {
 		visit(stmt)
 		return nil

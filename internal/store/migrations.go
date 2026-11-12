@@ -286,6 +286,7 @@ var migrationV24 = createSessionCommands + ";\n" +
 // the v75 window left residue (cheap re-sync otherwise), and
 // session_entries_fts is dropped. See schema_v76.go.
 // migrationV77 marks the stored turn counts for one recount. See schema_v77.go.
+// migrationV78 widens stored harness checks to the sixteen known values. See schema_v78.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -367,6 +368,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV75,
 		migrationV76,
 		migrationV77,
+		migrationV78,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -438,5 +440,6 @@ var dbSchema = sqlitemigration.Schema{
 		{DisableForeignKeys: true}, // V75: image entries and session attachments
 		nil,                        // V76: search trigger repair (trigger + FTS DML only, no FK-bearing tables)
 		nil,                        // V77: turn count recount marker (new table, no data rewrite)
+		{DisableForeignKeys: true}, // V78: widen stored harness checks to the sixteen known values
 	},
 }

@@ -13,7 +13,7 @@ peasant sessions list [flags]
 ### Options
 
 ```
-      --harness string      Filter by harness ({claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike, pi, grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew})
+      --harness string      Filter by harness ({claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike, pi, grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew, antigravity-cli, antigravity-ide})
       --has strings         Only sessions where all these facets hold, comma-separated or repeated: subagent, skill, mcp, compact, clear, model-switch, background, partial
   -h, --help                help for list
       --include-subagents   Also list subagent sessions (by default only main sessions are listed; --session still finds a subagent session by id)
