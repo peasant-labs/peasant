@@ -1,12 +1,14 @@
 # The rule "bind without a re-parse" (capturedInputBindsWithoutReparse), one
 # case per term. Every case starts from the same settled Claude session: a
 # file input whose digest equals the stored input proof, the current producer
-# and index format, complete content, no latest attempt, and metadata
+# and strict format-1 index, complete content, no latest attempt, and metadata
 # capture revision 2. Each case changes only the fields it names.
 #
 # published:          the pair was saved this run.
 # bound:              the stored index is bound to the current capture.
 # inputProof:         same | different | missing, against the captured digest.
+# managedGeneration:  the harness target is the managed-generation format,
+#                     and the stored index is in that format.
 # directoryInput:     the input is a native directory tree, which the capture
 #                     vouches for only when this run saved it.
 # want:               the session binds without a re-parse.
@@ -22,6 +24,7 @@ required_names:
   - different-input-proof-parses
   - missing-input-proof-parses
   - certifiable-incomplete-content-parses
+  - managed-generation-reads-the-metadata-capture-and-parses
   - store-without-a-binder-parses
   - unvouched-directory-tree-does-not-bind
 cases:
@@ -66,6 +69,10 @@ cases:
   - name: certifiable-incomplete-content-parses
     published: true
     contentIncomplete: true
+    want: false
+  - name: managed-generation-reads-the-metadata-capture-and-parses
+    published: true
+    managedGeneration: true
     want: false
   - name: store-without-a-binder-parses
     published: true

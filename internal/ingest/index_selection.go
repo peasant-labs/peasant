@@ -100,8 +100,18 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 // constant-size settle: it advances the index time past the save and binds the
 // index to the newer metadata capture. Every term below is required.
 //
-//   - The parse would read the same input: the stored input proof equals the
-//     captured input digest.
+//   - The parse would read the same input. The stored input proof equals the
+//     captured input digest, and the declared output is the strict format-1
+//     parse. That parse reads the captured transcript bytes, the session
+//     identity the digest covers, and, for an OpenCode native tree, the tree
+//     the digest covers. It reads nothing else from the metadata capture: no
+//     working directory, project, git or host context, and no redaction runs
+//     at index time, because ingest stores the transcript as recorded. The
+//     source format and parent the input copies from the metadata are read by
+//     no format-1 parser. TestIndexParseIgnoresMetadataCapture pins this. A
+//     managed generation is excluded: its builder copies the recorded
+//     metadata's project, git, host, parent and redaction context into the
+//     generation, so a metadata change must rebuild it.
 //   - The same producer would parse it: the stored indexer revision and index
 //     format are this build's target.
 //   - Nothing else is owed: no explicit rebuild (force or reindex), no latest
@@ -119,6 +129,9 @@ func (p *Pipeline) capturedInputBindsWithoutReparse(input *CapturedIndexInput) b
 	target := p.sessionVersionTarget(input.session)
 	state := input.expected
 	if state == nil || p.config.Force || p.config.Reindex || state.LatestAttemptArtifactHash != nil {
+		return false
+	}
+	if target.IndexVersion != strictIndexFormat {
 		return false
 	}
 	if state.IndexerVersion < target.IndexerVersion || state.IndexVersion == nil || *state.IndexVersion != target.IndexVersion {
