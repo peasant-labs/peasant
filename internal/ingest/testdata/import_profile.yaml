@@ -1,0 +1,26 @@
+# The import profile on the production pipeline: the real Claude adapter and
+# indexer over synthetic source files, and a real store. The cases run in
+# order against one store, each on its own harvest.
+sessions:
+  - {name: first, id: "97100000-0000-4000-8000-000000000001", entries: 3}
+  - {name: second, id: "97100000-0000-4000-8000-000000000002", entries: 3}
+entryLine: '{"sessionId":"{{session}}","type":"user","cwd":"/work/project","message":{"role":"user","content":"synthetic entry {{n}}"}}'
+# The structural case imports the same sessions twice, with few and with many
+# entries each. The profiler's observation count must not move.
+structural:
+  smallEntries: 4
+  largeEntries: 400
+cases:
+  - name: new-session-writes-a-refresh-row
+  - name: each-refreshed-session-has-exactly-one-refresh-row-per-run
+  - name: census-by-run-counts-every-refreshed-session
+  - name: run-stores-its-stage-rows-and-index-timings
+  - name: unchanged-session-writes-no-outcome-row
+  - name: compare-only-session-writes-no-outcome-row
+  - name: native-refresh-writes-a-refresh-row
+  - name: stored-index-refresh-writes-a-refresh-row-and-an-index-row
+  - name: adapter-bump-refresh-writes-a-refresh-row
+  - name: forced-run-names-every-refresh-forced
+  - name: dry-run-stores-nothing
+  - name: cancelled-run-stores-the-profile-it-measured
+  - name: profiler-observations-scale-with-batches-sessions-and-stages

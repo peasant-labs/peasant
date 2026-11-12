@@ -51,7 +51,6 @@ func (r *writeLaneRecorder) observe(stage Stage, wait, busy time.Duration) {
 	if r == nil {
 		return
 	}
-	r.queued.Add(-1)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.stats.Jobs++
@@ -95,6 +94,8 @@ func (r *writeLaneRecorder) run(stage Stage, now func() time.Time, do func(func(
 	r.enqueue()
 	enqueued := now()
 	do(func() {
+		// The job holds the lane now: it is running, not waiting.
+		r.queued.Add(-1)
 		started := now()
 		job()
 		r.observe(stage, started.Sub(enqueued), now().Sub(started))

@@ -779,6 +779,9 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath, writeLane)
 		var insufficient *InsufficientRetainedInputError
 		if refreshed.result.Error == nil || !errors.As(refreshed.result.Error, &insufficient) {
+			// The adapter stamp is behind and the stored transcript served the
+			// refresh: no native read.
+			p.markRefreshReason(entry.Session.SessionID, OutcomeReasonRefreshAdapterBehind)
 			return refreshed
 		}
 	}

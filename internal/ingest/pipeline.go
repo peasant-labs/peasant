@@ -3215,10 +3215,25 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// rows selected forever instead of republishing them once. This is
 			// deliberately not sessionVersionTarget, which narrows only the index
 			// lane.
-			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || metadataNeedsNativeRefresh(loc.SchemaVersion) ||
-				(loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled) ||
-				adapterRevisionBehind(loc.AdapterVersion, p.versionTargets()[session.Harness]) {
+			// The captured comparison is the authority, so it also names why the
+			// session is refreshed. The first true term is the reason.
+			var reason OutcomeReason
+			switch {
+			case !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint):
+				reason = OutcomeReasonRefreshSourceChanged
+			case metadataNeedsNativeRefresh(loc.SchemaVersion):
+				reason = OutcomeReasonRefreshMetadataSchema
+			case loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled:
+				reason = OutcomeReasonRefreshPublicationUnbound
+			case adapterRevisionBehind(loc.AdapterVersion, p.versionTargets()[session.Harness]):
+				reason = OutcomeReasonRefreshAdapterBehind
+				if loc.AdapterVersion == nil {
+					reason = OutcomeReasonRefreshAdapterStampAbsent
+				}
+			}
+			if reason != 0 {
 				status = DiffUpdated
+				p.markRefreshReason(session.SessionID, reason)
 			}
 		}
 		// Captured-source evidence decides a supported source, and only a

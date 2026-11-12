@@ -86,10 +86,12 @@ func (p *Pipeline) markRefreshReason(sid SessionID, reason OutcomeReason) {
 // maintenance pass that queued it.
 func (p *Pipeline) refreshReasonFor(result SessionResult, named map[SessionID]OutcomeReason) OutcomeReason {
 	switch {
+	case p.config.Force:
+		// A forced run reports every session it processes as new, so the
+		// status cannot tell a first import from a forced refresh.
+		return OutcomeReasonRefreshForced
 	case result.Status == DiffNew:
 		return OutcomeReasonRefreshNew
-	case p.config.Force:
-		return OutcomeReasonRefreshForced
 	case named[result.SessionID] != 0:
 		return named[result.SessionID]
 	case p.config.Reindex:

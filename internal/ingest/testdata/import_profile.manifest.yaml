@@ -1,0 +1,16 @@
+# Required-name manifest for import_profile: deletion protection by NAME, never
+# by count.
+requiredNames:
+  - new-session-writes-a-refresh-row
+  - each-refreshed-session-has-exactly-one-refresh-row-per-run
+  - census-by-run-counts-every-refreshed-session
+  - run-stores-its-stage-rows-and-index-timings
+  - unchanged-session-writes-no-outcome-row
+  - compare-only-session-writes-no-outcome-row
+  - native-refresh-writes-a-refresh-row
+  - stored-index-refresh-writes-a-refresh-row-and-an-index-row
+  - adapter-bump-refresh-writes-a-refresh-row
+  - forced-run-names-every-refresh-forced
+  - dry-run-stores-nothing
+  - cancelled-run-stores-the-profile-it-measured
+  - profiler-observations-scale-with-batches-sessions-and-stages
