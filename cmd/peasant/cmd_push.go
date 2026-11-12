@@ -1760,14 +1760,16 @@ func firstPushStageError(transcriptErr, annotationErr error) error {
 	return annotationErr
 }
 
-// sourceHarnessHelp builds the --source-harness flag help text by deriving
-// the provider list from schema.AllHarnesses (the canonical ingestion-supported
-// harness set). Deriving — rather than hardcoding — means adding a new harness
-// to AllHarnesses updates this help string automatically, so it can never drift
-// out of sync with the providers peasant actually supports.
+// sourceHarnessHelp builds the --source-harness flag help text from
+// ingest.HarvestableHarnesses(), the harnesses this build has an adapter for.
+// Deriving it from the adapter registry, rather than hardcoding it or reading
+// the wider declared set, means the help lists exactly the harnesses whose
+// sessions this build can have stored, and changes when an adapter is added or
+// removed.
 func sourceHarnessHelp() string {
-	names := make([]string, len(schema.AllHarnesses))
-	for i, h := range schema.AllHarnesses {
+	harvestable := ingest.HarvestableHarnesses()
+	names := make([]string, len(harvestable))
+	for i, h := range harvestable {
 		names[i] = h.String()
 	}
 	return fmt.Sprintf("Filter to a specific harness (%s)", strings.Join(names, ", "))

@@ -17,6 +17,9 @@ var layoutHarnessYAML []byte
 //go:embed testdata/layout_harness.manifest.yaml
 var layoutHarnessManifestYAML []byte
 
+// Only test-owned tools are omitted from the production layout inventory.
+var syntheticLayoutTools = map[harnesslayout.Tool]bool{exampleTool: true, "scripted": true, "fixture-tool": true}
+
 // TestLayoutHarnessPairs pins the harness identity of every declared layout.
 // A tool that is its own product names its own known value; a tool that is one
 // more store of a product already known names that product. The fixture is the
@@ -85,9 +88,8 @@ func TestLayoutHarnessPairs(t *testing.T) {
 	// Every registered production layout must have a row. Test-only synthetic
 	// registrations are excluded by their known ids; a new real registration
 	// fails here until the fixture and manifest grow with it.
-	synthetic := map[harnesslayout.Tool]bool{"example-tool": true, "scripted": true, "fixture-tool": true}
 	for _, layout := range harnesslayout.Layouts() {
-		if synthetic[layout.Tool] {
+		if syntheticLayoutTools[layout.Tool] {
 			continue
 		}
 		if !covered[string(layout.Tool)] {

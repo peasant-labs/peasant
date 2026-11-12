@@ -1,0 +1,3 @@
+cases:
+  - {name: layout-help-lists-layout-only-kiro, harness: kiro, present: true}
+  - {name: layout-help-omits-harvestable-cursor, harness: cursor, present: false}

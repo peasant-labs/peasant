@@ -25,34 +25,32 @@ Because `schema.Harness` is an **alias**, not a defined type, it cannot carry it
 
 ### Known harnesses, declared support, and this build
 
-Three sets exist, and they are not the same set. Each has one owner. The block
-below is a pinned snapshot of those owners, and a test compares it to them:
+These sets describe different properties. The block below is a snapshot; a test
+compares its membership with the owners:
 
 <!-- harness-sets:begin -->
 known: claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike, pi, grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew
 declared: claude-code, gemini-cli, codex, opencode, cursor, strike, pi
-harvestable: claude-code, opencode, codex, cursor, strike, pi
-deprecated: gemini-cli
+harvestable: claude-code, codex, opencode, cursor, strike, pi
+layout-only: grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew
+archived: gemini-cli
 <!-- harness-sets:end -->
 
-Fourteen names are known, seven are declared ingestion-supported, and six are
-harvestable by this build. The owners are `bestiary.Harnesses()`, the
-`schema.AllHarnesses` export, and the adapter registry that
-`peasant harvest --help` prints. Do not restate this membership elsewhere.
+The known set comes from `bestiary.Harnesses()` through `schema.Harnesses()`;
+`schema.AllHarnesses` owns the declared set. The adapter registry owns what this
+build can harvest. Layout-only combines the layout registry with that adapter
+registry: a harness is in it when it has a layout but no adapter. The archived
+entry is the retained `gemini-cli` contract value. Do not restate the membership
+elsewhere.
 
-`gemini-cli` is declared and deprecated: it was replaced by the Antigravity
-products, so this build refuses it by name and no adapter is planned. It stays
-known and declared for wire compatibility with sessions that already carry it;
-stored rows are not rewritten, and retiring the value is a separate change.
+`gemini-cli` is archived: retained for history, never removed. It was replaced
+by the Antigravity products; this build refuses it by name and no adapter is
+planned. It stays known and declared for wire compatibility with existing
+sessions; stored rows are not rewritten.
 
-The single `antigravity` value is deliberate. It is not established whether its
-CLI and IDE products keep separate stores that update independently, so
-splitting it into separate identities is deferred until that evidence exists.
-
-A known harness with no adapter is either planned and not started (known minus
-declared) or deprecated (`gemini-cli`, no adapter planned). Those are not one
-status. Being known makes a value a legal wire value and lets the CLI refuse it
-by name; it does not make it harvestable, and it stores nothing.
+Being known makes a value a legal wire value and lets the CLI refuse it by
+name; it does not make it harvestable, and it stores nothing. A known value may
+have neither an adapter nor a layout.
 
 `peasant layout` is not ingestion. It records roots, shape, and metadata only —
 never transcript text — and it writes no session, no database row, and no wire
@@ -103,7 +101,7 @@ them.
 |---------|----------|
 | CLI `--source-harness` | Legacy `claude`/`gemini` → "renamed to X, rerun with X"; the `defaults.LegacyHarnessClaude`/`LegacyHarnessGemini` constants exist solely for this (`resolveHarnessFlag`, `cmd/peasant/cmd_harvest.go`). |
 | config YAML | Deprecated keys are **rejected with remediation, never silently mapped**: `sources.claude:` (→ `claude-code:`) and `selection.providers:` (→ `selection.harnesses:`). Implemented via `Deprecated*` capture fields + `validate()` in `internal/config/config.go`. |
-| CLI + adapters | Every known harness is recognized; `cursor` is ingested. `antigravity` and the six layout-stack harnesses are planned and not started; `gemini-cli` is declared and deprecated. See the [roster](#known-harnesses-declared-support-and-this-build). |
+| CLI + adapters | Every known harness is recognized; `cursor` is ingested. Layout-only harnesses have no adapter; `gemini-cli` is declared and archived. See the [roster](#known-harnesses-declared-support-and-this-build). |
 
 ## OpenAPI enum exposure
 

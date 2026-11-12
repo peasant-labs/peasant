@@ -1,6 +1,12 @@
 package defaults
 
-import "github.com/peasant-labs/schema"
+import (
+	"cmp"
+	"slices"
+	"strings"
+
+	"github.com/peasant-labs/schema"
+)
 
 // Harness identifies the coding tool or AI-assisted development environment.
 // Re-exported from schema (which re-exports from bestiary).
@@ -41,6 +47,43 @@ var AllHarnesses = schema.AllHarnesses
 // Harnesses returns every harness identifier known to bestiary (the full known
 // set, a superset of AllHarnesses). Re-exported from schema.
 var Harnesses = schema.Harnesses
+
+// InKnownOrder returns the distinct values of harnesses in the contract's known
+// order. A value the contract does not recognise sorts after the known values,
+// by name. No value is dropped.
+func InKnownOrder(harnesses []Harness) []Harness {
+	known := schema.Harnesses()
+	rank := make(map[Harness]int, len(known))
+	for index, harness := range known {
+		if _, ok := rank[harness]; !ok {
+			rank[harness] = index
+		}
+	}
+	seen := make(map[Harness]struct{}, len(harnesses))
+	ordered := make([]Harness, 0, len(harnesses))
+	for _, harness := range harnesses {
+		if _, ok := seen[harness]; ok {
+			continue
+		}
+		seen[harness] = struct{}{}
+		ordered = append(ordered, harness)
+	}
+	slices.SortFunc(ordered, func(a, b Harness) int {
+		rankA, knownA := rank[a]
+		rankB, knownB := rank[b]
+		switch {
+		case knownA && knownB:
+			return cmp.Compare(rankA, rankB)
+		case knownA:
+			return -1
+		case knownB:
+			return 1
+		default:
+			return strings.Compare(string(a), string(b))
+		}
+	})
+	return ordered
+}
 
 // HarnessDisplayName returns the human-readable name for a harness.
 var HarnessDisplayName = schema.HarnessDisplayName

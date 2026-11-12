@@ -8,10 +8,18 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/harnesslayout"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
 
 const defaultLayoutCaptureLimit = 5
+
+// layoutOnlyHarnesses composes the registered layouts and adapters without
+// making either registry depend on the other.
+func layoutOnlyHarnesses() []schema.Harness {
+	return harnesslayout.LayoutOnly(harnesslayout.Layouts(), ingest.HarvestableHarnesses())
+}
 
 // BuildLayoutCommand returns the layout command wired to the running host.
 func BuildLayoutCommand() *cobra.Command {
@@ -19,6 +27,11 @@ func BuildLayoutCommand() *cobra.Command {
 }
 
 func buildLayoutCommand(hostEnv func() (harnesslayout.Env, error), open func(string) harnesslayout.Source) *cobra.Command {
+	harnesses := layoutOnlyHarnesses()
+	names := make([]string, 0, len(harnesses))
+	for _, harness := range harnesses {
+		names = append(names, harness.String())
+	}
 	layoutCmd := &cobra.Command{
 		Use:   "layout",
 		Short: "Describe and capture the storage layout of tools Peasant does not ingest yet",
@@ -33,7 +46,9 @@ a public issue.
 
 The report records roots, shape, and metadata only. It does not store a session,
 and it does not make the tool a harness: a tool's harness identity is declared in
-bestiary and the schema, not observed here.`,
+bestiary and the schema, not observed here.
+
+Layout-only harnesses (no adapter): ` + strings.Join(names, ", ") + ".",
 	}
 
 	listCmd := &cobra.Command{

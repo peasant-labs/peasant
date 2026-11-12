@@ -7,7 +7,7 @@ import (
 	"slices"
 
 	"github.com/peasant-labs/peasant/internal/config"
-	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/redact"
 )
 
@@ -60,7 +60,7 @@ func (c *Config) SaveTo(path string, loaded *config.Config) error {
 	cfg.Daemon.ProjectMode = c.DaemonMode
 	cfg.Push.Method = config.PushMethod(c.ImportMethod)
 	cfg.Push.Sources = c.ImportSources
-	for _, harness := range defaults.AllHarnesses {
+	for _, harness := range ingest.HarvestableHarnesses() {
 		if source, ok := cfg.Sources.Provider(harness); ok {
 			source.Enabled = slices.Contains(c.ImportSources, harness.String())
 		}

@@ -22,26 +22,6 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// TestPushCmd_SourceHarnessHelpDerived pins the --source-harness flag's help
-// text to schema.AllHarnesses on the ACTUAL flag wired into BuildPushCommand().
-// sourceHarnessHelp() derives the provider list so it can never go stale, but a
-// derived helper that is never attached to the flag (or a regression that
-// re-hardcodes the usage string) would still pass the rest of make check. This
-// test fails if the flag is missing/unwired or if any supported harness is absent
-// from its usage, preserving the derived rather than hardcoded contract.
-func TestPushCmd_SourceHarnessHelpDerived(t *testing.T) {
-	t.Parallel()
-	flag := BuildPushCommand().Flags().Lookup("source-harness")
-	if flag == nil {
-		t.Fatal("--source-harness flag is not registered on the push command")
-	}
-	for _, h := range schema.AllHarnesses {
-		if !strings.Contains(flag.Usage, h.String()) {
-			t.Errorf("--source-harness usage %q is missing harness %q; help must be derived from schema.AllHarnesses, not hardcoded", flag.Usage, h.String())
-		}
-	}
-}
-
 // executePushCmd is a test helper that runs the push cobra command under a root
 // carrying --data-dir=dir, --config-dir=dir AND --state-dir=dir (one temp dir
 // isolates data + config + state), captures combined stdout+stderr, and returns

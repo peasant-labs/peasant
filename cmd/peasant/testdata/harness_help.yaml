@@ -1,0 +1,21 @@
+# Subject: the harness lists that command help derives from the registries.
+# Each case names a help surface, one harness token, and whether that token is
+# listed or omitted. The test parses the surface's list into tokens and
+# compares tokens, never substrings.
+#
+# Surfaces (a closed switch in the test; an unknown surface fails):
+#   push-source-harness -> the usage of --source-harness on BuildPushCommand(),
+#                          derived from ingest.HarvestableHarnesses()
+#
+# mutation names the change to the help derivation that turns the case red.
+cases:
+  - name: push-help-lists-claude-code
+    surface: push-source-harness
+    token: claude-code
+    want: listed
+    mutation: the help is derived from an empty set, or no longer attached to the flag
+  - name: push-help-omits-archived-gemini-cli
+    surface: push-source-harness
+    token: gemini-cli
+    want: omitted
+    mutation: the help is left on the declared set (schema.AllHarnesses)

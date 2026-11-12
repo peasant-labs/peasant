@@ -1,0 +1,27 @@
+cases:
+  - name: known
+    owner: schema-harnesses
+    disjoint: false
+    subsetOf: []
+  - name: declared
+    owner: schema-declared
+    disjoint: false
+    subsetOf:
+      - label: known
+  - name: harvestable
+    owner: adapter-registry
+    disjoint: true
+    subsetOf:
+      - label: known
+      - label: declared
+        reason: the metric reader and session source reader accept only declared harnesses
+  - name: layout-only
+    owner: layout-minus-adapters
+    disjoint: true
+    subsetOf:
+      - label: known
+  - name: archived
+    owner: archived-gemini
+    disjoint: true
+    subsetOf:
+      - label: known
