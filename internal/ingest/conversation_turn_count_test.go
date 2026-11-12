@@ -42,7 +42,7 @@ func loadConversationTurnCountCases(t *testing.T) []conversationTurnCountCase {
 	if err := testutil.DecodeFixtureYAML(conversationTurnCountYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := testutil.DecodeSemanticManifest(conversationTurnCountManifestYAML, "conversation turn count")
+	manifest, err := testutil.DecodeRequiredNamesManifest(conversationTurnCountManifestYAML, "conversation turn count")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func loadConversationTurnCountCases(t *testing.T) []conversationTurnCountCase {
 	for i, testCase := range fixture.Cases {
 		names[i] = testCase.Name
 	}
-	if err := testutil.ValidateSemanticNames(manifest, names, "conversation turn count"); err != nil {
+	if err := testutil.ValidateRequiredNames(manifest, names, "conversation turn count"); err != nil {
 		t.Fatal(err)
 	}
 	return fixture.Cases

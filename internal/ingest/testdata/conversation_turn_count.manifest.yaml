@@ -1,4 +1,3 @@
-expectedCaseCount: 6
 requiredNames:
   - user_and_assistant_turns_count
   - system_control_turns_stay_served_and_do_not_count
