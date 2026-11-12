@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
 import { applyDeterminism } from './determinism.mjs'
 import { SurfaceGate } from './surface-gate.mjs'
+import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from './lib/owned-server-start.mjs'
+import { groupedSyncPayload } from './grouped-sync-payload.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -22,7 +25,11 @@ const VIEWPORTS = [
   { id: 'narrow-320', width: 320, height: 844 },
 ]
 const pause = (ms) => new Promise((resolvePause) => setTimeout(resolvePause, ms))
-const fail = (message) => { throw new Error(`Share geometry gate failed: ${message}`) }
+const fail = (message, exit = false) => {
+  const detail = `Share geometry gate failed: ${message}`
+  if (exit) { console.error(`ERROR [share-geometry] ${detail}`); process.exit(2) }
+  throw new Error(detail)
+}
 
 function filesBelow(directory) {
   if (!existsSync(directory)) return []
@@ -117,6 +124,9 @@ async function installMocks(page) {
     const url = new URL(request.url())
     if (url.origin !== ORIGIN) return void request.continue()
     if (url.pathname === '/api/v1/config/mock') return void request.respond(jsonResponse({ enabled: false }))
+    // The chooser reads the grouped sync list. It is answered from the fixture, like the other reads, so the
+    // geometry is measured on the fixture's sessions and not on those of the store the server was started on.
+    if (url.pathname === '/api/v1/sync/sessions') return void request.respond(jsonResponse(groupedSyncPayload(FIXTURE.sessions)))
     if (url.pathname === '/api/v1/sessions') return void request.respond(jsonResponse({ sessions: FIXTURE.sessions }))
     if (url.pathname === '/api/v1/web/discovery') return void request.respond(jsonResponse({ items: FIXTURE.discovery }))
     if (url.pathname === '/api/v1/annotations') return void request.respond(jsonResponse({ annotations: [] }))
@@ -158,14 +168,14 @@ if (!CHROME) fail('CHROME_PATH is unset; set it to a Chrome or Chromium executab
 const chunk = assertProvenance()
 mkdirSync(OUT, { recursive: true })
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
-const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', '--mock-data-store=web,sessions,annotations'], { cwd: REPO, stdio: ['ignore', 'ignore', 'pipe'] })
-let serverError = ''
-server.stderr.on('data', (data) => { serverError += data.toString() })
+// The server's configuration, data, state and cache directories and its HOME are a throwaway root of this run,
+// so it never opens the store of the person running the script. The mock data store supplies what it serves.
+const sandbox = ownedServerSandbox('share-geometry')
+// It is started only when nothing answers on the port yet, and the wait ends when it answers or has exited,
+// so the pages are never driven against a server this run did not start.
+const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_SHARE_GEOMETRY_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,annotations'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) }).catch((error) => fail(error.message, true))
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: null })
 try {
-  let healthy = false
-  for (let attempt = 0; attempt < 40 && !healthy; attempt++) { healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200; if (!healthy) await pause(250) }
-  if (!healthy) fail(`real built binary did not become healthy at ${ORIGIN}: ${serverError.trim()}`)
   const served = await fetch(`${ORIGIN}/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk).split('\\').join('/')}`)
   if (served.status !== 200 || !(await served.text()).includes('share-footer-actions')) fail('served build provenance does not match the exact worktree artifacts; stop stale servers and rebuild')
   console.log(`provenance chunk=${relative(REPO, chunk)} binaryMarker=share-footer-actions served=true`)
