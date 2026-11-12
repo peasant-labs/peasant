@@ -1,0 +1,64 @@
+# Self-check rows for a cut's conversation turn positions. Each row states the
+# refs a cut returned, the session's canonical conversation turn count, and the
+# fault the check must report. A row without a fault is a sound cut.
+cases:
+  # A ref without a span: the position of every later segment is unknowable.
+  - name: presence
+    canonical: 5
+    refs:
+      - {index: 0, conversationTurns: {before: 0, count: 2}}
+      - {index: 1}
+      - {index: 2, conversationTurns: {before: 2, count: 3}}
+    fault:
+      rule: presence
+      segment: 1
+      want: 1
+      got: 0
+      messageContains: ["transcript.CheckConversationTurns", "segment 1", "carries no conversationTurns span", "served without conversationTurns and totalConversationTurns"]
+  # Segment 2 starts one past where segment 1 ended, so a turn would be skipped.
+  - name: continuity
+    canonical: 9
+    refs:
+      - {index: 0, conversationTurns: {before: 0, count: 2}}
+      - {index: 1, conversationTurns: {before: 2, count: 3}}
+      - {index: 2, conversationTurns: {before: 6, count: 3}}
+    fault:
+      rule: continuity
+      segment: 2
+      want: 5
+      got: 6
+      messageContains: ["segment 2", "declares 6 conversation turns before it", "earlier segments hold 5", "start every span at the running count"]
+  # A negative count is a continuity fault at its own segment, even though the
+  # next segment's before would agree with the arithmetic.
+  - name: continuity-negative-count
+    canonical: 4
+    refs:
+      - {index: 0, conversationTurns: {before: 0, count: 2}}
+      - {index: 1, conversationTurns: {before: 2, count: -1}}
+      - {index: 2, conversationTurns: {before: 1, count: 3}}
+    fault:
+      rule: continuity
+      segment: 1
+      want: 0
+      got: -1
+      messageContains: ["segment 1", "declares -1 as a conversation turn count or start", "neither can be below 0"]
+  # Every span is continuous, but the refs hold fewer conversation turns than
+  # the session's canonical count.
+  - name: canonical
+    canonical: 7
+    refs:
+      - {index: 0, conversationTurns: {before: 0, count: 2}}
+      - {index: 1, conversationTurns: {before: 2, count: 0}}
+      - {index: 2, conversationTurns: {before: 2, count: 3}}
+    fault:
+      rule: canonical
+      segment: -1
+      want: 7
+      got: 5
+      messageContains: ["hold 5 conversation turns in total", "canonical count is 7", "ingest.ConversationTurnCount"]
+  - name: sound
+    canonical: 5
+    refs:
+      - {index: 0, conversationTurns: {before: 0, count: 2}}
+      - {index: 1, conversationTurns: {before: 2, count: 0}}
+      - {index: 2, conversationTurns: {before: 2, count: 3}}

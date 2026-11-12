@@ -6,3 +6,7 @@ requiredNames:
   - cut-single-turn
   - cut-empty-session
   - cut-includes-tool-call-bytes
+  - cut-positions-skip-uncounted-rows
+  - cut-positions-single-conversation-turn
+  - cut-positions-no-conversation-turns-segment
+  - cut-positions-zero-count-middle-segment
