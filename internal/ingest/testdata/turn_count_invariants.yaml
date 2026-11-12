@@ -1,0 +1,59 @@
+# One session read at one revision states each turn number once:
+#   the detail's turnCount             == the segment directory's totalTurns
+#   the detail's conversationTurnCount == the directory's totalConversationTurns
+#                                      == the stored conversation_turn_count
+# Every expected value is a literal, and the two counts of a session differ.
+#
+# The capture below holds a prompt, a thinking-only reply, a tool-only reply
+# with its result, a prose reply, a system row and a prompt with an image. The
+# test first asserts the served turns include a system row, a tool row and an
+# image, so the counts are measured over rows the allowed list must skip.
+#
+# path:
+#   unmanaged  the stored indexer's entries, written through the entry lane
+#   managed    the indexer's built generation, activated as a candidate
+#
+# An entry-less session has no fold and no directory: its stored counts are
+# served as they are.
+requiredNames:
+  - counts-unmanaged-session
+  - counts-managed-session
+  - counts-entry-less-unmanaged
+  - counts-entry-less-managed
+capture:
+  - '{"type":"user","uuid":"u1","timestamp":"2026-01-02T10:00:00Z","message":{"role":"user","content":"what changed?"}}'
+  - '{"type":"assistant","uuid":"a1","timestamp":"2026-01-02T10:00:01Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"pondering the diff"}]}}'
+  - '{"type":"assistant","uuid":"a2","timestamp":"2026-01-02T10:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_9","name":"Read","input":{"path":"diff.go"}}]}}'
+  - '{"type":"user","uuid":"t9","timestamp":"2026-01-02T10:00:03Z","message":{"role":"tool","content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"changed lines"}]}}'
+  - '{"type":"assistant","uuid":"a3","timestamp":"2026-01-02T10:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"The diff looks good."}]}}'
+  - '{"type":"system","uuid":"s1","timestamp":"2026-01-02T10:00:05Z","content":"context compacted"}'
+  - '{"type":"user","uuid":"u2","timestamp":"2026-01-02T10:02:00Z","message":{"role":"user","content":[{"type":"text","text":"look at this diagram"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]}}'
+cases:
+  - name: counts-unmanaged-session
+    path: unmanaged
+    wantTurnCount: 6
+    wantConversationTurnCount: 3
+  - name: counts-managed-session
+    path: managed
+    wantTurnCount: 7
+    wantConversationTurnCount: 3
+    # Known gap, not the intended state. The detail and the stored count fold
+    # the generation's own entries and serve the prose-less tool carrier as a
+    # turn. The segment directory folds the mirror rows, where that carrier has
+    # no source ref and no preview, and drops it. So totalTurns reads 6 while
+    # turnCount reads 7. The conversation count is not affected: the carrier
+    # is a tool_use row. Remove this line when the directory folds the same
+    # entries as the detail; the row then requires 7 on both.
+    directoryTotalTurnsGap: 6
+  - name: counts-entry-less-unmanaged
+    path: entry-less-unmanaged
+    storedTurnCount: 6
+    storedConversationTurnCount: 5
+    wantTurnCount: 6
+    wantConversationTurnCount: 5
+  - name: counts-entry-less-managed
+    path: entry-less-managed
+    storedTurnCount: 8
+    storedConversationTurnCount: 7
+    wantTurnCount: 8
+    wantConversationTurnCount: 7
