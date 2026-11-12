@@ -8,7 +8,35 @@ was tagged but not published links to its tag instead.
 
 ## [Unreleased]
 
+### Added
+- `peasant migrate --schema-only` upgrades the store schema and stops before
+  converting sessions.
+
 ### Changed
+- Commands now show the store upgrade steps instead of running them silently.
+  At a terminal, a quick upgrade runs without asking when disk space is not
+  tight; an upgrade with a long step or tight free disk asks first.
+- A git hook that encounters a long upgrade skips publishing and exits 0, so
+  it does not block git. It names `peasant migrate --schema-only` to run in a
+  terminal before pushing again. A script or CI run also skips a long upgrade
+  and exits non-zero; `peasant migrate --schema-only --confirm` permits it
+  without a prompt.
+- The local web server refuses to start when the store needs an upgrade and
+  names `peasant migrate --schema-only` to run in a terminal. Run
+  `peasant web start` in a terminal to upgrade first and then start the server.
+- `peasant migrate` runs the schema upgrade as its first phase, before its
+  session conversion phases. `peasant migrate --dry-run` prints the upgrade
+  plan for a store that needs it without changing anything.
+- An import no longer rewrites an unchanged transcript or re-indexes it just
+  because its metadata changed. For example, an adapter version bump can
+  update only the metadata. An indexer upgrade or an explicit re-index can
+  still re-index the transcript.
+- Unreferenced image files are collected once at the end of an import instead
+  of after every session. If a run stops early, the next completed run retries
+  the collection.
+- Discovery shows how many files it has processed out of the total and how many
+  required re-reading, for example:
+  `Discovering Claude Code sessions... (812/13631) · 219 required re-read`.
 - Every import keeps its timing profile: `peasant harvest`, the kickstart
   import and the import started from the local web app each store it with the
   run's audit row. `harvest --profile-index` now only decides whether the
@@ -21,6 +49,10 @@ was tagged but not published links to its tag instead.
   stages it measured.
 
 ### Database
+- A store upgrade estimates the free disk it needs and refuses before the first
+  step if there is not enough. If free space is unknown, it warns before a long
+  step and continues. Ctrl-C rolls back the running step and keeps the finished
+  steps; run `peasant migrate --schema-only` to resume.
 - Migration 77 stores a profile of every import. `ingest_run_stages` holds one
   row per pipeline stage per run (duration, counts, bytes, time spent waiting
   for the write lane), kept for the latest 100 runs, and `index_log` gains
