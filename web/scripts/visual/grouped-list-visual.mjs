@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from '../journey/lib/owned-server-start.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -308,14 +309,11 @@ const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core'))
 // The server's configuration, data, state and cache directories and its HOME are a throwaway root of this run,
 // so it never opens the store of the person running the script. The mock data store supplies what it serves.
 const sandbox = ownedServerSandbox('grouped-list-visual')
-const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,search'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] })
-let serverError = ''
-server.stderr.on('data', (data) => { serverError += data.toString() })
+// It is started only when nothing answers on the port yet, and the wait ends when it answers or has exited,
+// so the pages are never driven against a server this run did not start.
+const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_GROUPED_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,search'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) })
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: null })
 try {
-  let healthy = false
-  for (let i = 0; i < 40 && !healthy; i++) { healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200; if (!healthy) await pause(250) }
-  if (!healthy) fail(`real binary did not become healthy on ${ORIGIN}: ${serverError.trim()}`)
 
   const servedPaths = chunks.map((chunk) => `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk.path).split('\\').join('/')}`)
   for (const [index, servedPath] of servedPaths.entries()) {

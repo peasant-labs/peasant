@@ -35,8 +35,6 @@ export function groupedSyncPayload(sessions) {
     perPage: 25,
     revision: 'visual-fixture',
     total: items.length,
-    limit: items.length,
-    totalItems: items.length,
     ordinarySessionTotal: sessions.length,
     helperThreadTotal: sessions.reduce((total, session) => total + (session.helperGroups || []).reduce((count, group) => count + group.helperThreadCount, 0), 0),
   }

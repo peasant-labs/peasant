@@ -6,6 +6,7 @@ import YAML from 'yaml'
 import { applyDeterminism } from './determinism.mjs'
 import { SurfaceGate } from './surface-gate.mjs'
 import { ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from '../journey/lib/owned-server-start.mjs'
 import { groupedSyncPayload } from './grouped-sync-payload.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -166,14 +167,11 @@ const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core'))
 // The server's configuration, data, state and cache directories and its HOME are a throwaway root of this run,
 // so it never opens the store of the person running the script. The mock data store supplies what it serves.
 const sandbox = ownedServerSandbox('share-geometry')
-const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,annotations'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] })
-let serverError = ''
-server.stderr.on('data', (data) => { serverError += data.toString() })
+// It is started only when nothing answers on the port yet, and the wait ends when it answers or has exited,
+// so the pages are never driven against a server this run did not start.
+const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_SHARE_GEOMETRY_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,annotations'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) })
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: null })
 try {
-  let healthy = false
-  for (let attempt = 0; attempt < 40 && !healthy; attempt++) { healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200; if (!healthy) await pause(250) }
-  if (!healthy) fail(`real built binary did not become healthy at ${ORIGIN}: ${serverError.trim()}`)
   const served = await fetch(`${ORIGIN}/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk).split('\\').join('/')}`)
   if (served.status !== 200 || !(await served.text()).includes('share-footer-actions')) fail('served build provenance does not match the exact worktree artifacts; stop stale servers and rebuild')
   console.log(`provenance chunk=${relative(REPO, chunk)} binaryMarker=share-footer-actions served=true`)

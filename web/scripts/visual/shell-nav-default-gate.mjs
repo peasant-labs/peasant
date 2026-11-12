@@ -22,9 +22,9 @@
  */
 import { spawn } from 'node:child_process'
 import YAML from 'yaml'
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
-import { isolatedServerSandbox } from '../journey/lib/isolated-sandbox.mjs'
-import { tmpdir } from 'node:os'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs'
+import { directoryNamedBy, ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from '../journey/lib/owned-server-start.mjs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import { SurfaceGate } from './surface-gate.mjs'
@@ -121,12 +121,12 @@ const STILL_PATTERN = new RegExp(`^${escapeRegExp(ANNOUNCE.stillStopped)} \\d{2}
 // Every directory the server reads or writes is under one throwaway root, so it never opens the store,
 // the configuration or the recordings of the person running the gate. A configuration or data directory
 // the caller names is theirs: it is used as given and kept. Naming only a configuration directory still
-// leaves the data directory in the sandbox.
-const sandbox = isolatedServerSandbox(
-  mkdtempSync(join(tmpdir(), 'peasant-offline-gate-')),
-  { configDir: process.env.PEASANT_OFFLINE_CONFIG_DIR, dataDir: process.env.PEASANT_OFFLINE_DATA_DIR },
-  process.env,
-)
+// leaves the data directory in the sandbox. A relative path is taken from the directory the gate was run
+// in. The root is removed when the gate's process exits; a directory the caller named lies outside it.
+const sandbox = ownedServerSandbox('offline-gate', {
+  configDir: directoryNamedBy('PEASANT_OFFLINE_CONFIG_DIR'),
+  dataDir: directoryNamedBy('PEASANT_OFFLINE_DATA_DIR'),
+})
 mkdirSync(OUT, { recursive: true })
 const serverLog = join(OUT, 'server.log')
 closeSync(openSync(serverLog, 'w')) // one run per log: earlier runs never mix into the one a failure points to
@@ -141,18 +141,19 @@ const healthAnswers = async () => {
   }
 }
 
+// Refused when something already answers on the port, so the gate never judges a server it did not start.
 const startServer = async () => {
-  if (await healthAnswers()) throw new Error(`something already answers on ${ORIGIN}; stop it or set PEASANT_OFFLINE_PORT to a free port`)
   const log = openSync(serverLog, 'a')
-  server = spawn(BIN, ['web', 'start', '--port', String(PORT), '--foreground', '--no-browser', ...sandbox.args, `--mock-data-store=${SMOKE_MOCKS}`], { env: sandbox.env, stdio: ['ignore', log, log] })
-  closeSync(log)
-  const started = Date.now()
-  while (Date.now() - started < 20000) {
-    if (server.exitCode !== null) throw new Error(`${BIN} exited with ${server.exitCode} before answering; see ${serverLog}`)
-    if (await healthAnswers()) return
-    await pause(200)
+  try {
+    server = await startOwnedServer({
+      port: PORT,
+      portVariable: 'PEASANT_OFFLINE_PORT',
+      log: serverLog,
+      start: () => server = spawn(BIN, ['web', 'start', '--port', String(PORT), '--foreground', '--no-browser', ...sandbox.args, `--mock-data-store=${SMOKE_MOCKS}`], { env: sandbox.env, stdio: ['ignore', log, log] }),
+    })
+  } finally {
+    closeSync(log)
   }
-  throw new Error(`${BIN} did not answer ${ORIGIN}/api/v1/health within 20s; see ${serverLog}`)
 }
 
 const stopServer = async () => {
@@ -166,15 +167,9 @@ const stopServer = async () => {
   if (await healthAnswers()) throw new Error(`${ORIGIN} still answers after the server was stopped`)
 }
 
-// Only the root this run made. A directory the caller named lies outside it and is kept.
-const removeSandbox = () => {
-  try { rmSync(sandbox.root, { recursive: true, force: true }) } catch {}
-}
-
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     try { server?.kill('SIGKILL') } catch {}
-    removeSandbox()
     process.exit(130)
   })
 }
@@ -521,7 +516,6 @@ try {
 } finally {
   try { await browser?.close() } catch {}
   try { await stopServer() } catch {}
-  removeSandbox()
 }
 
 if (!process.exitCode) {

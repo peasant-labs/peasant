@@ -29,6 +29,7 @@ import { assertKnownProject } from './validate-mock-coordinates.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { loadStrikeSmokeFixture } from './strike-smoke-fixture.mjs'
 import { ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from '../journey/lib/owned-server-start.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')            // .../peasant/<worktree>
@@ -309,7 +310,9 @@ console.log(`[smoke] starting ${BIN} on :${PORT} (mock store: ${MOCKS}) …`)
 // The server's configuration, data, state and cache directories and its HOME are a throwaway root of this run,
 // so it never opens the store of the person running the script. The mock data store supplies what it serves.
 const sandbox = ownedServerSandbox('full-app-smoke')
-const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, `--mock-data-store=${MOCKS}`], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'inherit'] })
+// It is started only when nothing answers on the port yet, and the wait ends when it answers or has exited,
+// so the pages are never driven against a server this run did not start.
+const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_SMOKE_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, `--mock-data-store=${MOCKS}`], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'inherit'] }) }).catch((error) => { console.error(`ERROR [full-app-smoke] ${error.message}`); process.exit(2) })
 let serverDown = false
 server.on('exit', () => { serverDown = true })
 
@@ -321,10 +324,6 @@ const httpGet = async (path) => {
   const res = await fetch(ORIGIN + path).catch(() => null)
   return res ? res.status : 0
 }
-// poll health
-let healthy = false
-for (let i = 0; i < 40 && !healthy; i++) { if (await httpGet('/api/v1/health') === 200) healthy = true; else await pause(500) }
-if (!healthy) { console.error('ERROR [full-app-smoke] server never became healthy.'); await teardown(); process.exit(2) }
 
 // Fail-fast coordinate check BEFORE driving any surface — see validate-mock-coordinates.mjs for why
 // (this is the systemic guard against the recurring stale-mock-project-default class of bug).

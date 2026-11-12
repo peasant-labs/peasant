@@ -247,23 +247,41 @@ mock data store supplies what the pages show, so no such script needs your recor
 may open `~/.local/share/peasant` or `~/.config/peasant`.
 - **the helpers:** `scripts/journey/lib/isolated-sandbox.mjs` lays the directories out and returns the
   flags and the environment; `scripts/journey/lib/owned-server-sandbox.mjs` also makes the root and
-  removes it when the script exits. A new script that starts the binary uses one of them and passes BOTH
-  `...sandbox.args` and `env: sandbox.env` to `spawn`. Setting only `--config-dir` is the mistake this
-  replaces: the binary then opens the data directory of whoever runs the script.
+  removes it when the script exits; `scripts/journey/lib/owned-server-start.mjs` starts the server. A new
+  script that starts the binary uses them and passes BOTH `...sandbox.args` and `env: sandbox.env` to
+  `spawn`. Setting only `--config-dir` is the mistake this replaces: the binary then opens the data
+  directory of whoever runs the script.
+- **a port that already answers is refused:** `startOwnedServer` checks `/api/v1/health` on the script's
+  port before it starts anything and stops with the port and the script's port variable when something
+  answers, so a server left from an earlier run is never driven in place of this run's. Its wait ends as
+  soon as the server it started has exited.
 - **who uses them:** `full-app-smoke.mjs`, `context-navigation-shoot.mjs`, `search-share-visual.mjs`,
   `publish-states-shoot.mjs`, `share-geometry.mjs`, `grouped-list-visual.mjs` and
-  `shell-nav-default-gate.mjs`. `home-pages-visual.mjs`, `root-page-visual.mjs`, `settings-shoot.mjs` and
-  `transcript-segments-shoot.mjs` already give the binary its own config, data and state directories in
-  their own way.
+  `shell-nav-default-gate.mjs`.
+- **the other scripts that start the binary** isolate it in their own way, and not all to the same extent:
+  - `home-pages-visual.mjs`, `root-page-visual.mjs`: `HOME` and the config, data, state and cache XDG
+    variables, all under one temp root.
+  - `settings-shoot.mjs`: a temp `HOME` and the config, data and state XDG variables under it. The cache
+    variable is inherited.
+  - `transcript-segments-shoot.mjs`: `--data-dir`, `--config-dir` and `--state-dir` of a seeded temp
+    store. It keeps your real `HOME` and cache directory, so the store, configuration and state are its
+    own but anything the binary finds through `HOME` is yours.
+  - `scripts/journey/api-binary.test.mjs`, `scripts/journey/run-collective-observations.mjs`: `HOME` and
+    the config, data and state XDG variables under their own root. The cache variable is inherited.
+- **what the binary inherits:** the rest of the script's environment, without `OPENCODE_DB` and
+  `OPENCODE_DISABLE_CHANNEL_DB`, which name a database by path past every directory above.
 - **naming a directory yourself:** only `shell-nav-default-gate.mjs` takes one
   (`PEASANT_OFFLINE_CONFIG_DIR`, `PEASANT_OFFLINE_DATA_DIR`); a directory you name is used as given and
-  kept, and one you do not name stays in the sandbox.
+  kept, and one you do not name stays in the sandbox. A relative path is taken from the directory you
+  run the gate in.
 - **what a page lists comes from a fixture too:** `share-geometry.mjs` used to leave the chooser's
   `GET /api/v1/sync/sessions` to the server, so it measured whatever store the server had opened. It now
   answers that route from `testdata/search-share.yaml` through `grouped-sync-payload.mjs`, the builder
   `search-share-visual.mjs` already used.
-- **the check:** `scripts/journey/testdata/lifecycle.yaml` (`server-sandbox-*`, `owned-server-sandbox-*`),
-  run by `pnpm test:journey:support`.
+- **the check:** `scripts/journey/testdata/server-sandbox.yaml`, run by `pnpm test:journey:support`
+  (`scripts/journey/server-sandbox.test.mjs`). It also reads every script under `web/scripts`: one that
+  starts `peasant web start` must be in that file's `scripts.required` list (and pass the whole sandbox on
+  its spawn) or in `scripts.exempt` with what it isolates instead.
 - **a server you start by hand** (§2) uses your own directories unless you pass the three flags.
 
 ### 3. `full-app-smoke.mjs` — the durable real-binary gate for every visual change
