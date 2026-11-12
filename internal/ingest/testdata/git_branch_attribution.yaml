@@ -1,5 +1,6 @@
 # Which branch a session belongs to. The branch it recorded wins; the branch
-# checked out in its directory counts only when it recorded none.
+# checked out in its directory counts only when it recorded none. HEAD is git's
+# word for a detached checkout, which is on no branch, so it is never a branch.
 # requiredNames is the deletion guard: every name below must still be present.
 requiredNames:
   - recorded-branch-wins-over-checkout
@@ -10,6 +11,8 @@ requiredNames:
   - git-not-asked-without-a-directory
   - no-resolver-keeps-the-recorded-branch
   - no-resolver-and-nothing-recorded-is-empty
+  - detached-checkout-is-no-branch
+  - recorded-detached-head-is-no-branch-and-git-is-not-asked
 cases:
   - name: recorded-branch-wins-over-checkout
     dir: /work/tool
@@ -52,5 +55,19 @@ cases:
   - name: no-resolver-and-nothing-recorded-is-empty
     dir: /work/tool
     noResolver: true
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  # git rev-parse --abbrev-ref HEAD prints HEAD in a detached checkout.
+  - name: detached-checkout-is-no-branch
+    dir: /work/tool
+    checkout: HEAD
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  # A recording that names HEAD says the session ran on no branch. The checkout
+  # does not answer for it: it may sit on a branch the session never saw.
+  - name: recorded-detached-head-is-no-branch-and-git-is-not-asked
+    dir: /work/tool
+    recordedBranch: HEAD
+    checkout: main
     wantBranch: ""
     wantCheckoutCalls: 0

@@ -38,7 +38,7 @@ func Scan(
 	if cfg == nil {
 		return inventory, sessions, subagents
 	}
-	staleness := ConfigStaleness(cfg)
+	staleness := cfg.StalenessWindow()
 
 	for provider, factory := range ingest.DefaultAdapterRegistry {
 		src, ok := configuredSource(cfg, provider)
@@ -84,16 +84,11 @@ func Scan(
 			projectName := d.ProjectName
 			title := d.Title
 			workingDir := d.CWD
-			var gitRemote string
-			claudeProjectDir := ""
 
 			if provider == defaults.HarnessClaudeCode {
 				slug := filepath.Base(filepath.Dir(string(d.SourcePath)))
-				if decoded := DecodeClaudeSlugToPath(slug); decoded != "" {
-					claudeProjectDir = decoded
-					if projectName == "" {
-						projectName = ShortenPath(decoded)
-					}
+				if decoded := DecodeClaudeSlugToPath(slug); decoded != "" && projectName == "" {
+					projectName = ShortenPath(decoded)
 				}
 				if projectName == "" {
 					projectName = ClaudeSlugToProjectName(slug)
@@ -102,18 +97,17 @@ func Scan(
 
 			record, stored := reusable(known, d, staleness)
 			if stored {
-				gitRemote = record.GitRemote
 				if title == "" {
 					title = record.Title
 				}
 				if workingDir == "" {
 					workingDir = record.WorkingDirectory()
 				}
-			} else {
-				gitRemote = ResolveSessionRemote(ctx, git, d, claudeProjectDir)
 			}
-			// The import filter asks the same function with the same index, so the
-			// branch a session is listed under is the branch it is judged by.
+			// The import filter asks the same functions with the same index, so the
+			// remote and the branch a session is listed under are the remote and
+			// the branch it is judged by.
+			gitRemote := ingest.SessionRemoteFor(ctx, git, d, record, stored)
 			branchName := ingest.SessionBranchFor(ctx, git, d, record, stored)
 
 			sessions = append(sessions, SessionListing{
@@ -196,19 +190,6 @@ func configuredSource(cfg *config.Config, harness defaults.Harness) (ingest.Sour
 	return ingest.SourceConfig{Paths: paths, Enabled: configured.Enabled}, true
 }
 
-// ConfigStaleness returns the window inside which a source file counts as still
-// being written. Ingest and a re-scan read it the same way.
-func ConfigStaleness(cfg *config.Config) time.Duration {
-	if cfg == nil {
-		return time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-	}
-	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
-	if staleness == 0 {
-		staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-	}
-	return staleness
-}
-
 // FilterRootSessions returns only root sessions. A subagent session is never
 // selectable or ingestable on its own.
 func FilterRootSessions(discovered []ingest.DiscoveredSession) []ingest.DiscoveredSession {
@@ -253,41 +234,6 @@ func ExpandAllowedSessionIDs(selected []SessionListing) map[ingest.SessionID]boo
 		}
 	}
 	return allowed
-}
-
-// ResolveSessionRemote walks git for one discovered session's remote. Its
-// branch is not resolved here: ingest.SessionBranchFor owns that, for the
-// tree and for the import filter alike.
-func ResolveSessionRemote(
-	ctx context.Context,
-	git ingest.GitResolver,
-	d ingest.DiscoveredSession,
-	claudeProjectDir string,
-) string {
-	if git == nil {
-		return ""
-	}
-	var gitRemote string
-	if claudeProjectDir != "" {
-		if remote, err := git.RemoteURL(ctx, claudeProjectDir); err == nil && remote != "" {
-			gitRemote = remote
-		}
-	}
-	if gitRemote == "" && d.CWD != "" {
-		if remote, err := git.RemoteURL(ctx, d.CWD); err == nil && remote != "" {
-			gitRemote = remote
-		}
-	}
-	if gitRemote == "" && d.ProjectName != "" {
-		dir := string(d.OriginalRoot)
-		if dir == "" {
-			dir = filepath.Dir(string(d.SourcePath))
-		}
-		if remote, err := git.RemoteURL(ctx, dir); err == nil && remote != "" {
-			gitRemote = remote
-		}
-	}
-	return gitRemote
 }
 
 // ResolveListingOrigin turns discovery's typed origin into the listing value.

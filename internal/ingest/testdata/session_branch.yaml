@@ -17,6 +17,9 @@ requiredNames:
   - recording-only-harness-keeps-its-recorded-branch
   - recording-only-harness-keeps-the-stored-branch
   - recording-only-harness-with-a-changed-source-still-has-no-branch
+  - stored-detached-head-is-no-branch
+  - changed-source-in-a-detached-checkout-has-no-branch
+  - recorded-detached-head-beats-stored-branch
 cases:
   - name: recorded-branch-beats-stored-branch
     directory: /work/tool
@@ -94,6 +97,30 @@ cases:
     directory: /work/tool
     storedBranch: feature/recorded
     storedKnown: false
+    checkout: develop
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  # An earlier import stored git's word for a detached checkout. It is not a
+  # branch name, so the tree and the filter read it as no branch.
+  - name: stored-detached-head-is-no-branch
+    directory: /work/tool
+    storedBranch: HEAD
+    storedKnown: true
+    checkout: develop
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  - name: changed-source-in-a-detached-checkout-has-no-branch
+    directory: /work/tool
+    storedBranch: main
+    storedKnown: false
+    checkout: HEAD
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  - name: recorded-detached-head-beats-stored-branch
+    directory: /work/tool
+    recordedBranch: HEAD
+    storedBranch: main
+    storedKnown: true
     checkout: develop
     wantBranch: ""
     wantCheckoutCalls: 0

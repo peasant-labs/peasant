@@ -12,7 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
-	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/testkit/branchruleoverlay"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -137,85 +137,6 @@ func loadScenarios(t *testing.T, relPath string, floor int) []equivalenceScenari
 		t.Fatalf("%q holds %d scenarios, below the floor of %d", relPath, len(doc.Scenarios), floor)
 	}
 	return doc.Scenarios
-}
-
-// --- the branch rule overlay --------------------------------------------------
-
-const legacyBranchRuleRelPath = "testdata/legacy_branch_rule.yaml"
-
-// legacyBranchRuleDoc names the captured scenarios the branch rule changes. The
-// legacy wizard saved a project chosen at project level with no branch list;
-// the rebuild saves the branches the project shows. legacy_goldens.yaml records
-// the old wizard and is not edited, so a scenario listed here is measured
-// against its entry instead.
-type legacyBranchRuleDoc struct {
-	RequiredNames []string                `yaml:"requiredNames"`
-	Scenarios     []legacyBranchRuleEntry `yaml:"scenarios"`
-}
-
-type legacyBranchRuleEntry struct {
-	Name     string          `yaml:"name"`
-	Reason   string          `yaml:"reason"`
-	Expected goldenSelection `yaml:"expected"`
-}
-
-func loadLegacyBranchRule(t *testing.T, captured []equivalenceScenario) map[string]legacyBranchRuleEntry {
-	t.Helper()
-	data, err := os.ReadFile(legacyBranchRuleRelPath)
-	if err != nil {
-		t.Fatalf("read branch rule overlay %q: %v", legacyBranchRuleRelPath, err)
-	}
-	var doc legacyBranchRuleDoc
-	if err := decodeStrictFixture(data, &doc); err != nil {
-		t.Fatalf("decode branch rule overlay %q: %v", legacyBranchRuleRelPath, err)
-	}
-	capturedByName := map[string]equivalenceScenario{}
-	for _, scenario := range captured {
-		capturedByName[scenario.Name] = scenario
-	}
-	entries := map[string]legacyBranchRuleEntry{}
-	for _, entry := range doc.Scenarios {
-		scenario, known := capturedByName[entry.Name]
-		if !known {
-			t.Fatalf("%s names %q, which legacy_goldens.yaml does not capture", legacyBranchRuleRelPath, entry.Name)
-		}
-		if strings.TrimSpace(entry.Reason) == "" {
-			t.Fatalf("%s entry %q gives no reason", legacyBranchRuleRelPath, entry.Name)
-		}
-		// The overlay changes the branch list and nothing else: without the
-		// branch lists, it is the captured golden.
-		if !reflect.DeepEqual(withoutBranches(entry.Expected.toConfig()), withoutBranches(scenario.Golden.toConfig())) {
-			t.Fatalf("%s entry %q differs from the captured golden by more than a branch list:\n overlay  = %#v\n captured = %#v",
-				legacyBranchRuleRelPath, entry.Name, entry.Expected.toConfig(), scenario.Golden.toConfig())
-		}
-		if reflect.DeepEqual(normalizeSelection(entry.Expected.toConfig()), normalizeSelection(scenario.Golden.toConfig())) {
-			t.Fatalf("%s entry %q equals the captured golden, so it overlays nothing", legacyBranchRuleRelPath, entry.Name)
-		}
-		entries[entry.Name] = entry
-	}
-	if err := testutil.RequireFixtureNames(legacyBranchRuleRelPath, "scenario", doc.RequiredNames, namesOf(entries)); err != nil {
-		t.Fatal(err)
-	}
-	return entries
-}
-
-func namesOf(entries map[string]legacyBranchRuleEntry) map[string]bool {
-	names := make(map[string]bool, len(entries))
-	for name := range entries {
-		names[name] = true
-	}
-	return names
-}
-
-func withoutBranches(selection config.SelectionConfig) config.SelectionConfig {
-	copy := normalizeSelection(selection)
-	for harness, configured := range copy.Harnesses {
-		for index := range configured.Projects {
-			configured.Projects[index].Branches = nil
-		}
-		copy.Harnesses[harness] = configured
-	}
-	return copy
 }
 
 // --- the inventory forest the scenarios are checked over ----------------------
@@ -492,21 +413,25 @@ func mustRead(t *testing.T, path string) []byte {
 // field remains equivalent after removing the one additive identity field. Any
 // project selection must also carry a clone path; explicit-session-only rows do
 // not invent a project. A project chosen at project level is measured against
-// its testdata/legacy_branch_rule.yaml entry, which adds the branch list the
-// project shows to the captured golden and changes nothing else.
+// its branchruleoverlay entry, which adds the branch list the project shows to
+// the captured golden and changes nothing else.
 func TestKickstartEquivalence_LegacyGoldens(t *testing.T) {
 	t.Parallel()
 	scenarios := loadScenarios(t, legacyGoldensRelPath, legacyGoldenFloor)
-	branchRule := loadLegacyBranchRule(t, scenarios)
+	captured := make(map[string]config.SelectionConfig, len(scenarios))
+	for _, scenario := range scenarios {
+		captured[scenario.Name] = scenario.Golden.toConfig()
+	}
+	branchRule, err := branchruleoverlay.Load(captured)
+	if err != nil {
+		t.Fatalf("legacy branch rule overlay: %v", err)
+	}
 	for _, scenario := range scenarios {
 		scenario := scenario
 		if scenario.Oracle != "legacy-captured" {
 			t.Fatalf("scenario %q is a %q row in the legacy golden file", scenario.Name, scenario.Oracle)
 		}
-		want := scenario.Golden.toConfig()
-		if entry, changed := branchRule[scenario.Name]; changed {
-			want = entry.Expected.toConfig()
-		}
+		want := branchRule.Want(scenario.Name, captured[scenario.Name])
 		t.Run(scenario.Name, func(t *testing.T) {
 			t.Parallel()
 			roots := loadInventory(t)

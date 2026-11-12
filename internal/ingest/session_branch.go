@@ -2,9 +2,7 @@ package ingest
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
-	"slices"
 	"time"
 )
 
@@ -23,30 +21,6 @@ const (
 	// the checkout never answers for it.
 	BranchSourceRecordingOnly
 )
-
-// AllBranchSources is the closed set, excluding the unknown zero value.
-var AllBranchSources = []BranchSource{BranchSourceRecordingOrCheckout, BranchSourceRecordingOnly}
-
-// NewBranchSource accepts the String form of a declared branch source.
-func NewBranchSource(raw string) (BranchSource, error) {
-	for _, source := range AllBranchSources {
-		if source.String() == raw {
-			return source, nil
-		}
-	}
-	return BranchSourceUnknown, fmt.Errorf(
-		"read branch source %q.\n"+
-			"what: %q is not a branch source.\n"+
-			"why: the closed set is recording-or-checkout and recording-only.\n"+
-			"where: ingest.NewBranchSource.\n"+
-			"when: a caller named where a harness takes a session's branch from.\n"+
-			"means: the branch source was not accepted.\n"+
-			"fix: use recording-or-checkout or recording-only.",
-		raw, raw)
-}
-
-// IsValid reports whether s is a declared branch source.
-func (s BranchSource) IsValid() bool { return slices.Contains(AllBranchSources, s) }
 
 // String returns the declaration token, or "unknown".
 func (s BranchSource) String() string {
@@ -67,7 +41,7 @@ func (s BranchSource) AsksCheckout() bool { return s != BranchSourceRecordingOnl
 // HarnessBranchSources declares, once per registered harness, where its
 // sessions get a branch from. It is keyed like DefaultAdapterRegistry and
 // HarvesterVersionRegistry, and a test holds the three key sets equal.
-// ResolveSessionBranch reads it, so the tree, the import filter and the store
+// SessionBranchFor reads it, so the tree, the import filter and the store
 // cannot disagree about a harness.
 //
 // Codex records its git context once in session_meta and Strike keeps its branch
@@ -148,10 +122,10 @@ func SessionProjectDirectory(session DiscoveredSession) string {
 	return ""
 }
 
-// SessionBranchEvidence is everything that can say which branch a session
-// belongs to. Both the tree and the import filter build it from the same
-// discovered session and the same known-session index.
-type SessionBranchEvidence struct {
+// sessionBranchEvidence is everything that can say which branch a session
+// belongs to. SessionBranchFor builds it from the discovered session and the
+// known-session index, so the tree and the import filter cannot build it two ways.
+type sessionBranchEvidence struct {
 	// Harness is the harness that recorded the session; HarnessBranchSources
 	// says whether the checkout may answer for it.
 	Harness Harness
@@ -171,10 +145,10 @@ type SessionBranchEvidence struct {
 // evidence for the session from what its transcript recorded and from what the
 // known-session index holds for it (record and stored are the result of
 // KnownSessionIndex.Reusable; the zero record and false when there is none), and
-// lets ResolveSessionBranch decide. The tree and the import filter both call
+// lets resolveSessionBranch decide. The tree and the import filter both call
 // it, so neither can build the evidence another way.
 func SessionBranchFor(ctx context.Context, git GitResolver, session DiscoveredSession, record KnownSession, stored bool) string {
-	return ResolveSessionBranch(ctx, git, SessionBranchEvidence{
+	return resolveSessionBranch(ctx, git, sessionBranchEvidence{
 		Harness:      session.Harness,
 		Recorded:     session.Branch,
 		StoredBranch: record.Branch,
@@ -183,8 +157,8 @@ func SessionBranchFor(ctx context.Context, git GitResolver, session DiscoveredSe
 	})
 }
 
-// ResolveSessionBranch is the one precedence for which branch a session belongs
-// to, for the tree and for the import alike:
+// resolveSessionBranch is the precedence SessionBranchFor applies, for the tree
+// and for the import alike:
 //
 //  1. the branch the transcript recorded;
 //  2. the branch the store holds for a session that is already stored and whose
@@ -197,9 +171,9 @@ func SessionBranchFor(ctx context.Context, git GitResolver, session DiscoveredSe
 // at git for it, and walking git for every such session on every scan is the
 // cost the index exists to avoid. A session whose source changed is not stored
 // evidence, so it falls through to the checkout.
-func ResolveSessionBranch(ctx context.Context, git GitResolver, evidence SessionBranchEvidence) string {
+func resolveSessionBranch(ctx context.Context, git GitResolver, evidence sessionBranchEvidence) string {
 	if evidence.Recorded == "" && evidence.StoredKnown {
-		return evidence.StoredBranch
+		return NamedBranch(evidence.StoredBranch)
 	}
 	if evidence.Recorded == "" && !BranchSourceOf(evidence.Harness).AsksCheckout() {
 		return ""

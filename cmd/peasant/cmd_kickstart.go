@@ -499,7 +499,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			return nil, fmt.Errorf("resolve output path: %w", err)
 		}
 
-		staleness := configStaleness(cfg)
+		staleness := cfg.StalenessWindow()
 
 		// Map selected sessions to AllowedSessionIDs filter, expanding
 		// parent sessions to include their subagent children.

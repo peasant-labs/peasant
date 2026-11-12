@@ -29,22 +29,35 @@ type branchAgreementCase struct {
 	ExtractsNoBranch bool     `yaml:"extractsNoBranch"`
 	Subfolder        string   `yaml:"subfolder"`
 	FolderOnly       bool     `yaml:"folderOnly"`
+	NoDirectory      bool     `yaml:"noDirectory"`
+	ChosenSession    bool     `yaml:"chosenSession"`
 	RecordedBranch   string   `yaml:"recordedBranch"`
 	Stored           bool     `yaml:"stored"`
 	StoredBranch     string   `yaml:"storedBranch"`
+	StoredRemote     string   `yaml:"storedRemote"`
 	SourceChanged    bool     `yaml:"sourceChanged"`
 	HeadBranch       string   `yaml:"headBranch"`
+	HeadRemote       string   `yaml:"headRemote"`
 	ChosenBranch     string   `yaml:"chosenBranch"`
+	ChosenRemote     string   `yaml:"chosenRemote"`
 	TreeBranch       string   `yaml:"treeBranch"`
+	TreeRemote       *string  `yaml:"treeRemote"`
 	Matched          bool     `yaml:"matched"`
 	BranchDirs       []string `yaml:"branchDirs"`
+	RemoteDirs       []string `yaml:"remoteDirs"`
 }
 
-// branchRecordingGit answers every directory with one checked-out branch and
-// remembers which directories it was asked about.
+// branchRecordingGit answers every directory with one checked-out branch and one
+// remote, and remembers which directories it was asked about.
 type branchRecordingGit struct {
 	*testutil.StubGitResolver
 	branchDirs []string
+	remoteDirs []string
+}
+
+func (g *branchRecordingGit) RemoteURL(ctx context.Context, dir string) (string, error) {
+	g.remoteDirs = append(g.remoteDirs, dir)
+	return g.StubGitResolver.RemoteURL(ctx, dir)
 }
 
 func (g *branchRecordingGit) Branch(ctx context.Context, dir string) (string, error) {
@@ -55,7 +68,8 @@ func (g *branchRecordingGit) Branch(ctx context.Context, dir string) (string, er
 // TestTreeAndImportFilterPlaceASessionOnTheSameBranch runs the real scan (what
 // the tree lists) and the real selection filter (what the import judges) over
 // one recording, the same stored-session index and equivalent git doubles. They
-// must agree on the branch and on the directory they ask git about.
+// must agree on the branch and the remote, and on the directories they ask git
+// about.
 func TestTreeAndImportFilterPlaceASessionOnTheSameBranch(t *testing.T) {
 	t.Parallel()
 	var fixtures struct {
@@ -86,6 +100,19 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 		remote    = "https://github.com/example-org/demo.git"
 		sessionID = "11111111-1111-4111-8111-111111111111"
 	)
+	// Each remote is the shared one unless the case names another, so a case that
+	// does not care about remotes still asks the same question of both surfaces.
+	orDefault := func(value string) string {
+		if value == "" {
+			return remote
+		}
+		return value
+	}
+	storedRemote, headRemote, chosenRemote := orDefault(c.StoredRemote), orDefault(c.HeadRemote), orDefault(c.ChosenRemote)
+	treeRemote := remote
+	if c.TreeRemote != nil {
+		treeRemote = *c.TreeRemote
+	}
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -137,13 +164,15 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 	}
 	under.Enabled = true
 	under.Paths = []string{source}
+	chosen := config.SelectionHarnessConfig{Projects: []config.ProjectSelection{
+		{GitRemote: chosenRemote, Branches: []string{c.ChosenBranch}},
+	}}
+	if c.ChosenSession {
+		chosen = config.SelectionHarnessConfig{Sessions: []string{sessionID}}
+	}
 	cfg.Selection = config.SelectionConfig{
-		Mode: config.SelectionModeSelected,
-		Harnesses: map[string]config.SelectionHarnessConfig{
-			harness.String(): {Projects: []config.ProjectSelection{
-				{GitRemote: remote, Branches: []string{c.ChosenBranch}},
-			}},
-		},
+		Mode:      config.SelectionModeSelected,
+		Harnesses: map[string]config.SelectionHarnessConfig{harness.String(): chosen},
 	}
 
 	var known ingest.KnownSessionIndex
@@ -154,11 +183,11 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 		}
 		known = discovery.NewStoreKnownSessions([]store.IngestedSessionRow{{
 			SessionID: sessionID, IngestedMs: ingested.UnixMilli(), SchemaVersion: int(ingest.CurrentSchemaVersion),
-			GitRemote: remote, Branch: c.StoredBranch,
+			GitRemote: storedRemote, Branch: c.StoredBranch,
 		}})
 	}
 	newGit := func() *branchRecordingGit {
-		return &branchRecordingGit{StubGitResolver: &testutil.StubGitResolver{Remote: remote, BranchName: c.HeadBranch}}
+		return &branchRecordingGit{StubGitResolver: &testutil.StubGitResolver{Remote: headRemote, BranchName: c.HeadBranch}}
 	}
 	expand := func(dirs []string) []string {
 		out := make([]string, 0, len(dirs))
@@ -169,15 +198,16 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 		return out
 	}
 	wantDirs := expand(c.BranchDirs)
+	wantRemoteDirs := expand(c.RemoteDirs)
 
 	// The tree: what the scan lists the session under.
 	treeGit := newGit()
 	_, listings, _ := discovery.Scan(t.Context(), cfg, &ingest.OSFileSystem{}, treeGit, known, nil, nil)
-	var treeBranch string
+	var treeBranch, listedRemote string
 	found := false
 	for _, listing := range listings {
 		if listing.SessionID == sessionID {
-			treeBranch, found = listing.Branch, true
+			treeBranch, listedRemote, found = listing.Branch, listing.GitRemote, true
 		}
 	}
 	if !found {
@@ -186,7 +216,11 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 	if treeBranch != c.TreeBranch {
 		t.Fatalf("the tree lists the session under %q, want %q", treeBranch, c.TreeBranch)
 	}
+	if listedRemote != treeRemote {
+		t.Fatalf("the tree lists the session under the remote %q, want %q", listedRemote, treeRemote)
+	}
 	assertBranchDirs(t, "the scan", treeGit.branchDirs, wantDirs)
+	assertRemoteDirs(t, "the scan", treeGit.remoteDirs, wantRemoteDirs)
 
 	// The import filter: the same recording, the same index.
 	adapter := ingest.DefaultAdapterRegistry[harness](&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
@@ -196,14 +230,15 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 	}
 	filterGit := newGit()
 	filter, _ := selectionfilter.New(cfg, filterGit, ingest.NewPhysicalPathResolver(),
-		selectionfilter.WithKnownSessions(known, discovery.ConfigStaleness(cfg)))
+		selectionfilter.WithKnownSessions(known, cfg.StalenessWindow()))
 	if err := filter.Prepare(t.Context(), discovered); err != nil {
 		t.Fatalf("prepare the import cohort: %v", err)
 	}
 	if got := filter.Match(discovered[0]); got != c.Matched {
-		t.Fatalf("the import filter admits the session = %v, want %v (the tree lists it under %q, the choice is %q)", got, c.Matched, treeBranch, c.ChosenBranch)
+		t.Fatalf("the import filter admits the session = %v, want %v (the tree lists it under %q of %q, the choice is %q of %q)", got, c.Matched, treeBranch, listedRemote, c.ChosenBranch, chosenRemote)
 	}
 	assertBranchDirs(t, "the import filter", filterGit.branchDirs, wantDirs)
+	assertRemoteDirs(t, "the import filter", filterGit.remoteDirs, wantRemoteDirs)
 
 	// The store: what the harness's own metadata extraction keeps for the session.
 	if c.ExtractsNoBranch {
@@ -227,6 +262,13 @@ func assertBranchDirs(t *testing.T, who string, got, want []string) {
 	}
 }
 
+func assertRemoteDirs(t *testing.T, who string, got, want []string) {
+	t.Helper()
+	if !slices.Equal(got, want) {
+		t.Fatalf("%s asked git for the remote of %v, want %v", who, got, want)
+	}
+}
+
 func writeBranchAgreementRecording(t *testing.T, harness ingest.Harness, path, id, cwd string, c branchAgreementCase, modified time.Time) {
 	t.Helper()
 	if harness == ingest.HarnessCodex {
@@ -234,7 +276,7 @@ func writeBranchAgreementRecording(t *testing.T, harness ingest.Harness, path, i
 		return
 	}
 	fields := fmt.Sprintf(`"sessionId":%q,"type":"user","uuid":"%s-user","timestamp":"2026-01-01T00:00:00Z"`, id, id)
-	if !c.FolderOnly {
+	if !c.FolderOnly && !c.NoDirectory {
 		fields += fmt.Sprintf(`,"cwd":%q`, cwd)
 	}
 	if c.RecordedBranch != "" {

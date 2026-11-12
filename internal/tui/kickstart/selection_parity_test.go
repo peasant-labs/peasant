@@ -46,19 +46,17 @@ type selectionParityCase struct {
 func loadSelectionParityDocument(t *testing.T) selectionParityDocument {
 	t.Helper()
 	var document selectionParityDocument
-	if err := testutil.DecodeFixtureYAML(selectionParityData, &document); err != nil {
+	if err := testutil.DecodeNamedFixtureYAML(selectionParityData, &document); err != nil {
 		t.Fatalf("decode kickstart testdata/selection_parity.yaml: %v", err)
 	}
-	present := map[string]bool{}
 	inventories := map[string]bool{}
 	for _, inventory := range document.Inventories {
+		if inventories[inventory.Name] {
+			t.Fatalf("duplicate selection parity inventory %q", inventory.Name)
+		}
 		inventories[inventory.Name] = true
 	}
 	for _, testCase := range document.Cases {
-		if present[testCase.Name] {
-			t.Fatalf("duplicate selection parity case %q", testCase.Name)
-		}
-		present[testCase.Name] = true
 		if !inventories[testCase.Inventory] {
 			t.Fatalf("selection parity case %q names inventory %q, which the fixture does not define", testCase.Name, testCase.Inventory)
 		}
@@ -70,9 +68,6 @@ func loadSelectionParityDocument(t *testing.T) selectionParityDocument {
 				t.Fatalf("selection parity case %q has unknown action %q", testCase.Name, action)
 			}
 		}
-	}
-	if err := testutil.RequireFixtureNames("testdata/selection_parity.yaml", "case", document.RequiredNames, present); err != nil {
-		t.Fatal(err)
 	}
 	return document
 }
@@ -154,13 +149,22 @@ func terminalSelection(t *testing.T, listings []ftue.SessionListing, actions []m
 }
 
 // webSelection derives the selection the setup page's answer saves: the session
-// ids alone, over the forest discovery builds, through the shared onboarding
+// ids alone, read against the forest discovery builds exactly as the server
+// reads them (ApplyTreeAnswer), then derived through the shared onboarding
 // model.
 func webSelection(t *testing.T, listings []ftue.SessionListing, chosen []string) config.SelectionConfig {
 	t.Helper()
 	prepared := discovery.PrepareSessionListings(listings, ingest.NewPhysicalPathResolver())
 	forest := discovery.BuildForest(prepared, nil, nil)
-	value, err := onboarding.SelectionIDsValue(chosen)
+	// The server reads the ids a tab reports against its forest before it keeps
+	// them: a row that names no session, or two, selects nothing, and a group id
+	// selects the sessions beneath it. What it keeps is the answer the save
+	// derives from.
+	answer := onboarding.ApplyTreeAnswer(forest, chosen)
+	if want := sortedCopy(chosen); !reflect.DeepEqual(sortedCopy(answer.SessionIDs), want) {
+		t.Fatalf("the server keeps %v of the answered sessions %v; the answer names a session the forest does not hold", sortedCopy(answer.SessionIDs), want)
+	}
+	value, err := onboarding.SelectionIDsValue(answer.SessionIDs)
 	if err != nil {
 		t.Fatalf("encode the web answer: %v", err)
 	}

@@ -221,7 +221,9 @@ terminal and the web setup page save the same selection for the same chosen sess
 you ticked. Only a clone with no named branch is saved without a branch list, because it has no
 branch to name. A selection saved by an earlier version can still hold a project with no branch
 list. It keeps meaning all branches until you change the selection and save it again, when the list of
-the branches you chose replaces it. The review step shows that change.
+the branches you chose replaces it. The review step shows that change. A rule with a branch list never
+imports a session that has no branch, such as one recorded in a detached checkout, even when
+`autoIngestNewBranches` is `true`; kickstart saves those sessions by session id.
 
 An exact branch exclusion still wins when `autoIngestNewBranches` is `true`. Clearing one available
 branch records a denial for that physical clone and branch. It does not disable automatic discovery

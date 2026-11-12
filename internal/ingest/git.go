@@ -373,7 +373,7 @@ func (g *ExecGitResolver) ResolveRepositoryRoot(ctx context.Context, dir string)
 
 func (g *ExecGitResolver) RemoteURL(ctx context.Context, dir string) (string, error) {
 	branch, branchErr := g.Branch(ctx, dir)
-	if branchErr == nil && branch != "" && branch != "HEAD" {
+	if branchErr == nil && NamedBranch(branch) != "" {
 		if remote, _, err := g.RemoteURLForBranch(ctx, dir, branch); err == nil && remote != "" {
 			return remote, nil
 		}
@@ -446,19 +446,36 @@ func ResolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch,
 	return remote, tracking
 }
 
-// ResolveGitBranch is the one rule for which branch a session belongs to. The
+// detachedHeadToken is what git reports as the checked-out branch when no branch
+// is checked out: `git rev-parse --abbrev-ref HEAD` prints HEAD, and a harness
+// that records the branch it saw records the same word.
+const detachedHeadToken = "HEAD"
+
+// NamedBranch returns branch, or "" when branch is not the name of a branch. A
+// detached checkout is on no branch, so git's word for it is not a name a
+// selection can save or a rule can match. Every place that takes a branch from
+// git, from a recording or from the store reads it through this function.
+func NamedBranch(branch string) string {
+	if branch == detachedHeadToken {
+		return ""
+	}
+	return branch
+}
+
+// ResolveGitBranch is the branch an extractor stores for one session. The
 // branch the session recorded wins: it names where the work happened and it does
 // not change when the checkout later moves. Only a session that recorded no
 // branch is attributed to the branch checked out in dir now, and an empty result
-// means neither source knew. Git is not asked when a branch was recorded, when
-// git is nil, or when dir is empty.
+// means neither source knew, or the checkout is detached. Git is not asked when
+// a branch was recorded (even a detached HEAD, which says the session ran on no
+// branch), when git is nil, or when dir is empty.
 //
-// Everything that groups, selects, or imports a session by branch calls this
-// function, so the tree a person chooses from and the import that follows it
-// cannot place one session on two branches.
+// SessionBranchFor decides the same question for the tree and the import filter
+// and ends here for a session with nothing recorded and nothing stored, so the
+// extractors and the tree place one session on one branch.
 func ResolveGitBranch(ctx context.Context, git GitResolver, dir, recordedBranch string) string {
 	if recordedBranch != "" {
-		return recordedBranch
+		return NamedBranch(recordedBranch)
 	}
 	if git == nil || dir == "" {
 		return ""
@@ -467,7 +484,7 @@ func ResolveGitBranch(ctx context.Context, git GitResolver, dir, recordedBranch 
 	if err != nil {
 		return ""
 	}
-	return checkedOut
+	return NamedBranch(checkedOut)
 }
 
 func (g *ExecGitResolver) Branch(ctx context.Context, dir string) (string, error) {

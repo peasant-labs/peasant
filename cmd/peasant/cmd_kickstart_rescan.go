@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"os"
-	"time"
 
-	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/store"
 )
@@ -63,12 +61,4 @@ func loadKnownSessionsFrom(ctx context.Context, db *store.Store) discovery.Store
 		return nil
 	}
 	return discovery.NewStoreKnownSessions(rows)
-}
-
-// configStaleness returns the window inside which a source file counts as still
-// being written, from config with the packaged default as the fallback. Ingest
-// and the re-scan read it the same way so they agree on which sessions are
-// active.
-func configStaleness(cfg *config.Config) time.Duration {
-	return discovery.ConfigStaleness(cfg)
 }

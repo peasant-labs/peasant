@@ -10,7 +10,8 @@
 # checkout and even when every branch is chosen. The checkout's own rule, with no
 # branch list, is saved only when the checkout has no named branch. A branch that
 # appears later is admitted by autoIngestNewBranches, never by the shape of the
-# rule.
+# rule. A session in a detached checkout has no branch: git's word for it, HEAD,
+# is not a branch name, so such a session is branchless.
 #
 # requiredNames is the deletion guard.
 requiredNames:
@@ -25,6 +26,9 @@ requiredNames:
   - explicit-sessions-stay-sessions-when-all-chosen
   - an-explicit-branch-keeps-its-sessions-and-another-branch-stays-a-branch
   - branches-are-saved-sorted
+  - detached-sessions-have-no-branch-so-the-checkout-is-saved
+  - a-detached-session-beside-a-branch-is-named-by-id
+  - a-detached-session-left-out-saves-the-chosen-ones-by-id
 cases:
   - name: nothing-chosen-saves-nothing
     sessions:
@@ -94,3 +98,23 @@ cases:
       - {id: b, branch: alpha, chosen: true}
       - {id: c, branch: mid, chosen: true}
     expected: {branches: [alpha, mid, zeta]}
+
+  # HEAD is what git reports for a detached checkout. It names no branch, so a
+  # checkout whose sessions are all detached has no branch to save.
+  - name: detached-sessions-have-no-branch-so-the-checkout-is-saved
+    sessions:
+      - {id: a, branch: HEAD, chosen: true}
+      - {id: b, branch: HEAD, chosen: true}
+    expected: {whole: true}
+
+  - name: a-detached-session-beside-a-branch-is-named-by-id
+    sessions:
+      - {id: a, branch: main, chosen: true}
+      - {id: b, branch: HEAD, chosen: true}
+    expected: {branches: [main], sessions: [b]}
+
+  - name: a-detached-session-left-out-saves-the-chosen-ones-by-id
+    sessions:
+      - {id: a, branch: HEAD, chosen: true}
+      - {id: b, branch: HEAD}
+    expected: {sessions: [a]}
