@@ -7,7 +7,6 @@ import (
 	"maps"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	regexp "github.com/wasilibs/go-re2"
 )
 
 //go:embed testdata/stored_harness_check.yaml
