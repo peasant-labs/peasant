@@ -97,8 +97,9 @@ type ScanProgress interface {
 	SetProgress(done, total int)
 }
 
-// ScanStatisticsProgress is an optional extension for a progress display that
-// can name how many discovery evidence records have been re-mined so far.
-type ScanStatisticsProgress interface {
-	SetDiscoveryReminedCount(int)
+// ScanRereadProgress is an optional extension for a progress display that can
+// name how many sources the current discovery has had to read again so far. A
+// negative count means the current adapter does not report one.
+type ScanRereadProgress interface {
+	SetDiscoveryRequiredRereads(count int)
 }

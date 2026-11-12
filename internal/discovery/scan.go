@@ -62,8 +62,7 @@ func Scan(
 		adapter := factory(fs, git, salt.Salt{})
 		ingest.AttachClaudeEvidenceCache(adapter, evidence)
 		if progress != nil {
-			statistics, _ := adapter.(ingest.DiscoveryStatistics)
-			ingest.AttachDiscoveryProgress(adapter, &scanDiscoveryProgress{harness: provider, progress: progress, statistics: statistics})
+			ingest.AttachDiscoveryProgress(adapter, &scanDiscoveryProgress{harness: provider, progress: progress})
 		}
 		discovered, err := adapter.Discover(ctx, src)
 		if err != nil {
@@ -156,12 +155,11 @@ func Scan(
 // current scan phase. Every adapter gets a fresh instance, so counts never leak
 // from one harness into another.
 type scanDiscoveryProgress struct {
-	mu         sync.Mutex
-	harness    ingest.Harness
-	progress   ScanProgress
-	statistics ingest.DiscoveryStatistics
-	done       int
-	total      int
+	mu       sync.Mutex
+	harness  ingest.Harness
+	progress ScanProgress
+	done     int
+	total    int
 }
 
 var _ ingest.DiscoveryProgress = (*scanDiscoveryProgress)(nil)
@@ -174,23 +172,18 @@ func (p *scanDiscoveryProgress) DiscoveryTotal(harness ingest.Harness, total int
 	defer p.mu.Unlock()
 	p.done, p.total = 0, total
 	p.progress.SetProgress(p.done, p.total)
-	p.reportStatistics()
 }
 
-func (p *scanDiscoveryProgress) DiscoveryAdvance(harness ingest.Harness, delta int) {
+func (p *scanDiscoveryProgress) DiscoveryAdvance(harness ingest.Harness, step ingest.DiscoveryStep) {
 	if harness != p.harness {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.done += delta
+	p.done += step.Sources
 	p.progress.SetProgress(p.done, p.total)
-	p.reportStatistics()
-}
-
-func (p *scanDiscoveryProgress) reportStatistics() {
-	if sink, ok := p.progress.(ScanStatisticsProgress); ok && p.statistics != nil {
-		sink.SetDiscoveryReminedCount(p.statistics.ReminedCount())
+	if sink, ok := p.progress.(ScanRereadProgress); ok && step.RereadsReported() {
+		sink.SetDiscoveryRequiredRereads(step.RequiredRereads)
 	}
 }
 

@@ -200,13 +200,13 @@ discoveryProgressStates:
     phase: Discovering Claude Code sessions...
     done: 812
     total: 13631
-    remined: 219
+    requiredRereads: 219
     wantContains: ["⠋", "Discovering Claude Code sessions...", "(812/13631)", "219 re-read"]
   - key: complete
     phase: Discovering Claude Code sessions...
     done: 13631
     total: 13631
-    remined: 819
+    requiredRereads: 819
     wantContains: ["⠋", "Discovering Claude Code sessions...", "(13631/13631)", "819 re-read"]
   - key: phase-only
     phase: Discovering Other sessions...

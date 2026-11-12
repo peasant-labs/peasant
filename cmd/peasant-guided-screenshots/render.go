@@ -197,13 +197,13 @@ func renderDiscoveryProgressCapture(capture discoveryProgressCaptureFixture, sta
 	spinner := discoveryprogress.New(io.Discard, false)
 	spinner.SetPhase("previous")
 	spinner.SetProgress(1, 2)
-	spinner.SetDiscoveryReminedCount(1)
+	spinner.SetDiscoveryRequiredRereads(1)
 	spinner.SetPhase(state.Phase)
 	if state.Total > 0 {
 		spinner.SetProgress(state.Done, state.Total)
 	}
-	if state.Remined != nil {
-		spinner.SetDiscoveryReminedCount(*state.Remined)
+	if state.RequiredRereads != nil {
+		spinner.SetDiscoveryRequiredRereads(*state.RequiredRereads)
 	}
 	view := spinner.View()
 	if lipgloss.Height(view) > capture.Height || lipgloss.Width(view) > capture.Width {

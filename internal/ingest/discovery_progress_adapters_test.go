@@ -106,8 +106,9 @@ func TestAdapterDiscoveryProgress(t *testing.T) {
 				t.Fatalf("fixture discovered no sessions or reported the wrong harness: %+v", progress.events)
 			}
 			for _, event := range progress.events[1:] {
-				if event.harness != adapter.Harness() || event.isTotal || event.delta != 1 {
-					t.Fatalf("invalid progress event: %+v", event)
+				oneSource := !event.isTotal && event.harness == adapter.Harness() && event.delta == 1
+				if !oneSource || event.rereads >= 0 {
+					t.Fatalf("invalid progress event (one source, no re-read count from an adapter without an evidence cache): %+v", event)
 				}
 			}
 		})

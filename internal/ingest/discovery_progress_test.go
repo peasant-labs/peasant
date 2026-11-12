@@ -33,21 +33,23 @@ type discoveryProgressCase struct {
 	UnreadableDir string                  `yaml:"unreadable_dir"`
 	Total         int                     `yaml:"total"`
 	Sessions      int                     `yaml:"sessions"`
-	Remined       int                     `yaml:"remined"`
-	ReminedCounts []int                   `yaml:"remined_counts"`
+	// FinalRereads is the adapter's DiscoveryStatistics count after Discover.
+	FinalRereads int `yaml:"final_rereads"`
+	// StepRereads, when set, is the required re-read count each advance carries.
+	StepRereads []int `yaml:"step_rereads"`
 }
 
 type discoveryProgressEvent struct {
 	harness ingest.Harness
 	total   int
 	delta   int
+	rereads int
 	isTotal bool
 }
 
 type discoveryProgressRecorder struct {
-	events    []discoveryProgressEvent
-	onTotal   func()
-	onAdvance func()
+	events  []discoveryProgressEvent
+	onTotal func()
 }
 
 func (r *discoveryProgressRecorder) DiscoveryTotal(h ingest.Harness, total int) {
@@ -57,11 +59,8 @@ func (r *discoveryProgressRecorder) DiscoveryTotal(h ingest.Harness, total int) 
 	r.events = append(r.events, discoveryProgressEvent{harness: h, total: total, isTotal: true})
 }
 
-func (r *discoveryProgressRecorder) DiscoveryAdvance(h ingest.Harness, delta int) {
-	r.events = append(r.events, discoveryProgressEvent{harness: h, delta: delta})
-	if r.onAdvance != nil {
-		r.onAdvance()
-	}
+func (r *discoveryProgressRecorder) DiscoveryAdvance(h ingest.Harness, step ingest.DiscoveryStep) {
+	r.events = append(r.events, discoveryProgressEvent{harness: h, delta: step.Sources, rereads: step.RequiredRereads})
 }
 
 var _ ingest.DiscoveryProgress = (*discoveryProgressRecorder)(nil)
@@ -141,29 +140,34 @@ func TestClaudeDiscoveryProgress(t *testing.T) {
 			if c.FailedStat != "" {
 				fs.Fail(testutil.FSOpStat, root+"/"+c.FailedStat, errors.New("fixture: unreadable source"))
 			}
-			var reminedCounts []int
-			events := discoveryProgressRecorder{onAdvance: func() { reminedCounts = append(reminedCounts, adapter.ReminedCount()) }}
+			events := discoveryProgressRecorder{}
 			ingest.AttachDiscoveryProgress(adapter, &events)
 			fs.ResetCounts()
 			sessions, err := adapter.Discover(context.Background(), cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(sessions) != c.Sessions || adapter.ReminedCount() != c.Remined {
-				t.Fatalf("sessions/re-mined = %d/%d; want %d/%d", len(sessions), adapter.ReminedCount(), c.Sessions, c.Remined)
+			if len(sessions) != c.Sessions || adapter.ReminedCount() != c.FinalRereads {
+				t.Fatalf("sessions/required re-reads after discovery = %d/%d; want %d/%d", len(sessions), adapter.ReminedCount(), c.Sessions, c.FinalRereads)
 			}
 			if c.UnreadableDir != "" && len(adapter.DiscoveryDiagnostics()) == 0 {
 				t.Fatal("unreadable directory was not reported")
 			}
-			if c.ReminedCounts != nil && !reflect.DeepEqual(reminedCounts, c.ReminedCounts) {
-				t.Fatalf("re-read counts during discovery = %v, want %v", reminedCounts, c.ReminedCounts)
+			var stepRereads []int
+			for _, event := range events.events[1:] {
+				stepRereads = append(stepRereads, event.rereads)
+			}
+			if c.StepRereads != nil && !reflect.DeepEqual(stepRereads, c.StepRereads) {
+				t.Fatalf("required re-reads carried by the advances = %v, want %v", stepRereads, c.StepRereads)
 			}
 			if len(events.events) != c.Total+1 || !events.events[0].isTotal || events.events[0].total != c.Total {
 				t.Fatalf("progress events = %+v; want total %d followed by one advance per source", events.events, c.Total)
 			}
 			for _, event := range events.events[1:] {
-				if event.isTotal || event.harness != ingest.HarnessClaudeCode || event.delta != 1 {
-					t.Fatalf("invalid source advance: %+v", event)
+				oneClaudeSource := !event.isTotal && event.harness == ingest.HarnessClaudeCode && event.delta == 1
+				rereadsReported := event.rereads >= 0 && event.rereads <= c.FinalRereads
+				if !oneClaudeSource || !rereadsReported {
+					t.Fatalf("invalid source advance (one source, with a reported re-read count no larger than the final count): %+v", event)
 				}
 			}
 			if events.events[0].harness != ingest.HarnessClaudeCode {

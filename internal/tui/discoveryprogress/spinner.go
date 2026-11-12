@@ -10,31 +10,34 @@ import (
 	"github.com/peasant-labs/peasant/internal/discovery"
 )
 
+// rereadsNotReported is the re-read count of a phase whose adapter has not
+// reported one. Any negative count means the same.
+const rereadsNotReported = -1
+
 // Spinner shows the current discovery phase and counts on one terminal line.
 // When terminal is false it records updates but does not write to the output.
 type Spinner struct {
-	w           io.Writer
-	terminal    bool
-	mu          sync.Mutex
-	phase       string
-	count       int
-	total       int
-	remined     int
-	showRemined bool
-	done        bool
-	frame       int
-	wg          sync.WaitGroup
+	w        io.Writer
+	terminal bool
+	mu       sync.Mutex
+	phase    string
+	count    int
+	total    int
+	rereads  int
+	done     bool
+	frame    int
+	wg       sync.WaitGroup
 }
 
 var _ discovery.ScanProgress = (*Spinner)(nil)
-var _ discovery.ScanStatisticsProgress = (*Spinner)(nil)
+var _ discovery.ScanRereadProgress = (*Spinner)(nil)
 
 var frames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // New starts the spinner only for a terminal. The caller determines whether
 // the destination is a terminal, allowing other writers to remain quiet.
 func New(w io.Writer, terminal bool) *Spinner {
-	s := &Spinner{w: w, terminal: terminal}
+	s := &Spinner{w: w, terminal: terminal, rereads: rereadsNotReported}
 	if terminal {
 		s.wg.Add(1)
 		go s.run()
@@ -51,19 +54,19 @@ func (s *Spinner) SetPhase(phase string) {
 	s.phase = phase
 	s.count = 0
 	s.total = 0
-	s.remined = 0
-	s.showRemined = false
+	s.rereads = rereadsNotReported
 	s.mu.Unlock()
 }
 
-// SetDiscoveryReminedCount adds the evidence re-read count to this phase.
-func (s *Spinner) SetDiscoveryReminedCount(count int) {
+// SetDiscoveryRequiredRereads sets how many sources this phase has had to read
+// again so far. A negative count means the adapter does not report one, and
+// the line shows no re-read count.
+func (s *Spinner) SetDiscoveryRequiredRereads(count int) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	s.remined = count
-	s.showRemined = true
+	s.rereads = count
 	s.mu.Unlock()
 }
 
@@ -104,8 +107,8 @@ func (s *Spinner) view() string {
 	ch := frames[s.frame%len(frames)]
 	if s.total > 0 {
 		line := fmt.Sprintf("%s %s (%d/%d)", ch, s.phase, s.count, s.total)
-		if s.showRemined {
-			line += fmt.Sprintf(" · %d re-read", s.remined)
+		if s.rereads >= 0 {
+			line += fmt.Sprintf(" · %d re-read", s.rereads)
 		}
 		return line
 	}
