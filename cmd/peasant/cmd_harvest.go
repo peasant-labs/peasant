@@ -199,7 +199,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	// Detect-commits flag (relevant for index and all modes).
 	if mode != harvestLogsOnly {
 		cmd.Flags().BoolVar(&flags.detectCommits, "detect-commits", true, "Detect and store git commits linked to each session")
-		cmd.Flags().BoolVar(&flags.profileIndex, "profile-index", false, "Print INDEX parse/write timing diagnostics")
+		cmd.Flags().BoolVar(&flags.profileIndex, "profile-index", false, "Print the run's timing profile (it is stored after every run either way)")
 	}
 	// The unchanged-session commit refresh is a harvest-run behavior. logs has
 	// no store to write, and index does not take this path, so neither accepts
@@ -392,10 +392,9 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	// For index-only mode, use the existing Reindex code path.
 	reindex := mode == harvestIndexOnly
 
-	var indexProfiler *ingest.IndexProfiler
-	if flags.profileIndex {
-		indexProfiler = &ingest.IndexProfiler{}
-	}
+	// The profiler is always on: the pipeline stores its stage totals with the
+	// run's audit row. --profile-index only decides whether it is also printed.
+	indexProfiler := &ingest.IndexProfiler{}
 
 	pipelineCfg := ingest.PipelineConfig{
 		Sources:            sources,
@@ -613,7 +612,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	return report(cmd, execution, harvestOutputOptions{
 		flags: flags, outputDir: string(resolvedOutput), configPath: configPath,
 		sources: sources, customPatternCount: customPatternCount,
-		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler,
+		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler, printIndexProfile: flags.profileIndex,
 		rebuildAll: reindex && flags.all,
 		upgrade:    upgradeResult,
 		scopeRun:   pipelineCfg.Scope != nil,
@@ -630,6 +629,7 @@ type harvestOutputOptions struct {
 	customPatternCount int
 	selectionConflicts *selectionfilter.ConflictRecorder
 	indexProfiler      *ingest.IndexProfiler
+	printIndexProfile  bool
 	// rebuildAll is set for `harvest index --all`: the run prints the
 	// not-restored summary line at the end.
 	rebuildAll bool
@@ -680,8 +680,8 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 	for _, diagnostic := range result.DiscoveryDiagnostics {
 		fmt.Fprintf(os.Stderr, "warning: %s discovery skipped %s: %s; %s\n", string(diagnostic.Provider), diagnostic.Location, diagnostic.Summary, diagnostic.Detail)
 	}
-	if options.indexProfiler != nil {
-		printIndexProfile(os.Stderr, options.indexProfiler.Snapshot())
+	if options.printIndexProfile && options.indexProfiler != nil {
+		printIndexProfile(cmd.ErrOrStderr(), options.indexProfiler.Snapshot())
 	}
 	if options.flags.jsonOutput {
 		if err := printJSON(cmd.OutOrStdout(), result); err != nil {

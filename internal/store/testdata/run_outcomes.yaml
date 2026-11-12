@@ -1,4 +1,4 @@
-requiredNames: [worker-error, session-diagnostic, run-diagnostic]
+requiredNames: [worker-error, session-diagnostic, run-diagnostic, retention-prunes-refresh-rows-with-the-other-outcomes]
 outcomes:
   - name: worker-error
     sessionId: 59000000-0000-0000-0000-000000000001
@@ -11,3 +11,9 @@ outcomes:
   - name: run-diagnostic
     kind: diagnostic
     reason: index_coverage_unavailable
+  # A refresh row is an outcome row: the writer, the reader and the retention
+  # rule treat it like the others.
+  - name: retention-prunes-refresh-rows-with-the-other-outcomes
+    sessionId: 59000000-0000-0000-0000-000000000003
+    kind: refresh
+    reason: source_changed

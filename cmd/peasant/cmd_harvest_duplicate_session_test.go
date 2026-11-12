@@ -79,7 +79,7 @@ func TestHarvestRefusesOneSessionIDInTwoSourceFiles(t *testing.T) {
 	}
 	defer conn.Close()
 	var reasons []string
-	if err := sqlitex.ExecuteTransient(conn, `SELECT reason_code FROM ingest_run_outcomes WHERE session_id = ?`, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, `SELECT r.code FROM ingest_run_outcomes o JOIN ingest_outcome_reasons r ON r.id = o.reason_id WHERE o.session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{sid},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			reasons = append(reasons, stmt.ColumnText(0))

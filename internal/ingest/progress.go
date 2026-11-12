@@ -1,6 +1,10 @@
 package ingest
 
-import "sync"
+import (
+	"fmt"
+	"slices"
+	"sync"
+)
 
 // Stage identifies a pipeline stage for progress reporting.
 type Stage string
@@ -53,6 +57,16 @@ var StageOrder = []Stage{
 }
 
 func (s Stage) String() string { return string(s) }
+
+// NewStage validates a raw stage name at a write boundary. It refuses a name
+// this build does not define, so a stored stage row always names a real stage.
+func NewStage(raw string) (Stage, error) {
+	stage := Stage(raw)
+	if stage == StageRecover || slices.Contains(IndexProfileStageOrder, stage) {
+		return stage, nil
+	}
+	return "", fmt.Errorf("ingest: validate pipeline stage %q before storing a run profile: this build defines no such stage; no stage row was written; use one of the stages in ingest.IndexProfileStageOrder", raw)
+}
 
 // EventKind classifies a ProgressEvent.
 type EventKind int

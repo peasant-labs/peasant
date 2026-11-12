@@ -96,6 +96,12 @@ type PipelineResult struct {
 	// membership chunk failed. Computed at finalize from FailedIndexSessions
 	// plus the entries-membership capability.
 	IndexCoverage *IndexCoverage `json:"indexCoverage,omitempty"`
+	// Census counts the sessions this run refreshed, by reason. It is built
+	// from the same refresh rows the audit stores. Nil on a dry run.
+	Census *RefreshCensus `json:"census,omitempty"`
+	// WriteLane is the store-write lane's wait and busy totals for the run.
+	// Nil when the run had no profiler.
+	WriteLane *WriteLaneStats `json:"write_lane,omitempty"`
 	// DiscoveryDiagnostics names source locations an adapter could not fully
 	// enumerate. Discovery stayed non-fatal per location, so the run continued;
 	// these records make each skipped location visible to the caller.
@@ -197,8 +203,9 @@ type PipelineConfig struct {
 	// value means every shipped default; the harvest command fills it from
 	// the user configuration. Resolved through writeConfig at the use sites.
 	Write WriteConfig
-	// IndexProfiler receives opt-in INDEX timing observations.
-	// Nil means no INDEX profiling.
+	// IndexProfiler receives the run's timing observations. Every import
+	// entry point passes one; the pipeline stores its stage totals with the
+	// audit row. Nil records nothing and stores no stage row.
 	IndexProfiler *IndexProfiler
 	// Progress receives ProgressEvents from each pipeline stage.
 	// Nil means no progress reporting.
@@ -419,7 +426,16 @@ type Pipeline struct {
 	diagnosticsMu      sync.Mutex
 	diagnostics        []DiagnosticEntry
 	diagnosticSessions map[sessionDiagnostic]struct{}
-	diagnosticSet      map[DiagnosticEntry]struct{}
+	// refreshReasons names why a maintenance pass queued a session. Guarded by
+	// diagnosticsMu and reset with the diagnostics at the start of each run.
+	refreshReasons map[SessionID]OutcomeReason
+	// writeLaneStats records the store-write lane's wait and busy time for the
+	// run. Nil when the run has no profiler.
+	writeLaneStats *writeLaneRecorder
+	// auditWritten reports that this run's ingest_log row was attempted, so the
+	// early-exit audit does not write a second one.
+	auditWritten  bool
+	diagnosticSet map[DiagnosticEntry]struct{}
 	// The two maps below record what this harvest has already told the user
 	// about a session's unusable source. They share one mutex because both are
 	// written from the same lanes in the same run.
@@ -502,14 +518,18 @@ func (lane *storeWriteLane) close() {
 	lane.wg.Wait()
 }
 
-func (p *Pipeline) runStoreWrite(lane *storeWriteLane, run func()) {
-	if lane != nil {
-		lane.do(run)
-		return
-	}
-	p.storeWriteMu.Lock()
-	defer p.storeWriteMu.Unlock()
-	run()
+// runStoreWrite serializes one store write. stage names the caller's stage,
+// so the time the job waited for the lane is attributed to it.
+func (p *Pipeline) runStoreWrite(lane *storeWriteLane, stage Stage, run func()) {
+	p.writeLaneStats.run(stage, time.Now, func(job func()) {
+		if lane != nil {
+			lane.do(job)
+			return
+		}
+		p.storeWriteMu.Lock()
+		defer p.storeWriteMu.Unlock()
+		job()
+	}, run)
 }
 
 // PipelineOption configures optional pipeline behavior.
@@ -786,6 +806,18 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		return nil, err
 	}
 	defer unlock()
+	p.auditWritten = false
+	p.writeLaneStats = nil
+	if p.config.IndexProfiler != nil {
+		p.writeLaneStats = &writeLaneRecorder{}
+	}
+	// A run that ends early still stores the profile it measured. It runs
+	// before the lock is released.
+	defer func() {
+		if err != nil {
+			p.auditInterruptedRun(ctx, start, err)
+		}
+	}()
 
 	// REINDEX mode: alternative code path that scans peasant-sync output
 	// instead of discovering from source providers.
@@ -1132,6 +1164,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	maintenanceQueued := make(map[SessionID]bool, len(toProcessEntries)-priorEntries)
 	for _, entry := range toProcessEntries[priorEntries:] {
 		maintenanceQueued[entry.Session.SessionID] = true
+		// The two maintenance passes know why they queued a session; the
+		// session's final status alone does not.
+		if entry.pairRepair {
+			p.markRefreshReason(entry.Session.SessionID, OutcomeReasonRefreshPairMissing)
+		} else {
+			p.markRefreshReason(entry.Session.SessionID, OutcomeReasonRefreshAdapterBehind)
+		}
 	}
 	keptResults := sessionResults[:0]
 	for _, result := range sessionResults {
@@ -2368,7 +2407,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		// A refusal about the source bytes is reported once. The audit row still
 		// records every attempt, and the parse still runs every harvest, so a
 		// repaired source is seen; only the user-facing repeat settles.
-		if cause, ok := sourceUnavailableCause(err); !ok || p.settleUnavailableSource(ctx, im.session.SessionID, cause, writeLane) {
+		if cause, ok := sourceUnavailableCause(err); !ok || p.settleUnavailableSource(ctx, im.session.SessionID, cause, writeLane, StageIndex) {
 			p.reportIndexRefusal(im.session.SessionID, err)
 		}
 		errMsg := err.Error()
@@ -2405,10 +2444,32 @@ func (p *Pipeline) flushIndexParseResults(ctx context.Context, results []indexPa
 // only after the managed-generation candidates in the same batch drain.
 func (p *Pipeline) flushIndexParseResultsWithProgress(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane, emit func()) indexWriteFlush {
 	batchStore, ok := p.metricsStore.(SessionEntryBatchStore)
+	var flush indexWriteFlush
 	if !ok || len(results) == 0 {
-		return p.flushIndexParseResultsOneByOne(ctx, results, outcome, logPrefix, writeLane, emit)
+		flush = p.flushIndexParseResultsOneByOne(ctx, results, outcome, logPrefix, writeLane, emit)
+	} else {
+		flush = p.flushIndexParseResultsBatch(ctx, results, batchStore, outcome, logPrefix, writeLane, emit)
 	}
-	return p.flushIndexParseResultsBatch(ctx, results, batchStore, outcome, logPrefix, writeLane, emit)
+	flush.attachTimings()
+	return flush
+}
+
+// attachTimings copies each attempt's measured parse time, write time and
+// parsed bytes onto its index_log entry. An attempt that neither parsed nor
+// wrote keeps nil: not measured.
+func (flush *indexWriteFlush) attachTimings() {
+	for i := range flush.logEntries {
+		if i >= len(flush.profileSessions) || flush.logEntries[i].SessionID == "" {
+			continue
+		}
+		profile := flush.profileSessions[i]
+		if profile.ParseDuration <= 0 && profile.WriteDuration <= 0 {
+			continue
+		}
+		flush.logEntries[i].ParseDuration = &profile.ParseDuration
+		flush.logEntries[i].WriteDuration = &profile.WriteDuration
+		flush.logEntries[i].Bytes = &profile.Bytes
+	}
 }
 
 func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string, writeLane *storeWriteLane, emit func()) indexWriteFlush {
@@ -2572,7 +2633,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			// Hold one session's file ownership before entering the writer lane.
 			// Parent/child ownership is never nested; each item commits atomically.
 			err := p.withCurrentIndexInput(ctx, results[writePositions[i]].input, func() error {
-				p.runStoreWrite(writeLane, func() {
+				p.runStoreWrite(writeLane, StageIndex, func() {
 					flush.writeTxs++
 					flush.writeSavepoints++
 					written := batchStore.IndexSessionEntryBatch(ctx, []SessionEntryWrite{writes[i]})
@@ -2700,6 +2761,50 @@ func (p *Pipeline) writeIndexParseResult(ctx context.Context, result indexParseR
 		WriteDuration: writeDuration,
 	}
 	return indexedResult, logEntry, profileSession
+}
+
+// profileStages returns the run's stage totals with the lane wait each stage's
+// store writes accumulated. Nil when the run has no profiler.
+func (p *Pipeline) profileStages() []IndexProfileStage {
+	stages := p.config.IndexProfiler.StageTotals()
+	for i := range stages {
+		stages[i].LaneWait += p.writeLaneStats.stageWait(stages[i].Stage)
+	}
+	return stages
+}
+
+// auditInterruptedRun stores the profile of a run that was cancelled or timed
+// out before its AUDIT stage. It writes the audit row and
+// the stage rows measured so far. The stored message names the class of the
+// ending only: an error's text can carry source paths. The write is best
+// effort and ignores the run's cancellation, since the run is already over.
+func (p *Pipeline) auditInterruptedRun(ctx context.Context, start time.Time, runErr error) {
+	if p.logger == nil || p.auditWritten || p.config.DryRun {
+		return
+	}
+	// Only a cancelled or timed-out run is recorded. A refused run, such as an
+	// unusable session scope, keeps its promise that nothing was recorded.
+	var message string
+	switch {
+	case errors.Is(runErr, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
+		message = "run timed out before its audit stage"
+	case errors.Is(runErr, context.Canceled) || ctx.Err() != nil:
+		message = "run cancelled before its audit stage"
+	default:
+		return
+	}
+	p.auditWritten = true
+	finishedAt := time.Now().UnixMilli()
+	entry := IngestLogEntry{
+		StartedAt:    start.UnixMilli(),
+		FinishedAt:   &finishedAt,
+		ErrorMessage: &message,
+		SourcePath:   collectSourcePaths(p.config.Sources),
+		Stages:       p.profileStages(),
+	}
+	if err := p.logger.LogIngestRun(context.WithoutCancel(ctx), entry); err != nil {
+		slog.Warn("pipeline: log interrupted ingest run", "error", err)
+	}
 }
 
 func recordIndexProfileMax(maxValue *atomic.Int64, value int64) {
@@ -3110,10 +3215,25 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// rows selected forever instead of republishing them once. This is
 			// deliberately not sessionVersionTarget, which narrows only the index
 			// lane.
-			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || metadataNeedsNativeRefresh(loc.SchemaVersion) ||
-				(loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled) ||
-				adapterRevisionBehind(loc.AdapterVersion, p.versionTargets()[session.Harness]) {
+			// The captured comparison is the authority, so it also names why the
+			// session is refreshed. The first true term is the reason.
+			var reason OutcomeReason
+			switch {
+			case !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint):
+				reason = OutcomeReasonRefreshSourceChanged
+			case metadataNeedsNativeRefresh(loc.SchemaVersion):
+				reason = OutcomeReasonRefreshMetadataSchema
+			case loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled:
+				reason = OutcomeReasonRefreshPublicationUnbound
+			case adapterRevisionBehind(loc.AdapterVersion, p.versionTargets()[session.Harness]):
+				reason = OutcomeReasonRefreshAdapterBehind
+				if loc.AdapterVersion == nil {
+					reason = OutcomeReasonRefreshAdapterStampAbsent
+				}
+			}
+			if reason != 0 {
 				status = DiffUpdated
+				p.markRefreshReason(session.SessionID, reason)
 			}
 		}
 		// Captured-source evidence decides a supported source, and only a
@@ -4302,7 +4422,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 		stopFlushTimer()
 		annotateStarted := time.Now()
 		var flushed []SessionAnnotationBatchResult
-		p.runStoreWrite(writeLane, func() {
+		p.runStoreWrite(writeLane, StageAnnotate, func() {
 			flushed = buffered.FlushAnnotationBatches(ctx, bufferedPending, p.config.IndexProfiler)
 		})
 		annotateDuration += time.Since(annotateStarted)
@@ -4340,7 +4460,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 			computeStarted := time.Now()
 			var n int
 			var err error
-			p.runStoreWrite(writeLane, func() {
+			p.runStoreWrite(writeLane, StageCompute, func() {
 				n, ids, err = p.computeReadyMetrics(ctx, ids)
 			})
 			computeDuration += time.Since(computeStarted)
@@ -4398,7 +4518,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 				}
 				annotateStarted := time.Now()
 				var err error
-				p.runStoreWrite(writeLane, func() {
+				p.runStoreWrite(writeLane, StageAnnotate, func() {
 					if useProfile && p.config.IndexProfiler != nil {
 						err = profiled.AnnotateWithProfile(ctx, sid, p.config.IndexProfiler)
 					} else {
@@ -4758,12 +4878,24 @@ func (p *Pipeline) indexComputeAndFinalize(
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageReport, Done: len(pipelineResult.Sessions), Total: len(pipelineResult.Sessions)})
 	p.recordIndexProfileStage(StageReport, reportProfileStart, len(pipelineResult.Sessions), len(pipelineResult.Sessions))
 
-	// AUDIT — write ingest_log entry (best-effort, non-fatal).
+	// AUDIT — write ingest_log entry (best-effort, non-fatal). The run row,
+	// its stage rows and the stage retention commit in one transaction; the
+	// outcome rows follow in bounded batches.
 	auditProfileStart := time.Now()
+	auditAt := auditProfileStart.UnixMilli()
+	outcomes := p.runOutcomes(sessionResults, indexLogEntries, auditAt)
+	census := refreshCensus(outcomes, indexLogEntries)
+	pipelineResult.Census = &census
+	if p.writeLaneStats != nil {
+		lane := p.writeLaneStats.Snapshot()
+		pipelineResult.WriteLane = &lane
+	}
+	p.auditWritten = true
 	if p.logger != nil {
 		finishedAt := time.Now().UnixMilli()
 		logEntry := IngestLogEntry{
-			Outcomes:        p.runOutcomes(sessionResults, finishedAt),
+			Outcomes:        outcomes,
+			Stages:          p.profileStages(),
 			StartedAt:       start.UnixMilli(),
 			FinishedAt:      &finishedAt,
 			SessionsNew:     pipelineResult.Summary.New,

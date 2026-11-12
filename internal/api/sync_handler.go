@@ -1428,7 +1428,9 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		OutputDir:          resolvedOutput,
 		StalenessThreshold: staleness,
 		Write:              cfg.Write,
-		Progress:           progState,
+		// Always on: the pipeline stores the run's profile with its audit row.
+		IndexProfiler: &ingest.IndexProfiler{},
+		Progress:      progState,
 	}
 	// A full import applies the saved selection. An explicit session re-index
 	// keeps the allowlist scope of `peasant harvest --session` and does not.

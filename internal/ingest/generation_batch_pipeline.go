@@ -43,7 +43,7 @@ func (p *Pipeline) stageAndCommitNativeBatches(ctx context.Context, results []in
 			activations[i] = job.commit.prepared.activation
 		}
 		var staged []GenerationStaged
-		p.runStoreWrite(lane, func() {
+		p.runStoreWrite(lane, StageIndex, func() {
 			staged, _ = stager.StageGenerationCandidates(ctx, activations)
 		})
 		for i := range window {
@@ -74,7 +74,7 @@ func (p *Pipeline) commitNativeBatch(ctx context.Context, jobs []generationCommi
 	var activations []GenerationActivation
 	var staged []GenerationStaged
 	var outcomes []NativeActivationResult
-	p.runStoreWrite(lane, func() {
+	p.runStoreWrite(lane, StageIndex, func() {
 		// Hold each input guard through the batch call. A refusal excludes only
 		// that candidate; the store still applies its own per-session C0 CAS.
 		var guard func(int)

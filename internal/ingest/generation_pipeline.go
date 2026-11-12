@@ -447,7 +447,7 @@ func (p *Pipeline) commitGenerationResult(ctx context.Context, prepared prepared
 	}
 	var activationOutcome ActivationOutcome
 	var activationErr error
-	p.runStoreWrite(writeLane, func() {
+	p.runStoreWrite(writeLane, StageIndex, func() {
 		activationErr = p.withCurrentIndexInput(ctx, result.input, func() error {
 			var err error
 			if staged := prepared.staged; staged != nil {

@@ -8,8 +8,11 @@ import (
 
 const defaultIndexProfileSlowLimit = 10
 
-// IndexProfiler collects opt-in INDEX timing data for one pipeline run.
-// It is intentionally in memory only: callers decide how to print or discard it.
+// IndexProfiler collects timing data for one pipeline run. Every import entry
+// point creates one. The pipeline stores its per-stage totals with the run's
+// audit row and its per-session timings in index_log; a caller may also print
+// the snapshot. It observes per batch, per session and per stage, never per
+// entry.
 type IndexProfiler struct {
 	mu              sync.Mutex
 	batches         []IndexProfileBatch
@@ -19,6 +22,7 @@ type IndexProfiler struct {
 	flushWaits      []time.Duration
 	activationSizes map[int]int
 	stagedPeak      int64
+	observations    int64
 }
 
 const (
@@ -59,6 +63,78 @@ type IndexProfileStage struct {
 	Duration time.Duration
 	Done     int
 	Total    int
+	// Bytes is the transcript bytes the stage moved; 0 when it reports none.
+	Bytes int64
+	// LaneWait is the time the stage's store writes waited for the write lane.
+	LaneWait time.Duration
+}
+
+// StageTotals folds the recorded stage segments into one row per stage, in
+// profile display order. Several segments of one stage sum their durations and
+// bytes; Done and Total come from the last segment. Stages overlap by design,
+// so the rows do not sum to wall time.
+func (p *IndexProfiler) StageTotals() []IndexProfileStage {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	segments := append([]IndexProfileStage(nil), p.stages...)
+	var indexBytes int64
+	for _, batch := range p.batches {
+		indexBytes += batch.Bytes
+	}
+	p.mu.Unlock()
+	totals := FoldProfileStages(segments)
+	for i := range totals {
+		if totals[i].Stage == StageIndex {
+			totals[i].Bytes += indexBytes
+		}
+	}
+	return totals
+}
+
+// FoldProfileStages folds stage segments into one row per stage, in profile
+// display order: durations, bytes and lane waits sum; Done and Total come from
+// the last segment.
+func FoldProfileStages(segments []IndexProfileStage) []IndexProfileStage {
+	position := make(map[Stage]int, len(segments))
+	var totals []IndexProfileStage
+	for _, segment := range segments {
+		at, seen := position[segment.Stage]
+		if !seen {
+			position[segment.Stage] = len(totals)
+			totals = append(totals, segment)
+			continue
+		}
+		totals[at].Duration += segment.Duration
+		totals[at].Bytes += segment.Bytes
+		totals[at].LaneWait += segment.LaneWait
+		totals[at].Done = segment.Done
+		totals[at].Total = segment.Total
+	}
+	order := make(map[Stage]int, len(IndexProfileStageOrder))
+	for i, stage := range IndexProfileStageOrder {
+		order[stage] = i
+	}
+	rank := func(stage Stage) int {
+		if i, ok := order[stage]; ok {
+			return i
+		}
+		return len(order)
+	}
+	sort.SliceStable(totals, func(i, j int) bool { return rank(totals[i].Stage) < rank(totals[j].Stage) })
+	return totals
+}
+
+// Observations returns how many times the profiler was called. It grows with
+// batches, sessions and stages, never with entries.
+func (p *IndexProfiler) Observations() int64 {
+	if p == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.observations
 }
 
 // SessionEntryWriteStats records the branch decisions made by the INDEX writer.
@@ -130,7 +206,7 @@ func (s SessionEntryWriteStats) Any() bool {
 }
 
 // AnnotationProfileStats records aggregate work inside the ANNOTATE stage.
-// It is populated only for opt-in index profiles and is safe to add across
+// It is safe to add across
 // parallel classifier workers through IndexProfiler.RecordAnnotation.
 type AnnotationProfileStats struct {
 	ListEntriesCount   int
@@ -462,6 +538,7 @@ func (p *IndexProfiler) RecordFlushWait(wait time.Duration) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.observations++
 	p.flushWaits = append(p.flushWaits, wait)
 }
 
@@ -471,6 +548,7 @@ func (p *IndexProfiler) RecordActivationSize(size int) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.observations++
 	if p.activationSizes == nil {
 		p.activationSizes = make(map[int]int)
 	}
@@ -483,6 +561,7 @@ func (p *IndexProfiler) RecordStagedPeak(peak int64) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.observations++
 	p.stagedPeak = max(p.stagedPeak, peak)
 }
 
@@ -493,6 +572,7 @@ func (p *IndexProfiler) Record(batch IndexProfileBatch, sessions []IndexProfileS
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.observations++
 	p.batches = append(p.batches, batch)
 	p.sessions = append(p.sessions, sessions...)
 }
@@ -504,6 +584,7 @@ func (p *IndexProfiler) RecordStage(stage Stage, duration time.Duration, done in
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.observations++
 	p.stages = append(p.stages, IndexProfileStage{Stage: stage, Duration: duration, Done: done, Total: total})
 }
 
@@ -514,6 +595,7 @@ func (p *IndexProfiler) RecordAnnotation(stats AnnotationProfileStats) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.observations++
 	p.annotate.Add(stats)
 }
 

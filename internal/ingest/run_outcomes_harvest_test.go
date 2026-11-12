@@ -81,18 +81,21 @@ func TestRunOutcomesHarvestSQLite(t *testing.T) {
 		}
 		session := makeDiscoveredSession(t, row.SessionID, path, time.Now().Add(-time.Hour))
 		sessions = append(sessions, session)
-		kind, err := ingest.NewRunOutcomeKind(row.Kind)
+		kind, err := ingest.NewOutcomeKind(row.Kind)
 		if err != nil {
 			t.Fatal(err)
 		}
-		reason, err := ingest.NewAuditReason(row.Reason)
+		reason, err := ingest.NewOutcomeReason(row.Reason)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if reason.Kind() != kind {
+			t.Fatalf("fixture row %s names kind %s, but its reason belongs to %s", row.Name, kind, reason.Kind())
 		}
 		if _, ok := want[session.SessionID]; ok {
 			t.Fatal("duplicate fixture identity")
 		}
-		want[session.SessionID] = ingest.RunOutcome{SessionID: session.SessionID, Kind: kind, ReasonCode: reason}
+		want[session.SessionID] = ingest.RunOutcome{SessionID: session.SessionID, Reason: reason}
 		if row.WorkerFailure {
 			failures[session.SessionID] = errors.New(fixture.PrivateMessage + " at " + fixture.PrivateLocation)
 		} else {
@@ -147,17 +150,41 @@ func TestRunOutcomesHarvestSQLite(t *testing.T) {
 	if aggregates != 1 || runID == 0 {
 		t.Fatal("harvest did not write exactly one parent audit")
 	}
-	got, err := db.ListIngestRunOutcomes(t.Context(), runID)
+	stored, err := db.ListIngestRunOutcomes(t.Context(), runID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Both sessions are new, so each has exactly one refresh row beside its
+	// failure or diagnostic row: a failed refresh is still a refresh.
+	refreshed := make(map[ingest.SessionID]int)
+	var got []ingest.RunOutcome
+	for _, outcome := range stored {
+		if outcome.Reason.Kind() == ingest.OutcomeKindRefresh {
+			if outcome.Reason != ingest.OutcomeReasonRefreshNew {
+				t.Fatalf("new session refreshed for reason %s", outcome.Reason.Code())
+			}
+			refreshed[outcome.SessionID]++
+			continue
+		}
+		got = append(got, outcome)
+	}
+	for sid := range want {
+		if refreshed[sid] != 1 {
+			t.Fatalf("session %s has %d refresh rows, want exactly 1", sid, refreshed[sid])
+		}
+	}
+	if len(refreshed) != len(want) {
+		t.Fatalf("refresh rows name %d sessions, want %d", len(refreshed), len(want))
+	}
+	if result.Census == nil || result.Census.Sessions() != len(want) {
+		t.Fatalf("run census = %+v, want %d refreshed sessions", result.Census, len(want))
 	}
 	if len(got) != len(want) {
 		t.Fatalf("harvest outcomes = %+v", got)
 	}
 	for _, outcome := range got {
 		expected, ok := want[outcome.SessionID]
-		if !ok || outcome.Kind != expected.Kind ||
-			outcome.ReasonCode != expected.ReasonCode ||
+		if !ok || outcome.Reason != expected.Reason ||
 			outcome.RunID != runID || outcome.CreatedAt == 0 {
 			t.Fatalf("unexpected harvest outcome: %+v", outcome)
 		}
