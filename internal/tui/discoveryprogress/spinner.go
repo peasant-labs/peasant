@@ -10,6 +10,14 @@ import (
 	"github.com/peasant-labs/peasant/internal/discovery"
 )
 
+// frameInterval is how often a terminal spinner redraws its line and advances
+// to the next frame.
+const frameInterval = 80 * time.Millisecond
+
+// frames is the Braille animation a terminal spinner cycles through, one frame
+// per frameInterval.
+var frames = [...]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 // rereadsNotReported is the re-read count of a phase whose adapter has not
 // reported one. Any negative count means the same.
 const rereadsNotReported = -1
@@ -31,8 +39,6 @@ type Spinner struct {
 
 var _ discovery.ScanProgress = (*Spinner)(nil)
 var _ discovery.ScanRereadProgress = (*Spinner)(nil)
-
-var frames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // New starts the spinner only for a terminal. The caller determines whether
 // the destination is a terminal, allowing other writers to remain quiet.
@@ -131,7 +137,7 @@ func (s *Spinner) Stop() {
 
 func (s *Spinner) run() {
 	defer s.wg.Done()
-	ticker := time.NewTicker(80 * time.Millisecond)
+	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
 	for range ticker.C {
 		s.mu.Lock()
