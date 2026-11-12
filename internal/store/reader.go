@@ -318,7 +318,13 @@ func sqlSessionDetailByIDQuery(latestAttemptCounts bool) string {
 		return "CASE WHEN s.latest_attempt_generation_id IS NOT NULL THEN json_extract(s.latest_attempt_stats_json,'$." + key + "') ELSE " + fallback + " END"
 	}
 	turnCount := latestAttemptExpr("turnCount", turnAuthority)
-	conversationTurnCount := latestAttemptExpr("conversationTurnCount", sqlSessionConversationTurnCount)
+	// A latest attempt recorded before producers wrote conversationTurnCount
+	// has no such key in its stats document. That attempt falls back to the
+	// session's stored conversation count instead of reading as 0.
+	conversationTurnCount := sqlSessionConversationTurnCount
+	if latestAttemptCounts {
+		conversationTurnCount = "CASE WHEN s.latest_attempt_generation_id IS NOT NULL THEN COALESCE(json_extract(s.latest_attempt_stats_json,'$.conversationTurnCount'), " + sqlSessionConversationTurnCount + ") ELSE " + sqlSessionConversationTurnCount + " END"
+	}
 	toolCalls := latestAttemptExpr("toolCallCount", toolAuthority)
 	tokensOut := latestAttemptExpr("tokensOut", outAuthority)
 	// The latest attempt's producer stats record the attempt duration in

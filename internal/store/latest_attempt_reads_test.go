@@ -313,6 +313,29 @@ func TestLatestAttemptAvailableReadBindsLatestAttempt(t *testing.T) {
 	}
 }
 
+// TestLatestAttemptAvailableReadFallsBackForStatsWithoutConversationCount
+// proves a latest attempt whose producer stats document was recorded before
+// the conversation turn count existed reports the session's stored
+// conversation count, never 0, while its other counts stay the attempt's own.
+func TestLatestAttemptAvailableReadFallsBackForStatsWithoutConversationCount(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("44445555-6666-4777-8888-99990000aaaa")
+	seedLatestAttemptCoexistence(t, s, sid)
+	execGenerationSQL(t, s, `UPDATE sessions SET latest_attempt_stats_json = json_remove(latest_attempt_stats_json, '$.conversationTurnCount') WHERE session_id = '`+string(sid)+`';`)
+
+	snapshot, err := s.ReadSessionAvailable(context.Background(), ingest.SessionID(sid))
+	if err != nil {
+		t.Fatalf("ReadSessionAvailable: %v", err)
+	}
+	if int64(snapshot.Detail.ConversationTurnCount) != *authorityStats.ConversationTurnCount {
+		t.Fatalf("available conversation turn count = %d, want the session's stored %d: the attempt's stats document has no conversationTurnCount", snapshot.Detail.ConversationTurnCount, *authorityStats.ConversationTurnCount)
+	}
+	if snapshot.Detail.TurnCount != latestAttemptStats.TurnCount || snapshot.Detail.ToolCalls != latestAttemptStats.ToolCallCount {
+		t.Fatalf("available counts = %d/%d, want the latest attempt's %d/%d",
+			snapshot.Detail.TurnCount, snapshot.Detail.ToolCalls, latestAttemptStats.TurnCount, latestAttemptStats.ToolCallCount)
+	}
+}
+
 // TestLatestAttemptPreviewSnapshotReportsLatestAttemptStats proves the
 // preview-snapshot read resolves the latest attempt's generation and its
 // counts from the latest attempt's own producer stats document.
