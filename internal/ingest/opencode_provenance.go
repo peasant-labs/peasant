@@ -470,11 +470,17 @@ func classifyOpenCodeToolFormShell(msg OpenCodeProvenanceMessage, attr OpenCodeM
 	if err != nil {
 		return nil, err
 	}
+	// A tool-form shell message holds only tool calls, never prose, so
+	// its carrier is a tool_use turn with no countable tool use of its
+	// own: no call key, no tool name, no content.
+	hasProse := false
+	hasToolUse := true
+	hasThinking := false
 	blocks := []ClassifiedBlock{
 		{
 			NativeKey: carrierKey,
 			Role:      schema.RoleAssistant,
-			EntryType: schema.EntryTypeText,
+			EntryType: assistantEntryType(hasProse, hasToolUse, hasThinking),
 			Provenance: &schema.ContentProvenance{
 				Origin:        schema.ContentOriginToolActivity,
 				Actor:         schema.ActorOriginUnknown,
@@ -587,10 +593,16 @@ func classifyOpenCodeAssistant(msg OpenCodeProvenanceMessage, attr OpenCodeMessa
 					return nil, err
 				}
 				carrierKey = key
+				// A tool-only message holds no prose, so its carrier is a
+				// tool_use turn with no countable tool use of its own: no
+				// call key, no tool name, no content.
+				hasProse := false
+				hasToolUse := true
+				hasThinking := false
 				blocks = append(blocks, ClassifiedBlock{
 					NativeKey: carrierKey,
 					Role:      schema.RoleAssistant,
-					EntryType: schema.EntryTypeText,
+					EntryType: assistantEntryType(hasProse, hasToolUse, hasThinking),
 					Provenance: &schema.ContentProvenance{
 						Origin:        schema.ContentOriginToolActivity,
 						Actor:         schema.ActorOriginUnknown,

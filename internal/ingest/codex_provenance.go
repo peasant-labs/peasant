@@ -1343,10 +1343,11 @@ func (c *codexBlockClassifier) classifyReasoning(node CodexCapturedNode, payload
 
 // classifyToolUse emits the depth-1 tool_use block under the assistant carrier
 // its segment belongs to. The first local agent-output text/thinking block
-// after a non-assistant block is that carrier; a tool-only segment creates an
-// empty assistant carrier with its own ref. The carrier counts as the tool-only
-// turn without claiming content, and one folded tool adds exactly one main
-// record. Correlation is the native call identity, never text equality.
+// after a non-assistant block is that carrier; a tool-only segment creates a
+// prose-less assistant carrier with its own ref. The carrier is typed tool_use
+// and holds no tool call of its own, so it leaves the conversation count while
+// its tool calls keep their own turns. Correlation is the native call
+// identity, never text equality.
 func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload codexItemPayload, metadata codexEnvelopeMetadata) {
 	ownership := ownershipOf(node, metadata)
 	if ownership == schema.ContentOwnershipUncertain {
@@ -1358,12 +1359,18 @@ func (c *codexBlockClassifier) classifyToolUse(node CodexCapturedNode, payload c
 	}
 	if carrierKey == "" {
 		carrierKey = node.NativeKey + "/carrier"
+		// A tool-only segment holds no prose, so its carrier is a tool_use
+		// turn with no countable tool use of its own: no call key, no tool
+		// name, no content.
+		hasProse := false
+		hasToolUse := true
+		hasThinking := false
 		c.emit(ClassifiedBlock{
 			NativeKey: carrierKey,
 			Section:   sectionOf(ownership),
 			Uncertain: ownership == schema.ContentOwnershipUncertain,
 			Role:      RoleAssistant,
-			EntryType: EntryTypeText,
+			EntryType: assistantEntryType(hasProse, hasToolUse, hasThinking),
 		})
 		if ownership == schema.ContentOwnershipLocal {
 			c.carrierKey = carrierKey
