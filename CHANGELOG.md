@@ -2,10 +2,95 @@
 
 All notable changes to Peasant are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Peasant follows
-[Semantic Versioning](https://semver.org/). Each version links to its GitHub
-Release, which holds the signed artifacts and checksums.
+[Semantic Versioning](https://semver.org/). Published versions link to their
+GitHub Releases, which hold the signed artifacts and checksums. A version that
+was tagged but not published links to its tag instead.
 
 ## [Unreleased]
+
+### Changed
+- Every import keeps its timing profile: `peasant harvest`, the kickstart
+  import and the import started from the local web app each store it with the
+  run's audit row. `harvest --profile-index` now only decides whether the
+  profile is also printed. Each run also records one `refresh` row for every
+  session it refreshed, with the reason.
+- A session whose native source could not be read is recorded in the run audit
+  as `adapter_capture_failed`. `adapter_refresh_unavailable` now names only the
+  warning that a refresh could not run and the previous copy was kept.
+- An import that is cancelled before it finishes records its run row and the
+  stages it measured.
+
+### Database
+- Migration 77 stores a profile of every import. `ingest_run_stages` holds one
+  row per pipeline stage per run (duration, counts, bytes, time spent waiting
+  for the write lane), kept for the latest 100 runs, and `index_log` gains
+  `parse_ms`, `write_ms` and `bytes`. `ingest_run_outcomes` now holds a
+  `reason_id` in place of the `kind` and `reason_code` text: the kinds and
+  reasons live in `ingest_outcome_kinds` and `ingest_outcome_reasons`, each
+  reason with a stable id. A query that read `kind` or `reason_code` must join
+  those tables; `docs/harvest-audit.md` has the new queries. The upgrade
+  rebuilds that one small table and keeps every row of the latest 100 runs.
+
+## [0.16.2] - 2026-11-12
+
+### Fixed
+- Search finds entries again after the 0.16.1 upgrade. The 0.16.1 store
+  upgrade pointed the transcript-entry search triggers at a retired index, so
+  entries written afterwards were missing from search, and an entry deleted
+  afterwards could leave its words behind, where they could match an unrelated
+  entry that later reused its row. Opening the store repairs this once: a store
+  without leftover words only adds the missing entries, which takes moments; a
+  store with leftover words rebuilds the whole search index once, which reads
+  all stored text and can take several minutes.
+- Only a command run in a terminal performs that one-time rebuild, and it
+  prints a line before it starts. A git hook, a script, a CI job or the
+  background web server that finds a store needing it skips its work and names
+  the command to run: `peasant harvest` or `peasant web start` in a terminal.
+  `village push` reports the run as nothing attempted, so a git hook never
+  blocks the push; other commands exit non-zero. `peasant migrate` and
+  `peasant reclaim` refuse it without a terminal unless `--confirm` is given,
+  which runs the rebuild as the user's explicit choice.
+- A failed transcript window load shows one alert, not two, with a retry.
+
+### Database
+- Migration 76 (`schema-76`) repairs the search index left by migration 75.
+  Upgrading from 0.16.1: the first command you run in a terminal may rebuild
+  the search index once, which needs free disk space for a new index. A store
+  that never ran 0.16.0 or 0.16.1, including one upgraded straight from
+  0.15.x, does not need this repair rebuild. The earlier migration 75 can still
+  rebuild the search indexes while upgrading from 0.15.x; see 0.16.0 below.
+  As a small-scale estimate, on 2026-11-12 a synthetic store containing 70 MiB
+  of repetitive indexed text took about 0.9 seconds to repair. Real times vary
+  with the amount and content of text, hardware and disk, and can be much longer.
+- If an interrupted 0.16.0 or 0.16.1 upgrade left conversation turn counts at
+  zero, `peasant harvest index --all` can rebuild them from the saved files.
+  This forces a re-index of all saved sessions and can itself take a long time.
+
+## [0.16.1] - 2026-11-11
+
+This is the first published release containing the changes listed under
+0.16.0. Its upgrade has the same store migration and refresh costs; see the
+database notes below.
+
+### Fixed
+- The web provider display follows the complete schema inventory instead of a
+  fixed count, and harvest help derives the list of supported sources from the
+  adapter registry. Release validation also fixes source-root handling under
+  `-trimpath` and pins the matching Village contract.
+
+### Database
+- **Upgrade from 0.15.x:** this release applies the 0.16.0 store migrations,
+  including a turn-count backfill and a search-index rebuild over stored text.
+  Discovery can re-read cached Claude sources, and the next harvest can also
+  refresh and re-index older Claude and OpenCode sessions. The work grows with
+  stored text and affected sessions; the store upgrade does not show
+  step-by-step progress. Allow time and free disk space; the 0.16.0 notes below
+  describe the individual changes.
+
+## [0.16.0] - 2026-11-11
+
+This version was tagged but never published as a GitHub release. Its changes
+shipped to users in 0.16.1, with the additional fixes noted above.
 
 ### Added
 - `harvest --session` and `harvest index --session` process the named sessions
@@ -13,6 +98,81 @@ Release, which holds the signed artifacts and checksums.
   yet. `--no-related` narrows the run to the named sessions themselves.
 - `--harness` is accepted as an alias for `--source-harness` on `harvest` and
   `harvest index`; both names set the same filter.
+- The transcript shows local images in order with text. Image bytes stay in the
+  local content-addressed store; published transcripts report omitted images
+  without uploading those bytes. Attachment control records have shape-only
+  previews, and retained control payloads are capped at 256 KiB.
+- `peasant layout list` and `peasant layout capture` describe observed session
+  layouts for Grok Build, Devin Desktop, Cline, Kiro and Cursor. These probes
+  do not add ingestion for the observed tools; their default reports omit
+  transcript content and identifying metadata.
+
+### Changed
+- `open --session` no longer passes `--force`. An unchanged session is not
+  re-extracted or re-indexed; opening it still refreshes that session's commits.
+  `harvest` gains `--refresh-commits`, off by default, for the same refresh
+  without opening the dashboard.
+- `harvest --session <unknown>` now exits non-zero and prints the reason it
+  could not use the session. It used to exit 0 and report the session as
+  unchanged.
+- A `--source-harness`/`--harness` or `--since` that excludes a named session is
+  now an error naming the filter that excluded it. It used to be silent.
+- The dashboard's one-session re-index now processes that session's related
+  sessions too, matching `harvest --session`.
+- `open --session` and `harvest --session` re-capture the named session's
+  subagents as well, so `open` time grows with the session's subagent count.
+- A named session that is recorded but can no longer be read keeps its stored
+  transcript, receives the same store-side upkeep a full harvest gives it,
+  exits 0, and prints one warning on stderr. `open` opens the stored copy and
+  says so on stderr; `harvest index --session` names the saved pair it could
+  not read instead of a source. It used to be silent.
+- A plain `harvest index` now keeps the Codex rollout catalog current as it
+  walks the Codex source for canonical facts. It used to walk Codex and write
+  nothing, so a database maintained only through `harvest index` never gained
+  the catalog.
+- Home reads sessions in bounded pages, remembers its view and groups, and
+  keeps the reader's place. Large transcripts load in segments, with more
+  content read on demand; earlier history remains available on request.
+- Conversation turn counts agree across the list, transcript, export and
+  publication. The web remembers the system-entries toggle and shows a channel
+  failure separately from the connection notice.
+
+### Fixed
+- A harvest that finds a stored transcript written by an older adapter revision
+  now re-reads and republishes it once, then settles. This includes
+  `harvest logs`, which has no database and used to keep the old projection
+  forever, and rows that recorded no adapter revision at all. A retained latest
+  attempt parsed at the current revision also advances the stored stamp, so the
+  row is not re-read on every harvest.
+- OpenCode idle markers are interpreted instead of reported as unknown;
+  failed markers retain their failure text when available.
+- A full web import applies the saved session selection instead of importing
+  every discovered session. Claude subagents with API-request records that
+  omit `isSidechain` are no longer left out solely for that reason.
+- Transcript failures name their operation and remain local to the failed
+  channel. Per-turn duplicate files-read panels are removed; the session-wide
+  Files tab remains available.
+
+### Database
+- **Upgrade from 0.15.x:** migrations 70–75 (`schema-70`, `schema-71`,
+  `schema-72`, `schema-73`, `schema-74`, `schema-75`) update the local store.
+  The turn-count backfill folds stored sessions, and migration 75 rebuilds
+  search indexes over stored text. Time and temporary disk use grow with the
+  size of the store. The upgrade runs when a command opens the store; these
+  versions do not show step-by-step progress during it.
+- The next harvest may also re-read and re-index stored sessions. The OpenCode
+  adapter targets increase (`opencode-adapter-4`, `opencode-adapter-5`), and
+  the Claude indexer targets increase (`claude-indexer-24`,
+  `claude-indexer-25`). Older or missing adapter stamps can also make sessions
+  eligible for a one-time refresh. The cost grows with the number and size of
+  affected sessions; harvest shows its normal import stages, not a prior
+  estimate of all the work.
+- Claude discovery may re-mine cached source files once as its identity proof
+  changes, so discovery time can grow with the files it needs to read again.
+
+## [0.15.0] - 2026-11-08
+
+### Added
 - `peasant sessions review` checks named sessions for what redaction leaves
   behind, in memory and writing nothing: credentials in formats no rule knows,
   passwords on a `mysql -p<password>` command line, tool calls that read or
@@ -48,74 +208,16 @@ Release, which holds the signed artifacts and checksums.
   prints the plan. It uploads nothing and changes no visibility or license. It
   exits 3 whenever it sent no share request, every target failing included,
   and 1 only when it sent one and something failed.
+- `sessions search --tag` filters search results by tag, like `sessions list`.
 
 ### Changed
-- Every import keeps its timing profile: `peasant harvest`, the kickstart
-  import and the import started from the local web app each store it with the
-  run's audit row. `harvest --profile-index` now only decides whether the
-  profile is also printed. Each run also records one `refresh` row for every
-  session it refreshed, with the reason.
-- A session whose native source could not be read is recorded in the run audit
-  as `adapter_capture_failed`. `adapter_refresh_unavailable` now names only the
-  warning that a refresh could not run and the previous copy was kept.
-- An import that is cancelled before it finishes records its run row and the
-  stages it measured.
-- `open --session` no longer passes `--force`. An unchanged session is not
-  re-extracted or re-indexed; opening it still refreshes that session's commits.
-  `harvest` gains `--refresh-commits`, off by default, for the same refresh
-  without opening the dashboard.
-- `harvest --session <unknown>` now exits non-zero and prints the reason it
-  could not use the session. It used to exit 0 and report the session as
-  unchanged.
-- A `--source-harness`/`--harness` or `--since` that excludes a named session is
-  now an error naming the filter that excluded it. It used to be silent.
-- The dashboard's one-session re-index now processes that session's related
-  sessions too, matching `harvest --session`.
-- `open --session` and `harvest --session` re-capture the named session's
-  subagents as well, so `open` time grows with the session's subagent count.
-- A named session that is recorded but can no longer be read keeps its stored
-  transcript, receives the same store-side upkeep a full harvest gives it,
-  exits 0, and prints one warning on stderr. `open` opens the stored copy and
-  says so on stderr; `harvest index --session` names the saved pair it could
-  not read instead of a source. It used to be silent.
-- A plain `harvest index` now keeps the Codex rollout catalog current as it
-  walks the Codex source for canonical facts. It used to walk Codex and write
-  nothing, so a database maintained only through `harvest index` never gained
-  the catalog.
+- Transcripts focus on conversation: empty top-level system entries no longer
+  project, and system records carry their producer's control kind. Turn counts
+  in transcript detail, export and publication exclude system turns.
 
 ### Fixed
-- Search finds entries again after the 0.16.1 upgrade. The 0.16.1 store
-  upgrade pointed the transcript-entry search triggers at a retired index, so
-  entries written afterwards were missing from search, and an entry deleted
-  afterwards could leave its words behind, where they could match an unrelated
-  entry that later reused its row. Opening the store repairs this once: a store
-  without leftover words only adds the missing entries, which takes moments; a
-  store with leftover words rebuilds the whole search index once, which reads
-  all stored text and can take several minutes.
-- Only a command run in a terminal performs that one-time rebuild, and it
-  prints a line before it starts. A git hook, a script, a CI job or the
-  background web server that finds a store needing it skips its work and names
-  the command to run: `peasant harvest` or `peasant web start` in a terminal.
-  `village push` reports the run as nothing attempted, so a git hook never
-  blocks the push; other commands exit non-zero. `peasant migrate` and
-  `peasant reclaim` refuse it without a terminal unless `--confirm` is given,
-  which runs the rebuild as the user's explicit choice.
-
-### Database
-- Migration 76 repairs the search index left by migration 75. Upgrading from
-  0.16.1: the first command you run in a terminal may rebuild the search index
-  once, which needs free disk space for a new index. A store that never ran
-  0.16.1, including one upgraded straight from 0.15.x, only takes the quick
-  path.
-- Migration 77 stores a profile of every import. `ingest_run_stages` holds one
-  row per pipeline stage per run (duration, counts, bytes, time spent waiting
-  for the write lane), kept for the latest 100 runs, and `index_log` gains
-  `parse_ms`, `write_ms` and `bytes`. `ingest_run_outcomes` now holds a
-  `reason_id` in place of the `kind` and `reason_code` text: the kinds and
-  reasons live in `ingest_outcome_kinds` and `ingest_outcome_reasons`, each
-  reason with a stable id. A query that read `kind` or `reason_code` must join
-  those tables; `docs/harvest-audit.md` has the new queries. The upgrade
-  rebuilds that one small table and keeps every row of the latest 100 runs.
+- Grouped search uses the ranked page and its documented result cap. Search
+  offsets above 5000 are refused instead of advertising an unusable next page.
 
 ## [0.14.0] - 2026-11-04
 
@@ -182,12 +284,6 @@ Release, which holds the signed artifacts and checksums.
   24 hours incorrectly added.
 
 ### Fixed
-- A harvest that finds a stored transcript written by an older adapter revision
-  now re-reads and republishes it once, then settles. This includes
-  `harvest logs`, which has no database and used to keep the old projection
-  forever, and rows that recorded no adapter revision at all. A retained latest
-  attempt parsed at the current revision also advances the stored stamp, so the
-  row is not re-read on every harvest.
 - Only one writing harvest runs at a time per data directory. Two harvests
   started together on one data dir used to race each other's index
   replacement. Now `peasant harvest`, `harvest logs`, `harvest index` and
@@ -1170,6 +1266,10 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.16.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.16.2
+[0.16.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.16.1
+[0.16.0]: https://github.com/peasant-labs/peasant/tree/v0.16.0
+[0.15.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.15.0
 [0.14.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.14.0
 [0.13.5]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.5
 [0.13.4]: https://github.com/peasant-labs/peasant/releases/tag/v0.13.4
