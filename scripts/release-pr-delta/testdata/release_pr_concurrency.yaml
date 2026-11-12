@@ -1,13 +1,16 @@
 # Pins the release-pr.yml concurrency contract: the merge run has its own
 # group and is never cancelled, a body edit queues behind running gates, and
-# validate only runs on an open PR. Each entry is identified by name; the test
-# looks every value up by that name and fails on a missing or extra entry.
+# validate and changes only run on an open PR. Each entry is identified by
+# name; the test looks every value up by that name and fails on a missing or
+# extra entry.
 expectations:
   - name: group
-    value: "release-pr-${{ github.event.pull_request.number }}-${{ github.event.action == 'closed' && 'merge' || (github.event.action == 'labeled' && github.event.label.name || 'gates') }}"
+    value: "release-pr-${{ github.event.pull_request.number }}-${{ github.event.action == 'closed' && 'merge' || (github.event.action == 'labeled' && format('label-{0}', github.event.label.name) || 'gates') }}"
   - name: cancel-in-progress
     value: "${{ github.event.action != 'closed' && github.event.action != 'edited' && github.event.action != 'labeled' }}"
   - name: validate-if
+    value: "github.event.action != 'closed' && github.event.pull_request.state == 'open' && startsWith(github.event.pull_request.title, 'release(')"
+  - name: changes-if
     value: "github.event.action != 'closed' && github.event.pull_request.state == 'open' && startsWith(github.event.pull_request.title, 'release(')"
   - name: required-trigger
     value: edited

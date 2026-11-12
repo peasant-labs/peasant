@@ -43,7 +43,7 @@ func loadReleasePRConcurrencyFixture(t *testing.T) map[string]string {
 	if err := yaml.Unmarshal(releasePRConcurrencyFixtureBytes, &fixture); err != nil {
 		t.Fatalf("parse testdata/release_pr_concurrency.yaml: %v", err)
 	}
-	wantNames := map[string]bool{"group": false, "cancel-in-progress": false, "validate-if": false, "required-trigger": false}
+	wantNames := map[string]bool{"group": false, "cancel-in-progress": false, "validate-if": false, "changes-if": false, "required-trigger": false}
 	got := make(map[string]string, len(fixture.Expectations))
 	for _, expectation := range fixture.Expectations {
 		if strings.TrimSpace(expectation.Name) == "" || strings.TrimSpace(expectation.Value) == "" {
@@ -68,7 +68,7 @@ func normalizeReleasePRCondition(value string) string {
 
 // TestReleasePRConcurrencyGuard pins the release-pr.yml concurrency contract:
 // the merge run has its own group and is never cancelled, a body edit queues
-// behind running gates, and validate only runs on an open PR.
+// behind running gates, and validate and changes only run on an open PR.
 func TestReleasePRConcurrencyGuard(t *testing.T) {
 	expect := loadReleasePRConcurrencyFixture(t)
 	data, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release-pr.yml"))
@@ -79,10 +79,10 @@ func TestReleasePRConcurrencyGuard(t *testing.T) {
 	if err := yaml.Unmarshal(data, &workflow); err != nil {
 		t.Fatalf("parse release-pr.yml: %v", err)
 	}
-	if workflow.Concurrency.Group != expect["group"] {
+	if normalizeReleasePRCondition(workflow.Concurrency.Group) != normalizeReleasePRCondition(expect["group"]) {
 		t.Fatalf("release-pr.yml concurrency.group = %q, want %q", workflow.Concurrency.Group, expect["group"])
 	}
-	if workflow.Concurrency.CancelInProgress != expect["cancel-in-progress"] {
+	if normalizeReleasePRCondition(workflow.Concurrency.CancelInProgress) != normalizeReleasePRCondition(expect["cancel-in-progress"]) {
 		t.Fatalf("release-pr.yml concurrency.cancel-in-progress = %q, want %q", workflow.Concurrency.CancelInProgress, expect["cancel-in-progress"])
 	}
 	validate, ok := workflow.Jobs["validate"]
@@ -91,6 +91,13 @@ func TestReleasePRConcurrencyGuard(t *testing.T) {
 	}
 	if normalizeReleasePRCondition(validate.If) != normalizeReleasePRCondition(expect["validate-if"]) {
 		t.Fatalf("release-pr.yml jobs.validate.if = %q, want %q", validate.If, expect["validate-if"])
+	}
+	changes, ok := workflow.Jobs["changes"]
+	if !ok {
+		t.Fatal("release-pr.yml has no job changes")
+	}
+	if normalizeReleasePRCondition(changes.If) != normalizeReleasePRCondition(expect["changes-if"]) {
+		t.Fatalf("release-pr.yml jobs.changes.if = %q, want %q", changes.If, expect["changes-if"])
 	}
 	for _, trigger := range workflow.On.PullRequest.Types {
 		if trigger == expect["required-trigger"] {
