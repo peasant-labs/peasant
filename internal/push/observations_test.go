@@ -110,7 +110,7 @@ func TestActionObservationProductionPaths(t *testing.T) {
 			ctx := context.Background()
 			home := t.TempDir()
 			path := storetest.CopyGoldenDB(t)
-			db, err := store.Open(path, store.WithSkipMigrations())
+			db, err := store.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -396,7 +396,7 @@ func TestActionObservationProductionPaths(t *testing.T) {
 				}
 			}
 			if c.CloseAfterPublish || c.CloseAfterShare || c.CloseAfterWithdrawal {
-				db, err = store.Open(path, store.WithSkipMigrations())
+				db, err = store.Open(path)
 				if err != nil {
 					t.Fatal(err)
 				}

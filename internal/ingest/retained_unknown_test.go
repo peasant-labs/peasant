@@ -169,7 +169,7 @@ func TestRetainedUnknownStreamAndRetainedBatch(t *testing.T) {
 			if c.LegacyOmission {
 				meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, schema.DiagnosticEntry{ErrorType: "record_too_large", Location: "synthetic prior source", Message: "an older capture omitted a source record without a positional placeholder"})
 			}
-			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+			database, err := store.Open(storetest.CopyGoldenDB(t))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -38,20 +38,17 @@ func terminalAvailable() bool {
 	return term.IsTerminal(int(os.Stdout.Fd())) && inputTerminalAvailable()
 }
 
-// requireTerminal is the check every production Bubble Tea boundary runs
-// before it starts a program.
-func requireTerminal(command string) error {
+// requireTerminal is the one terminal check: every production Bubble Tea
+// boundary runs it before it starts a program, and the store upgrade policy
+// runs it to tell a terminal from a pipe. It is a variable so a test can
+// drive the interactive and non-interactive paths without a PTY; production
+// always uses the real terminal probe.
+var requireTerminal = func(command string) error {
 	if !terminalAvailable() {
 		return noTerminalError{command: command}
 	}
 	return nil
 }
-
-// tuiTerminalAvailable reports whether a Bubble Tea program can run here.
-// It is a variable (not a direct call) so tests can drive the interactive
-// and non-interactive paths without a PTY; production always uses the real
-// terminal probe, the same detector the kickstart and reclaim commands use.
-var tuiTerminalAvailable = terminalAvailable
 
 // cleanTerminalError unwraps a noTerminalError from a command's error chain,
 // returns it on its own, and silences cobra's usage block, which only helps

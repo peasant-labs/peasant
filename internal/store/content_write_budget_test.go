@@ -350,7 +350,7 @@ func runWriteBudgetHoldUnderBusyTimeout(t *testing.T, c contentWriteBudgetCase) 
 func writeBudgetSeed(t *testing.T, fixtures contentWriteBudgetFixtures, sessions int) (*store.Store, string, []ingest.ArtifactMirrorRequest) {
 	t.Helper()
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithWALAutocheckpointDisabled(), store.WithPoolSize(1))
+	db, err := store.Open(dbPath, store.WithWALAutocheckpointDisabled(), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +508,7 @@ func openWriteBudgetHarmonized(t *testing.T, dbPath string, options ...store.Ope
 	// rule can see it: the file opens an already-migrated golden copy, so
 	// skipping the migration replay changes nothing. Go spreads a single
 	// slice only, hence the nested append.
-	db, err := store.Open(dbPath, append([]store.OpenOption{store.WithSkipMigrations()}, append(base, options...)...)...)
+	db, err := store.Open(dbPath, append(base, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

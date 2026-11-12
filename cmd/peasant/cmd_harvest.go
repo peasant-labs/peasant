@@ -1058,10 +1058,8 @@ func runVerify(cmd *cobra.Command, verbose, content, repair bool) error {
 	// Verify only reads: use read-only mode when the data directory is unwritable.
 	db, err := openReadOnlyIfUnwritable(cmd)
 	if err == nil && db == nil {
-		// The writable fallback opens for migration: a non-interactive
-		// caller never runs migration v76's whole-index rebuild invisibly.
-		if gateErr := refuseStaleSearchIndex(dbPath); gateErr != nil {
-			return gateErr
+		if upgradeErr := ensureStoreCurrent(cmd, dbPath, storeEntryModeFor(cmd)); upgradeErr != nil {
+			return upgradeErr
 		}
 		db, err = store.Open(dbPath)
 	}

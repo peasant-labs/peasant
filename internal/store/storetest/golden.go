@@ -1,12 +1,11 @@
-// Package storetest provides test helpers that use a pre-migrated "golden"
-// SQLite database so a parallel test pays only a file copy and a connection
-// open instead of re-running the migration-state check. A private fallback
-// build is removed when its last user finishes; an adopted cached stamp stays
-// in `.testcache/` until it is swept or the cache directory is deleted. This
-// package is the sanctioned source of migrated templates: the
-// no-migrating-store-open-in-tests ast-grep rule forbids a skip-less
-// store.Open in _test.go outside this package and the migration suite, and
-// sanctions an inline CopyGolden* followed by a store.WithSkipMigrations open.
+// Package storetest provides test helpers that use a prepared "golden"
+// SQLite database at the head schema, so a parallel test pays only a file
+// copy and a connection open instead of building a store from the baseline.
+// A private fallback build is removed when its last user finishes; an adopted
+// cached stamp stays in `.testcache/` until it is swept or the cache
+// directory is deleted. This package is the sanctioned source of head-schema
+// templates: a test copies one with CopyGolden* and opens it with store.Open,
+// which takes a current store as it is and never migrates.
 //
 // The template is cached per checkout under `.testcache/golden/` (gitignored,
 // keyed by schema fingerprint) so focused runs reuse it across processes; the
@@ -480,14 +479,12 @@ func OpenWith(t *testing.T, options ...store.OpenOption) *store.Store {
 	// below, so t.Cleanup's LIFO order closes the store first.
 	dbPath := filepath.Join(copyDirForTest(t), "test.db")
 	writeCopy(t, golden, dbPath)
-	// The copy is byte-identical to the freshly-migrated golden DB, so skip the
-	// per-Open migration re-check (pure waste here). Pool size is left at the
-	// default: some store paths take a second connection while holding the first
+	// The copy is byte-identical to the golden DB at the head schema, so Open
+	// takes it as a current store. Pool size is left at the default: some store paths take a second connection while holding the first
 	// (the internal/store concurrency tests deadlock on a 1-connection pool);
 	// single-threaded callers (the cmd/peasant CLI tests) opt into a small pool
 	// via the EnvPoolSize override in their TestMain.
-	openOptions := append([]store.OpenOption{store.WithSkipMigrations()}, options...)
-	s, err := store.Open(dbPath, openOptions...)
+	s, err := store.Open(dbPath, options...)
 	if err != nil {
 		t.Fatalf("storetest.Open: %v", err)
 	}

@@ -345,7 +345,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 				t.Fatalf("retained/native mismatch: %v", err)
 			}
 			dbPath := storetest.CopyGoldenDB(t)
-			db, err := store.Open(dbPath, store.WithSkipMigrations())
+			db, err := store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -385,7 +385,7 @@ func TestPiUnknownPersistence(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(dbPath, store.WithSkipMigrations())
+			db, err = store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}

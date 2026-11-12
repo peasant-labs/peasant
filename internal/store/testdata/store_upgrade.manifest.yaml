@@ -1,0 +1,19 @@
+# Required-name manifest for store_upgrade: deletion protection by NAME,
+# never by count.
+requiredNames:
+  - fresh-store-is-created-at-head-without-a-plan
+  - current-store-has-no-steps
+  - behind-store-plan-lists-every-step-with-title-and-cost
+  - open-refuses-a-behind-store-and-changes-no-byte
+  - newer-store-is-refused-before-any-step
+  - cancel-during-a-step-rolls-it-back-and-keeps-finished-steps
+  - data-fill-commits-with-its-schema-step
+  - insufficient-free-disk-refuses-before-the-first-step
+  - unknown-free-disk-warns-and-continues
+  - wal-is-truncated-after-the-last-step
+  - second-process-waits-on-the-run-lock
+  - every-migration-has-a-catalog-entry
+  - precheck-missing-retired-index-warns-and-continues
+  - precheck-missing-live-index-returns-the-actionable-error
+  - notice-writer-is-an-open-option
+  - events-arrive-in-order-for-every-step

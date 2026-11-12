@@ -135,16 +135,12 @@ func openReclaimStore(cmd *cobra.Command, dryRun, confirm bool, ownedRoot, dbPat
 	if err != nil {
 		return nil, func() {}, err
 	}
-	options = append(options, store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()))
-	// The residue gate runs before the open unless --confirm was given: an
-	// explicit --confirm is the user's own act, so the one-time search index
-	// repair runs by consent even off-terminal. Without it, a
-	// non-interactive run would pay the whole-index rebuild unseen and then
-	// refuse at the confirmation prompt anyway, so it refuses here first.
-	if !confirm {
-		if err := refuseStaleSearchIndex(dbPath); err != nil {
-			return nil, func() {}, err
-		}
+	// A behind store is upgraded first. An explicit --confirm is the user's
+	// own consent, so the upgrade runs without a prompt, also off-terminal.
+	// Without it the entry-point policy applies: a terminal asks before a
+	// long step, and a run with no terminal refuses one.
+	if err := ensureStoreCurrentConfirmed(cmd, dbPath, storeEntryModeFor(cmd), confirm); err != nil {
+		return nil, func() {}, err
 	}
 	db, err := store.Open(dbPath, options...)
 	if err != nil {

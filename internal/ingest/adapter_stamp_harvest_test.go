@@ -42,7 +42,7 @@ func TestAdapterBumpRepairsAnAlreadyHarvestedOpenCodeSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	database, err := store.Open(storetest.CopyGoldenDB(t), append([]store.OpenOption{store.WithSkipMigrations()}, generationOptions...)...)
+	database, err := store.Open(storetest.CopyGoldenDB(t), generationOptions...)
 	if err != nil {
 		t.Fatal(err)
 	}

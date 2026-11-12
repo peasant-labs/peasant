@@ -26,7 +26,7 @@ func TestPublicationReadinessAcrossRefreshFreeSchemaBump(t *testing.T) {
 	if ingest.MetadataSchemaVersionIsCurrent(1) {
 		t.Fatal("schema 1 reads as current; the unreadable-version control cannot be exercised")
 	}
-	s, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
+	s, err := store.Open(storetest.CopyGoldenDB(t), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

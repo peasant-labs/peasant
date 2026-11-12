@@ -73,7 +73,7 @@ func openGenerationStoreAt(t *testing.T, dir string) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(filepath.Join(dir, "generations.db"), WithPoolSize(2), WithIndexFormats(generationIndexFormat{}), WithGenerationArtifacts(artifacts, locker))
+	s, err := openUpgraded(filepath.Join(dir, "generations.db"), WithPoolSize(2), WithIndexFormats(generationIndexFormat{}), WithGenerationArtifacts(artifacts, locker))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
@@ -313,9 +312,7 @@ type OpenOption func(*openOptions)
 type openOptions struct {
 	indexFormats        []IndexFormat
 	indexConversions    []IndexFormatConversion
-	migrationConsent    MigrationConsent
 	poolSize            int
-	skipMigrations      bool
 	generationArtifacts GenerationArtifactStore
 	sessionLocker       SessionLocker
 	// walAutocheckpointDisabled keeps every committed frame in the write-ahead
@@ -352,15 +349,6 @@ func WithImmutableReadOnly() OpenOption {
 // (WithDefaults applied); a nil option keeps the shipped defaults.
 func WithWriteConfig(cfg ingest.WriteConfig) OpenOption {
 	return func(o *openOptions) { o.writeConfig = &cfg }
-}
-
-// WithSkipMigrations skips the migration-state check on Open. The caller MUST
-// guarantee the database is already at the current schema (e.g. a copy of a
-// freshly-migrated golden DB in tests). Using it on an unmigrated or stale DB
-// will surface as missing-table / missing-column errors at query time. Intended
-// for test helpers that open many copies of an already-migrated template.
-func WithSkipMigrations() OpenOption {
-	return func(o *openOptions) { o.skipMigrations = true }
 }
 
 // WithPoolSize sets the SQLite connection-pool size for this Open. Use a small
@@ -415,14 +403,6 @@ func ManagedGenerationOptions(ownedRoot string) ([]OpenOption, error) {
 	return append(options, WithGenerationArtifacts(artifacts, locker)), nil
 }
 
-// WithMigrationConsent supplies a callback that gates running the V33 harness
-// rename migration on a database that already contains session data. The
-// callback may prompt the user. If nil or omitted, the migration runs without
-// confirmation (legacy behavior; appropriate for fresh DBs and tests).
-func WithMigrationConsent(consent MigrationConsent) OpenOption {
-	return func(o *openOptions) { o.migrationConsent = consent }
-}
-
 // newSQLitePool opens the connection pool, retrying briefly when two first
 // opens of the same brand-new file race the write-ahead-log conversion. SQLite
 // returns SQLITE_BUSY when one connection tries to switch a database to WAL
@@ -450,8 +430,14 @@ func isTransientOpenContention(err error) bool {
 	return strings.Contains(message, "database is locked") || strings.Contains(message, "SQLITE_BUSY")
 }
 
-// Open creates or opens the SQLite database at dbPath, applies migrations,
-// and configures PRAGMAs. The caller must call Close when done.
+// Open creates or opens the SQLite database at dbPath and configures its
+// PRAGMAs. The caller must call Close when done.
+//
+// Open never changes the schema of a store that holds data. It creates a new
+// store at the head schema from the committed baseline, opens a store that is
+// already current, refuses a store a newer build upgraded, and refuses a
+// behind store with a *SchemaBehindError, changing nothing. Upgrade is the
+// only function that applies migrations.
 func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 	o := openOptions{}
 	for _, opt := range opts {
@@ -466,11 +452,21 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, err
 	}
 
-	// V33 is a breaking migration (renames harness identifiers in sessions).
-	// If a consent callback was supplied AND the DB already has data,
-	// invoke it and create a backup before opening for write.
-	if err := maybeRunV33Consent(dbPath, o.migrationConsent); err != nil {
-		return nil, err
+	// A behind or newer store is refused before any connection that could
+	// write is opened: a writable WAL connection creates sidecar files and
+	// checkpoints the log when it closes, and a refusal must change no byte.
+	head := CurrentSchemaVersion()
+	if isStoreFilePath(dbPath) {
+		version, exists, err := peekSchemaVersion(dbPath)
+		if err != nil {
+			return nil, err
+		}
+		if exists && version > head {
+			return nil, newerSchemaError(dbPath, version)
+		}
+		if exists && version > 0 && version < head {
+			return nil, &SchemaBehindError{DBPath: dbPath, From: version, To: head}
+		}
 	}
 
 	prepare := preparePragmas
@@ -490,100 +486,71 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: open pool: %w", err)
 	}
 
-	// Apply migrations on a single connection — unless the caller guarantees the
-	// DB is already at the current schema (WithSkipMigrations). Skipping avoids
-	// the per-Open migration-state re-check (~16% of store.Open CPU), which is
-	// pure waste for a copy of a freshly-migrated golden DB in tests.
 	conn, err := pool.Take(context.Background())
 	if err != nil {
 		_ = pool.Close()
-		return nil, fmt.Errorf("store: take connection for migration: %w", err)
+		return nil, fmt.Errorf("store: take connection for the schema check: %w", err)
 	}
-	// A database upgraded by a newer release is refused before any
-	// migration, backfill, or salt load: the migrator only moves forward,
-	// so opening it would silently serve a schema this build cannot
-	// understand.
-	if err := refuseNewerSchemaOnConn(conn, dbPath); err != nil {
+	fail := func(err error) (*Store, error) {
 		pool.Put(conn)
 		_ = pool.Close()
 		return nil, err
 	}
-	// The pre-migration version decides whether the one-time Go backfills
-	// below run. A fresh database (version zero) is built at head and needs
-	// none; a database already at head must not re-fold its sessions on every
-	// open.
-	versionBeforeMigration, err := readPragmaInt(conn, "PRAGMA user_version")
-	if err != nil {
-		pool.Put(conn)
-		_ = pool.Close()
-		return nil, fmt.Errorf("store: read the pre-migration schema version: %w", err)
+	// A database upgraded by a newer release is refused before the salt
+	// load: opening it would silently serve a schema this build cannot
+	// understand.
+	if err := refuseNewerSchemaOnConn(conn, dbPath); err != nil {
+		return fail(err)
 	}
-	if !o.skipMigrations {
-		if err := refuseUnmappableCaptureFormats(conn); err != nil {
-			pool.Put(conn)
-			_ = pool.Close()
-			return nil, err
-		}
+	version, err := readPragmaInt(conn, "PRAGMA user_version")
+	if err != nil {
+		return fail(fmt.Errorf("store: read the schema version of %s: %w", dbPath, err))
+	}
+	if version == 0 {
 		// A brand-new database is created at head from the committed baseline
-		// snapshot instead of replaying the 61-migration chain. The read-only
-		// probe is only an optimization: applyBaselineIfStillFresh re-checks the
-		// full predicate inside its immediate transaction and rolls back when the
-		// database stopped being fresh, so an existing (or foreign-identity)
-		// database falls through to the chain, which stays the only upgrade path.
+		// snapshot. The read-only probe is only an optimization:
+		// applyBaselineIfStillFresh re-checks the full predicate inside its
+		// immediate transaction and rolls back when the database stopped being
+		// fresh. A version-zero database that already holds objects is not
+		// new: it is behind, and only Upgrade may change it.
 		fresh, err := databaseIsFresh(conn)
 		if err != nil {
-			pool.Put(conn)
-			_ = pool.Close()
-			return nil, fmt.Errorf("store: probe whether the database is fresh: %w", err)
+			return fail(fmt.Errorf("store: probe whether the database is fresh: %w", err))
 		}
 		if fresh {
 			if _, err := applyBaselineIfStillFresh(conn); err != nil {
-				pool.Put(conn)
-				_ = pool.Close()
-				return nil, err
+				return fail(err)
 			}
 		}
-		// V76 detects a stale union entries half before the chain runs: when
-		// the pre-migration version is 75 with residue in the union index,
-		// v76 rebuilds the whole index (minutes on large stores), so warn on
-		// stderr first. The in-migration gate reads the latch v76 records at
-		// its own transactional point; this call only warns, once per run,
-		// and never fails the open.
-		maybePrintSearchIndexRebuildNotice(conn, versionBeforeMigration)
-		if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
-			pool.Put(conn)
-			_ = pool.Close()
-			return nil, fmt.Errorf("store: run migrations: %w", err)
+		version, err = readPragmaInt(conn, "PRAGMA user_version")
+		if err != nil {
+			return fail(fmt.Errorf("store: read the schema version of %s after creating it: %w", dbPath, err))
 		}
-		pool.Put(conn)
-
-		// V23 Go-driven phase: populate v2 tables with HMAC-SHA256 opaque IDs,
-		// drop old tables, and rename v2 → final names.
-		// This is idempotent: applyV23DataMigration checks migration state before running.
-		if err := applyV23DataMigration(pool); err != nil {
-			_ = pool.Close()
-			return nil, fmt.Errorf("store: apply V23 data migration: %w", err)
-		}
-
-		// V71 Go-driven phase: a store upgraded from a pre-V71 version folds
-		// each managed session's stored entries once and records the
-		// conversation turn count. A fresh baseline and an already-upgraded
-		// store skip it, so a normal open never pays for the fold.
-		if shouldBackfillConversationTurnCounts(versionBeforeMigration) {
-			report, err := backfillConversationTurnCounts(pool)
-			if err != nil {
-				_ = pool.Close()
-				return nil, fmt.Errorf("store: apply the conversation turn count backfill: %w", err)
-			}
-			logConversationTurnCountBackfill(report)
-		}
-	} else {
-		// The caller guarantees the schema: the newer-schema check above
-		// already ran on this connection, so return it before the salt
-		// load takes its own.
-		pool.Put(conn)
 	}
+	if version == 0 {
+		// Version zero and not new: a file with another application's
+		// identity is not a peasant store at all, and gets the migration
+		// library's own refusal instead of an offer to upgrade it.
+		appID, err := readPragmaInt(conn, "PRAGMA application_id")
+		if err != nil {
+			return fail(fmt.Errorf("store: read the application_id of %s: %w", dbPath, err))
+		}
+		if appID != int64(dbSchema.AppID) && appID != 0 {
+			return fail(fmt.Errorf("store: open %s: database application_id = %#x (expected %#x); the file is not a peasant store; nothing was changed; point peasant at its own data directory, or move this file aside", dbPath, int32(appID), dbSchema.AppID))
+		}
+	}
+	if int(version) != head {
+		return fail(&SchemaBehindError{DBPath: dbPath, From: int(version), To: head})
+	}
+	pool.Put(conn)
 
+	return newStoreOnPool(pool, dbPath, o, formats, conversions)
+}
+
+// newStoreOnPool finishes an open on a pool whose schema was already
+// accepted: it loads the installation salt and wires the store's parts. It
+// closes the pool when it fails.
+func newStoreOnPool(pool *sqlitex.Pool, dbPath string, o openOptions, formats map[int]IndexFormat, conversions map[indexConversionKey]IndexFormatConversion) (*Store, error) {
 	// Load the installation salt. Required by InsertSessions to compute opaque_host_id.
 	// salt.Load is idempotent and creates the salt on first call.
 	s, _, err := salt.Load(pool)

@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,18 +35,25 @@ func syncResidueHandler(t *testing.T, dataHome string, cfg *config.Config) *sync
 	return &syncHandler{config: newLiveConfig(cfg), dataHome: dataHome}
 }
 
-// TestSyncIngestRefusesResidue proves a web-triggered ingest never runs the
-// v76 whole-index rebuild inside the server: on an affected store the
-// pipeline constructor refuses with the actionable fix instead of opening
-// the database, and the database file is byte-identical afterwards.
-func TestSyncIngestRefusesResidue(t *testing.T) {
+// TestSyncIngestNeverUpgradesABehindStore proves a server-triggered import
+// never upgrades the store: on a behind store, with or without stale search
+// results, the pipeline constructor refuses with the command that runs the
+// upgrade, and the database file is byte-identical afterwards.
+func TestSyncIngestNeverUpgradesABehindStore(t *testing.T) {
+	t.Parallel()
+	t.Run("long-step", func(t *testing.T) { assertSyncIngestRefusesBehindStore(t, true) })
+	t.Run("quick-step", func(t *testing.T) { assertSyncIngestRefusesBehindStore(t, false) })
+}
+
+func assertSyncIngestRefusesBehindStore(t *testing.T, affected bool) {
+	t.Helper()
 	t.Parallel()
 	dataHome := t.TempDir()
 	dbPath := defaults.ResolveDBFilePathWith(dataHome)
 	if err := os.MkdirAll(filepath.Dir(string(dbPath)), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	seedSyncResidueDB(t, string(dbPath), true)
+	seedSyncResidueDB(t, string(dbPath), affected)
 	before, err := os.ReadFile(string(dbPath))
 	if err != nil {
 		t.Fatal(err)
@@ -55,11 +61,10 @@ func TestSyncIngestRefusesResidue(t *testing.T) {
 	h := syncResidueHandler(t, dataHome, nil)
 	_, _, _, err = h.newIngestPipeline(ingest.NewProgressState(), nil)
 	if err == nil {
-		t.Fatal("web ingest opened an affected store; it must refuse instead of rebuilding in the server")
+		t.Fatal("web ingest opened a behind store; a server must refuse instead of upgrading")
 	}
-	var refusal *store.SearchResidueRebuildError
-	if !errors.As(err, &refusal) {
-		t.Fatalf("web ingest error = %v; want the actionable residue refusal", err)
+	if !store.IsSchemaBehind(err) {
+		t.Fatalf("web ingest error = %v; want the behind-store refusal", err)
 	}
 	for _, fragment := range residuefixture.RefusalFragments {
 		if !strings.Contains(err.Error(), fragment) {
@@ -73,23 +78,9 @@ func TestSyncIngestRefusesResidue(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Error("refused web ingest modified the database file")
 	}
-}
-
-// TestSyncIngestProceedsWithoutResidue proves a clean store passes the gate:
-// the constructor gets past the residue check (any later failure is
-// unrelated to it).
-func TestSyncIngestProceedsWithoutResidue(t *testing.T) {
-	t.Parallel()
-	dataHome := t.TempDir()
-	dbPath := defaults.ResolveDBFilePathWith(dataHome)
-	if err := os.MkdirAll(filepath.Dir(string(dbPath)), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	seedSyncResidueDB(t, string(dbPath), false)
-	h := syncResidueHandler(t, dataHome, nil)
-	_, _, _, err := h.newIngestPipeline(ingest.NewProgressState(), nil)
-	var refusal *store.SearchResidueRebuildError
-	if errors.As(err, &refusal) {
-		t.Fatalf("clean store refused: %v", err)
+	for _, sidecar := range []string{string(dbPath) + "-wal", string(dbPath) + "-shm"} {
+		if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+			t.Errorf("refused web ingest left %s behind", sidecar)
+		}
 	}
 }

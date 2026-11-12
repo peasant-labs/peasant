@@ -151,7 +151,7 @@ func assertPiSourceRejectionPipeline(t *testing.T, source ingest.ResolvedPath, b
 	}
 	dbPath := filepath.Join(t.TempDir(), "index.db")
 	storetest.CopyGoldenTo(t, dbPath)
-	db, err := store.Open(dbPath, store.WithSkipMigrations())
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			}
 			dbPath := filepath.Join(t.TempDir(), "index.db")
 			storetest.CopyGoldenTo(t, dbPath)
-			db, err := store.Open(dbPath, store.WithSkipMigrations())
+			db, err := store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -346,7 +346,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(dbPath, store.WithSkipMigrations())
+			db, err = store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -253,7 +253,6 @@ func ppeOpenStore(t *testing.T) *store.Store {
 	storetest.CopyGoldenTo(t, destPath)
 	db, err := store.Open(
 		destPath,
-		store.WithSkipMigrations(),
 		store.WithPoolSize(2),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker),

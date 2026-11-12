@@ -37,7 +37,7 @@ VALUES('11111111-1111-4111-8111-111111111111', 0, 'claude-code', 'text', 'user',
 		t.Fatal(err)
 	}
 
-	s, err := Open(path, WithPoolSize(1))
+	s, err := openUpgraded(path, WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

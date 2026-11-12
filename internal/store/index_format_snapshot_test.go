@@ -147,12 +147,12 @@ func TestIndexFormatReadersKeepBaseAndExtraInOneSnapshot(t *testing.T) {
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
 			path := storetest.CopyGoldenDB(t)
-			reader, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
+			reader, err := store.Open(path, store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer reader.Close()
-			writer, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
+			writer, err := store.Open(path, store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

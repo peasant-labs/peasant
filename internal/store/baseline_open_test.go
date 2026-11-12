@@ -221,6 +221,17 @@ func baselineCaseIsObservation(kind string) bool {
 	return false
 }
 
+// openStoreAfterUpgrade runs the explicit upgrade on path and then opens it:
+// the chain is the only upgrade path for a store that is not new, and Open
+// alone refuses such a store.
+func openStoreAfterUpgrade(t *testing.T, path string) *Store {
+	t.Helper()
+	if _, err := Upgrade(t.Context(), path, UpgradeOptions{}); err != nil {
+		t.Fatalf("store.Upgrade(%s): %v", path, err)
+	}
+	return openFreshStore(t, path)
+}
+
 // openFreshStore opens the production fresh path on path and registers cleanup.
 func openFreshStore(t *testing.T, path string) *Store {
 	t.Helper()
@@ -413,7 +424,7 @@ func runVersionZeroWithObjectsCase(t *testing.T) {
 	}
 
 	before := baselineApplicationTotal()
-	s := openFreshStore(t, path)
+	s := openStoreAfterUpgrade(t, path)
 	after := baselineApplicationTotal()
 	if after != before {
 		t.Fatalf("a version-zero database carrying user objects applied the baseline snapshot: counter %d -> %d; it must fall through to the chain", before, after)
@@ -459,7 +470,7 @@ func runPredecessorUpgradeCase(t *testing.T, c baselineOpenCaseFixture) {
 	}
 
 	before := baselineApplicationTotal()
-	s := openFreshStore(t, path)
+	s := openStoreAfterUpgrade(t, path)
 	after := baselineApplicationTotal()
 	if after != before {
 		t.Fatalf("a predecessor database applied the baseline snapshot: counter %d -> %d; only the chain may upgrade it", before, after)
