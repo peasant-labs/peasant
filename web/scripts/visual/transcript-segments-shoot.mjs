@@ -189,6 +189,34 @@ try {
         })
         return { header: read.header, total, ranges }
       }
+      // The outline rails collapse and reopen with a transition. A shot taken
+      // part way shows a rail at a width no reader sees, so each shot waits
+      // until no finite animation runs under the viewer and every rail keeps
+      // the same box across two animation frames.
+      const railWidths = {}
+      const settle = async (step) => {
+        try {
+          await page.waitForFunction(() => new Promise((done) => {
+            const root = document.querySelector('.txn-app')
+            if (!root) return done(false)
+            const boxes = () => JSON.stringify([...root.querySelectorAll('.txn-rail, .txn-rail-strip')].map((rail) => {
+              const box = rail.getBoundingClientRect()
+              return [box.left, box.width, box.height]
+            }))
+            const moving = () => root.getAnimations({ subtree: true }).some((animation) => (
+              animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime)
+            ))
+            const first = boxes()
+            requestAnimationFrame(() => requestAnimationFrame(() => done(!moving() && boxes() === first)))
+          }), { timeout: 10_000, polling: 100 })
+        } catch (error) {
+          throw fail(`capturing ${theme} ${step}`, `the outline rails did not settle within 10s: ${error.message}`)
+        }
+        railWidths[step] = await page.$$eval('.txn-app .txn-rail, .txn-app .txn-rail-strip', (rails) => rails.map((rail) => ({
+          rail: rail.className,
+          width: Math.round(rail.getBoundingClientRect().width),
+        })))
+      }
       const edge = async (name) => {
         const selector = `[data-segment-boundary="${name}"]`
         await page.$eval(selector, (boundary) => boundary.scrollIntoView({ block: 'center', inline: 'nearest' }))
@@ -210,6 +238,7 @@ try {
         })
         if (!visible) throw fail(`capturing ${theme} ${name}`, 'the boundary, its conversation turn range, or the load control is not visible')
         positions = await assertPositions()
+        await settle(name)
         const path = resolve(OUT, `transcript-segments-${theme}-${name}.png`)
         await viewer.screenshot({ path })
         return path
@@ -237,6 +266,7 @@ try {
       }
       await actionGroup.evaluate((group) => group.scrollIntoView({ block: 'center', inline: 'nearest' }))
       await pause(200)
+      await settle('actions')
       const actions = resolve(OUT, `transcript-segments-${theme}-actions.png`)
       await viewer.screenshot({ path: actions })
       const path = resolve(OUT, `transcript-segments-${theme}.png`)
@@ -265,13 +295,15 @@ try {
       if (listed.includes(String(seeded.turns))) throw fail(`reading the ${theme} session list`, `the row also prints the folded turn count ${seeded.turns}: ${JSON.stringify(listed)}`)
       const list = resolve(OUT, `session-list-${theme}.png`)
       await page.screenshot({ path: list })
-      captures.push({ theme, path, older, newer, actions, list, listed, positions, actionSegments: actionSegments.map((segment) => segment.index), boundaries, turn: middle.firstTurn, segments: index.totalSegments })
+      captures.push({ theme, path, older, newer, actions, list, listed, positions, railWidths, actionSegments: actionSegments.map((segment) => segment.index), boundaries, turn: middle.firstTurn, segments: index.totalSegments })
       await page.close()
     }
   } finally {
     await browser.close()
   }
-  const report = { origin: ORIGIN, provenance, positionChunks, directory: { totalTurns: index.totalTurns, totalConversationTurns: index.totalConversationTurns, segments: index.segments }, seeded: { sessionId: seeded.sessionId, projectHash: seeded.projectHash }, captures }
+  const head = (await run('git', ['rev-parse', 'HEAD'])).stdout.trim()
+  const dirty = (await run('git', ['status', '--porcelain', '--untracked-files=no'])).stdout.trim() !== ''
+  const report = { origin: ORIGIN, head, dirty, provenance, positionChunks, directory: { totalTurns: index.totalTurns, totalConversationTurns: index.totalConversationTurns, segments: index.segments }, seeded: { sessionId: seeded.sessionId, projectHash: seeded.projectHash }, captures }
   writeFileSync(resolve(OUT, 'report.json'), `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify(report, null, 2))
 } catch (error) {
