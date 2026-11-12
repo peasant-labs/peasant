@@ -58,6 +58,10 @@ let importedAfterSetup = null;
 const laterImports = {};
 // The selection the setup saved, as the file holds it, kept in the evidence.
 let savedSelection = null;
+// The project each session was listed under in the tree the person chose from,
+// read from the server's own tree, and what the store holds for each import.
+const treeProjectOf = new Map();
+let storedRemotes = null;
 
 function watch(page, label) {
   page.on('console', (message) => {
@@ -251,7 +255,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   writeFileSync(join(artifacts, `${theme()}-evidence.json`), JSON.stringify({
-    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, laterImports, importedAfterSetup, savedSelection,
+    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, laterImports, importedAfterSetup, savedSelection, storedRemotes,
     frames: frames.map(({ tab, kind, revision, reason, scan, ingest }) => ({ tab, kind, revision, reason, scan, ingest })),
     requests: requests.filter((entry) => entry.path.startsWith('/api/')).map((entry) => `${entry.tab} ${entry.method} ${entry.path}${entry.scope === undefined ? '' : ` (scope ${entry.scope})`}`),
   }, null, 2));
@@ -335,6 +339,18 @@ test('scan-progress-and-tree-selection', async () => {
   expect(new Set(scans.filter((frame) => frame.scan.state === 'running' && frame.scan.done > 0).map((frame) => frame.scan.done)).size, 'the server pushed more than one progress tick').toBeGreaterThan(1);
   expect(scans.at(-1).scan.state, 'the last pushed scan state').toBe('done');
   expect(requests.slice(requestMark).filter((entry) => entry.tab === 'A' && entry.method === 'GET' && /\/tree$/.test(entry.path)).length, 'the forest was read again when the scan ended').toBeGreaterThan(0);
+
+  // What the tree lists each session under, from the server's own tree: the
+  // project row above its branch row. The stored remote is compared with it later.
+  const { id: wizardId } = await snapshot(pageA.request);
+  const treeNodes = (await (await pageA.request.get(`${API}/sessions/${wizardId}/tree`)).json()).nodes;
+  const nodeById = new Map(treeNodes.map((node) => [node.id, node]));
+  for (const node of treeNodes.filter((candidate) => candidate.kind === 'session')) {
+    let up = node;
+    while (up && up.kind !== 'project') up = nodeById.get(up.parentId);
+    if (up) treeProjectOf.set(node.sessionId ?? node.id, up.label);
+  }
+  for (const entry of seeded) expect(treeProjectOf.has(entry.sessionId), `the tree lists ${entry.name} under a project`).toBe(true);
 
   // Nothing is chosen yet, and the tree is the server's, not the page's.
   await expect(pageA.locator('.ks-counts', { hasText: '0 chosen' })).toBeVisible();
@@ -672,6 +688,34 @@ test('import-honours-the-recorded-branch', async () => {
   // though main is what git has checked out.
   const stored = await storedTitles(pageA.request);
   expect(stored, `a session recorded on ${stray.branch} was not chosen, so it is not imported`).not.toContain(stray.prompt);
+});
+
+test('stored-remote-matches-the-tree', async () => {
+  // Every imported session was stored with the remote and the branch it was
+  // listed under in the tree the person chose from. The tree's project row, the
+  // project the store files the session under, and the remote and branch the
+  // store holds for it are read from the server, and the seeded repository is
+  // the only place the journey says what they should be.
+  const list = (await (await pageA.request.get('/api/v1/sessions')).json()).sessions;
+  const stored = [];
+  for (const row of list) {
+    const detail = await (await pageA.request.get(`/api/v1/sessions/${row.id}`)).json();
+    stored.push({ id: row.id, project: row.project, gitRemote: detail.gitRemote, gitBranch: detail.gitBranch });
+  }
+  const imported = new Set([...chosenIds, taxReport.sessionId, marketing.sessionId]);
+  expect(new Set(stored.map((entry) => entry.id)), 'exactly the sessions that were chosen and imported are stored').toEqual(imported);
+  storedRemotes = stored.map((entry) => {
+    const recorded = seeded.find((candidate) => candidate.sessionId === entry.id);
+    return { name: recorded.name, tree: treeProjectOf.get(entry.id), ...entry };
+  });
+  for (const entry of storedRemotes) {
+    const recorded = seeded.find((candidate) => candidate.name === entry.name);
+    expect(entry.tree, `${entry.name}: the tree listed it under a project`).toBeTruthy();
+    expect(entry.tree, `${entry.name}: the tree's project row names its repository`).toContain(new URL(recorded.remote).pathname.replace(/^\//, '').replace(/\.git$/, ''));
+    expect(entry.project, `${entry.name}: the store files it under the project the tree listed it under`).toBe(entry.tree);
+    expect(entry.gitRemote, `${entry.name}: the remote it was stored with is its repository's`).toBe(recorded.remote);
+    expect(entry.gitBranch, `${entry.name}: the branch it was stored with is the branch it recorded`).toBe(recorded.branch);
+  }
 });
 
 test('computed-styles-and-themes', async () => {
