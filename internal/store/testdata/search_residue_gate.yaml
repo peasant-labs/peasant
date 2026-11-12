@@ -55,7 +55,7 @@ cases:
     wantResidue: false
 messageMustContain:
   - "a one-time search index repair would rebuild the whole search index"
-  - "schema version 75"
+  - "after upgrading to 0.16.1"
   - "session_entries reuses rowids"
   - "before opening the local store"
   - "was not migrated and no files were changed"

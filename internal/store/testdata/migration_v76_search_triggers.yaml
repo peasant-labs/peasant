@@ -43,7 +43,7 @@ cases:
     wantLegacyAbsent: true
     wantTriggersTarget: union
     wantNeedsRebuild: false
-  - name: healed-rebuild-flag-preserved
+  - name: rebuild-path-clears-a-pending-rebuild-flag
     chain: full
     presetNeedsRebuild: true
     wantInsertedInUnion: true
@@ -54,7 +54,7 @@ cases:
     wantLegBGhostInUnion: false
     wantLegacyAbsent: true
     wantTriggersTarget: union
-    wantNeedsRebuild: true
+    wantNeedsRebuild: false
   - name: v75-defect-union-misses-new-entries-writes
     chain: v75
     presetNeedsRebuild: false
@@ -101,7 +101,11 @@ predicateCases:
 # the targeted insert; the same-count path stays silent (predicate blind) and
 # keeps the stale term. The notice only warns. A body-half sentinel posting
 # probes the SQL gate: it survives the targeted insert and is gone only after
-# a whole-index rebuild.
+# a whole-index rebuild. The rebuild branch clears a pending rebuild flag; the
+# targeted-insert branch leaves a set flag set. crossing-from-v74 stops the
+# build at v74 so one Open crosses v75 and v76 with no window between.
+# tampered drops the retired index without re-pointing the triggers: the
+# pre-open check errors, Open warns once and continues, and v76 rebuilds.
 openCases:
   - name: open-affected-window-rebuilds-with-notice
     window: affected
@@ -118,3 +122,15 @@ openCases:
   - name: open-consolidated-after-v75-silent
     window: consolidated
     wantNotice: false
+  - name: clean-path-leaves-a-set-rebuild-flag-set
+    window: none
+    wantNotice: false
+    presetNeedsRebuild: true
+    wantNeedsRebuild: true
+  - name: open-true-crossing-from-v74-silent
+    window: crossing-from-v74
+    wantNotice: false
+  - name: open-tampered-store-warns-and-rebuilds
+    window: tampered
+    wantNotice: false
+    wantPrecheckWarning: true

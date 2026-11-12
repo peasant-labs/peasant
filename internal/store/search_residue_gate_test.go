@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/store/storetest/residuefixture"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
@@ -69,39 +70,20 @@ func loadSearchResidueGateFixtures(t *testing.T) searchResidueGateFixtures {
 	return searchResidueGateFixtures{Cases: decoded.Cases, MessageMustContain: decoded.MessageMustContain}
 }
 
-// seedSearchResidueDB builds the minimal store the helper reads: a stamped
-// user_version plus the two FTS docsize tables seeded from the fixture rows.
-// Only what NeedsSearchResidueRebuild inspects exists, so the cases pin the
-// gate and nothing else.
+// seedSearchResidueDB builds the minimal store the helper reads from one
+// fixture case through the shared residue fixture: a stamped user_version
+// plus the two FTS docsize tables. Only what NeedsSearchResidueRebuild
+// inspects exists, so the cases pin the gate and nothing else.
 func seedSearchResidueDB(t *testing.T, path string, c searchResidueGateCase) {
 	t.Helper()
-	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite, sqlite.OpenCreate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := conn.Close(); err != nil {
-			t.Errorf("close residue fixture database: %v", err)
-		}
-	}()
-	seedTerms := func(table string, terms []searchResidueGateTerm) {
-		t.Helper()
-		if err := sqlitex.ExecuteTransient(conn, `CREATE VIRTUAL TABLE `+table+` USING fts5(t)`, nil); err != nil {
-			t.Fatalf("create %s: %v", table, err)
-		}
+	convert := func(terms []searchResidueGateTerm) []residuefixture.ResidueTerm {
+		out := make([]residuefixture.ResidueTerm, 0, len(terms))
 		for _, term := range terms {
-			if err := sqlitex.ExecuteTransient(conn, `INSERT INTO `+table+`(rowid, t) VALUES (?, ?)`, &sqlitex.ExecOptions{
-				Args: []any{term.ID, term.Text},
-			}); err != nil {
-				t.Fatalf("seed %s row %d: %v", table, term.ID, err)
-			}
+			out = append(out, residuefixture.ResidueTerm{ID: term.ID, Text: term.Text})
 		}
+		return out
 	}
-	seedTerms("session_search_fts", c.UnionTerms)
-	seedTerms("session_entries_fts", c.LegacyTerms)
-	if err := sqlitex.ExecuteTransient(conn, fmt.Sprintf(`PRAGMA user_version = %d`, c.Version), nil); err != nil {
-		t.Fatalf("stamp user_version %d: %v", c.Version, err)
-	}
+	residuefixture.Seed(t, path, c.Version, convert(c.UnionTerms), convert(c.LegacyTerms))
 }
 
 // fileHash returns the SHA-256 of the named file for the never-writes proof.
@@ -161,71 +143,62 @@ func TestNeedsSearchResidueRebuild(t *testing.T) {
 	}
 }
 
-// TestNeedsSearchResidueRebuildWALMode proves the read-only check leaves WAL
-// sidecars untouched: real stores run in WAL mode, so the fixture switches a
-// seeded affected store to WAL, records both sidecars, runs the check, and
-// asserts residue true with byte-identical file and sidecars.
-func TestNeedsSearchResidueRebuildWALMode(t *testing.T) {
+// TestNeedsSearchResidueRebuildWALPresent drives the -wal-present branch of
+// the read-only open on a live WAL store. A writer connection stays open with
+// automatic checkpoints off and commits, into the -wal only, the change that
+// makes the store affected: user_version 74 -> 75 and a union-only posting.
+// The database file alone is a clean v74 store, so both checks can only
+// report 75 and residue by reading the uncheckpointed -wal. The database
+// file and the -wal are byte-identical afterwards. The -shm is not compared:
+// every reader of a live WAL store records its read mark there.
+func TestNeedsSearchResidueRebuildWALPresent(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "residue-wal.db")
-	seedSearchResidueDB(t, path, searchResidueGateCase{
-		Name:        "wal-affected",
-		Version:     75,
-		UnionTerms:  []searchResidueGateTerm{{ID: 1, Text: "kangaroo ghost"}, {ID: 2, Text: "keep me"}},
-		LegacyTerms: []searchResidueGateTerm{{ID: 2, Text: "keep me"}},
-		WantResidue: true,
-	})
-	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	residuefixture.Seed(t, path, 74, residuefixture.CleanUnion, residuefixture.CleanLegacy)
+	writer, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `PRAGMA journal_mode=WAL`, nil); err != nil {
-		_ = conn.Close()
-		t.Fatalf("switch fixture to WAL: %v", err)
+	t.Cleanup(func() {
+		if err := writer.Close(); err != nil {
+			t.Errorf("close the WAL writer: %v", err)
+		}
+	})
+	for _, pragma := range []string{`PRAGMA journal_mode=WAL`, `PRAGMA wal_autocheckpoint=0`} {
+		if err := sqlitex.ExecuteTransient(writer, pragma, nil); err != nil {
+			t.Fatalf("%s on the fixture writer: %v", pragma, err)
+		}
 	}
-	if err := conn.Close(); err != nil {
+	ghost := residuefixture.AffectedUnion[0]
+	if err := sqlitex.ExecuteScript(writer, fmt.Sprintf(`INSERT INTO session_search_fts(rowid, t) VALUES (%d, '%s');
+PRAGMA user_version = 75;`, ghost.ID+100, ghost.Text), nil); err != nil {
+		t.Fatalf("commit the affected state into the -wal: %v", err)
+	}
+	if _, err := os.Stat(path + "-wal"); err != nil {
+		t.Fatalf("the -wal is missing before the check: %v; the WAL-present branch is not exercised", err)
+	}
+	dbBefore := fileHash(t, path)
+	walBefore := fileHash(t, path+"-wal")
+
+	version, err := SchemaVersionAt(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	before := fileHash(t, path)
-	var walBefore, shmBefore []byte
-	walPresent, shmPresent := false, false
-	if data, err := os.ReadFile(path + "-wal"); err == nil {
-		walBefore, walPresent = data, true
-	} else if !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	if data, err := os.ReadFile(path + "-shm"); err == nil {
-		shmBefore, shmPresent = data, true
-	} else if !os.IsNotExist(err) {
-		t.Fatal(err)
+	if version != 75 {
+		t.Errorf("SchemaVersionAt = %d, want the uncheckpointed 75 from the -wal", version)
 	}
 	got, err := NeedsSearchResidueRebuild(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !got {
-		t.Error("WAL affected store reports no residue; want true")
+		t.Error("NeedsSearchResidueRebuild = false, want the residue committed to the -wal")
 	}
-	if after := fileHash(t, path); string(after) != string(before) {
-		t.Error("WAL check modified the database file")
+	if after := fileHash(t, path); string(after) != string(dbBefore) {
+		t.Error("the WAL-present check modified the database file")
 	}
-	if data, err := os.ReadFile(path + "-wal"); err == nil {
-		if !walPresent || string(data) != string(walBefore) {
-			t.Error("WAL check modified the -wal sidecar")
-		}
-	} else if !os.IsNotExist(err) {
-		t.Fatal(err)
-	} else if walPresent {
-		t.Error("WAL check removed the -wal sidecar")
-	}
-	if data, err := os.ReadFile(path + "-shm"); err == nil {
-		if !shmPresent || string(data) != string(shmBefore) {
-			t.Error("WAL check modified the -shm sidecar")
-		}
-	} else if !os.IsNotExist(err) {
-		t.Fatal(err)
-	} else if shmPresent {
-		t.Error("WAL check removed the -shm sidecar")
+	if after := fileHash(t, path+"-wal"); string(after) != string(walBefore) {
+		t.Error("the WAL-present check modified the -wal")
 	}
 }
 
