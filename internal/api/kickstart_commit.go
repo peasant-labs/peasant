@@ -148,6 +148,11 @@ func (c *kickstartCommitter) finish(w http.ResponseWriter, id string, result onb
 		Ingest:     ingestResponse(start, startErr),
 		NextSteps:  steps,
 	}
+	// A retention failure is about the save, not about reading the sessions. The
+	// contract has one list for it and for the import's own notes, so the line
+	// names the save in its own words. The import's notes arrive later, with the
+	// import's last state (see selectionConflictNote), because the import runs
+	// after this answer is written.
 	if result.Retention.Status == onboarding.RetentionFailed {
 		body.Diagnostics = []string{result.Retention.Note}
 	}

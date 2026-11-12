@@ -313,7 +313,7 @@ func (d *Draft) finish(in CommitInput, p *commitPlan) CommitResult {
 		result.Retention = RetentionOutcome{Status: RetentionApplied, Days: p.retentionDays}
 		if err := in.Hooks.Retention(p.retentionDays); err != nil {
 			result.Retention.Status = RetentionFailed
-			result.Retention.Note = fmt.Sprintf("config saved, retention not applied: %v", err)
+			result.Retention.Note = fmt.Sprintf("the setup was saved, but claude code's retention period was not applied: %v", err)
 		}
 	}
 	in.Hooks.Publish(p.saved)

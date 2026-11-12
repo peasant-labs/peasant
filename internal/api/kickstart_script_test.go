@@ -92,6 +92,9 @@ type kickstartSpec struct {
 	Recordings []string `yaml:"recordings"`
 	// HoldIngest holds each import until a releaseIngest step.
 	HoldIngest bool `yaml:"holdIngest"`
+	// RetentionFails makes the write of Claude Code's retention period fail with
+	// this text, after the configuration was saved.
+	RetentionFails string `yaml:"retentionFails"`
 	// Unreadable names harnesses the scan could not read, each with the reason
 	// discovery gives.
 	Unreadable map[string]string `yaml:"unreadable"`

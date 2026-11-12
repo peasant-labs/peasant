@@ -24,6 +24,7 @@ requiredNames:
   - no-reset-in-any-response
   - failed-save-keeps-the-session
   - retention-shown-unanswered-writes-the-shown-value
+  - retention-failure-is-told-as-a-note-about-the-save
   - take-theirs-summary-shows-the-file-value
   - coupled-field-change-yields-a-row
   - selection-scope-commit-without-a-config-file-is-refused
@@ -432,8 +433,8 @@ cases:
         status: 409
         len: {conflicts: 1}
         json: {conflicts.0.field: transcripts}
-        noReset: true
         contains: {error: "1 setting(s) the save writes changed in the configuration file"}
+        noReset: true
       - configHas: ['license: ""', "visibility: group"]
       # every tab of the wizard hears the row
       - await: {kind: conflicts, session: "{full}", len: {view.conflicts: 1}}
@@ -546,6 +547,34 @@ cases:
         json: {saved: true}
       - retention: {calls: [90], sawSavedFile: true}
 
+  # Claude Code's retention period is written after the configuration is saved. A
+  # refusal to write it never retracts the save; it travels in the committed
+  # body's notes, in words that say the setup was saved and which part was not.
+  - name: retention-failure-is-told-as-a-note-about-the-save
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+      retentionFails: settings.json is read-only
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json:
+          saved: true
+          diagnostics.0: "the setup was saved, but claude code's retention period was not applied: settings.json is read-only"
+        len: {diagnostics: 1}
+        absent: [ingest.note]
+      - configHas: ["license: CC0-1.0"]
+      - retention: {calls: [90], sawSavedFile: true}
+
   # The review summary explains what the save will write. After the user takes the
   # file's side of a row, that is the value the file holds now, not the answer the
   # user gave up and not the file as it was when the session opened.
@@ -617,6 +646,7 @@ cases:
         status: 409
         len: {conflicts: 1}
         json: {conflicts.0.field: publication-preference}
+        contains: {error: "1 setting(s) the save writes changed in the configuration file"}
         noReset: true
       - configHas: ['sharePreference: ""']
       # the user keeps the other writer's value; the answer they gave still saves
@@ -646,7 +676,6 @@ cases:
       - release: true
       - await: {kind: session, session: "{selection}", json: {view.scan.state: done}}
       - call: GET /api/v1/kickstart/sessions/{selection}
-        contains: {error: "1 setting(s) the save writes changed in the configuration file"}
         save: {rev: revision}
       - call: PATCH /api/v1/kickstart/sessions/{selection}
         body: {revision: "{rev}", selectedIds: [11111111-1111-4111-8111-111111111111]}
