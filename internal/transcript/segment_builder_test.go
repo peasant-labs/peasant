@@ -141,9 +141,6 @@ type segmentCutCase struct {
 type segmentCutExpectation struct {
 	Segments     []segmentRefExpectation `yaml:"segments"`
 	CrossingTurn int                     `yaml:"crossingTurn,omitempty"`
-	// UncountedSegments is the least number of segments that must hold a system
-	// or tool row, so a position case cannot pass on a cut with none.
-	UncountedSegments int `yaml:"uncountedSegments,omitempty"`
 }
 
 type segmentCutFixture struct {
@@ -235,6 +232,9 @@ func loadSegmentTurnsFixture(t *testing.T) segmentTurnsFixture {
 	return fixture
 }
 
+// TestSegmentCutFixtureCases pins CutSegments as a caller of the contract's
+// cut: the folded turns' projection reaches schema.CutTranscriptSegments whole.
+// The cut rule's own cases run in the schema module.
 func TestSegmentCutFixtureCases(t *testing.T) {
 	t.Parallel()
 	fixture := loadSegmentCutFixture(t)
@@ -251,22 +251,6 @@ func TestSegmentCutFixtureCases(t *testing.T) {
 				turns[i] = turn
 			}
 			refs, totalTurns := CutSegments(turns, fixtureCase.BudgetBytes)
-			if want := fixtureCase.Expected.UncountedSegments; want > 0 {
-				holding := 0
-				for _, ref := range refs {
-					for _, turn := range turns {
-						inSegment := turn.Index >= ref.FirstTurn && turn.Index <= ref.LastTurn
-						uncounted := turn.Role == schema.RoleSystem || turn.Role == schema.RoleTool
-						if inSegment && uncounted {
-							holding++
-							break
-						}
-					}
-				}
-				if holding < want {
-					t.Fatalf("%d segment(s) hold a system or tool row, fixture requires at least %d", holding, want)
-				}
-			}
 			if totalTurns != len(turns) {
 				t.Fatalf("cut reports %d turns, want %d", totalTurns, len(turns))
 			}
@@ -348,7 +332,7 @@ func TestSegmentTurnBoundFixtureCases(t *testing.T) {
 			}
 			before := make([]int, len(turns))
 			for i := range turns {
-				before[i] = TurnByteLength(turns[i])
+				before[i] = schema.TranscriptTurnByteLength(turns[i])
 			}
 			bounds := BoundServedTurns(turns, budget)
 			if fixtureCase.DocumentBytes > 0 {
@@ -458,30 +442,6 @@ func TestFoldedTurnByteLengthMatchesTurnByteLength(t *testing.T) {
 	rows := SegmentTurnRows([]ingest.Turn{folded}, DefaultServedDocumentBudget())
 	if FoldedTurnByteLength(folded) != rows[0].ByteLength {
 		t.Fatalf("folded byte length = %d, row byte length = %d", FoldedTurnByteLength(folded), rows[0].ByteLength)
-	}
-}
-
-// TestCutTurnRowsDirect pins the cut over already-projected wire turns, the
-// entry point the directory build uses.
-func TestCutTurnRowsDirect(t *testing.T) {
-	t.Parallel()
-	turns := []schema.TurnDetail{
-		{Index: 4, Role: schema.RoleUser, EntryType: schema.EntryTypeText, Content: strings.Repeat("a", 1024)},
-		{Index: 7, Role: schema.RoleAssistant, EntryType: schema.EntryTypeText, Content: strings.Repeat("b", 1024)},
-		{Index: 11, Role: schema.RoleUser, EntryType: schema.EntryTypeText, Content: strings.Repeat("c", 1024)},
-	}
-	refs, total := CutTurnRows(turns, 3*1024)
-	if total != 3 {
-		t.Fatalf("total = %d, want 3", total)
-	}
-	if len(refs) != 2 {
-		t.Fatalf("segments = %d, want 2 (two 1026-byte turns fit the 3072-byte budget; the third is deferred)", len(refs))
-	}
-	if !(segmentRefExpectation{Index: 0, FirstTurn: 4, LastTurn: 7, ByteLength: 2052, ConversationTurns: segmentSpanExpectation{Before: 0, Count: 2}}).refMatches(refs[0]) {
-		t.Fatalf("ref 0 = %+v with span %+v, want turns 4-7 with 2052 bytes and span {0, 2}", refs[0], refs[0].ConversationTurns)
-	}
-	if !(segmentRefExpectation{Index: 1, FirstTurn: 11, LastTurn: 11, ByteLength: 1026, ConversationTurns: segmentSpanExpectation{Before: 2, Count: 1}}).refMatches(refs[1]) {
-		t.Fatalf("ref 1 = %+v with span %+v, want turn 11 alone with 1026 bytes and span {2, 1}", refs[1], refs[1].ConversationTurns)
 	}
 }
 

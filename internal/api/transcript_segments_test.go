@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -139,14 +138,6 @@ func loadWindowFixture(t *testing.T) transcriptWindowFixture {
 		t.Fatal(err)
 	}
 	return fixture
-}
-
-func turnMeta(turns []ingest.Turn) []segmentTurnMeta {
-	meta := make([]segmentTurnMeta, len(turns))
-	for i := range turns {
-		meta[i] = segmentTurnMeta{index: turns[i].Index, role: turns[i].Role}
-	}
-	return meta
 }
 
 func sparseTurns(t *testing.T, fixture sparseSessionFixture) []ingest.Turn {
@@ -770,20 +761,55 @@ func TestTranscriptSegmentFixtureCases(t *testing.T) {
 // Window descriptors
 // ---------------------------------------------------------------------------
 
+// TestTranscriptWindowDescriptors serves each window row through the mounted
+// handler over the sparse session. The resolution rule is the contract's and is
+// tested there; this pins that the route supplies the resolver with the
+// directory's own turns and refs and serves what it resolves. The directory is
+// seeded in the producer's cache under the reader's revision, because the
+// sparse identities are a measured fold result that no entry builder here
+// reproduces.
 func TestTranscriptWindowDescriptors(t *testing.T) {
 	t.Parallel()
 	sparse := loadSparseSessionFixture(t)
 	turns := sparseTurns(t, sparse)
-	refs, _ := transcript.CutSegments(turns, defaults.TranscriptSegmentBudgetBytes)
+	refs, total := transcript.CutSegments(turns, defaults.TranscriptSegmentBudgetBytes)
+	meta := make([]schema.TranscriptWindowTurn, len(turns))
+	for i := range turns {
+		meta[i] = schema.TranscriptWindowTurn{Index: turns[i].Index, Role: turns[i].Role}
+	}
+	reader := newFakeSegmentReader(nil)
+	server := newTestServerForSegments(t, reader)
+	revision, err := reader.Revision(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer := server.segments
+	producer.mu.Lock()
+	producer.storeLocked(newSegmentCacheKey(ingest.SessionID(transcriptTestSessionID), revision), segmentDirectory{
+		revision:   revision,
+		totalTurns: total,
+		refs:       refs,
+		turns:      meta,
+	})
+	producer.mu.Unlock()
 	fixture := loadWindowFixture(t)
 
 	for _, fixtureCase := range fixture.Cases {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
 			t.Parallel()
-			window, err := buildTranscriptWindow(schema.SessionID(transcriptTestSessionID), sparse.Revision, fixtureCase.Anchor, fixtureCase.Span, turnMeta(turns), refs)
-			if err != nil {
-				t.Fatalf("build window: %v", err)
+			target := fmt.Sprintf("/api/v1/sessions/%s/transcript/window?anchor=%d&span=%d", transcriptTestSessionID, fixtureCase.Anchor, fixtureCase.Span)
+			request := httptest.NewRequest(http.MethodGet, target, nil)
+			request.SetPathValue("id", transcriptTestSessionID)
+			recorder := httptest.NewRecorder()
+			server.handleTranscriptWindow(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("window status = %d, want 200; body %s", recorder.Code, recorder.Body.String())
+			}
+			encoded := recorder.Body.Bytes()
+			var window schema.TranscriptWindow
+			if err := json.Unmarshal(encoded, &window); err != nil {
+				t.Fatalf("decode window: %v; body %s", err, encoded)
 			}
 			if window.AnchorTurn != fixtureCase.Expected.AnchorTurn ||
 				window.FirstTurn != fixtureCase.Expected.FirstTurn ||
@@ -818,30 +844,12 @@ func TestTranscriptWindowDescriptors(t *testing.T) {
 
 			// The descriptor carries no content: no turns, content or toolCalls
 			// key anywhere in its body.
-			encoded, err := json.Marshal(window)
-			if err != nil {
-				t.Fatal(err)
-			}
 			for _, forbidden := range []string{`"turns"`, `"content"`, `"toolCalls"`} {
 				if bytes.Contains(encoded, []byte(forbidden)) {
 					t.Fatalf("window body carries %s: %s", forbidden, encoded)
 				}
 			}
 		})
-	}
-}
-
-func TestTranscriptWindowHasNoUserTurn(t *testing.T) {
-	t.Parallel()
-	turns := []ingest.Turn{
-		{Index: 4, Role: schema.RoleAssistant, Content: "a"},
-		{Index: 7, Role: schema.RoleSystem, Content: "s"},
-	}
-	refs, _ := transcript.CutSegments(turns, defaults.TranscriptSegmentBudgetBytes)
-	_, err := buildTranscriptWindow(schema.SessionID(transcriptTestSessionID), "4213", 4, 10, turnMeta(turns), refs)
-	var missing *noUserTurnError
-	if !errors.As(err, &missing) {
-		t.Fatalf("window error = %v, want noUserTurnError", err)
 	}
 }
 
