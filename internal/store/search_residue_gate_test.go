@@ -143,6 +143,49 @@ func TestNeedsSearchResidueRebuild(t *testing.T) {
 	}
 }
 
+// TestNeedsSearchResidueRebuildWALModeClosed drives the no--wal branch on a
+// WAL-mode store after every connection closed, the state a real store is in
+// between runs: the header says WAL but no -wal or -shm exists. The check
+// must open it with immutable=1, report the residue, leave the database file
+// byte-identical, and create neither sidecar.
+func TestNeedsSearchResidueRebuildWALModeClosed(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "residue-wal-closed.db")
+	residuefixture.SeedAffected(t, path)
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `PRAGMA journal_mode=WAL`, nil); err != nil {
+		_ = conn.Close()
+		t.Fatalf("switch fixture to WAL: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, sidecar := range []string{path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+			t.Fatalf("%s survived the last close; the closed-WAL premise is broken", sidecar)
+		}
+	}
+	before := fileHash(t, path)
+	got, err := NeedsSearchResidueRebuild(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Error("closed WAL-mode affected store reports no residue; want true")
+	}
+	if after := fileHash(t, path); string(after) != string(before) {
+		t.Error("the check modified the database file")
+	}
+	for _, sidecar := range []string{path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+			t.Errorf("the check created %s; immutable=1 must prevent sidecars", sidecar)
+		}
+	}
+}
+
 // TestNeedsSearchResidueRebuildWALPresent drives the -wal-present branch of
 // the read-only open on a live WAL store. A writer connection stays open with
 // automatic checkpoints off and commits, into the -wal only, the change that
