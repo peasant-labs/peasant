@@ -8,113 +8,72 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-	"github.com/peasant-labs/schema"
 )
 
-// turnCountRecountProgressInterval is how many sessions the recount folds
-// between two progress lines.
-const turnCountRecountProgressInterval = 500
-
-// turnCountRecountHook is called after each session the recount handles, with
-// the number of sessions handled so far. Production passes nil. A test returns
-// an error from it to stop the recount part way, the way a killed first open
-// would.
-type turnCountRecountHook func(done int, sessionID ingest.SessionID) error
-
-// recountTurnCounts folds every stored session once and writes both turn
-// counts: session_captured_stats.turn_count takes the number of folded turns
-// and conversation_turn_count takes the folded turns on the contract's allowed
-// list. It runs only while the pending_recounts marker exists and deletes the
-// marker in the same transaction as its writes, so an interrupted run changes
-// nothing and is repeated by the next open. ran reports whether the marker was
-// found.
+// recountTurnCountsOnConn folds every stored session once and writes both
+// turn counts: session_captured_stats.turn_count takes the number of folded
+// turns and conversation_turn_count takes the folded turns on the contract's
+// allowed list. It is the upgrade step that migration 77 marks as owed. It
+// runs only while the pending_recounts marker exists and deletes the marker
+// in the same transaction as its writes, so a run that fails, is cancelled or
+// is killed changes nothing and the next upgrade runs it again. ran reports
+// whether the marker was found.
 //
-// A managed session folds its generation's main entries; any other session
-// folds its mirror rows. A session with no stored entries has nothing to fold:
-// it keeps both stored values and is reported. A session whose entries cannot
-// be read is logged, reported, keeps both stored values and does not stop the
-// store from opening. Running it twice gives the same values.
-func recountTurnCounts(pool *sqlitex.Pool, hook turnCountRecountHook, logger *slog.Logger) (report ConversationTurnCountBackfillReport, ran bool, err error) {
-	conn, err := pool.Take(context.Background())
-	if err != nil {
-		return report, false, fmt.Errorf("store: take connection for the turn count recount: %w; no count was changed and the recount stays pending; retry when database access is available", err)
-	}
-	defer pool.Put(conn)
-
-	pending, err := turnCountRecountPendingOnConn(conn)
-	if err != nil {
-		return report, false, err
-	}
-	if !pending {
-		return report, false, nil
-	}
-
+// It walks the sessions with foldStoredSessions, the walk the step 74 fill
+// also uses. A session with no stored entries has nothing to fold: it keeps
+// both stored values and is reported. A session whose entries cannot be read
+// is logged, reported and keeps both stored values; it does not stop the
+// recount. Running it twice gives the same values. progress receives the
+// running session count; hook, nil in production, is called after each
+// session.
+func recountTurnCountsOnConn(ctx context.Context, conn *sqlite.Conn, progress func(done, of int64), hook recountSessionHook, logger *slog.Logger) (report ConversationTurnCountBackfillReport, ran bool, err error) {
 	end, err := sqlitex.ImmediateTransaction(conn)
 	if err != nil {
-		return report, false, fmt.Errorf("store: begin the turn count recount transaction: %w; no count was changed and the recount stays pending; close other writers of this database and reopen it", err)
+		return report, false, fmt.Errorf("store: begin the turn count recount transaction: %w; no count was changed and the recount stays owed; close other writers of this database and run `peasant migrate --schema-only` again", err)
 	}
 	defer end(&err)
 
-	// Another process may have finished the recount between the probe and the
-	// write lock.
-	pending, err = turnCountRecountPendingOnConn(conn)
-	if err != nil {
+	// The marker is read under the write lock: another upgrade may have
+	// finished the recount since this one was planned.
+	pending, err := turnCountRecountPendingOnConn(conn)
+	if err != nil || !pending {
 		return report, false, err
 	}
-	if !pending {
-		return report, false, nil
-	}
 
-	type storedSession struct {
-		id     ingest.SessionID
-		active string
-	}
-	var sessions []storedSession
-	if err := sqlitex.ExecuteTransient(conn,
-		`SELECT session_id, COALESCE(active_generation_id, '') FROM sessions ORDER BY session_id`,
-		&sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
-			sessions = append(sessions, storedSession{ingest.SessionID(stmt.ColumnText(0)), stmt.ColumnText(1)})
-			return nil
-		}}); err != nil {
-		return report, true, fmt.Errorf("store: list sessions for the turn count recount: %w; no count was changed and the recount stays pending; repair the sessions table and reopen the store", err)
-	}
-
-	total := len(sessions)
-	if total > 0 {
-		logger.Info("store: recounting turn counts for every stored session; this runs once after the upgrade", "sessions", total)
-	}
-	for i, session := range sessions {
-		entries, readErr := recountSessionEntriesOnConn(conn, session.id, session.active)
+	err = foldStoredSessions(conn, "the turn count recount", progress, func(done, total int, session storedSessionEntries, readErr error) error {
 		switch {
 		case readErr != nil:
 			report.UnreadableSessions = append(report.UnreadableSessions, session.id)
 			logger.Warn("store: a session's stored entries could not be read during the turn count recount; it keeps its stored turn counts; re-index the session to replace them",
 				"session_id", session.id, "error", readErr.Error())
-		case len(entries) == 0:
+		case len(session.entries) == 0:
 			report.EntryLessSessions = append(report.EntryLessSessions, session.id)
 		default:
-			turns := ingest.EntriesToTurns(entries)
+			turns := ingest.EntriesToTurns(session.entries)
 			if err := writeTurnCountsOnConn(conn, session.id, len(turns), ingest.ConversationTurnCount(turns)); err != nil {
-				return report, true, err
+				return err
 			}
 			report.SessionsUpdated++
 		}
-		done := i + 1
 		if hook != nil {
 			if err := hook(done, session.id); err != nil {
-				return report, true, fmt.Errorf("store: the turn count recount stopped after %d of %d sessions at session %s: %w; no count was changed and the recount stays pending; reopen the store to run it again", done, total, session.id, err)
+				return fmt.Errorf("store: the turn count recount stopped after %d of %d sessions at session %s: %w; no count was changed and the recount stays owed; run `peasant migrate --schema-only` to run it again", done, total, session.id, err)
 			}
 		}
-		if done%turnCountRecountProgressInterval == 0 && done < total {
-			logger.Info("store: turn count recount in progress", "sessions_done", done, "sessions_total", total)
-		}
+		// A cancellation stops between sessions too: the fold of one session
+		// is Go work the connection's interrupt does not reach.
+		return ctx.Err()
+	})
+	if err != nil {
+		return report, true, err
 	}
 
 	if err := sqlitex.ExecuteTransient(conn, `DELETE FROM pending_recounts WHERE name = ?`,
 		&sqlitex.ExecOptions{Args: []any{pendingRecountTurnCounts}}); err != nil {
-		return report, true, fmt.Errorf("store: clear the turn count recount marker: %w; no count was changed and the recount stays pending; reopen the store to run it again", err)
+		return report, true, fmt.Errorf("store: clear the turn count recount marker: %w; no count was changed and the recount stays owed; run `peasant migrate --schema-only` to run it again", err)
 	}
-	return report, true, nil
+	// A cancellation that arrived after the last session must not commit.
+	return report, true, ctx.Err()
 }
 
 // turnCountRecountPendingOnConn reports whether the recount marker exists.
@@ -124,19 +83,9 @@ func turnCountRecountPendingOnConn(conn *sqlite.Conn) (bool, error) {
 		Args:       []any{pendingRecountTurnCounts},
 		ResultFunc: func(*sqlite.Stmt) error { pending = true; return nil },
 	}); err != nil {
-		return false, fmt.Errorf("store: read the turn count recount marker from pending_recounts: %w; no count was changed; the store cannot tell whether its turn counts are current; repair the database and reopen it", err)
+		return false, fmt.Errorf("store: read the turn count recount marker from pending_recounts: %w; no count was changed; the store cannot tell whether its turn counts are current; restore the database from a backup, or move it aside and run `peasant harvest` to rebuild it", err)
 	}
 	return pending, nil
-}
-
-// recountSessionEntriesOnConn reads the entries the recount folds: the
-// generation's emitted main entries for a managed session, the mirror rows
-// otherwise.
-func recountSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, activeGeneration string) ([]schema.SessionEntry, error) {
-	if activeGeneration != "" {
-		return nativeGenerationEntriesOnConn(conn, sessionID, activeGeneration)
-	}
-	return listEntriesOnConn(conn, sessionID)
 }
 
 // writeTurnCountsOnConn stores both turn counts from one fold, creating the

@@ -57,6 +57,12 @@ was tagged but not published links to its tag instead.
   step if there is not enough. If free space is unknown, it warns before a long
   step and continues. Ctrl-C rolls back the running step and keeps the finished
   steps; run `peasant migrate --schema-only` to resume.
+- The turn count recount that 0.17.0 ran when it first opened the store is
+  now a step of the store upgrade, right after migration 77, and the open no
+  longer runs it. Its time grows with the number of stored sessions, so at a
+  terminal the upgrade asks first, and a script or a git hook leaves it for
+  `peasant migrate --schema-only`. A store whose 0.17.0 recount did not finish
+  is behind until that command runs it.
 - Migration 78 stores a profile of every import. `ingest_run_stages` holds one
   row per pipeline stage per run (duration, counts, bytes, time spent waiting
   for the write lane), kept for the latest 100 runs, and `index_log` gains

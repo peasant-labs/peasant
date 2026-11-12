@@ -195,7 +195,9 @@ func seedPolicyStore(t *testing.T, dir, kind string) string {
 	case "quick", "clean":
 		residuefixture.SeedClean(t, dbPath)
 	case "real-v75":
-		storetest.BuildCleanV75Store(t, dbPath)
+		storetest.BuildSessionlessV75Store(t, dbPath)
+	case "owed-recount":
+		storetest.BuildRecountOwedHeadStore(t, dbPath)
 	case "real-v75-long":
 		buildLongV75Store(t, dbPath)
 	case "current":
@@ -311,7 +313,11 @@ func TestStoreUpgradePolicy(t *testing.T) {
 				if err != nil {
 					t.Errorf("the upgrade ran but the helper returned %v", err)
 				}
-				if !strings.Contains(stderr.String(), "needs an upgrade: schema 75 to") {
+				wantHeader := "needs an upgrade: schema 75 to"
+				if c.Store == "owed-recount" {
+					wantHeader = "is current, but an earlier upgrade did not finish 1 step(s)"
+				}
+				if !strings.Contains(stderr.String(), wantHeader) {
 					t.Errorf("the steps were not named before the upgrade ran; stderr:\n%s", stderr.String())
 				}
 				// Tight disk is said in every mode the upgrade runs in, a
@@ -346,10 +352,16 @@ func TestStoreUpgradePolicy(t *testing.T) {
 						t.Errorf("refusal misses %q:\n%s", part, err)
 					}
 				}
+				what := "is at schema 75 and this build needs"
+				if c.Store == "owed-recount" {
+					what = "the schema this build needs, but an earlier upgrade did not finish 1 step(s)"
+				}
+				if !strings.Contains(err.Error(), what) {
+					t.Errorf("the refusal does not say what the store needs (%q):\n%s", what, err)
+				}
 				if mode == storeEntryServer {
 					for _, part := range []string{
 						"did not run", "needs an upgrade first",
-						"is at schema 75 and this build needs",
 						"a server process never upgrades the store",
 						"run `peasant migrate --schema-only` in a terminal",
 					} {

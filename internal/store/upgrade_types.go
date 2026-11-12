@@ -3,7 +3,10 @@ package store
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/ingest"
 )
 
 // UpgradeStepKind names what an upgrade step changes. The set is closed.
@@ -16,10 +19,17 @@ const (
 	// UpgradeStepSearch is a search index build that is not a schema version.
 	// A step of this kind carries Version 0.
 	UpgradeStepSearch UpgradeStepKind = "search"
+	// UpgradeStepRecount is a pass over the stored sessions that a migration
+	// records as owed with a marker row in pending_recounts. It runs in its
+	// own transaction after the migration that wrote the marker, and deletes
+	// the marker when it commits. A step of this kind carries the Version of
+	// that migration and changes no schema: a store at the head schema still
+	// owes it until it commits.
+	UpgradeStepRecount UpgradeStepKind = "recount"
 )
 
 // AllUpgradeStepKinds is the closed step-kind set, in declaration order.
-var AllUpgradeStepKinds = []UpgradeStepKind{UpgradeStepSchema, UpgradeStepSearch}
+var AllUpgradeStepKinds = []UpgradeStepKind{UpgradeStepSchema, UpgradeStepSearch, UpgradeStepRecount}
 
 // NewUpgradeStepKind validates a raw step kind at an input boundary.
 func NewUpgradeStepKind(raw string) (UpgradeStepKind, error) {
@@ -134,6 +144,10 @@ type UpgradeStep struct {
 	// Counts is the unit the step reports in its progress events, or the
 	// empty unit when it cannot count.
 	Counts UpgradeUnit
+
+	// recount is the pending_recounts marker a recount step clears; it is
+	// empty for every other kind.
+	recount string
 }
 
 // UpgradePlan is what an upgrade of one store would do. PlanUpgrade builds
@@ -141,7 +155,8 @@ type UpgradeStep struct {
 type UpgradePlan struct {
 	DBPath string
 	// From is the store's schema version and To is the version this build
-	// needs. From == To means the plan has no steps.
+	// needs. From == To with steps means the store is at the head schema but
+	// an earlier upgrade left a recount owed (see UpgradeStepRecount).
 	From, To int
 	Steps    []UpgradeStep
 	// StoreBytes is the size of the database file.
@@ -210,7 +225,15 @@ type UpgradeOptions struct {
 	// cancel inside a step's transaction, after the step's data fill and
 	// before its commit.
 	afterDataFill func(version int) error
+	// afterRecountSession is a nil production hook. A recount step calls it
+	// after each session it handles, inside the step's transaction; a test
+	// returns an error from it, or cancels, to stop the recount part way.
+	afterRecountSession recountSessionHook
 }
+
+// recountSessionHook is called after each session a recount step handles,
+// with the number of sessions handled so far.
+type recountSessionHook func(done int, sessionID ingest.SessionID) error
 
 // UpgradeStepResult is one finished step of an upgrade.
 type UpgradeStepResult struct {
@@ -228,21 +251,29 @@ type UpgradeReport struct {
 }
 
 // SchemaBehindError is what Open returns for a store that holds data and is
-// behind the schema this build needs. Open changes nothing; Upgrade is the
-// only function that applies migrations.
+// behind the schema this build needs, or is at that schema and still owes a
+// recount an earlier upgrade did not finish. Open changes nothing; Upgrade is
+// the only function that applies migrations and runs recounts.
 type SchemaBehindError struct {
 	DBPath   string
 	From, To int
+	// Owed lists the titles of the recounts the store still owes. It is set
+	// only when From == To.
+	Owed []string
 }
 
 func (e *SchemaBehindError) Error() string {
-	return fmt.Sprintf("store: open %s: the store is at schema %d and this build needs %d, so the open was refused. "+
+	what := fmt.Sprintf("the store is at schema %d and this build needs %d", e.From, e.To)
+	if e.From == e.To && len(e.Owed) > 0 {
+		what = fmt.Sprintf("the store is at schema %d, the schema this build needs, but an earlier upgrade did not finish %d step(s) (%s)", e.From, len(e.Owed), strings.Join(e.Owed, "; "))
+	}
+	return fmt.Sprintf("store: open %s: %s, so the open was refused. "+
 		"why: a store that holds data is upgraded only by the explicit store upgrade, never as a side effect of another command. "+
 		"where: store open, before any connection wrote to the database. "+
 		"when: at open; nothing was changed. "+
 		"meaning: the command did not run; stored sessions and history are unchanged. "+
 		"fix: run `peasant migrate --schema-only` in a terminal, then run the command again",
-		e.DBPath, e.From, e.To)
+		e.DBPath, what)
 }
 
 // UpgradeDiskError is the refusal of an upgrade whose planned steps need more

@@ -89,6 +89,9 @@ const (
 	// row data, or a per-session data fill. The largest of the five measured
 	// steps (70 to 74) wrote 0.0018 times the database and the five together
 	// 0.0032; 0.01 is about five times the largest and three times the sum.
+	// The turn count recount that migration 77 marks as owed wrote at most
+	// 0.0023 times the database (about 75 log bytes per session, 2026-11-12,
+	// TestSandboxTurnCountRecountMeasure).
 	StoreUpgradeRowsStepDiskFactor = 0.01
 
 	// StoreUpgradeQuickStepDiskFactor is for a step that changes the catalog

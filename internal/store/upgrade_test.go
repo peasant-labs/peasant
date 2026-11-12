@@ -61,6 +61,9 @@ type storeUpgradeCase struct {
 	// estimate measures the tables (true) or takes the whole database.
 	MaxEntryRows int64 `yaml:"maxEntryRows,omitempty"`
 	WantMeasured bool  `yaml:"wantMeasured,omitempty"`
+	// StopAfterSessions is how many sessions a recount case lets the
+	// recount handle before it cancels the upgrade.
+	StopAfterSessions int `yaml:"stopAfterSessions,omitempty"`
 }
 
 // LoadStoreUpgradeFixtures decodes the store upgrade cases and checks them
@@ -169,6 +172,11 @@ func TestStoreUpgrade(t *testing.T) {
 		"precheck-live-missing":    runUpgradePrecheckLiveMissingCase,
 		"notice-option":            runUpgradeNoticeOptionCase,
 		"events":                   runUpgradeEventsCase,
+		"recount-plan":             runUpgradeRecountPlanCase,
+		"recount-owed-at-head":     runUpgradeRecountOwedAtHeadCase,
+		"recount-open-never-runs":  runUpgradeRecountOpenNeverRunsCase,
+		"recount-cancelled":        runUpgradeRecountCancelledCase,
+		"recount-in-order":         runUpgradeRecountInOrderCase,
 	}
 	for _, c := range cases {
 		c := c
@@ -708,6 +716,34 @@ func runUpgradeCatalogCase(t *testing.T, _ storeUpgradeCase) {
 	for version := range upgradeDataFills {
 		if version < 1 || version > len(dbSchema.Migrations) {
 			t.Errorf("upgradeDataFills registers a fill for version %d, which is not a migration in the chain", version)
+		}
+	}
+	for name, recount := range upgradeRecountCatalog {
+		if _, ok := upgradeRecountRuns[name]; !ok {
+			t.Errorf("upgradeRecountCatalog describes the recount %q, which upgradeRecountRuns in internal/store/upgrade.go cannot run; register its run there", name)
+		}
+		if recount.markedBy < 1 || recount.markedBy > len(dbSchema.Migrations) {
+			t.Errorf("the recount %q is marked by migration %d, which is not a migration in the chain", name, recount.markedBy)
+		}
+		if recount.title == "" || recount.title != strings.ToLower(recount.title) || strings.HasSuffix(recount.title, ".") {
+			t.Errorf("catalog title for the recount %q = %q, want a lowercase reader-facing phrase with no final period", name, recount.title)
+		}
+		if _, err := NewUpgradeCost(string(recount.cost)); err != nil {
+			t.Errorf("catalog cost for the recount %q: %v", name, err)
+		}
+		if _, err := NewUpgradeUnit(string(recount.counts)); err != nil {
+			t.Errorf("catalog unit for the recount %q: %v", name, err)
+		}
+		if recount.disk != (upgradeDiskNeed{}) {
+			t.Errorf("the recount %q overrides its disk need; a recount copies no table, so its cost gives the need", name)
+		}
+		if strings.TrimSpace(recount.owedAfterMigration) == "" {
+			t.Errorf("the recount %q has no owedAfterMigration query; the plan cannot tell whether migration %d marks it", name, recount.markedBy)
+		}
+	}
+	for name := range upgradeRecountRuns {
+		if _, ok := upgradeRecountCatalog[name]; !ok {
+			t.Errorf("upgradeRecountRuns runs the recount %q, which has no entry in upgradeRecountCatalog in internal/store/upgrade_catalog.go; add its title and cost there", name)
 		}
 	}
 }

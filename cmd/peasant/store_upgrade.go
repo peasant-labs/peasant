@@ -170,13 +170,22 @@ func (e *storeUpgradeRefusal) Error() string {
 		then = "then push again."
 	}
 	return fmt.Sprintf("%s\n"+
-		"what: the store at %s is at schema %d and this build needs %d.\n"+
+		"what: %s.\n"+
 		"why: %s.\n"+
 		"where: store upgrade check, before `%s` opened the store.\n"+
 		"when: %s\n"+
 		"meaning: %s\n"+
 		"fix: run `peasant migrate --schema-only` in a terminal, %s",
-		headline, plan.DBPath, plan.From, plan.To, why, e.Command, when, meaning, then)
+		headline, storeUpgradeWhat(plan), why, e.Command, when, meaning, then)
+}
+
+// storeUpgradeWhat says what the store needs. A store at the head schema can
+// still owe the steps an earlier upgrade did not finish.
+func storeUpgradeWhat(plan store.UpgradePlan) string {
+	if plan.From == plan.To {
+		return fmt.Sprintf("the store at %s is at schema %d, the schema this build needs, but an earlier upgrade did not finish %d step(s)", plan.DBPath, plan.From, len(plan.Steps))
+	}
+	return fmt.Sprintf("the store at %s is at schema %d and this build needs %d", plan.DBPath, plan.From, plan.To)
 }
 
 // planStoreUpgrade is the read-only plan the policy runs on. It is a
@@ -303,7 +312,11 @@ const storeUpgradeTightDiskLine = "free disk is tight: less than twice what the 
 // runs or asks prints it before the first step, so a pipe and a hook see the
 // tight-disk line too.
 func writeStoreUpgradePlan(w io.Writer, plan store.UpgradePlan) {
-	fmt.Fprintf(w, "the local store at %s needs an upgrade: schema %d to %d, %d step(s)\n", plan.DBPath, plan.From, plan.To, len(plan.Steps))
+	if plan.From == plan.To {
+		fmt.Fprintf(w, "the local store at %s needs an upgrade: schema %d is current, but an earlier upgrade did not finish %d step(s)\n", plan.DBPath, plan.From, len(plan.Steps))
+	} else {
+		fmt.Fprintf(w, "the local store at %s needs an upgrade: schema %d to %d, %d step(s)\n", plan.DBPath, plan.From, plan.To, len(plan.Steps))
+	}
 	for i, step := range plan.Steps {
 		fmt.Fprintf(w, "  %d. %s (%s)\n", i+1, step.Title, storeUpgradeCostLabel(step.Cost))
 	}

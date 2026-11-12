@@ -31,3 +31,8 @@ requiredNames:
   - heavy-tail-in-a-rows-store-takes-the-whole-database
   - entry-rows-rising-with-rowid-in-a-rows-store-take-the-whole-database
   - unmeasurable-search-index-falls-back-to-the-whole-database-with-a-notice
+  - plan-includes-the-turn-count-recount-when-its-marker-exists
+  - store-at-head-with-a-pending-recount-is-behind
+  - open-never-runs-the-recount
+  - cancelled-recount-keeps-its-marker
+  - upgrade-from-0.16.2-runs-77-recount-and-78-in-order

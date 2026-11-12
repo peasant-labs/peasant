@@ -9,7 +9,9 @@
 # server is fixed. store names the fixture: quick is a
 # schema-75 store with no stale search results (one quick step), long is a
 # schema-75 store with stale search results (one long step), current is at
-# the head schema, missing has no file. want is the policy outcome: ran,
+# the head schema, missing has no file, and owed-recount is at the head
+# schema with one session and the turn count recount still owed (one long
+# step: the store is behind although its schema is current). want is the policy outcome: ran,
 # asked (the plan and a prompt were shown; wantRan says whether the answer
 # let the upgrade run), skipped (the nothing-attempted status, which a
 # generated hook turns into exit 0), refused, or none. exit is peasant's
@@ -301,6 +303,34 @@ policyCases:
     want: skipped
     exit: 3
     hookScriptExitsZero: true
+  # A store at the head schema that still owes the turn count recount is
+  # behind, and each mode applies its long-step policy to the recount.
+  - name: harvest-terminal-owed-recount-asks-first
+    entry: harvest
+    mode: terminal
+    store: owed-recount
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: harvest-piped-owed-recount-refuses
+    entry: harvest
+    mode: piped
+    store: owed-recount
+    want: refused
+    exit: 1
+  - name: village-push-hook-owed-recount-skips
+    entry: village-push
+    mode: hook
+    store: owed-recount
+    want: skipped
+    exit: 3
+  - name: web-child-server-owed-recount-refuses
+    entry: web-child
+    mode: server
+    store: owed-recount
+    want: refused
+    exit: 1
   - name: piped-long-step-skips-and-exits-one
     entry: harvest
     mode: piped
@@ -423,7 +453,8 @@ pushCases:
 # and clean are the minimal schema-75 fixtures (long and quick plans; the
 # quick upgrade cannot finish on the minimal fixture, so a case on it asserts
 # only that the entry point did not refuse); current is a real head store;
-# real-v75 is a real schema-75 store with no stale results, and wantOpened
+# real-v75 is a real schema-75 store with no stale results and no sessions,
+# so migration 77 marks no recount and its plan is quick, and wantOpened
 # requires the entry point to upgrade it and open it at the head schema.
 # wantRefuse requires the typed refusal with the database file and its
 # sidecars byte-identical. confirm is --confirm for the migrate and reclaim

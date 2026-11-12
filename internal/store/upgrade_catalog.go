@@ -148,6 +148,42 @@ var upgradeStepCatalog = map[int]upgradeCatalogEntry{
 	78: {title: "store the import profile and give run outcomes stable ids", cost: UpgradeCostQuick},
 }
 
+// upgradeRecountCatalogEntry describes one recount a migration can leave
+// owed: the marker row it writes in pending_recounts, the migration that
+// writes it, and the step the plan shows for it.
+type upgradeRecountCatalogEntry struct {
+	upgradeCatalogEntry
+	// markedBy is the schema version whose migration writes the marker.
+	markedBy int
+	// owedAfterMigration is a query that returns a row exactly when the
+	// migration markedBy writes the marker on this store. The plan runs it
+	// on a store below markedBy, where no marker can exist yet. It restates
+	// the condition of the shipped migration's INSERT, which cannot name a
+	// constant; a test pins the two together on a store with sessions and on
+	// one without.
+	owedAfterMigration string
+}
+
+// upgradeRecountCatalog gives every recount marker a title and a cost
+// class, keyed by its name in pending_recounts. A test fails when a recount
+// registered in upgradeRecountRuns has no entry here, or the reverse.
+//
+// The turn count recount folds every stored session's entries once and
+// writes two integers per session. Measured on synthetic stores upgraded from
+// schema 76 (TestSandboxTurnCountRecountMeasure, 2026-11-12, recorded in
+// docs/store-upgrade.md): 0.20 to 0.23 ms per session at 40 entries and 0.42
+// ms at 120, so its time grows with the sessions and their entries, and about
+// 75 log bytes per session, at most 0.0023 times the database. It is a
+// row-scaled step that counts sessions, like step 74, with the row-scaled
+// disk need.
+var upgradeRecountCatalog = map[string]upgradeRecountCatalogEntry{
+	pendingRecountTurnCounts: {
+		upgradeCatalogEntry: upgradeCatalogEntry{title: "recount the turn counts of every stored session", cost: UpgradeCostScalesWithRows, counts: UpgradeUnitSessions},
+		markedBy:            77,
+		owedAfterMigration:  `SELECT 1 FROM sessions LIMIT 1`,
+	},
+}
+
 const (
 	// searchRepairQuickTitle is the title of the search trigger repair on a
 	// store with no stale search results.

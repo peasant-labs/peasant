@@ -209,3 +209,22 @@ cases:
     textEntries: 5
     meanEntryBytes: 512
     rowEntries: 1
+  # The turn count recount. Migration 77 records it as owed with a marker row
+  # in pending_recounts when the store holds sessions. The recount is an
+  # upgrade step of its own, right after 77, and deletes the marker in the
+  # transaction of its writes; a store at any schema that still holds the
+  # marker is behind. The sessions are those of turn_count_recount.yaml.
+  - name: plan-includes-the-turn-count-recount-when-its-marker-exists
+    kind: recount-plan
+  - name: store-at-head-with-a-pending-recount-is-behind
+    kind: recount-owed-at-head
+  - name: open-never-runs-the-recount
+    kind: recount-open-never-runs
+  - name: cancelled-recount-keeps-its-marker
+    kind: recount-cancelled
+    from: 76
+    stopAfterSessions: 2
+    wantVersion: 77
+  - name: upgrade-from-0.16.2-runs-77-recount-and-78-in-order
+    kind: recount-in-order
+    from: 76

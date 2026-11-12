@@ -526,6 +526,10 @@ func writeSchemaUpgradeResult(cmd *cobra.Command, before store.UpgradePlan, json
 		fmt.Fprintf(out, "schema: the store at %s is current at schema %d; nothing to upgrade\n", before.DBPath, before.To)
 		return nil
 	}
+	if before.From == before.To {
+		fmt.Fprintf(out, "schema: finished %d step(s) an earlier upgrade of the store at %s left owed; it is at schema %d\n", len(before.Steps), before.DBPath, before.To)
+		return nil
+	}
 	fmt.Fprintf(out, "schema: upgraded the store at %s from schema %d to %d\n", before.DBPath, before.From, before.To)
 	return nil
 }

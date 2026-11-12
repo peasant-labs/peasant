@@ -44,6 +44,10 @@ requiredNames:
   - server-refuses-to-start-and-names-the-terminal-command
   - server-long-confirm-still-refuses
   - hook-long-step-skips-and-exits-zero
+  - harvest-terminal-owed-recount-asks-first
+  - harvest-piped-owed-recount-refuses
+  - village-push-hook-owed-recount-skips
+  - web-child-server-owed-recount-refuses
   - piped-long-step-skips-and-exits-one
   - terminal-quick-upgrade-runs-without-a-prompt
   - terminal-long-step-asks-first

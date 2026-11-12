@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +42,70 @@ var upgradeDataFills = map[int]upgradeDataFill{
 		logConversationTurnCountBackfill(filled)
 		return nil
 	},
+}
+
+// upgradeRecountRun runs one owed recount on the upgrade's connection. It
+// owns its transaction: it reads its marker under the write lock, does
+// nothing when the marker is gone, and deletes the marker in the transaction
+// that writes its results. report sends its count to the progress events;
+// hook is nil in production.
+type upgradeRecountRun func(ctx context.Context, conn *sqlite.Conn, report func(done, of int64), hook recountSessionHook) error
+
+// upgradeRecountRuns maps a pending_recounts marker name to the recount that
+// clears it. Every name has an entry in upgradeRecountCatalog.
+var upgradeRecountRuns = map[string]upgradeRecountRun{
+	pendingRecountTurnCounts: func(ctx context.Context, conn *sqlite.Conn, report func(done, of int64), hook recountSessionHook) error {
+		logger := slog.Default()
+		recount, ran, err := recountTurnCountsOnConn(ctx, conn, report, hook, logger)
+		if err == nil && ran {
+			logTurnCountRecount(logger, recount)
+		}
+		return err
+	},
+}
+
+// owedRecountsOnConn lists the recounts the store owes: the marker rows in
+// pending_recounts that this build knows, in the order their migrations ran.
+// A store below the migration that creates the table owes none.
+func owedRecountsOnConn(conn *sqlite.Conn) ([]string, error) {
+	if !tableExistsOnConn(conn, "pending_recounts") {
+		return nil, nil
+	}
+	var owed []string
+	if err := sqlitex.ExecuteTransient(conn, `SELECT name FROM pending_recounts ORDER BY name`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if _, known := upgradeRecountCatalog[stmt.ColumnText(0)]; known {
+				owed = append(owed, stmt.ColumnText(0))
+			}
+			return nil
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("store: read the owed recounts from pending_recounts: %w; nothing was changed; the store cannot tell whether an earlier upgrade finished; restore the database from a backup, or move it aside and run `peasant harvest` to rebuild it", err)
+	}
+	slices.SortStableFunc(owed, func(a, b string) int {
+		return upgradeRecountCatalog[a].markedBy - upgradeRecountCatalog[b].markedBy
+	})
+	return owed, nil
+}
+
+// owedRecountTitlesOnConn names the recounts the store owes, for the
+// refusal of Open.
+func owedRecountTitlesOnConn(conn *sqlite.Conn) ([]string, error) {
+	owed, err := owedRecountsOnConn(conn)
+	if err != nil {
+		return nil, err
+	}
+	titles := make([]string, 0, len(owed))
+	for _, name := range owed {
+		titles = append(titles, upgradeRecountCatalog[name].title)
+	}
+	return titles, nil
+}
+
+// recountStep is the plan step of the recount the marker name owes.
+func recountStep(name string) UpgradeStep {
+	entry := upgradeRecountCatalog[name]
+	return UpgradeStep{Version: entry.markedBy, Kind: UpgradeStepRecount, Title: entry.title, Cost: entry.cost, Counts: entry.counts, recount: name}
 }
 
 // isStoreFilePath reports whether dbPath names a database file on disk, as
@@ -116,12 +183,14 @@ func planUpgrade(dbPath string) (UpgradePlan, []string, error) {
 	if err != nil {
 		return UpgradePlan{}, nil, err
 	}
-	if !exists || version == head {
+	if !exists {
 		return current, nil, nil
 	}
 	if version > head {
 		return UpgradePlan{}, nil, newerSchemaError(dbPath, version)
 	}
+	// A store at the head schema is read too: an earlier upgrade can have
+	// left a recount owed.
 	conn, err := openReadOnlyNoSidecars(dbPath)
 	if err != nil {
 		return UpgradePlan{}, nil, fmt.Errorf("store: open %s read-only to plan its upgrade: %w; no files were changed; check the path and read permissions", dbPath, err)
@@ -152,7 +221,11 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 		return UpgradePlan{}, nil, newerSchemaError(dbPath, int(version))
 	}
 	plan.From = int(version)
-	if plan.From == head {
+	owed, err := owedRecountsOnConn(conn)
+	if err != nil {
+		return UpgradePlan{}, nil, err
+	}
+	if plan.From == head && len(owed) == 0 {
 		return plan, nil, nil
 	}
 
@@ -173,22 +246,7 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 	// basisBytes holds each basis the plan has measured, so a basis shared
 	// by several steps is estimated once.
 	basisBytes := map[upgradeDiskBasis]int64{}
-	for produced := plan.From + 1; produced <= head; produced++ {
-		entry, ok := upgradeStepCatalog[produced]
-		if !ok {
-			return UpgradePlan{}, nil, fmt.Errorf("store: plan the upgrade of %s: schema version %d has no entry in the upgrade step catalog; nothing was changed; this is a defect in this build: %s", dbPath, produced, missingCatalogEntryFix(produced))
-		}
-		step := UpgradeStep{Version: produced, Kind: UpgradeStepSchema, Title: entry.title, Cost: entry.cost, Counts: entry.counts}
-		if produced == searchRepairSchemaVersion && plan.From == searchRepairSchemaVersion-1 {
-			repair, notice, err := searchRepairStep(conn, step)
-			if err != nil {
-				return UpgradePlan{}, nil, err
-			}
-			step = repair
-			if notice != "" {
-				notices = append(notices, notice)
-			}
-		}
+	addStep := func(step UpgradeStep, entry upgradeCatalogEntry) {
 		need := entry.diskNeedFor(step.Cost)
 		size, measured := basisBytes[need.basis]
 		if !measured {
@@ -207,7 +265,60 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 		}
 		plan.Steps = append(plan.Steps, step)
 	}
+	// A recount an earlier upgrade left owed runs first: the migration that
+	// marked it already ran.
+	for _, name := range owed {
+		addStep(recountStep(name), upgradeRecountCatalog[name].upgradeCatalogEntry)
+	}
+	for produced := plan.From + 1; produced <= head; produced++ {
+		entry, ok := upgradeStepCatalog[produced]
+		if !ok {
+			return UpgradePlan{}, nil, fmt.Errorf("store: plan the upgrade of %s: schema version %d has no entry in the upgrade step catalog; nothing was changed; this is a defect in this build: %s", dbPath, produced, missingCatalogEntryFix(produced))
+		}
+		step := UpgradeStep{Version: produced, Kind: UpgradeStepSchema, Title: entry.title, Cost: entry.cost, Counts: entry.counts}
+		if produced == searchRepairSchemaVersion && plan.From == searchRepairSchemaVersion-1 {
+			repair, notice, err := searchRepairStep(conn, step)
+			if err != nil {
+				return UpgradePlan{}, nil, err
+			}
+			step = repair
+			if notice != "" {
+				notices = append(notices, notice)
+			}
+		}
+		addStep(step, entry)
+		// A recount this migration marks as owed runs right after it, in
+		// its own transaction.
+		for _, name := range slices.Sorted(maps.Keys(upgradeRecountCatalog)) {
+			recount := upgradeRecountCatalog[name]
+			if recount.markedBy != produced {
+				continue
+			}
+			marked, err := recountOwedAfterMigration(conn, recount)
+			if err != nil {
+				return UpgradePlan{}, nil, fmt.Errorf("store: plan the upgrade of %s: decide whether migration %d leaves %q owed: %w; nothing was changed", dbPath, produced, recount.title, err)
+			}
+			if marked {
+				addStep(recountStep(name), recount.upgradeCatalogEntry)
+			}
+		}
+	}
 	return plan, notices, nil
+}
+
+// recountOwedAfterMigration reports whether the migration that marks the
+// recount will write its marker on this store.
+func recountOwedAfterMigration(conn *sqlite.Conn, recount upgradeRecountCatalogEntry) (bool, error) {
+	if !tableExistsOnConn(conn, "sessions") {
+		// The chain creates the sessions table empty before the marking
+		// migration runs, so no marker is written.
+		return false, nil
+	}
+	owed := false
+	err := sqlitex.ExecuteTransient(conn, recount.owedAfterMigration, &sqlitex.ExecOptions{
+		ResultFunc: func(*sqlite.Stmt) error { owed = true; return nil },
+	})
+	return owed, err
 }
 
 // missingCatalogEntryFix says exactly what to add for a migration that has
@@ -382,12 +493,12 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 		}
 		return report, fmt.Errorf("store: upgrade %s: stat the database: %w; nothing was changed; check the path and its permissions", dbPath, statErr)
 	}
-	// The cheap header read keeps a current store from taking the lock or
-	// opening a writable connection at all.
-	if version, exists, peekErr := peekSchemaVersion(dbPath); peekErr != nil {
+	// The cheap header read refuses a newer store before anything else. A
+	// store at the head schema goes on to the read-only plan, which says
+	// whether it still owes a recount; a current store returns there, before
+	// the lock or any writable connection.
+	if version, _, peekErr := peekSchemaVersion(dbPath); peekErr != nil {
 		return report, peekErr
-	} else if exists && version == head {
-		return report, nil
 	} else if version > head {
 		return report, newerSchemaError(dbPath, version)
 	}
@@ -475,9 +586,12 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 		return report, err
 	}
 
+	// at is the schema version the store is at: a schema step moves it, a
+	// recount does not.
+	at := plan.From
 	for i, step := range plan.Steps {
 		interrupted := func(cause error) error {
-			return &UpgradeInterruptedError{DBPath: dbPath, Step: step, Finished: i, Total: len(plan.Steps), At: plan.From + i, Cause: cause}
+			return &UpgradeInterruptedError{DBPath: dbPath, Step: step, Finished: i, Total: len(plan.Steps), At: at, Cause: cause}
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return report, interrupted(ctxErr)
@@ -505,7 +619,12 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 				}
 			}
 		}()
-		stepErr := applyUpgradeStep(ctx, conn, step.Version, progress.count, opts.afterDataFill)
+		var stepErr error
+		if step.Kind == UpgradeStepRecount {
+			stepErr = applyRecountStep(ctx, conn, step, progress.count, opts.afterRecountSession)
+		} else {
+			stepErr = applyUpgradeStep(ctx, conn, step.Version, progress.count, opts.afterDataFill)
+		}
 		close(stopTicks)
 		<-ticksDone
 		if stepErr != nil {
@@ -513,7 +632,10 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 				return report, interrupted(ctxErr)
 			}
 			return report, fmt.Errorf("store: upgrade %s: step %d of %d (%s) failed and rolled back: %w; the %d step(s) before it stay applied and the store is at schema %d; fix the cause, then run `peasant migrate --schema-only` again",
-				dbPath, i+1, len(plan.Steps), step.Title, stepErr, i, plan.From+i)
+				dbPath, i+1, len(plan.Steps), step.Title, stepErr, i, at)
+		}
+		if step.Kind == UpgradeStepSchema {
+			at = step.Version
 		}
 		elapsed, grown := progress.send(UpgradeEventStepFinished)
 		report.Steps = append(report.Steps, UpgradeStepResult{Step: step, Duration: elapsed, WALBytes: grown})
@@ -565,6 +687,19 @@ func applyUpgradeStep(ctx context.Context, conn *sqlite.Conn, version int, repor
 		// it: the caller reports the step as rolled back.
 		return ctx.Err()
 	})
+}
+
+// applyRecountStep runs one owed recount on the upgrade's connection. The
+// recount owns its transaction; cancelling ctx interrupts it, and it rolls
+// back with its marker kept.
+func applyRecountStep(ctx context.Context, conn *sqlite.Conn, step UpgradeStep, report func(done, of int64), hook recountSessionHook) error {
+	run, ok := upgradeRecountRuns[step.recount]
+	if !ok {
+		return fmt.Errorf("store: the upgrade plan names the recount %q, which this build cannot run; nothing was changed; this is a defect in this build: register it in upgradeRecountRuns in internal/store/upgrade.go", step.recount)
+	}
+	conn.SetInterrupt(ctx.Done())
+	defer conn.SetInterrupt(nil)
+	return run(ctx, conn, report, hook)
 }
 
 // truncateWAL checkpoints the write-ahead log and truncates it to zero

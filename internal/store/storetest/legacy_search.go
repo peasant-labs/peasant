@@ -102,13 +102,31 @@ CREATE INDEX idx_ingest_run_outcomes_run ON ingest_run_outcomes(run_id, id);
 // the chain from 75 creates them again instead of colliding.
 func BuildCleanV75Store(t *testing.T, path string) {
 	t.Helper()
+	buildV75Store(t, path, true)
+}
+
+// BuildSessionlessV75Store writes a real version-75 store that holds no
+// session, the way BuildCleanV75Store does without its seeded session. Its
+// upgrade plan is quick: there are no stale search results to rebuild, and
+// migration 77 marks no turn count recount on a store with no sessions.
+func BuildSessionlessV75Store(t *testing.T, path string) {
+	t.Helper()
+	buildV75Store(t, path, false)
+}
+
+// buildV75Store builds the version-75 store of BuildCleanV75Store, with or
+// without its one seeded session.
+func buildV75Store(t *testing.T, path string, withSession bool) {
+	t.Helper()
 	s, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("open the current schema to build a v75 store: %v", err)
 	}
-	const sessionID = "cccccccc-3333-4333-8333-cccccccccccc"
-	SeedSession(t, s, sessionID)
-	SeedSessionEntry(t, s, sessionID, 0)
+	if withSession {
+		const sessionID = "cccccccc-3333-4333-8333-cccccccccccc"
+		SeedSession(t, s, sessionID)
+		SeedSessionEntry(t, s, sessionID, 0)
+	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("close the seeded store: %v", err)
 	}
@@ -126,5 +144,37 @@ INSERT INTO session_entries_fts(session_entries_fts) VALUES('rebuild');
 DROP TABLE pending_recounts;
 PRAGMA user_version = 75;`, nil); err != nil {
 		t.Fatalf("restore the v75 search index shape: %v", err)
+	}
+}
+
+// BuildRecountOwedHeadStore writes a real store at the head schema that
+// holds one session and still owes the turn count recount: the marker row
+// migration 77 writes ('turn_counts' in pending_recounts, see
+// internal/store/schema_v77.go) is present, as if the recount that follows
+// that migration never committed. Open refuses it as behind, and its upgrade
+// plan is the one recount step.
+func BuildRecountOwedHeadStore(t *testing.T, path string) {
+	t.Helper()
+	s, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("open the current schema to build a store that owes its recount: %v", err)
+	}
+	const sessionID = "dddddddd-4444-4444-8444-dddddddddddd"
+	SeedSession(t, s, sessionID)
+	SeedSessionEntry(t, s, sessionID, 0)
+	if err := s.Close(); err != nil {
+		t.Fatalf("close the seeded store: %v", err)
+	}
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatalf("reopen the seeded store raw: %v", err)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close the store that owes its recount: %v", err)
+		}
+	}()
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO pending_recounts(name) VALUES('turn_counts')`, nil); err != nil {
+		t.Fatalf("mark the turn count recount as owed: %v", err)
 	}
 }

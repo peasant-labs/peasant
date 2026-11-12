@@ -12,8 +12,10 @@ the store on disk has. This page says what happens then.
 - It refuses a store that a newer build upgraded.
 - It refuses a store that is behind, with `store.SchemaBehindError`, and changes
   no byte of it.
+- It refuses a store at the head schema that still owes a recount (see
+  [Recounts](#recounts)) the same way: such a store is behind.
 
-Exactly one function applies migrations: `store.Upgrade`. `store.PlanUpgrade`
+Exactly one function applies migrations and runs recounts: `store.Upgrade`. `store.PlanUpgrade`
 reads what an upgrade would do and changes no file. A source guard in
 `internal/store` fails when the migration engine has a second caller.
 
@@ -27,13 +29,13 @@ store. The helper classes the entry point and applies this policy.
 | a command at a terminal | names the steps and runs them | shows the plan, the store size and the free disk, and asks first |
 | the same command with no terminal (a pipe, a script, CI) | runs, one line per step on standard error | refuses, changes nothing, exits 1 |
 | a generated git hook (`village push --non-interactive`) | runs | skips with the nothing-attempted status; the hook script exits 0, so git is not blocked |
+| `peasant web start` | the parent upgrades before it starts the server | the same, and asks first at a terminal |
+| a server process (the web server, an import started from the web) | never upgrades; refuses a behind store | the same |
+| `peasant migrate` | the explicit upgrade | the explicit upgrade; `--confirm` skips the prompt |
 
 Hook mode belongs to `village push` alone: that command declares
 `--non-interactive` as the flag generated hooks pass. Another command with a
 flag of that name is a terminal or a piped command like any other.
-| `peasant web start` | the parent upgrades before it starts the server | the same, and asks first at a terminal |
-| a server process (the web server, an import started from the web) | never upgrades; refuses a behind store | the same |
-| `peasant migrate` | the explicit upgrade | the explicit upgrade; `--confirm` skips the prompt |
 
 A server refuses to start on a behind store. Its message says what the store
 needs and names `peasant migrate --schema-only`, to run in a terminal.
@@ -186,6 +188,33 @@ Ctrl-C stops the running step. That step rolls back. The steps before it stay
 applied, and the next `peasant migrate --schema-only` resumes at the step that
 was stopped.
 
+## Recounts
+
+A migration whose data change is Go work, not SQL, records that work as owed:
+it writes a marker row, by name, in `pending_recounts`. The recount is an
+upgrade step of its own, of kind `recount`, that runs right after the migration
+that wrote the marker. It reads the marker under the write lock, does its
+work, and deletes the marker in the same transaction. A recount that fails, is
+cancelled or is killed leaves the marker, and the next upgrade runs it again.
+The schema version cannot say that a recount is owed: it moves as soon as the
+migration commits. So the plan reads the markers, and a store that holds one
+is behind at any schema version, the head included. `Open` never runs a
+recount; it refuses the store with `SchemaBehindError`, whose message names
+the steps an earlier upgrade did not finish, and every entry point's policy
+applies as to any behind store.
+
+Migration 77 writes the `turn_counts` marker when the store holds sessions.
+Its recount folds every stored session's entries once and writes both turn
+counts: `turn_count` takes the folded turns and `conversation_turn_count`
+the conversation turns. A session with no stored entries, or whose entries
+cannot be read, keeps both stored values and is logged. The recount walks the
+sessions with the same code as the step 74 fill. 0.17.0 ran this recount when
+it opened the store; a 0.17.0 store whose open was killed part way is at
+schema 77 with the marker, and its plan is the recount, then 78.
+
+A 0.16.2 store (schema 76) with sessions plans three steps: 77 (quick), the
+turn count recount (scales with rows, counted in sessions), and 78 (quick).
+
 ## The step catalog
 
 `internal/store/upgrade_catalog.go` gives every migration a title and a cost
@@ -196,7 +225,11 @@ disk factor and basis; a step that copies a table overrides them with
 no disk need, or when an override restates the need its cost already gives,
 and its message names the file and the fields to add or remove.
 `testdata/upgrade_step_catalog.manifest.yaml` lists the versions by name. A new
-migration adds both.
+migration adds both. A recount has its entry in `upgradeRecountCatalog`,
+keyed by its marker name, with the migration that marks it and a query that
+says whether that migration will write the marker on a store; its run is
+registered in `upgradeRecountRuns` in `internal/store/upgrade.go`. A test
+fails when either has a name the other lacks.
 
 A cost can depend on the store. The step that repairs the search index
 triggers (schema 76) is long only on a store that carries stale search results
@@ -234,5 +267,21 @@ logs the duration and log growth of each step.
 text layout, and one whose entry table holds as many rows as the plan reads,
 compares the plan's basis estimate and its time with `dbstat`, and
 logs what step 75 used: the log's high-water mark plus the database's growth.
-Neither runs in the gate. The free-disk factors in
+`TestSandboxTurnCountRecountMeasure` builds schema-76 stores of a chosen
+number of sessions with a chosen number of entries each, half of them managed
+generations, upgrades them, and logs the turn count recount's time and log
+growth per session.
+None of them runs in the gate. The free-disk factors in
 `internal/defaults/store_upgrade.go` record the last runs.
+
+The last recount run (2026-11-12, load average about 18):
+
+| sessions x entries | database | recount | per session | log written |
+|---|---|---|---|---|
+| 2,000 x 40 | 71 MB | 0.45 s | 0.23 ms | 161 kB, 0.0023 of the database |
+| 5,000 x 40 | 176 MB | 0.99 s | 0.20 ms | 363 kB, 0.0021 of the database |
+| 5,000 x 120 | 515 MB | 2.10 s | 0.42 ms | 363 kB, 0.0007 of the database |
+
+The time grows with the sessions and with their entries, so the recount is a
+row-scaled step that counts sessions, like step 74. Its log stays near 75
+bytes per session, well inside the row-scaled disk factor (0.01).

@@ -327,10 +327,6 @@ type openOptions struct {
 	// immutable opens a read-only store with SQLite's immutable=1 so it
 	// needs no -shm file; see WithImmutableReadOnly.
 	immutable bool
-	// turnCountRecountHook is called after each session the upgrade recount
-	// handles. It is nil on every production open; a test sets it to stop
-	// the recount part way.
-	turnCountRecountHook turnCountRecountHook
 }
 
 // WithImmutableReadOnly makes OpenReadOnlyWithOptions open the database with
@@ -440,8 +436,10 @@ func isTransientOpenContention(err error) bool {
 // Open never changes the schema of a store that holds data. It creates a new
 // store at the head schema from the committed baseline, opens a store that is
 // already current, refuses a store a newer build upgraded, and refuses a
-// behind store with a *SchemaBehindError, changing nothing. Upgrade is the
-// only function that applies migrations.
+// behind store with a *SchemaBehindError, changing nothing. A store at the
+// head schema that still owes a recount an earlier upgrade marked is behind
+// too. Upgrade is the only function that applies migrations and runs
+// recounts.
 func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 	o := openOptions{}
 	for _, opt := range opts {
@@ -545,6 +543,17 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 	}
 	if int(version) != head {
 		return fail(&SchemaBehindError{DBPath: dbPath, From: int(version), To: head})
+	}
+	// A store at the head schema can still owe a recount that an earlier
+	// upgrade marked and did not finish (a 0.17.0 open that was killed part
+	// way, or a cancelled upgrade). Open never runs it: the store is behind
+	// until Upgrade does.
+	owed, err := owedRecountTitlesOnConn(conn)
+	if err != nil {
+		return fail(fmt.Errorf("store: open %s: %w", dbPath, err))
+	}
+	if len(owed) > 0 {
+		return fail(&SchemaBehindError{DBPath: dbPath, From: head, To: head, Owed: owed})
 	}
 	pool.Put(conn)
 
