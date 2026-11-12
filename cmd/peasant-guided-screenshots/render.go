@@ -293,7 +293,7 @@ func renderGuidedCapture(workingDirectory string, index int, capture guidedCaptu
 	})
 	var selected settings.Section
 	for _, section := range registry.Sections {
-		if section.Key == string(capture.Section) {
+		if section.Key == capture.Section.String() {
 			selected = section
 			break
 		}

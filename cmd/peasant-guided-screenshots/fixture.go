@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
-	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"gopkg.in/yaml.v3"
 )
 
@@ -66,19 +66,22 @@ func (s ingestProgressState) valid() bool {
 	return s == ingestProgressStateRunning || s == ingestProgressStateHarvestInline || s == ingestProgressStateHarvestCanceling || s == ingestProgressStateHarvestCanceled
 }
 
-type guidedSection string
+type guidedSection = onboarding.FlowKey
 
 const (
-	guidedSectionAutoIngest  guidedSection = kickstart.SectionAutoIngest
-	guidedSectionPublication guidedSection = kickstart.SectionPublication
-	guidedSectionAutoPublish guidedSection = kickstart.SectionAutoPublish
-	guidedSectionPrivacy     guidedSection = kickstart.SectionPrivacy
-	guidedSectionLicense     guidedSection = kickstart.SectionLicense
-	guidedSectionDestination guidedSection = kickstart.SectionDestination
-	guidedSectionRetention   guidedSection = kickstart.SectionRetention
+	guidedSectionAutoIngest  = onboarding.FlowAutoIngest
+	guidedSectionPublication = onboarding.FlowPublication
+	guidedSectionAutoPublish = onboarding.FlowAutoPublish
+	guidedSectionPrivacy     = onboarding.FlowPrivacy
+	guidedSectionLicense     = onboarding.FlowLicense
+	guidedSectionDestination = onboarding.FlowDestination
+	guidedSectionRetention   = onboarding.FlowRetention
 )
 
-func (s guidedSection) valid() bool {
+func validGuidedSection(s guidedSection) bool {
+	if _, err := onboarding.NewFlowKey(s.String()); err != nil {
+		return false
+	}
 	switch s {
 	case guidedSectionAutoIngest, guidedSectionPublication, guidedSectionAutoPublish, guidedSectionPrivacy,
 		guidedSectionLicense, guidedSectionDestination, guidedSectionRetention:
@@ -686,7 +689,7 @@ func validateSheets(sheets []sheetFixture) error {
 func validateGuidedMatrix(sections []guidedSectionFixture, captures []guidedCaptureFixture) error {
 	sectionRows := make(map[guidedSection]guidedSectionFixture, len(sections))
 	for _, section := range sections {
-		if !section.Key.valid() || sectionRows[section.Key].Key != "" || !nonEmptyStrings(section.WantContains) {
+		if !validGuidedSection(section.Key) || sectionRows[section.Key].Key != "" || !nonEmptyStrings(section.WantContains) {
 			return fmt.Errorf("screenshot fixture has an invalid or duplicate guided section: %#v", section)
 		}
 		sectionRows[section.Key] = section
