@@ -10,6 +10,7 @@ import { acquireLifecycle, bounded, ownedGroups } from './lib/owned-lifecycle.mj
 import { assertExportedSurface, assertPublishedFiles, hash, inventory, verifyServed } from './lib/provenance.mjs';
 import { startVillageFixture } from './lib/village-fixture.mjs';
 import { selectionRecord } from './lib/selection.mjs';
+import { seedConfiguredSandbox } from './lib/configured-sandbox.mjs';
 
 const web = fileURLToPath(new URL('../../', import.meta.url)), repo = resolve(web, '..');
 const require = createRequire(join(web, 'package.json'));
@@ -116,6 +117,9 @@ try {
   manifest = { sourceCommit, sourceFiles, counterfactual: mutationMode, ...selection, lockHash: hash(readFileSync(join(web, 'pnpm-lock.yaml'))), packages, binary, binaryHash: hash(readFileSync(binary)), webAssets: inventory(out), nodeExecutable: process.execPath, nodeVersion: process.version, fetchTimeout: env.PEASANT_COLLECTIVE_FETCH_TIMEOUT, served: [], appURL };
   saveManifest = () => writeFileSync(join(artifacts, 'build-manifest.json'), JSON.stringify(manifest, null, 2));
   async function startApp() {
+    // These journeys are about an installed dashboard, not first-run setup: every start is from a
+    // computer that is already set up, including after a reset cleared its configuration directory.
+    seedConfiguredSandbox(env);
     app = launch(binary, ['web', 'start', '--foreground', '--no-browser', '--port', new URL(appURL).port], { env });
     await bounded((async () => { for (;;) {
       if (app.child.exitCode !== null) throw new Error('The owned production binary exited during startup');

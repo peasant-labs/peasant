@@ -10,6 +10,7 @@ import { parse } from 'yaml';
 import * as contract from '@peasant-labs/schema';
 import { acquireLifecycle, bounded, ownedGroups } from './lib/owned-lifecycle.mjs';
 import { startVillageFixture } from './lib/village-fixture.mjs';
+import { seedConfiguredSandbox } from './lib/configured-sandbox.mjs';
 
 const web = fileURLToPath(new URL('../../', import.meta.url)), repo = resolve(web, '..');
 const fixture = parse(readFileSync(new URL('./testdata/api-binary.yaml', import.meta.url), 'utf8'));
@@ -80,6 +81,8 @@ for (const row of fixture.cases) it(row.name, async () => {
   try {
     const seedArgs = ['--root', life.identity.stateRoot, '--village-url', remote.origin];
     const seeded = contract.zCollectiveObservationResponse.parse(JSON.parse(await capture(seeder, [...seedArgs, '--action', 'seed'], { env })));
+    // The shared sandbox seed: a computer that is already set up. A row can leave it out to prove the seed is what decides.
+    if (row.configSeed !== false) seedConfiguredSandbox(env);
     const origin = `http://127.0.0.1:${await port()}`;
     app = launch(binary, ['web', 'start', '--foreground', '--no-browser', '--port', new URL(origin).port], { env: { ...env, PEASANT_COLLECTIVE_FETCH_TIMEOUT: row.invalidTimeout ?? fixture.timeout } });
     processes.add(app);
@@ -98,6 +101,9 @@ for (const row of fixture.cases) it(row.name, async () => {
     } })(), 30000, 'actual binary API readiness');
     expect(realpathSync(`/proc/${app.child.pid}/exe`)).toBe(realpathSync(binary));
     expect(sha(readFileSync(`/proc/${app.child.pid}/exe`))).toBe(sha(readFileSync(binary)));
+    const status = contract.zLocalKickstartStatus.parse(await (await fetch(`${origin}/api/v1/kickstart/status`)).json());
+    expect(status.configured).toBe(row.configSeed !== false);
+    if (row.mode === 'setup-status') { expect(remote.requests).toEqual([]); return; }
     const path = '/api/v1/village/collective-observations';
     const before = contract.zCollectiveObservationResponse.parse(await (await fetch(`${origin}${path}`)).json());
     expect(before).toEqual(seeded); expect(remote.requests).toEqual([]);
