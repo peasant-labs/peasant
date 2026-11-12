@@ -39,6 +39,9 @@ type importProfileFixtures struct {
 		LargeEntries int    `yaml:"largeEntries"`
 		EntryLine    string `yaml:"entryLine"`
 	} `yaml:"structural"`
+	Discover struct {
+		StrayFile string `yaml:"strayFile"`
+	} `yaml:"discover"`
 	Cases []struct {
 		Name string `yaml:"name"`
 	} `yaml:"cases"`
@@ -280,9 +283,6 @@ WHERE k.name = 'refresh' AND o.run_id = ?`, firstRun)
 					t.Fatalf("run %d stored no %s stage row; stored %+v", firstRun, required, stages)
 				}
 			}
-			if seen[ingest.StageDiscover].Done != len(fixtures.Sessions) {
-				t.Fatalf("DISCOVER row = %+v, want %d sessions done", seen[ingest.StageDiscover], len(fixtures.Sessions))
-			}
 			if seen[ingest.StageIndex].Bytes <= 0 {
 				t.Fatalf("INDEX row carries no bytes: %+v", seen[ingest.StageIndex])
 			}
@@ -302,6 +302,31 @@ WHERE k.name = 'refresh' AND o.run_id = ?`, firstRun)
 					t.Fatalf("session %s index timings = %+v, want one measured attempt", session.ID, timings)
 				}
 			}
+		},
+		"discover-stage-row-counts-sessions-not-files": func(t *testing.T) {
+			// The live discovery display counts files; the stored row counts
+			// the sessions discovery found. A .jsonl file that is not a
+			// session must not move it.
+			stray := filepath.Join(bench.root, "source", "-workspace", fixtures.Discover.StrayFile)
+			if err := os.WriteFile(stray, []byte("{}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = os.Remove(stray) }()
+			bench.run(nil)
+			stages, err := bench.db.ListIngestRunStages(t.Context(), bench.lastRun())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, stage := range stages {
+				if stage.Stage != ingest.StageDiscover {
+					continue
+				}
+				if stage.Done != len(fixtures.Sessions) || stage.Total != len(fixtures.Sessions) {
+					t.Fatalf("DISCOVER row = %+v, want done and total %d sessions (the tree holds %d .jsonl files)", stage, len(fixtures.Sessions), len(fixtures.Sessions)+1)
+				}
+				return
+			}
+			t.Fatalf("the run stored no DISCOVER row: %+v", stages)
 		},
 		"unchanged-session-writes-no-outcome-row": func(t *testing.T) {
 			result, _ := bench.run(nil)

@@ -15,11 +15,17 @@ structural:
   smallEntries: 4
   largeEntries: 400
   entryLine: '{"sessionId":"{{session}}","type":"assistant","uuid":"a{{n}}","cwd":"/work/project","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"step {{n}} completed"}]}}'
+# The DISCOVER stage row counts sessions, not files: the case adds a .jsonl
+# file that is not a session to the source tree and expects done and total to
+# stay the session count.
+discover:
+  strayFile: notes.jsonl
 cases:
   - name: new-session-writes-a-refresh-row
   - name: each-refreshed-session-has-exactly-one-refresh-row-per-run
   - name: census-by-run-counts-every-refreshed-session
   - name: run-stores-its-stage-rows-and-index-timings
+  - name: discover-stage-row-counts-sessions-not-files
   - name: unchanged-session-writes-no-outcome-row
   - name: compare-only-session-writes-no-outcome-row
   - name: native-refresh-writes-a-refresh-row

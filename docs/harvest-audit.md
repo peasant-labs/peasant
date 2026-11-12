@@ -84,7 +84,9 @@ A processed session with no more specific reason is recorded as
 
 Every import entry point (`peasant harvest`, the kickstart import, and the
 import started from the local web app) keeps the profiler on.
-`harvest --profile-index` only decides whether the profile is also printed.
+`harvest --profile-index` decides whether the profile is also printed, and
+only then adds the per-annotation-result breakdown the printout shows; the
+stored profile never times work per result or per entry.
 
 `ingest_run_stages` holds one row per stage per run: `duration_ms`, `done`,
 `total`, `bytes` (transcript bytes the stage moved; 0 when it reports none) and
@@ -93,6 +95,11 @@ lane). Several segments of one stage are summed into its row. Stages overlap,
 so the rows do not sum to the run's wall time; `ingest_log.started_at` and
 `finished_at` give that. The run row, its stage rows and the stage retention
 delete commit in one transaction. Stage rows are kept for the latest 100 runs.
+
+`done` and `total` count each stage's own unit. For `DISCOVER` the unit is
+sessions: the sessions discovery found, not the transcript files it walked. The
+live discovery display counts files, so its final count can differ from the
+stored row.
 
 `index_log` carries `parse_ms`, `write_ms` and `bytes` for each index attempt.
 NULL means not measured: a row written before these columns existed, or an
