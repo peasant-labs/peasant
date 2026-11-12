@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
@@ -60,4 +61,50 @@ func derefDurationMs(d *time.Duration) any {
 		return nil
 	}
 	return max(d.Milliseconds(), 0)
+}
+
+// IndexLogTiming is the stored measurement of one index attempt. A nil field
+// means not measured: the row predates the timing columns, or the attempt did
+// not parse.
+type IndexLogTiming struct {
+	Outcome       ingest.IndexOutcome
+	Reason        string
+	ParseDuration *time.Duration
+	WriteDuration *time.Duration
+	Bytes         *int64
+}
+
+// ListIndexLogTimings reads the index attempts of one session, oldest first,
+// with their stored timings.
+func (s *Store) ListIndexLogTimings(ctx context.Context, sessionID ingest.SessionID) ([]IndexLogTiming, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: read index_log timings for session %s: %w; check database access and retry", sessionID, err)
+	}
+	defer s.pool.Put(conn)
+	var timings []IndexLogTiming
+	err = sqlitex.ExecuteTransient(conn, `SELECT outcome, COALESCE(reason, ''), parse_ms, write_ms, bytes FROM index_log WHERE session_id=? ORDER BY id`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+		timing := IndexLogTiming{Outcome: ingest.IndexOutcome(stmt.ColumnText(0)), Reason: stmt.ColumnText(1)}
+		if !timing.Outcome.IsValid() {
+			return fmt.Errorf("stored index outcome %q is not one this build defines", stmt.ColumnText(0))
+		}
+		if stmt.ColumnType(2) != sqlite.TypeNull {
+			parse := time.Duration(stmt.ColumnInt64(2)) * time.Millisecond
+			timing.ParseDuration = &parse
+		}
+		if stmt.ColumnType(3) != sqlite.TypeNull {
+			write := time.Duration(stmt.ColumnInt64(3)) * time.Millisecond
+			timing.WriteDuration = &write
+		}
+		if stmt.ColumnType(4) != sqlite.TypeNull {
+			bytes := stmt.ColumnInt64(4)
+			timing.Bytes = &bytes
+		}
+		timings = append(timings, timing)
+		return nil
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("store: read index_log timings for session %s: %w; check the stored audit data and retry", sessionID, err)
+	}
+	return timings, nil
 }

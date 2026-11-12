@@ -1,0 +1,12 @@
+# Required-name manifest for ingest_profile_log: deletion protection by NAME,
+# never by count.
+requiredNames:
+  - run-writes-one-row-per-stage
+  - stage-segments-are-summed-into-one-row
+  - run-row-and-stage-rows-commit-together
+  - unknown-stage-name-is-refused-at-the-write-boundary
+  - deleting-a-run-row-cascades-to-its-stage-rows
+  - retention-keeps-the-stage-rows-of-the-last-n-runs
+  - retention-deletes-no-run-row-and-no-index-row
+  - indexed-row-carries-parse-write-and-bytes
+  - row-written-before-the-migration-reads-as-not-measured

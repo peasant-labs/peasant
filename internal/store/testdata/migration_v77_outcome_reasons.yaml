@@ -1,0 +1,101 @@
+# Rows of a schema-76 ingest_run_outcomes table and the reason id each must
+# carry after migration 77. There is one named row for every (kind, code) pair
+# a build before the migration could write, so no pair can be dropped. The
+# special rows pin the split of adapter_refresh_unavailable by kind, the
+# run-wide diagnostic, and a stored code no build lists.
+runs: 3
+rows:
+  - {name: worker-error-error, id: 3, run: 1, session: "77000000-0000-4000-8000-000000000001", kind: worker_error, code: error, createdAt: 1001, wantReasonId: 1}
+  - {name: worker-error-adapter-refresh-unavailable, id: 6, run: 1, session: "77000000-0000-4000-8000-000000000002", kind: worker_error, code: adapter_refresh_unavailable, createdAt: 1002, wantReasonId: 2}
+  - {name: diagnostic-adapter-refresh-unavailable, id: 9, run: 2, session: "77000000-0000-4000-8000-000000000100", kind: diagnostic, code: adapter_refresh_unavailable, createdAt: 1003, wantReasonId: 100}
+  - {name: diagnostic-artifact-cleanup, id: 12, run: 2, session: "77000000-0000-4000-8000-000000000101", kind: diagnostic, code: artifact_cleanup, createdAt: 1004, wantReasonId: 101}
+  - {name: diagnostic-artifact-mirror-pending, id: 15, run: 2, session: "77000000-0000-4000-8000-000000000102", kind: diagnostic, code: artifact_mirror_pending, createdAt: 1005, wantReasonId: 102}
+  - {name: diagnostic-artifact-relocation, id: 18, run: 2, session: "77000000-0000-4000-8000-000000000103", kind: diagnostic, code: artifact_relocation, createdAt: 1006, wantReasonId: 103}
+  - {name: diagnostic-codex-checkpoint-metadata-misaligned, id: 21, run: 2, session: "77000000-0000-4000-8000-000000000104", kind: diagnostic, code: codex_checkpoint_metadata_misaligned, createdAt: 1007, wantReasonId: 104}
+  - {name: diagnostic-codex-copied-prefix-incomplete, id: 24, run: 2, session: "77000000-0000-4000-8000-000000000105", kind: diagnostic, code: codex_copied_prefix_incomplete, createdAt: 1008, wantReasonId: 105}
+  - {name: diagnostic-codex-copy-boundary-malformed, id: 27, run: 2, session: "77000000-0000-4000-8000-000000000106", kind: diagnostic, code: codex_copy_boundary_malformed, createdAt: 1009, wantReasonId: 106}
+  - {name: diagnostic-codex-history-envelope-malformed, id: 30, run: 2, session: "77000000-0000-4000-8000-000000000107", kind: diagnostic, code: codex_history_envelope_malformed, createdAt: 1010, wantReasonId: 107}
+  - {name: diagnostic-codex-history-mode-unsupported, id: 33, run: 2, session: "77000000-0000-4000-8000-000000000108", kind: diagnostic, code: codex_history_mode_unsupported, createdAt: 1011, wantReasonId: 108}
+  - {name: diagnostic-codex-item-body-malformed, id: 36, run: 2, session: "77000000-0000-4000-8000-000000000109", kind: diagnostic, code: codex_item_body_malformed, createdAt: 1012, wantReasonId: 109}
+  - {name: diagnostic-codex-item-variant-unknown, id: 39, run: 2, session: "77000000-0000-4000-8000-000000000110", kind: diagnostic, code: codex_item_variant_unknown, createdAt: 1013, wantReasonId: 110}
+  - {name: diagnostic-codex-lifecycle-unbalanced, id: 42, run: 2, session: "77000000-0000-4000-8000-000000000111", kind: diagnostic, code: codex_lifecycle_unbalanced, createdAt: 1014, wantReasonId: 111}
+  - {name: diagnostic-codex-native-pointer-identity-mismatch, id: 45, run: 2, session: "77000000-0000-4000-8000-000000000112", kind: diagnostic, code: codex_native_pointer_identity_mismatch, createdAt: 1015, wantReasonId: 112}
+  - {name: diagnostic-codex-native-pointer-unreadable, id: 48, run: 2, session: "77000000-0000-4000-8000-000000000113", kind: diagnostic, code: codex_native_pointer_unreadable, createdAt: 1016, wantReasonId: 113}
+  - {name: diagnostic-codex-ordinal-regression, id: 51, run: 2, session: "77000000-0000-4000-8000-000000000114", kind: diagnostic, code: codex_ordinal_regression, createdAt: 1017, wantReasonId: 114}
+  - {name: diagnostic-codex-paginated-rollback-anomaly, id: 54, run: 2, session: "77000000-0000-4000-8000-000000000115", kind: diagnostic, code: codex_paginated_rollback_anomaly, createdAt: 1018, wantReasonId: 115}
+  - {name: diagnostic-codex-record-malformed, id: 57, run: 2, session: "77000000-0000-4000-8000-000000000116", kind: diagnostic, code: codex_record_malformed, createdAt: 1019, wantReasonId: 116}
+  - {name: diagnostic-codex-reference-ambiguous, id: 60, run: 2, session: "77000000-0000-4000-8000-000000000117", kind: diagnostic, code: codex_reference_ambiguous, createdAt: 1020, wantReasonId: 117}
+  - {name: diagnostic-codex-reference-bounds-invalid, id: 63, run: 2, session: "77000000-0000-4000-8000-000000000118", kind: diagnostic, code: codex_reference_bounds_invalid, createdAt: 1021, wantReasonId: 118}
+  - {name: diagnostic-codex-reference-byte-boundary-invalid, id: 66, run: 2, session: "77000000-0000-4000-8000-000000000119", kind: diagnostic, code: codex_reference_byte_boundary_invalid, createdAt: 1022, wantReasonId: 119}
+  - {name: diagnostic-codex-reference-coverage-incomplete, id: 69, run: 2, session: "77000000-0000-4000-8000-000000000120", kind: diagnostic, code: codex_reference_coverage_incomplete, createdAt: 1023, wantReasonId: 120}
+  - {name: diagnostic-codex-reference-cycle, id: 72, run: 2, session: "77000000-0000-4000-8000-000000000121", kind: diagnostic, code: codex_reference_cycle, createdAt: 1024, wantReasonId: 121}
+  - {name: diagnostic-codex-reference-depth-exceeded, id: 75, run: 2, session: "77000000-0000-4000-8000-000000000122", kind: diagnostic, code: codex_reference_depth_exceeded, createdAt: 1025, wantReasonId: 122}
+  - {name: diagnostic-codex-reference-mode-unsupported, id: 78, run: 2, session: "77000000-0000-4000-8000-000000000123", kind: diagnostic, code: codex_reference_mode_unsupported, createdAt: 1026, wantReasonId: 123}
+  - {name: diagnostic-codex-reference-segments-bounded, id: 81, run: 2, session: "77000000-0000-4000-8000-000000000124", kind: diagnostic, code: codex_reference_segments_bounded, createdAt: 1027, wantReasonId: 124}
+  - {name: diagnostic-codex-reference-unavailable, id: 84, run: 2, session: "77000000-0000-4000-8000-000000000125", kind: diagnostic, code: codex_reference_unavailable, createdAt: 1028, wantReasonId: 125}
+  - {name: diagnostic-codex-reference-unreadable, id: 87, run: 2, session: "77000000-0000-4000-8000-000000000126", kind: diagnostic, code: codex_reference_unreadable, createdAt: 1029, wantReasonId: 126}
+  - {name: diagnostic-codex-rollback-beyond-history, id: 90, run: 2, session: "77000000-0000-4000-8000-000000000127", kind: diagnostic, code: codex_rollback_beyond_history, createdAt: 1030, wantReasonId: 127}
+  - {name: diagnostic-codex-turn-aborted, id: 93, run: 2, session: "77000000-0000-4000-8000-000000000128", kind: diagnostic, code: codex_turn_aborted, createdAt: 1031, wantReasonId: 128}
+  - {name: diagnostic-content-capture-incomplete, id: 96, run: 2, session: "77000000-0000-4000-8000-000000000129", kind: diagnostic, code: content_capture_incomplete, createdAt: 1032, wantReasonId: 129}
+  - {name: diagnostic-content-recovery-refused, id: 99, run: 2, session: "77000000-0000-4000-8000-000000000130", kind: diagnostic, code: content_recovery_refused, createdAt: 1033, wantReasonId: 130}
+  - {name: diagnostic-content-recovery-unavailable, id: 102, run: 2, session: "77000000-0000-4000-8000-000000000131", kind: diagnostic, code: content_recovery_unavailable, createdAt: 1034, wantReasonId: 131}
+  - {name: diagnostic-copy-failed, id: 105, run: 2, session: "77000000-0000-4000-8000-000000000132", kind: diagnostic, code: copy_failed, createdAt: 1035, wantReasonId: 132}
+  - {name: diagnostic-derive-identity-error, id: 108, run: 2, session: "77000000-0000-4000-8000-000000000133", kind: diagnostic, code: derive_identity_error, createdAt: 1036, wantReasonId: 133}
+  - {name: diagnostic-dry-run-unindexed, id: 111, run: 2, session: "77000000-0000-4000-8000-000000000134", kind: diagnostic, code: dry_run_unindexed, createdAt: 1037, wantReasonId: 134}
+  - {name: diagnostic-duplicate-session-id, id: 114, run: 2, session: "77000000-0000-4000-8000-000000000135", kind: diagnostic, code: duplicate_session_id, createdAt: 1038, wantReasonId: 135}
+  - {name: diagnostic-event-data-parse-error, id: 117, run: 2, session: "77000000-0000-4000-8000-000000000136", kind: diagnostic, code: event_data_parse_error, createdAt: 1039, wantReasonId: 136}
+  - {name: diagnostic-git-failure, id: 120, run: 2, session: "77000000-0000-4000-8000-000000000137", kind: diagnostic, code: git_failure, createdAt: 1040, wantReasonId: 137}
+  - {name: diagnostic-git-timeout, id: 123, run: 2, session: "77000000-0000-4000-8000-000000000138", kind: diagnostic, code: git_timeout, createdAt: 1041, wantReasonId: 138}
+  - {name: diagnostic-inactive-dangling-parent, id: 126, run: 2, session: "77000000-0000-4000-8000-000000000139", kind: diagnostic, code: inactive_dangling_parent, createdAt: 1042, wantReasonId: 139}
+  - {name: diagnostic-incomplete-tail, id: 129, run: 2, session: "77000000-0000-4000-8000-000000000140", kind: diagnostic, code: incomplete_tail, createdAt: 1043, wantReasonId: 140}
+  - {name: diagnostic-index-coverage-unavailable, id: 132, run: 2, session: "77000000-0000-4000-8000-000000000141", kind: diagnostic, code: index_coverage_unavailable, createdAt: 1044, wantReasonId: 141}
+  - {name: diagnostic-index-empty-unverified, id: 135, run: 2, session: "77000000-0000-4000-8000-000000000142", kind: diagnostic, code: index_empty_unverified, createdAt: 1045, wantReasonId: 142}
+  - {name: diagnostic-index-refused, id: 138, run: 2, session: "77000000-0000-4000-8000-000000000143", kind: diagnostic, code: index_refused, createdAt: 1046, wantReasonId: 143}
+  - {name: diagnostic-invalid-model, id: 141, run: 2, session: "77000000-0000-4000-8000-000000000144", kind: diagnostic, code: invalid_model, createdAt: 1047, wantReasonId: 144}
+  - {name: diagnostic-invalid-parent-cycle, id: 144, run: 2, session: "77000000-0000-4000-8000-000000000145", kind: diagnostic, code: invalid_parent_cycle, createdAt: 1048, wantReasonId: 145}
+  - {name: diagnostic-invalid-parent-session-id, id: 147, run: 2, session: "77000000-0000-4000-8000-000000000146", kind: diagnostic, code: invalid_parent_session_id, createdAt: 1049, wantReasonId: 146}
+  - {name: diagnostic-metadata-refused, id: 150, run: 2, session: "77000000-0000-4000-8000-000000000147", kind: diagnostic, code: metadata_refused, createdAt: 1050, wantReasonId: 147}
+  - {name: diagnostic-metrics-incomplete, id: 153, run: 2, session: "77000000-0000-4000-8000-000000000148", kind: diagnostic, code: metrics_incomplete, createdAt: 1051, wantReasonId: 148}
+  - {name: diagnostic-missing-model, id: 156, run: 2, session: "77000000-0000-4000-8000-000000000149", kind: diagnostic, code: missing_model, createdAt: 1052, wantReasonId: 149}
+  - {name: diagnostic-missing-project, id: 159, run: 2, session: "77000000-0000-4000-8000-000000000150", kind: diagnostic, code: missing_project, createdAt: 1053, wantReasonId: 150}
+  - {name: diagnostic-missing-session-meta, id: 162, run: 2, session: "77000000-0000-4000-8000-000000000151", kind: diagnostic, code: missing_session_meta, createdAt: 1054, wantReasonId: 151}
+  - {name: diagnostic-missing-sidecar, id: 165, run: 2, session: "77000000-0000-4000-8000-000000000152", kind: diagnostic, code: missing_sidecar, createdAt: 1055, wantReasonId: 152}
+  - {name: diagnostic-missing-user-email, id: 168, run: 2, session: "77000000-0000-4000-8000-000000000153", kind: diagnostic, code: missing_user_email, createdAt: 1056, wantReasonId: 153}
+  - {name: diagnostic-native-cursor-unavailable, id: 171, run: 2, session: "77000000-0000-4000-8000-000000000154", kind: diagnostic, code: native_cursor_unavailable, createdAt: 1057, wantReasonId: 154}
+  - {name: diagnostic-native-discovery-unavailable, id: 174, run: 2, session: "77000000-0000-4000-8000-000000000155", kind: diagnostic, code: native_discovery_unavailable, createdAt: 1058, wantReasonId: 155}
+  - {name: diagnostic-native-refresh-unavailable, id: 177, run: 2, session: "77000000-0000-4000-8000-000000000156", kind: diagnostic, code: native_refresh_unavailable, createdAt: 1059, wantReasonId: 156}
+  - {name: diagnostic-opencode-missing-parent, id: 180, run: 2, session: "77000000-0000-4000-8000-000000000157", kind: diagnostic, code: opencode_missing_parent, createdAt: 1060, wantReasonId: 157}
+  - {name: diagnostic-opencode-orphan-part-dropped, id: 183, run: 2, session: "77000000-0000-4000-8000-000000000158", kind: diagnostic, code: opencode_orphan_part_dropped, createdAt: 1061, wantReasonId: 158}
+  - {name: diagnostic-opencode-unknown-part-type, id: 186, run: 2, session: "77000000-0000-4000-8000-000000000159", kind: diagnostic, code: opencode_unknown_part_type, createdAt: 1062, wantReasonId: 159}
+  - {name: diagnostic-oversize-write-advisory, id: 189, run: 2, session: "77000000-0000-4000-8000-000000000160", kind: diagnostic, code: oversize_write_advisory, createdAt: 1063, wantReasonId: 160}
+  - {name: diagnostic-pair-repair-unavailable, id: 192, run: 2, session: "77000000-0000-4000-8000-000000000161", kind: diagnostic, code: pair_repair_unavailable, createdAt: 1064, wantReasonId: 161}
+  - {name: diagnostic-parent-session-mismatch, id: 195, run: 2, session: "77000000-0000-4000-8000-000000000162", kind: diagnostic, code: parent_session_mismatch, createdAt: 1065, wantReasonId: 162}
+  - {name: diagnostic-parse-error, id: 198, run: 2, session: "77000000-0000-4000-8000-000000000163", kind: diagnostic, code: parse_error, createdAt: 1066, wantReasonId: 163}
+  - {name: diagnostic-read-error, id: 201, run: 2, session: "77000000-0000-4000-8000-000000000164", kind: diagnostic, code: read_error, createdAt: 1067, wantReasonId: 164}
+  - {name: diagnostic-record-too-large, id: 204, run: 2, session: "77000000-0000-4000-8000-000000000165", kind: diagnostic, code: record_too_large, createdAt: 1068, wantReasonId: 165}
+  - {name: diagnostic-sidecar-parse-error, id: 207, run: 2, session: "77000000-0000-4000-8000-000000000166", kind: diagnostic, code: sidecar_parse_error, createdAt: 1069, wantReasonId: 166}
+  - {name: diagnostic-sidecar-session-mismatch, id: 210, run: 2, session: "77000000-0000-4000-8000-000000000167", kind: diagnostic, code: sidecar_session_mismatch, createdAt: 1070, wantReasonId: 167}
+  - {name: diagnostic-stale-index-missing-input, id: 213, run: 2, session: "77000000-0000-4000-8000-000000000168", kind: diagnostic, code: stale_index_missing_input, createdAt: 1071, wantReasonId: 168}
+  - {name: diagnostic-stale-index-outside-selection, id: 216, run: 2, session: "77000000-0000-4000-8000-000000000169", kind: diagnostic, code: stale_index_outside_selection, createdAt: 1072, wantReasonId: 169}
+  - {name: diagnostic-stats-overflow, id: 219, run: 2, session: "77000000-0000-4000-8000-000000000170", kind: diagnostic, code: stats-overflow, createdAt: 1073, wantReasonId: 170}
+  - {name: diagnostic-transcript-read-failed, id: 222, run: 2, session: "77000000-0000-4000-8000-000000000171", kind: diagnostic, code: transcript_read_failed, createdAt: 1074, wantReasonId: 171}
+  - {name: diagnostic-transcript-read-timeout, id: 225, run: 2, session: "77000000-0000-4000-8000-000000000172", kind: diagnostic, code: transcript_read_timeout, createdAt: 1075, wantReasonId: 172}
+  - {name: diagnostic-unknown-data-retained, id: 228, run: 2, session: "77000000-0000-4000-8000-000000000173", kind: diagnostic, code: unknown_data_retained, createdAt: 1076, wantReasonId: 173}
+  - {name: both-rows-worker-error, id: 231, run: 3, session: "77000000-0000-4000-8000-000000000500", kind: worker_error, code: adapter_refresh_unavailable, createdAt: 1077, wantReasonId: 2}
+  - {name: both-rows-diagnostic, id: 234, run: 3, session: "77000000-0000-4000-8000-000000000500", kind: diagnostic, code: adapter_refresh_unavailable, createdAt: 1078, wantReasonId: 100}
+  - {name: run-wide-diagnostic, id: 237, run: 3, session: null, kind: diagnostic, code: index_coverage_unavailable, createdAt: 1079, wantReasonId: 141}
+  - {name: unlisted-code-first, id: 240, run: 3, session: "77000000-0000-4000-8000-000000000501", kind: diagnostic, code: code_no_build_lists, createdAt: 1080, wantReasonId: 1000000}
+  - {name: unlisted-code-second, id: 243, run: 3, session: "77000000-0000-4000-8000-000000000502", kind: worker_error, code: code_no_build_lists, createdAt: 1081, wantReasonId: 1000000}
+cases:
+  - name: every-existing-row-lands-on-its-reason-id
+  - name: worker-error-refresh-unavailable-rows-become-adapter-capture-failed
+  - name: diagnostic-refresh-unavailable-rows-keep-their-code
+  - name: one-session-with-both-rows-gets-two-different-ids
+  - name: run-wide-diagnostic-keeps-its-null-session
+  - name: unlisted-stored-code-is-seeded-once-as-retired-above-the-fixed-range
+  - name: row-count-is-the-same-before-and-after
+  - name: rows-of-runs-older-than-the-retained-window-are-not-copied
+  - name: index-log-rows-read-as-not-measured
+  - name: autoincrement-sequence-survives-the-rebuild
+  # Last: it deletes the audit runs to prove the cascade.
+  - name: rebuilt-table-keeps-the-cascade-and-the-run-index

@@ -84,10 +84,19 @@ func (p *IndexProfiler) StageTotals() []IndexProfileStage {
 		indexBytes += batch.Bytes
 	}
 	p.mu.Unlock()
-	return foldStageSegments(segments, indexBytes)
+	totals := FoldProfileStages(segments)
+	for i := range totals {
+		if totals[i].Stage == StageIndex {
+			totals[i].Bytes += indexBytes
+		}
+	}
+	return totals
 }
 
-func foldStageSegments(segments []IndexProfileStage, indexBytes int64) []IndexProfileStage {
+// FoldProfileStages folds stage segments into one row per stage, in profile
+// display order: durations, bytes and lane waits sum; Done and Total come from
+// the last segment.
+func FoldProfileStages(segments []IndexProfileStage) []IndexProfileStage {
 	position := make(map[Stage]int, len(segments))
 	var totals []IndexProfileStage
 	for _, segment := range segments {
@@ -114,11 +123,6 @@ func foldStageSegments(segments []IndexProfileStage, indexBytes int64) []IndexPr
 		return len(order)
 	}
 	sort.SliceStable(totals, func(i, j int) bool { return rank(totals[i].Stage) < rank(totals[j].Stage) })
-	for i := range totals {
-		if totals[i].Stage == StageIndex {
-			totals[i].Bytes += indexBytes
-		}
-	}
 	return totals
 }
 

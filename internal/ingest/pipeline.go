@@ -434,8 +434,8 @@ type Pipeline struct {
 	writeLaneStats *writeLaneRecorder
 	// auditWritten reports that this run's ingest_log row was attempted, so the
 	// early-exit audit does not write a second one.
-	auditWritten bool
-	diagnosticSet      map[DiagnosticEntry]struct{}
+	auditWritten  bool
+	diagnosticSet map[DiagnosticEntry]struct{}
 	// The two maps below record what this harvest has already told the user
 	// about a session's unusable source. They share one mutex because both are
 	// written from the same lanes in the same run.

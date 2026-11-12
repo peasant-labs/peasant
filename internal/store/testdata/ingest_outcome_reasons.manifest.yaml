@@ -1,0 +1,13 @@
+# Required-name manifest for ingest_outcome_reasons: deletion protection by
+# NAME, never by count.
+requiredNames:
+  - go-constants-and-seeded-rows-match-exactly
+  - kinds-match-exactly
+  - constructor-refuses-an-unknown-code
+  - every-code-is-unique-across-kinds
+  - capture-failure-is-a-worker-error-named-adapter-capture-failed
+  - refresh-unavailable-is-a-diagnostic-and-keeps-its-code
+  - retired-code-keeps-its-row-and-its-id
+  - outcome-row-cannot-name-a-missing-reason
+  - reader-refuses-an-id-this-build-does-not-define
+  - reader-skips-and-counts-a-store-local-reason-id
