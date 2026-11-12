@@ -1,12 +1,18 @@
+# setup is performed by the test below the case root; see profile_push_copy_steps_test.go for the ops.
 - name: absent
 - name: existing-directory
-  setup: mkdir -m 0750 base; printf untouched > base/sentinel
+  setup:
+    - {op: mkdir, path: base, mode: 0o750}
+    - {op: write, path: base/sentinel, content: untouched}
   files: {base/sentinel: untouched}
 - name: symlink
-  setup: printf untouched > sentinel; ln -s "$ROOT" base
+  setup:
+    - {op: write, path: sentinel, content: untouched}
+    - {op: symlink, path: base, to: .}
   wantError: not a physical directory
   files: {sentinel: untouched, base/sentinel: untouched}
 - name: regular-file
-  setup: printf untouched > base
+  setup:
+    - {op: write, path: base, content: untouched}
   wantError: not a physical directory
   files: {base: untouched}
