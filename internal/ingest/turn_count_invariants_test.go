@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -31,6 +33,15 @@ type turnCountInvariantCase struct {
 	StoredConversationTurnCount int    `yaml:"storedConversationTurnCount"`
 	WantTurnCount               int    `yaml:"wantTurnCount"`
 	WantConversationTurnCount   int    `yaml:"wantConversationTurnCount"`
+	// SessionID, NativeRows and Rollout state the native records of a row that
+	// does not read the shared Claude capture: OpenCode message rows, or the
+	// lines of a Codex rollout.
+	SessionID  string                    `yaml:"sessionId"`
+	NativeRows []assistantEntryNativeRow `yaml:"nativeRows"`
+	Rollout    []string                  `yaml:"rollout"`
+	// WantToolCallCount is the session's tool call count after the metrics
+	// recompute. It is required on the managed OpenCode and Codex rows.
+	WantToolCallCount *int `yaml:"wantToolCallCount"`
 }
 
 type turnCountInvariantFixture struct {
@@ -57,6 +68,9 @@ func loadTurnCountInvariantFixture(t *testing.T) turnCountInvariantFixture {
 		seen[c.Name] = true
 		if c.WantTurnCount == c.WantConversationTurnCount {
 			t.Fatalf("case %q expects equal counts; the two counts must differ so a swapped column fails", c.Name)
+		}
+		if (c.Path == "managed-opencode" || c.Path == "managed-codex") && c.WantToolCallCount == nil {
+			t.Fatalf("case %q states no wantToolCallCount; a managed OpenCode or Codex row must pin it", c.Name)
 		}
 	}
 	for name := range required {
@@ -190,6 +204,12 @@ func TestSessionTurnCountsAgreeWithTheSegmentDirectory(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if c.SessionID != "" {
+				sessionID = c.SessionID
+				if sid, err = ingest.NewSessionID(sessionID); err != nil {
+					t.Fatal(err)
+				}
+			}
 			storetest.SeedSession(t, db, sessionID)
 			mfs := testutil.NewMemFS()
 			sourcePath := "/native/" + sessionID + ".jsonl"
@@ -241,6 +261,16 @@ func TestSessionTurnCountsAgreeWithTheSegmentDirectory(t *testing.T) {
 				if err != nil || outcome.Disposition != ingest.ActivationCommittedNow {
 					t.Fatalf("activate the managed generation: outcome=%+v err=%v", outcome, err)
 				}
+			case "managed-opencode":
+				setSeededSessionHarness(t, db, sessionID, ingest.HarnessOpenCode)
+				candidate := buildOpenCodeTurnCountCandidate(t, c, sid)
+				activateTurnCountCandidate(t, db, ingest.HarnessOpenCode, ingest.TranscriptOriginOpenCodeCurrentSQLite, candidate)
+				recomputeTurnCountMetrics(t, db, sid)
+			case "managed-codex":
+				setSeededSessionHarness(t, db, sessionID, ingest.HarnessCodex)
+				candidate := buildCodexTurnCountCandidate(t, c, sid)
+				activateTurnCountCandidate(t, db, ingest.HarnessCodex, ingest.TranscriptOriginFile, candidate)
+				recomputeTurnCountMetrics(t, db, sid)
 			case "entry-less-unmanaged", "entry-less-managed":
 				turnCount, conversationTurnCount := c.StoredTurnCount, c.StoredConversationTurnCount
 				if _, err := db.UpsertCapturedStats(ctx, store.CapturedStats{
@@ -301,7 +331,135 @@ func TestSessionTurnCountsAgreeWithTheSegmentDirectory(t *testing.T) {
 			if stats.TurnCount == nil || *stats.TurnCount != c.WantTurnCount {
 				t.Errorf("stored turn_count = %v, want %d", stats.TurnCount, c.WantTurnCount)
 			}
+			if c.WantToolCallCount != nil {
+				if detail.ToolCallCount != *c.WantToolCallCount {
+					t.Errorf("detail toolCallCount = %d, want %d", detail.ToolCallCount, *c.WantToolCallCount)
+				}
+				if stats.ToolCallCount == nil || *stats.ToolCallCount != *c.WantToolCallCount {
+					t.Errorf("stored tool_call_count = %v, want %d", stats.ToolCallCount, *c.WantToolCallCount)
+				}
+			}
 		})
+	}
+}
+
+// setSeededSessionHarness makes the seeded session row name the harness whose
+// generation the row activates.
+func setSeededSessionHarness(t *testing.T, db *store.Store, sessionID string, harness ingest.Harness) {
+	t.Helper()
+	conn, err := db.Pool().Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Pool().Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET model_harness = ? WHERE session_id = ?`,
+		&sqlitex.ExecOptions{Args: []any{string(harness), sessionID}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// buildOpenCodeTurnCountCandidate decodes the row's native OpenCode message
+// rows into a history snapshot and builds the managed generation from it with
+// the indexer's BuildGeneration, the build a harvest runs.
+func buildOpenCodeTurnCountCandidate(t *testing.T, c turnCountInvariantCase, sid ingest.SessionID) ingest.GenerationCandidate {
+	t.Helper()
+	if len(c.NativeRows) == 0 {
+		t.Fatalf("case %q has no native rows", c.Name)
+	}
+	scope := ingest.OpenCodeProvenanceScope{SessionID: c.SessionID, Shape: ingest.OpenCodeProvenanceCurrent, ParentNullProven: true}
+	snapshot := ingest.OpenCodeHistorySnapshot{SessionID: c.SessionID}
+	for _, native := range c.NativeRows {
+		if !json.Valid([]byte(native.Data)) {
+			t.Fatalf("case %q row %q data is not valid JSON", c.Name, native.ID)
+		}
+		decoded, settled, err := ingest.DecodeOpenCodeProvenanceRow(ingest.OpenCodeProvenanceRow{
+			ID: native.ID, SessionID: scope.SessionID, Type: native.Type,
+			TimeCreated: native.TimeCreated, TimeUpdated: native.TimeUpdated,
+			Seq: native.Seq, HasSeq: true, Data: native.Data,
+		}, scope)
+		if err != nil {
+			t.Fatalf("row %q decode: %v", native.ID, err)
+		}
+		snapshot.Messages = append(snapshot.Messages, ingest.OpenCodeHistoryRow{
+			MessageID: native.ID, Shape: scope.Shape, Seq: native.Seq, HasSeq: true, NativeType: native.Type,
+			CreatedMs: native.TimeCreated, UpdatedMs: native.TimeUpdated, Settled: settled, Message: decoded,
+		})
+	}
+	snapshot.SourceEvidenceDigest = ingest.DigestOpenCodeSnapshot(snapshot)
+	metadata := schema.UnifiedMetadata{SchemaVersion: ingest.CurrentSchemaVersion, SessionID: sid, ModelHarness: ingest.HarnessOpenCode}
+	candidate, err := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}).BuildGeneration(context.Background(), ingest.GenerationBuildInput{
+		Session:          ingest.DiscoveredSession{SessionID: sid, Harness: ingest.HarnessOpenCode, TranscriptOrigin: ingest.TranscriptOriginOpenCodeCurrentSQLite},
+		GenerationID:     "gen-turn-count-opencode",
+		RecordedMetadata: &metadata,
+		Prior:            generationTestPriorFromOpenCode(t, ingest.OpenCodeProvenancePrior{Aliases: ingest.NewProjectionPriorState(), HasCompleteGeneration: true}),
+		OpenCode: generationTestOpenCodeSource{snapshot: func(context.Context, string) (ingest.OpenCodeHistorySnapshot, error) {
+			return snapshot, nil
+		}},
+	})
+	if err != nil {
+		t.Fatalf("build the OpenCode generation: %v", err)
+	}
+	return candidate
+}
+
+// buildCodexTurnCountCandidate writes the row's rollout lines to a file and
+// builds the managed generation from it with the indexer's BuildGeneration.
+func buildCodexTurnCountCandidate(t *testing.T, c turnCountInvariantCase, sid ingest.SessionID) ingest.GenerationCandidate {
+	t.Helper()
+	if len(c.Rollout) == 0 {
+		t.Fatalf("case %q has no rollout lines", c.Name)
+	}
+	for i, line := range c.Rollout {
+		if !json.Valid([]byte(line)) {
+			t.Fatalf("case %q rollout line %d is not valid JSON: %s", c.Name, i, line)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "rollout-2026-01-02T00-00-00-"+c.SessionID+".jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(c.Rollout, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := ingest.NewCodexIndexer(&ingest.OSFileSystem{}).BuildGeneration(context.Background(), ingest.GenerationBuildInput{
+		Session:      ingest.DiscoveredSession{SessionID: sid, Harness: ingest.HarnessCodex, SourcePath: ingest.ResolvedPath(path), SourceFormat: ingest.SourceFormatJSONL},
+		GenerationID: "gen-turn-count-codex",
+	})
+	if err != nil {
+		t.Fatalf("build the Codex generation: %v", err)
+	}
+	return candidate
+}
+
+// activateTurnCountCandidate assesses the candidate as a fresh authoritative
+// capture and installs it as the session's active generation.
+func activateTurnCountCandidate(t *testing.T, db *store.Store, harness ingest.Harness, origin ingest.TranscriptOrigin, candidate ingest.GenerationCandidate) {
+	t.Helper()
+	if len(candidate.Result.Generation.Main.Entries) == 0 {
+		t.Fatal("the built generation holds no main entries")
+	}
+	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{
+		Harness: harness, Result: candidate.Result, Policy: ingest.CaptureFreshCandidate, Authoritative: true,
+	})
+	if err != nil {
+		t.Fatalf("AssessCapture: %v", err)
+	}
+	contentCapture, err := assessment.ContentCapture(ingest.ContentSourceProviderSource, origin, 1)
+	if err != nil {
+		t.Fatalf("content capture: %v", err)
+	}
+	outcome, err := db.ActivateGenerationCandidate(context.Background(), ingest.GenerationActivation{
+		Generation: candidate.Result, Blobs: candidate.Blobs, PriorEvidence: candidate.PriorEvidence,
+		IndexerVersion: ingest.GenerationRepairTargets[harness].IndexerVersion, IndexedAtMs: 1, ContentCapture: contentCapture,
+	})
+	if err != nil || outcome.Disposition != ingest.ActivationCommittedNow {
+		t.Fatalf("activate the %s generation: outcome=%+v err=%v", harness, outcome, err)
+	}
+}
+
+// recomputeTurnCountMetrics runs the production metrics recompute for the
+// session, so a tool call count read after it is the one a harvest leaves.
+func recomputeTurnCountMetrics(t *testing.T, db *store.Store, sid ingest.SessionID) {
+	t.Helper()
+	if _, err := metrics.NewEngine(db).RecomputeMetrics(context.Background(), []ingest.SessionID{sid}); err != nil {
+		t.Fatalf("recompute metrics: %v", err)
 	}
 }
 
