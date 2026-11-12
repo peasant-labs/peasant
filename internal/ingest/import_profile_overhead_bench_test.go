@@ -68,7 +68,6 @@ func BenchmarkImportProfilerOverhead(b *testing.B) {
 				// The golden copy needs a *testing.T. A fresh open applies the
 				// baseline snapshot, as a first install does, outside the timed
 				// region.
-				// ast-grep-ignore: no-migrating-store-open-in-tests -- a benchmark has no *testing.T for the golden copy; this fresh open runs outside the timed region
 				db, err := store.Open(filepath.Join(b.TempDir(), "bench.db"), options...)
 				if err != nil {
 					b.Fatal(err)
