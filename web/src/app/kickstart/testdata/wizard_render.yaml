@@ -10,6 +10,7 @@ requiredNames:
   - no-client-visibility-decision
   - review-stacks-rows-summary-then-collapsed-diff
   - opening-stop-draws-its-controls
+  - wizard-stops-render-through-the-step-wizard-frame
   - conflict-choice-is-sent-per-field
   - commit-refusal-shows-the-rows-and-saves-nothing
 cases:
@@ -164,3 +165,19 @@ cases:
       - expectControl: {role: button, name: keep mine for publication preference}
       # The page is still the review: nothing moved to the finish panel.
       - expectNoText: [your setup is saved]
+
+  # The stops are fairtrade's step-wizard frame: the rail is named for the page,
+  # the first marker carries its stop's title, the foot holds back and the count
+  # is spoken. Where the labels sit in the rail is the frame's own business.
+  - name: wizard-stops-render-through-the-step-wizard-frame
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - expectText: [step 1 of 8]
+      - expectControl: {role: navigation, name: set up peasant progress}
+      - expectControl: {role: button, name: 1 peasant online, disabled: false}
+      # The stop the server hides is not a step; the next visible one is, and is locked.
+      - expectControl: {role: button, name: 2 choose sessions to import, disabled: true}
+      - expectControl: {role: button, name: 3 auto-ingest new branches, present: false}
+      - expectControl: {role: button, name: back, disabled: true}
+      - expectControl: {role: button, name: continue, disabled: false}
