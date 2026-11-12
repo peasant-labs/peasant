@@ -364,6 +364,40 @@ func TestLatestAttemptPreviewSnapshotReportsLatestAttemptStats(t *testing.T) {
 	}
 }
 
+// TestLatestAttemptPreviewSnapshotFallsBackForStatsWithoutConversationCount
+// proves the preview snapshot of a latest attempt whose producer stats
+// document was recorded before the conversation turn count existed reports the
+// session's stored conversation count, the same answer the available read
+// gives, while its other counts stay the attempt's own.
+func TestLatestAttemptPreviewSnapshotFallsBackForStatsWithoutConversationCount(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("44445555-6666-4777-8888-99990000bbbb")
+	seedLatestAttemptCoexistence(t, s, sid)
+	execGenerationSQL(t, s, `UPDATE sessions SET latest_attempt_stats_json = json_remove(latest_attempt_stats_json, '$.conversationTurnCount') WHERE session_id = '`+string(sid)+`';`)
+
+	var snapshot indexformat.ReadSnapshot
+	if err := s.WithSessionPreviewSnapshot(context.Background(), sid, func(s indexformat.ReadSnapshot) error {
+		snapshot = s
+		return nil
+	}); err != nil {
+		t.Fatalf("WithSessionPreviewSnapshot: %v", err)
+	}
+	if snapshot.GenerationID != "gen_preview_b" {
+		t.Fatalf("preview snapshot generation = %q, want the latest attempt", snapshot.GenerationID)
+	}
+	want := *authorityStats.ConversationTurnCount
+	if got := snapshot.Metadata.Stats.ConversationTurnCount; got == nil || *got != want {
+		t.Fatalf("preview stats conversation turn count = %v, want the session's stored %d: the attempt's stats document has no conversationTurnCount", got, want)
+	}
+	if got := snapshot.Session.ConversationTurnCount; got == nil || *got != want {
+		t.Fatalf("preview session conversation turn count = %v, want the session's stored %d: the attempt's stats document has no conversationTurnCount", got, want)
+	}
+	if snapshot.Session.TurnCount != latestAttemptStats.TurnCount || snapshot.Session.ToolCallCount != latestAttemptStats.ToolCallCount {
+		t.Fatalf("preview session counts = %d/%d, want the latest attempt's %d/%d",
+			snapshot.Session.TurnCount, snapshot.Session.ToolCallCount, latestAttemptStats.TurnCount, latestAttemptStats.ToolCallCount)
+	}
+}
+
 // TestLatestAttemptCaptureReadIsDisplayEffective proves the display-effective
 // capture read reports the latest attempt, so the mounted partial notice is
 // reachable, while the authority read keeps the active certificate.
