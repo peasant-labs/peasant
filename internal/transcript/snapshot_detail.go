@@ -206,11 +206,12 @@ func snapshotToSession(snapshot indexformat.ReadSnapshot) *ingest.Session {
 			TurnCount:     snapshot.Session.TurnCount,
 			ToolCallCount: snapshot.Session.ToolCallCount,
 		},
-		Relationships:        append([]schema.SessionRelationship(nil), snapshot.Session.Relationships...),
-		Purpose:              snapshot.Session.Purpose,
-		RootSessionID:        snapshot.Session.RootSessionID,
-		ParentSessionID:      snapshot.Session.ParentSessionID,
-		InputSubmissionCount: snapshot.Session.InputSubmissionCount,
+		Relationships:         append([]schema.SessionRelationship(nil), snapshot.Session.Relationships...),
+		Purpose:               snapshot.Session.Purpose,
+		RootSessionID:         snapshot.Session.RootSessionID,
+		ParentSessionID:       snapshot.Session.ParentSessionID,
+		InputSubmissionCount:  snapshot.Session.InputSubmissionCount,
+		ConversationTurnCount: snapshot.Session.ConversationTurnCount,
 	}
 	if metadata.CWD != "" {
 		session.ProjectPath = metadata.CWD

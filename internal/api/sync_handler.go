@@ -120,19 +120,20 @@ func syncUserPatterns(cfg *config.Config) ([]redact.UserPattern, error) {
 // --------------------------------------------------------------------------
 
 type syncSessionResponse struct {
-	ParentSessionID  *string           `json:"parentSessionId,omitempty"`
-	ParentUnresolved *bool             `json:"parentUnresolved,omitempty"`
-	ID               string            `json:"id"`
-	Harness          string            `json:"harness"`
-	ProjectName      string            `json:"projectName"`
-	ProjectHash      string            `json:"projectHash"`
-	HostSlug         string            `json:"hostSlug"`
-	StartTime        string            `json:"startTime"`
-	DurationMs       int64             `json:"durationMs"`
-	TotalTokens      int               `json:"totalTokens"`
-	TurnCount        int               `json:"turnCount"`
-	Model            string            `json:"model"`
-	SyncStatus       schema.SyncStatus `json:"syncStatus"`
+	ParentSessionID  *string `json:"parentSessionId,omitempty"`
+	ParentUnresolved *bool   `json:"parentUnresolved,omitempty"`
+	ID               string  `json:"id"`
+	Harness          string  `json:"harness"`
+	ProjectName      string  `json:"projectName"`
+	ProjectHash      string  `json:"projectHash"`
+	HostSlug         string  `json:"hostSlug"`
+	StartTime        string  `json:"startTime"`
+	DurationMs       int64   `json:"durationMs"`
+	TotalTokens      int     `json:"totalTokens"`
+	// TurnCount is the count the sync row shows: the conversation turn count.
+	TurnCount  int               `json:"turnCount"`
+	Model      string            `json:"model"`
+	SyncStatus schema.SyncStatus `json:"syncStatus"`
 	// HoldReason says why a held row waits. Only a held row carries one.
 	HoldReason schema.SyncHoldReason `json:"holdReason,omitempty"`
 	// PreviouslyPushed reports that this session was published before, whatever
@@ -215,7 +216,7 @@ func serveSyncSessions(w http.ResponseWriter, r *http.Request, db syncSessionRea
 			StartTime:        time.UnixMilli(s.StartMs).UTC().Format(time.RFC3339),
 			DurationMs:       s.DurationMs,
 			TotalTokens:      s.TokensTotal,
-			TurnCount:        s.TurnCount,
+			TurnCount:        s.ConversationTurnCount,
 			Model:            s.ModelID,
 			SyncStatus:       entry.status,
 			HoldReason:       entry.hold,

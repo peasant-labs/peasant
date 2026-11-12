@@ -46,6 +46,7 @@ import (
 //	                     never report this value as a session's parent.
 //	22: project_path   (session worktree, falling back to project canonical cwd)
 //	23: session_origin (NOT NULL over the three-value menu; V46)
+//	24: conversation_turn_count
 //
 // Uses JOIN session_metrics (not LEFT JOIN) — sessions without metrics are
 // excluded. This is intentional: sessions held back from push until
@@ -66,7 +67,8 @@ const sqlPushSessionsBase = `SELECT
     COALESCE(h.git_remote, ''),
     COALESCE(s.parent_id, ''),
     ` + sqlRecordedDirectory + `,
-    s.session_origin
+    s.session_origin,
+    ` + sqlSessionConversationTurnCount + `
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
 LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
@@ -318,7 +320,8 @@ func scanPushSessionRow(stmt *sqlite.Stmt) ingest.PushSessionRow {
 		GitRemote:    stmt.ColumnText(20), // COALESCE'd to '' — non-null
 		ProjectPath:  stmt.ColumnText(22), // COALESCE'd to '' — non-null
 		// col 23: session_origin — NOT NULL with a CHECK over the menu tokens
-		SessionOrigin: stmt.ColumnText(23),
+		SessionOrigin:         stmt.ColumnText(23),
+		ConversationTurnCount: stmt.ColumnInt(24),
 	}
 
 	// Nullable: pushed_at (col 9)

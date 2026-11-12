@@ -1468,11 +1468,12 @@ func hydrateProjectionEntriesForCount(entries []schema.SessionEntry, content map
 	return out
 }
 
-// applyStrictCounts writes the single count authority and the prose-title refs.
-// TurnCount is the conversation turn count: the folded projection's turns whose
-// rendered role is not system. It is computed here, once, from the same fold
-// every reader uses, so a stored or published count is never a raw record count
-// and every count surface reports the same thing. The input count is the
+// applyStrictCounts writes the count authorities and the prose-title refs.
+// TurnCount is the number of folded turns, system and tool rows included, and
+// ConversationTurnCount is the folded turns on the contract's allowed list.
+// Both are computed here, once, from the same fold every reader uses, so a
+// stored or published count is never a raw record count and every count
+// surface reports the same thing. The input count is the
 // distinct submission refs that satisfy the strict predicate.
 func applyStrictCounts(generation *indexformat.Generation, completeness indexformat.GenerationCompleteness, turns []Turn) {
 	main := generation.Main.Entries
@@ -1497,7 +1498,9 @@ func applyStrictCounts(generation *indexformat.Generation, completeness indexfor
 			titleRefs = append(titleRefs, entry.SourceEntryRef)
 		}
 	}
-	generation.Metadata.Stats.TurnCount = ConversationTurnCount(turns)
+	generation.Metadata.Stats.TurnCount = len(turns)
+	conversationTurnCount := int64(ConversationTurnCount(turns))
+	generation.Metadata.Stats.ConversationTurnCount = &conversationTurnCount
 	generation.TitleRefs = titleRefs
 	if completeness == indexformat.GenerationCompletenessComplete {
 		count := int64(len(submissions))

@@ -22,22 +22,27 @@ import (
 // SessionRow is a store-native session representation.
 // Joins sessions + session_metrics + projects for common queries.
 type SessionRow struct {
-	SessionID       string
-	ModelHarness    string
-	ModelID         string
-	HostSlug        string
-	ProjectHash     string
-	ProjectName     string
-	StartMs         int64
-	EndMs           int64
-	GitBranch       *string
-	ToolVersion     *string
-	TurnCount       int
-	ToolCalls       int
-	InputTokens     int
-	OutputTokens    int
-	TokensTotal     int
-	DurationMinutes float64
+	SessionID    string
+	ModelHarness string
+	ModelID      string
+	HostSlug     string
+	ProjectHash  string
+	ProjectName  string
+	StartMs      int64
+	EndMs        int64
+	GitBranch    *string
+	ToolVersion  *string
+	// TurnCount is the number of folded turns, system and tool rows included.
+	// It feeds the wire turnCount only.
+	TurnCount int
+	// ConversationTurnCount is the conversation turn count: the number a
+	// reader is shown and every list sorts, bounds and averages by.
+	ConversationTurnCount int
+	ToolCalls             int
+	InputTokens           int
+	OutputTokens          int
+	TokensTotal           int
+	DurationMinutes       float64
 
 	// Quality-specific columns from session_metrics (nullable).
 	Title                *string
@@ -163,12 +168,20 @@ type SessionListFilter struct {
 // ---------------------------------------------------------------------------
 
 const (
-	// sqlSessionTurnCount is the one turn count a session list reports, sorts
-	// by and bounds: the producer's stored conversation turn count. It needs
-	// the session_captured_stats c join. Every count surface splices this one
-	// expression, so no query can report a different definition of a turn;
-	// the retired raw turn_count column is never a fallback here.
-	sqlSessionTurnCount = `COALESCE(c.conversation_turn_count, 0)`
+	// sqlSessionTurnCount is the stored folded turn count: every folded turn
+	// of the session's main partition, system and tool rows included. It
+	// feeds the wire turnCount and nothing else; no query sorts, bounds,
+	// filters, averages or classifies by it. It needs the
+	// session_captured_stats c join.
+	sqlSessionTurnCount = `COALESCE(c.turn_count, 0)`
+
+	// sqlSessionConversationTurnCount is the one turn count a reader is shown:
+	// the producer's stored conversation turn count. It feeds the wire
+	// conversationTurnCount and everything that sorts, bounds, filters,
+	// averages or classifies by turns. It needs the session_captured_stats c
+	// join. Every such surface splices this one expression, so no query can
+	// use a different definition of a conversation turn.
+	sqlSessionConversationTurnCount = `COALESCE(c.conversation_turn_count, 0)`
 
 	// sqlDashboardAggregates is the dashboard aggregate query.
 	sqlDashboardAggregates = `SELECT
@@ -209,7 +222,8 @@ var (
 	// signal_density(24), spec_quality_score(25), exploration_ratio(26),
 	// scope_breadth(27), discovery_turns(28), parent_id(29), canonical_remote(30),
 	// git_worktree(31), session_origin(32), indexed_at(33), thinking_level(34),
-	// thinking_level_raw(35), thinking_level_history(36)
+	// thinking_level_raw(35), thinking_level_history(36),
+	// conversation_turn_count(37)
 	//
 	// V23+: sessions stores opaque_host_id FK, but we JOIN host_slugs and return
 	// the human-readable h.host_slug at col 3 for backward-compatible SessionRow.HostSlug.
@@ -245,7 +259,8 @@ var (
     COALESCE(s.git_worktree, ''),
     s.session_origin,
     s.indexed_at,
-    s.thinking_level, s.thinking_level_raw, s.thinking_level_history
+    s.thinking_level, s.thinking_level_raw, s.thinking_level_history,
+    ` + sqlSessionConversationTurnCount + `
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
 JOIN projects p ON s.project_hash = p.project_hash
@@ -269,10 +284,11 @@ ORDER BY s.start_ms ASC`
 )
 
 // sqlSessionDetailByID extends sqlAllSessions with extra columns for the detail
-// view. Columns 0-36 are the sqlAllSessions shape (scanned by scanSessionRow),
-// including column 33 s.indexed_at and columns 34-36 the thinking level;
-// column 37 is h.git_remote (nullable, from the host_slugs JOIN on opaque_id);
-// column 38 is s.pushed_at (nullable); and column 39 is p.canonical_cwd (the
+// view. Columns 0-37 are the sqlAllSessions shape (scanned by scanSessionRow),
+// including column 33 s.indexed_at, columns 34-36 the thinking level and
+// column 37 the conversation turn count;
+// column 38 is h.git_remote (nullable, from the host_slugs JOIN on opaque_id);
+// column 39 is s.pushed_at (nullable); and column 40 is p.canonical_cwd (the
 // project working dir).
 var sqlSessionDetailByID = sqlSessionDetailByIDQuery(false)
 
@@ -302,6 +318,7 @@ func sqlSessionDetailByIDQuery(latestAttemptCounts bool) string {
 		return "CASE WHEN s.latest_attempt_generation_id IS NOT NULL THEN json_extract(s.latest_attempt_stats_json,'$." + key + "') ELSE " + fallback + " END"
 	}
 	turnCount := latestAttemptExpr("turnCount", turnAuthority)
+	conversationTurnCount := latestAttemptExpr("conversationTurnCount", sqlSessionConversationTurnCount)
 	toolCalls := latestAttemptExpr("toolCallCount", toolAuthority)
 	tokensOut := latestAttemptExpr("tokensOut", outAuthority)
 	// The latest attempt's producer stats record the attempt duration in
@@ -332,6 +349,7 @@ func sqlSessionDetailByIDQuery(latestAttemptCounts bool) string {
     s.session_origin,
     s.indexed_at,
     s.thinking_level, s.thinking_level_raw, s.thinking_level_history,
+    ` + conversationTurnCount + `,
     h.git_remote, s.pushed_at, COALESCE(p.canonical_cwd, '')
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
@@ -983,11 +1001,11 @@ func buildSessionListFilterWhere(f SessionListFilter) (conditions []string, args
 	// Turn bounds read the turns column a row shows, which prints a missing
 	// count as 0, so a session with no count is a session with no turns.
 	if f.MinTurns != nil {
-		conditions = append(conditions, "COALESCE("+sqlSessionTurnCount+", 0) >= ?")
+		conditions = append(conditions, "COALESCE("+sqlSessionConversationTurnCount+", 0) >= ?")
 		args = append(args, *f.MinTurns)
 	}
 	if f.MaxTurns != nil {
-		conditions = append(conditions, "COALESCE("+sqlSessionTurnCount+", 0) <= ?")
+		conditions = append(conditions, "COALESCE("+sqlSessionConversationTurnCount+", 0) <= ?")
 		args = append(args, *f.MaxTurns)
 	}
 	return conditions, args
@@ -1077,10 +1095,10 @@ LEFT JOIN session_captured_stats c ON c.session_id = s.session_id`
 func sortFieldToColumn(f defaults.SessionSortField) string {
 	switch f {
 	case defaults.SessionSortTurns:
-		// Sorts the moved turn count both homes serve: the captured row for
-		// native sessions, the legacy metrics columns otherwise. sqlAllSessions
-		// carries both joins, so this expression is valid wherever it sorts.
-		return sqlSessionTurnCount
+		// Sorts by the conversation turn count, the turns column a row shows.
+		// sqlAllSessions carries the captured stats join, so this expression
+		// is valid wherever it sorts.
+		return sqlSessionConversationTurnCount
 	case defaults.SessionSortTokens:
 		// tokens_total in sqlAllSessions is COALESCE(m.input_tokens, 0); use m.input_tokens for sort.
 		return "COALESCE(m.input_tokens, 0)"
@@ -1372,24 +1390,25 @@ func TruncateToRunes(s string, maxRunes int) string {
 // ---------------------------------------------------------------------------
 
 // scanSessionDetailRow reads a SessionDetailRow from the current statement.
-// Columns 0-36 are scanned by scanSessionRow (33 = s.indexed_at, 34-36 = the
-// thinking level); columns 37-39 are the extra detail fields.
+// Columns 0-37 are scanned by scanSessionRow (33 = s.indexed_at, 34-36 = the
+// thinking level, 37 = the conversation turn count); columns 38-40 are the
+// extra detail fields.
 func scanSessionDetailRow(stmt *sqlite.Stmt) SessionDetailRow {
 	row := SessionDetailRow{
 		SessionRow: scanSessionRow(stmt),
 	}
-	// Column 37: h.git_remote (nullable)
-	if stmt.ColumnType(37) != sqlite.TypeNull {
-		v := stmt.ColumnText(37)
+	// Column 38: h.git_remote (nullable)
+	if stmt.ColumnType(38) != sqlite.TypeNull {
+		v := stmt.ColumnText(38)
 		row.GitRemote = &v
 	}
-	// Column 38: s.pushed_at (nullable)
-	if stmt.ColumnType(38) != sqlite.TypeNull {
-		v := stmt.ColumnInt64(38)
+	// Column 39: s.pushed_at (nullable)
+	if stmt.ColumnType(39) != sqlite.TypeNull {
+		v := stmt.ColumnInt64(39)
 		row.PushedAt = &v
 	}
-	// Column 39: p.canonical_cwd (V23+: was project_path)
-	row.ProjectPath = stmt.ColumnText(39)
+	// Column 40: p.canonical_cwd (V23+: was project_path)
+	row.ProjectPath = stmt.ColumnText(40)
 	return row
 }
 
@@ -1397,20 +1416,21 @@ func scanSessionDetailRow(stmt *sqlite.Stmt) SessionDetailRow {
 // Column order must match sqlAllSessions.
 func scanSessionRow(stmt *sqlite.Stmt) SessionRow {
 	row := SessionRow{
-		SessionID:       stmt.ColumnText(0),
-		ModelHarness:    stmt.ColumnText(1),
-		ModelID:         stmt.ColumnText(2),
-		HostSlug:        stmt.ColumnText(3),
-		ProjectHash:     stmt.ColumnText(4),
-		ProjectName:     stmt.ColumnText(5),
-		StartMs:         stmt.ColumnInt64(6),
-		EndMs:           stmt.ColumnInt64(7),
-		TurnCount:       stmt.ColumnInt(10),
-		ToolCalls:       stmt.ColumnInt(11),
-		InputTokens:     stmt.ColumnInt(12),
-		OutputTokens:    stmt.ColumnInt(13),
-		TokensTotal:     stmt.ColumnInt(14),
-		DurationMinutes: stmt.ColumnFloat(15),
+		SessionID:             stmt.ColumnText(0),
+		ModelHarness:          stmt.ColumnText(1),
+		ModelID:               stmt.ColumnText(2),
+		HostSlug:              stmt.ColumnText(3),
+		ProjectHash:           stmt.ColumnText(4),
+		ProjectName:           stmt.ColumnText(5),
+		StartMs:               stmt.ColumnInt64(6),
+		EndMs:                 stmt.ColumnInt64(7),
+		TurnCount:             stmt.ColumnInt(10),
+		ConversationTurnCount: stmt.ColumnInt(37),
+		ToolCalls:             stmt.ColumnInt(11),
+		InputTokens:           stmt.ColumnInt(12),
+		OutputTokens:          stmt.ColumnInt(13),
+		TokensTotal:           stmt.ColumnInt(14),
+		DurationMinutes:       stmt.ColumnFloat(15),
 	}
 
 	// Nullable columns: git_branch (col 8), tool_version (col 9)

@@ -442,6 +442,10 @@ CREATE TABLE pending_annotations (
     created_at  INTEGER NOT NULL
 ) STRICT;
 
+CREATE TABLE pending_recounts (
+    name TEXT PRIMARY KEY
+);
+
 CREATE TABLE projects (
     project_hash     TEXT PRIMARY KEY,
     canonical_cwd    TEXT,
@@ -2214,4 +2218,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'000000000000');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 75;
+PRAGMA user_version = 76;

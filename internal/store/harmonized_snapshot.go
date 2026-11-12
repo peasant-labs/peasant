@@ -283,17 +283,18 @@ WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
 		metadata.Stats = latestAttemptStats
 	}
 	session = schema.SessionDetailPayload{
-		ID:                   string(sessionID),
-		Harness:              metadata.ModelHarness,
-		StartTime:            time.UnixMilli(metadata.Timestamp.Start),
-		EndTime:              time.UnixMilli(metadata.Timestamp.End),
-		TurnCount:            metadata.Stats.TurnCount,
-		InputSubmissionCount: metadata.Stats.InputSubmissionCount,
-		ToolCallCount:        metadata.Stats.ToolCallCount,
-		ParentSessionID:      snapshotLogicalParent(metadata),
-		RootSessionID:        metadata.RootSessionID,
-		Purpose:              metadata.Purpose,
-		Relationships:        metadata.Relationships,
+		ID:                    string(sessionID),
+		Harness:               metadata.ModelHarness,
+		StartTime:             time.UnixMilli(metadata.Timestamp.Start),
+		EndTime:               time.UnixMilli(metadata.Timestamp.End),
+		TurnCount:             metadata.Stats.TurnCount,
+		ConversationTurnCount: metadata.Stats.ConversationTurnCount,
+		InputSubmissionCount:  metadata.Stats.InputSubmissionCount,
+		ToolCallCount:         metadata.Stats.ToolCallCount,
+		ParentSessionID:       snapshotLogicalParent(metadata),
+		RootSessionID:         metadata.RootSessionID,
+		Purpose:               metadata.Purpose,
+		Relationships:         metadata.Relationships,
 	}
 	return metadata, session, nil
 }

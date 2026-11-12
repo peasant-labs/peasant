@@ -165,7 +165,12 @@ func seedFileBackedGeneration(t *testing.T, s *Store, root string, sid schema.Se
 		t.Fatal(err)
 	}
 	seedDocText := string(seedDoc)
-	conversationTurnCount := generation.Metadata.Stats.TurnCount
+	turnCount := generation.Metadata.Stats.TurnCount
+	var conversationTurnCount *int
+	if generation.Metadata.Stats.ConversationTurnCount != nil {
+		conversation := int(*generation.Metadata.Stats.ConversationTurnCount)
+		conversationTurnCount = &conversation
+	}
 	toolCallCount := generation.Metadata.Stats.ToolCallCount
 	subagentCount := generation.Metadata.Stats.SubagentCount
 	durationMs := generation.Metadata.Stats.DurationMs
@@ -173,7 +178,8 @@ func seedFileBackedGeneration(t *testing.T, s *Store, root string, sid schema.Se
 	tokensOut := generation.Metadata.Stats.TokensOut
 	if _, err := upsertCapturedStatsOnConn(conn, CapturedStats{
 		SessionID:             sid,
-		ConversationTurnCount: &conversationTurnCount,
+		TurnCount:             &turnCount,
+		ConversationTurnCount: conversationTurnCount,
 		InputSubmissionCount:  generation.Metadata.Stats.InputSubmissionCount,
 		ToolCallCount:         &toolCallCount,
 		SubagentCount:         &subagentCount,

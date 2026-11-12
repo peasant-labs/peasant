@@ -122,21 +122,33 @@ func nullableText(stmt *sqlite.Stmt, col int) *string {
 // fields read NULL as 0 (turnCount, toolCallCount, subagentCount, tokensIn,
 // tokensOut, durationMs); omitempty pointers read NULL as absent
 // (inputSubmissionCount, thoughtTokens, cachedReadTokens, cachedWriteTokens).
+// Each turn number reads its own column: turnCount is the folded turn count
+// and conversationTurnCount is the conversation turn count, which a scanned
+// row always carries.
 // This matches the retired behavior where a missing metric row also read as
 // 0/absent; unknown stays distinguishable only at the stats layer.
 func capturedStatsToWire(stats CapturedStats) schema.SessionStats {
 	return schema.SessionStats{
-		TurnCount:            derefOrZero(stats.ConversationTurnCount),
-		InputSubmissionCount: stats.InputSubmissionCount,
-		ToolCallCount:        derefOrZero(stats.ToolCallCount),
-		SubagentCount:        derefOrZero(stats.SubagentCount),
-		DurationMs:           derefOrZeroInt64(stats.DurationMs),
-		TokensIn:             derefOrZero(stats.TokensIn),
-		TokensOut:            derefOrZero(stats.TokensOut),
-		ThoughtTokens:        stats.ThoughtTokens,
-		CachedReadTokens:     stats.CachedReadTokens,
-		CachedWriteTokens:    stats.CachedWriteTokens,
+		TurnCount:             derefOrZero(stats.TurnCount),
+		ConversationTurnCount: intPtrToInt64(stats.ConversationTurnCount),
+		InputSubmissionCount:  stats.InputSubmissionCount,
+		ToolCallCount:         derefOrZero(stats.ToolCallCount),
+		SubagentCount:         derefOrZero(stats.SubagentCount),
+		DurationMs:            derefOrZeroInt64(stats.DurationMs),
+		TokensIn:              derefOrZero(stats.TokensIn),
+		TokensOut:             derefOrZero(stats.TokensOut),
+		ThoughtTokens:         stats.ThoughtTokens,
+		CachedReadTokens:      stats.CachedReadTokens,
+		CachedWriteTokens:     stats.CachedWriteTokens,
 	}
+}
+
+func intPtrToInt64(p *int) *int64 {
+	if p == nil {
+		return nil
+	}
+	v := int64(*p)
+	return &v
 }
 
 func derefOrZero(p *int) int {
@@ -279,8 +291,9 @@ func capturedStatsFromRaw(raw json.RawMessage, harness schema.Harness) (Captured
 	seedDoc := string(seed)
 	stats.SeedJSON = &seedDoc
 	known := map[string]any{
-		"turnCount": &stats.TurnCount, "inputSubmissionCount": &stats.InputSubmissionCount,
-		"toolCallCount": &stats.ToolCallCount, "subagentCount": &stats.SubagentCount,
+		"turnCount": &stats.TurnCount, "conversationTurnCount": &stats.ConversationTurnCount,
+		"inputSubmissionCount": &stats.InputSubmissionCount,
+		"toolCallCount":        &stats.ToolCallCount, "subagentCount": &stats.SubagentCount,
 		"durationMs": &stats.DurationMs, "tokensIn": &stats.TokensIn, "tokensOut": &stats.TokensOut,
 		"thoughtTokens": &stats.ThoughtTokens, "cachedReadTokens": &stats.CachedReadTokens,
 		"cachedWriteTokens": &stats.CachedWriteTokens,
@@ -455,8 +468,19 @@ WHERE d.session_id = ? AND d.error_type = 'stats-overflow'`, &sqlitex.ExecOption
 // only; a derived update never carries a seed. Non-pointer typed adapter
 // fields are measurements, including zero. Raw retained documents preserve
 // absence separately through capturedStatsFromRaw before wire decoding.
+//
+// Both turn counts come from the producer's one fold. turnCount is a
+// non-pointer measurement like the others and is always written. The optional
+// conversationTurnCount is written when the document carries it, which every
+// generation the current projection builds does; a document without it leaves
+// the stored conversation count as it is.
 func capturedStatsForHarnessWrite(sessionID schema.SessionID, stats schema.SessionStats, seedDoc string, updatedAtMs int64) CapturedStats {
-	conversationTurnCount := stats.TurnCount
+	turnCount := stats.TurnCount
+	var conversationTurnCount *int
+	if stats.ConversationTurnCount != nil {
+		conversation := int(*stats.ConversationTurnCount)
+		conversationTurnCount = &conversation
+	}
 	toolCallCount := stats.ToolCallCount
 	subagentCount := stats.SubagentCount
 	durationMs := stats.DurationMs
@@ -464,7 +488,8 @@ func capturedStatsForHarnessWrite(sessionID schema.SessionID, stats schema.Sessi
 	tokensOut := stats.TokensOut
 	return CapturedStats{
 		SessionID:             sessionID,
-		ConversationTurnCount: &conversationTurnCount,
+		TurnCount:             &turnCount,
+		ConversationTurnCount: conversationTurnCount,
 		InputSubmissionCount:  stats.InputSubmissionCount,
 		ToolCallCount:         &toolCallCount,
 		SubagentCount:         &subagentCount,

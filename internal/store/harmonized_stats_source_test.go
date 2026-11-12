@@ -58,7 +58,7 @@ VALUES(?, ?, ?, ?, ?, 0.5)`, nativeID, c.LegacyTurns, c.LegacyTools, c.PeakInput
 	exec(`INSERT INTO session_metrics(session_id, turn_count, tool_calls, input_tokens, output_tokens, duration_minutes)
 VALUES(?, ?, ?, ?, ?, 0.5)`, legacyID, c.LegacyTurns, c.LegacyTools, c.PeakInput, c.LegacyOutput)
 	exec(`INSERT INTO session_captured_stats(session_id, turn_count, tool_call_count, tokens_out, duration_ms, tokens_in, conversation_turn_count, source, updated_at_ms)
-VALUES(?, ?, ?, ?, ?, 111, ?, 'harness', 100)`, nativeID, c.NativeTurns, c.NativeTools, c.NativeOutput, c.DurationMs, c.NativeTurns)
+VALUES(?, ?, ?, ?, ?, 111, ?, 'harness', 100)`, nativeID, c.NativeTurns, c.NativeTools, c.NativeOutput, c.DurationMs, c.NativeConversationTurns)
 }
 
 // runListDetailStatsSource pins list-detail-stats-source: list and detail
@@ -71,14 +71,14 @@ func runListDetailStatsSource(t *testing.T, c capturedStatsCase) {
 	seedStatsListSuite(t, s, c)
 	nativeID := "0a999aaa-36bc-424c-a789-8be54d9702e1"
 	legacyID := "0a999aaa-36bc-424c-a789-8be54d9702e2"
-	// The upgrade backfill gives a legacy session the same conversation count
-	// column; only the other moved measurements stay on the legacy row.
+	// The upgrade recount gives a legacy session the same two turn count
+	// columns; only the other moved measurements stay on the legacy row.
 	conn, err := s.PoolForTest().Take(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_captured_stats(session_id, conversation_turn_count, source, updated_at_ms) VALUES(?, ?, 'harness', 100)`,
-		&sqlitex.ExecOptions{Args: []any{legacyID, c.LegacyTurns}}); err != nil {
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_captured_stats(session_id, turn_count, conversation_turn_count, source, updated_at_ms) VALUES(?, ?, ?, 'harness', 100)`,
+		&sqlitex.ExecOptions{Args: []any{legacyID, c.LegacyTurns, c.LegacyConversationTurns}}); err != nil {
 		s.PoolForTest().Put(conn)
 		t.Fatal(err)
 	}
@@ -99,6 +99,9 @@ func runListDetailStatsSource(t *testing.T, c capturedStatsCase) {
 		t.Fatalf("native list = (%d, %d, %d), want captured (10, 20, 300)",
 			native.TurnCount, native.ToolCalls, native.OutputTokens)
 	}
+	if native.ConversationTurnCount != c.NativeConversationTurns {
+		t.Fatalf("native list conversation turns = %d, want the stored %d", native.ConversationTurnCount, c.NativeConversationTurns)
+	}
 	if native.InputTokens != c.PeakInput {
 		t.Fatalf("native input tokens = %d, want peak 700", native.InputTokens)
 	}
@@ -115,12 +118,18 @@ func runListDetailStatsSource(t *testing.T, c capturedStatsCase) {
 	if legacy.TurnCount != c.LegacyTurns || legacy.ToolCalls != c.LegacyTools || legacy.OutputTokens != c.LegacyOutput || legacy.TokensTotal != c.PeakInput+c.LegacyOutput {
 		t.Fatalf("legacy list = %+v, want legacy values", legacy)
 	}
+	if legacy.ConversationTurnCount != c.LegacyConversationTurns {
+		t.Fatalf("legacy list conversation turns = %d, want the stored %d", legacy.ConversationTurnCount, c.LegacyConversationTurns)
+	}
 	detail, err := s.SessionByID(ctx, nativeID)
 	if err != nil {
 		t.Fatalf("detail: %v", err)
 	}
 	if detail.TurnCount != c.NativeTurns || detail.ToolCalls != c.NativeTools || detail.OutputTokens != c.NativeOutput {
 		t.Fatalf("native detail = %+v, want captured values", detail)
+	}
+	if detail.ConversationTurnCount != c.NativeConversationTurns {
+		t.Fatalf("native detail conversation turns = %d, want the stored %d", detail.ConversationTurnCount, c.NativeConversationTurns)
 	}
 }
 
@@ -164,8 +173,8 @@ func TestComputeDerivedScopeNativeVsLegacy(t *testing.T) {
 	if stats.TurnCount == nil || *stats.TurnCount != 10 {
 		t.Fatalf("captured harness turn = %v, want 10", stats.TurnCount)
 	}
-	if stats.ConversationTurnCount == nil || *stats.ConversationTurnCount != 10 {
-		t.Fatalf("captured conversation turn = %v, want 10", stats.ConversationTurnCount)
+	if stats.ConversationTurnCount == nil || *stats.ConversationTurnCount != 7 {
+		t.Fatalf("captured conversation turn = %v, want 7", stats.ConversationTurnCount)
 	}
 	if stats.DurationMs == nil || *stats.DurationMs != 120000 {
 		t.Fatalf("captured duration = %v, want 120000ms", stats.DurationMs)
@@ -245,11 +254,12 @@ func TestStoredMetadataSeedSource(t *testing.T) {
 	seedStatsListSuite(t, s)
 	nativeID := ingest.SessionID("0a999aaa-36bc-424c-a789-8be54d9702e1")
 	legacyID := ingest.SessionID("0a999aaa-36bc-424c-a789-8be54d9702e2")
-	// The retired raw count deliberately differs from the seeded conversation
-	// count (10) so the read cannot pass by echoing the seed document or the
-	// old column: only the conversation column may supply the served count.
+	// The seed document's raw count (999) deliberately differs from both stored
+	// counts (13 folded turns, 7 conversation turns), so the read cannot pass
+	// by echoing the seed document: each served number comes from its own
+	// column.
 	if _, err := s.UpsertCapturedStats(ctx, store.CapturedStats{
-		SessionID: schema.SessionID(nativeID), TurnCount: statsInt(999),
+		SessionID: schema.SessionID(nativeID), TurnCount: statsInt(13),
 		SeedJSON: statsString(`{"turnCount":999,"toolCallCount":20}`),
 		Source:   store.StatsSourceHarness, UpdatedAtMs: 200,
 	}); err != nil {
@@ -265,8 +275,11 @@ func TestStoredMetadataSeedSource(t *testing.T) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatalf("decode stored metadata: %v", err)
 	}
-	if doc.Stats == nil || doc.Stats.TurnCount != 10 || doc.Stats.ToolCallCount != 20 {
-		t.Fatalf("native embedded stats = %+v, want the conversation count 10 and the seed's 20 tool calls", doc.Stats)
+	if doc.Stats == nil || doc.Stats.TurnCount != 13 || doc.Stats.ToolCallCount != 20 {
+		t.Fatalf("native embedded stats = %+v, want the folded turn count 13 and the seed's 20 tool calls", doc.Stats)
+	}
+	if doc.Stats.ConversationTurnCount == nil || *doc.Stats.ConversationTurnCount != 7 {
+		t.Fatalf("native embedded conversation turn count = %v, want the stored 7", doc.Stats.ConversationTurnCount)
 	}
 	legacyData, err := s.ReadStoredMetadata(ctx, legacyID)
 	if err != nil {

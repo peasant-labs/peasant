@@ -11,13 +11,18 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// ConversationTurnCountBackfillReport is the one-time V74 upgrade report. A
-// session with no stored entries cannot be re-folded, so the backfill copies
-// its legacy count and names it here; re-indexing that session replaces the
-// copy with the conversation count.
+// ConversationTurnCountBackfillReport is the report of an upgrade fold over
+// the stored sessions: the one-time V74 backfill and the V76 turn count
+// recount. A session with no stored entries cannot be re-folded, so it is
+// named here; re-indexing that session replaces its stored counts with the
+// folded ones. The V74 backfill copies such a session's legacy count; the
+// recount keeps both stored values.
 type ConversationTurnCountBackfillReport struct {
 	SessionsUpdated   int
 	EntryLessSessions []ingest.SessionID
+	// UnreadableSessions were skipped by the recount because their stored
+	// entries could not be read. Their stored counts are kept.
+	UnreadableSessions []ingest.SessionID
 }
 
 // backfillConversationTurnCounts fills session_captured_stats.conversation_turn_count

@@ -690,6 +690,7 @@ func metadataToSession(meta *ingest.UnifiedMetadata, fields config.PushFieldVisi
 	session.Metadata.TokensOut = meta.Stats.TokensOut
 	session.Metadata.TotalTokens = meta.Stats.TokensIn + meta.Stats.TokensOut
 	session.Metadata.TurnCount = meta.Stats.TurnCount
+	session.ConversationTurnCount = meta.Stats.ConversationTurnCount
 	session.Metadata.ToolCallCount = meta.Stats.ToolCallCount
 	session.Metadata.Duration = time.Duration(meta.Stats.DurationMs) * time.Millisecond
 	if resolved.GitBranch && meta.Git.Branch != nil {

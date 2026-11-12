@@ -738,10 +738,16 @@ stay written.`,
 					continue
 				}
 
-				if !jsonOutput {
-					fmt.Fprintf(cmd.OutOrStdout(), "exported %s -> %s (%d turns)\n", sid, outPath, exported.TurnCount)
+				// The count a reader is shown is the conversation turn count;
+				// a payload from a producer older than it reports its turnCount.
+				shownTurns := exported.TurnCount
+				if exported.ConversationTurnCount != nil {
+					shownTurns = int(*exported.ConversationTurnCount)
 				}
-				exportedSessions = append(exportedSessions, exportedSession{SessionID: sid, Path: outPath, Turns: exported.TurnCount})
+				if !jsonOutput {
+					fmt.Fprintf(cmd.OutOrStdout(), "exported %s -> %s (%d turns)\n", sid, outPath, shownTurns)
+				}
+				exportedSessions = append(exportedSessions, exportedSession{SessionID: sid, Path: outPath, Turns: shownTurns})
 				succeeded++
 			}
 

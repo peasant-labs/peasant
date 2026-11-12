@@ -184,8 +184,15 @@ func TestMigrationV53PiPreservesCurrentStore(t *testing.T) {
 				t.Fatalf("capture after the upgrade=%+v, want %+v", afterCapture, wantCapture)
 			}
 			bundle, err := newDB.LoadPublicationInput(ctx, sid)
-			if err != nil || bundle.Readiness != ingest.PublicationReady || bundle.CaptureRevision != c.PublicationRevision || !reflect.DeepEqual(bundle.Metadata, *publication.Metadata) || bundle.ContentCapture.PublicationCaptureRevision != c.PublicationRevision {
-				t.Fatalf("publication proof changed across migration/reopen: readiness=%s revision=%d metadataMatch=%t contentRevision=%d err=%v", bundle.Readiness, bundle.CaptureRevision, reflect.DeepEqual(bundle.Metadata, *publication.Metadata), bundle.ContentCapture.PublicationCaptureRevision, err)
+			// The upgrade recount folds the one stored entry, and the served
+			// metadata is stamped with both stored counts and re-signed.
+			wantMetadata := *publication.Metadata
+			wantConversationTurns := int64(1)
+			wantMetadata.Stats.TurnCount = 1
+			wantMetadata.Stats.ConversationTurnCount = &wantConversationTurns
+			wantMetadata.MetadataHash = schema.ComputeMetadataHash(&wantMetadata)
+			if err != nil || bundle.Readiness != ingest.PublicationReady || bundle.CaptureRevision != c.PublicationRevision || !reflect.DeepEqual(bundle.Metadata, wantMetadata) || bundle.ContentCapture.PublicationCaptureRevision != c.PublicationRevision {
+				t.Fatalf("publication proof changed across migration/reopen: readiness=%s revision=%d metadataMatch=%t contentRevision=%d err=%v", bundle.Readiness, bundle.CaptureRevision, reflect.DeepEqual(bundle.Metadata, wantMetadata), bundle.ContentCapture.PublicationCaptureRevision, err)
 			}
 			for _, a := range c.Assertions {
 				if got := scalarText(t, conn, a.Query); got != a.Want {

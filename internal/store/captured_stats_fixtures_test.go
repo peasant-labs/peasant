@@ -71,6 +71,11 @@ type capturedStatsCase struct {
 	WantSeed     *capturedStatsSeed    `yaml:"wantSeed"`
 	CheckSeed    bool                  `yaml:"checkSeed"`
 	NativeTurns  int                   `yaml:"nativeTurns"`
+	// NativeConversationTurns and LegacyConversationTurns are the stored
+	// conversation turn counts. They differ from the folded turn counts so a
+	// read of the wrong column fails.
+	NativeConversationTurns int `yaml:"nativeConversationTurns"`
+	LegacyConversationTurns int `yaml:"legacyConversationTurns"`
 	NativeTools  int                   `yaml:"nativeTools"`
 	NativeOutput int                   `yaml:"nativeOutput"`
 	LegacyTurns  int                   `yaml:"legacyTurns"`
