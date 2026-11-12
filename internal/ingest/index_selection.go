@@ -88,27 +88,51 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 			!permanentRefusalIsSettled(expected, target)) && !settled
 }
 
-// capturedInputBindsWithoutParse reports that the stored index already
-// describes a captured input and only its bookkeeping is behind. That is the
-// state a metadata-only install leaves: the transcript file was kept, so the
-// stored input proof still equals the captured input, and the producer that
-// built the index is still current. Re-parsing would reproduce the stored
-// entries, so the write is one constant-size settle: it advances the index
-// time past the save and binds the index to the newer metadata capture.
+// capturedInputBindsWithoutReparse is the rule "bind without a re-parse". It
+// is stated here and nowhere else: the store's half,
+// Store.BindPublicationIndex, cites it and re-decides none of it, keeping only
+// its compare-and-swap.
 //
-// It applies when the pair was saved this run or the index is unbound from a
-// capture the input can vouch for. Every other pending term keeps the
-// ordinary parse: an explicit rebuild, a behind producer or index format, a
-// missing or different input proof, content this build could still certify,
-// and a latest attempt held beside the active authority, whose retry is the
-// parse's to make.
-func (p *Pipeline) capturedInputBindsWithoutParse(input *CapturedIndexInput) bool {
+// A session binds without a re-parse when a parse would reproduce the stored
+// entries exactly and only the index bookkeeping is behind. That is the state a
+// metadata-only install leaves: the transcript file was kept, so the stored
+// input proof still equals the captured input. The write is then one
+// constant-size settle: it advances the index time past the save and binds the
+// index to the newer metadata capture. Every term below is required.
+//
+//   - The parse would read the same input. The stored input proof equals the
+//     captured input digest, and the declared output is the strict format-1
+//     parse. That parse reads the captured transcript bytes, the session
+//     identity the digest covers, and, for an OpenCode native tree, the tree
+//     the digest covers. It reads nothing else from the metadata capture: no
+//     working directory, project, git or host context, and no redaction runs
+//     at index time, because ingest stores the transcript as recorded. The
+//     source format and parent the input copies from the metadata are read by
+//     no format-1 parser. TestIndexParseIgnoresMetadataCapture pins this. A
+//     managed generation is excluded: its builder copies the recorded
+//     metadata's project, git, host, parent and redaction context into the
+//     generation, so a metadata change must rebuild it.
+//   - The same producer would parse it: the stored indexer revision and index
+//     format are this build's target.
+//   - Nothing else is owed: no explicit rebuild (force or reindex), no latest
+//     attempt held beside the active authority (its retry is the parse's to
+//     make), and no incomplete content this build could still certify.
+//   - Something is behind: the pair was saved this run, so the index time must
+//     pass the save, or the index is unbound from a capture the input can
+//     vouch for.
+//
+// A store that cannot bind is served by the ordinary parse and write.
+func (p *Pipeline) capturedInputBindsWithoutReparse(input *CapturedIndexInput) bool {
 	if _, ok := p.metricsStore.(PublicationIndexBinder); !ok {
 		return false
 	}
 	target := p.sessionVersionTarget(input.session)
 	state := input.expected
-	if state == nil || p.config.Force || p.config.Reindex || state.LatestAttemptArtifactHash != nil {
+	rebuild := p.config.Force || p.config.Reindex
+	if state == nil || rebuild || state.LatestAttemptArtifactHash != nil {
+		return false
+	}
+	if target.IndexVersion != strictIndexFormat {
 		return false
 	}
 	if state.IndexerVersion < target.IndexerVersion || state.IndexVersion == nil || *state.IndexVersion != target.IndexVersion {
@@ -117,10 +141,12 @@ func (p *Pipeline) capturedInputBindsWithoutParse(input *CapturedIndexInput) boo
 	if state.IndexedInputHash == nil || *state.IndexedInputHash != input.inputHash {
 		return false
 	}
-	if state.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness) && !permanentRefusalIsSettled(state, target) {
+	certifiable := state.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness)
+	if certifiable && !permanentRefusalIsSettled(state, target) {
 		return false
 	}
-	return input.published || (state.PublicationCaptureRevision > 0 && !state.PublicationBound && input.bindsPublication())
+	unbound := state.PublicationCaptureRevision > 0 && !state.PublicationBound
+	return input.published || (unbound && input.bindsPublication())
 }
 
 // latestAttemptPreviewSettles reports whether a stored latest attempt has

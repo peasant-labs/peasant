@@ -569,9 +569,11 @@ type PublicationIndexBind struct {
 	IndexedAtMs int64
 }
 
-// PublicationIndexBinder is the constant-size index write for a session whose
-// metadata was refreshed beside an unchanged transcript. A store without it is
-// served by the ordinary parse and write.
+// PublicationIndexBinder is the constant-size index write of the rule "bind
+// without a re-parse", which Pipeline.capturedInputBindsWithoutReparse in
+// index_selection.go states once. An implementation does not re-decide that
+// rule: it is a compare-and-swap against the captured state. A store without
+// it is served by the ordinary parse and write.
 type PublicationIndexBinder interface {
 	BindPublicationIndex(ctx context.Context, bind PublicationIndexBind) error
 }

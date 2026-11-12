@@ -10,19 +10,21 @@ import (
 
 var _ ingest.PublicationIndexBinder = (*Store)(nil)
 
-// BindPublicationIndex settles the stored index against a refreshed pair
-// without replacing any entry. It is the whole index write for a session whose
-// metadata was refreshed beside an unchanged transcript: the stored index was
-// built from exactly the bytes the caller captured, so nothing is parsed. It
-// advances indexed_at, so the session no longer reads as saved after it was
-// indexed, and binds the index to the metadata capture when the request names
-// a capture revision, moving the stored content capture to that revision with
-// it. At most two rows are written, whatever the size of the session.
+// BindPublicationIndex is the store half of the rule "bind without a
+// re-parse". The rule is stated once, at
+// ingest.Pipeline.capturedInputBindsWithoutReparse; this method re-decides none
+// of it. It is a compare-and-swap:
 //
-// It runs in one immediate transaction and refuses, changing nothing, unless
-// the row still reads as the caller captured it and its input proof names the
-// captured bytes. A refused bind leaves the session unbound, so the next
-// harvest selects it again.
+//   - compare: in one immediate transaction, the row still reads as the caller
+//     captured it (bind.ExpectedState), its input proof names the bytes the
+//     caller read (bind.IndexedInputHash), and the current metadata capture is
+//     still the revision the caller binds to;
+//   - swap: advance indexed_at and, when a capture revision is named, bind the
+//     index and the stored content capture to it. At most two rows change and
+//     no entry is written, whatever the size of the session.
+//
+// Any failed compare changes nothing and leaves the session unbound, so the
+// next harvest selects it again.
 func (s *Store) BindPublicationIndex(ctx context.Context, bind ingest.PublicationIndexBind) (err error) {
 	captured := bind.ExpectedState != nil && bind.ExpectedState.SessionID == bind.SessionID
 	timed := bind.CaptureRevision >= 0 && bind.IndexedAtMs > 0
@@ -56,10 +58,9 @@ func (s *Store) BindPublicationIndex(ctx context.Context, bind ingest.Publicatio
 	if bind.CaptureRevision == 0 {
 		return nil
 	}
-	// The stored content capture describes the same transcript bytes under
-	// the same producer, so a parse would write it again unchanged but for the
-	// capture revision it belongs to. Move that revision with the binding;
-	// publication readiness requires the two to agree.
+	// Under the rule, a parse would rewrite the stored content capture
+	// unchanged but for the capture revision it belongs to. Move that revision
+	// with the binding; publication readiness requires the two to agree.
 	if err = sqlitex.ExecuteTransient(conn, `UPDATE session_content_captures SET publication_capture_revision = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{bind.CaptureRevision, string(bind.SessionID)}}); err != nil {
 		return fmt.Errorf("store: move the content capture of session %s to metadata capture revision %d: %w; where: store.BindPublicationIndex; impact: the transaction rolled back and the session is selected again; fix: restore database access and retry harvest", bind.SessionID, bind.CaptureRevision, err)
 	}

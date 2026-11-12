@@ -2237,12 +2237,12 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		if input.bindsPublication() {
 			result.im.captureRevision = input.expected.PublicationCaptureRevision
 		}
-		if p.capturedInputBindsWithoutParse(input) {
-			// The stored index already describes these bytes under the current
-			// producer; only the metadata capture moved. The flush binds the
-			// index to it in one constant-size write.
+		if p.capturedInputBindsWithoutReparse(input) {
+			// The rule "bind without a re-parse" holds: the flush binds the
+			// stored index to the refreshed metadata capture in one
+			// constant-size write.
 			result.bindPublication = true
-			reason := "stored index already matches captured input and current producer; bound to the refreshed metadata capture"
+			reason := indexBindWithoutReparseReason
 			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
 		} else if p.capturedInputNeedsWork(input) {
 			parsed = true
@@ -2441,11 +2441,16 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	return result
 }
 
-// bindPublicationIndex performs the bind-only index write for a result that
-// parsed nothing. It re-checks that the saved pair is still the one the input
-// was captured from, then binds through the writer lane. A refused bind is
-// reported as an index error and changes nothing: the session stays unbound
-// and the next harvest selects it again.
+// indexBindWithoutReparseReason is the index-log reason of a session settled
+// by the rule "bind without a re-parse" (capturedInputBindsWithoutReparse).
+const indexBindWithoutReparseReason = "stored index already matches captured input and current producer; bound to the refreshed metadata capture"
+
+// bindPublicationIndex performs the bind-only index write the rule "bind
+// without a re-parse" (capturedInputBindsWithoutReparse) selected. It
+// re-checks that the saved pair is still the one the input was captured from,
+// then binds through the writer lane. A refused bind is reported as an index
+// error and changes nothing: the session stays unbound and the next harvest
+// selects it again.
 func (p *Pipeline) bindPublicationIndex(ctx context.Context, result indexParseResult, logPrefix string, writeLane *storeWriteLane) (IndexLogEntry, time.Duration) {
 	start := time.Now()
 	sid := result.im.session.SessionID
