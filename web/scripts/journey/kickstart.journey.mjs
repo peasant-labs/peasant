@@ -98,7 +98,7 @@ const next = (page) => page.getByRole('button', { name: 'continue', exact: true 
 const save = (page) => page.getByRole('button', { name: 'save and import' });
 
 async function stepOf(page) {
-  const text = await page.locator('.swz-count .sr-only').first().textContent();
+  const text = await page.locator('.swz-count .swz-sr-only').first().textContent();
   const match = /step (\d+) of (\d+)/.exec(text ?? '');
   if (!match) throw new Error(`the step counter reads ${JSON.stringify(text)}, not "step N of M"`);
   return { index: Number(match[1]), total: Number(match[2]) };
@@ -196,25 +196,28 @@ async function probe(page) {
     }
     const tabular = [...document.querySelectorAll('.ks-num')].filter((element) => !getComputedStyle(element).fontVariantNumeric.includes('tabular-nums')).map(describe);
     // The step rail: where each label and its text were laid out, against the frame they sit in.
+    // The frame decides whether the rail shows its labels (a rail too narrow for them keeps them
+    // in the accessible name and draws the numbers), so a rail is labelled when any label is drawn.
     const frame = document.querySelector('.ks-wizard');
     const frameBox = frame ? frame.getBoundingClientRect() : null;
+    const railLabels = [...(frame ? frame.querySelectorAll('.swz-rail .swz-label') : [])].map((element) => {
+      const box = element.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const text = range.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        text: element.textContent.trim(),
+        place: (/swz-label--(\w+)/.exec(element.className) ?? [])[1] ?? '',
+        left: box.left, right: box.right, textLeft: text.left, textRight: text.right,
+        visible: box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none',
+      };
+    });
     const rail = {
-      labelled: !!frame && frame.classList.contains('ks-wizard-labelled'),
+      labelled: railLabels.some((label) => label.visible),
       frame: frameBox ? { left: frameBox.left, right: frameBox.right } : { left: 0, right: 0 },
       viewportWidth: document.documentElement.clientWidth,
-      labels: [...(frame ? frame.querySelectorAll('.ks-rail-label') : [])].map((element) => {
-        const box = element.getBoundingClientRect();
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        const text = range.getBoundingClientRect();
-        const style = getComputedStyle(element);
-        return {
-          text: element.textContent.trim(),
-          place: (/ks-rail-label-(\w+)/.exec(element.className) ?? [])[1] ?? '',
-          left: box.left, right: box.right, textLeft: text.left, textRight: text.right,
-          visible: box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none',
-        };
-      }),
+      labels: railLabels,
     };
     return {
       theme: document.documentElement.getAttribute('data-theme'),

@@ -674,8 +674,8 @@ export function ShareWizardClient() {
           <StepIndicator
             steps={WIZARD_STEPS}
             current={step}
-            completed={completed as Set<string>}
-            reachable={reachable as Set<string>}
+            completed={completed}
+            reachable={reachable}
             onJump={(id) => setStep(id as WizardStep)}
             aria-label="publish progress"
           />

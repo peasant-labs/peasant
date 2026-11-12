@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
-import { Button, FeedbackPanel, Skeleton } from '@/lib/ft-ui';
+import { Button, FeedbackPanel, Skeleton, StepWizardFrame } from '@/lib/ft-ui';
 import { kickstartCopy } from '@/lib/kickstart/copy';
 import type { KickstartSession, KickstartStop } from '@/lib/kickstart/model';
 import { useKickstartSession } from '@/lib/kickstart/useKickstartSession';
@@ -20,7 +20,6 @@ import { KickstartCloseReason, KickstartStopKind, type KickstartScope } from '@/
 import { ConnectOffer } from './ConnectOffer';
 import { FinishPanel } from './FinishPanel';
 import { StaleNotice } from './StaleNotice';
-import { StepFrame } from './StepFrame';
 import { StopRenderer } from './StopRenderer';
 import './kickstart.css';
 
@@ -189,19 +188,33 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
         ? { label: 'continue', onClick: () => go(next) }
         : null;
 
+  // The stops the server lists as visible are the frame's steps, in its order;
+  // the frame knows nothing about what a stop contains.
+  const back = settled && previous !== undefined ? () => go(previous) : null;
   return frame(
-    <StepFrame
-      ariaLabel={ariaLabel}
+    <StepWizardFrame
+      aria-label={ariaLabel}
+      className="ks-wizard"
       steps={steps}
       current={stop.key}
       completed={completed}
       reachable={reachable}
       onJump={(key) => go(stopByKey(session, key))}
-      notices={notices}
-      back={settled && previous !== undefined ? () => go(previous) : null}
-      primary={primary}
+      footStart={
+        <Button variant="ghost" onClick={back ?? undefined} disabled={back === null}>
+          back
+        </Button>
+      }
+      footEnd={
+        primary !== null && (
+          <Button variant="primary" onClick={primary.onClick} disabled={primary.disabled} loading={primary.loading}>
+            {primary.label}
+          </Button>
+        )
+      }
     >
+      {notices}
       {body}
-    </StepFrame>,
+    </StepWizardFrame>,
   );
 }

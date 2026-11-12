@@ -1,10 +1,12 @@
 /**
- * The step rail's labels, judged from boxes the browser measured. A label wider
- * than its marker, centred on it, leaves the frame at either end of the rail; a
- * frame that clips overflow then cuts the first and last label short. The page
- * is probed for each label's box, the box of its text, the frame's box and the
- * viewport, and this file says what is wrong with them, so the judgement can be
- * checked against boxes written down in a fixture without a browser.
+ * The step rail's labels, judged from boxes the browser measured on the built
+ * page. Fairtrade's step-wizard frame lays the labels out and its own mounted
+ * rows judge that for every step count; this judges the same thing where the
+ * app puts the frame, because a host that clips overflow or squeezes the frame
+ * can still cut the first and last label short. The page is probed for each
+ * label's box, the box of its text, the frame's box and the viewport, and this
+ * file says what is wrong with them, so the judgement can be checked against
+ * boxes written down in a fixture without a browser.
  */
 
 /** Sub-pixel layout can put an edge a fraction of a pixel out; that is not a spill. */

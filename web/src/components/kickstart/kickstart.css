@@ -1,8 +1,9 @@
 /*
  * The setup wizard and the selection page. Tokens only (fairtrade's
  * components.css declares them for both themes), radius 0, lowercase chrome,
- * tabular numbers on counts. The shell reuses fairtrade's `.swz` rail, body
- * and footer; this file adds only what a served stop needs inside it.
+ * tabular numbers on counts. The shell is fairtrade's step-wizard frame (rail,
+ * body, footer); this file only makes it own the viewport and adds what a
+ * served stop needs inside it.
  */
 
 /* The page owns the viewport below the chrome, as the publish wizard does:
@@ -24,11 +25,6 @@
   width: 100%;
   max-width: 100%;
 }
-.ks-wizard .swz-head,
-.ks-wizard .swz-body,
-.ks-wizard .swz-foot {
-  min-width: 0;
-}
 .ks-wizard .swz-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -38,14 +34,6 @@
   position: static;
   flex: 0 0 auto;
 }
-/* Where the stop's primary action sits, in the footer. */
-.ks-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-}
 /* The answers a stop asks for, in its body. */
 .ks-answers {
   display: flex;
@@ -53,51 +41,6 @@
   justify-content: flex-start;
   gap: var(--sp-2);
   flex-wrap: wrap;
-}
-
-/* With many steps the rail shows its numbers; the labels stay for assistive
-   technology and the stop's title heads the body. */
-.ks-wizard:not(.ks-wizard-labelled) .swz-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-/* Where each label hangs under its marker (see `RailLabelPlace` in
-   StepFrame.tsx). Fairtrade centres a label on a marker that is only
-   --swz-mark-size wide, so a longer label spills past both sides of it: the
-   first would leave the frame on the left and the last on the right. The first
-   label starts at its marker's left edge, the last ends at its marker's right
-   edge, and the rest stay centred. The label box is as wide as its text, so
-   half of its own width, less half a marker, is the shift that moves its edge
-   onto the marker's. Every label is also capped at its share of the rail (the
-   rail's width over the step count plus one) and wraps inside it, so labels
-   never meet on a narrow rail; with no container-query units the cap is
-   dropped and the placement still holds. */
-.ks-rail {
-  container-type: inline-size;
-}
-.ks-rail-label {
-  position: relative;
-  display: block;
-  width: max-content;
-  max-width: calc(100cqi / (var(--ks-rail-steps) + 1));
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-.ks-rail-label-start {
-  left: calc(50% - var(--swz-mark-size) / 2);
-  text-align: left;
-}
-.ks-rail-label-middle {
-  text-align: center;
-}
-.ks-rail-label-end {
-  left: calc(var(--swz-mark-size) / 2 - 50%);
-  text-align: right;
 }
 
 /* One stop. */

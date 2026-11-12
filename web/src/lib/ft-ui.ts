@@ -74,6 +74,7 @@ import {
   ProviderBars as FtProviderBars,
   StepWizard as FtStepWizard,
   StepIndicator as FtStepIndicator,
+  StepWizardFrame as FtStepWizardFrame,
   ConsentDialog as FtConsentDialog,
   ConsentSummary as FtConsentSummary,
   Treemap as FtTreemap,
@@ -424,7 +425,7 @@ export interface WizardBodyArgs {
  * footer.  Advance with continue/submit; jump back to completed steps.
  */
 export interface StepWizardProps {
-  steps: WizardStep[];
+  steps: readonly WizardStep[];
   onComplete?: (args: { completed: Set<string> }) => void;
   /** Render-prop for the active step's body. */
   renderStep?: (args: WizardBodyArgs) => ReactNode;
@@ -439,15 +440,43 @@ export const StepWizard = FtStepWizard as unknown as ComponentType<StepWizardPro
 
 /** Pure/controlled step-progress rail — numbered markers joined by connector lines. */
 export interface StepIndicatorProps {
-  steps: WizardStep[];
+  steps: readonly WizardStep[];
   /** Id of the active step. */
   current: string;
-  completed?: Set<string>;
-  reachable?: Set<string>;
+  completed?: ReadonlySet<string>;
+  reachable?: ReadonlySet<string>;
   onJump?: (id: string) => void;
   'aria-label'?: string;
 }
 export const StepIndicator = FtStepIndicator as unknown as ComponentType<StepIndicatorProps>;
+
+/**
+ * The controlled step-wizard frame: the rail, a body and a foot, with the host
+ * owning the current step and the footer's actions. The rail keeps every label
+ * inside it at any width and is named `<aria-label> progress`.
+ */
+export interface StepWizardFrameProps {
+  steps: readonly WizardStep[];
+  /** Id of the active step. A step id the frame does not list reads "step 0 / m". */
+  current: string;
+  completed?: ReadonlySet<string>;
+  reachable?: ReadonlySet<string>;
+  onJump?: (id: string) => void;
+  /** Shown in the head, under the rail. */
+  head?: ReactNode;
+  /** The foot's start slot (typically back). */
+  footStart?: ReactNode;
+  /** The foot's end slot (typically the one primary action). */
+  footEnd?: ReactNode;
+  /** Attributes for the body region. */
+  bodyProps?: HTMLAttributes<HTMLDivElement>;
+  /** Extra class on the frame, for a host that sizes it. */
+  className?: string;
+  children?: ReactNode;
+  /** The frame's accessible name (default "step wizard"). */
+  'aria-label'?: string;
+}
+export const StepWizardFrame = FtStepWizardFrame as unknown as ComponentType<StepWizardFrameProps>;
 
 // -- Consent dialog: ConsentDialog / ConsentSummary -------------------------
 
