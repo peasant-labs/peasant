@@ -90,6 +90,7 @@ cases:
     origin: settings
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
     steps:
       - expectLink: {name: settings, href: /settings}
       - click: continue

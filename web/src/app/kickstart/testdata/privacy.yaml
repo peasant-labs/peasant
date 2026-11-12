@@ -1,6 +1,11 @@
 # The privacy stop's example. The lines come from the server's real redactor
 # run on the current draft; the page has no sample of its own. When the server
 # withholds the example it says why, and the page shows that and no example.
+# Every case below is played with the forest of the session it opens answered,
+# because the page reads it whatever the case is about. A case that is about the
+# forest scripts the route itself.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
 requiredNames:
   - real-redactor-lines-for-current-draft
   - failure-withholds-and-shows-actionable-error

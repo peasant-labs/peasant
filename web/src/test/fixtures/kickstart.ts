@@ -18,7 +18,11 @@ import { parseStrictYAML, requireRecord, requireUniqueNames } from '@/test/stric
  * Loaders for the kickstart fixtures.
  *
  * Every case file is a required-name manifest: its cases must be exactly the
- * names it lists, so a deleted or renamed case fails instead of vanishing.
+ * names it lists, so a deleted or renamed case fails instead of vanishing. A
+ * file may state `defaultServer`, the routes every case in it is played with
+ * unless the case scripts the route itself: the reads a page makes whatever the
+ * case is about (the forest of a session it opened) are written once, in the
+ * file, instead of in every case or left to a 404 the harness would not report.
  * Everything a fixture makes the server say (the named sessions, each scripted
  * route answer, each pushed event) is written as wire JSON and checked against
  * the generated Local API contract before a test sees it, so a fixture cannot
@@ -48,7 +52,12 @@ export function loadCases(path: string, section?: string): FixtureCase[] {
   const root = section === undefined ? top : requireRecord(top[section], `${path}.${section}`);
   const rows = root.cases;
   if (!Array.isArray(rows)) throw new Error(`${path}.cases must be a list`);
-  const cases = rows.map((row, index) => requireRecord(row, `${path}.cases[${index}]`) as FixtureCase);
+  const defaults = root.defaultServer === undefined ? {} : requireRecord(root.defaultServer, `${path}.defaultServer`);
+  const cases = rows.map((row, index) => {
+    const record = requireRecord(row, `${path}.cases[${index}]`) as FixtureCase;
+    if (Object.keys(defaults).length === 0) return record;
+    return { ...record, server: { ...structuredClone(defaults), ...requireRecord(record.server ?? {}, `${path}.cases[${index}].server`) } };
+  });
   requireUniqueNames(cases, `${path}.cases`);
   const required = root.requiredNames;
   if (!Array.isArray(required) || required.some((name) => typeof name !== 'string')) {
@@ -172,7 +181,41 @@ const ANY = '[^/]+';
  * is not checked; a route under the kickstart path that is missing here is an
  * error, so a new route cannot go unchecked.
  */
+/**
+ * The statuses on which a kickstart route answers the closed refusal body. This
+ * restates a table the schema owns: its `testdata/local-api/kickstart_errors.yaml`
+ * lists each route's statuses (`routes[].errors`) and, in `code_status`, the one
+ * status each `LocalKickstartErrorCode` answers with (the table behind
+ * `LocalKickstartErrorCode.HTTPStatus()` in Go). The TypeScript package exports
+ * neither, so this list is written here and a scripted code is not held to its
+ * own status. When a schema release exports the code-to-status table, derive this
+ * list from it and refuse a fixture that pairs a code with another status.
+ */
 const KICKSTART_REFUSAL_STATUSES: readonly number[] = [400, 404, 500, 503];
+
+/**
+ * The refusal of a request that does not come from this computer, 403. Its body
+ * is the shared local error body, whose `code` is an open string in the schema;
+ * the contract names exactly which codes a kickstart route can answer: a read
+ * only the host code, a write that and the origin code.
+ */
+const HOST_REFUSAL_CODE = 'request_host_not_local';
+const ORIGIN_REFUSAL_CODE = 'request_origin_not_local';
+
+function refusalBody(codes: readonly string[]): Decoder {
+  return {
+    safeParse(value) {
+      const body = typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+      const issue = (path: string, message: string) => ({ success: false as const, error: { issues: [{ path: [path], message }] } });
+      if (body === null) return issue('<root>', 'expected an object with error and code');
+      const extra = Object.keys(body).filter((key) => key !== 'error' && key !== 'code');
+      if (extra.length > 0) return issue(extra[0], 'unrecognized key');
+      if (typeof body.error !== 'string' || body.error === '') return issue('error', 'expected a sentence');
+      if (typeof body.code !== 'string' || !codes.includes(body.code)) return issue('code', `expected one of ${codes.join(', ')}`);
+      return { success: true as const };
+    },
+  };
+}
 
 /** `*` stands for any method. */
 const SERVED: readonly { method: string; path: RegExp; status: number; schema: Decoder }[] = [
@@ -185,6 +228,10 @@ const SERVED: readonly { method: string; path: RegExp; status: number; schema: D
   { method: 'POST', path: new RegExp(`^${KICKSTART_API}/sessions/${ANY}/scan$`), status: 200, schema: zLocalKickstartScan },
   { method: 'POST', path: new RegExp(`^${KICKSTART_API}/sessions/${ANY}/commit$`), status: 200, schema: zLocalKickstartCommitted },
   { method: 'POST', path: new RegExp(`^${KICKSTART_API}/sessions/${ANY}/commit$`), status: 409, schema: zLocalKickstartCommitRefusal },
+  // The refusal of a request that is not from this computer: a read names the host code, a write both.
+  { method: 'GET', path: new RegExp(`^${KICKSTART_API}/`), status: 403, schema: refusalBody([HOST_REFUSAL_CODE]) },
+  { method: 'POST', path: new RegExp(`^${KICKSTART_API}/`), status: 403, schema: refusalBody([HOST_REFUSAL_CODE, ORIGIN_REFUSAL_CODE]) },
+  { method: 'PATCH', path: new RegExp(`^${KICKSTART_API}/`), status: 403, schema: refusalBody([HOST_REFUSAL_CODE, ORIGIN_REFUSAL_CODE]) },
   // Every other refusal of a kickstart route is the closed `{error, code}` body.
   ...KICKSTART_REFUSAL_STATUSES.map((status) => ({ method: '*', path: new RegExp(`^${KICKSTART_API}/`), status, schema: zLocalKickstartErrorResponse })),
 ];

@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within, type BoundFunctions, type queries } from '@testing-library/react';
 import { type ReactElement } from 'react';
-import { expect, vi } from 'vitest';
+import { expect, vi, type Mock } from 'vitest';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { MockWebSocket } from '@/test/mockWebSocket';
 import { checkPushedEvent, checkScriptedAnswer, expandRefs, loadModels, loadTrees, type FixtureCase, type ScriptedAnswer } from '@/test/fixtures/kickstart';
@@ -49,6 +49,14 @@ export interface Step {
   script?: { route: string; answers: RouteAnswer | RouteAnswer[] };
   /** Send the answers a route has been holding (`held: true`), and let its later calls through at once. */
   release?: string;
+  /**
+   * Wait until the page has redirected to this path. The page's router is the
+   * `redirect` mock the playing test hands to `playCase`; a case that names a
+   * redirect without one is an error.
+   */
+  expectRedirect?: string;
+  /** The page has not redirected anywhere. Say it after the page has done what it was going to do. */
+  expectNoRedirect?: true;
   socket?: 'close' | 'open';
   advance?: number;
   /** Let pending promises settle. */
@@ -103,6 +111,8 @@ const STEP_KEYS = Object.freeze({
   check: true,
   script: true,
   release: true,
+  expectRedirect: true,
+  expectNoRedirect: true,
   socket: true,
   advance: true,
   settle: true,
@@ -171,8 +181,13 @@ function isSubset(actual: Json, subset: Json): boolean {
   return Object.is(actual, subset);
 }
 
+/** Every server installed since the last teardown, so teardown can say what no fixture answered. */
+const installed = new Set<KickstartServer>();
+
 export class KickstartServer {
   readonly calls: Call[] = [];
+  /** Calls to a kickstart route that no script answers; each was answered 404. */
+  readonly unscripted: Call[] = [];
   readonly models = loadModels();
   readonly trees = loadTrees();
   private readonly scripts = new Map<string, RouteAnswer[]>();
@@ -213,6 +228,7 @@ export class KickstartServer {
   }
 
   install(): void {
+    installed.add(this);
     vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost');
       const method = (init?.method ?? 'GET').toUpperCase();
@@ -222,6 +238,7 @@ export class KickstartServer {
       const route = `${method} ${path}`;
       const answers = this.scripts.get(route);
       if (answers === undefined) {
+        if (path.startsWith(`${API}/`) || path === API) this.unscripted.push({ method, path, body });
         return new Response(JSON.stringify({ error: `no fixture answers ${route}` }), { status: 404 });
       }
       const index = Math.min(this.used.get(route) ?? 0, answers.length - 1);
@@ -260,6 +277,8 @@ type Queries = BoundFunctions<typeof queries>;
 
 export interface Mounted {
   server: KickstartServer;
+  /** The mock the page's router calls to redirect, when the playing test gave one. */
+  redirect?: Mock;
   socket: MockWebSocket;
   reloads: { count: number };
   /** Where this page is drawn. A single page owns the document body. */
@@ -336,14 +355,19 @@ function stepsOf(entry: FixtureCase): Step[] {
  * steps. `own` names the case keys the calling test reads itself; any other
  * key the harness does not read is an error.
  */
-export async function playCase(entry: FixtureCase, element: ReactElement, own: readonly string[] = []): Promise<Mounted> {
+export async function playCase(
+  entry: FixtureCase,
+  element: ReactElement,
+  own: readonly string[] = [],
+  options: { redirect?: Mock } = {},
+): Promise<Mounted> {
   checkCaseKeys(entry, CASE_KEYS, own);
   const steps = stepsOf(entry);
   // Only timeouts are faked, and the clock still moves with real time, so
   // Testing Library's own polling keeps working while a case controls timers.
   if (entry.fakeTimers === true) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
   const server = scriptServer(entry);
-  const mounted = await mountKickstart(element, server);
+  const mounted = { ...(await mountKickstart(element, server)), redirect: options.redirect };
   await runSteps(steps, mounted);
   return mounted;
 }
@@ -376,10 +400,25 @@ export async function playTabs(entry: FixtureCase, pages: Readonly<Record<string
   return mounted;
 }
 
+/**
+ * Undo what a mounted page needed, then fail the test if the page called a
+ * kickstart route that no fixture answers. The harness answers such a call 404,
+ * which a page may shrug off, so a case that never scripted a route the page
+ * really calls asserts less than it seems to. Script the route (a refusal is a
+ * scripted answer too) or the page is calling something the case did not expect.
+ */
 export function teardown(): void {
   cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  const missed = [...installed].flatMap((server) => server.unscripted.map((call) => `${call.method} ${call.path}`));
+  installed.clear();
+  if (missed.length > 0) {
+    throw new Error(
+      `the page called ${[...new Set(missed)].join(', ')}, which no fixture answers, so the harness answered 404 (${missed.length} call${missed.length === 1 ? '' : 's'}). ` +
+      'script the route in the case, with the refusal the case means if it means one.',
+    );
+  }
 }
 
 function control(q: Queries, role: string, name: string): HTMLElement {
@@ -550,6 +589,16 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
       const details = summary.closest('details');
       expect(details, `${at}: ${step.expectDetails.summary} is inside <details>`).not.toBeNull();
       expect(details!.open, `${at}: ${step.expectDetails.summary} open state`).toBe(step.expectDetails.open);
+    }
+    if (step.expectRedirect !== undefined) {
+      const { redirect } = mounted;
+      if (redirect === undefined) throw new Error(`${at}: expectRedirect needs the router's redirect mock; the playing test passes it to playCase`);
+      await waitFor(() => expect(redirect, `${at}: the page should have redirected to ${step.expectRedirect}`).toHaveBeenCalledWith(step.expectRedirect));
+    }
+    if (step.expectNoRedirect) {
+      const { redirect } = mounted;
+      if (redirect === undefined) throw new Error(`${at}: expectNoRedirect needs the router's redirect mock; the playing test passes it to playCase`);
+      expect(redirect, `${at}: the page should not have redirected`).not.toHaveBeenCalled();
     }
     if (step.expectNoReload) expect(mounted.reloads.count, `${at}: the page reloaded`).toBe(0);
   }

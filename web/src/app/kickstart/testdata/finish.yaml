@@ -1,6 +1,11 @@
 # The finish panel after a save: the server's next steps, the import's pushed
 # progress, the notes the server sends with the save. It never installs a hook
 # and never publishes. Each case reaches the review stop and saves.
+# Every case below is played with the forest of the session it opens answered,
+# because the page reads it whatever the case is about. A case that is about the
+# forest scripts the route itself.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
 requiredNames:
   - auto-publish-link-navigates-to-real-section
   - diagnostics-render

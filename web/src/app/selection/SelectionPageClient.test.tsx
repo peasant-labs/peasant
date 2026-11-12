@@ -137,10 +137,15 @@ describe('/selection', () => {
         // The gate's own cases script the status themselves: what the shell is
         // told decides whether the page draws, and the request log says what
         // the page started before that.
-        await playCase(entry, <Shell><SelectionPage /></Shell>, ['kind', 'redirects']);
+        // What the case says about the redirect is a step of the case (it waits on the
+        // router's own call); this only checks that the case says it either way.
         const redirects = (entry as unknown as { redirects: boolean }).redirects;
-        if (redirects) await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/kickstart'));
-        else expect(nav.replace).not.toHaveBeenCalled();
+        const steps = entry.steps as { expectRedirect?: string; expectNoRedirect?: true }[];
+        expect(
+          steps.some((step) => (redirects ? step.expectRedirect === '/kickstart' : step.expectNoRedirect === true)),
+          `a gate case that ${redirects ? 'redirects' : 'does not redirect'} says so in a step`,
+        ).toBe(true);
+        await playCase(entry, <Shell><SelectionPage /></Shell>, ['kind', 'redirects'], { redirect: nav.replace });
       });
     }
     if (kind === 'copy') {
