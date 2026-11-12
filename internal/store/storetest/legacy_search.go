@@ -63,13 +63,39 @@ func SeedLegacySearchIndex(t *testing.T, s *store.Store) {
 	}
 }
 
+// undoImportProfileScript undoes what the migration after v76 adds, so a store
+// built from the current schema can be stamped as an earlier version and have
+// that migration applied to it again: the index_log timing columns, the stage
+// table, the outcome lookup tables, and the reason-id shape of
+// ingest_run_outcomes, which returns to its kind and reason text columns.
+const undoImportProfileScript = `
+ALTER TABLE index_log DROP COLUMN parse_ms;
+ALTER TABLE index_log DROP COLUMN write_ms;
+ALTER TABLE index_log DROP COLUMN bytes;
+DROP TABLE ingest_run_stages;
+DROP INDEX idx_ingest_run_outcomes_run;
+DROP TABLE ingest_run_outcomes;
+DROP TABLE ingest_outcome_reasons;
+DROP TABLE ingest_outcome_kinds;
+CREATE TABLE ingest_run_outcomes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES ingest_log(id) ON DELETE CASCADE,
+    session_id TEXT,
+    kind TEXT NOT NULL CHECK(kind IN ('worker_error', 'diagnostic')),
+    reason_code TEXT NOT NULL CHECK(length(reason_code) > 0),
+    created_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX idx_ingest_run_outcomes_run ON ingest_run_outcomes(run_id, id);
+`
+
 // BuildCleanV75Store writes a real, clean version-75 store at path: it opens
 // the current schema (so every table, view, and trigger is the shipped
 // shape), seeds one session entry through the live triggers, then undoes
 // exactly what migration v76 changes - it re-creates the retired
 // session_entries_fts index with the v75 definition, points the three
 // session_entries triggers back at it, rebuilds it from session_entries so
-// both search indexes agree, and stamps user_version 75. Migration v76 only
+// both search indexes agree, undoes the later import-profile migration, and
+// stamps user_version 75. Migration v76 only
 // re-points those triggers and drops that index, so the result is the v75
 // schema with no residue: opening it runs v76 on the targeted-insert path.
 func BuildCleanV75Store(t *testing.T, path string) {
@@ -93,7 +119,7 @@ func BuildCleanV75Store(t *testing.T, path string) {
 			t.Errorf("close the v75 store: %v", err)
 		}
 	}()
-	if err := sqlitex.ExecuteScript(conn, legacySearchIndexScript+`
+	if err := sqlitex.ExecuteScript(conn, legacySearchIndexScript+undoImportProfileScript+`
 INSERT INTO session_entries_fts(session_entries_fts) VALUES('rebuild');
 PRAGMA user_version = 75;`, nil); err != nil {
 		t.Fatalf("restore the v75 search index shape: %v", err)
