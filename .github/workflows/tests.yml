@@ -17,7 +17,7 @@ name: Tests
 # normal public dependency.
 #
 # The web/ jobs (`web-lockfiles-in-sync`, `web-pnpm-build`,
-# `web-lockfiles-in-sync`) DO build the frontend — they guard the pnpm-only
+# `home-phone-gate`) DO build or exercise the frontend — they guard the pnpm-only
 # web build: pnpm-lock.yaml drift and a broken real pnpm build. Web is pnpm-only.
 # They only run when web/**, the Makefile, or this workflow change
 # (see the path filters below).
@@ -754,11 +754,82 @@ jobs:
           # cache is redundant here. Saving the multi-GB cache in the post-step
           # ran past the job timeout after every test step had passed.
           cache: false
+
+      # The mounted Home check runs in a separate job inside the Playwright
+      # image, which has no Go. Build the binary here (it embeds web/out) and
+      # hand it over with the exported web/out the check compares it against.
+      # CGO_ENABLED=0 matches the released binary (.goreleaser.yml) and keeps it
+      # static, so it starts in the image whatever glibc the runner host has.
+      - name: Build the binary for the mounted Home gate
+        run: CGO_ENABLED=0 go build -o peasant ./cmd/peasant
+
+      - name: Upload the binary and exported dashboard
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mounted-home-build
+          # Two paths share the workspace root, so the artifact keeps
+          # `peasant` and `web/out/` at the paths the check reads.
+          path: |
+            peasant
+            web/out/
+          retention-days: 1
+          if-no-files-found: error
+
+  # Mounted Home on the exact binary the web job built. The official Playwright
+  # image carries Chromium and its system libraries, so this job installs no
+  # operating-system packages and downloads no browser: a package mirror
+  # outage cannot fail it.
+  home-phone-gate:
+    name: mounted Home table scroll at phone width
+    if: >-
+      github.event_name != 'pull_request' ||
+      !startsWith(github.event.pull_request.title, 'release(') ||
+      github.workflow == 'Release PR'
+    needs: [determine-runner, web-pnpm-build]
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    timeout-minutes: 10
+    container:
+      # mcr.microsoft.com/playwright:v1.63.0-noble, linux/amd64 manifest. Must match
+      # @playwright/test in web/package.json; bump both together.
+      image: mcr.microsoft.com/playwright@sha256:bc6ab0d6d44ff4826e4cb8c1e6d801e185bfc42bb0753f8e2a30efc70db054c7
+      options: --ipc=host --init
+    # Inside a container `run:` defaults to sh (dash), which rejects
+    # `set -o pipefail`; use bash like the host jobs.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: web/package.json
+
+      # The image ships Node 24; the repo builds and tests on Node 26.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web dependencies
+        run: pnpm --dir web install --frozen-lockfile
+
+      - name: Download the binary and exported dashboard
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mounted-home-build
+          path: .
+
       - name: Gate mounted Home table scroll at phone width
         run: |
           set -euo pipefail
-          pnpm --dir web exec playwright install --with-deps chromium
-          go build -o peasant ./cmd/peasant
+          chmod +x peasant
           mkdir -p /tmp/opencode
           PLAYWRIGHT_MODULE=@playwright/test node web/scripts/visual/home-pages-visual.mjs
 
