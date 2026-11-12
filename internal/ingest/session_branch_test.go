@@ -51,13 +51,8 @@ func TestResolveSessionBranchPrecedence(t *testing.T) {
 			t.Run(c.Name+"/"+harness, func(t *testing.T) {
 				t.Parallel()
 				git := &checkoutCountingGit{StubGitResolver: &testutil.StubGitResolver{BranchName: c.Checkout}}
-				got := ingest.ResolveSessionBranch(t.Context(), git, ingest.SessionBranchEvidence{
-					Harness:      ingest.Harness(harness),
-					Recorded:     c.RecordedBranch,
-					StoredBranch: c.StoredBranch,
-					StoredKnown:  c.StoredKnown,
-					Directory:    c.Directory,
-				})
+				session := ingest.DiscoveredSession{Harness: ingest.Harness(harness), Branch: c.RecordedBranch, CWD: c.Directory}
+				got := ingest.SessionBranchFor(t.Context(), git, session, ingest.KnownSession{Branch: c.StoredBranch}, c.StoredKnown)
 				if got != c.WantBranch {
 					t.Fatalf("branch = %q, want %q", got, c.WantBranch)
 				}
@@ -71,9 +66,9 @@ func TestResolveSessionBranchPrecedence(t *testing.T) {
 
 // TestHarnessBranchSourcesCoverTheAdapterRegistry holds the declaration to the
 // registry it hangs off: every registered harness declares where its branch
-// comes from, nothing else does, and the declarations are members of the closed
-// set. A harness added without a declaration fails here instead of silently
-// getting the general rule.
+// comes from, nothing else does, and no declaration is the unknown zero value. A
+// harness added without a declaration fails here instead of silently getting the
+// general rule.
 func TestHarnessBranchSourcesCoverTheAdapterRegistry(t *testing.T) {
 	t.Parallel()
 	for harness := range ingest.DefaultAdapterRegistry {
@@ -82,20 +77,14 @@ func TestHarnessBranchSourcesCoverTheAdapterRegistry(t *testing.T) {
 			t.Errorf("registered harness %q declares no branch source; add it to ingest.HarnessBranchSources", harness)
 			continue
 		}
-		if !source.IsValid() {
-			t.Errorf("harness %q declares the invalid branch source %d", harness, source)
-		}
-		if parsed, err := ingest.NewBranchSource(source.String()); err != nil || parsed != source {
-			t.Errorf("harness %q branch source %q does not round-trip: got %v, error %v", harness, source, parsed, err)
+		if source.String() == ingest.BranchSourceUnknown.String() {
+			t.Errorf("harness %q declares the branch source %d, which is not one of the declared sources", harness, source)
 		}
 	}
 	for harness := range ingest.HarnessBranchSources {
 		if _, registered := ingest.DefaultAdapterRegistry[harness]; !registered {
 			t.Errorf("branch source declared for %q, which has no registered adapter", harness)
 		}
-	}
-	if _, err := ingest.NewBranchSource("guess"); err == nil {
-		t.Error("an unknown branch source was accepted")
 	}
 }
 

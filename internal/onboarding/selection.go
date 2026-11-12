@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -948,8 +949,15 @@ type CheckoutRule struct {
 //
 // Choosing a branch saves that branch, even when it is the only branch in its
 // checkout and even when every branch of the checkout is chosen. The
-// whole-checkout rule is saved only when the checkout has no named branch.
+// whole-checkout rule is saved only when the checkout has no named branch. A
+// session in a detached checkout has no branch (ingest.NamedBranch).
 func DeriveCheckout(sessions []CheckoutSession) CheckoutRule {
+	// A detached checkout is on no branch, so git's word for it names none: the
+	// session is branchless, whichever listing carried the word.
+	sessions = slices.Clone(sessions)
+	for index := range sessions {
+		sessions[index].Branch = ingest.NamedBranch(sessions[index].Branch)
+	}
 	allChosen, allExplicit, chosen := true, true, 0
 	var branchOrder []string
 	byBranch := map[string][]CheckoutSession{}

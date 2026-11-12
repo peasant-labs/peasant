@@ -7,6 +7,7 @@
 # declared is the harness's entry in ingest.HarnessBranchSources: the tree and the
 # import filter place a session by that declaration, so the extractor must behave
 # as it says. A recording-only harness never has the checkout answer.
+# A detached checkout reports HEAD, which is no branch: no extractor stores it.
 # requiredNames is the deletion guard: every name below must still be present.
 requiredNames:
   - claude-recorded-branch-wins-over-checkout
@@ -20,6 +21,11 @@ requiredNames:
   - codex-never-asks-the-checkout
   - strike-recorded-branch-is-stored
   - strike-never-asks-the-checkout
+  - claude-detached-checkout-is-no-branch
+  - claude-recorded-detached-head-is-no-branch
+  - cursor-detached-checkout-is-no-branch
+  - opencode-detached-checkout-is-no-branch
+  - pi-detached-checkout-is-no-branch
 cases:
   - name: claude-recorded-branch-wins-over-checkout
     harness: claude-code
@@ -95,3 +101,38 @@ cases:
     checkout: main
     wantBranch: ""
     wantCheckoutCalls: 0
+  # A detached checkout reports HEAD, which is not a branch name, so no extractor
+  # that asks the checkout stores it.
+  - name: claude-detached-checkout-is-no-branch
+    harness: claude-code
+    declared: recording-or-checkout
+    checkout: HEAD
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  # A recording that names HEAD says the session ran on no branch; the checkout,
+  # which sits on main, does not answer for it.
+  - name: claude-recorded-detached-head-is-no-branch
+    harness: claude-code
+    declared: recording-or-checkout
+    recordedBranch: HEAD
+    checkout: main
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  - name: cursor-detached-checkout-is-no-branch
+    harness: cursor
+    declared: recording-or-checkout
+    checkout: HEAD
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  - name: opencode-detached-checkout-is-no-branch
+    harness: opencode
+    declared: recording-or-checkout
+    checkout: HEAD
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  - name: pi-detached-checkout-is-no-branch
+    harness: pi
+    declared: recording-or-checkout
+    checkout: HEAD
+    wantBranch: ""
+    wantCheckoutCalls: 1

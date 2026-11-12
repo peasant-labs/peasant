@@ -15,6 +15,8 @@ requiredNames:
   - recorded-branch-wins-over-current-head
   - recorded-branch-admits-when-current-head-moved
   - head-used-only-when-no-branch-recorded
+  - branch-list-never-admits-a-session-in-a-detached-checkout
+  - branch-list-never-admits-a-branchless-session-with-auto-ingest-on
 cases:
   - name: prepare-builds-complete-cohort
     harness: claude-code
@@ -203,3 +205,33 @@ cases:
     checkSecondMatch: true
     expectMatch: true
     expectSecondMatch: false
+  # A rule that lists branches never admits a session that has no branch, and
+  # autoIngestNewBranches only admits a branch outside the list, not the absence
+  # of one. A detached checkout is on no branch: git reports HEAD, which is not a
+  # branch name, so the session is branchless and is not admitted as a new branch.
+  - name: branch-list-never-admits-a-session-in-a-detached-checkout
+    harness: claude-code
+    autoIngestNewBranches: true
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: HEAD
+    expectGitCalls: 2
+    expectMatch: false
+  - name: branch-list-never-admits-a-branchless-session-with-auto-ingest-on
+    harness: claude-code
+    autoIngestNewBranches: true
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: ""
+    expectGitCalls: 2
+    expectMatch: false
