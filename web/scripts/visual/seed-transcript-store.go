@@ -27,6 +27,19 @@ const (
 	hostSlug          = "github.com-synthetic"
 	firstActionParent = 31
 	lastActionParent  = 51
+	// 80 entries fold to 69 turns: the 11 tool children ride their parents.
+	// 5 of those turns are system rows and 4 are tool rows, so 60 are
+	// conversation turns.
+	foldedTurns       = 69
+	conversationTurns = 60
+)
+
+// Top-level rows that are turns but not conversation turns. They sit on both
+// sides of the middle segments, so a segment's conversation turn position is
+// never its row index and the mounted captions can be told from turn ids.
+var (
+	systemRows = map[int]bool{4: true, 14: true, 24: true, 60: true, 70: true}
+	toolRows   = map[int]bool{8: true, 18: true, 64: true, 74: true}
 )
 
 func main() {
@@ -64,6 +77,7 @@ func main() {
 		fail(err)
 	}
 	const start = int64(1_700_000_000_000)
+	measured := int64(conversationTurns)
 	ingested := start + 120_000
 	entry := ingest.StoreEntry{
 		Metadata: &ingest.UnifiedMetadata{
@@ -84,11 +98,12 @@ func main() {
 				FilePath: "/tmp/synthetic-large",
 			},
 			Stats: ingest.StatsInfo{
-				TurnCount:     69,
-				ToolCallCount: 11,
-				DurationMs:    60_000,
-				TokensIn:      1000,
-				TokensOut:     500,
+				TurnCount:             foldedTurns,
+				ConversationTurnCount: &measured,
+				ToolCallCount:         11,
+				DurationMs:            60_000,
+				TokensIn:              1000,
+				TokensOut:             500,
 			},
 			Version:     "2.1.14",
 			Subagents:   []ingest.SubagentRef{},
@@ -128,6 +143,30 @@ func main() {
 			})
 			continue
 		}
+		if systemRows[turn] {
+			content := fmt.Sprintf("synthetic system notice %d: the context was compacted.", turn)
+			entries = append(entries, schema.SessionEntry{
+				SessionID: sid, EntryIndex: turn, Harness: schema.HarnessClaudeCode,
+				EntryType: schema.EntryTypeSystem, Role: schema.RoleSystem,
+				TimestampMs: &timestamp, ContentPreview: &content, Depth: 0,
+			})
+			continue
+		}
+		if toolRows[turn] {
+			// A reply that holds a tool call and no prose: its own turn, typed
+			// tool_use, and not a conversation turn.
+			id := fmt.Sprintf("synthetic-lookup-%d", turn)
+			name := "Read"
+			input := fmt.Sprintf(`{"file_path":"/tmp/synthetic-large/notes-%d.md"}`, turn)
+			output := fmt.Sprintf("synthetic notes %d", turn)
+			entries = append(entries, schema.SessionEntry{
+				SessionID: sid, EntryIndex: turn, Harness: schema.HarnessClaudeCode,
+				EntryType: schema.EntryTypeToolUse, Role: schema.RoleAssistant,
+				TimestampMs: &timestamp, Depth: 0,
+				ToolCallID: &id, ToolNamesCSV: &name, ToolInput: &input, ToolOutput: &output,
+			})
+			continue
+		}
 		role := schema.RoleUser
 		content := fmt.Sprintf("synthetic user turn %d. the reader can page from here.", turn)
 		if turn%2 == 1 && turn != 53 {
@@ -155,11 +194,13 @@ func main() {
 		fail(err)
 	}
 	encoded, err := json.Marshal(map[string]any{
-		"dataDir":       root,
-		"sessionId":     sessionID,
-		"projectHash":   projectHash,
-		"projectName":   projectName,
-		"actionParents": []int{firstActionParent, lastActionParent},
+		"dataDir":           root,
+		"sessionId":         sessionID,
+		"projectHash":       projectHash,
+		"projectName":       projectName,
+		"actionParents":     []int{firstActionParent, lastActionParent},
+		"turns":             foldedTurns,
+		"conversationTurns": conversationTurns,
 	})
 	if err != nil {
 		fail(err)
