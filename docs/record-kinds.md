@@ -144,11 +144,11 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | content_block | `tool_reference` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go captureContentBlockKinds; claude_indexer.go decomposeClaudeContentBlocks` |
 | native-generation | content_block | `image` | literal | represented | yes | textual media marker |  | `content_capture.go captureContentBlockKinds; claude_indexer.go decomposeClaudeContentBlocks` |
 
-## codex (adapter 2, indexer 19)
+## codex (adapter 3, indexer 19)
 
 Baseline index format: 1.
 
-Managed generation: adapter 3, indexer 21, index format 2.
+Managed generation: adapter 4, indexer 21, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -404,7 +404,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | content_block | `image` | literal | represented | yes | textual media marker |  | `pi_indexer.go piBlockType.UnmarshalJSON; pi_indexer.go piContent` |
 | retained-format-1 | content_block | `toolCall` | literal | represented | no | tool name and arguments |  | `pi_indexer.go piBlockType.UnmarshalJSON; pi_indexer.go piContent` |
 
-## strike (adapter 2, indexer 18)
+## strike (adapter 3, indexer 18)
 
 Baseline index format: 1.
 

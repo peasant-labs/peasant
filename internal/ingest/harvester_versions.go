@@ -20,9 +20,9 @@ var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 	HarnessPi:         {AdapterVersion: 3, IndexerVersion: 18, IndexVersion: 1},
 	HarnessClaudeCode: {AdapterVersion: 4, IndexerVersion: 24, IndexVersion: 1},
 	HarnessOpenCode:   {AdapterVersion: 4, IndexerVersion: 18, IndexVersion: 1},
-	HarnessCodex:      {AdapterVersion: 2, IndexerVersion: 19, IndexVersion: 1},
+	HarnessCodex:      {AdapterVersion: 3, IndexerVersion: 19, IndexVersion: 1},
 	HarnessCursor:     {AdapterVersion: 1, IndexerVersion: 18, IndexVersion: 1},
-	HarnessStrike:     {AdapterVersion: 2, IndexerVersion: 18, IndexVersion: 1},
+	HarnessStrike:     {AdapterVersion: 3, IndexerVersion: 18, IndexVersion: 1},
 }
 
 // GenerationRepairTargets declares the adapter, indexer and format
@@ -34,7 +34,7 @@ var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 // exist. When a harness is absent from the baseline it is also absent here.
 var GenerationRepairTargets = map[Harness]HarvesterVersions{
 	HarnessClaudeCode: {AdapterVersion: 4, IndexerVersion: 25, IndexVersion: 2},
-	HarnessCodex:      {AdapterVersion: 3, IndexerVersion: 21, IndexVersion: 2},
+	HarnessCodex:      {AdapterVersion: 4, IndexerVersion: 21, IndexVersion: 2},
 	HarnessOpenCode:   {AdapterVersion: 5, IndexerVersion: 19, IndexVersion: 2},
 }
 
