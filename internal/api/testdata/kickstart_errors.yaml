@@ -7,8 +7,9 @@
 #
 # codes accounts for the whole closed set. A code is driven by a case that
 # asserts it (fixture and case), by a row of one of the tables below, or it is
-# unreachable through a request, and says why. Adding a code to the schema fails
-# the manifest until it is placed here.
+# unreachable through a request, and says why; an unreachable code names, in
+# instead, the case that shows the code a request meets in its place. Adding a
+# code to the schema fails the manifest until it is placed here.
 requiredNames:
   - open-without-a-body-is-refused
   - body-that-is-not-one-object-is-refused
@@ -18,6 +19,7 @@ requiredNames:
   - server-without-a-configuration-file-is-unavailable-on-every-route
   - save-while-another-change-holds-the-file-is-busy
   - foreign-host-is-refused-on-every-route
+  - unknown-connect-token-is-an-invalid-body
 codes:
   kickstart_body_missing: {case: open-without-a-body-is-refused}
   kickstart_body_invalid: {case: body-that-is-not-one-object-is-refused}
@@ -35,6 +37,7 @@ codes:
   kickstart_connect_not_connected: {fixture: patch, case: connect-accept-requires-connected}
   kickstart_connect_unknown:
     unreachable: the closed connect answer set refuses any other token while the body is decoded, which answers kickstart_body_invalid before the plan sees it
+    instead: {case: unknown-connect-token-is-an-invalid-body, code: kickstart_body_invalid}
   kickstart_commit_refused: {fixture: commit, case: selection-scope-commit-without-a-config-file-is-refused}
   kickstart_session_not_found: {fixture: tree, case: preview-unknown-node-refused}
   kickstart_preview_row_not_found: {fixture: tree, case: preview-unknown-node-refused}
@@ -53,15 +56,23 @@ codes:
   kickstart_config_changing: {table: commitFailures}
 # What a refused save is answered with, by the reason it failed. The mapping is
 # commitFailureResponse; a kind the model adds fails here until it has a row.
+# unknown is the zero kind, which no failure should carry and which is answered as
+# the defect it would be.
 commitFailures:
   - {kind: invalid, code: kickstart_commit_refused}
   - {kind: read, code: kickstart_config_unreadable}
   - {kind: lock, code: kickstart_config_busy}
   - {kind: changed, code: kickstart_config_changing}
   - {kind: write, code: kickstart_config_unwritable}
-# What a failure no code names is answered with.
+  - {kind: unknown, code: kickstart_failed}
+# What the one writer answers for an error, by the error it is handed: an error
+# no code names is the defect it is, and a refusal wrapped in context is still
+# the refusal. failure names the error (see kickstartWriterErrors).
 writer:
-  - {failure: a plain error from the session store, code: kickstart_failed}
+  - {failure: plain, code: kickstart_failed}
+  - {failure: wrapped-plain, code: kickstart_failed}
+  - {failure: wrapped-refusal, code: kickstart_session_not_found}
+  - {failure: wrapped-commit-failure, code: kickstart_config_busy}
 cases:
   # No body is not an empty object: it is its own refusal, on both routes that
   # take one.
@@ -246,3 +257,19 @@ cases:
       # nothing was opened
       - call: GET /api/v1/kickstart/status
         absent: [activeSessionId]
+
+  # The connect offer's answers are a closed set that the body's decoder holds,
+  # so a token outside it never reaches the plan: it is an invalid body, and
+  # kickstart_connect_unknown has no request that raises it.
+  - name: unknown-connect-token-is-an-invalid-body
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, connectAnswer: maybe}
+        status: 400
+        json: {code: kickstart_body_invalid}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {revision: 1}

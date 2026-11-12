@@ -204,9 +204,10 @@ func ingestResponse(start ingestStart, err error) schema.LocalKickstartIngest {
 	}
 }
 
-// commitFailureResponse maps a failed save to the refusal it is answered with.
-// The contract declares 404 and 409 for this route; the rest follow the status
-// the other kickstart routes use for the same kind of failure.
+// commitFailureResponse maps a failed save to the refusal it is answered with:
+// each kind of failure the save names has its own code, and the code brings its
+// own status. An error that is not a save failure is returned as it is, and a
+// kind this mapping has no code for is the defect it is, answered as one.
 func commitFailureResponse(err error) error {
 	var failed *onboarding.CommitError
 	if !errors.As(err, &failed) {
@@ -225,9 +226,12 @@ func commitFailureResponse(err error) error {
 	case onboarding.CommitFailureChanged:
 		return newKickstartError(schema.LocalKickstartErrorConfigChanging,
 			"The setup was not saved because the configuration file kept changing in internal/api.kickstartHandler.handleCommit: %v. Nothing was written. Stop the other program that edits it, then save again.", failed.Err)
-	default:
+	case onboarding.CommitFailureWrite:
 		return newKickstartError(schema.LocalKickstartErrorConfigUnwritable,
 			"The setup was not saved because the configuration file could not be written in internal/api.kickstartHandler.handleCommit: %v. The previous file is unchanged. Fix the directory's permissions or free space, then save again.", failed.Err)
+	default:
+		return newKickstartError(schema.LocalKickstartErrorFailed,
+			"The setup was not saved because it failed in a way internal/api.commitFailureResponse has no code for (%v): %v. Nothing was written. Retry; if it repeats, report it.", failed.Kind, failed.Err)
 	}
 }
 
