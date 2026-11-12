@@ -3,4 +3,5 @@ requiredNames:
   - continuity
   - continuity-negative-count
   - canonical
+  - canonical-overcount
   - sound

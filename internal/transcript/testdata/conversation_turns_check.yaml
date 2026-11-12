@@ -56,6 +56,20 @@ cases:
       want: 7
       got: 5
       messageContains: ["hold 5 conversation turns in total", "canonical count is 7", "ingest.ConversationTurnCount"]
+  # Every span is continuous, but the refs hold more conversation turns than
+  # the session's canonical count: the last segment would end past the total.
+  - name: canonical-overcount
+    canonical: 5
+    refs:
+      - {index: 0, conversationTurns: {before: 0, count: 2}}
+      - {index: 1, conversationTurns: {before: 2, count: 1}}
+      - {index: 2, conversationTurns: {before: 3, count: 3}}
+    fault:
+      rule: canonical
+      segment: -1
+      want: 5
+      got: 6
+      messageContains: ["hold 6 conversation turns in total", "canonical count is 5", "ingest.ConversationTurnCount"]
   - name: sound
     canonical: 5
     refs:
