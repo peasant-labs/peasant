@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"os"
 	"slices"
@@ -21,8 +22,15 @@ var harnessRosterYAML []byte
 var harnessRosterManifestYAML []byte
 
 type harnessRosterCase struct {
-	Name  string `yaml:"name"`
-	Owner string `yaml:"owner"`
+	Name     string                `yaml:"name"`
+	Owner    string                `yaml:"owner"`
+	Disjoint *bool                 `yaml:"disjoint"`
+	SubsetOf []harnessRosterSubset `yaml:"subsetOf"`
+}
+
+type harnessRosterSubset struct {
+	Label  string `yaml:"label"`
+	Reason string `yaml:"reason"`
 }
 
 func documentedHarnessRoster(t *testing.T) ([]string, map[string][]string) {
@@ -73,7 +81,9 @@ func TestDocumentedHarnessRoster(t *testing.T) {
 	var manifest struct {
 		RequiredNames []string `yaml:"requiredNames"`
 	}
-	if err := yaml.Unmarshal(harnessRosterYAML, &fixture); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(harnessRosterYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatal(err)
 	}
 	if err := yaml.Unmarshal(harnessRosterManifestYAML, &manifest); err != nil {
@@ -83,6 +93,12 @@ func TestDocumentedHarnessRoster(t *testing.T) {
 	for _, tc := range fixture.Cases {
 		if tc.Name == "" || seen[tc.Name] {
 			t.Fatalf("empty or duplicate roster case %q", tc.Name)
+		}
+		if tc.Disjoint == nil {
+			t.Fatalf("roster case %q must explicitly declare disjoint", tc.Name)
+		}
+		if tc.SubsetOf == nil {
+			t.Fatalf("roster case %q must explicitly declare subsetOf", tc.Name)
 		}
 		seen[tc.Name] = true
 	}
@@ -94,6 +110,9 @@ func TestDocumentedHarnessRoster(t *testing.T) {
 		t.Fatalf("roster labels = %v, want exactly %v in order", labels, manifest.RequiredNames)
 	}
 	for _, tc := range fixture.Cases {
+		if _, ok := rows[tc.Name]; !ok {
+			t.Fatalf("roster case %q has no documented line", tc.Name)
+		}
 		want, ordered := rosterOwner(t, tc.Owner)
 		got := slices.Clone(rows[tc.Name])
 		if !ordered {
@@ -104,26 +123,34 @@ func TestDocumentedHarnessRoster(t *testing.T) {
 			t.Errorf("roster %s = %v, owner %s = %v; exclude any new test-only layout by its tool name, not its harness", tc.Name, got, tc.Owner, want)
 		}
 	}
-	for label, values := range rows {
-		if label == "known" {
-			continue
-		}
-		for _, value := range values {
-			if !slices.Contains(rows["known"], value) {
-				t.Errorf("%s value %q is not known", label, value)
+	for i, tc := range fixture.Cases {
+		seenTargets := make(map[string]bool, len(tc.SubsetOf))
+		for _, subset := range tc.SubsetOf {
+			target, ok := rows[subset.Label]
+			if !ok || subset.Label == tc.Name || seenTargets[subset.Label] {
+				t.Fatalf("roster case %q has an unknown, self-referential or duplicate subset target %q", tc.Name, subset.Label)
+			}
+			seenTargets[subset.Label] = true
+			for _, value := range rows[tc.Name] {
+				if !slices.Contains(target, value) {
+					if subset.Reason == "" {
+						t.Errorf("%s value %q must be in %s", tc.Name, value, subset.Label)
+					} else {
+						t.Errorf("%s value %q must be in %s: %s", tc.Name, value, subset.Label, subset.Reason)
+					}
+				}
 			}
 		}
-	}
-	for _, value := range rows["harvestable"] {
-		if !slices.Contains(rows["declared"], value) {
-			t.Errorf("harvestable %q must be declared: the metric reader and session source reader accept only declared harnesses", value)
+		if !*tc.Disjoint {
+			continue
 		}
-	}
-	for _, label := range []string{"harvestable", "layout-only", "archived"} {
-		for _, value := range rows[label] {
-			for _, other := range []string{"harvestable", "layout-only", "archived"} {
-				if label < other && slices.Contains(rows[other], value) {
-					t.Errorf("%q is both %s and %s", value, label, other)
+		for _, other := range fixture.Cases[i+1:] {
+			if !*other.Disjoint {
+				continue
+			}
+			for _, value := range rows[tc.Name] {
+				if slices.Contains(rows[other.Name], value) {
+					t.Errorf("%q is both %s and %s", value, tc.Name, other.Name)
 				}
 			}
 		}
