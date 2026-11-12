@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -25,6 +26,16 @@ type adapterBranchCase struct {
 	Checkout          string `yaml:"checkout"`
 	WantBranch        string `yaml:"wantBranch"`
 	WantCheckoutCalls int    `yaml:"wantCheckoutCalls"`
+	// NoCWD records no working directory in a Claude transcript;
+	// ProjectDirectoryExists makes the directory its transcript folder decodes to
+	// exist on the extractor's filesystem. WantGitCalls, when set, is the number
+	// of questions of any kind the extractor asked git.
+	NoCWD                  bool `yaml:"noCWD"`
+	ProjectDirectoryExists bool `yaml:"projectDirectoryExists"`
+	WantGitCalls           *int `yaml:"wantGitCalls"`
+	// WantGitDirs, where given, lists the distinct directories git was asked
+	// about, in order.
+	WantGitDirs []string `yaml:"wantGitDirs"`
 }
 
 // TestAdapterMetadataBranchAttribution runs each harness's real metadata
@@ -82,6 +93,14 @@ func TestAdapterMetadataBranchAttribution(t *testing.T) {
 			if git.calls != c.WantCheckoutCalls {
 				t.Fatalf("checked-out branch asked %d times, want %d", git.calls, c.WantCheckoutCalls)
 			}
+			if c.WantGitCalls != nil && git.all != *c.WantGitCalls {
+				t.Fatalf("git was asked %d questions, want %d", git.all, *c.WantGitCalls)
+			}
+			if c.WantGitDirs != nil {
+				if asked := slices.Compact(slices.Clone(git.dirs)); !slices.Equal(asked, c.WantGitDirs) {
+					t.Fatalf("git was asked about the directories %v, want %v", asked, c.WantGitDirs)
+				}
+			}
 		})
 	}
 }
@@ -110,9 +129,26 @@ func TestAdapterBranchAttributionCoversEveryRegisteredHarness(t *testing.T) {
 
 func extractClaudeBranch(t *testing.T, git ingest.GitResolver, c adapterBranchCase) *string {
 	t.Helper()
-	const base, slug = "/home/test/.claude/projects", "-home-test-project"
+	const base = "/home/test/.claude/projects"
+	slug := "-home-test-project"
 	mfs := testutil.NewMemFS()
-	data := sampleClaudeJSONL(testutil.TestSessionUUID, "2.1.14", "/home/test/project", c.RecordedBranch)
+	cwd := "/home/test/project"
+	if c.NoCWD {
+		cwd = ""
+		if !c.ProjectDirectoryExists {
+			// A folder whose first segment is no directory at the root decodes to
+			// nothing; "-home-test-project" would decode to /home/test, the deepest
+			// directory of its path that exists, because the transcript's own
+			// parents do.
+			slug = "-no-such-root-for-the-project"
+		}
+	}
+	if c.ProjectDirectoryExists {
+		if err := mfs.MkdirAll("/home/test/project", 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data := sampleClaudeJSONL(testutil.TestSessionUUID, "2.1.14", cwd, c.RecordedBranch)
 	path := setupClaudeFS(t, mfs, base, slug, testutil.TestSessionUUID, data)
 	sid, err := ingest.NewSessionID(testutil.TestSessionUUID)
 	if err != nil {

@@ -417,19 +417,36 @@ func isUsableRemoteURL(remote string) bool {
 	return err == nil
 }
 
-// ResolveGitRemote applies the attribution policy shared by adapters and
-// repository-scoped operations. Explicit provider evidence wins; otherwise a
-// recorded branch uses its current upstream configuration, followed by the
-// origin only. Checkout upstream is used only without a recorded branch. Callers retain path identity when
+// ResolveGitRemote is the one rule for which git remote a session belongs to,
+// for the extractors that store it and for the tree and the import filter that
+// show and judge it before it is stored (SessionRemoteFor). Explicit provider
+// evidence wins (a Codex session_meta repository_url, a Strike sidecar remote);
+// otherwise a recorded branch uses its current upstream configuration, followed
+// by the origin only; a session with no recorded branch (or only a detached
+// HEAD) uses the checkout's upstream. A parent directory's repository is never
+// adopted: dir answers for itself, and a directory git cannot place has no
+// remote. An empty dir asks git nothing, so a caller with no project directory
+// never reaches the process's own repository. Callers retain path identity when
 // this returns an empty remote.
 func ResolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch, explicitRemote string) (remoteURL, trackingBranch string) {
+	return resolveGitRemote(ctx, git, dir, recordedBranch, explicitRemote, true)
+}
+
+// ResolveGitRemoteURL is ResolveGitRemote for a caller that needs the remote
+// alone, so it does not ask git for the checkout's tracking branch.
+func ResolveGitRemoteURL(ctx context.Context, git GitResolver, dir, recordedBranch, explicitRemote string) string {
+	remoteURL, _ := resolveGitRemote(ctx, git, dir, recordedBranch, explicitRemote, false)
+	return remoteURL
+}
+
+func resolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch, explicitRemote string, wantTracking bool) (remoteURL, trackingBranch string) {
 	if explicitRemote != "" {
 		return explicitRemote, ""
 	}
-	if git == nil {
+	if git == nil || dir == "" {
 		return "", ""
 	}
-	if recordedBranch != "" {
+	if recordedBranch = NamedBranch(recordedBranch); recordedBranch != "" {
 		if resolver, ok := git.(RecordedBranchRemoteResolver); ok {
 			if remote, tracking, err := resolver.RemoteURLForBranch(ctx, dir, recordedBranch); err == nil && remote != "" {
 				return remote, tracking
@@ -442,6 +459,9 @@ func ResolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch,
 		return remote, ""
 	}
 	remote, _ := git.RemoteURL(ctx, dir)
+	if !wantTracking {
+		return remote, ""
+	}
 	tracking, _ := git.TrackingBranch(ctx, dir)
 	return remote, tracking
 }

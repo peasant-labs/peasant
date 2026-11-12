@@ -338,18 +338,19 @@ func (a *CodexAdapter) buildCodexSession(source codexRolloutSource, titles map[s
 
 	return codexSessionBuild{
 		Session: DiscoveredSession{
-			SessionID:     sessionID,
-			Harness:       HarnessCodex,
-			SourcePath:    source.path,
-			SourceFormat:  SourceFormatJSONL,
-			OriginalRoot:  source.root,
-			SubagentPaths: []ResolvedPath{},
-			DebugPaths:    []ResolvedPath{},
-			ModTime:       info.ModTime(),
-			Title:         titles[rawID],
-			ProjectName:   hints.projectName,
-			Branch:        hints.branch,
-			CWD:           hints.cwd,
+			SessionID:      sessionID,
+			Harness:        HarnessCodex,
+			SourcePath:     source.path,
+			SourceFormat:   SourceFormatJSONL,
+			OriginalRoot:   source.root,
+			SubagentPaths:  []ResolvedPath{},
+			DebugPaths:     []ResolvedPath{},
+			ModTime:        info.ModTime(),
+			Title:          titles[rawID],
+			ProjectName:    hints.projectName,
+			Branch:         hints.branch,
+			RecordedRemote: hints.remote,
+			CWD:            hints.cwd,
 		},
 		ParentID:  parentID,
 		ReadError: readErr,
@@ -672,16 +673,27 @@ func (a *CodexAdapter) loadCodexSessionTitles(root string) map[string]string {
 	return titles
 }
 
+// sessionMetaCWD is the working directory a rollout's session_meta names, or ""
+// when the rollout has none.
+func sessionMetaCWD(meta *codexSessionMeta) string {
+	if meta == nil {
+		return ""
+	}
+	return meta.CWD
+}
+
 // codexSessionHints holds metadata extracted from a rollout's session_meta line.
 // All fields are best-effort; zero values are valid (caller renders fallbacks).
 type codexSessionHints struct {
 	cwd         string
 	branch      string
+	remote      string
 	projectName string
 }
 
 // codexHintsFromRollout peeks the first non-empty line of a rollout and parses
-// session_meta for cwd and git.branch. Project name is the basename of cwd.
+// session_meta for cwd, git.branch and git.repository_url. Project name is the
+// basename of cwd.
 // Returns zero hints on any parse error (the wizard will fall back to
 // UUID/date display, identical to pre-hint behavior).
 func codexHintsFromRollout(data []byte) codexSessionHints {
@@ -709,6 +721,7 @@ func codexHintsFromRollout(data []byte) codexSessionHints {
 		}
 		if sm.Git != nil {
 			hints.branch = sm.Git.Branch
+			hints.remote = sm.Git.RepositoryURL
 		}
 		return hints
 	}
@@ -925,7 +938,12 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 	if meta.Git.Branch != nil {
 		recordedBranch = *meta.Git.Branch
 	}
-	remoteURL, tracking := ResolveGitRemote(ctx, a.git, cwd, recordedBranch, remoteURL)
+	// The recorded repository_url wins; otherwise git answers for the session's
+	// project directory only, as it does for the tree and the import filter
+	// before the session is stored. cwd above may be the storage folder, which
+	// is only a path for the identity hash and is never asked.
+	gitDir := ExtractionDirectory(session, sessionMetaCWD(sessionMeta), osDirectoryExists)
+	remoteURL, tracking := ResolveGitRemote(ctx, a.git, gitDir, recordedBranch, remoteURL)
 	if remoteURL != "" {
 		meta.Git.Remote = &remoteURL
 	}

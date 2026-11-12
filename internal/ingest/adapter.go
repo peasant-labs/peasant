@@ -268,7 +268,13 @@ type DiscoveredSession struct {
 	ProjectWorktree string
 	Title           string // Session title (optional, populated when available without extra I/O)
 	Branch          string // Git branch active when session ran (optional, from session data not current repo)
-	Agent           string // Agent label for a subagent session (optional; OpenCode records it on the session row, like a Claude teammate's agent type)
+	// RecordedRemote is the git remote the harness's own recording names for the
+	// session: Codex's session_meta repository_url, Strike's sidecar remote. It
+	// is explicit evidence, so it wins over anything git answers (see
+	// ResolveGitRemote), and the tree and the import filter read it before the
+	// session is stored. It is empty for a harness whose recording names none.
+	RecordedRemote string
+	Agent          string // Agent label for a subagent session (optional; OpenCode records it on the session row, like a Claude teammate's agent type)
 	// Slug is the harness-generated session name, used as the display-name
 	// fallback when Title is empty. Version, TokensIn, TokensOut, and Cost carry
 	// the session-level aggregates the harness records on the session row, so

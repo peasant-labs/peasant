@@ -3,6 +3,7 @@ package ingest_test
 import (
 	_ "embed"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -25,6 +26,8 @@ func TestResolveGitRemoteAttribution(t *testing.T) {
 			TrackedCheckout bool   `yaml:"trackedCheckout"`
 			RemoveOrigin    bool   `yaml:"removeOrigin"`
 			LocalUpstream   bool   `yaml:"localUpstream"`
+			Subfolder       string `yaml:"subfolder"`
+			EmptyDirectory  bool   `yaml:"emptyDirectory"`
 		} `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(gitRemoteAttributionData, &fixtures); err != nil {
@@ -65,7 +68,14 @@ func TestResolveGitRemoteAttribution(t *testing.T) {
 			if c.RemoveOrigin {
 				run("remote", "remove", "origin")
 			}
-			remote, tracking := ingest.ResolveGitRemote(t.Context(), &ingest.ExecGitResolver{}, repo, c.RecordedBranch, c.ExplicitRemote)
+			dir := repo
+			if c.Subfolder != "" {
+				dir = filepath.Join(repo, filepath.FromSlash(c.Subfolder))
+			}
+			if c.EmptyDirectory {
+				dir = ""
+			}
+			remote, tracking := ingest.ResolveGitRemote(t.Context(), &ingest.ExecGitResolver{}, dir, c.RecordedBranch, c.ExplicitRemote)
 			if remote != c.WantRemote || tracking != c.WantTracking {
 				t.Fatalf("got (%q, %q), want (%q, %q)", remote, tracking, c.WantRemote, c.WantTracking)
 			}

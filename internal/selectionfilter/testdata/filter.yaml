@@ -17,6 +17,7 @@ requiredNames:
   - head-used-only-when-no-branch-recorded
   - branch-list-never-admits-a-session-in-a-detached-checkout
   - branch-list-never-admits-a-branchless-session-with-auto-ingest-on
+  - match-withheld-conflicts-are-counted-in-the-summary
 cases:
   - name: prepare-builds-complete-cohort
     harness: claude-code
@@ -77,6 +78,10 @@ cases:
       - aaaa1111-1111-4111-8111-111111111111
       - claude-code
       - name "demo"
+      - /config/chosen.yaml
+    summaryContains:
+      - 1 session was left out
+      - the selection rules for its project disagree
       - /config/chosen.yaml
   - name: match-unknown-session-fails-closed
     harness: claude-code
@@ -235,3 +240,32 @@ cases:
     gitBranch: ""
     expectGitCalls: 2
     expectMatch: false
+  # Two sessions of one project are withheld by the same disagreement: the summary
+  # counts both, and names the file to edit.
+  - name: match-withheld-conflicts-are-counted-in-the-summary
+    harness: claude-code
+    projects:
+      - name: demo
+        branches: [main]
+      - name: demo
+        branches: [other]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        projectName: demo
+        cwd: /workspace/demo
+      - id: bbbb2222-2222-4222-8222-222222222222
+        projectName: demo
+        cwd: /workspace/demo
+    gitBranch: main
+    checkSecondMatch: true
+    expectGitCalls: 2
+    expectMatch: false
+    expectSecondMatch: false
+    expectConflictCount: 2
+    noticeContains:
+      - aaaa1111-1111-4111-8111-111111111111
+      - bbbb2222-2222-4222-8222-222222222222
+    summaryContains:
+      - 2 sessions were left out
+      - the selection rules for their projects disagree
+      - /config/chosen.yaml

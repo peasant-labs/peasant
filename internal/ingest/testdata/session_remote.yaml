@@ -1,8 +1,12 @@
 # The one precedence for which git remote a session belongs to, for the tree and
 # for the import filter: the remote the store holds for an unchanged stored
-# session, then the remote of the one directory the session names, its project
-# directory. remote is what git answers for any directory. askedDirs is every
-# directory git was asked for a remote. sourcePath and originalRoot name where the
+# session, then what ingest.ResolveGitRemote names for the session: the remote its
+# recording carries (explicitRemote), else the upstream of the branch it recorded
+# (recordedBranch; upstreamBranch tracks upstreamRemote), else origin, else with
+# no recorded branch the checkout's remote (remote), in the one directory the
+# session names, its project directory. The extractors store the same answer.
+# remote is what git answers for the checkout and, unless origin says otherwise,
+# for origin. askedDirs is every distinct directory git was asked. sourcePath and originalRoot name where the
 # harness found the recording; they never answer, because a storage folder can sit
 # inside an unrelated repository.
 # requiredNames is the deletion guard: every name below must still be present.
@@ -16,6 +20,12 @@ requiredNames:
   - stored-remote-needs-no-resolver
   - no-project-directory-asks-git-for-no-remote
   - nothing-to-ask-is-empty
+  - recorded-branch-upstream-names-the-remote
+  - recorded-branch-without-an-upstream-uses-origin
+  - recorded-detached-head-asks-the-checkout
+  - explicit-recorded-remote-wins
+  - explicit-recorded-remote-needs-no-directory-or-resolver
+  - stored-remote-beats-the-explicit-remote
 cases:
   - name: stored-remote-beats-the-directory
     cwd: /work/tool
@@ -77,4 +87,58 @@ cases:
   - name: nothing-to-ask-is-empty
     remote: https://github.com/example-org/demo.git
     wantRemote: ""
+    askedDirs: []
+  # A fork: the clone's origin is the fork, but the branch the session recorded
+  # tracks the upstream repository. The session belongs to the upstream, as the
+  # remote the import stores for it does; asking the checkout instead would list
+  # it under the fork until it was imported.
+  - name: recorded-branch-upstream-names-the-remote
+    cwd: /work/fork
+    recordedBranch: feature/x
+    remote: https://github.com/example-org/fork.git
+    upstreamBranch: feature/x
+    upstreamRemote: https://github.com/example-org/upstream.git
+    wantRemote: https://github.com/example-org/upstream.git
+    askedDirs: [/work/fork]
+  - name: recorded-branch-without-an-upstream-uses-origin
+    cwd: /work/fork
+    recordedBranch: feature/y
+    remote: https://github.com/example-org/other.git
+    origin: https://github.com/example-org/fork.git
+    upstreamBranch: feature/x
+    upstreamRemote: https://github.com/example-org/upstream.git
+    wantRemote: https://github.com/example-org/fork.git
+    askedDirs: [/work/fork]
+  # A recording that names HEAD says the session ran on no branch, so there is no
+  # recorded upstream to read; the checkout answers.
+  - name: recorded-detached-head-asks-the-checkout
+    cwd: /work/fork
+    recordedBranch: HEAD
+    remote: https://github.com/example-org/fork.git
+    upstreamBranch: HEAD
+    upstreamRemote: https://github.com/example-org/upstream.git
+    wantRemote: https://github.com/example-org/fork.git
+    askedDirs: [/work/fork]
+  # Codex and Strike record a remote of their own. It wins over what git says, and
+  # it needs neither a directory nor a resolver.
+  - name: explicit-recorded-remote-wins
+    cwd: /work/fork
+    recordedBranch: feature/x
+    explicitRemote: https://github.com/example-org/recorded.git
+    remote: https://github.com/example-org/fork.git
+    upstreamBranch: feature/x
+    upstreamRemote: https://github.com/example-org/upstream.git
+    wantRemote: https://github.com/example-org/recorded.git
+    askedDirs: []
+  - name: explicit-recorded-remote-needs-no-directory-or-resolver
+    noResolver: true
+    explicitRemote: https://github.com/example-org/recorded.git
+    wantRemote: https://github.com/example-org/recorded.git
+    askedDirs: []
+  - name: stored-remote-beats-the-explicit-remote
+    cwd: /work/fork
+    storedRemote: https://github.com/example-org/stored.git
+    storedKnown: true
+    explicitRemote: https://github.com/example-org/recorded.git
+    wantRemote: https://github.com/example-org/stored.git
     askedDirs: []

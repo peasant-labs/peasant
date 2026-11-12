@@ -19,9 +19,9 @@ import (
 )
 
 // ConfigChangedError is what Swap returns when the file on disk is not the
-// document the caller read; a caller finds it with errors.As. Fresh holds the bytes now on disk, so the caller can
-// recompute against them under the lock it already holds. Fresh is nil when the
-// file is now absent.
+// document the caller read; a caller finds it with errors.As. Fresh holds the
+// bytes now on disk, so the caller can recompute against them under the lock it
+// already holds. Fresh is nil when the file is now absent.
 type ConfigChangedError struct {
 	Path  string
 	Fresh []byte
