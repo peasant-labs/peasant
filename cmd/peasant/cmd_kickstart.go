@@ -52,7 +52,8 @@ type kickstartCommandDeps struct {
 	// flowIngest is a focused test seam for the post-save callback. Production
 	// uses localIngest so the runner and progress source always share one attempt.
 	flowIngest kickstart.IngestFunc
-	// ensureStore upgrades a behind store before discovery reads it.
+	// ensureStore upgrades a behind store before discovery reads it. A nil
+	// value selects the production check, so no dependency set can skip it.
 	ensureStore func(*cobra.Command, string) error
 }
 
@@ -82,9 +83,7 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 			return villageAlreadyConnected(configDir)
 		},
 		localIngest: kickstartLocalIngest,
-		ensureStore: func(cmd *cobra.Command, dbPath string) error {
-			return ensureStoreCurrent(cmd, dbPath, storeEntryModeFor(cmd))
-		},
+		ensureStore: ensureKickstartStore,
 		existingUser: func(configDir string) string {
 			if creds, err := auth.LoadCredentialsFrom(configDir); err == nil && creds != nil && creds.IsValid() {
 				return creds.Username
@@ -92,6 +91,12 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 			return ""
 		},
 	}
+}
+
+// ensureKickstartStore is kickstart's store upgrade check, under the
+// entry-point policy.
+func ensureKickstartStore(cmd *cobra.Command, dbPath string) error {
+	return ensureStoreCurrent(cmd, dbPath, storeEntryModeFor(cmd))
 }
 
 func BuildKickstartCommand() *cobra.Command {
@@ -163,7 +168,11 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 			// saved scan results, and the mount never migrates behind the
 			// screen. A declined or refused upgrade ends here with nothing
 			// changed.
-			if err := deps.ensureStore(cmd, dbPath); err != nil {
+			ensureStore := deps.ensureStore
+			if ensureStore == nil {
+				ensureStore = ensureKickstartStore
+			}
+			if err := ensureStore(cmd, dbPath); err != nil {
 				cmd.SilenceUsage = true
 				return err
 			}
