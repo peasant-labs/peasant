@@ -20,6 +20,7 @@ requiredNames:
   - rescan-never-widens
   - preview-of-an-unreadable-transcript-reports-the-reason
   - scan-progress-ticks-are-coalesced
+  - partial-scan-notice-is-its-own-field
 cases:
   - name: tree-is-whole-forest
     world: {listings: two-projects}
@@ -454,3 +455,26 @@ cases:
             revision: 3
             json: {scan.state: done, scan.done: 4, scan.total: 4}
           - {kind: session, session: "{full}", revision: 4}
+
+  # A harness the scan could not read is told in the scan's notice, once the scan
+  # finishes. The phase belongs to a running scan and a failure belongs to the
+  # error, so the notice is in neither.
+  - name: partial-scan-notice-is-its-own-field
+    world: {listings: two-projects, unreadable: {codex: the folder is not readable}}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await:
+          kind: scan
+          session: "{full}"
+          json: {scan.state: done, scan.notice: "Codex could not be read: the folder is not readable"}
+          absent: [scan.phase, scan.error]
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {scan.state: done}
+        contains: {scan.notice: "could not be read: the folder is not readable"}
+        absent: [scan.phase, scan.error]
+      # a rescan starts without the notice, and a scan that read everything has none
+      - call: POST /api/v1/kickstart/sessions/{full}/scan
+        json: {state: running}
+        absent: [notice, error]

@@ -241,6 +241,7 @@ func newKickstartSessionID() string {
 type kickstartScanRecord struct {
 	state         onboarding.ScanState
 	phase         string
+	notice        string
 	done, total   int
 	err           string
 	locked        int

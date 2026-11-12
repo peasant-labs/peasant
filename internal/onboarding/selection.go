@@ -6,6 +6,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/schema"
 )
 
 const (
@@ -129,12 +130,9 @@ func SanitizeSelectionPlaceholders(forest Forest, sel config.SelectionConfig) (c
 	return sanitizePlaceholderSelection(sel, availableProjects(selectionTree(forest)))
 }
 
-// DroppedLabelsMax is how many vanished choices a rescan names. The count
-// carries the rest.
-const DroppedLabelsMax = 3
-
-// DroppedSelections is what a rescan removed from an answered id set.
-// Labels holds at most DroppedLabelsMax names. Count is the full number removed.
+// DroppedSelections is what a rescan removed from an answered id set. Labels
+// holds at most schema.LocalKickstartDroppedLabelsMax names, the number the
+// contract allows a scan to carry. Count is the full number removed.
 type DroppedSelections struct {
 	Count  int
 	Labels []string
@@ -142,9 +140,10 @@ type DroppedSelections struct {
 
 // RescanIDs keeps the answered ids that still exist in the forest the rescan
 // found (current) and drops the rest. It never adds an id. Vanished ids are
-// reported by count and at most DroppedLabelsMax labels. A vanished row is
-// gone from current, so its label is read from the forest the answer was given
-// over (previous); an id that forest does not hold either is its own label.
+// reported by count and at most schema.LocalKickstartDroppedLabelsMax labels.
+// A vanished row is gone from current, so its label is read from the forest the
+// answer was given over (previous); an id that forest does not hold either is
+// its own label.
 func RescanIDs(ids []string, previous, current Forest) ([]string, DroppedSelections) {
 	present := forestRowIDs(current)
 	kept := make([]string, 0, len(ids))
@@ -161,7 +160,7 @@ func RescanIDs(ids []string, previous, current Forest) ([]string, DroppedSelecti
 			continue
 		}
 		dropped.Count++
-		if len(dropped.Labels) >= DroppedLabelsMax {
+		if len(dropped.Labels) >= schema.LocalKickstartDroppedLabelsMax {
 			continue
 		}
 		if labels == nil {
