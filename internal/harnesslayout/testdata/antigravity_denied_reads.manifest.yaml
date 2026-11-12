@@ -1,0 +1,26 @@
+# Required case names of antigravity_denied_reads.yaml. A case is removed
+# only together with its name here.
+requiredNames:
+  - body-steps-metadata
+  - body-steps-error-details
+  - body-steps-permissions
+  - body-steps-task-details
+  - body-steps-render-info
+  - body-steps-step-payload
+  - body-battle-mode-infos-data
+  - body-executor-metadata-data
+  - body-gen-metadata-data
+  - body-parent-references-data
+  - body-trajectory-metadata-blob-data
+  - index-conversation-summaries-title
+  - index-conversation-summaries-preview
+  - index-conversation-summaries-raw-summary
+  - index-conversations-fts-any-column
+  - index-conversations-fts-config-any-column
+  - index-conversations-fts-content-any-column
+  - index-conversations-fts-data-any-column
+  - index-conversations-fts-docsize-any-column
+  - index-conversations-fts-idx-any-column
+  - body-blob-column-not-on-the-list-is-refused
+  - select-star-on-the-body-is-refused
+  - allowed-reads-succeed

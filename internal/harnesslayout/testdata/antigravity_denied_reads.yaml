@@ -1,0 +1,138 @@
+# The Antigravity read guard: one case per read it must refuse, and the rules
+# around the list. Every statement runs on a connection from antigravityOpen
+# against the synthetic store in antigravity_store.yaml (the body with its
+# blobExtension applied).
+#
+# denial is the entry of antigravityDeniedReads the case covers. The set of
+# denials in this file equals that list exactly, in both directions. The
+# conversations_fts* entry matches by table prefix, so it has one case for the
+# full-text table and one for each shadow table that table creates.
+#
+# refused is what the error names: the table, the column, and the rule that
+# refused it (deny-list or blob-column). A case without refused expects every
+# read to succeed.
+# session is the conversation the index is built with.
+session: conv-a
+cases:
+  - name: body-steps-metadata
+    reads:
+      - {database: body, sql: "SELECT metadata FROM steps"}
+    denial: {database: body, table: steps, column: metadata}
+    refused: {table: steps, column: metadata, rule: deny-list}
+  - name: body-steps-error-details
+    reads:
+      - {database: body, sql: "SELECT error_details FROM steps"}
+    denial: {database: body, table: steps, column: error_details}
+    refused: {table: steps, column: error_details, rule: deny-list}
+  - name: body-steps-permissions
+    reads:
+      - {database: body, sql: "SELECT permissions FROM steps"}
+    denial: {database: body, table: steps, column: permissions}
+    refused: {table: steps, column: permissions, rule: deny-list}
+  - name: body-steps-task-details
+    reads:
+      - {database: body, sql: "SELECT task_details FROM steps"}
+    denial: {database: body, table: steps, column: task_details}
+    refused: {table: steps, column: task_details, rule: deny-list}
+  - name: body-steps-render-info
+    reads:
+      - {database: body, sql: "SELECT render_info FROM steps"}
+    denial: {database: body, table: steps, column: render_info}
+    refused: {table: steps, column: render_info, rule: deny-list}
+  - name: body-steps-step-payload
+    reads:
+      - {database: body, sql: "SELECT step_payload FROM steps"}
+    denial: {database: body, table: steps, column: step_payload}
+    refused: {table: steps, column: step_payload, rule: deny-list}
+  - name: body-battle-mode-infos-data
+    reads:
+      - {database: body, sql: "SELECT data FROM battle_mode_infos"}
+    denial: {database: body, table: battle_mode_infos, column: data}
+    refused: {table: battle_mode_infos, column: data, rule: deny-list}
+  - name: body-executor-metadata-data
+    reads:
+      - {database: body, sql: "SELECT data FROM executor_metadata"}
+    denial: {database: body, table: executor_metadata, column: data}
+    refused: {table: executor_metadata, column: data, rule: deny-list}
+  - name: body-gen-metadata-data
+    reads:
+      - {database: body, sql: "SELECT data FROM gen_metadata"}
+    denial: {database: body, table: gen_metadata, column: data}
+    refused: {table: gen_metadata, column: data, rule: deny-list}
+  - name: body-parent-references-data
+    reads:
+      - {database: body, sql: "SELECT data FROM parent_references"}
+    denial: {database: body, table: parent_references, column: data}
+    refused: {table: parent_references, column: data, rule: deny-list}
+  - name: body-trajectory-metadata-blob-data
+    reads:
+      - {database: body, sql: "SELECT data FROM trajectory_metadata_blob"}
+    denial: {database: body, table: trajectory_metadata_blob, column: data}
+    refused: {table: trajectory_metadata_blob, column: data, rule: deny-list}
+  - name: index-conversation-summaries-title
+    reads:
+      - {database: index, sql: "SELECT title FROM conversation_summaries"}
+    denial: {database: index, table: conversation_summaries, column: title}
+    refused: {table: conversation_summaries, column: title, rule: deny-list}
+  - name: index-conversation-summaries-preview
+    reads:
+      - {database: index, sql: "SELECT preview FROM conversation_summaries"}
+    denial: {database: index, table: conversation_summaries, column: preview}
+    refused: {table: conversation_summaries, column: preview, rule: deny-list}
+  - name: index-conversation-summaries-raw-summary
+    reads:
+      - {database: index, sql: "SELECT raw_summary FROM conversation_summaries"}
+    denial: {database: index, table: conversation_summaries, column: raw_summary}
+    refused: {table: conversation_summaries, column: raw_summary, rule: deny-list}
+  - name: index-conversations-fts-any-column
+    reads:
+      - {database: index, sql: "SELECT conversation_id FROM conversations_fts"}
+    denial: {database: index, table: "conversations_fts*", column: "*"}
+    # The full-text module reads its config table while the statement is
+    # prepared, before any column of the full-text table, so that read is the
+    # one refused.
+    refused: {table: conversations_fts_config, column: k, rule: deny-list}
+  - name: index-conversations-fts-config-any-column
+    reads:
+      - {database: index, sql: "SELECT k FROM conversations_fts_config"}
+    denial: {database: index, table: "conversations_fts*", column: "*"}
+    refused: {table: conversations_fts_config, column: k, rule: deny-list}
+  - name: index-conversations-fts-content-any-column
+    reads:
+      - {database: index, sql: "SELECT c3 FROM conversations_fts_content"}
+    denial: {database: index, table: "conversations_fts*", column: "*"}
+    refused: {table: conversations_fts_content, column: c3, rule: deny-list}
+  - name: index-conversations-fts-data-any-column
+    reads:
+      - {database: index, sql: "SELECT block FROM conversations_fts_data"}
+    denial: {database: index, table: "conversations_fts*", column: "*"}
+    refused: {table: conversations_fts_data, column: block, rule: deny-list}
+  - name: index-conversations-fts-docsize-any-column
+    reads:
+      - {database: index, sql: "SELECT sz FROM conversations_fts_docsize"}
+    denial: {database: index, table: "conversations_fts*", column: "*"}
+    refused: {table: conversations_fts_docsize, column: sz, rule: deny-list}
+  - name: index-conversations-fts-idx-any-column
+    reads:
+      - {database: index, sql: "SELECT term FROM conversations_fts_idx"}
+    denial: {database: index, table: "conversations_fts*", column: "*"}
+    refused: {table: conversations_fts_idx, column: term, rule: deny-list}
+  - name: body-blob-column-not-on-the-list-is-refused
+    reads:
+      - {database: body, sql: "SELECT future_payload FROM steps"}
+    refused: {table: steps, column: future_payload, rule: blob-column}
+  - name: select-star-on-the-body-is-refused
+    reads:
+      - {database: body, sql: "SELECT * FROM steps"}
+    refused: {table: steps, column: metadata, rule: deny-list}
+  - name: allowed-reads-succeed
+    reads:
+      - {database: body, sql: "SELECT count(*) FROM battle_mode_infos"}
+      - {database: body, sql: "SELECT count(*) FROM executor_metadata"}
+      - {database: body, sql: "SELECT count(*) FROM gen_metadata"}
+      - {database: body, sql: "SELECT count(*) FROM parent_references"}
+      - {database: body, sql: "SELECT count(*) FROM steps"}
+      - {database: body, sql: "SELECT count(*) FROM trajectory_meta"}
+      - {database: body, sql: "SELECT count(*) FROM trajectory_metadata_blob"}
+      - {database: body, sql: "SELECT step_type, status, count(*) FROM steps GROUP BY step_type, status"}
+      - {database: index, sql: "SELECT step_count, last_modified_time, workspace_uris, source, project_id FROM conversation_summaries WHERE conversation_id = 'conv-a'"}
