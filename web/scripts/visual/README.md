@@ -239,6 +239,33 @@ lockfile is regenerated. Run the Fairtrade demo from the checkout matching that 
 - **expect:** `curl -sf localhost:8690/api/v1/health`; serves `/review/<project>/`,
   `/projects/<project>/<session>/` (transcript), `/` (dashboard), `/map/<project>/`.
 
+### 2b. Scripts that start their own server never open your store
+A script that boots `peasant web start` itself gives the binary every directory it reads or writes:
+its config, data and state directories (as `--config-dir`, `--data-dir`, `--state-dir` and as the XDG
+variables), its cache directory and its `HOME`, all under one throwaway root in the temp directory. The
+mock data store supplies what the pages show, so no such script needs your recorded sessions, and none
+may open `~/.local/share/peasant` or `~/.config/peasant`.
+- **the helpers:** `scripts/journey/lib/isolated-sandbox.mjs` lays the directories out and returns the
+  flags and the environment; `scripts/journey/lib/owned-server-sandbox.mjs` also makes the root and
+  removes it when the script exits. A new script that starts the binary uses one of them and passes BOTH
+  `...sandbox.args` and `env: sandbox.env` to `spawn`. Setting only `--config-dir` is the mistake this
+  replaces: the binary then opens the data directory of whoever runs the script.
+- **who uses them:** `full-app-smoke.mjs`, `context-navigation-shoot.mjs`, `search-share-visual.mjs`,
+  `publish-states-shoot.mjs`, `share-geometry.mjs`, `grouped-list-visual.mjs` and
+  `shell-nav-default-gate.mjs`. `home-pages-visual.mjs`, `root-page-visual.mjs`, `settings-shoot.mjs` and
+  `transcript-segments-shoot.mjs` already give the binary its own config, data and state directories in
+  their own way.
+- **naming a directory yourself:** only `shell-nav-default-gate.mjs` takes one
+  (`PEASANT_OFFLINE_CONFIG_DIR`, `PEASANT_OFFLINE_DATA_DIR`); a directory you name is used as given and
+  kept, and one you do not name stays in the sandbox.
+- **what a page lists comes from a fixture too:** `share-geometry.mjs` used to leave the chooser's
+  `GET /api/v1/sync/sessions` to the server, so it measured whatever store the server had opened. It now
+  answers that route from `testdata/search-share.yaml` through `grouped-sync-payload.mjs`, the builder
+  `search-share-visual.mjs` already used.
+- **the check:** `scripts/journey/testdata/lifecycle.yaml` (`server-sandbox-*`, `owned-server-sandbox-*`),
+  run by `pnpm test:journey:support`.
+- **a server you start by hand** (§2) uses your own directories unless you pass the three flags.
+
 ### 3. `full-app-smoke.mjs` — the durable real-binary gate for every visual change
 - **cmd:** `cd PEASANT/web && node scripts/visual/full-app-smoke.mjs`
 - **what:** runs `make build`, boots the REAL `peasant`, drives EVERY surface over its HTTP
@@ -299,7 +326,10 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
 - **offline (server stopped) cmd:** `cd PEASANT/web && pnpm shell:offline` after `make build`. It boots
   its own default-mode `peasant` on `PEASANT_OFFLINE_PORT` (default `8698`), so nothing else may
   hold that port; it kills that server by its own process handle on exit, failure or signal, removes the
-  temp config dir it made, and rewrites `server.log` per run. `pnpm shell:gate` runs both arms.
+  temp sandbox it made, and rewrites `server.log` per run. The server it boots never opens your own
+  store: its config, data, state and cache directories and its `HOME` are all inside that sandbox. A
+  config dir you name (`PEASANT_OFFLINE_CONFIG_DIR`) or a data dir you name (`PEASANT_OFFLINE_DATA_DIR`)
+  is used as given and kept; naming only a config dir still leaves the data dir in the sandbox. `pnpm shell:gate` runs both arms.
 - **provenance first:** both gates run `served-build.mjs`'s `assertServedBuild` before any capture —
   `web/out` must not be older than the newest file under `web/src`, the served page must reference
   exactly `web/out/index.html`'s chunks, and those chunks must carry

@@ -28,6 +28,7 @@ import { SMOKE_MOCKS, SMOKE_THEMES, makeSmokeSurfaces } from './smoke-surfaces.m
 import { assertKnownProject } from './validate-mock-coordinates.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { loadStrikeSmokeFixture } from './strike-smoke-fixture.mjs'
+import { ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')            // .../peasant/<worktree>
@@ -305,7 +306,10 @@ if (!existsSync(BIN)) { console.error(`ERROR [full-app-smoke] ${BIN} not found �
 
 // ── 2. boot the real binary ───────────────────────────────────────────────────
 console.log(`[smoke] starting ${BIN} on :${PORT} (mock store: ${MOCKS}) …`)
-const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', `--mock-data-store=${MOCKS}`], { cwd: REPO, stdio: ['ignore', 'ignore', 'inherit'] })
+// The server's configuration, data, state and cache directories and its HOME are a throwaway root of this run,
+// so it never opens the store of the person running the script. The mock data store supplies what it serves.
+const sandbox = ownedServerSandbox('full-app-smoke')
+const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, `--mock-data-store=${MOCKS}`], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'inherit'] })
 let serverDown = false
 server.on('exit', () => { serverDown = true })
 

@@ -1,4 +1,4 @@
-requiredNames: [forced-child-reaped-once, timed-out-child-reaped, stale-owner-recovered, stale-owner-other-temp-context, concurrent-recovery-loser-preserves-winner, missing-command-reaped]
+requiredNames: [forced-child-reaped-once, timed-out-child-reaped, stale-owner-recovered, stale-owner-other-temp-context, concurrent-recovery-loser-preserves-winner, missing-command-reaped, server-sandbox-owns-every-directory, server-sandbox-keeps-a-named-config-dir-and-still-owns-the-data, server-sandbox-uses-a-data-dir-only-when-the-caller-names-it, server-sandbox-never-keeps-an-inherited-directory, server-sandbox-refuses-a-relative-path, owned-server-sandbox-is-removed-when-the-script-exits, owned-server-sandbox-refuses-a-name-that-is-not-a-slug]
 cases:
   - {name: forced-child-reaped-once, mode: forced, termMs: 50, killMs: 2000}
   - {name: timed-out-child-reaped, mode: timeout, termMs: 50, killMs: 2000}
@@ -6,3 +6,40 @@ cases:
   - {name: stale-owner-other-temp-context, mode: changed-temp, termMs: 50, killMs: 2000}
   - {name: concurrent-recovery-loser-preserves-winner, mode: concurrent, termMs: 50, killMs: 2000}
   - {name: missing-command-reaped, mode: missing, termMs: 50, killMs: 2000}
+  # A script that starts its own server gives it every directory it reads or writes, so the
+  # person's store is never opened. `named` are the directories the caller names itself
+  # ($ROOT and $OTHER are throwaway directories of the test); every path in `expect` is
+  # relative to $ROOT unless it starts with $OTHER.
+  - name: server-sandbox-owns-every-directory
+    mode: sandbox
+    named: {}
+    expect: {configDir: config, dataDir: data, stateDir: state, home: home, cache: cache, ownsConfigDir: true, ownsDataDir: true}
+  - name: server-sandbox-keeps-a-named-config-dir-and-still-owns-the-data
+    mode: sandbox
+    named: {configDir: $OTHER/their-config}
+    expect: {configDir: $OTHER/their-config, dataDir: data, stateDir: state, home: home, cache: cache, ownsConfigDir: false, ownsDataDir: true}
+  - name: server-sandbox-uses-a-data-dir-only-when-the-caller-names-it
+    mode: sandbox
+    named: {configDir: $OTHER/their-config, dataDir: $OTHER/their-data}
+    expect: {configDir: $OTHER/their-config, dataDir: $OTHER/their-data, stateDir: state, home: home, cache: cache, ownsConfigDir: false, ownsDataDir: false}
+  # The script's own environment names the person's directories; none of them may reach the binary.
+  - name: server-sandbox-never-keeps-an-inherited-directory
+    mode: sandbox
+    named: {}
+    inherited: {HOME: /home/someone, XDG_CONFIG_HOME: /home/someone/.config, XDG_DATA_HOME: /home/someone/.local/share, XDG_STATE_HOME: /home/someone/.local/state, XDG_CACHE_HOME: /home/someone/.cache, PATH: /usr/bin}
+    kept: {PATH: /usr/bin}
+    expect: {configDir: config, dataDir: data, stateDir: state, home: home, cache: cache, ownsConfigDir: true, ownsDataDir: true}
+  - name: server-sandbox-refuses-a-relative-path
+    mode: sandbox-relative
+    error: not an absolute path
+  # A script that owns its server for one run: the root is made in the temporary directory, its
+  # name says which script made it, and it is gone once the script's process has exited, also
+  # when the script leaves through process.exit with a failure status.
+  - name: owned-server-sandbox-is-removed-when-the-script-exits
+    mode: owned-sandbox
+    script: share-geometry
+    exits: [0, 3]
+  - name: owned-server-sandbox-refuses-a-name-that-is-not-a-slug
+    mode: owned-sandbox-name
+    names: ["", "Share Geometry", "../escape"]
+    error: lowercase letters, digits and dashes

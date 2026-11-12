@@ -10,8 +10,12 @@
    Env:
      PEASANT_BIN               binary to boot (default <repo>/peasant; build it with make build)
      PEASANT_OFFLINE_PORT      port to boot it on (default 8698; must be free)
-     PEASANT_OFFLINE_CONFIG_DIR config dir for the booted server (default a fresh temp dir, removed
-                               afterwards; a supplied dir is kept)
+     PEASANT_OFFLINE_CONFIG_DIR config dir for the booted server (default inside the run's own temp
+                               sandbox, removed afterwards; a supplied dir is kept)
+     PEASANT_OFFLINE_DATA_DIR  data dir for the booted server (default inside the same sandbox). The
+                               server never opens your own store: its data, state and cache
+                               directories and its HOME are the sandbox's unless you name a data dir
+                               here, and naming a config dir does not change that
      SHELL_OFFLINE_CAPTURE_DIR output root for the offline frames (default <base>/shell-offline)
      CHROME_PATH               Chrome/Chromium binary (required)
      PUPPETEER_CORE            explicit puppeteer-core module path (optional)
@@ -19,6 +23,7 @@
 import { spawn } from 'node:child_process'
 import YAML from 'yaml'
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
+import { isolatedServerSandbox } from '../journey/lib/isolated-sandbox.mjs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
@@ -113,8 +118,15 @@ const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const STILL_PATTERN = new RegExp(`^${escapeRegExp(ANNOUNCE.stillStopped)} \\d{2}:\\d{2}:\\d{2}\\.$`)
 
 // ── the server this gate owns ────────────────────────────────────────────────────────────────────
-const ownConfigDir = !process.env.PEASANT_OFFLINE_CONFIG_DIR
-const configDir = process.env.PEASANT_OFFLINE_CONFIG_DIR || mkdtempSync(join(tmpdir(), 'peasant-offline-gate-'))
+// Every directory the server reads or writes is under one throwaway root, so it never opens the store,
+// the configuration or the recordings of the person running the gate. A configuration or data directory
+// the caller names is theirs: it is used as given and kept. Naming only a configuration directory still
+// leaves the data directory in the sandbox.
+const sandbox = isolatedServerSandbox(
+  mkdtempSync(join(tmpdir(), 'peasant-offline-gate-')),
+  { configDir: process.env.PEASANT_OFFLINE_CONFIG_DIR, dataDir: process.env.PEASANT_OFFLINE_DATA_DIR },
+  process.env,
+)
 mkdirSync(OUT, { recursive: true })
 const serverLog = join(OUT, 'server.log')
 closeSync(openSync(serverLog, 'w')) // one run per log: earlier runs never mix into the one a failure points to
@@ -132,7 +144,7 @@ const healthAnswers = async () => {
 const startServer = async () => {
   if (await healthAnswers()) throw new Error(`something already answers on ${ORIGIN}; stop it or set PEASANT_OFFLINE_PORT to a free port`)
   const log = openSync(serverLog, 'a')
-  server = spawn(BIN, ['web', 'start', '--port', String(PORT), '--foreground', '--no-browser', '--config-dir', configDir, `--mock-data-store=${SMOKE_MOCKS}`], { stdio: ['ignore', log, log] })
+  server = spawn(BIN, ['web', 'start', '--port', String(PORT), '--foreground', '--no-browser', ...sandbox.args, `--mock-data-store=${SMOKE_MOCKS}`], { env: sandbox.env, stdio: ['ignore', log, log] })
   closeSync(log)
   const started = Date.now()
   while (Date.now() - started < 20000) {
@@ -154,16 +166,15 @@ const stopServer = async () => {
   if (await healthAnswers()) throw new Error(`${ORIGIN} still answers after the server was stopped`)
 }
 
-const removeOwnConfigDir = () => {
-  if (ownConfigDir) {
-    try { rmSync(configDir, { recursive: true, force: true }) } catch {}
-  }
+// Only the root this run made. A directory the caller named lies outside it and is kept.
+const removeSandbox = () => {
+  try { rmSync(sandbox.root, { recursive: true, force: true }) } catch {}
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     try { server?.kill('SIGKILL') } catch {}
-    removeOwnConfigDir()
+    removeSandbox()
     process.exit(130)
   })
 }
@@ -510,7 +521,7 @@ try {
 } finally {
   try { await browser?.close() } catch {}
   try { await stopServer() } catch {}
-  removeOwnConfigDir()
+  removeSandbox()
 }
 
 if (!process.exitCode) {

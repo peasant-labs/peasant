@@ -38,6 +38,7 @@ import { applyDeterminism } from './determinism.mjs'
 import { SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
 import { createPublishWorld, expectedPushBody, loadPublishStates } from '../../src/app/share/testdata/publish-popup-states.mjs'
 import { createAutomaticConsentWorld, loadAutomaticConsent } from '../../src/app/share/testdata/publish-automatic-consent.mjs'
+import { ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -355,7 +356,10 @@ const chunkPath = chunkPaths[0]
 console.log(`[publish-states-shoot] provenance OK: ${chunkPaths.map((path) => relative(REPO, path)).join(', ')} carry ${FEATURE_BYTES.join(', ')}`)
 
 console.log(`[publish-states-shoot] starting ${relative(REPO, BIN)} on :${PORT} (mock store: ${SMOKE_MOCKS}) …`)
-const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', `--mock-data-store=${SMOKE_MOCKS}`], { cwd: REPO, stdio: ['ignore', 'ignore', 'pipe'] })
+// The server's configuration, data, state and cache directories and its HOME are a throwaway root of this run,
+// so it never opens the store of the person running the script. The mock data store supplies what it serves.
+const sandbox = ownedServerSandbox('publish-states-shoot')
+const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, `--mock-data-store=${SMOKE_MOCKS}`], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] })
 let serverError = ''
 server.stderr.on('data', (data) => { serverError += data.toString() })
 let serverDown = false

@@ -14,6 +14,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
+import { ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -304,7 +305,10 @@ if (!CHROME) fail('CHROME_PATH is unset; set it to google-chrome or chromium')
 const chunks = assertProvenance()
 mkdirSync(OUT, { recursive: true })
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
-const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', '--mock-data-store=web,sessions,search'], { cwd: REPO, stdio: ['ignore', 'ignore', 'pipe'] })
+// The server's configuration, data, state and cache directories and its HOME are a throwaway root of this run,
+// so it never opens the store of the person running the script. The mock data store supplies what it serves.
+const sandbox = ownedServerSandbox('grouped-list-visual')
+const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,search'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] })
 let serverError = ''
 server.stderr.on('data', (data) => { serverError += data.toString() })
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: null })
