@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"slices"
 )
@@ -53,10 +54,21 @@ type RefreshCensusRow struct {
 	SourceBytes int64
 }
 
+// MarshalJSON writes the reason as its stable code, not its id, so a report
+// reads the same in every build.
+func (row RefreshCensusRow) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Reason      string      `json:"reason"`
+		Lane        RefreshLane `json:"lane"`
+		Sessions    int         `json:"sessions"`
+		SourceBytes int64       `json:"source_bytes"`
+	}{row.Reason.Code(), row.Lane, row.Sessions, row.SourceBytes})
+}
+
 // RefreshCensus is the per-reason count of the sessions a run refreshed. An
 // unchanged session is not in it.
 type RefreshCensus struct {
-	Rows []RefreshCensusRow
+	Rows []RefreshCensusRow `json:"rows"`
 }
 
 // Sessions returns the number of refreshed sessions across every reason.
@@ -111,7 +123,10 @@ func (p *Pipeline) refreshOutcomes(results []SessionResult, indexLog []IndexLogE
 	seen := make(map[SessionID]bool, len(results))
 	var outcomes []RunOutcome
 	for _, result := range results {
-		if result.SessionID == "" || result.ExcludedBySelection || result.Status == DiffUnchanged || seen[result.SessionID] {
+		if result.SessionID == "" ||
+			result.ExcludedBySelection ||
+			result.Status == DiffUnchanged ||
+			seen[result.SessionID] {
 			continue
 		}
 		seen[result.SessionID] = true

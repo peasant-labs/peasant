@@ -90,7 +90,10 @@ func TestWriteLaneStats(t *testing.T) {
 				t.Fatalf("%d of %d jobs ran", ran, len(row.Jobs))
 			}
 			got := recorder.Snapshot()
-			if got.Jobs != row.Want.Jobs || got.WaitTotal.Milliseconds() != row.Want.WaitMs || got.BusyTotal.Milliseconds() != row.Want.BusyMs || got.Queued != 0 {
+			if got.Jobs != row.Want.Jobs ||
+				got.WaitTotal.Milliseconds() != row.Want.WaitMs ||
+				got.BusyTotal.Milliseconds() != row.Want.BusyMs ||
+				got.Queued != 0 {
 				t.Fatalf("lane stats = %+v, want %+v with none waiting", got, row.Want)
 			}
 			for name, want := range row.WantStageWaitMs {

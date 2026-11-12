@@ -138,7 +138,10 @@ func TestIngestOutcomeReasons(t *testing.T) {
 				t.Fatalf("seeded kinds = %+v, fixture %+v, Go %v", got, fixtures.Kinds, ingest.AllOutcomeKinds)
 			}
 			for i, kind := range ingest.AllOutcomeKinds {
-				if got[i].id != int64(kind) || got[i].name != kind.String() || fixtures.Kinds[i].ID != got[i].id || fixtures.Kinds[i].Name != got[i].name {
+				if got[i].id != int64(kind) ||
+					got[i].name != kind.String() ||
+					fixtures.Kinds[i].ID != got[i].id ||
+					fixtures.Kinds[i].Name != got[i].name {
 					t.Fatalf("kind %d: seeded %+v, fixture %+v, Go %d %s", i, got[i], fixtures.Kinds[i], kind, kind)
 				}
 			}

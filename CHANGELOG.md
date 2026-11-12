@@ -50,6 +50,16 @@ Release, which holds the signed artifacts and checksums.
   and 1 only when it sent one and something failed.
 
 ### Changed
+- Every import keeps its timing profile: `peasant harvest`, the kickstart
+  import and the import started from the local web app each store it with the
+  run's audit row. `harvest --profile-index` now only decides whether the
+  profile is also printed. Each run also records one `refresh` row for every
+  session it refreshed, with the reason.
+- A session whose native source could not be read is recorded in the run audit
+  as `adapter_capture_failed`. `adapter_refresh_unavailable` now names only the
+  warning that a refresh could not run and the previous copy was kept.
+- An import that is cancelled before it finishes records its run row and the
+  stages it measured.
 - `open --session` no longer passes `--force`. An unchanged session is not
   re-extracted or re-indexed; opening it still refreshes that session's commits.
   `harvest` gains `--refresh-commits`, off by default, for the same refresh
@@ -97,6 +107,15 @@ Release, which holds the signed artifacts and checksums.
   once, which needs free disk space for a new index. A store that never ran
   0.16.1, including one upgraded straight from 0.15.x, only takes the quick
   path.
+- Migration 77 stores a profile of every import. `ingest_run_stages` holds one
+  row per pipeline stage per run (duration, counts, bytes, time spent waiting
+  for the write lane), kept for the latest 100 runs, and `index_log` gains
+  `parse_ms`, `write_ms` and `bytes`. `ingest_run_outcomes` now holds a
+  `reason_id` in place of the `kind` and `reason_code` text: the kinds and
+  reasons live in `ingest_outcome_kinds` and `ingest_outcome_reasons`, each
+  reason with a stable id. A query that read `kind` or `reason_code` must join
+  those tables; `docs/harvest-audit.md` has the new queries. The upgrade
+  rebuilds that one small table and keeps every row of the latest 100 runs.
 
 ## [0.14.0] - 2026-11-04
 

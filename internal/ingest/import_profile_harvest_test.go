@@ -275,7 +275,11 @@ WHERE k.name = 'refresh' AND o.run_id = ?`, firstRun)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(timings) != 1 || timings[0].ParseDuration == nil || timings[0].WriteDuration == nil || timings[0].Bytes == nil || *timings[0].Bytes <= 0 {
+				if len(timings) != 1 ||
+					timings[0].ParseDuration == nil ||
+					timings[0].WriteDuration == nil ||
+					timings[0].Bytes == nil ||
+					*timings[0].Bytes <= 0 {
 					t.Fatalf("session %s index timings = %+v, want one measured attempt", session.ID, timings)
 				}
 			}

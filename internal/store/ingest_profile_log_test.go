@@ -242,10 +242,16 @@ func TestIngestProfileLog(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(got) != 1 || got[0].ParseDuration == nil || got[0].WriteDuration == nil || got[0].Bytes == nil {
+			if len(got) != 1 ||
+				got[0].ParseDuration == nil ||
+				got[0].WriteDuration == nil ||
+				got[0].Bytes == nil {
 				t.Fatalf("stored timings = %+v, want all three measured", got)
 			}
-			if *got[0].ParseDuration != parse || *got[0].WriteDuration != write || *got[0].Bytes != fixtures.IndexLog.Bytes || got[0].Reason != reason {
+			if *got[0].ParseDuration != parse ||
+				*got[0].WriteDuration != write ||
+				*got[0].Bytes != fixtures.IndexLog.Bytes ||
+				got[0].Reason != reason {
 				t.Fatalf("stored timings = %v %v %d %q", *got[0].ParseDuration, *got[0].WriteDuration, *got[0].Bytes, got[0].Reason)
 			}
 		},
