@@ -69,10 +69,6 @@ exemptTables:
   ingest_run_outcomes: >-
     Append-only run log: AUTOINCREMENT id and the run's reason codes, a
     property of the run.
-  session_entries_fts_data: >-
-    FTS5 shadow table for external-content session_entries; its b-tree bytes
-    depend on transaction boundaries, not on logical content, which the
-    content table already compares.
   session_search_fts_data: >-
     FTS5 shadow table for external-content session_search_source; its bytes
     depend on transaction boundaries, not on logical content.
