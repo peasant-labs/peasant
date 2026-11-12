@@ -11,8 +11,12 @@ export interface ShareSession {
   startTime: string;
   durationMins: number;
   totalTokens: number;
-  /** The turns a reader is shown: the session's conversation turns. */
-  turnCount: number;
+  /**
+   * The session's conversation turns (user and assistant text or image turns),
+   * the count a reader is shown. Not the folded turn count, which also counts
+   * system and tool rows.
+   */
+  conversationTurns: number;
   model: string;
   shareStatus: ShareStatus;
   /**

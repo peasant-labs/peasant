@@ -9,6 +9,7 @@ import type {
   LocalSessionListItem,
   LocalSessionListPayload,
   LocalSessionRow,
+  SessionSummary,
 } from '@peasant-labs/schema';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { IngestTeach } from '@/components/IngestTeach';
@@ -42,27 +43,18 @@ import type { ShareFooterActions } from '@/components/share/footer-actions';
 // reachable for publishing several sessions at once and for the evidence exits
 // (?sessions=) the changes and code-map pages link here.
 
-interface BackendSessionSummary {
-  id: string;
-  harness: string;
-  startTime: string;
-  durationMins: number;
-  totalTokens: number;
-  turnCount: number;
-  /** Optional measured conversation turns; the count a reader is shown. */
-  conversationTurnCount?: number;
-  toolCallCount: number;
-  /** Optional measured input submissions (present includes a measured zero). */
-  inputSubmissionCount?: number;
-  project?: string;
-  /** Canonical project identity from the schema-owned SessionSummary wire. */
-  projectHash?: string;
-  /** Redaction-safe first user message — see SessionSummary.preview (Go). */
-  preview?: string;
-  /** Heuristic outcome — see SessionSummary.outcome (Go). */
-  outcome?: string;
+/**
+ * The session fields the chooser reads from the sessions route. Their types
+ * are the contract's; only `shareStatus` is this route's own addition.
+ */
+type BackendSessionSummary = Pick<
+  SessionSummary,
+  | 'id' | 'harness' | 'startTime' | 'durationMins' | 'totalTokens'
+  | 'turnCount' | 'conversationTurnCount' | 'toolCallCount' | 'inputSubmissionCount'
+  | 'project' | 'projectHash' | 'preview' | 'outcome'
+> & {
   shareStatus?: ShareSession['shareStatus'];
-}
+};
 
 /**
  * Map the sync route's status menu onto the chooser's contribution status.
@@ -103,7 +95,7 @@ function mapBackendToShareSession(backend: BackendSessionSummary): ShareSession 
     startTime: backend.startTime,
     durationMins: Math.round(backend.durationMins),
     totalTokens: backend.totalTokens,
-    turnCount: displayedTurnCount(backend),
+    conversationTurns: displayedTurnCount(backend),
     model: '',
     shareStatus: backend.shareStatus ?? 'new',
     preview: backend.preview ?? '',
@@ -127,7 +119,7 @@ function mapGroupedToShareSession(row: LocalSessionRow): ShareSession {
     startTime: backend.startTime,
     durationMins: Math.round(backend.durationMins),
     totalTokens: backend.totalTokens,
-    turnCount: displayedTurnCount(backend),
+    conversationTurns: displayedTurnCount(backend),
     model: row.sync?.model ?? '',
     shareStatus: shareStatusFromSync(row.sync?.syncStatus),
     preview: backend.preview ?? '',
@@ -316,7 +308,7 @@ async function loadHelperMembers(group: ShareHelperGroup, page: number, perPage:
       title: sessionPreviewTitle(session.preview, session.id),
       provider: session.provider,
       inputSubmissionCount: row.session.inputSubmissionCount,
-      turnCount: session.turnCount,
+      turnCount: session.conversationTurns,
       selectable: isSelectableStatus(session.shareStatus),
       session,
       // A member may itself anchor saved helper groups. They are carried through

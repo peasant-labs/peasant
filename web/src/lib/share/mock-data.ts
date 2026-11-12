@@ -22,7 +22,7 @@ const MOCK_SESSIONS: ShareSession[] = [
     startTime: '2026-02-24T09:15:00Z',
     durationMins: 47,
     totalTokens: 128_450,
-    turnCount: 34,
+    conversationTurns: 34,
     model: 'claude-opus-4-6',
     shareStatus: 'new',    outcome: 'resolved',
     preview:
@@ -37,7 +37,7 @@ const MOCK_SESSIONS: ShareSession[] = [
     startTime: '2026-02-23T14:30:00Z',
     durationMins: 22,
     totalTokens: 56_200,
-    turnCount: 18,
+    conversationTurns: 18,
     model: 'claude-sonnet-4-6',
     shareStatus: 'new',    outcome: 'partial',
     preview:
@@ -52,7 +52,7 @@ const MOCK_SESSIONS: ShareSession[] = [
     startTime: '2026-02-22T10:00:00Z',
     durationMins: 65,
     totalTokens: 201_800,
-    turnCount: 52,
+    conversationTurns: 52,
     model: 'claude-opus-4-6',
     shareStatus: 'updated',    outcome: 'failed',
     preview:
@@ -67,7 +67,7 @@ const MOCK_SESSIONS: ShareSession[] = [
     startTime: '2026-02-24T08:00:00Z',
     durationMins: 33,
     totalTokens: 84_700,
-    turnCount: 26,
+    conversationTurns: 26,
     model: 'claude-sonnet-4-6',
     shareStatus: 'new',    preview:
       'Add a /health endpoint to village-api and document the response schema',
@@ -81,7 +81,7 @@ const MOCK_SESSIONS: ShareSession[] = [
     startTime: '2026-02-21T16:45:00Z',
     durationMins: 15,
     totalTokens: 31_500,
-    turnCount: 10,
+    conversationTurns: 10,
     model: 'claude-haiku-4-5',
     shareStatus: 'shared',    preview:
       'Investigate why village-api WebSocket subscriptions drop after 30 seconds',
@@ -95,7 +95,7 @@ const MOCK_SESSIONS: ShareSession[] = [
     startTime: '2026-02-23T11:20:00Z',
     durationMins: 41,
     totalTokens: 112_000,
-    turnCount: 29,
+    conversationTurns: 29,
     model: 'gemini-2.5-pro',
     shareStatus: 'new',    preview:
       'Provision the staging VPC with Terraform and tag every resource for cost tracking',
@@ -109,7 +109,7 @@ const MOCK_SESSIONS: ShareSession[] = [
     startTime: '2026-02-20T09:30:00Z',
     durationMins: 28,
     totalTokens: 67_300,
-    turnCount: 21,
+    conversationTurns: 21,
     model: 'claude-sonnet-4-6',
     shareStatus: 'shared',    preview:
       'Migrate the infra-terraform state backend from local files to remote S3',
@@ -123,7 +123,7 @@ const MOCK_SESSIONS: ShareSession[] = [
     startTime: '2026-02-24T07:00:00Z',
     durationMins: 12,
     totalTokens: 19_800,
-    turnCount: 8,
+    conversationTurns: 8,
     model: 'claude-haiku-4-5',
     shareStatus: 'held',    preview:
       'Draft the getting-started page for the docs site and add a code sample',
@@ -137,7 +137,7 @@ const MOCK_SESSIONS: ShareSession[] = [
     startTime: '2026-02-22T15:10:00Z',
     durationMins: 55,
     totalTokens: 145_600,
-    turnCount: 38,
+    conversationTurns: 38,
     model: 'codex-1',
     shareStatus: 'updated',    preview:
       'Set up the docs-site search index and verify it builds in CI',
@@ -151,7 +151,7 @@ const MOCK_SESSIONS: ShareSession[] = [
     startTime: '2026-02-23T17:00:00Z',
     durationMins: 38,
     totalTokens: 95_400,
-    turnCount: 31,
+    conversationTurns: 31,
     model: 'claude-opus-4-6',
     shareStatus: 'new',    preview:
       'Implement idempotent retry handling in the billing-service charge worker',
