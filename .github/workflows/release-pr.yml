@@ -26,13 +26,20 @@ on:
 # A push (synchronize) supersedes the running gates for this PR. A body edit
 # does NOT: it shares the `gates` group with the push run, so it queues behind
 # it instead of cancelling it, and the surviving edited run cannot leave the PR
-# with no pre-merge signal. A label add gets its own per-label group so an
-# unrelated label cannot replace a queued `full-gate` run; a full-gate run may
-# therefore overlap a push's run, but the child workflows are keyed per head and
-# cannot cancel each other across heads.
+# with no pre-merge signal. The merge (closed) run has its own `merge` group
+# that no other event enters and is never cancelled, so a body edit landing
+# while the merge run waits pending behind a cancellation cannot replace it and
+# `tag` still runs. A label add gets its own per-label group so an unrelated
+# label cannot replace a queued `full-gate` run; a full-gate run may therefore
+# overlap a push's run, but the child workflows are keyed per head and cannot
+# cancel each other across heads. One window remains: if a body edit lands in
+# the few seconds while a push's run is pending behind a cancellation, the edit
+# run replaces it and skips the expensive gates; push again or apply the
+# `full-gate` label to recover. Putting edits in their own group would be
+# wrong: an older push run's title check could finish after the edit's.
 concurrency:
-  group: release-pr-${{ github.event.pull_request.number }}-${{ github.event.action == 'labeled' && github.event.label.name || 'gates' }}
-  cancel-in-progress: ${{ github.event.action != 'edited' && github.event.action != 'labeled' }}
+  group: release-pr-${{ github.event.pull_request.number }}-${{ github.event.action == 'closed' && 'merge' || (github.event.action == 'labeled' && github.event.label.name || 'gates') }}
+  cancel-in-progress: ${{ github.event.action != 'closed' && github.event.action != 'edited' && github.event.action != 'labeled' }}
 
 permissions:
   contents: read
@@ -44,6 +51,7 @@ jobs:
     name: validate release PR
     if: >-
       github.event.action != 'closed' &&
+      github.event.pull_request.state == 'open' &&
       startsWith(github.event.pull_request.title, 'release(')
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
@@ -83,6 +91,7 @@ jobs:
     name: changed gates
     if: >-
       github.event.action != 'closed' &&
+      github.event.pull_request.state == 'open' &&
       startsWith(github.event.pull_request.title, 'release(')
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
