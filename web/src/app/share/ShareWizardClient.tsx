@@ -1,5 +1,6 @@
 'use client';
 
+import { displayedTurnCount } from '@/lib/sessions/displayedTurnCount';
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -48,6 +49,8 @@ interface BackendSessionSummary {
   durationMins: number;
   totalTokens: number;
   turnCount: number;
+  /** Optional measured conversation turns; the count a reader is shown. */
+  conversationTurnCount?: number;
   toolCallCount: number;
   /** Optional measured input submissions (present includes a measured zero). */
   inputSubmissionCount?: number;
@@ -100,7 +103,7 @@ function mapBackendToShareSession(backend: BackendSessionSummary): ShareSession 
     startTime: backend.startTime,
     durationMins: Math.round(backend.durationMins),
     totalTokens: backend.totalTokens,
-    turnCount: backend.turnCount,
+    turnCount: displayedTurnCount(backend),
     model: '',
     shareStatus: backend.shareStatus ?? 'new',
     preview: backend.preview ?? '',
@@ -124,7 +127,7 @@ function mapGroupedToShareSession(row: LocalSessionRow): ShareSession {
     startTime: backend.startTime,
     durationMins: Math.round(backend.durationMins),
     totalTokens: backend.totalTokens,
-    turnCount: backend.turnCount,
+    turnCount: displayedTurnCount(backend),
     model: row.sync?.model ?? '',
     shareStatus: shareStatusFromSync(row.sync?.syncStatus),
     preview: backend.preview ?? '',

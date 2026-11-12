@@ -1,5 +1,6 @@
 'use client';
 
+import { displayedTurnCount } from '@/lib/sessions/displayedTurnCount';
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { SearchIcon } from 'lucide-react';
@@ -34,11 +35,11 @@ import type { SessionSummary } from '@/types/messages';
  *     would be three columns of decoration that read as live state.
  *
  * And one column is deliberately RENAMED:
- *   - "Turns", not "user turns". SessionSummary.turnCount counts USER AND
- *     ASSISTANT turns together (the ingest tests pin this: a 1-user/1-assistant
- *     fixture yields turnCount === 2). There is no user-only count in the
- *     pipeline, and turns do not reliably alternate, so it cannot be derived by
- *     halving. The honest header is the total.
+ *   - "Turns", not "user turns". The column prints the session's conversation
+ *     turns (`displayedTurnCount`): user and assistant text or image entries
+ *     together. There is no user-only count in the pipeline, and turns do not
+ *     reliably alternate, so it cannot be derived by halving. System and tool
+ *     rows are not counted; `turnCount` counts those too and is not shown.
  */
 
 const AllSessionColumn = Object.freeze({
@@ -86,7 +87,7 @@ function SessionCell({ session }: { session: SessionSummary }) {
   const projectHash = parseProjectHash(session.projectHash);
   const project = session.project ? displayProject(session.project) : '—';
   const primary = rowTitle(session);
-  const label = `${primary}, ${session.harness}, ${session.turnCount} turns, ${session.totalTokens.toLocaleString()} tokens${session.project ? `, ${project}` : ''}`;
+  const label = `${primary}, ${session.harness}, ${displayedTurnCount(session)} turns, ${session.totalTokens.toLocaleString()} tokens${session.project ? `, ${project}` : ''}`;
 
   const body = (
     <>
@@ -191,7 +192,7 @@ export function AllSessions({
       label: 'turns',
       align: ColumnAlign.End,
       numeric: true,
-      render: (session) => session.turnCount.toLocaleString(),
+      render: (session) => displayedTurnCount(session).toLocaleString(),
     },
     {
       id: AllSessionColumn.Tokens,

@@ -1,5 +1,6 @@
 'use client';
 
+import { displayedTurnCount } from '@/lib/sessions/displayedTurnCount';
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, FileCode, FolderOpen, RotateCw, X } from 'lucide-react';
@@ -318,7 +319,7 @@ function AllConversations({
                     <span className="mt-0.5 flex items-center gap-2 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-4">
                       <span>{formatRelative(s.startTime, nowMs)}</span>
                       <span>
-                        {s.turnCount} request{s.turnCount !== 1 ? 's' : ''}
+                        {displayedTurnCount(s)} request{displayedTurnCount(s) !== 1 ? 's' : ''}
                       </span>
                     </span>
                   </Link>

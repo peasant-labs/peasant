@@ -11,6 +11,7 @@ export interface ShareSession {
   startTime: string;
   durationMins: number;
   totalTokens: number;
+  /** The turns a reader is shown: the session's conversation turns. */
   turnCount: number;
   model: string;
   shareStatus: ShareStatus;
