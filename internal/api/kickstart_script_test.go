@@ -92,6 +92,9 @@ type kickstartSpec struct {
 	Recordings []string `yaml:"recordings"`
 	// HoldIngest holds each import until a releaseIngest step.
 	HoldIngest bool `yaml:"holdIngest"`
+	// RetentionFails makes the write of Claude Code's retention period fail with
+	// this text, after the configuration was saved.
+	RetentionFails string `yaml:"retentionFails"`
 	// Unreadable names harnesses the scan could not read, each with the reason
 	// discovery gives.
 	Unreadable map[string]string `yaml:"unreadable"`
@@ -660,6 +663,10 @@ func (w *kickstartWorld) call(index int, step kickstartStep) {
 		if fault := kickstartAnswerFault(contract, method, path, response.StatusCode, raw); fault != "" {
 			w.fail(index, "%s %s: %s", method, path, fault)
 		}
+	}
+	// Every answer is JSON, said once, whoever wrote it.
+	if got := response.Header.Values(defaults.HeaderContentType); len(got) != 1 || got[0] != defaults.ContentJSON.String() {
+		w.fail(index, "%s %s: Content-Type = %q, want exactly [%q]", method, path, got, defaults.ContentJSON.String())
 	}
 	var decoded any
 	if err := json.Unmarshal(raw, &decoded); err != nil {

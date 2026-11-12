@@ -31,9 +31,11 @@ describe('/kickstart renders the served model', () => {
 
 // jsdom applies no stylesheet and has no layout, so a test cannot see a theme
 // from here: the two themes are judged on the built page in the browser journey.
-// What this can hold is the source of the stylesheet itself.
+// What this can hold is two things in the source of the stylesheet itself: it
+// writes no colour literal, and it rounds no corner. Sizes and weights are not
+// read here.
 describe('the wizard stylesheet', () => {
-  it('reaches every colour, size and weight through a token and has no rounded corner', () => {
+  it('writes no literal colour and rounds no corner', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/components/kickstart/kickstart.css'), 'utf8');
     expect(css, 'a literal colour in the wizard stylesheet').not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
     expect(css, 'a rounded corner in the wizard stylesheet').not.toMatch(/border-radius\s*:\s*(?!0\b)/);

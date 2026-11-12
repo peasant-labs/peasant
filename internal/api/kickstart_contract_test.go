@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
 
@@ -167,6 +169,62 @@ func kickstartAnswerFault(contract *kickstartContract, method, path string, stat
 		}
 	}
 	return fmt.Sprintf("%s answers %d with code %s, which the contract does not declare for it (declared: %v)", route.OperationID, status, response.Code, route.Errors[strconv.Itoa(status)])
+}
+
+//go:embed testdata/kickstart_contract_faults.yaml
+var kickstartContractFaultsYAML []byte
+
+type kickstartContractFaultCase struct {
+	Name   string `yaml:"name"`
+	Method string `yaml:"method"`
+	Path   string `yaml:"path"`
+	Status int    `yaml:"status"`
+	Body   string `yaml:"body"`
+	Fault  string `yaml:"fault"`
+	OK     bool   `yaml:"ok"`
+}
+
+// TestKickstartAnswerFaultRefusesWhatTheContractRefuses shows the check that
+// holds every kickstart answer to the contract's record can refuse. It runs on
+// each answer of each kickstart fixture, and a check that reported nothing
+// would leave all of them green, so these answers are the proof: each bad one
+// names its fault, and each one the contract allows, or the check is not asked
+// to judge, names none.
+func TestKickstartAnswerFaultRefusesWhatTheContractRefuses(t *testing.T) {
+	t.Parallel()
+	contract, reason := loadKickstartContract(t)
+	if contract == nil {
+		t.Skipf("the kickstart error record is not on this machine: %s; make check reads it from the module cache", reason)
+	}
+	var fixture struct {
+		RequiredNames []string                     `yaml:"requiredNames"`
+		Cases         []kickstartContractFaultCase `yaml:"cases"`
+	}
+	if err := testutil.DecodeNamedFixtureYAML(kickstartContractFaultsYAML, &fixture); err != nil {
+		t.Fatalf("testdata/kickstart_contract_faults.yaml: %v", err)
+	}
+	present := make(map[string]bool, len(fixture.Cases))
+	for _, c := range fixture.Cases {
+		present[c.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("internal/api/testdata/kickstart_contract_faults.yaml", "case", fixture.RequiredNames, present); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
+			if c.OK == (c.Fault != "") {
+				t.Fatalf("case %q must name exactly one of fault and ok", c.Name)
+			}
+			got := kickstartAnswerFault(contract, c.Method, c.Path, c.Status, []byte(c.Body))
+			switch {
+			case c.OK && got != "":
+				t.Errorf("%s %s answered %d: fault %q, want none", c.Method, c.Path, c.Status, got)
+			case !c.OK && !strings.Contains(got, c.Fault):
+				t.Errorf("%s %s answered %d: fault %q, want one containing %q", c.Method, c.Path, c.Status, got, c.Fault)
+			}
+		})
+	}
 }
 
 // TestKickstartContractRecordIsReadable holds the reader of the schema module's

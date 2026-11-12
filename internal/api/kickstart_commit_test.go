@@ -84,7 +84,9 @@ type kickstartCommitWorld struct {
 	started    []kickstartIngestRun
 	finished   int
 	retention  []kickstartRetentionCall
-	wake       chan struct{}
+	// retentionFails is the text a retention write fails with; empty succeeds.
+	retentionFails string
+	wake           chan struct{}
 	// violation is the first way an import broke the case's boundary. The import
 	// runs on the server's goroutine, where a test cannot fail, so it records the
 	// breach and the case fails from its next wait or, at the latest, at its end.
@@ -102,6 +104,7 @@ func (c *kickstartCommitWorld) prepare(t *testing.T, dir string, homes testXDGHo
 	c.output = filepath.Join(dir, "managed")
 	c.wake = make(chan struct{})
 	c.broken = make(chan struct{})
+	c.retentionFails = spec.RetentionFails
 	for _, step := range spec.NextSteps {
 		c.nextSteps = append(c.nextSteps, onboarding.NextStep(step))
 	}
@@ -244,6 +247,9 @@ func (c *kickstartCommitWorld) writeRetention(configPath string) func(int) error
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		c.retention = append(c.retention, kickstartRetentionCall{days: days, file: string(file)})
+		if c.retentionFails != "" {
+			return errors.New(c.retentionFails)
+		}
 		return nil
 	}
 }

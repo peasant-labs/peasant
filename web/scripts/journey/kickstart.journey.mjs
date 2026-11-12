@@ -179,7 +179,7 @@ async function probe(page) {
   return page.evaluate(() => {
     const family = /^"?atkinsonHyperlegible(Mono)?"?(,|$)/i;
     const corners = ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius'];
-    const surface = document.querySelector('.ks-page');
+    const surface = document.querySelector('.wizard-page');
     const offenders = { font: [], radius: [] };
     let textElements = 0;
     let drawn = 0;
@@ -200,7 +200,7 @@ async function probe(page) {
     // The step rail: where each label and its text were laid out, against the frame they sit in.
     // The frame decides whether the rail shows its labels (a rail too narrow for them keeps them
     // in the accessible name and draws the numbers), so a rail is labelled when any label is drawn.
-    const frame = document.querySelector('.ks-wizard');
+    const frame = document.querySelector('.wizard-host');
     const frameBox = frame ? frame.getBoundingClientRect() : null;
     const railLabels = [...(frame ? frame.querySelectorAll('.swz-rail .swz-label') : [])].map((element) => {
       const box = element.getBoundingClientRect();
@@ -582,7 +582,7 @@ test('selection-page-saves-only-selection', async () => {
 
   // A wizard is open with an answer that is not saved.
   const pageC = await openPage('C', '/kickstart/?from=settings');
-  await expect(pageC.locator('.ks-page').getByRole('link', { name: 'settings', exact: true }), 'the trail says setup was opened from settings').toBeVisible();
+  await expect(pageC.locator('.wizard-page').getByRole('link', { name: 'settings', exact: true }), 'the trail says setup was opened from settings').toBeVisible();
   await expect(title(pageC)).toHaveText('peasant online');
   await pageC.getByRole('button', { name: 'no', exact: true }).click();
   await expect(title(pageC)).toHaveText('choose sessions to import');
@@ -616,7 +616,8 @@ test('selection-page-saves-only-selection', async () => {
   await expect(pageD.getByRole('heading', { name: 'your selection is saved' })).toBeVisible();
   // The sessions stored already are not counted again: the import brings in the one that was added.
   laterImports.selectionPage = await finishCounts(pageD);
-  expect(laterImports.selectionPage.new, 'the import brought in the session that was added').toBe(fixture.selectionPage.imported);
+  // The sessions stored already are unchanged on disk, so they are neither new nor updated.
+  expect(laterImports.selectionPage, 'the import brought in the session that was added and updated none').toEqual({ new: fixture.selectionPage.imported, updated: 0 });
 
   // Only the selection changed on disk.
   const after = readConfig();
@@ -654,7 +655,7 @@ test('selection-page-names-the-chosen-branch', async () => {
   await save(page).click();
   await expect(page.getByRole('heading', { name: 'your selection is saved' })).toBeVisible();
   laterImports.branchChoice = await finishCounts(page);
-  expect(laterImports.branchChoice.new, 'the import brought in the session of the chosen branch').toBe(fixture.branchChoice.imported);
+  expect(laterImports.branchChoice, 'the import brought in the session of the chosen branch and updated none').toEqual({ new: fixture.branchChoice.imported, updated: 0 });
 
   const projects = readConfig().selection.harnesses['claude-code'].projects;
   const entry = projects.find((candidate) => candidate.gitRemote === marketingRepo.remote);

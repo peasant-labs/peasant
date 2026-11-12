@@ -3,9 +3,17 @@
 # event it forbids must fail when it is played, not pass without running. Each
 # case is a fixture case in miniature (`play`, with `own` for the case keys the
 # playing test reads itself, and `page`, the page it is played on: `text`, the
-# default, or `status-probe`, which asks the status route once it is drawn) and
-# either `refuses`, text the error must contain, or nothing, meaning the harness
-# plays it.
+# default, `status-probe`, which asks the status route once it is drawn, or
+# `tree-probe`, which reads the forest of the session `ses-x`, or
+# `redirect-probe`, which redirects to /kickstart when the status says setup is
+# not saved) and either
+# `refuses`, text the error must contain, `teardownRefuses`, text the error of
+# the teardown that follows a case that played must contain, or nothing, meaning
+# the harness plays it.
+#
+# Every case is played with the file's `defaultServer` beneath its own `server`.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-x/tree": {body: {nodes: []}}
 requiredNames:
   - a-valid-case-is-played
   - a-misspelt-step-key-is-refused
@@ -31,6 +39,18 @@ requiredNames:
   - a-kickstart-refusal-with-a-code-the-contract-lists-is-played
   - a-kickstart-refusal-with-an-unknown-code-is-refused
   - a-kickstart-refusal-without-a-code-is-refused
+  - a-file-default-answers-a-route-a-case-does-not-script
+  - a-case-script-wins-over-the-file-default
+  - a-kickstart-call-no-fixture-answers-fails-the-test-at-teardown
+  - a-kickstart-call-that-is-scripted-passes-the-teardown
+  - a-read-refused-for-its-host-with-the-host-code-is-played
+  - a-write-refused-for-its-origin-with-the-origin-code-is-played
+  - a-read-refused-with-the-origin-code-is-refused
+  - a-host-refusal-with-another-code-is-refused
+  - a-step-waits-for-the-redirect-the-page-takes
+  - a-step-says-the-page-did-not-redirect
+  - a-redirect-the-page-never-takes-is-refused
+  - a-redirect-the-page-did-not-take-is-refused-as-no-redirect
 cases:
   - name: a-valid-case-is-played
     play:
@@ -185,3 +205,92 @@ cases:
       steps:
         - expectText: [hello]
     refuses: [breaks the Local API contract, code, malformed]
+  - name: a-file-default-answers-a-route-a-case-does-not-script
+    page: tree-probe
+    play:
+      steps:
+        - expectText: ["rows: 0"]
+  - name: a-case-script-wins-over-the-file-default
+    page: tree-probe
+    play:
+      server:
+        "GET /api/v1/kickstart/sessions/ses-x/tree": {body: {nodes: [{id: p-one, kind: project, state: none, label: ledger}]}}
+      steps:
+        - expectText: ["rows: 1"]
+  # The harness answers a call nothing scripts with 404, which a page can shrug
+  # off. The case plays; the teardown after it says what was never answered.
+  - name: a-kickstart-call-no-fixture-answers-fails-the-test-at-teardown
+    page: status-probe
+    play:
+      steps:
+        - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+    teardownRefuses: ["GET /api/v1/kickstart/status", which no fixture answers, script the route]
+  - name: a-kickstart-call-that-is-scripted-passes-the-teardown
+    page: status-probe
+    play:
+      server:
+        "GET /api/v1/kickstart/status": {body: {configured: true}}
+      steps:
+        - expectText: ["configured: yes"]
+  - name: a-read-refused-for-its-host-with-the-host-code-is-played
+    play:
+      server:
+        "GET /api/v1/kickstart/status": {status: 403, body: {code: request_host_not_local, error: this request is not from this computer}}
+      steps:
+        - expectText: [hello]
+  - name: a-write-refused-for-its-origin-with-the-origin-code-is-played
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions": {status: 403, body: {code: request_origin_not_local, error: this request does not come from the dashboard}}
+      steps:
+        - expectText: [hello]
+  - name: a-read-refused-with-the-origin-code-is-refused
+    play:
+      server:
+        "GET /api/v1/kickstart/status": {status: 403, body: {code: request_origin_not_local, error: this request does not come from the dashboard}}
+      steps:
+        - expectText: [hello]
+    refuses: [breaks the Local API contract, code, request_host_not_local, malformed]
+  - name: a-host-refusal-with-another-code-is-refused
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions": {status: 403, body: {code: forbidden, error: no}}
+      steps:
+        - expectText: [hello]
+    refuses: [breaks the Local API contract, code, malformed]
+  - name: a-step-waits-for-the-redirect-the-page-takes
+    page: redirect-probe
+    play:
+      server:
+        "GET /api/v1/kickstart/status": {body: {configured: false}, held: true}
+      steps:
+        - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+        - expectNoRedirect: true
+        - release: "GET /api/v1/kickstart/status"
+        - expectRedirect: /kickstart
+  - name: a-step-says-the-page-did-not-redirect
+    page: redirect-probe
+    play:
+      server:
+        "GET /api/v1/kickstart/status": {body: {configured: true}}
+      steps:
+        - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+        - expectNoRedirect: true
+  - name: a-redirect-the-page-never-takes-is-refused
+    page: redirect-probe
+    play:
+      server:
+        "GET /api/v1/kickstart/status": {body: {configured: true}}
+      steps:
+        - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+        - expectRedirect: /kickstart
+    refuses: [the page should have redirected to /kickstart]
+  - name: a-redirect-the-page-did-not-take-is-refused-as-no-redirect
+    page: redirect-probe
+    play:
+      server:
+        "GET /api/v1/kickstart/status": {body: {configured: false}}
+      steps:
+        - expectRedirect: /kickstart
+        - expectNoRedirect: true
+    refuses: [the page should not have redirected]

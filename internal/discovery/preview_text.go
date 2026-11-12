@@ -17,6 +17,17 @@ import (
 // harness transcript holds no readable turns.
 const PreviewNoTurnsNote = "no readable turns are in this session's transcript yet."
 
+// PreviewUnavailableNote is what a preview says for a discovered session whose
+// transcript location discovery did not record. The session is still ingested
+// whole, and the sentence says so, because a missing preview otherwise reads as
+// a missing session.
+const PreviewUnavailableNote = "no transcript preview is available for this session; it still ingests normally."
+
+// PreviewShortenedNote closes a preview that filled its line bound, or that
+// stopped where the source did not say how large it is, so PreviewCutNotice has
+// no size to name.
+const PreviewShortenedNote = "preview shortened here. the full session ingests normally."
+
 // HarnessLabel is the name of a harness in the lowercase chrome of a preview.
 func HarnessLabel(harness string) string {
 	return strings.ToLower(schema.HarnessDisplayName(defaults.Harness(harness)))
@@ -28,10 +39,15 @@ func HarnessLabel(harness string) string {
 // cleaner; this one serves a surface that is not a terminal.
 func CleanPreviewValue(value string) string {
 	cleaned := strings.Map(func(r rune) rune {
+		// A tab, a line break and a carriage return are white space, so they
+		// are tested before the control range that holds them.
+		isLineSpace := r == '\t' || r == '\n' || r == '\r'
+		isC0Control := r < 0x20 || r == 0x7f
+		isC1Control := r >= 0x80 && r <= 0x9f
 		switch {
-		case r == '\t' || r == '\n' || r == '\r':
+		case isLineSpace:
 			return ' '
-		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
+		case isC0Control || isC1Control:
 			return -1
 		default:
 			return r

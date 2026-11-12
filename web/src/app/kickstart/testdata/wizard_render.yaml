@@ -2,6 +2,14 @@
 # src/test/fixtures/kickstart/models.yaml). Each case scripts the server's
 # answers and then acts as a person would; the assertions read what the page
 # draws. The page must draw the served model and decide nothing on top of it.
+# Every case below is played with the forest of the session it opens answered,
+# because the page reads it whatever the case is about. A case that is about the
+# forest scripts the route itself.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
+  "GET /api/v1/kickstart/sessions/ses-odd/tree": {body: {$tree: empty}}
+  "GET /api/v1/kickstart/sessions/ses-full/tree/s-one/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+  "GET /api/v1/kickstart/sessions/ses-full/tree/s-two/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
 requiredNames:
   - synthetic-model-with-absurd-labels
   - hidden-stop-not-rendered
@@ -13,6 +21,7 @@ requiredNames:
   - wizard-stops-render-through-the-step-wizard-frame
   - conflict-choice-is-sent-per-field
   - commit-refusal-shows-the-rows-and-saves-nothing
+  - conflict-help-covers-rows-that-move-with-another-answer
 cases:
   - name: synthetic-model-with-absurd-labels
     server:
@@ -181,3 +190,27 @@ cases:
       - expectControl: {role: button, name: 3 auto-ingest new branches, present: false}
       - expectControl: {role: button, name: back, disabled: true}
       - expectControl: {role: button, name: continue, disabled: false}
+
+  # The server lists every row whose saved value moved, including a row that moved
+  # because of another answer the person gave. The words over the rows must not
+  # claim the person answered each one.
+  - name: conflict-help-covers-rows-that-move-with-another-answer
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        status: 409
+        body:
+          error: a value you answered changed in your saved settings
+          conflicts:
+            - {field: publication-preference, stop: publication, label: publication preference, mine: share-later, theirs: keep-local}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText:
+          - "these saved values changed while you set up; some move because of another answer you gave. choose which value to keep for each one."
+      - expectNoText: [after you answered them here]

@@ -100,6 +100,12 @@ function plainReason(text: string): string {
  * The statuses on which a kickstart route answers with the contract's closed
  * refusal body. Others (403 for a request that is not from this computer, a
  * gateway's 502) are not the server's kickstart refusals and are shown as sent.
+ *
+ * This restates a table the schema owns: its `testdata/local-api/kickstart_errors.yaml`
+ * lists each route's statuses and, in `code_status`, the one status each
+ * `LocalKickstartErrorCode` answers with (`LocalKickstartErrorCode.HTTPStatus()`
+ * in Go). The TypeScript package does not export it yet. When the next schema
+ * release does, read the statuses from it instead of listing them here.
  */
 const CONTRACT_REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 404, 500, 503]);
 

@@ -3,6 +3,11 @@
 # existing browser flow (POST /api/v1/sync/login, then GET /api/v1/sync/auth
 # until it says so); the page records an answer only once this computer is
 # signed in. Whether the offer is due is the server's `connect.offered`.
+# Every case below is played with the forest of the session it opens answered,
+# because the page reads it whatever the case is about. A case that is about the
+# forest scripts the route itself.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
 requiredNames:
   - connect-works
   - continue-locally-works

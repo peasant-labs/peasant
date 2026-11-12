@@ -112,8 +112,9 @@ type settingsHandler struct {
 	// changes, and a read never applies a file an update is replacing.
 	mu sync.Mutex
 	// lockWait bounds how long an update waits for the configuration file's
-	// lock, which the setup commit and `peasant config` also take. Zero waits
-	// defaultSettingsLockWait.
+	// lock, which the setup commit also takes. Zero waits
+	// defaults.ConfigLockWait. `peasant config` does not take the lock, so the
+	// swap re-reads the file to find a change it made.
 	lockWait time.Duration
 	// afterRead, when set, runs between an update's read of the file and its
 	// swap. A test replaces the file there, as a writer that ignores the lock
@@ -121,15 +122,11 @@ type settingsHandler struct {
 	afterRead func()
 }
 
-// defaultSettingsLockWait is how long an update waits for another writer of
-// config.yaml before it is refused. A request should not hang for minutes.
-const defaultSettingsLockWait = 5 * time.Second
-
 func (h *settingsHandler) lockWaitOrDefault() time.Duration {
 	if h.lockWait > 0 {
 		return h.lockWait
 	}
-	return defaultSettingsLockWait
+	return defaults.ConfigLockWait
 }
 
 // handleGetSettings answers GET /api/v1/settings: every key of config.Config
@@ -235,10 +232,11 @@ func (h *settingsHandler) handleUpdateSetting(w http.ResponseWriter, r *http.Req
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	// The file lock is the one every writer of config.yaml takes: this route,
-	// the setup commit and `peasant config`. Holding it from the read to the swap
-	// means an update starts from the file as the last writer left it and cannot
-	// put back a setting that writer just saved.
+	// The file lock is the one this route and the setup commit take. Holding it
+	// from the read to the swap means an update starts from the file as the last
+	// of those writers left it and cannot put back a setting that writer just
+	// saved. `peasant config` replaces the file without the lock, so the swap
+	// below re-reads the file and an update recomputes when it finds it changed.
 	file, err := config.OpenConfigFile(h.path, time.Now().Add(h.lockWaitOrDefault()))
 	if err != nil {
 		slog.Warn("settings: take the configuration lock before an update", "path", h.path, "key", request.Key, "error", err)

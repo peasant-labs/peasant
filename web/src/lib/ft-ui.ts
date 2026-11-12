@@ -74,7 +74,7 @@ import {
   ProviderBars as FtProviderBars,
   StepWizard as FtStepWizard,
   StepIndicator as FtStepIndicator,
-  StepWizardFrame as FtStepWizardFrame,
+  StepWizardFrame,
   ConsentDialog as FtConsentDialog,
   ConsentSummary as FtConsentSummary,
   Treemap as FtTreemap,
@@ -240,10 +240,12 @@ export const Skeleton = FtSkeleton as unknown as ComponentType<SkeletonProps>;
 // shipped (their declared types are sufficient).
 export { GroupedMultiSelect, RedactionReview, WhereDoesThisGo };
 
-// The server-grouped selection forest, the unified hunk diff, the progress bar and the spinner:
-// their shipped declarations already carry their props. SelectionNodeKind is the forest's own
-// closed set of row kinds; a host that needs to name one takes it from here.
-export { DiffView, Progress, SelectionNodeKind, SelectionTree, Spinner };
+// The server-grouped selection forest, the unified hunk diff, the progress bar, the spinner and
+// the controlled step-wizard frame: their shipped declarations already carry their props (the
+// frame's accessible name is a hyphenated JSX attribute, `aria-label`, which TypeScript does not
+// check against a props type). SelectionNodeKind is the forest's own closed set of row kinds; a
+// host that needs to name one takes it from here.
+export { DiffView, Progress, SelectionNodeKind, SelectionTree, Spinner, StepWizardFrame };
 
 // The settings page parts. Their declared props cover these call-sites; a row's
 // `data-*` attributes pass through to its element at runtime.
@@ -450,33 +452,6 @@ export interface StepIndicatorProps {
 }
 export const StepIndicator = FtStepIndicator as unknown as ComponentType<StepIndicatorProps>;
 
-/**
- * The controlled step-wizard frame: the rail, a body and a foot, with the host
- * owning the current step and the footer's actions. The rail keeps every label
- * inside it at any width and is named `<aria-label> progress`.
- */
-export interface StepWizardFrameProps {
-  steps: readonly WizardStep[];
-  /** Id of the active step. A step id the frame does not list reads "step 0 / m". */
-  current: string;
-  completed?: ReadonlySet<string>;
-  reachable?: ReadonlySet<string>;
-  onJump?: (id: string) => void;
-  /** Shown in the head, under the rail. */
-  head?: ReactNode;
-  /** The foot's start slot (typically back). */
-  footStart?: ReactNode;
-  /** The foot's end slot (typically the one primary action). */
-  footEnd?: ReactNode;
-  /** Attributes for the body region. */
-  bodyProps?: HTMLAttributes<HTMLDivElement>;
-  /** Extra class on the frame, for a host that sizes it. */
-  className?: string;
-  children?: ReactNode;
-  /** The frame's accessible name (default "step wizard"). */
-  'aria-label'?: string;
-}
-export const StepWizardFrame = FtStepWizardFrame as unknown as ComponentType<StepWizardFrameProps>;
 
 // -- Consent dialog: ConsentDialog / ConsentSummary -------------------------
 
