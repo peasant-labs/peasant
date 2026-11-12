@@ -159,7 +159,7 @@ func (s *Store) verifyContentSession(ctx context.Context, sessionID schema.Sessi
 		return nil, fmt.Errorf("store: read the capture row while verifying session %s: %w", sessionID, err)
 	}
 	if found && capture.FullCaptureSHA256 != "" && string(capture.SessionID) == string(sessionID) {
-		if _, err := verifyShimCaptureProjection(ctx, conn, ingest.SessionID(sessionID), capture); err != nil {
+		if _, err := verifyShimCaptureProjection(ctx, conn, ingest.SessionID(sessionID), capture, false); err != nil {
 			return &ContentDamage{SessionID: sessionID, Object: "capture-proof", Reason: fmt.Sprintf("the shim entries no longer match the capture proof: %v", err)}, nil
 		}
 	}

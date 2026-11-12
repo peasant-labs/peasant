@@ -35,8 +35,12 @@ func TestContentModelParityFixtureManifest(t *testing.T) {
 // The three named captures were regenerated when conversation-turn counting
 // replaced stored projected-turn counting. System entries are harness
 // bookkeeping and are not turns, and a depth-0 tool wrapper that is not
-// projected is not a turn either. Exact equality on the whole payload remains;
-// only the served turnCount moved.
+// projected is not a turn either. The captures were regenerated again when the
+// payload gained conversationTurnCount beside turnCount: turnCount is the
+// number of folded turns and conversationTurnCount is the allowed-list count
+// (opencode-omitted-placeholder serves one tool turn and no conversation
+// turn). Exact equality on the whole payload remains; only the count fields
+// moved.
 func TestContentModelParity(t *testing.T) {
 	for _, c := range LoadContentModelParityFixtures(t) {
 		t.Run(c.Name, func(t *testing.T) {

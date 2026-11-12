@@ -42,7 +42,7 @@ func loadConversationTurnCountCases(t *testing.T) []conversationTurnCountCase {
 	if err := testutil.DecodeFixtureYAML(conversationTurnCountYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := testutil.DecodeSemanticManifest(conversationTurnCountManifestYAML, "conversation turn count")
+	manifest, err := testutil.DecodeRequiredNamesManifest(conversationTurnCountManifestYAML, "conversation turn count")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,15 +50,16 @@ func loadConversationTurnCountCases(t *testing.T) []conversationTurnCountCase {
 	for i, testCase := range fixture.Cases {
 		names[i] = testCase.Name
 	}
-	if err := testutil.ValidateSemanticNames(manifest, names, "conversation turn count"); err != nil {
+	if err := testutil.ValidateRequiredNames(manifest, names, "conversation turn count"); err != nil {
 		t.Fatal(err)
 	}
 	return fixture.Cases
 }
 
 // TestConversationTurnCount pins the one ingest definition every count surface
-// reports: projected turns whose rendered role is not system. The fixture also
-// proves system rows stay served while leaving the count.
+// reports: top-level folded turns on the contract's allowed list of role and
+// entry type. The fixture also proves system, tool and thinking rows stay
+// served while leaving the count.
 func TestConversationTurnCount(t *testing.T) {
 	t.Parallel()
 	for _, testCase := range loadConversationTurnCountCases(t) {
@@ -99,4 +100,17 @@ func describeTurns(turns []ingest.Turn) string {
 		out[i] = fmt.Sprintf("%d:%s", turn.Index, turn.Role)
 	}
 	return fmt.Sprintf("%v", out)
+}
+
+// generationConversationTurnCount reads the conversation turn count a built
+// generation carries. The producer fixtures state their expected count in
+// conversation turns under the key turnCount, so they compare against this
+// number and not against Stats.TurnCount, which is the number of folded turns.
+// A generation that carries no conversation count reads as -1, which no
+// fixture expects.
+func generationConversationTurnCount(stats schema.SessionStats) int {
+	if stats.ConversationTurnCount == nil {
+		return -1
+	}
+	return int(*stats.ConversationTurnCount)
 }

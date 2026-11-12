@@ -619,8 +619,11 @@ func validateUnifiedMetadata(metadata schema.UnifiedMetadata, path string) error
 	if err := schema.ValidateInputSubmissionCount(metadata.Stats.InputSubmissionCount, path+".stats.inputSubmissionCount"); err != nil {
 		return fmt.Errorf("indexformat.%s: %w", path, err)
 	}
+	if err := schema.ValidateConversationTurnCount(metadata.Stats.ConversationTurnCount, path+".stats.conversationTurnCount"); err != nil {
+		return fmt.Errorf("indexformat.%s: %w", path, err)
+	}
 	if metadata.Stats.TurnCount < 0 {
-		return fmt.Errorf("indexformat.%s: stats.turnCount %d is negative; the count cannot be trusted; record the emitted main record count", path, metadata.Stats.TurnCount)
+		return fmt.Errorf("indexformat.%s: stats.turnCount %d is negative; the count cannot be trusted; record the number of folded turns", path, metadata.Stats.TurnCount)
 	}
 	if metadata.RootSessionID != nil {
 		if _, err := schema.NewSessionID(string(*metadata.RootSessionID)); err != nil {
@@ -877,6 +880,9 @@ func validateSnapshotMirrors(session schema.SessionDetailPayload, metadata schem
 	}
 	if session.TurnCount != metadata.Stats.TurnCount {
 		return fmt.Errorf("indexformat.ReadSnapshot.Validate: session.turnCount %d disagrees with metadata.stats.turnCount %d; two count authorities are present; derive both from Metadata.Stats", session.TurnCount, metadata.Stats.TurnCount)
+	}
+	if !equalOptionalInt64(session.ConversationTurnCount, metadata.Stats.ConversationTurnCount) {
+		return fmt.Errorf("indexformat.ReadSnapshot.Validate: session.conversationTurnCount and metadata.stats.conversationTurnCount disagree, including absent versus measured zero; a reader would be shown a count the metadata does not carry; derive both from Metadata.Stats")
 	}
 	if !equalOptionalInt64(session.InputSubmissionCount, metadata.Stats.InputSubmissionCount) {
 		return fmt.Errorf("indexformat.ReadSnapshot.Validate: session.inputSubmissionCount and metadata.stats.inputSubmissionCount disagree, including absent versus measured zero; the unknown/measured distinction would be lost; derive both from Metadata.Stats")

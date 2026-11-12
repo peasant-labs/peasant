@@ -93,7 +93,7 @@ func NewSession(sessions []ingest.Session) SessionModel {
 			s.StartTime.Format("Jan 02 15:04"),
 			formatDuration(s.Metadata.Duration),
 			fmt.Sprintf("%d", s.Metadata.TotalTokens),
-			fmt.Sprintf("%d", s.Metadata.TurnCount),
+			fmt.Sprintf("%d", s.ReaderTurnCount()),
 		}
 	}
 

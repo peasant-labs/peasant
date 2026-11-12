@@ -17,11 +17,14 @@ type Run =
 /**
  * A session this computer recorded but holds no indexed turns for: its turn
  * count comes from the recording, while the index has nothing to show (an
- * earlier build refused the recording, or indexing stopped partway). A count
- * above an empty transcript reads as a broken viewer, so the page says what is
- * missing and offers the one fix, a re-index of this session, here. When the
- * re-index lands, `onReindexed` reads the session again and the transcript
- * replaces this state.
+ * earlier build refused the recording, or indexing stopped partway). That
+ * recorded count is the one this page states, as "recorded turns": the
+ * conversation turn count lists print is measured from indexed entries, and
+ * this session has none, so it cannot say how much is waiting to be indexed.
+ * A count above an empty transcript reads as a broken viewer, so the page says
+ * what is missing and offers the one fix, a re-index of this session, here.
+ * When the re-index lands, `onReindexed` reads the session again and the
+ * transcript replaces this state.
  */
 export function SessionNotIndexed({
   sessionId,

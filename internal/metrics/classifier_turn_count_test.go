@@ -26,8 +26,13 @@ type classifierTurnCountCase struct {
 		Index   int    `yaml:"index"`
 		Role    string `yaml:"role"`
 		Content string `yaml:"content"`
+		// EntryType defaults to text when a row omits it.
+		EntryType schema.EntryType `yaml:"entryType"`
 	} `yaml:"entries"`
-	WantAbandoned bool `yaml:"wantAbandoned"`
+	// ConversationTurns is the conversation turn count the entries fold to,
+	// stated as a literal for the rows that set it.
+	ConversationTurns *int `yaml:"conversationTurns"`
+	WantAbandoned     bool `yaml:"wantAbandoned"`
 }
 
 func loadClassifierTurnCountCases(t *testing.T) []classifierTurnCountCase {
@@ -75,13 +80,22 @@ func TestClassifierAbandonedUsesConversationTurns(t *testing.T) {
 			entries := make([]schema.SessionEntry, len(testCase.Entries))
 			for i, source := range testCase.Entries {
 				content := source.Content
+				entryType := source.EntryType
+				if entryType == "" {
+					entryType = schema.EntryTypeText
+				}
 				entries[i] = schema.SessionEntry{
 					SessionID:      sid,
 					Harness:        schema.HarnessClaudeCode,
 					EntryIndex:     source.Index,
 					Role:           schema.Role(source.Role),
-					EntryType:      schema.EntryTypeText,
+					EntryType:      entryType,
 					ContentPreview: &content,
+				}
+			}
+			if want := testCase.ConversationTurns; want != nil {
+				if got := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries)); got != *want {
+					t.Fatalf("entries fold to %d conversation turns, want %d (entries: %s)", got, *want, describeEntryRoles(entries))
 				}
 			}
 			turnCount := testCase.MetricsTurnCount

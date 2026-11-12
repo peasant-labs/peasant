@@ -120,7 +120,7 @@ func seedGateFixtureStore(t *testing.T, kind string) string {
 	case "clean":
 		residuefixture.SeedClean(t, path)
 	case "current":
-		residuefixture.Seed(t, path, 76, nil, nil)
+		residuefixture.Seed(t, path, store.CurrentSchemaVersion(), nil, nil)
 	case "missing":
 	default:
 		t.Fatalf("unknown gate fixture store %q", kind)

@@ -65,16 +65,18 @@ func seedEntriesFromOpenCode(t *testing.T, ctx context.Context, s interface {
 	return entries
 }
 
-// seedConversationTurnCount writes the producer's conversation count the way
-// the capture lane does, so a fixture session exposes the same loaded value a
+// seedConversationTurnCount writes the producer's two turn counts the way the
+// capture lane does, so a fixture session exposes the same loaded values a
 // real indexed session carries.
 func seedConversationTurnCount(t *testing.T, ctx context.Context, s interface {
 	UpsertCapturedStats(context.Context, store.CapturedStats) (bool, error)
 }, sessionID string, entries []schema.SessionEntry) {
 	t.Helper()
-	count := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
+	turns := ingest.EntriesToTurns(entries)
+	turnCount, count := len(turns), ingest.ConversationTurnCount(turns)
 	if _, err := s.UpsertCapturedStats(ctx, store.CapturedStats{
 		SessionID:             schema.SessionID(sessionID),
+		TurnCount:             &turnCount,
 		ConversationTurnCount: &count,
 		Source:                store.StatsSourceHarness,
 		UpdatedAtMs:           1,

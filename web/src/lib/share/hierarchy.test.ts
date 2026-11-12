@@ -15,7 +15,7 @@ describe('Share hierarchy fixture', () => {
     expect(fixture.sessions).toHaveLength(7);
     const sessions = fixture.sessions.map((row): ShareHierarchySession => ({
       ...row, provider: 'claude-code', hostSlug: '', startTime: '2026-08-12T00:00:00Z',
-      durationMins: 1, totalTokens: 1, turnCount: 1, model: '', shareStatus: 'new', preview: row.id,
+      durationMins: 1, totalTokens: 1, conversationTurns: 1, model: '', shareStatus: 'new', preview: row.id,
     }));
     const hierarchy = groupShareHierarchy(sessions);
     expect(hierarchy).toHaveLength(2);

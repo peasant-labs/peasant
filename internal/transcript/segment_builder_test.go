@@ -23,6 +23,12 @@ var segmentCutFixtureYAML []byte
 //go:embed testdata/segment_cut.manifest.yaml
 var segmentCutManifestYAML []byte
 
+//go:embed testdata/conversation_turns_check.yaml
+var conversationTurnsCheckFixtureYAML []byte
+
+//go:embed testdata/conversation_turns_check.manifest.yaml
+var conversationTurnsCheckManifestYAML []byte
+
 //go:embed testdata/segment_turns.yaml
 var segmentTurnsFixtureYAML []byte
 
@@ -37,6 +43,24 @@ type segmentTurnSpec struct {
 	ResultBytes    []int  `yaml:"resultBytes,omitempty"`
 	TextPartBytes  int    `yaml:"textPartBytes,omitempty"`
 	ImageRef       string `yaml:"imageRef,omitempty"`
+	// EntryType is the top-level entry type; text when the row omits it.
+	EntryType string `yaml:"entryType,omitempty"`
+}
+
+func (s segmentTurnSpec) entryType() (schema.EntryType, error) {
+	switch s.EntryType {
+	case "", "text":
+		return schema.EntryTypeText, nil
+	case "tool_use":
+		return schema.EntryTypeToolUse, nil
+	case "tool_result":
+		return schema.EntryTypeToolResult, nil
+	case "thinking":
+		return schema.EntryTypeThinking, nil
+	case "system":
+		return schema.EntryTypeSystem, nil
+	}
+	return "", fmt.Errorf("segment fixture names entry type %q; use text, tool_use, tool_result, thinking or system", s.EntryType)
 }
 
 func (s segmentTurnSpec) role() (schema.Role, error) {
@@ -47,8 +71,10 @@ func (s segmentTurnSpec) role() (schema.Role, error) {
 		return schema.RoleAssistant, nil
 	case "system":
 		return schema.RoleSystem, nil
+	case "tool":
+		return schema.RoleTool, nil
 	}
-	return "", fmt.Errorf("segment fixture names role %q; use user, assistant or system", s.Role)
+	return "", fmt.Errorf("segment fixture names role %q; use user, assistant, system or tool", s.Role)
 }
 
 func (s segmentTurnSpec) turn() (ingest.Turn, error) {
@@ -59,7 +85,11 @@ func (s segmentTurnSpec) turn() (ingest.Turn, error) {
 	if len(s.ArgumentsBytes) != len(s.ResultBytes) {
 		return ingest.Turn{}, fmt.Errorf("segment fixture turn %d states %d tool arguments and %d results", s.Index, len(s.ArgumentsBytes), len(s.ResultBytes))
 	}
-	turn := ingest.Turn{Index: s.Index, Role: role, Content: strings.Repeat("x", s.ContentBytes)}
+	entryType, err := s.entryType()
+	if err != nil {
+		return ingest.Turn{}, err
+	}
+	turn := ingest.Turn{Index: s.Index, Role: role, EntryType: entryType, Content: strings.Repeat("x", s.ContentBytes)}
 	for i := range s.ArgumentsBytes {
 		turn.ToolCalls = append(turn.ToolCalls, ingest.ToolCall{
 			ID:        fmt.Sprintf("call-%d-%d", s.Index, i),
@@ -76,6 +106,29 @@ type segmentRefExpectation struct {
 	FirstTurn  int `yaml:"firstTurn"`
 	LastTurn   int `yaml:"lastTurn"`
 	ByteLength int `yaml:"byteLength"`
+	// ConversationTurns is the literal span the cut must state for the segment.
+	ConversationTurns segmentSpanExpectation `yaml:"conversationTurns"`
+}
+
+type segmentSpanExpectation struct {
+	Before int `yaml:"before"`
+	Count  int `yaml:"count"`
+}
+
+// refMatches compares a cut ref with its fixture row, span included: a ref
+// without a span never matches.
+func (want segmentRefExpectation) refMatches(ref schema.TranscriptSegmentRef) bool {
+	if ref.ConversationTurns == nil {
+		return false
+	}
+	got := segmentRefExpectation{
+		Index:             ref.Index,
+		FirstTurn:         ref.FirstTurn,
+		LastTurn:          ref.LastTurn,
+		ByteLength:        ref.ByteLength,
+		ConversationTurns: segmentSpanExpectation{Before: ref.ConversationTurns.Before, Count: ref.ConversationTurns.Count},
+	}
+	return got == want
 }
 
 type segmentCutCase struct {
@@ -179,6 +232,9 @@ func loadSegmentTurnsFixture(t *testing.T) segmentTurnsFixture {
 	return fixture
 }
 
+// TestSegmentCutFixtureCases pins CutSegments as a caller of the contract's
+// cut: the folded turns' projection reaches schema.CutTranscriptSegments whole.
+// The cut rule's own cases run in the schema module.
 func TestSegmentCutFixtureCases(t *testing.T) {
 	t.Parallel()
 	fixture := loadSegmentCutFixture(t)
@@ -202,8 +258,8 @@ func TestSegmentCutFixtureCases(t *testing.T) {
 				t.Fatalf("cut produced %d segments, fixture expects %d: %+v", len(refs), len(fixtureCase.Expected.Segments), refs)
 			}
 			for i, want := range fixtureCase.Expected.Segments {
-				if refs[i] != (schema.TranscriptSegmentRef{Index: want.Index, FirstTurn: want.FirstTurn, LastTurn: want.LastTurn, ByteLength: want.ByteLength}) {
-					t.Fatalf("segment %d = %+v, want %+v", i, refs[i], want)
+				if !want.refMatches(refs[i]) {
+					t.Fatalf("segment %d = %+v with span %+v, want %+v", i, refs[i], refs[i].ConversationTurns, want)
 				}
 			}
 			// Every turn must belong to exactly one segment, and the segment's
@@ -276,7 +332,7 @@ func TestSegmentTurnBoundFixtureCases(t *testing.T) {
 			}
 			before := make([]int, len(turns))
 			for i := range turns {
-				before[i] = TurnByteLength(turns[i])
+				before[i] = schema.TranscriptTurnByteLength(turns[i])
 			}
 			bounds := BoundServedTurns(turns, budget)
 			if fixtureCase.DocumentBytes > 0 {
@@ -389,26 +445,84 @@ func TestFoldedTurnByteLengthMatchesTurnByteLength(t *testing.T) {
 	}
 }
 
-// TestCutTurnRowsDirect pins the cut over already-projected wire turns, the
-// entry point the directory build uses.
-func TestCutTurnRowsDirect(t *testing.T) {
+type conversationTurnsCheckRef struct {
+	Index int `yaml:"index"`
+	// ConversationTurns is absent for a ref that carries no span.
+	ConversationTurns *segmentSpanExpectation `yaml:"conversationTurns,omitempty"`
+}
+
+type conversationTurnsCheckFault struct {
+	Rule    string `yaml:"rule"`
+	Segment int    `yaml:"segment"`
+	Want    int    `yaml:"want"`
+	Got     int    `yaml:"got"`
+	// MessageContains are fragments the fault's message must hold.
+	MessageContains []string `yaml:"messageContains"`
+}
+
+type conversationTurnsCheckCase struct {
+	Name      string                      `yaml:"name"`
+	Canonical int                         `yaml:"canonical"`
+	Refs      []conversationTurnsCheckRef `yaml:"refs"`
+	// Fault is absent for a sound cut.
+	Fault *conversationTurnsCheckFault `yaml:"fault,omitempty"`
+}
+
+type conversationTurnsCheckFixture struct {
+	Cases []conversationTurnsCheckCase `yaml:"cases"`
+}
+
+func TestCheckConversationTurnsFixtureCases(t *testing.T) {
 	t.Parallel()
-	turns := []schema.TurnDetail{
-		{Index: 4, Role: schema.RoleUser, Content: strings.Repeat("a", 1024)},
-		{Index: 7, Role: schema.RoleAssistant, Content: strings.Repeat("b", 1024)},
-		{Index: 11, Role: schema.RoleUser, Content: strings.Repeat("c", 1024)},
+	fixture, err := decodeYAML[conversationTurnsCheckFixture](conversationTurnsCheckFixtureYAML, "conversation turns check fixture")
+	if err != nil {
+		t.Fatal(err)
 	}
-	refs, total := CutTurnRows(turns, 3*1024)
-	if total != 3 {
-		t.Fatalf("total = %d, want 3", total)
+	manifest, err := testutil.DecodeRequiredNamesManifest(conversationTurnsCheckManifestYAML, "conversation turns check")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(refs) != 2 {
-		t.Fatalf("segments = %d, want 2 (two 1026-byte turns fit the 3072-byte budget; the third is deferred)", len(refs))
+	names := make([]string, len(fixture.Cases))
+	for i, fixtureCase := range fixture.Cases {
+		names[i] = fixtureCase.Name
 	}
-	if refs[0] != (schema.TranscriptSegmentRef{Index: 0, FirstTurn: 4, LastTurn: 7, ByteLength: 2052}) {
-		t.Fatalf("ref 0 = %+v, want turns 4-7 with 2052 bytes", refs[0])
+	if err := testutil.ValidateRequiredNames(manifest, names, "conversation turns check"); err != nil {
+		t.Fatal(err)
 	}
-	if refs[1] != (schema.TranscriptSegmentRef{Index: 1, FirstTurn: 11, LastTurn: 11, ByteLength: 1026}) {
-		t.Fatalf("ref 1 = %+v, want turn 11 alone with 1026 bytes", refs[1])
+	for _, fixtureCase := range fixture.Cases {
+		fixtureCase := fixtureCase
+		t.Run(fixtureCase.Name, func(t *testing.T) {
+			t.Parallel()
+			refs := make([]schema.TranscriptSegmentRef, len(fixtureCase.Refs))
+			for i, spec := range fixtureCase.Refs {
+				refs[i] = schema.TranscriptSegmentRef{Index: spec.Index}
+				if spec.ConversationTurns != nil {
+					refs[i].ConversationTurns = &schema.ConversationTurnSpan{Before: spec.ConversationTurns.Before, Count: spec.ConversationTurns.Count}
+				}
+			}
+			fault := CheckConversationTurns(refs, fixtureCase.Canonical)
+			want := fixtureCase.Fault
+			if want == nil {
+				if fault != nil {
+					t.Fatalf("a sound cut was faulted: %v", fault)
+				}
+				return
+			}
+			if fault == nil {
+				t.Fatalf("the check passed a cut that breaks the %s rule", want.Rule)
+			}
+			wantFault := ConversationTurnsFault{Rule: ConversationTurnsRule(want.Rule), Segment: want.Segment, Want: want.Want, Got: want.Got}
+			if *fault != wantFault {
+				t.Fatalf("fault = %+v, want %+v", *fault, wantFault)
+			}
+			if len(want.MessageContains) == 0 {
+				t.Fatal("a fault row must state the message fragments it expects")
+			}
+			for _, fragment := range want.MessageContains {
+				if !strings.Contains(fault.Error(), fragment) {
+					t.Fatalf("fault message does not hold %q: %s", fragment, fault.Error())
+				}
+			}
+		})
 	}
 }

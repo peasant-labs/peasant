@@ -32,6 +32,13 @@ type statsOverflowCase struct {
 	RefreshCount   int              `yaml:"refreshCount"`
 	LegacySeedOnly bool             `yaml:"legacySeedOnly"`
 	CheckSkip      bool             `yaml:"checkSkip"`
+	// RecountedTurnCounts, when set, are written to the stats row before the
+	// conversion, the way the upgrade recount leaves them. They differ from
+	// the retained document's numbers and must survive the conversion.
+	RecountedTurnCounts *struct {
+		TurnCount             int `yaml:"turnCount"`
+		ConversationTurnCount int `yaml:"conversationTurnCount"`
+	} `yaml:"recountedTurnCounts"`
 }
 
 //go:embed testdata/stats_overflow.yaml
@@ -70,15 +77,20 @@ func LoadStatsOverflowFixtures(t *testing.T) []statsOverflowCase {
 	return fixtures.Cases
 }
 
-func assertStatsPresence(t *testing.T, got CapturedStats, want v62ExpectedStats) {
+func assertStatsPresence(t *testing.T, got CapturedStats, want v62ExpectedStats, recountedConversationTurnCount ...int) {
 	t.Helper()
-	// The current producer's document carries the conversation count, so the
-	// first conversion seeds the conversation column from it. A document with
-	// no turn count leaves the column at its NOT NULL default zero.
+	// These sessions hold no stored entries, so the V74 upgrade backfill copies
+	// the legacy turn count into the conversation column and the V77 recount
+	// keeps both. A document with no turn count leaves the column at its NOT
+	// NULL default zero. A row that states recounted counts passes its
+	// conversation count explicitly.
 	conversation := want.TurnCount
 	if conversation == nil {
 		zero := 0
 		conversation = &zero
+	}
+	if len(recountedConversationTurnCount) == 1 {
+		conversation = &recountedConversationTurnCount[0]
 	}
 	expected := CapturedStats{TurnCount: want.TurnCount, ConversationTurnCount: conversation,
 		InputSubmissionCount: want.InputSubmissionCount,
@@ -211,6 +223,9 @@ func runStatsOverflowCase(t *testing.T, c statsOverflowCase) {
 			migrateShadowSeam = previous
 		})
 	}
+	if recounted := c.RecountedTurnCounts; recounted != nil {
+		execMigrateSQL(t, s, fmt.Sprintf(`UPDATE session_captured_stats SET turn_count=%d, conversation_turn_count=%d WHERE session_id='%s'`, recounted.TurnCount, recounted.ConversationTurnCount, sid))
+	}
 	var result MigrateResult
 	var outcome MigrateOutcome
 	if c.ReportDriver {
@@ -235,7 +250,18 @@ func runStatsOverflowCase(t *testing.T, c statsOverflowCase) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertStatsPresence(t, got, c.Want)
+	if recounted := c.RecountedTurnCounts; recounted != nil {
+		wantAfterConversion := c.Want
+		wantAfterConversion.TurnCount = &recounted.TurnCount
+		assertStatsPresence(t, got, wantAfterConversion, recounted.ConversationTurnCount)
+	} else {
+		assertStatsPresence(t, got, c.Want)
+	}
+	if recounted := c.RecountedTurnCounts; recounted != nil {
+		if got.TurnCount == nil || *got.TurnCount != recounted.TurnCount || got.ConversationTurnCount == nil || *got.ConversationTurnCount != recounted.ConversationTurnCount {
+			t.Fatalf("the conversion overwrote the recounted turn counts: stored (%v, %v), want (%d, %d)", got.TurnCount, got.ConversationTurnCount, recounted.TurnCount, recounted.ConversationTurnCount)
+		}
+	}
 	if !reflect.DeepEqual(got.Overflow, c.Overflow) || got.SeedJSON == nil || *got.SeedJSON != c.StatsJSON {
 		t.Fatalf("raw stats retention: %+v", got)
 	}

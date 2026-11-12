@@ -1,5 +1,6 @@
 'use client';
 
+import { displayedTurnCount } from '@/lib/sessions/displayedTurnCount';
 import { useEffect, useMemo, useRef } from 'react';
 import type { useHomeSessions } from '@/hooks/useHomeSessions';
 import { SkeletonList } from '@/lib/skeleton';
@@ -320,7 +321,7 @@ export function RootSessionList({
       label: 'turns',
       align: ColumnAlign.End,
       numeric: true,
-      render: (row) => row.sync.turnCount.toLocaleString('en-US'),
+      render: (row) => displayedTurnCount(row.sync).toLocaleString('en-US'),
     },
     {
       id: HomeColumn.Duration,

@@ -1,0 +1,15 @@
+# Required rows of transcript_directory_positions.yaml. A row may be added
+# freely; removing or renaming one listed here fails the test.
+requiredNames:
+  - fields absent
+  - fields kept
+  - a segment with no conversation turns keeps its zero count
+  - positions that disagree with each other are kept
+  - a span beside no total is kept
+  - malformed span drops every position field and warns once
+  - malformed total drops every position field and warns once
+  - a null span drops every position field and warns once
+  - a fractional count drops every position field and warns once
+  - a span missing its count drops every position field and warns once
+  - a null total drops every position field and warns once
+  - two malformed fields warn once

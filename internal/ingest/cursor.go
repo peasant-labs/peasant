@@ -1259,11 +1259,22 @@ func cursorDecodedLineEntry(sessionID SessionID, index int, raw []byte, line cur
 			entry.Extra = &extra
 		}
 	}
-	if entry.HasToolUse && entry.Role == RoleAssistant {
-		entry.EntryType = EntryTypeToolUse
+	// hasProse is the record's own words: non-blank plain text or a
+	// non-blank text block. A preview filled from a tool result or from
+	// thinking is not prose, so those records stay typed by what they hold.
+	hasProse := strings.TrimSpace(plainText) != ""
+	if !hasProse {
+		for _, block := range blocks {
+			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
+				hasProse = true
+				break
+			}
+		}
 	}
-	if entry.HasThinking && entry.EntryType == EntryTypeText && entry.Role == RoleAssistant {
-		entry.EntryType = EntryTypeThinking
+	if entry.Role == RoleAssistant {
+		hasToolUse := entry.HasToolUse
+		hasThinking := entry.HasThinking
+		entry.EntryType = assistantEntryType(hasProse, hasToolUse, hasThinking)
 	}
 	if entry.IsError && entry.Role == RoleTool {
 		entry.EntryType = EntryTypeToolResult

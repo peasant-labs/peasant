@@ -397,8 +397,8 @@ func TestHarmonizedSkip(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if stats.ConversationTurnCount == nil || *stats.ConversationTurnCount != c.TurnCount {
-					t.Fatalf("captured conversation turn count = %v, want the refreshed %d", stats.ConversationTurnCount, c.TurnCount)
+				if stats.TurnCount == nil || *stats.TurnCount != c.TurnCount {
+					t.Fatalf("captured turn count = %v, want the refreshed %d", stats.TurnCount, c.TurnCount)
 				}
 			case "metadata-hash-stats-excluded":
 				s, base, _ := skipSetup(t, sid)

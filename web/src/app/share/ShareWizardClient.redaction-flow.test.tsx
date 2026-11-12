@@ -109,7 +109,7 @@ describe('ShareWizardClient redaction flow', () => {
             startTime: REDACTION_STEP_SESSION.startTime,
             durationMins: REDACTION_STEP_SESSION.durationMins,
             totalTokens: REDACTION_STEP_SESSION.totalTokens,
-            turnCount: REDACTION_STEP_SESSION.turnCount,
+            turnCount: REDACTION_STEP_SESSION.conversationTurns,
             project: REDACTION_STEP_SESSION.projectName,
             projectHash: REDACTION_STEP_SESSION.projectHash,
             preview: REDACTION_STEP_SESSION.preview,

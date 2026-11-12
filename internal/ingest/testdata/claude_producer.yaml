@@ -68,7 +68,7 @@ cases:
       {"type":"assistant","uuid":"q1","parentUuid":"q0","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"tool_use","id":"toolu_ask","name":"AskUserQuestion","input":{"questions":[]}},{"type":"tool_use","id":"toolu_ask2","name":"AskUserQuestion","input":{"questions":[]}}]}}
       {"type":"user","uuid":"q2","parentUuid":"q1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","content":"answer one"},{"type":"tool_result","tool_use_id":"toolu_ask2","content":"answer two"}]}}
     completeness: complete
-    turnCount: 2
+    turnCount: 1
     inputSubmissionCount: 3
     titleRefCount: 3
     distinctSubmissionRefs: true
@@ -158,7 +158,7 @@ cases:
       {"peasantOmittedRecord":{"reason":"record_too_large","line":2,"bytes":300000000,"limitBytes":268435456,"toolCallId":"toolu_omit"}}
       {"type":"user","uuid":"o2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"after omission"}}
     completeness: complete
-    turnCount: 3
+    turnCount: 2
     inputSubmissionCount: 2
     titleRefCount: 2
     keys:
@@ -180,7 +180,7 @@ cases:
       {"type":"user","uuid":"g2","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_big","content":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]}}
       {"type":"user","uuid":"g3","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"after big"}}
     completeness: complete
-    turnCount: 3
+    turnCount: 2
     inputSubmissionCount: 2
     titleRefCount: 2
     keys:
@@ -805,7 +805,7 @@ cases:
       {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"thinking","thinking":"12345678"},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"a.txt"}}]}}
       {"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"contents"}]}}
     completeness: complete
-    turnCount: 2
+    turnCount: 1
     inputSubmissionCount: 1
     titleRefCount: 1
     keys:

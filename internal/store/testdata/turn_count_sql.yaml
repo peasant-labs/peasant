@@ -1,8 +1,14 @@
-# Every read surface that reports, sorts by, bounds, or aggregates a session
-# turn count must splice the ONE shared expression over the conversation column.
-# The retired raw columns (session_captured_stats.turn_count and
-# session_metrics.turn_count) may not appear as a count source in any of them.
-expectedCaseCount: 10
+# A session has two turn numbers, and each has one SQL expression.
+#
+# foldedTurnCount: the site splices the folded turn count expression. It feeds
+# the wire turnCount and nothing else.
+# conversationTurnCount: the site splices the conversation turn count
+# expression. It feeds the wire conversationTurnCount and everything that
+# sorts, bounds, filters, averages or classifies by turns.
+#
+# A site that shows, sorts, bounds or aggregates turns must use the
+# conversation expression. No site may read session_captured_stats.turn_count
+# outside the folded expression, and none may read session_metrics.turn_count.
 requiredNames:
   - session_list_reader
   - session_detail_reader
@@ -14,3 +20,18 @@ requiredNames:
   - dashboard_summary_writer
   - dashboard_harness_writer
   - friction_review_queue_reader
+  - session_sort_by_turns
+  - session_turn_bounds
+sites:
+  - {name: session_list_reader, foldedTurnCount: true, conversationTurnCount: true}
+  - {name: session_detail_reader, foldedTurnCount: true, conversationTurnCount: true}
+  - {name: session_detail_latest_attempt_reader, foldedTurnCount: true, conversationTurnCount: true}
+  - {name: metrics_reader, foldedTurnCount: true, conversationTurnCount: false}
+  - {name: push_reader, foldedTurnCount: true, conversationTurnCount: true}
+  - {name: prune_reader, foldedTurnCount: false, conversationTurnCount: true}
+  - {name: legacy_snapshot_reader, foldedTurnCount: true, conversationTurnCount: true}
+  - {name: dashboard_summary_writer, foldedTurnCount: false, conversationTurnCount: true}
+  - {name: dashboard_harness_writer, foldedTurnCount: false, conversationTurnCount: true}
+  - {name: friction_review_queue_reader, foldedTurnCount: false, conversationTurnCount: true}
+  - {name: session_sort_by_turns, foldedTurnCount: false, conversationTurnCount: true}
+  - {name: session_turn_bounds, foldedTurnCount: false, conversationTurnCount: true}

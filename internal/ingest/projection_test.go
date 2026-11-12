@@ -622,8 +622,8 @@ func assertProjectionEntry(t *testing.T, label string, want fixtureEntryExpect, 
 
 func assertProjectionWant(t *testing.T, label string, want fixtureWant, generation indexformat.Generation) {
 	t.Helper()
-	if generation.Metadata.Stats.TurnCount != want.TurnCount {
-		t.Fatalf("%s turnCount = %d, want %d", label, generation.Metadata.Stats.TurnCount, want.TurnCount)
+	if got := generationConversationTurnCount(generation.Metadata.Stats); got != want.TurnCount {
+		t.Fatalf("%s conversationTurnCount = %d, want %d", label, got, want.TurnCount)
 	}
 	if want.InputSubmissionAbsent {
 		if generation.Metadata.Stats.InputSubmissionCount != nil {

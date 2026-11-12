@@ -227,8 +227,8 @@ func assertOpenCodeCounts(t *testing.T, generation indexformat.Generation, want 
 	} else if *generation.Metadata.Stats.InputSubmissionCount != *want.Own {
 		t.Fatalf("inputSubmissionCount = %d, want %d", *generation.Metadata.Stats.InputSubmissionCount, *want.Own)
 	}
-	if generation.Metadata.Stats.TurnCount != want.TurnCount {
-		t.Fatalf("turnCount = %d, want %d", generation.Metadata.Stats.TurnCount, want.TurnCount)
+	if got := generationConversationTurnCount(generation.Metadata.Stats); got != want.TurnCount {
+		t.Fatalf("conversationTurnCount = %d, want %d", got, want.TurnCount)
 	}
 	gotTitle := make([]string, len(generation.TitleRefs))
 	for i, ref := range generation.TitleRefs {

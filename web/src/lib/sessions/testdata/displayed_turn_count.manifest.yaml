@@ -1,0 +1,6 @@
+# Required rows of displayed_turn_count.yaml. Removing or renaming one fails.
+requiredNames:
+  - the conversation count is printed when the two counts differ
+  - a measured zero is printed as zero
+  - a session measured before the field prints its folded count
+  - a large conversation count is grouped

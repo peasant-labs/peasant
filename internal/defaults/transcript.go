@@ -1,6 +1,10 @@
 package defaults
 
-import "time"
+import (
+	"time"
+
+	"github.com/peasant-labs/schema"
+)
 
 // TranscriptInitialReadBytes is the soft initial transcript read budget.
 const TranscriptInitialReadBytes int64 = 256 << 10
@@ -10,7 +14,10 @@ const TranscriptInitialReadBytes int64 = 256 << 10
 // past this size; that turn starts the next segment, so a segment ends on a
 // complete entry and turn boundary. The one exception is a single turn larger
 // than the budget, which is alone in its segment and bounded per field.
-const TranscriptSegmentBudgetBytes int = 1 << 20
+//
+// The value is the contract's: every server cuts with the same budget, so it is
+// defined from the schema constant and never restated here.
+const TranscriptSegmentBudgetBytes int = schema.TranscriptSegmentBudgetBytes
 
 // TranscriptSegmentDirectoryCapacity is the number of segment directories one
 // producer keeps, keyed by session and store revision, in LRU order. The
@@ -38,16 +45,17 @@ const TranscriptSegmentColdBuildBudget = 600 * time.Millisecond
 const TranscriptSegmentColdBuildCeiling = 2 * time.Second
 
 // TranscriptWindowSpanDefault is the design number of assistant turns a window
-// collects on each side of its anchor.
-const TranscriptWindowSpanDefault = 10
+// collects on each side of its anchor. The three span values are the
+// contract's, defined from the schema constants.
+const TranscriptWindowSpanDefault = schema.TranscriptWindowSpanDefault
 
 // TranscriptWindowSpanMaximum is the widest span a caller may request. The
 // parameter exists to narrow a window for a smaller context; it cannot widen the
 // design value.
-const TranscriptWindowSpanMaximum = 10
+const TranscriptWindowSpanMaximum = schema.TranscriptWindowSpanMaximum
 
 // TranscriptWindowSpanMinimum is the narrowest span a caller may request.
-const TranscriptWindowSpanMinimum = 1
+const TranscriptWindowSpanMinimum = schema.TranscriptWindowSpanMinimum
 
 // TranscriptContinuationReadBytes is the soft body and continuation read budget.
 // Each boundary measures its own payload bytes; oversized entries remain whole.

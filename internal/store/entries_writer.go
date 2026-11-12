@@ -401,7 +401,7 @@ func rollbackSessionEntrySavepoint(conn *sqlite.Conn, savepointName string, caus
 }
 
 // indexSessionEntriesOnConn replaces the V1 mirror rows and records the
-// producer's conversation turn count for a session that has no activation lane.
+// producer's two turn counts for a session that has no activation lane.
 func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
 	outcome, err := indexSessionEntriesRowsOnConn(conn, sessionID, entries, stmts)
 	if err != nil {
@@ -412,8 +412,8 @@ func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, en
 		return outcome, err
 	}
 	if !native {
-		count := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
-		if err := writeConversationTurnCountOnConn(conn, sessionID, count); err != nil {
+		turns := ingest.EntriesToTurns(entries)
+		if err := writeTurnCountsOnConn(conn, sessionID, len(turns), ingest.ConversationTurnCount(turns)); err != nil {
 			return outcome, err
 		}
 	}

@@ -67,9 +67,10 @@ WHERE s.session_id = ?1`, &sqlitex.ExecOptions{
 	if len(data) == 0 {
 		return data, nil
 	}
-	// The document's stats are the adapter seed. The count a served or
-	// published surface reports is the producer's stored conversation count, so
-	// overlay it here; the seed field itself stays unchanged for evidence.
+	// The document's stats are the adapter seed. The counts a served or
+	// published surface reports are the producer's stored folded turn count and
+	// conversation turn count, so overlay both here; the seed field itself
+	// stays unchanged for evidence.
 	stats, statsErr := readCapturedStatsOnConn(conn, sid)
 	if statsErr != nil {
 		if errors.Is(statsErr, ErrNoCapturedStats) {
@@ -85,7 +86,11 @@ WHERE s.session_id = ?1`, &sqlitex.ExecOptions{
 	if statsDocument == nil {
 		statsDocument = map[string]any{}
 	}
-	statsDocument["turnCount"] = capturedStatsToWire(stats).TurnCount
+	wire := capturedStatsToWire(stats)
+	statsDocument["turnCount"] = wire.TurnCount
+	if wire.ConversationTurnCount != nil {
+		statsDocument["conversationTurnCount"] = *wire.ConversationTurnCount
+	}
 	document["stats"] = statsDocument
 	overlaid, err := json.Marshal(document)
 	if err != nil {

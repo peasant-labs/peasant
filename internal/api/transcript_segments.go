@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -22,6 +24,10 @@ import (
 // LoadAvailableSessionEntries, not ListEntries, is the directory's source: the
 // latter always serves the 2 KB preview projection, so a directory measured
 // from it would declare a byte length the segment read can never match.
+//
+// Both reads return a managed generation's entries with their source refs
+// (ReadSessionEntries with GenerationRefs set), so the directory and a segment
+// fold the turns the session's stored turn counts count.
 type SegmentReader interface {
 	LoadAvailableSessionEntries(context.Context, ingest.SessionID) ([]schema.SessionEntry, error)
 	ReadSessionEntries(context.Context, ingest.SessionID, ingest.SessionEntryReadOptions) (ingest.SessionEntryReadPage, error)
@@ -37,15 +43,6 @@ func newSegmentCacheKey(id ingest.SessionID, revision string) segmentCacheKey {
 	return segmentCacheKey(string(id) + "\x00" + revision)
 }
 
-// segmentTurnMeta is the identity and role of one turn. A window read needs
-// both to resolve an anchor and count assistant turns, and neither is turn
-// content. Retaining this small metadata is what lets a jump stop at its
-// extents without folding the whole session again.
-type segmentTurnMeta struct {
-	index int
-	role  schema.Role
-}
-
 // segmentDirectory is the producer's retained artifact: refs, scalars, one
 // entry count per segment, and each turn's identity and role. Turn content is
 // never retained. Retained memory is O(turns) for the identity/role list — two
@@ -57,7 +54,12 @@ type segmentDirectory struct {
 	totalTurns  int
 	refs        []schema.TranscriptSegmentRef
 	entryCounts []int
-	turns       []segmentTurnMeta
+	// turns is what the window resolver reads: identity and role, never
+	// content, so a jump stops at its extents without folding the session again.
+	turns []schema.TranscriptWindowTurn
+	// totalConversationTurns is nil when the cut failed the self-check; every
+	// ref's span is nil with it.
+	totalConversationTurns *int
 }
 
 type segmentDirectoryEntry struct {
@@ -83,6 +85,10 @@ type segmentProducer struct {
 	reader   SegmentReader
 	budget   int
 	capacity int
+	// cut is transcript.CutSegments in production. It is a field because a cut
+	// with wrong position data cannot be produced through the store.
+	cut    func([]ingest.Turn, int) ([]schema.TranscriptSegmentRef, int)
+	logger *slog.Logger
 
 	mu        sync.Mutex
 	dirs      []*segmentDirectoryEntry // LRU: oldest first, newest last
@@ -95,6 +101,8 @@ func newSegmentProducer(reader SegmentReader) *segmentProducer {
 		reader:    reader,
 		budget:    defaults.TranscriptSegmentBudgetBytes,
 		capacity:  defaults.TranscriptSegmentDirectoryCapacity,
+		cut:       transcript.CutSegments,
+		logger:    slog.Default(),
 		dirBuilds: make(map[segmentCacheKey]*segmentBuild),
 	}
 }
@@ -182,10 +190,23 @@ func (p *segmentProducer) buildDirectory(ctx context.Context, id ingest.SessionI
 	if err != nil {
 		return segmentDirectory{}, err
 	}
-	refs, totalTurns := transcript.CutSegments(turns, p.budget)
-	meta := make([]segmentTurnMeta, len(turns))
+	refs, totalTurns := p.cut(turns, p.budget)
+	// A position fault never costs the directory: the position fields are
+	// withheld together and the read still answers.
+	canonical := ingest.ConversationTurnCount(turns)
+	total := &canonical
+	if fault := transcript.CheckConversationTurns(refs, canonical); fault != nil {
+		p.logger.Error("transcript segments: conversation turn positions withheld",
+			"session", string(id), "revision", revision,
+			"rule", string(fault.Rule), "segment", fault.Segment, "error", fault.Error())
+		for i := range refs {
+			refs[i].ConversationTurns = nil
+		}
+		total = nil
+	}
+	meta := make([]schema.TranscriptWindowTurn, len(turns))
 	for i := range turns {
-		meta[i] = segmentTurnMeta{index: turns[i].Index, role: turns[i].Role}
+		meta[i] = schema.TranscriptWindowTurn{Index: turns[i].Index, Role: turns[i].Role}
 	}
 	return segmentDirectory{
 		revision:    revision,
@@ -193,6 +214,8 @@ func (p *segmentProducer) buildDirectory(ctx context.Context, id ingest.SessionI
 		refs:        refs,
 		entryCounts: transcript.SegmentEntryCounts(entries, refs),
 		turns:       meta,
+
+		totalConversationTurns: total,
 	}, nil
 }
 
@@ -335,6 +358,10 @@ func (s *Server) handleTranscriptSegment(w http.ResponseWriter, r *http.Request)
 		FromIndex:    ref.FirstTurn,
 		Limit:        limit,
 		SoftMaxBytes: softMax,
+		// The directory was folded from entries that keep their generation
+		// source refs; the segment must fold the same entries or it would
+		// drop a turn the directory counted.
+		GenerationRefs: true,
 	})
 	if err != nil {
 		writeTranscriptReadError(w, "read the stored entries for transcript segment", err)
@@ -449,10 +476,11 @@ func (s *Server) handleTranscriptWindow(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	window, err := buildTranscriptWindow(schema.SessionID(id), directory.revision, requestedAnchor, span, directory.turns, directory.refs)
+	// The anchor, extent and covering-segment rule is the contract's, so every
+	// server resolves the same window from the same turns.
+	window, err := schema.ResolveTranscriptWindow(schema.SessionID(id), directory.revision, requestedAnchor, span, directory.turns, directory.refs)
 	if err != nil {
-		var missing *noUserTurnError
-		if asNoUserTurn(err, &missing) {
+		if errors.Is(err, schema.ErrTranscriptWindowNoUserTurn) {
 			writeJSONError(w, http.StatusNotFound, fmt.Sprintf("session %s has no user turn, so a transcript window cannot be centred on turn %d; no window was served; a window requires a user turn", id, requestedAnchor))
 			return
 		}
@@ -480,6 +508,8 @@ func transcriptDirectoryPayload(id ingest.SessionID, directory segmentDirectory,
 		TotalTurns:    directory.totalTurns,
 		TotalSegments: len(directory.refs),
 		Segments:      directory.refs,
+		// The whole-session total goes on every page of refs.
+		TotalConversationTurns: directory.totalConversationTurns,
 	}
 	if len(directory.refs) <= schema.MaxTranscriptDirectoryRefs {
 		return payload
@@ -545,136 +575,4 @@ func writeTranscriptJSON(w http.ResponseWriter, payload any) {
 		return
 	}
 	_, _ = w.Write(data)
-}
-
-// noUserTurnError reports that a window request named a session with no user
-// turn to centre a window on.
-type noUserTurnError struct {
-	session   string
-	requested int
-}
-
-func (e *noUserTurnError) Error() string {
-	return fmt.Sprintf("session %s has no user turn to centre a window on turn %d", e.session, e.requested)
-}
-
-func asNoUserTurn(err error, target **noUserTurnError) bool {
-	missing, ok := err.(*noUserTurnError)
-	if ok {
-		*target = missing
-	}
-	return ok
-}
-
-// buildTranscriptWindow resolves the anchor to a user turn, collects up to
-// span assistant turns on each side, and describes the contiguous range. It
-// never serialises turn content.
-func buildTranscriptWindow(id schema.SessionID, revision string, requestedAnchor, span int, turns []segmentTurnMeta, refs []schema.TranscriptSegmentRef) (schema.TranscriptWindow, error) {
-	anchorPos, ok := resolveWindowAnchor(turns, requestedAnchor)
-	if !ok {
-		return schema.TranscriptWindow{}, &noUserTurnError{session: string(id), requested: requestedAnchor}
-	}
-
-	firstPos := anchorPos
-	seen := 0
-	for pos := anchorPos - 1; pos >= 0; pos-- {
-		firstPos = pos
-		if turns[pos].role == schema.RoleAssistant {
-			seen++
-			if seen == span {
-				break
-			}
-		}
-	}
-	lastPos := anchorPos
-	seen = 0
-	for pos := anchorPos + 1; pos < len(turns); pos++ {
-		lastPos = pos
-		if turns[pos].role == schema.RoleAssistant {
-			seen++
-			if seen == span {
-				break
-			}
-		}
-	}
-
-	firstTurn := turns[firstPos].index
-	lastTurn := turns[lastPos].index
-	segments, err := coveringSegments(refs, firstTurn, lastTurn)
-	if err != nil {
-		return schema.TranscriptWindow{}, err
-	}
-
-	window := schema.TranscriptWindow{
-		SessionID:       id,
-		Revision:        revision,
-		RequestedAnchor: requestedAnchor,
-		AnchorTurn:      turns[anchorPos].index,
-		Span:            span,
-		FirstTurn:       firstTurn,
-		LastTurn:        lastTurn,
-		Segments:        segments,
-		HasOlder:        firstPos > 0,
-		HasNewer:        lastPos < len(turns)-1,
-	}
-	if err := window.Validate(); err != nil {
-		return schema.TranscriptWindow{}, err
-	}
-	if err := schema.ValidateTranscriptWindowCoverage(window, refs); err != nil {
-		return schema.TranscriptWindow{}, err
-	}
-	return window, nil
-}
-
-// resolveWindowAnchor returns the position of the user turn a window is centred
-// on: the anchor itself when it is a user turn, otherwise the nearest lower
-// user turn, otherwise the nearest higher one.
-func resolveWindowAnchor(turns []segmentTurnMeta, anchor int) (int, bool) {
-	lower := -1
-	higher := -1
-	for pos := range turns {
-		if turns[pos].role != schema.RoleUser {
-			continue
-		}
-		if turns[pos].index == anchor {
-			return pos, true
-		}
-		if turns[pos].index < anchor {
-			lower = pos
-			continue
-		}
-		if higher < 0 {
-			higher = pos
-		}
-	}
-	if lower >= 0 {
-		return lower, true
-	}
-	if higher >= 0 {
-		return higher, true
-	}
-	return 0, false
-}
-
-// coveringSegments returns the ordered contiguous run of segment ordinals that
-// covers [firstTurn, lastTurn].
-func coveringSegments(refs []schema.TranscriptSegmentRef, firstTurn, lastTurn int) ([]int, error) {
-	first := -1
-	last := -1
-	for i := range refs {
-		if refs[i].FirstTurn <= firstTurn && firstTurn <= refs[i].LastTurn {
-			first = refs[i].Index
-		}
-		if refs[i].FirstTurn <= lastTurn && lastTurn <= refs[i].LastTurn {
-			last = refs[i].Index
-		}
-	}
-	if first < 0 || last < 0 {
-		return nil, fmt.Errorf("the transcript window [%d, %d] is not covered by the segment directory; no window was served; rebuild the directory after the session is re-indexed", firstTurn, lastTurn)
-	}
-	segments := make([]int, 0, last-first+1)
-	for index := first; index <= last; index++ {
-		segments = append(segments, index)
-	}
-	return segments, nil
 }

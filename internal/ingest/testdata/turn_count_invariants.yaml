@@ -1,0 +1,113 @@
+# One session read at one revision states each turn number once:
+#   the detail's turnCount             == the segment directory's totalTurns
+#   the detail's conversationTurnCount == the directory's totalConversationTurns
+#                                      == the stored conversation_turn_count
+# Every expected value is a literal, and the two counts of a session differ.
+#
+# The capture below holds a prompt, a thinking-only reply, a tool-only reply
+# with its result, a prose reply, a system row and a prompt with an image. The
+# test first asserts the served turns include a system row, a tool row and an
+# image, so the counts are measured over rows the allowed list must skip.
+#
+# path:
+#   unmanaged  the stored indexer's entries, written through the entry lane
+#   managed    the indexer's built generation, activated as a candidate
+#   managed-opencode, managed-codex
+#              the row's own native records, built with that harness's
+#              BuildGeneration and activated; the metrics recompute then runs,
+#              and wantToolCallCount is the session's tool call count after it.
+#              That literal was recorded before reply typing changed and must
+#              not move.
+#
+# An entry-less session has no fold and no directory: its stored counts are
+# served as they are.
+requiredNames:
+  - counts-unmanaged-session
+  - counts-managed-session
+  - counts-managed-opencode-session
+  - counts-managed-codex-session
+  - counts-entry-less-unmanaged
+  - counts-entry-less-managed
+capture:
+  - '{"type":"user","uuid":"u1","timestamp":"2026-01-02T10:00:00Z","message":{"role":"user","content":"what changed?"}}'
+  - '{"type":"assistant","uuid":"a1","timestamp":"2026-01-02T10:00:01Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"pondering the diff"}]}}'
+  - '{"type":"assistant","uuid":"a2","timestamp":"2026-01-02T10:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_9","name":"Read","input":{"path":"diff.go"}}]}}'
+  - '{"type":"user","uuid":"t9","timestamp":"2026-01-02T10:00:03Z","message":{"role":"tool","content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"changed lines"}]}}'
+  - '{"type":"assistant","uuid":"a3","timestamp":"2026-01-02T10:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"The diff looks good."}]}}'
+  - '{"type":"system","uuid":"s1","timestamp":"2026-01-02T10:00:05Z","content":"context compacted"}'
+  - '{"type":"user","uuid":"u2","timestamp":"2026-01-02T10:02:00Z","message":{"role":"user","content":[{"type":"text","text":"look at this diagram"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]}}'
+cases:
+  - name: counts-unmanaged-session
+    path: unmanaged
+    wantTurnCount: 6
+    wantConversationTurnCount: 3
+  - name: counts-managed-session
+    path: managed
+    wantTurnCount: 7
+    wantConversationTurnCount: 3
+  # OpenCode messages built with the indexer's BuildGeneration: a prompt, a
+  # tool-only message, a shell-form message, a text-then-tool message and a
+  # reasoning-then-tool message. Only the prompt and the text reply are
+  # conversation turns.
+  - name: counts-managed-opencode-session
+    path: managed-opencode
+    sessionId: ses_opencodeTurnCounts
+    nativeRows:
+      - id: msg_user
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_user","type":"user","text":"what is in the package?","time":{"created":1000}}'
+      - id: msg_tool
+        type: assistant
+        seq: 1
+        timeCreated: 2000
+        timeUpdated: 3000
+        data: '{"id":"msg_tool","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"prt_tool_only","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"a.go"}]},"time":{"created":2000,"completed":3000}}],"time":{"created":2000,"completed":3000}}'
+      - id: msg_sh
+        type: shell
+        seq: 2
+        timeCreated: 4000
+        timeUpdated: 5000
+        data: '{"id":"msg_sh","type":"shell","shellID":"sh_1","command":"ls","status":"exited","exit":0,"output":{"output":"a.go","cursor":4,"size":4,"truncated":false},"time":{"created":4000,"completed":5000}}'
+      - id: msg_tt
+        type: assistant
+        seq: 3
+        timeCreated: 6000
+        timeUpdated: 7000
+        data: '{"id":"msg_tt","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_text","text":"Checking now."},{"type":"tool","id":"prt_tool_after_text","name":"read","state":{"status":"completed","input":{"path":"a.go"},"content":[{"type":"text","text":"body"}]},"time":{"created":6000,"completed":7000}}],"time":{"created":6000,"completed":7000}}'
+      - id: msg_rt
+        type: assistant
+        seq: 4
+        timeCreated: 8000
+        timeUpdated: 9000
+        data: '{"id":"msg_rt","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"reasoning","id":"prt_reason","text":"Weighing it."},{"type":"tool","id":"prt_tool_after_reason","name":"read","state":{"status":"completed","input":{"path":"b.go"},"content":[{"type":"text","text":"body"}]},"time":{"created":8000,"completed":9000}}],"time":{"created":8000,"completed":9000}}'
+    wantTurnCount: 5
+    wantConversationTurnCount: 2
+    wantToolCallCount: 4
+  # A Codex rollout built with the indexer's BuildGeneration: a prompt and a
+  # tool-only segment. Only the prompt is a conversation turn.
+  - name: counts-managed-codex-session
+    path: managed-codex
+    sessionId: 11111111-1111-4111-8111-111111111111
+    rollout:
+      - '{"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"legacy","thread_source":"user"}}'
+      - '{"type":"response_item","payload":{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"read the file"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}},"metadata":{"user_input_order":1}}'
+      - '{"type":"response_item","payload":{"type":"function_call","id":"tool1","name":"read","call_id":"call_1","arguments":"{}"}}'
+      - '{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"file body"}}'
+    wantTurnCount: 2
+    wantConversationTurnCount: 1
+    wantToolCallCount: 1
+  - name: counts-entry-less-unmanaged
+    path: entry-less-unmanaged
+    storedTurnCount: 6
+    storedConversationTurnCount: 5
+    wantTurnCount: 6
+    wantConversationTurnCount: 5
+  - name: counts-entry-less-managed
+    path: entry-less-managed
+    storedTurnCount: 8
+    storedConversationTurnCount: 7
+    wantTurnCount: 8
+    wantConversationTurnCount: 7

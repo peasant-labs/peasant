@@ -1,3 +1,4 @@
+import { displayedTurnCount } from '@/lib/sessions/displayedTurnCount';
 import type { AnalyticsSessionRecord } from '@peasant-labs/fairtrade/analytics';
 import type { QualitySession } from '@/lib/quality/types';
 
@@ -32,7 +33,8 @@ import type { QualitySession } from '@/lib/quality/types';
  *   TEMPORARY:  contributorFields(qs) -> contributorId/hasCommit/commitCount
  *   TRANSFORM:  durationMinutes -> durationMins
  *   PRESENT:    totalTokens     -> totalTokens
- *   PRESENT:    turnCount       -> turnCount
+ *   TRANSFORM:  conversationTurnCount (else turnCount) -> turnCount
+ *               (the record's turnCount is documented as conversation turns)
  *   TRANSFORM:  toolCalls       -> toolCallCount
  *   PRESENT:    outcome         -> outcome
  *   INTENTIONALLY NOT MAPPED (not part of the dashboard's record contract):
@@ -78,7 +80,7 @@ export function adaptAnalytics(
     ...contributorFields(session),
     durationMins: session.durationMinutes,
     totalTokens: session.totalTokens,
-    turnCount: session.turnCount,
+    turnCount: displayedTurnCount(session),
     toolCallCount: session.toolCalls,
     outcome: session.outcome,
   }));

@@ -57,11 +57,11 @@ integration suites. Publication requires validated retained evidence, partial
 signaling and the receiver's preservation capability; failed or oversized
 transfer must not silently discard evidence. Schema release/tag precedes pins.
 
-## claude-code (adapter 4, indexer 24)
+## claude-code (adapter 4, indexer 25)
 
 Baseline index format: 1.
 
-Managed generation: adapter 4, indexer 25, index format 2.
+Managed generation: adapter 4, indexer 26, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -148,7 +148,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 
 Baseline index format: 1.
 
-Managed generation: adapter 4, indexer 21, index format 2.
+Managed generation: adapter 4, indexer 22, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -304,7 +304,7 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | content_kind | `network_proxy.rule_saved` | literal | represented | yes | session entries |  | `codex_provenance.go codexContentKindRegistry` |
 | native-generation | content_kind | `user_verification.notice` | literal | represented | yes | session entries |  | `codex_provenance.go codexContentKindRegistry` |
 
-## cursor (adapter 1, indexer 18)
+## cursor (adapter 1, indexer 19)
 
 Baseline index format: 1.
 
@@ -323,11 +323,11 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | content_block | `tool_use` | literal | represented | no | tool name and arguments |  | `content_capture.go captureContentBlockKinds` |
 | retained-format-1 | content_block | `tool_result` | literal | represented | yes | tool output |  | `content_capture.go captureContentBlockKinds` |
 
-## opencode (adapter 4, indexer 18)
+## opencode (adapter 4, indexer 19)
 
 Baseline index format: 1.
 
-Managed generation: adapter 5, indexer 19, index format 2.
+Managed generation: adapter 5, indexer 20, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 

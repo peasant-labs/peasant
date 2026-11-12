@@ -4,5 +4,7 @@ requiredNames:
   - unknown-kind-kept-in-overflow
   - absent-stays-null-through-conversion
   - explicit-zero-stays-zero
+  - conversation-turn-count-is-a-known-stat
+  - conversion-keeps-recounted-turn-counts
   - overflow-diagnostic-emitted
   - shadow-detects-dropped-overflow

@@ -7,3 +7,7 @@ requiredNames:
   - oversized-multi-entry-turn
   - partial-turn-fold
   - short-store-page
+  - positions-eighty-rows-three-system
+  - positions-paged-second-page
+  - positions-withheld-on-failed-self-check
+  - positions-withheld-on-negative-count

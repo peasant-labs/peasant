@@ -223,7 +223,7 @@ WITH base AS (
         COALESCE(m.outcome, '') AS outcome,
         ` + analyticsDurationExpr + ` AS duration_mins,
         COALESCE(m.input_tokens, 0) + COALESCE(` + analyticsTokensOutExpr + `, 0) AS total_tokens,
-        COALESCE(` + sqlSessionTurnCount + `, 0) AS turn_count,
+        COALESCE(` + sqlSessionConversationTurnCount + `, 0) AS turn_count,
         COALESCE(` + analyticsToolCallsExpr + `, 0) AS tool_call_count
     ` + analyticsBaseSQL + `
     ` + where + `

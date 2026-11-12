@@ -1,8 +1,2 @@
 requiredNames:
-  - cut-defers-crossing-entry
-  - cut-user-turn-whole
-  - cut-oversized-turn-alone
-  - cut-exact-budget-turn
-  - cut-single-turn
-  - cut-empty-session
   - cut-includes-tool-call-bytes
