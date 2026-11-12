@@ -1,5 +1,6 @@
 # Every case folds the same entry shape every reader folds and asks for the
-# conversation turn count: projected turns whose rendered role is not system.
+# conversation turn count: top-level folded turns whose role and entry type are
+# on the contract's allowed list (user or assistant, text or image).
 cases:
   - name: user_and_assistant_turns_count
     entries:
@@ -19,7 +20,7 @@ cases:
       - {index: 0, role: user, entryType: text, content: "find the parser"}
       - {index: 1, role: assistant, entryType: tool_use, toolCallId: call-1, toolName: Grep, content: "rg parser", hasToolUse: true}
       - {index: 2, role: tool, entryType: tool_result, depth: 1, parentIndex: 1, toolCallId: call-1, content: "parser.go:12"}
-    expected: 2
+    expected: 1
     expectedServed: 2
   - name: injected_command_wrapper_is_a_system_turn
     entries:
@@ -35,3 +36,10 @@ cases:
       - {index: 2, role: assistant, entryType: text, content: "checks are running"}
     expected: 2
     expectedServed: 2
+  - name: thinking_only_reply_does_not_count
+    entries:
+      - {index: 0, role: user, entryType: text, content: "plan the change"}
+      - {index: 1, role: assistant, entryType: thinking, content: "weighing two options"}
+      - {index: 2, role: assistant, entryType: text, content: "here is the plan"}
+    expected: 2
+    expectedServed: 3

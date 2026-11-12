@@ -1,7 +1,8 @@
-expectedCaseCount: 5
+expectedCaseCount: 6
 requiredNames:
   - user_and_assistant_turns_count
   - system_control_turns_stay_served_and_do_not_count
   - folded_tool_call_is_not_a_second_turn
   - injected_command_wrapper_is_a_system_turn
   - empty_system_control_is_neither_counted_nor_served
+  - thinking_only_reply_does_not_count

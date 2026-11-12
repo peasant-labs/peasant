@@ -57,8 +57,9 @@ func loadConversationTurnCountCases(t *testing.T) []conversationTurnCountCase {
 }
 
 // TestConversationTurnCount pins the one ingest definition every count surface
-// reports: projected turns whose rendered role is not system. The fixture also
-// proves system rows stay served while leaving the count.
+// reports: top-level folded turns on the contract's allowed list of role and
+// entry type. The fixture also proves system, tool and thinking rows stay
+// served while leaving the count.
 func TestConversationTurnCount(t *testing.T) {
 	t.Parallel()
 	for _, testCase := range loadConversationTurnCountCases(t) {
