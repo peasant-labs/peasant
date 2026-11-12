@@ -2,7 +2,6 @@ package selectionfilter
 
 import (
 	"context"
-	"path/filepath"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -85,10 +84,10 @@ func New(cfg *config.Config, git ingest.GitResolver, r ingest.PathIdentityResolv
 // Prepare materializes every discovered session before the first Match call.
 // Decisions are cached by session ID. Git lookups are memoized by directory and
 // run only when the matcher can change its answer from repository evidence.
-// A session belongs to the branch the tree lists it under, which
-// ingest.SessionBranchFor decides for both: the branch its transcript
-// recorded, else the branch the store holds for an unchanged stored session,
-// else the branch checked out in its project directory.
+// A session belongs to the remote and the branch the tree lists it under, which
+// ingest.SessionRemoteFor and ingest.SessionBranchFor decide for both: what its
+// transcript recorded, else what the store holds for an unchanged stored
+// session, else what git answers for its project directory.
 // A cancelled context returns before this call's decisions are cached.
 func (f *Filter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSession) error {
 	if f == nil {
@@ -110,12 +109,7 @@ func (f *Filter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSessio
 		branch := session.Branch
 		gitRemote := ""
 		if f.projectHarnesses[session.Harness] || f.matcher.DiscoveryNeedsGit(session.Harness, session.SessionID) {
-			if dir := discoveredSessionGitDirectory(session, projectPath); dir != "" && git != nil {
-				if remote, err := git.RemoteURL(ctx, dir); err == nil {
-					gitRemote = remote
-				}
-			}
-			branch = f.sessionBranch(ctx, git, session)
+			gitRemote, branch = f.sessionPlacement(ctx, git, session)
 		}
 		inputs[index] = CandidateInput{
 			Harness:     session.Harness,
@@ -186,15 +180,15 @@ func (f *Filter) Match(session ingest.DiscoveredSession) bool {
 	return false
 }
 
-// sessionBranch is the branch the tree lists this session under: the answer of
-// the function the tree asks, over the same index.
-func (f *Filter) sessionBranch(ctx context.Context, git ingest.GitResolver, session ingest.DiscoveredSession) string {
+// sessionPlacement is the remote and the branch the tree lists this session
+// under: the answers of the functions the tree asks, over the same index.
+func (f *Filter) sessionPlacement(ctx context.Context, git ingest.GitResolver, session ingest.DiscoveredSession) (remote, branch string) {
 	var record ingest.KnownSession
 	stored := false
 	if f.known != nil {
 		record, stored = f.known.Reusable(session, f.staleness)
 	}
-	return ingest.SessionBranchFor(ctx, git, session, record, stored)
+	return ingest.SessionRemoteFor(ctx, git, session, record, stored), ingest.SessionBranchFor(ctx, git, session, record, stored)
 }
 
 type gitAnswer struct {
@@ -237,15 +231,4 @@ func (m *memoizedGit) Branch(ctx context.Context, dir string) (string, error) {
 	value, err := m.GitResolver.Branch(ctx, dir)
 	m.branches[dir] = gitAnswer{value: value, err: err}
 	return value, err
-}
-
-func discoveredSessionGitDirectory(session ingest.DiscoveredSession, projectPath string) string {
-	if projectPath != "" {
-		return projectPath
-	}
-	dir := string(session.OriginalRoot)
-	if dir == "" && session.SourcePath != "" {
-		dir = filepath.Dir(string(session.SourcePath))
-	}
-	return dir
 }
