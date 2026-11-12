@@ -399,7 +399,7 @@ cases:
         data: '{"id":"msg_o_assistant","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_text","text":"I will inspect."},{"type":"reasoning","id":"prt_reason","text":"I will inspect."},{"type":"tool","id":"prt_tool","name":"read","state":{"status":"completed","input":{"path":"parser.go"},"content":[{"type":"text","text":"parser.go:12"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
     want:
       own: 0
-      turnCount: 2
+      turnCount: 1
       titleRefs: []
       main:
         - ref: e_a1

@@ -101,3 +101,16 @@ func describeTurns(turns []ingest.Turn) string {
 	}
 	return fmt.Sprintf("%v", out)
 }
+
+// generationConversationTurnCount reads the conversation turn count a built
+// generation carries. The producer fixtures state their expected count in
+// conversation turns under the key turnCount, so they compare against this
+// number and not against Stats.TurnCount, which is the number of folded turns.
+// A generation that carries no conversation count reads as -1, which no
+// fixture expects.
+func generationConversationTurnCount(stats schema.SessionStats) int {
+	if stats.ConversationTurnCount == nil {
+		return -1
+	}
+	return int(*stats.ConversationTurnCount)
+}

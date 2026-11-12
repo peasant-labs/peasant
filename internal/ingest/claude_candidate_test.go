@@ -325,8 +325,8 @@ func assertClaudeProducerCandidate(t *testing.T, row claudeProducerCase, candida
 	if row.HarnessVersion != "" && generation.Metadata.Version != row.HarnessVersion {
 		t.Fatalf("harness version = %q, want %q", generation.Metadata.Version, row.HarnessVersion)
 	}
-	if got := generation.Metadata.Stats.TurnCount; got != row.TurnCount {
-		t.Fatalf("turnCount = %d, want %d", got, row.TurnCount)
+	if got := generationConversationTurnCount(generation.Metadata.Stats); got != row.TurnCount {
+		t.Fatalf("conversationTurnCount = %d, want %d", got, row.TurnCount)
 	}
 	if row.InputSubmissionCount < 0 {
 		if generation.Metadata.Stats.InputSubmissionCount != nil {

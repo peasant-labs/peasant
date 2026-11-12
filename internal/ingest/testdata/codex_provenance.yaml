@@ -161,7 +161,7 @@ cases:
     entryRefs: [e_carrier, e_call, e_result]
     expected: &local_pair_expected
       purpose: interaction
-      turnCount: 1
+      turnCount: 0
       inputSubmissionCount: 0
       main:
         - &local_carrier {ref: e_carrier, role: assistant, entryType: tool_use}
@@ -216,7 +216,7 @@ cases:
     entryRefs: [e_result, e_local_carrier, e_local_call, e_local_result, e_carrier, e_call]
     expected:
       <<: *boundary_expected
-      turnCount: 1
+      turnCount: 0
       main:
         - *standalone_result
         - {ref: e_local_carrier, role: assistant, entryType: tool_use}
@@ -628,7 +628,7 @@ cases:
       - s_u1
     expected:
       purpose: interaction
-      turnCount: 4
+      turnCount: 3
       inputSubmissionCount: 1
       titleRefs:
         - e_u1

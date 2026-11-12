@@ -191,7 +191,7 @@ func TestMountedHTTPContractsWithStoredSelectionData(t *testing.T) {
 	// sessionOrigin is the producer's declaration of who drove the session. It
 	// is always present on a stored row, because sessions.session_origin is NOT
 	// NULL over the three-value menu.
-	assertExactKeys(t, sessionRows[0], "durationMins", "harness", "id", "preview", "project", "projectHash", "sessionOrigin", "startTime", "toolCallCount", "totalTokens", "turnCount")
+	assertExactKeys(t, sessionRows[0], "conversationTurnCount", "durationMins", "harness", "id", "preview", "project", "projectHash", "sessionOrigin", "startTime", "toolCallCount", "totalTokens", "turnCount")
 	assertNoHostileEvidence(t, sessions, fixture.Forbidden)
 }
 

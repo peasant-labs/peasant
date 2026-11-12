@@ -1205,12 +1205,12 @@ func TestTranscriptProducerRevisionKeyedLRU(t *testing.T) {
 }
 
 // TestSessionDetailHeaderCoversEveryField guards the header projection with
-// reflection: every field of schema.SessionDetailHeader (33 today) must carry
+// reflection: every field of schema.SessionDetailHeader (34 today) must carry
 // the durable payload's value. A field added to the header but not mapped here
 // fails without anyone having to remember the count.
 func TestSessionDetailHeaderCoversEveryField(t *testing.T) {
 	t.Parallel()
-	const headerFieldCount = 33
+	const headerFieldCount = 34
 	headerType := reflect.TypeOf(schema.SessionDetailHeader{})
 	if headerType.NumField() != headerFieldCount {
 		t.Fatalf("header type has %d fields, want %d; update the projection and this guard together", headerType.NumField(), headerFieldCount)

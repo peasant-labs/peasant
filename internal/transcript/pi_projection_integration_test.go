@@ -367,12 +367,13 @@ func piFixtureEntry(t *testing.T, sid schema.SessionID, index int, e piProjectio
 }
 
 // TestPiV1IngestCarriesOneConversationTurnCount proves the production V1 entry
-// lane records the producer's conversation count for a non-native session. A
+// lane records the producer's two turn counts for a non-native session. A
 // Pi capture writes indexformat.V1 entries, not a managed generation, so the
-// count must come from that write; nothing else supplies it, and no
+// counts must come from that write; nothing else supplies them, and no
 // captured-stats seed is written here. Detail, list, export and publication
-// must all report the two conversation turns (the system row is served but
-// excluded from the conversation count).
+// must all report three folded turns and two conversation turns (the system
+// row is served but is not a conversation turn). The adapter's raw record
+// count of nine is neither.
 func TestPiV1IngestCarriesOneConversationTurnCount(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -388,10 +389,10 @@ func TestPiV1IngestCarriesOneConversationTurnCount(t *testing.T) {
 	}
 	db := storetest.OpenWith(t, store.WithPoolSize(2), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
 	ingested := int64(3)
-	rawTurns := 3
+	rawTurns := 9
 	submissions := int64(1)
 	// The adapter's own document reports its raw record count; the producer's
-	// conversation count is what the store must serve.
+	// folded counts are what the store must serve.
 	meta := &ingest.UnifiedMetadata{
 		SchemaVersion: ingest.CurrentSchemaVersion,
 		SessionID:     sid,
@@ -424,7 +425,7 @@ func TestPiV1IngestCarriesOneConversationTurnCount(t *testing.T) {
 	if len(writes) != 1 || writes[0].Err != nil {
 		t.Fatalf("index Pi session through the V1 lane: %v", writes)
 	}
-	const want = 2
+	const wantTurns, want = 3, 2
 	// A V1 Pi session serves from its stored entries, not a managed
 	// generation, so the detail is the provider's session projection.
 	provider := api.NewStoreDataProvider(db, sessionvisibility.Browsing())
@@ -436,22 +437,28 @@ func TestPiV1IngestCarriesOneConversationTurnCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.TurnCount != want {
-		t.Fatalf("detail turnCount = %d, want %d", detail.TurnCount, want)
+	if detail.TurnCount != wantTurns {
+		t.Fatalf("detail turnCount = %d, want %d", detail.TurnCount, wantTurns)
+	}
+	if detail.ConversationTurnCount == nil || *detail.ConversationTurnCount != want {
+		t.Fatalf("detail conversationTurnCount = %v, want %d", detail.ConversationTurnCount, want)
 	}
 	sessions, err := provider.Sessions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Metadata.TurnCount != want {
-		t.Fatalf("list turnCount = %+v, want %d", sessions, want)
+	if len(sessions) != 1 || sessions[0].Metadata.TurnCount != wantTurns || sessions[0].ReaderTurnCount() != want {
+		t.Fatalf("list counts = %+v, want %d folded turns and %d conversation turns", sessions, wantTurns, want)
 	}
 	exported, err := export.ExportSession(ctx, db, testutil.NewMemFS(), string(sid))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exported.TurnCount != want {
-		t.Fatalf("export turnCount = %d, want %d", exported.TurnCount, want)
+	if exported.TurnCount != wantTurns {
+		t.Fatalf("export turnCount = %d, want %d", exported.TurnCount, wantTurns)
+	}
+	if exported.ConversationTurnCount == nil || *exported.ConversationTurnCount != want {
+		t.Fatalf("export conversationTurnCount = %v, want %d", exported.ConversationTurnCount, want)
 	}
 	bundle, _, err := push.LoadPublicationInput(ctx, db, string(sid))
 	if err != nil {
@@ -462,7 +469,10 @@ func TestPiV1IngestCarriesOneConversationTurnCount(t *testing.T) {
 	if bundle.Readiness != ingest.PublicationReady {
 		t.Fatalf("publication readiness = %v, want ready", bundle.Readiness)
 	}
-	if bundle.Metadata.Stats.TurnCount != want {
-		t.Fatalf("publication metadata turnCount = %d, want %d", bundle.Metadata.Stats.TurnCount, want)
+	if bundle.Metadata.Stats.TurnCount != wantTurns {
+		t.Fatalf("publication metadata turnCount = %d, want %d", bundle.Metadata.Stats.TurnCount, wantTurns)
+	}
+	if bundle.Metadata.Stats.ConversationTurnCount == nil || *bundle.Metadata.Stats.ConversationTurnCount != want {
+		t.Fatalf("publication metadata conversationTurnCount = %v, want %d", bundle.Metadata.Stats.ConversationTurnCount, want)
 	}
 }
