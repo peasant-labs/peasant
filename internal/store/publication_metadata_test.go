@@ -237,8 +237,8 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 				if getErr != nil {
 					t.Fatal(getErr)
 				}
-				turns := 777
-				if _, statsErr := s.UpsertCapturedStats(ctx, store.CapturedStats{SessionID: id, ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); statsErr != nil {
+				turns, conversationTurns := 780, 777
+				if _, statsErr := s.UpsertCapturedStats(ctx, store.CapturedStats{SessionID: id, TurnCount: &turns, ConversationTurnCount: &conversationTurns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); statsErr != nil {
 					t.Fatal(statsErr)
 				}
 				m.TurnCount = &turns
@@ -338,12 +338,13 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 				if bundle.Readiness != tc.Readiness {
 					t.Fatalf("readiness %s, want %s", bundle.Readiness, tc.Readiness)
 				}
-				// Every other field round trips; the count does not, because
-				// the published envelope carries the store's conversation count
-				// while the extracted document keeps the adapter's raw record
-				// count.
+				// Every other field round trips; the two turn counts do not,
+				// because the published envelope carries the store's folded
+				// turn count and conversation turn count while the extracted
+				// document keeps the adapter's raw record count.
 				roundTrip := bundle.Metadata
 				roundTrip.Stats.TurnCount = e.Metadata.Stats.TurnCount
+				roundTrip.Stats.ConversationTurnCount = e.Metadata.Stats.ConversationTurnCount
 				roundTrip.MetadataHash = e.Metadata.MetadataHash
 				if bundle.Metadata.SessionID != "" && !reflect.DeepEqual(roundTrip, *e.Metadata) {
 					t.Fatalf("metadata did not round trip losslessly")
@@ -354,8 +355,10 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 				if bundle.Readiness == ingest.PublicationReady {
 					if stats, statsErr := s.ReadCapturedStats(readCtx, id); statsErr != nil || stats.ConversationTurnCount == nil {
 						t.Fatal("a ready publication has no stored conversation count")
-					} else if bundle.Metadata.Stats.TurnCount != *stats.ConversationTurnCount {
-						t.Fatalf("published metadata turnCount = %d, want the stored conversation count %d", bundle.Metadata.Stats.TurnCount, *stats.ConversationTurnCount)
+					} else if bundle.Metadata.Stats.ConversationTurnCount == nil || *bundle.Metadata.Stats.ConversationTurnCount != int64(*stats.ConversationTurnCount) {
+						t.Fatalf("published metadata conversationTurnCount = %v, want the stored conversation count %d", bundle.Metadata.Stats.ConversationTurnCount, *stats.ConversationTurnCount)
+					} else if stats.TurnCount != nil && bundle.Metadata.Stats.TurnCount != *stats.TurnCount {
+						t.Fatalf("published metadata turnCount = %d, want the stored folded turn count %d", bundle.Metadata.Stats.TurnCount, *stats.TurnCount)
 					}
 				}
 				if bundle.SessionOrigin != sessionorigin.User || bundle.ReceiptProjectHash != e.Metadata.Project.Hash {
@@ -374,13 +377,16 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 					}
 				}
 				if tc.Action == "metrics" {
-					if bundle.Quality == nil || bundle.Quality.TurnCount == nil || *bundle.Quality.TurnCount != 777 {
-						t.Fatal("current metrics did not report the stored conversation count")
+					if bundle.Quality == nil || bundle.Quality.TurnCount == nil || *bundle.Quality.TurnCount != 780 {
+						t.Fatal("current metrics did not report the stored folded turn count")
 					}
-					if bundle.Metadata.Stats.TurnCount != 777 {
-						t.Fatal("the published metadata count must agree with the served detail")
+					if bundle.Metadata.Stats.TurnCount != 780 {
+						t.Fatal("the published metadata turnCount must be the stored folded turn count")
 					}
-					if e.Metadata.Stats.TurnCount == 777 {
+					if bundle.Metadata.Stats.ConversationTurnCount == nil || *bundle.Metadata.Stats.ConversationTurnCount != 777 {
+						t.Fatal("the published metadata conversationTurnCount must be the stored conversation count")
+					}
+					if e.Metadata.Stats.TurnCount == 780 {
 						t.Fatal("the extracted seed must not be rewritten by current metrics")
 					}
 				}

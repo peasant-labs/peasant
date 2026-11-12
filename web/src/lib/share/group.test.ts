@@ -11,7 +11,7 @@ function session(over: Partial<ShareSession> & { id: string }): ShareSession {
     startTime: '2026-02-20T09:00:00Z',
     durationMins: 10,
     totalTokens: 1000,
-    turnCount: 5,
+    conversationTurns: 5,
     model: 'claude-sonnet-4-6',
     shareStatus: 'new',
     preview: 'Test preview message',

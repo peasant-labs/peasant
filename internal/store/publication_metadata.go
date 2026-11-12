@@ -18,12 +18,15 @@ import (
 var _ ingest.PublicationInputReader = (*Store)(nil)
 var _ ingest.PublicationCaptureStore = (*Store)(nil)
 
-// stampMetadataConversationTurnCount replaces the served metadata's record
-// count with the store's one conversation count and re-signs the document, so
-// an envelope that carries the repaired count still validates against its own
-// integrity digest. The stored capture document keeps the adapter's raw count.
+// stampMetadataConversationTurnCount replaces the served metadata's turn
+// counts with the store's two stored counts and re-signs the document, so an
+// envelope that carries the repaired counts still validates against its own
+// integrity digest. Both are stamped unconditionally from the stored row. The
+// stored capture document keeps the adapter's raw count.
 func stampMetadataConversationTurnCount(metadata *schema.UnifiedMetadata, stats CapturedStats) {
-	metadata.Stats.TurnCount = capturedStatsToWire(stats).TurnCount
+	wire := capturedStatsToWire(stats)
+	metadata.Stats.TurnCount = wire.TurnCount
+	metadata.Stats.ConversationTurnCount = wire.ConversationTurnCount
 	metadata.MetadataHash = schema.ComputeMetadataHash(metadata)
 }
 

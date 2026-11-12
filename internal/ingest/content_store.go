@@ -256,6 +256,14 @@ type SessionEntryReadOptions struct {
 	FromIndex    int
 	Limit        int
 	SoftMaxBytes int64
+	// GenerationRefs keeps each entry's source ref and provenance when the
+	// session reads from a managed generation. The turn fold keeps a turn with
+	// no text of its own, such as a tool call carrier, only when its entry has
+	// a source ref, and the stored turn counts are folded from entries that
+	// have them. A reader whose turns must be the turns those counts count sets
+	// this; other readers get the ref-less projection. It changes nothing for a
+	// session with no managed generation.
+	GenerationRefs bool
 }
 type SessionEntryReadPage struct {
 	Entries   []schema.SessionEntry

@@ -175,6 +175,8 @@ func buildLegacyExportPayload(ctx context.Context, db *store.Store, fs ingest.Fi
 		}
 		fullSession.Metadata.TotalTokens = detail.TokensTotal
 		fullSession.Metadata.TurnCount = detail.TurnCount
+		conversationTurnCount := int64(detail.ConversationTurnCount)
+		fullSession.ConversationTurnCount = &conversationTurnCount
 		if detail.StartMs > 0 && detail.EndMs > 0 {
 			fullSession.Metadata.Duration = time.Duration(detail.EndMs-detail.StartMs) * time.Millisecond
 		}

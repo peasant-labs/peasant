@@ -45,7 +45,12 @@ type Session struct {
 	RootSessionID        *schema.SessionID
 	ParentSessionID      *schema.SessionID
 	InputSubmissionCount *int64
-	EarlierHistory       []EarlierHistorySection
+	// ConversationTurnCount is the session's stored conversation turn count,
+	// the number a reader is shown. Nil means unmeasured: the session came
+	// from a producer or publication older than the count. Metadata.TurnCount
+	// is the number of folded turns and is never shown in its place.
+	ConversationTurnCount *int64
+	EarlierHistory        []EarlierHistorySection
 }
 
 // EarlierHistorySection is one retained uncertain-history partition carried on
@@ -166,4 +171,14 @@ type SessionMetadata struct {
 	TurnCount     int
 	ToolCallCount int
 	Quality       *schema.QualityMetrics // nil when quality data not available
+}
+
+// ReaderTurnCount is the turn count a reader is shown for this session: the
+// conversation turn count when it was measured, and the folded turn count for a
+// session from a producer or publication older than the conversation count.
+func (s Session) ReaderTurnCount() int {
+	if s.ConversationTurnCount != nil {
+		return int(*s.ConversationTurnCount)
+	}
+	return s.Metadata.TurnCount
 }

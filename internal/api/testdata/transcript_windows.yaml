@@ -1,29 +1,18 @@
-# Window descriptor cases over the sparse 55-turn session. The extent is ten
-# assistant turns per side plus the anchor and every interleaved user or system
-# turn; it is not a turn-count cap. Segment indexes are resolved against the
-# directory the test builds, so this fixture records only the extent and flags.
+# Window descriptors served by the mounted window read over the sparse 55-turn
+# session. The anchor, extent and covering-segment rule is the wire contract's
+# (schema.ResolveTranscriptWindow) and its cases live with the contract; these
+# rows pin that the route hands the resolver the directory it built: every
+# turn's identity and role, and the refs cut from the same turns.
 cases:
   - name: window-ten-assistants-each-side
     anchor: 72
     span: 10
     expected: {anchorTurn: 72, firstTurn: 39, lastTurn: 103, hasOlder: true, hasNewer: true}
-  - name: window-span-one
-    anchor: 72
-    span: 1
-    expected: {anchorTurn: 72, firstTurn: 71, lastTurn: 76, hasOlder: true, hasNewer: true}
   - name: window-snaps-lower-user-turn
     anchor: 74
     span: 1
     expected: {anchorTurn: 72, firstTurn: 71, lastTurn: 76, hasOlder: true, hasNewer: true}
-  - name: window-snaps-higher-before-first-user
-    anchor: 0
-    span: 1
-    expected: {anchorTurn: 4, firstTurn: 4, lastTurn: 7, hasOlder: false, hasNewer: true}
   - name: window-at-transcript-end
     anchor: 149
     span: 10
     expected: {anchorTurn: 140, firstTurn: 112, lastTurn: 149, hasOlder: true, hasNewer: false}
-  - name: window-near-first-user-turn
-    anchor: 4
-    span: 10
-    expected: {anchorTurn: 4, firstTurn: 4, lastTurn: 37, hasOlder: false, hasNewer: true}

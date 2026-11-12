@@ -137,8 +137,8 @@ func TestOpenCodeIndexer_ToolUseWithParts(t *testing.T) {
 	if !e.HasToolUse {
 		t.Error("has_tool_use: expected true (parts exist)")
 	}
-	if e.EntryType != ingest.EntryTypeToolUse {
-		t.Errorf("type: expected %s, got %s", ingest.EntryTypeToolUse, e.EntryType)
+	if e.EntryType != ingest.EntryTypeText {
+		t.Errorf("type: expected %s (prose with tool calls), got %s", ingest.EntryTypeText, e.EntryType)
 	}
 }
 

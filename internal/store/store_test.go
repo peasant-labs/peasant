@@ -977,8 +977,11 @@ func TestStore_AllSessions(t *testing.T) {
 	if r.TokensTotal != 4200 {
 		t.Errorf("row[0] tokens_total: expected 4200, got %d", r.TokensTotal)
 	}
-	if r.TurnCount != 10 {
-		t.Errorf("row[0] turn_count: expected 10, got %d", r.TurnCount)
+	if r.ConversationTurnCount != 10 {
+		t.Errorf("row[0] conversation_turn_count: expected 10, got %d", r.ConversationTurnCount)
+	}
+	if r.TurnCount != 10+seededUncountedTurns {
+		t.Errorf("row[0] turn_count: expected the folded %d, got %d", 10+seededUncountedTurns, r.TurnCount)
 	}
 	if r.ToolCalls != 5 {
 		t.Errorf("row[0] tool_calls: expected 5, got %d", r.ToolCalls)
@@ -1046,8 +1049,11 @@ func TestStore_SessionByID_Found(t *testing.T) {
 	if row.TokensTotal != 1500 {
 		t.Errorf("tokens_total: expected 1500, got %d", row.TokensTotal)
 	}
-	if row.TurnCount != 10 {
-		t.Errorf("turn_count: expected 10, got %d", row.TurnCount)
+	if row.ConversationTurnCount != 10 {
+		t.Errorf("conversation_turn_count: expected 10, got %d", row.ConversationTurnCount)
+	}
+	if row.TurnCount != 10+seededUncountedTurns {
+		t.Errorf("turn_count: expected the folded %d, got %d", 10+seededUncountedTurns, row.TurnCount)
 	}
 	if row.ToolCalls != 5 {
 		t.Errorf("tool_calls: expected 5, got %d", row.ToolCalls)
@@ -1561,12 +1567,20 @@ func seedSession(t *testing.T, s *store.Store, sessionID string) {
 	}
 }
 
-// seedConversationTurnCount records the producer's conversation count the way
-// the capture lane does, for tests that assert a session-list count.
+// seededUncountedTurns is how many folded turns seedConversationTurnCount
+// records beyond the conversation turns, so the two stored counts differ and a
+// reader of the wrong column fails its assertion.
+const seededUncountedTurns = 3
+
+// seedConversationTurnCount records the producer's two turn counts the way the
+// capture lane does, for tests that assert a session-list count: count
+// conversation turns, and seededUncountedTurns more folded turns.
 func seedConversationTurnCount(t *testing.T, s *store.Store, sessionID string, count int) {
 	t.Helper()
+	turnCount := count + seededUncountedTurns
 	if _, err := s.UpsertCapturedStats(context.Background(), store.CapturedStats{
 		SessionID:             schema.SessionID(sessionID),
+		TurnCount:             &turnCount,
 		ConversationTurnCount: &count,
 		Source:                store.StatsSourceHarness,
 		UpdatedAtMs:           1,
@@ -1827,8 +1841,10 @@ func TestStore_SaveMetrics_RoundTrip(t *testing.T) {
 	if got.SessionID != sessionID {
 		t.Errorf("session_id: expected %s, got %s", sessionID, got.SessionID)
 	}
-	if got.TurnCount == nil || *got.TurnCount != 15 {
-		t.Errorf("turn_count: expected 15, got %v", got.TurnCount)
+	// The metrics record's turnCount is the folded turn count, not the
+	// conversation count of 15 seeded beside it.
+	if got.TurnCount == nil || *got.TurnCount != 15+seededUncountedTurns {
+		t.Errorf("turn_count: expected the folded %d, got %v", 15+seededUncountedTurns, got.TurnCount)
 	}
 	if got.SubagentCount == nil || *got.SubagentCount != 2 {
 		t.Errorf("subagent_count: expected 2, got %v", got.SubagentCount)
@@ -1917,7 +1933,7 @@ func TestStore_SaveMetrics_NullPreservation(t *testing.T) {
 	// Turn count is no longer a nullable analysis column: the count surface
 	// reads the NOT NULL conversation column, which is zero here.
 	if got.TurnCount == nil || *got.TurnCount != 0 {
-		t.Errorf("turn_count: expected the stored conversation column, got %v", got.TurnCount)
+		t.Errorf("turn_count: expected the stored folded turn column, got %v", got.TurnCount)
 	}
 	if got.TitleGenerated != nil {
 		t.Errorf("title: expected nil, got %v", got.TitleGenerated)
@@ -2005,8 +2021,8 @@ func TestStore_SaveMetrics_NullM7BoolColumns(t *testing.T) {
 	}
 
 	// Sanity: non-nil fields should still be correct.
-	if got.TurnCount == nil || *got.TurnCount != 5 {
-		t.Errorf("TurnCount: expected 5, got %v", got.TurnCount)
+	if got.TurnCount == nil || *got.TurnCount != 5+seededUncountedTurns {
+		t.Errorf("TurnCount: expected the folded %d, got %v", 5+seededUncountedTurns, got.TurnCount)
 	}
 
 	// Verify explicit true value round-trips correctly.

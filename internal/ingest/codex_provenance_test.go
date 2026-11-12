@@ -593,8 +593,8 @@ func codexAssertCase(t *testing.T, c codexProvenanceCase, candidate ingest.Codex
 			t.Errorf("relationships = %+v, want %+v", metadata.Relationships, c.Expected.Relationships)
 		}
 	}
-	if generation.Metadata.Stats.TurnCount != c.Expected.TurnCount {
-		t.Errorf("turnCount = %d, want %d", generation.Metadata.Stats.TurnCount, c.Expected.TurnCount)
+	if got := generationConversationTurnCount(generation.Metadata.Stats); got != c.Expected.TurnCount {
+		t.Errorf("conversationTurnCount = %d, want %d", got, c.Expected.TurnCount)
 	}
 	switch {
 	case c.Expected.InputSubmissionAbsent:
@@ -1108,8 +1108,8 @@ func TestCodexProvenanceIndexerAdmitsV2Candidate(t *testing.T) {
 		t.Fatalf("BuildGeneration: %v", err)
 	}
 	v2 := candidate.Result
-	if v2.Generation.Metadata.Stats.TurnCount != 1 {
-		t.Errorf("turnCount = %d, want 1", v2.Generation.Metadata.Stats.TurnCount)
+	if got := generationConversationTurnCount(v2.Generation.Metadata.Stats); got != 1 {
+		t.Errorf("conversationTurnCount = %d, want 1", got)
 	}
 	if v2.Generation.Metadata.Stats.InputSubmissionCount == nil || *v2.Generation.Metadata.Stats.InputSubmissionCount != 1 {
 		t.Errorf("inputSubmissionCount = %v, want 1", v2.Generation.Metadata.Stats.InputSubmissionCount)

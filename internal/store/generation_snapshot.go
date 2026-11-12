@@ -281,12 +281,13 @@ func buildReadSnapshotModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, 
 	return generationReadSnapshotOnConn(conn, sessionID, *active, row)
 }
 
-// sqlSnapshotSessionRow reads the legacy snapshot row's turn and tool counts
-// through the one shared count expression, so a snapshot never reports a count
-// a list or transcript would disagree with.
+// sqlSnapshotSessionRow reads the legacy snapshot row's turn counts and tool
+// count through the shared count expressions, so a snapshot never reports a
+// count a list or transcript would disagree with.
 var sqlSnapshotSessionRow = `SELECT s.model_harness, ` + LogicalParentSQL("s") + `, s.root_session_id, s.session_purpose, s.source_path, s.start_ms, s.end_ms,
  COALESCE(` + sqlSessionTurnCount + `, 0),
- COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END, 0)
+ COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END, 0),
+ ` + sqlSessionConversationTurnCount + `
   FROM sessions s LEFT JOIN session_metrics m ON m.session_id = s.session_id
   LEFT JOIN session_captured_stats c ON c.session_id = s.session_id
   WHERE s.session_id = ?`
@@ -302,6 +303,8 @@ type snapshotSessionRow struct {
 	endMs         int64
 	turnCount     int
 	toolCallCount int
+	// conversationTurnCount is the stored conversation turn count.
+	conversationTurnCount int64
 }
 
 func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (snapshotSessionRow, error) {
@@ -340,6 +343,7 @@ func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID)
 			row.endMs = stmt.ColumnInt64(6)
 			row.turnCount = stmt.ColumnInt(7)
 			row.toolCallCount = stmt.ColumnInt(8)
+			row.conversationTurnCount = stmt.ColumnInt64(9)
 			return nil
 		},
 	}); err != nil {
@@ -355,23 +359,25 @@ func readSnapshotSessionRowOnConn(conn *sqlite.Conn, sessionID schema.SessionID)
 // stored transcript named by LegacySource, and empty generation partitions so
 // the caller uses the legacy overlay callback.
 func legacyReadSnapshot(row snapshotSessionRow) indexformat.ReadSnapshot {
+	conversationTurnCount := row.conversationTurnCount
 	session := schema.SessionDetailPayload{
-		ID:               string(row.sessionID),
-		Harness:          row.harness,
-		StartTime:        time.UnixMilli(row.startMs),
-		EndTime:          time.UnixMilli(row.endMs),
-		TurnCount:        row.turnCount,
-		ToolCallCount:    row.toolCallCount,
-		ParentSessionID:  row.parentID,
-		RootSessionID:    row.rootID,
-		Purpose:          row.purpose,
-		WorkingDirectory: "",
+		ID:                    string(row.sessionID),
+		Harness:               row.harness,
+		StartTime:             time.UnixMilli(row.startMs),
+		EndTime:               time.UnixMilli(row.endMs),
+		TurnCount:             row.turnCount,
+		ConversationTurnCount: &conversationTurnCount,
+		ToolCallCount:         row.toolCallCount,
+		ParentSessionID:       row.parentID,
+		RootSessionID:         row.rootID,
+		Purpose:               row.purpose,
+		WorkingDirectory:      "",
 	}
 	metadata := schema.UnifiedMetadata{
 		SchemaVersion: 1,
 		SessionID:     row.sessionID,
 		ModelHarness:  row.harness,
-		Stats:         schema.SessionStats{TurnCount: row.turnCount},
+		Stats:         schema.SessionStats{TurnCount: row.turnCount, ConversationTurnCount: &conversationTurnCount},
 		RootSessionID: row.rootID,
 		Purpose:       row.purpose,
 	}
@@ -443,17 +449,18 @@ func generationReadSnapshotOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 	// keeps the snapshot and ordinary store reads in agreement without a prior
 	// metadata upsert.
 	session := schema.SessionDetailPayload{
-		ID:                   string(sessionID),
-		Harness:              metadata.ModelHarness,
-		StartTime:            time.UnixMilli(metadata.Timestamp.Start),
-		EndTime:              time.UnixMilli(metadata.Timestamp.End),
-		TurnCount:            metadata.Stats.TurnCount,
-		InputSubmissionCount: metadata.Stats.InputSubmissionCount,
-		ToolCallCount:        metadata.Stats.ToolCallCount,
-		ParentSessionID:      snapshotLogicalParent(metadata),
-		RootSessionID:        metadata.RootSessionID,
-		Purpose:              metadata.Purpose,
-		Relationships:        metadata.Relationships,
+		ID:                    string(sessionID),
+		Harness:               metadata.ModelHarness,
+		StartTime:             time.UnixMilli(metadata.Timestamp.Start),
+		EndTime:               time.UnixMilli(metadata.Timestamp.End),
+		TurnCount:             metadata.Stats.TurnCount,
+		ConversationTurnCount: metadata.Stats.ConversationTurnCount,
+		InputSubmissionCount:  metadata.Stats.InputSubmissionCount,
+		ToolCallCount:         metadata.Stats.ToolCallCount,
+		ParentSessionID:       snapshotLogicalParent(metadata),
+		RootSessionID:         metadata.RootSessionID,
+		Purpose:               metadata.Purpose,
+		Relationships:         metadata.Relationships,
 	}
 	snapshot := indexformat.ReadSnapshot{
 		Session:      session,

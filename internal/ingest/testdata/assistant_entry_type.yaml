@@ -1,0 +1,595 @@
+# How an assistant reply is typed: prose is text, a prose-less tool record is
+# tool_use, a thinking-only record is thinking. Source records are in each
+# harness's real shape; each row runs one path (the stored indexer, then
+# EntriesToTurns) or both paths (indexer plus the managed BuildGeneration /
+# BuildV2WithContent build, then EntriesToTurns).
+#
+# want.entries is every depth-0 stored entry in order: role, entry type and
+# the two flags. want.turns is the full folded turn list in order: role,
+# entry type, content and tool calls as literals. want.turnCount is the number
+# of folded turns and want.conversationTurnCount is the folded turns the
+# contract's allowed list admits (top-level user or assistant, text or image).
+# The allowed list reads no content, but the indexer-path fold drops a record
+# with no content before it becomes a turn, so blank-text-counts folds to no
+# turn on that path; on the managed path a blank text block keeps its turn
+# (opencode-managed-blank-text-then-tool).
+#
+# requiredNames names the rows that must stay present. Removing one goes red
+# by name; adding a row need not appear here. The list, not a count, guards.
+requiredNames:
+  - claude-prose-and-tool-use-in-one-record
+  - claude-thinking-and-prose-in-one-record
+  - claude-thinking-only
+  - claude-blank-text-and-tool-use
+  - claude-blocks-as-separate-records
+  - claude-image-only-prompt
+  - opencode-unmanaged-text-part-and-tool-part
+  - opencode-unmanaged-tool-parts-only
+  - opencode-unmanaged-reasoning-only
+  - cursor-prose-and-tool-calls
+  - cursor-tool-calls-only
+  - opencode-managed-tool-only
+  - opencode-managed-tool-form-shell
+  - opencode-managed-text-then-tool
+  - opencode-managed-reasoning-then-tool
+  - opencode-managed-blank-text-then-tool
+  - codex-managed-tool-only-segment
+  - codex-managed-text-then-tool
+  - blank-text-counts
+  - harness-notice-as-user-text-counts
+  - reclassified-command-is-system
+  - pi-nested-tool-calls
+  - cursor-session-shape
+
+cases:
+  - name: claude-prose-and-tool-use-in-one-record
+    paths: [indexer, managed]
+    harness: claude-code
+    jsonl:
+      - '{"type":"user","uuid":"u1","timestamp":"2026-01-02T10:00:00Z","message":{"role":"user","content":"list the project files"}}'
+      - '{"type":"assistant","uuid":"a1","timestamp":"2026-01-02T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"I will list the project files."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}],"usage":{"input_tokens":10,"output_tokens":20}}}'
+      - '{"type":"user","uuid":"t1","timestamp":"2026-01-02T10:00:10Z","message":{"role":"tool","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"main.go\nstore.go"}]}}'
+    want:
+      turnCount: 2
+      conversationTurnCount: 2
+      entries:
+        - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
+        - {role: assistant, entry_type: text, has_tool_use: true, has_thinking: false}
+        - {role: tool, entry_type: tool_result, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: user
+          entry_type: text
+          content: 'list the project files'
+        - role: assistant
+          entry_type: text
+          content: 'I will list the project files.'
+          tools:
+            - {name: Bash, input: '{"command":"ls"}', output: "main.go\nstore.go"}
+    # The managed carrier is built from the parsed entry but carries no
+    # tool-use flag of its own: only the stored indexer record names the
+    # tool calls it holds.
+    want_managed:
+      turnCount: 2
+      conversationTurnCount: 2
+      entries:
+        - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
+        - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
+        - {role: tool, entry_type: tool_result, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: user
+          entry_type: text
+          content: 'list the project files'
+        - role: assistant
+          entry_type: text
+          content: 'I will list the project files.'
+          tools:
+            - {name: Bash, input: '{"command":"ls"}', output: "main.go\nstore.go"}
+
+  - name: claude-thinking-and-prose-in-one-record
+    paths: [indexer, managed]
+    harness: claude-code
+    jsonl:
+      - '{"type":"assistant","uuid":"a2","timestamp":"2026-01-02T10:01:00Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"let me think about the layout"},{"type":"text","text":"Here is the layout."}]}}'
+    want:
+      turnCount: 2
+      conversationTurnCount: 1
+      entries:
+        - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: true}
+      turns:
+        - role: assistant
+          entry_type: text
+          content: 'Here is the layout.'
+        - role: assistant
+          entry_type: thinking
+          content: 'let me think about the layout'
+
+  - name: claude-thinking-only
+    paths: [indexer, managed]
+    harness: claude-code
+    jsonl:
+      - '{"type":"assistant","uuid":"a3","timestamp":"2026-01-02T10:02:00Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"only thinking here"}]}}'
+    want:
+      turnCount: 1
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: true}
+      turns:
+        - role: assistant
+          entry_type: thinking
+          content: 'only thinking here'
+    # The managed build keeps the carrier and its thinking child as two
+    # turns; the stored indexer folds the record to one.
+    want_managed:
+      turnCount: 2
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: true}
+      turns:
+        - role: assistant
+          entry_type: thinking
+          content: 'only thinking here'
+        - role: assistant
+          entry_type: thinking
+          content: 'only thinking here'
+
+  - name: claude-blank-text-and-tool-use
+    paths: [indexer, managed]
+    harness: claude-code
+    jsonl:
+      - '{"type":"assistant","uuid":"a4","timestamp":"2026-01-02T10:03:00Z","message":{"role":"assistant","content":[{"type":"text","text":""},{"type":"tool_use","id":"toolu_2","name":"Read","input":{"path":"a.go"}}]}}'
+    want:
+      turnCount: 1
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: tool_use
+          content: ''
+          tools:
+            - {name: Read, input: '{"path":"a.go"}', output: ''}
+    want_managed:
+      turnCount: 2
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: tool_use
+          content: ''
+          tools:
+            - {name: Read, input: '{"path":"a.go"}', output: ''}
+        - role: assistant
+          entry_type: text
+          content: ''
+
+  - name: claude-blocks-as-separate-records
+    paths: [indexer, managed]
+    harness: claude-code
+    jsonl:
+      - '{"type":"user","uuid":"u1","timestamp":"2026-01-02T10:00:00Z","message":{"role":"user","content":"what changed?"}}'
+      - '{"type":"assistant","uuid":"a1","timestamp":"2026-01-02T10:00:01Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"pondering the diff"}]}}'
+      - '{"type":"assistant","uuid":"a2","timestamp":"2026-01-02T10:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_9","name":"Read","input":{"path":"diff.go"}}]}}'
+      - '{"type":"user","uuid":"t9","timestamp":"2026-01-02T10:00:03Z","message":{"role":"tool","content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"changed lines"}]}}'
+      - '{"type":"assistant","uuid":"a3","timestamp":"2026-01-02T10:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"The diff looks good."}]}}'
+      - '{"type":"system","uuid":"s1","timestamp":"2026-01-02T10:00:05Z","content":"context compacted"}'
+    want:
+      turnCount: 5
+      conversationTurnCount: 2
+      entries:
+        - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
+        - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: true}
+        - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
+        - {role: tool, entry_type: tool_result, has_tool_use: false, has_thinking: false}
+        - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
+        - {role: system, entry_type: system, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: user
+          entry_type: text
+          content: 'what changed?'
+        - role: assistant
+          entry_type: thinking
+          content: 'pondering the diff'
+        - role: assistant
+          entry_type: tool_use
+          content: ''
+          tools:
+            - {name: Read, input: '{"path":"diff.go"}', output: 'changed lines'}
+        - role: assistant
+          entry_type: text
+          content: 'The diff looks good.'
+        - role: system
+          entry_type: system
+          content: 'context compacted'
+    want_managed:
+      turnCount: 6
+      conversationTurnCount: 2
+      entries:
+        - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
+        - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: true}
+        - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
+        - {role: tool, entry_type: tool_result, has_tool_use: false, has_thinking: false}
+        - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
+        - {role: system, entry_type: system, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: user
+          entry_type: text
+          content: 'what changed?'
+        - role: assistant
+          entry_type: thinking
+          content: 'pondering the diff'
+        - role: assistant
+          entry_type: thinking
+          content: 'pondering the diff'
+        - role: assistant
+          entry_type: tool_use
+          content: ''
+          tools:
+            - {name: Read, input: '{"path":"diff.go"}', output: 'changed lines'}
+        - role: assistant
+          entry_type: text
+          content: 'The diff looks good.'
+        - role: system
+          entry_type: system
+          content: 'context compacted'
+
+  - name: claude-image-only-prompt
+    paths: [indexer, managed]
+    harness: claude-code
+    jsonl:
+      - '{"type":"user","uuid":"u2","timestamp":"2026-01-02T10:02:00Z","message":{"role":"user","content":[{"type":"text","text":"look at this diagram"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]}}'
+    want:
+      turnCount: 1
+      conversationTurnCount: 1
+      entries:
+        - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: user
+          entry_type: text
+          content: 'look at this diagram'
+
+  - name: opencode-unmanaged-text-part-and-tool-part
+    paths: [indexer]
+    harness: opencode
+    tree_messages:
+      - id: msg_1
+        data: '{"id":"msg_1","sessionID":"ses_assistanttyping01","role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic"},"time":{"created":1020,"completed":1090}}'
+        parts:
+          - id: part_text
+            data: '{"id":"part_text","messageID":"msg_1","type":"text","text":"Doing it now."}'
+          - id: part_tool
+            data: '{"id":"part_tool","messageID":"msg_1","type":"tool","name":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"a.go"}}'
+    want:
+      turnCount: 1
+      conversationTurnCount: 1
+      entries:
+        - {role: assistant, entry_type: text, has_tool_use: true, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: text
+          content: 'Doing it now.'
+          tools:
+            - {name: bash, input: '{"command":"ls"}', output: 'a.go'}
+
+  - name: opencode-unmanaged-tool-parts-only
+    paths: [indexer]
+    harness: opencode
+    tree_messages:
+      - id: msg_1
+        data: '{"id":"msg_1","sessionID":"ses_assistanttyping01","role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic"},"time":{"created":1020,"completed":1090}}'
+        parts:
+          - id: part_tool
+            data: '{"id":"part_tool","messageID":"msg_1","type":"tool","name":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"a.go"}}'
+    want:
+      turnCount: 1
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: tool_use
+          content: ''
+          tools:
+            - {name: bash, input: '{"command":"ls"}', output: 'a.go'}
+
+  - name: opencode-unmanaged-reasoning-only
+    paths: [indexer]
+    harness: opencode
+    tree_messages:
+      - id: msg_1
+        data: '{"id":"msg_1","sessionID":"ses_assistanttyping01","role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic"},"time":{"created":1020,"completed":1090}}'
+        parts:
+          - id: part_reason
+            data: '{"id":"part_reason","messageID":"msg_1","type":"reasoning","text":"weighing the options"}'
+    want:
+      turnCount: 2
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: thinking
+          content: ''
+        - role: assistant
+          entry_type: thinking
+          content: 'weighing the options'
+
+  - name: cursor-prose-and-tool-calls
+    paths: [indexer]
+    harness: cursor
+    jsonl:
+      - '{"role":"user","timestamp":"2026-06-04T10:00:00Z","message":{"content":[{"type":"text","text":"read the config"}]}}'
+      - '{"role":"assistant","timestamp":"2026-06-04T10:00:05Z","message":{"model":"cursor-agent","content":[{"type":"text","text":"I will read the config."},{"type":"tool_use","id":"tool-1","name":"ReadFile","input":{"path":"cfg"}}],"usage":{"input_tokens":10,"output_tokens":20}}}'
+    want:
+      turnCount: 2
+      conversationTurnCount: 2
+      entries:
+        - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
+        - {role: assistant, entry_type: text, has_tool_use: true, has_thinking: false}
+      turns:
+        - role: user
+          entry_type: text
+          content: 'read the config'
+        - role: assistant
+          entry_type: text
+          content: 'I will read the config.'
+          tools:
+            - {name: ReadFile, input: '{"path":"cfg"}', output: ''}
+
+  - name: cursor-tool-calls-only
+    paths: [indexer]
+    harness: cursor
+    jsonl:
+      - '{"role":"assistant","timestamp":"2026-06-04T10:00:05Z","message":{"content":[{"type":"tool_use","id":"tool-1","name":"ReadFile","input":{"path":"cfg"}}]}}'
+    want:
+      turnCount: 1
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: tool_use
+          content: ''
+          tools:
+            - {name: ReadFile, input: '{"path":"cfg"}', output: ''}
+
+  - name: opencode-managed-tool-only
+    paths: [managed]
+    harness: opencode
+    scope: {sessionId: ses_opencodeManagedTyping, shape: current, parentNullProven: true, hasParent: false}
+    native_rows:
+      - id: msg_tool
+        type: assistant
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 2000
+        data: '{"id":"msg_tool","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"prt_tool","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"a.go"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
+    allocator: {entries: [e_carrier, e_call, e_result], submissions: []}
+    want:
+      turnCount: 1
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: tool_use, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: tool_use
+          content: ''
+          tools:
+            - {name: bash, input: '{"command":"ls"}', output: '"a.go"'}
+
+  - name: opencode-managed-tool-form-shell
+    paths: [managed]
+    harness: opencode
+    scope: {sessionId: ses_opencodeManagedTyping, shape: current, parentNullProven: true, hasParent: false}
+    native_rows:
+      - id: msg_sh
+        type: shell
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 2000
+        data: '{"id":"msg_sh","type":"shell","shellID":"sh_1","command":"ls","status":"exited","exit":0,"output":{"output":"a.go","cursor":4,"size":4,"truncated":false},"time":{"created":1000,"completed":2000}}'
+    allocator: {entries: [e_carrier, e_call, e_result], submissions: []}
+    want:
+      turnCount: 1
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: tool_use, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: tool_use
+          content: ''
+          tools:
+            - {name: shell, input: 'ls', output: 'a.go'}
+
+  - name: opencode-managed-text-then-tool
+    paths: [managed]
+    harness: opencode
+    scope: {sessionId: ses_opencodeManagedTyping, shape: current, parentNullProven: true, hasParent: false}
+    native_rows:
+      - id: msg_tt
+        type: assistant
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 2000
+        data: '{"id":"msg_tt","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_text","text":"Checking now."},{"type":"tool","id":"prt_tool","name":"read","state":{"status":"completed","input":{"path":"a.go"},"content":[{"type":"text","text":"body"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
+    allocator: {entries: [e_text, e_call, e_result], submissions: []}
+    want:
+      turnCount: 1
+      conversationTurnCount: 1
+      entries:
+        - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: text
+          content: 'Checking now.'
+          tools:
+            - {name: read, input: '{"path":"a.go"}', output: '"body"'}
+
+  - name: opencode-managed-reasoning-then-tool
+    paths: [managed]
+    harness: opencode
+    scope: {sessionId: ses_opencodeManagedTyping, shape: current, parentNullProven: true, hasParent: false}
+    native_rows:
+      - id: msg_rt
+        type: assistant
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 2000
+        data: '{"id":"msg_rt","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"reasoning","id":"prt_reason","text":"Weighing it."},{"type":"tool","id":"prt_tool","name":"read","state":{"status":"completed","input":{"path":"a.go"},"content":[{"type":"text","text":"body"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
+    allocator: {entries: [e_reason, e_call, e_result], submissions: []}
+    want:
+      turnCount: 1
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: thinking
+          content: 'Weighing it.'
+          tools:
+            - {name: read, input: '{"path":"a.go"}', output: '"body"'}
+
+  - name: opencode-managed-blank-text-then-tool
+    paths: [managed]
+    harness: opencode
+    scope: {sessionId: ses_opencodeManagedTyping, shape: current, parentNullProven: true, hasParent: false}
+    native_rows:
+      - id: msg_bt
+        type: assistant
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 2000
+        data: '{"id":"msg_bt","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_blank","text":""},{"type":"tool","id":"prt_tool","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"a.go"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
+    allocator: {entries: [e_blank, e_call, e_result], submissions: []}
+    want:
+      turnCount: 1
+      conversationTurnCount: 1
+      entries:
+        - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: text
+          content: ''
+          tools:
+            - {name: bash, input: '{"command":"ls"}', output: '"a.go"'}
+
+  - name: codex-managed-tool-only-segment
+    paths: [managed]
+    harness: codex
+    thread_id: 11111111-1111-4111-8111-111111111111
+    rollout:
+      - '{"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"legacy","thread_source":"user"}}'
+      - '{"type":"response_item","payload":{"type":"function_call","id":"tool1","name":"read","call_id":"call_1","arguments":"{}"}}'
+      - '{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"file body"}}'
+    allocator: {entries: [e_carrier, e_call, e_result], submissions: []}
+    want:
+      turnCount: 1
+      conversationTurnCount: 0
+      entries:
+        - {role: assistant, entry_type: tool_use, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: tool_use
+          content: ''
+          tools:
+            - {name: read, input: '{}', output: 'file body'}
+
+  - name: codex-managed-text-then-tool
+    paths: [managed]
+    harness: codex
+    thread_id: 11111111-1111-4111-8111-111111111111
+    rollout:
+      - '{"type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","history_mode":"legacy","thread_source":"user"}}'
+      - '{"type":"response_item","payload":{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"I will check the file."}]}}'
+      - '{"type":"response_item","payload":{"type":"function_call","id":"tool1","name":"read","call_id":"call_1","arguments":"{}"}}'
+      - '{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"file body"}}'
+    allocator: {entries: [e_text, e_call, e_result], submissions: []}
+    want:
+      turnCount: 1
+      conversationTurnCount: 1
+      entries:
+        - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: assistant
+          entry_type: text
+          content: 'I will check the file.'
+          tools:
+            - {name: read, input: '{}', output: 'file body'}
+
+  - name: blank-text-counts
+    paths: [indexer]
+    harness: claude-code
+    jsonl:
+      - '{"type":"user","uuid":"u3","timestamp":"2026-01-02T10:04:00Z","message":{"role":"user","content":""}}'
+    want:
+      turnCount: 0
+      conversationTurnCount: 0
+      entries:
+        - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
+      turns: []
+
+  - name: harness-notice-as-user-text-counts
+    paths: [indexer]
+    harness: claude-code
+    jsonl:
+      - '{"type":"user","uuid":"u4","timestamp":"2026-01-02T10:05:00Z","message":{"role":"user","content":"Reminder: standup at 10"}}'
+    want:
+      turnCount: 1
+      conversationTurnCount: 1
+      entries:
+        - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: user
+          entry_type: text
+          content: 'Reminder: standup at 10'
+
+  - name: reclassified-command-is-system
+    paths: [indexer]
+    harness: claude-code
+    jsonl:
+      - '{"type":"user","uuid":"u5","timestamp":"2026-01-02T10:06:00Z","message":{"role":"user","content":"<command-name>/compact</command-name>"}}'
+    want:
+      turnCount: 1
+      conversationTurnCount: 0
+      entries:
+        - {role: system, entry_type: system, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: system
+          entry_type: system
+          content: '<command-name>/compact</command-name>'
+
+  - name: pi-nested-tool-calls
+    paths: [indexer]
+    harness: pi
+    jsonl:
+      - '{"type":"session","id":"11111111-1111-4111-8111-111111111111","version":3,"cwd":"/synthetic/pi"}'
+      - '{"type":"message","id":"m1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"list files"}}'
+      - '{"type":"message","id":"m2","parentId":"m1","timestamp":"2026-01-02T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"On it."},{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"ls"}},{"type":"toolCall","id":"c2","name":"read","arguments":{"path":"a.go"}}]}}'
+      - '{"type":"message","id":"m3","parentId":"m2","timestamp":"2026-01-02T00:00:03Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","content":"a.go"}}'
+      - '{"type":"message","id":"m4","parentId":"m3","timestamp":"2026-01-02T00:00:04Z","message":{"role":"toolResult","toolCallId":"c2","toolName":"read","content":"body"}}'
+    want:
+      turnCount: 2
+      conversationTurnCount: 2
+      entries:
+        - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
+        - {role: assistant, entry_type: text, has_tool_use: true, has_thinking: false}
+      turns:
+        - role: user
+          entry_type: text
+          content: 'list files'
+        - role: assistant
+          entry_type: text
+          content: 'On it.'
+          tools:
+            - {name: bash, input: '{"command":"ls"}', output: 'a.go'}
+            - {name: read, input: '{"path":"a.go"}', output: 'body'}
+
+  - name: cursor-session-shape
+    paths: [indexer]
+    harness: cursor
+    generated: {user_text: 45, assistant_text: 33, prose_tool_replies: 248}
+    want:
+      turnCount: 326
+      conversationTurnCount: 326
+      entries: []
+      turns: []

@@ -1,7 +1,7 @@
 package transcript
 
 import (
-	"encoding/json"
+	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
@@ -14,8 +14,9 @@ import (
 // turn, or a user turn.
 //
 // The cut and the read must agree on the measure, or the directory's declared
-// range and the segment's turns would be different sets. Both use
-// TurnByteLength here.
+// range and the segment's turns would be different sets. Both use the
+// contract's measure, schema.TranscriptTurnByteLength; the cut itself is the
+// contract's schema.CutTranscriptSegments.
 
 // ServedTurnBound reports what the served-text bound did to one turn, and the
 // turn's size before the bound was applied. It is the per-turn sibling of
@@ -30,28 +31,6 @@ type ServedTurnBound struct {
 	ByteLength int
 }
 
-// TurnByteLength returns the pre-bound JSON byte length of a turn's content,
-// text parts, image metadata, and every tool call's arguments and result. It is measured with
-// the JSON encoder, so escaping is counted exactly as the wire will carry it.
-// It is intentionally the size BEFORE the served-text bound, so an oversized
-// turn stays detectable in the cut after its text has been shortened.
-func TurnByteLength(turn schema.TurnDetail) int {
-	total := jsonEncodedStringLen(turn.Content)
-	for _, part := range turn.ContentParts {
-		if part.Type == schema.TurnPartTypeText {
-			total += jsonEncodedStringLen(part.Text)
-		} else if part.Type == schema.TurnPartTypeImage && part.Image != nil {
-			encoded, _ := json.Marshal(part.Image)
-			total += len(encoded)
-		}
-	}
-	for i := range turn.ToolCalls {
-		total += jsonEncodedStringLen(turn.ToolCalls[i].Arguments)
-		total += jsonEncodedStringLen(turn.ToolCalls[i].Result)
-	}
-	return total
-}
-
 // BoundServedTurns applies the served-text bound to every turn's own text and
 // reports, per turn, whether it was shortened and what it measured before the
 // bound. The caller passes the same ServedDocumentBudget the session detail
@@ -63,7 +42,7 @@ func BoundServedTurns(turns []schema.TurnDetail, budget ServedDocumentBudget) []
 	bounds := make([]ServedTurnBound, len(turns))
 	original := make([][]string, len(turns))
 	for i := range turns {
-		bounds[i].ByteLength = TurnByteLength(turns[i])
+		bounds[i].ByteLength = schema.TranscriptTurnByteLength(turns[i])
 		for _, field := range turnTextFields(&turns[i]) {
 			original[i] = append(original[i], *field.target)
 		}
@@ -132,7 +111,7 @@ func SegmentTurnRows(folded []ingest.Turn, budget ServedDocumentBudget) []schema
 // the measure the directory's refs carry and the measure a segment read must
 // reproduce exactly, so a soft store-budget stop inside a turn is detectable.
 func FoldedTurnByteLength(turn ingest.Turn) int {
-	return TurnByteLength(turnsToDetail([]ingest.Turn{turn})[0])
+	return schema.TranscriptTurnByteLength(turnsToDetail([]ingest.Turn{turn})[0])
 }
 
 // SegmentEntryCounts returns, per segment ref, the number of stored entries
@@ -164,49 +143,79 @@ func SegmentEntryCounts(entries []schema.SessionEntry, refs []schema.TranscriptS
 	return counts
 }
 
-// CutSegments fills segments with whole turns up to budget bytes and returns
-// one ref per segment plus the number of turns it cut. A turn is appended whole
-// or deferred; a turn larger than the budget is alone in its segment. The
-// function never splits a turn, so it never splits an entry or a user turn.
-//
-// The segment's ByteLength is the sum of its turns' TurnByteLength values,
-// which is the measure the cut used, so the directory states the same cost the
-// segment read will serve.
+// CutSegments projects the folded turns to wire turns and cuts them with the
+// contract's cut, schema.CutTranscriptSegments, so this server's segment
+// boundaries are the ones every server produces. It returns one ref per segment
+// plus the number of turns it cut. The measure, the whole-turn rule and the
+// conversation turn spans are the contract's; this function owns only the
+// projection.
 func CutSegments(folded []ingest.Turn, budget int) ([]schema.TranscriptSegmentRef, int) {
-	return CutTurnRows(turnsToDetail(folded), budget)
+	turns := turnsToDetail(folded)
+	return schema.CutTranscriptSegments(turns, budget), len(turns)
 }
 
-// CutTurnRows cuts already-projected wire turns into segment refs. It exists so
-// the cut can be exercised without rebuilding a session's entries and so the
-// directory build and the segment read use one implementation.
-func CutTurnRows(turns []schema.TurnDetail, budget int) ([]schema.TranscriptSegmentRef, int) {
-	if len(turns) == 0 {
-		return []schema.TranscriptSegmentRef{}, 0
-	}
-	refs := make([]schema.TranscriptSegmentRef, 0, len(turns))
-	var current *schema.TranscriptSegmentRef
-	bytes := 0
-	for i := range turns {
-		size := TurnByteLength(turns[i])
-		if current != nil && bytes+size > budget {
-			refs = append(refs, *current)
-			current = nil
-			bytes = 0
+// ConversationTurnsRule names the self-check rule a cut failed. Closed set.
+type ConversationTurnsRule string
+
+const (
+	// ConversationTurnsRulePresence: a ref carries no span.
+	ConversationTurnsRulePresence ConversationTurnsRule = "presence"
+	// ConversationTurnsRuleContinuity: a span's before differs from the running
+	// count, or its count is negative.
+	ConversationTurnsRuleContinuity ConversationTurnsRule = "continuity"
+	// ConversationTurnsRuleCanonical: the running count differs from the
+	// session's canonical conversation turn count.
+	ConversationTurnsRuleCanonical ConversationTurnsRule = "canonical"
+)
+
+// ConversationTurnsFault reports why a cut's position data is withheld.
+type ConversationTurnsFault struct {
+	Rule ConversationTurnsRule
+	// Segment is the segment ordinal, or -1 for the canonical rule. It is a log
+	// attribute and never reaches the wire.
+	Segment   int
+	Want, Got int
+}
+
+func (f *ConversationTurnsFault) Error() string {
+	const where = "transcript.CheckConversationTurns: checking the cut's conversation turn positions before the directory is served: "
+	const consequence = "; a reader would be shown a wrong position, so the directory is served without conversationTurns and totalConversationTurns"
+	switch f.Rule {
+	case ConversationTurnsRulePresence:
+		return fmt.Sprintf("%ssegment %d carries no conversationTurns span (want 1 span, got %d)%s; make the cut open every segment with a span", where, f.Segment, f.Got, consequence)
+	case ConversationTurnsRuleContinuity:
+		if f.Got < 0 && f.Want == 0 {
+			return fmt.Sprintf("%ssegment %d declares %d as a conversation turn count or start, and neither can be below %d%s; make the cut count only turns it appended", where, f.Segment, f.Got, f.Want, consequence)
 		}
-		if current == nil {
-			current = &schema.TranscriptSegmentRef{
-				Index:      len(refs),
-				FirstTurn:  turns[i].Index,
-				LastTurn:   turns[i].Index,
-				ByteLength: 0,
-			}
+		return fmt.Sprintf("%ssegment %d declares %d conversation turns before it, but the earlier segments hold %d%s; make the cut start every span at the running count", where, f.Segment, f.Got, f.Want, consequence)
+	case ConversationTurnsRuleCanonical:
+		return fmt.Sprintf("%sthe segments hold %d conversation turns in total, but the session's canonical count is %d%s; make the cut and ingest.ConversationTurnCount apply the same rule to the same turns", where, f.Got, f.Want, consequence)
+	}
+	return fmt.Sprintf("%sunknown rule %q at segment %d (want %d, got %d)%s; add the rule to ConversationTurnsFault.Error", where, string(f.Rule), f.Segment, f.Want, f.Got, consequence)
+}
+
+// CheckConversationTurns walks the refs once. It returns nil when every ref
+// carries a span, each span starts at the running count with a non-negative
+// count, and the running count ends at canonical. Those three facts imply the
+// wire rules for the whole list, and each wire rule is per ref or per adjacent
+// pair, so no page of a checked directory can be refused over positions.
+func CheckConversationTurns(refs []schema.TranscriptSegmentRef, canonical int) *ConversationTurnsFault {
+	running := 0
+	for i := range refs {
+		span := refs[i].ConversationTurns
+		if span == nil {
+			return &ConversationTurnsFault{Rule: ConversationTurnsRulePresence, Segment: refs[i].Index, Want: 1, Got: 0}
 		}
-		current.LastTurn = turns[i].Index
-		current.ByteLength += size
-		bytes += size
+		if span.Before != running {
+			return &ConversationTurnsFault{Rule: ConversationTurnsRuleContinuity, Segment: refs[i].Index, Want: running, Got: span.Before}
+		}
+		if span.Count < 0 {
+			return &ConversationTurnsFault{Rule: ConversationTurnsRuleContinuity, Segment: refs[i].Index, Want: 0, Got: span.Count}
+		}
+		running += span.Count
 	}
-	if current != nil {
-		refs = append(refs, *current)
+	if running != canonical {
+		return &ConversationTurnsFault{Rule: ConversationTurnsRuleCanonical, Segment: -1, Want: canonical, Got: running}
 	}
-	return refs, len(turns)
+	return nil
 }

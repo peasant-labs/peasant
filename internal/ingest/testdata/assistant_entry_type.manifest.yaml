@@ -1,0 +1,24 @@
+requiredNames:
+  - claude-prose-and-tool-use-in-one-record
+  - claude-thinking-and-prose-in-one-record
+  - claude-thinking-only
+  - claude-blank-text-and-tool-use
+  - claude-blocks-as-separate-records
+  - claude-image-only-prompt
+  - opencode-unmanaged-text-part-and-tool-part
+  - opencode-unmanaged-tool-parts-only
+  - opencode-unmanaged-reasoning-only
+  - cursor-prose-and-tool-calls
+  - cursor-tool-calls-only
+  - opencode-managed-tool-only
+  - opencode-managed-tool-form-shell
+  - opencode-managed-text-then-tool
+  - opencode-managed-reasoning-then-tool
+  - opencode-managed-blank-text-then-tool
+  - codex-managed-tool-only-segment
+  - codex-managed-text-then-tool
+  - blank-text-counts
+  - harness-notice-as-user-text-counts
+  - reclassified-command-is-system
+  - pi-nested-tool-calls
+  - cursor-session-shape

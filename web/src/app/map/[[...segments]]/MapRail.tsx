@@ -1,5 +1,6 @@
 'use client';
 
+import { displayedTurnCount } from '@/lib/sessions/displayedTurnCount';
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, FileCode, FolderOpen, RotateCw, X } from 'lucide-react';
@@ -305,7 +306,9 @@ function AllConversations({
             <p className="text-[length:var(--fs-label)] text-ink-4">no conversations match.</p>
           ) : (
             <ul className="flex flex-col">
-              {shown.map((s) => (
+              {shown.map((s) => {
+                const turns = displayedTurnCount(s);
+                return (
                 <li key={s.id}>
                   <Link
                     href={transcriptHref(projectHash, s.id, { origin: RouteOrigin.Map, returnLocation: returnTo })}
@@ -318,12 +321,13 @@ function AllConversations({
                     <span className="mt-0.5 flex items-center gap-2 font-mono tabular-nums text-[length:var(--fs-label)] text-ink-4">
                       <span>{formatRelative(s.startTime, nowMs)}</span>
                       <span>
-                        {s.turnCount} request{s.turnCount !== 1 ? 's' : ''}
+                        {turns} {turns === 1 ? 'turn' : 'turns'}
                       </span>
                     </span>
                   </Link>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
           {hidden > 0 && (

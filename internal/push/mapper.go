@@ -141,12 +141,15 @@ func mapMetadataWithPolicy(opts MapOptions, limitBytes int) (_ []byte, err error
 		},
 		Project: projectContextWire(meta, opts.Fields),
 		Stats: schema.SessionStats{
-			TurnCount:     meta.Stats.TurnCount,
-			ToolCallCount: meta.Stats.ToolCallCount,
-			SubagentCount: meta.Stats.SubagentCount,
-			DurationMs:    meta.Stats.DurationMs,
-			TokensIn:      meta.Stats.TokensIn,
-			TokensOut:     meta.Stats.TokensOut,
+			TurnCount: meta.Stats.TurnCount,
+			// Presence is preserved exactly: the stored row stamps the count on
+			// every local session, and an absent count stays absent.
+			ConversationTurnCount: meta.Stats.ConversationTurnCount,
+			ToolCallCount:         meta.Stats.ToolCallCount,
+			SubagentCount:         meta.Stats.SubagentCount,
+			DurationMs:            meta.Stats.DurationMs,
+			TokensIn:              meta.Stats.TokensIn,
+			TokensOut:             meta.Stats.TokensOut,
 			// Presence is preserved exactly: an absent capture stays absent
 			// (nil) and a measured zero stays a present zero. The receiver
 			// compares this mirror against the durable detail's value, so

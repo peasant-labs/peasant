@@ -1,5 +1,6 @@
 'use client';
 
+import { displayedTurnCount } from '@/lib/sessions/displayedTurnCount';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { FeedbackPanel } from '@/lib/ft-ui';
 import { SkeletonList } from '@/lib/skeleton';
@@ -221,7 +222,7 @@ export function GroupedSessionsSection({
       label: 'turns',
       align: ColumnAlign.End,
       numeric: true,
-      render: (row) => row.item.transcript ? tokenLabel(row.item.transcript.session.turnCount) : '—',
+      render: (row) => row.item.transcript ? tokenLabel(displayedTurnCount(row.item.transcript.session)) : '—',
     },
     {
       id: GroupedColumn.Tokens,

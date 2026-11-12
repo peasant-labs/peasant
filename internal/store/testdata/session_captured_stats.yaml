@@ -61,9 +61,11 @@ cases:
   - name: list-detail-stats-source
     action: list-detail
     nativeTurns: 10
+    nativeConversationTurns: 7
     nativeTools: 20
     nativeOutput: 300
     legacyTurns: 3
+    legacyConversationTurns: 2
     legacyTools: 4
     legacyOutput: 100
     peakInput: 700

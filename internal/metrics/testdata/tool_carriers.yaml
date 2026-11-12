@@ -5,6 +5,9 @@ requiredNames:
   - a_real_flat_call_is_not_a_carrier
   - claude_task_carrier_is_not_a_second_subagent
   - missing_parent_keeps_the_tool_block
+  - pi_parent_row_keeps_its_count
+  - strike_parent_row_keeps_its_count
+  - opencode_unmanaged_message_keeps_its_count
 cases:
   - name: claude_carrier_does_not_duplicate_its_tool_blocks
     entries:
@@ -42,4 +45,29 @@ cases:
     entries:
       - {index: 1, harness: claude-code, role: assistant, depth: 1, parent: 0, tools: Read, call: call-read}
     tools: 1
+    subagents: 0
+  # A prose-less carrier names no tool and no call but still flags the tool
+  # activity it groups; the counter reads the flag, so the row counts one for
+  # the carrier and one per tool child. Each row below is that shape for one
+  # harness, and each asserts today's count before and after the retype.
+  - name: pi_parent_row_keeps_its_count
+    entries:
+      - {index: 0, harness: pi, role: assistant, type: text, hasToolUse: true}
+      - {index: 1, harness: pi, role: assistant, depth: 1, parent: 0, tools: bash, call: pi-tool-c1}
+      - {index: 2, harness: pi, role: assistant, depth: 1, parent: 0, tools: read, call: pi-tool-c2}
+    tools: 3
+    subagents: 0
+  - name: strike_parent_row_keeps_its_count
+    entries:
+      - {index: 0, harness: strike, role: assistant, type: text, hasToolUse: true}
+      - {index: 1, harness: strike, role: assistant, depth: 1, parent: 0, tools: bash, call: strike-tool-c1}
+      - {index: 2, harness: strike, role: assistant, depth: 1, parent: 0, tools: read, call: strike-tool-c2}
+    tools: 3
+    subagents: 0
+  - name: opencode_unmanaged_message_keeps_its_count
+    entries:
+      - {index: 0, harness: opencode, role: assistant, type: text, hasToolUse: true}
+      - {index: 1, harness: opencode, role: assistant, depth: 1, parent: 0, tools: bash, call: opencode-tool-c1}
+      - {index: 2, harness: opencode, role: assistant, depth: 1, parent: 0, tools: read, call: opencode-tool-c2}
+    tools: 3
     subagents: 0

@@ -283,10 +283,11 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 	metadata.Project.Name = "fixture-project"
 	metadata.Project.FilePath = "/synthetic/parity"
 	metadata.HostSlug = "fixture-host"
-	conversationTurnCount := ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
+	foldedTurns := ingest.EntriesToTurns(entries)
+	conversationTurnCount := int64(ingest.ConversationTurnCount(foldedTurns))
 	// The adapter's document carries the raw record count, exactly as a real
-	// capture does. The production write lane derives the conversation count
-	// from the entries; the harness sets no count the producer would not.
+	// capture does. The production write lane derives both turn counts from
+	// the entries; the harness sets no count the producer would not.
 	metadata.Stats.TurnCount = len(entries)
 	count := int64(1)
 	metadata.Stats.InputSubmissionCount = &count
@@ -331,10 +332,12 @@ func Run(ctx context.Context, c Case) (Corpus, error) {
 			return result, fmt.Errorf("index %s: %v", c.Name, writes)
 		}
 	} else {
-		// The producer's projection writes the conversation count into the
-		// generation metadata (applyStrictCounts); the harness activates a
-		// prebuilt generation, so it applies that one step itself.
-		metadata.Stats.TurnCount = conversationTurnCount
+		// The producer's projection writes the folded turn count and the
+		// conversation turn count into the generation metadata
+		// (applyStrictCounts); the harness activates a prebuilt generation, so
+		// it applies that one step itself.
+		metadata.Stats.TurnCount = len(foldedTurns)
+		metadata.Stats.ConversationTurnCount = &conversationTurnCount
 		metadata.MetadataHash = schema.ComputeMetadataHash(&metadata)
 		generation := indexformat.Generation{ID: "g_" + strings.ReplaceAll(c.Name, "-", "_"), Metadata: metadata, Completeness: indexformat.GenerationCompletenessComplete, Main: indexformat.Partition{Entries: entries}, SourceEvidenceDigest: strings.Repeat("c", 64)}
 		if c.PreviewOnly {
@@ -574,14 +577,16 @@ func seedFileBacked(ctx context.Context, db *store.Store, path, root string, g i
 	// activation lane, so seed the complete captured stats the activation would
 	// have written before the V1 mirror index runs.
 	inputCount := int64(1)
-	conversationTurnCount := ingest.ConversationTurnCount(ingest.EntriesToTurns(g.Main.Entries))
+	foldedTurns := ingest.EntriesToTurns(g.Main.Entries)
+	turnCount := len(foldedTurns)
+	conversationTurnCount := ingest.ConversationTurnCount(foldedTurns)
 	seed, err := json.Marshal(g.Metadata.Stats)
 	if err != nil {
 		return err
 	}
 	seedText := string(seed)
 	if _, err := db.UpsertCapturedStats(ctx, store.CapturedStats{
-		SessionID: g.Metadata.SessionID, ConversationTurnCount: &conversationTurnCount,
+		SessionID: g.Metadata.SessionID, TurnCount: &turnCount, ConversationTurnCount: &conversationTurnCount,
 		InputSubmissionCount: &inputCount, SeedJSON: &seedText,
 		Source: store.StatsSourceHarness, UpdatedAtMs: 1,
 	}); err != nil {

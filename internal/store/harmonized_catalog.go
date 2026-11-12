@@ -185,13 +185,15 @@ type GenerationChildren struct {
 // by the harness updates and the migration backfills, never by COMPUTE.
 type CapturedStats struct {
 	SessionID schema.SessionID
-	// TurnCount is the retired raw harness record count. It stays readable so
-	// a pre-V71 store can be backfilled from its own legacy value, but no
-	// capture or compute lane writes it.
+	// TurnCount is the number of folded turns of the session's main
+	// partition, system and tool rows included. The index-time fold and the
+	// upgrade recount write it. On a session whose entries are gone it still
+	// holds the value an earlier store kept, which may be a raw harness
+	// record count.
 	TurnCount *int
 	// ConversationTurnCount is the producer's conversation turn count: the
-	// projected turns whose role is not system. It is the only turn count a
-	// store read, detail payload, export or publication reports.
+	// folded turns on the contract's allowed list. It is the turn count every
+	// list, sort, filter, average and reader-facing surface reports.
 	ConversationTurnCount *int
 	InputSubmissionCount  *int64
 	ToolCallCount         *int
@@ -379,13 +381,16 @@ func serializeMetadata(gen GenerationRecord, children GenerationChildren, stats 
 // NULL-to-wire mapping) and as absent for the optional pointers.
 func capturedStatsToSessionStats(stats CapturedStats) schema.SessionStats {
 	out := schema.SessionStats{}
-	// The rebuilt metadata document is compared byte-for-byte with the
-	// pre-upgrade document during migration and reused as prior evidence, so it
-	// keeps the retired raw field exactly as stored. Serving surfaces read
-	// capturedStatsToWire, which reports the conversation count.
+	// The rebuilt metadata document is reused as prior evidence and, during
+	// migration, compared with the retained document it was built from. It
+	// carries each turn number exactly as the stats it is given hold it: the
+	// folded turn count, and the conversation turn count only when present, so
+	// a retained document without the count rebuilds without it. The adapter's
+	// own raw value stays in seed_json.
 	if stats.TurnCount != nil {
 		out.TurnCount = *stats.TurnCount
 	}
+	out.ConversationTurnCount = intPtrToInt64(stats.ConversationTurnCount)
 	out.InputSubmissionCount = stats.InputSubmissionCount
 	if stats.ToolCallCount != nil {
 		out.ToolCallCount = *stats.ToolCallCount

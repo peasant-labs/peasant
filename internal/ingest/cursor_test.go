@@ -308,8 +308,11 @@ func TestCursorIndexer_BasicAndFullDepth(t *testing.T) {
 	if entries[0].ContentPreview == nil || *entries[0].ContentPreview != "Hello" {
 		t.Errorf("entry 0 preview = %v", entries[0].ContentPreview)
 	}
-	if entries[2].Role != ingest.RoleAssistant || entries[2].EntryType != ingest.EntryTypeToolUse {
-		t.Errorf("entry 2 role/type = %s/%s, want assistant/tool_use", entries[2].Role, entries[2].EntryType)
+	if entries[2].Role != ingest.RoleAssistant || entries[2].EntryType != ingest.EntryTypeText {
+		t.Errorf("entry 2 role/type = %s/%s, want assistant/text (prose with tool calls)", entries[2].Role, entries[2].EntryType)
+	}
+	if !entries[2].HasToolUse {
+		t.Errorf("entry 2 has_tool_use: expected true (tool calls still flagged)")
 	}
 	if entries[2].ToolNamesCSV == nil || *entries[2].ToolNamesCSV != "ReadFile" {
 		t.Errorf("entry 2 ToolNamesCSV = %v, want ReadFile", entries[2].ToolNamesCSV)

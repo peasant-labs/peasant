@@ -1,4 +1,5 @@
 import { adaptTranscript, type AdaptTranscriptOptions } from '@peasant-labs/fairtrade/ui';
+import { zConversationTurnSpan, type ConversationTurnSpan } from '@peasant-labs/schema';
 import { getApiBaseUrl } from '@/lib/api/base';
 import { readLocalAnswer } from '@/lib/api/validated-local';
 import type { SessionDetailPayload, TurnDetail } from '@/types/messages';
@@ -35,6 +36,12 @@ export type TranscriptSegmentRef = {
   firstTurn: number;
   lastTurn: number;
   byteLength: number;
+  /**
+   * Where the segment sits in the session's conversation turns: a pair of
+   * counts, never a turn identity. Absent when the server sent none, or when
+   * this directory's position fields were dropped as malformed.
+   */
+  conversationTurns?: ConversationTurnSpan;
 };
 
 export type TranscriptSegmentDirectory = {
@@ -42,6 +49,8 @@ export type TranscriptSegmentDirectory = {
   revision: string;
   totalTurns: number;
   totalSegments: number;
+  /** The total a position is stated against. Absent under the same rule as a ref's span. */
+  totalConversationTurns?: number;
   segments: TranscriptSegmentRef[];
 };
 
@@ -135,6 +144,67 @@ function parseRef(value: unknown, path: string, position: number): TranscriptSeg
   return { index, firstTurn, lastTurn, byteLength };
 }
 
+type DirectoryPositions = {
+  total: number | undefined;
+  spans: readonly (ConversationTurnSpan | undefined)[];
+};
+
+/** The first position field of a directory that is present and not well-shaped. */
+type PositionFault = { field: string; value: unknown; expected: string };
+
+function isPositionFault(read: DirectoryPositions | PositionFault): read is PositionFault {
+  return 'field' in read;
+}
+
+/**
+ * Read the optional conversation turn position fields of a directory: the
+ * total, then each segment's span in wire order. An absent field is not a
+ * fault. Each field is checked for its own shape only; the rules between
+ * fields (a span ends at or before the total, neighbours are continuous) are
+ * the server's, and are not repeated here.
+ */
+function readDirectoryPositions(
+  directory: Record<string, unknown>,
+  segments: readonly unknown[],
+): DirectoryPositions | PositionFault {
+  const rawTotal = directory.totalConversationTurns;
+  let total: number | undefined;
+  if (rawTotal !== undefined) {
+    if (typeof rawTotal !== 'number' || !Number.isSafeInteger(rawTotal) || rawTotal < 0) {
+      return { field: 'totalConversationTurns', value: rawTotal, expected: 'a non-negative safe integer' };
+    }
+    total = rawTotal;
+  }
+  const spans: (ConversationTurnSpan | undefined)[] = [];
+  for (const [position, segment] of segments.entries()) {
+    const rawSpan = isRecord(segment) ? segment.conversationTurns : undefined;
+    if (rawSpan === undefined) {
+      spans.push(undefined);
+      continue;
+    }
+    const span = zConversationTurnSpan.safeParse(rawSpan);
+    if (!span.success) {
+      return {
+        field: `segments[${position}].conversationTurns`,
+        value: rawSpan,
+        expected: 'a {before, count} pair of non-negative safe integers',
+      };
+    }
+    spans.push(span.data);
+  }
+  return { total, spans };
+}
+
+/**
+ * The one warning for a directory whose position data cannot be used. The
+ * directory itself is still served to the viewer, without any position field.
+ */
+function warnPositionsDropped(path: string, sessionId: string, revision: string, fault: PositionFault): void {
+  console.warn(
+    `peasant's transcript read ${path} carries a conversation turn position this page cannot use: ${fault.field} is ${JSON.stringify(fault.value)}, not ${fault.expected}. totalConversationTurns and every segment's conversationTurns were dropped from this directory, so its load-more boundaries show segment and byte sizes in place of turn ranges; the transcript itself still loads. Please report this with session id ${sessionId} and revision ${revision}.`,
+  );
+}
+
 export function parseTranscriptDirectory(value: unknown, path: string): TranscriptSegmentDirectory {
   if (!isRecord(value)) fail(path, 200, 'the directory is not an object');
   if (typeof value.sessionId !== 'string' || value.sessionId.length === 0) {
@@ -144,15 +214,26 @@ export function parseTranscriptDirectory(value: unknown, path: string): Transcri
   const totalTurns = safeCount(value.totalTurns, path, 'totalTurns');
   const totalSegments = safeCount(value.totalSegments, path, 'totalSegments');
   if (!Array.isArray(value.segments)) fail(path, 200, 'segments is not an array');
-  const segments = value.segments.map((ref, position) => parseRef(ref, path, position));
-  const directory: TranscriptSegmentDirectory = {
+  const refs = value.segments.map((ref, position) => parseRef(ref, path, position));
+  const read = readDirectoryPositions(value, value.segments);
+  if (isPositionFault(read)) {
+    // One malformed field puts every position of this directory in doubt, so
+    // none is kept: a boundary names a range against the total or not at all.
+    warnPositionsDropped(path, value.sessionId, revision, read);
+    return { sessionId: value.sessionId, revision, totalTurns, totalSegments, segments: refs };
+  }
+  const segments = refs.map((ref, position): TranscriptSegmentRef => {
+    const conversationTurns = read.spans[position];
+    return conversationTurns === undefined ? ref : { ...ref, conversationTurns };
+  });
+  return {
     sessionId: value.sessionId,
     revision,
     totalTurns,
     totalSegments,
+    ...(read.total === undefined ? {} : { totalConversationTurns: read.total }),
     segments,
   };
-  return directory;
 }
 
 function parseTurn(value: unknown, path: string, position: number): TranscriptTurnWire {

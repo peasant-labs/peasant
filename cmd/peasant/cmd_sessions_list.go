@@ -189,7 +189,7 @@ func listSessionsShared(cmd *cobra.Command, db *store.Store, f store.SessionList
 			Date:        formatSessionDate(row.StartMs),
 			Project:     projectDisplayName(row.CanonicalRemote, row.ProjectName),
 			ProjectHash: row.ProjectHash,
-			Turns:       row.TurnCount,
+			Turns:       row.ConversationTurnCount,
 			Tokens:      row.TokensTotal,
 			Preview:     previews[row.SessionID], // empty string when key absent
 

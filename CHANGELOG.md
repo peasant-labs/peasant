@@ -48,6 +48,9 @@ Release, which holds the signed artifacts and checksums.
   prints the plan. It uploads nothing and changes no visibility or license. It
   exits 3 whenever it sent no share request, every target failing included,
   and 1 only when it sent one and something failed.
+- Load-more boundaries in a long transcript, the scrubber ticks and the jump
+  alert name conversation turn ranges, such as "turns 20–43 of 77", in place
+  of segment and byte sizes.
 
 ### Changed
 - `open --session` no longer passes `--force`. An unchanged session is not
@@ -72,6 +75,15 @@ Release, which holds the signed artifacts and checksums.
   walks the Codex source for canonical facts. It used to walk Codex and write
   nothing, so a database maintained only through `harvest index` never gained
   the catalog.
+- Session lists, the transcript header, analytics and exports show a session's
+  conversation turns: the user and assistant turns that hold text or an image.
+  System and tool rows are no longer counted, so the number shown for a
+  session can drop, for example from 69 to 60. In the API, `turnCount` again
+  counts every folded turn and the new `conversationTurnCount` carries the
+  conversation count. This requires a Village deployed with schema 0.51.0;
+  deploy Village first.
+- An assistant reply is typed by whether it holds prose, for cursor, opencode
+  and Claude sessions (closes #959).
 
 ### Fixed
 - Search finds entries again after the 0.16.1 upgrade. The 0.16.1 store
@@ -97,6 +109,9 @@ Release, which holds the signed artifacts and checksums.
   once, which needs free disk space for a new index. A store that never ran
   0.16.1, including one upgraded straight from 0.15.x, only takes the quick
   path.
+- Migration 77 recounts both turn counts of every stored session, once, the
+  first time the store is opened after the upgrade. A session with no stored
+  entries keeps the counts it had.
 
 ## [0.14.0] - 2026-11-04
 

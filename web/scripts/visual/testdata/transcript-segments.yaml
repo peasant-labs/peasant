@@ -18,6 +18,8 @@ requiredNames:
   - per-field-bound
   - revision-refetch-segment-zero
   - revision-directory-fails
+  - positions-mounted
+  - legacy-duplicate-full-load
 cases:
   - name: system-only
     revision: "7"
@@ -258,3 +260,64 @@ cases:
     expectError: true
     notIndexed: false
     segmentMode: false
+
+  # Conversation turn positions. The directory states a span per segment and a
+  # session total; system and tool rows are in the turns but not in the counts,
+  # so a position never equals a row index. Opening turn 9 holds segment 2 only:
+  # the gap above it is segments 0 and 1, the gap below it is segment 3.
+  # `captions` are the boundary captions in document order and `header` is the
+  # trace header's count. Every range must end at or below the header's total.
+  - name: positions-mounted
+    revision: "7"
+    nextRevision: null
+    turn: 9
+    totalSegments: 4
+    totalConversationTurns: 12
+    systemTurns: [2, 14]
+    toolTurns: [6, 11]
+    repeatedTurns: []
+    segments:
+      - { index: 0, turns: [0, 1, 2, 3], conversationTurns: { before: 0, count: 3 } }
+      - { index: 1, turns: [4, 5, 6, 7, 8], conversationTurns: { before: 3, count: 4 } }
+      - { index: 2, turns: [9, 10, 11, 12], conversationTurns: { before: 7, count: 3 } }
+      - { index: 3, turns: [13, 14, 15], conversationTurns: { before: 10, count: 2 } }
+    window:
+      requestedAnchor: 9
+      anchorTurn: 9
+      segments: [2]
+    actions: []
+    reads: [directory, window, segment:2]
+    absent: [segment:0, segment:1, segment:3, turns]
+    boundaries: "2"
+    mountedTurns: [9, 10, 11, 12]
+    captions: ["turns 1–7 of 12", "turns 11–12 of 12"]
+    header: "3 of 12 turns"
+    notIndexed: false
+    segmentMode: true
+
+  # A session recorded before entries carried provenance repeats one reply:
+  # turn 3 has the role and text of turn 2, and the viewer's adapter shows the
+  # pair once. The server counted both, so the directory total is 4 while three
+  # conversation turns are held. With every segment loaded the header prints
+  # the directory total alone, not "3 of 4 turns".
+  - name: legacy-duplicate-full-load
+    revision: "7"
+    nextRevision: null
+    turn: null
+    totalSegments: 1
+    totalConversationTurns: 4
+    systemTurns: []
+    toolTurns: []
+    repeatedTurns: [3]
+    segments:
+      - { index: 0, turns: [0, 1, 2, 3], conversationTurns: { before: 0, count: 4 } }
+    window: null
+    actions: []
+    reads: [directory, segment:0]
+    absent: [window, turns]
+    boundaries: "0"
+    mountedTurns: [0, 1, 2]
+    captions: []
+    header: "4 turns"
+    notIndexed: false
+    segmentMode: true

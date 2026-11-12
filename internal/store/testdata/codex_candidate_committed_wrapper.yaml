@@ -18,7 +18,7 @@ generation:
   submissionRefs:
     - s_wrap1
 expected:
-  # Retired raw record count, retained for fixture history only.
+  # The number of folded turns: all three main entries are served.
   turnCount: 3
   # The producer's conversation count: e_wrap2 stays in main (role=system,
   # entryType=system, agents_md.instructions) but is harness bookkeeping, not

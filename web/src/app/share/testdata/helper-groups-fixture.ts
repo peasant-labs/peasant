@@ -54,6 +54,8 @@ export interface FixtureMember {
   id: string;
   preview: string;
   turnCount: number;
+  /** Measured conversation turns; absent on a row that states only one count. */
+  conversationTurnCount?: number;
   syncStatus: HelperGroupSyncStatus;
   helperGroups?: FixtureGroup[];
 }
@@ -153,6 +155,9 @@ function parseMember(value: unknown, where: string): FixtureMember {
     turnCount: requireCount(record.turnCount, `${where}.turnCount`),
     syncStatus: requireEnum(record.syncStatus, HELPER_GROUP_SYNC_STATUSES, `${where}.syncStatus`),
   };
+  if (record.conversationTurnCount !== undefined) {
+    member.conversationTurnCount = requireCount(record.conversationTurnCount, `${where}.conversationTurnCount`);
+  }
   const nested = parseNestedGroups(record, where);
   if (nested) member.helperGroups = nested;
   return member;

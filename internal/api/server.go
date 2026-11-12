@@ -659,7 +659,9 @@ func (s *Server) handleReviewSessions(w http.ResponseWriter, r *http.Request) {
 	// with counts of agent and human episodes. The store owns the read so the
 	// queue shares the session turn count definition instead of re-deriving it.
 	type reviewRow struct {
-		ID            string `json:"id"`
+		ID string `json:"id"`
+		// TurnCount is the count the queue row shows: the conversation
+		// turn count.
 		TurnCount     int    `json:"turnCount"`
 		Project       string `json:"project"`
 		AgentEpisodes int    `json:"agentEpisodes"`

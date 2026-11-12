@@ -46,6 +46,10 @@ type selectionDiscoveryFixture struct {
 	} `yaml:"expected"`
 }
 
+// seededUncountedTurns is how many folded turns the store fixtures record
+// beyond the conversation turns, so the two stored counts differ.
+const seededUncountedTurns = 3
+
 func loadSelectionDiscoveryFixture(t *testing.T) selectionDiscoveryFixture {
 	t.Helper()
 	var fixture selectionDiscoveryFixture
@@ -175,10 +179,13 @@ func seedStore(t *testing.T, s *store.Store, entries []ingest.StoreEntry) *api.S
 		if err := testutil.WriteFullEntries(ctx, s, e.Session.SessionID, nil); err != nil {
 			t.Fatal(err)
 		}
-		// These fixtures hold no stored entries, so the count is seeded
-		// directly; a real V1 ingest derives it in the entry write.
+		// These fixtures hold no stored entries, so both counts are seeded
+		// directly; a real V1 ingest derives them in the entry write. The
+		// folded count is seededUncountedTurns above the conversation count,
+		// so a read of the wrong column fails.
 		turns := e.Metadata.Stats.TurnCount
-		if _, err := s.UpsertCapturedStats(ctx, store.CapturedStats{SessionID: schema.SessionID(e.Session.SessionID), ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); err != nil {
+		foldedTurns := turns + seededUncountedTurns
+		if _, err := s.UpsertCapturedStats(ctx, store.CapturedStats{SessionID: schema.SessionID(e.Session.SessionID), TurnCount: &foldedTurns, ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); err != nil {
 			t.Fatalf("seed conversation turn count: %v", err)
 		}
 	}
@@ -213,10 +220,13 @@ func seedStoreWithFS(t *testing.T, s *store.Store, entries []ingest.StoreEntry, 
 		if err := testutil.WriteFullEntries(ctx, s, e.Session.SessionID, nil); err != nil {
 			t.Fatal(err)
 		}
-		// These fixtures hold no stored entries, so the count is seeded
-		// directly; a real V1 ingest derives it in the entry write.
+		// These fixtures hold no stored entries, so both counts are seeded
+		// directly; a real V1 ingest derives them in the entry write. The
+		// folded count is seededUncountedTurns above the conversation count,
+		// so a read of the wrong column fails.
 		turns := e.Metadata.Stats.TurnCount
-		if _, err := s.UpsertCapturedStats(ctx, store.CapturedStats{SessionID: schema.SessionID(e.Session.SessionID), ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); err != nil {
+		foldedTurns := turns + seededUncountedTurns
+		if _, err := s.UpsertCapturedStats(ctx, store.CapturedStats{SessionID: schema.SessionID(e.Session.SessionID), TurnCount: &foldedTurns, ConversationTurnCount: &turns, Source: store.StatsSourceHarness, UpdatedAtMs: 1}); err != nil {
 			t.Fatalf("seed conversation turn count: %v", err)
 		}
 	}
@@ -452,8 +462,11 @@ func TestStoreDataProvider_Sessions(t *testing.T) {
 	if sess.Metadata.TotalTokens != 4200 {
 		t.Errorf("sessions[0].Metadata.TotalTokens: expected 4200, got %d", sess.Metadata.TotalTokens)
 	}
-	if sess.Metadata.TurnCount != 20 {
-		t.Errorf("sessions[0].Metadata.TurnCount: expected 20, got %d", sess.Metadata.TurnCount)
+	if sess.Metadata.TurnCount != 20+seededUncountedTurns {
+		t.Errorf("sessions[0].Metadata.TurnCount: expected the folded %d, got %d", 20+seededUncountedTurns, sess.Metadata.TurnCount)
+	}
+	if sess.ReaderTurnCount() != 20 {
+		t.Errorf("sessions[0] reader turn count: expected the conversation count 20, got %d", sess.ReaderTurnCount())
 	}
 	if sess.Metadata.ToolCallCount != 12 {
 		t.Errorf("sessions[0].Metadata.ToolCallCount: expected 12, got %d", sess.Metadata.ToolCallCount)
@@ -554,8 +567,11 @@ func TestStoreDataProvider_SessionByID_Found(t *testing.T) {
 	if sess.Metadata.TotalTokens != 1500 {
 		t.Errorf("Metadata.TotalTokens: expected 1500, got %d", sess.Metadata.TotalTokens)
 	}
-	if sess.Metadata.TurnCount != 10 {
-		t.Errorf("Metadata.TurnCount: expected 10, got %d", sess.Metadata.TurnCount)
+	if sess.Metadata.TurnCount != 10+seededUncountedTurns {
+		t.Errorf("Metadata.TurnCount: expected the folded %d, got %d", 10+seededUncountedTurns, sess.Metadata.TurnCount)
+	}
+	if sess.ReaderTurnCount() != 10 {
+		t.Errorf("reader turn count: expected the conversation count 10, got %d", sess.ReaderTurnCount())
 	}
 	if sess.Metadata.ToolCallCount != 5 {
 		t.Errorf("Metadata.ToolCallCount: expected 5, got %d", sess.Metadata.ToolCallCount)
@@ -786,8 +802,11 @@ func TestStoreDataProvider_QualitySessions(t *testing.T) {
 	if qs.OutputTokens != 1200 {
 		t.Errorf("QualitySessions[0].OutputTokens: expected 1200, got %d", qs.OutputTokens)
 	}
-	if qs.TurnCount != 20 {
-		t.Errorf("QualitySessions[0].TurnCount: expected 20, got %d", qs.TurnCount)
+	if qs.TurnCount != 20+seededUncountedTurns {
+		t.Errorf("QualitySessions[0].TurnCount: expected the folded %d, got %d", 20+seededUncountedTurns, qs.TurnCount)
+	}
+	if qs.ConversationTurnCount == nil || *qs.ConversationTurnCount != 20 {
+		t.Errorf("QualitySessions[0].ConversationTurnCount: expected 20, got %v", qs.ConversationTurnCount)
 	}
 	if qs.ToolCalls != 12 {
 		t.Errorf("QualitySessions[0].ToolCalls: expected 12, got %d", qs.ToolCalls)
@@ -2575,8 +2594,8 @@ func TestStoreAdapter_rowToQualityMetrics_NonNilQualityWhenTurnCountPositive(t *
 	if q.TurnCount == nil {
 		t.Fatal("Quality.TurnCount: expected non-nil pointer, got nil")
 	}
-	if *q.TurnCount != 5 {
-		t.Errorf("Quality.TurnCount: expected 5, got %d", *q.TurnCount)
+	if *q.TurnCount != 5+seededUncountedTurns {
+		t.Errorf("Quality.TurnCount: expected the folded %d, got %d", 5+seededUncountedTurns, *q.TurnCount)
 	}
 	if q.TotalTokens == nil {
 		t.Fatal("Quality.TotalTokens: expected non-nil pointer, got nil")

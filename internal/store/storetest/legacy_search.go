@@ -72,6 +72,8 @@ func SeedLegacySearchIndex(t *testing.T, s *store.Store) {
 // both search indexes agree, and stamps user_version 75. Migration v76 only
 // re-points those triggers and drops that index, so the result is the v75
 // schema with no residue: opening it runs v76 on the targeted-insert path.
+// It also drops pending_recounts, the one table a later migration (v77)
+// creates, so the chain from 75 creates it again instead of colliding.
 func BuildCleanV75Store(t *testing.T, path string) {
 	t.Helper()
 	s, err := store.Open(path)
@@ -95,6 +97,7 @@ func BuildCleanV75Store(t *testing.T, path string) {
 	}()
 	if err := sqlitex.ExecuteScript(conn, legacySearchIndexScript+`
 INSERT INTO session_entries_fts(session_entries_fts) VALUES('rebuild');
+DROP TABLE pending_recounts;
 PRAGMA user_version = 75;`, nil); err != nil {
 		t.Fatalf("restore the v75 search index shape: %v", err)
 	}

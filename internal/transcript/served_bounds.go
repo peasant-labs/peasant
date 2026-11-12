@@ -185,7 +185,7 @@ func collectServedTextFields(detail *schema.SessionDetailPayload) []servedTextFi
 		}
 	}
 	for index := range fields {
-		fields[index].encoded = jsonEncodedStringLen(fields[index].original)
+		fields[index].encoded = schema.TranscriptJSONStringByteLength(fields[index].original)
 	}
 	return fields
 }
@@ -321,7 +321,7 @@ func servedDocumentSize(fields []servedTextField, base int, showBytes int) int {
 			size += field.encoded
 			continue
 		}
-		size += jsonEncodedStringLen(boundServedText(field.kind, field.original, showBytes))
+		size += schema.TranscriptJSONStringByteLength(boundServedText(field.kind, field.original, showBytes))
 	}
 	return size
 }
@@ -390,18 +390,4 @@ func cutServedTextAt(text string, showBytes int) int {
 func servedBoundNote(kind ServedTextKind, shown, recorded int) string {
 	return fmt.Sprintf("\n[%s bounded for display: showing %s of %s; the full record is kept by the peasant store that recorded this session]",
 		kind, defaults.HumanByteSize(int64(shown)), defaults.HumanByteSize(int64(recorded)))
-}
-
-// jsonEncodedStringLen is the number of bytes the JSON encoder writes for s,
-// quotes included. It is measured with the encoder itself so escaping,
-// HTML-escaping and invalid-UTF-8 replacement are counted exactly as the
-// document will carry them.
-func jsonEncodedStringLen(s string) int {
-	encoded, err := json.Marshal(s)
-	if err != nil {
-		// json.Marshal of a string does not fail; a future change that made it
-		// fail must not silently under-count the document.
-		return len(s) + 2
-	}
-	return len(encoded)
 }

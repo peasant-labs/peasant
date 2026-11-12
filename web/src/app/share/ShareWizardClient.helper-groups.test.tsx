@@ -61,6 +61,7 @@ function memberSpecsFor(groupId: string): GroupedSyncSessionSpec[] {
     durationMins: 1,
     totalTokens: 10,
     turnCount: member.turnCount,
+    conversationTurnCount: member.conversationTurnCount,
     toolCallCount: 0,
     project: 'alpha',
     projectHash: 'hash-alpha',
@@ -190,6 +191,15 @@ describe('mounted Share helper-group chooser', () => {
     // The ineligible member is rendered but disabled: held is not contributable.
     expect(memberCheckbox('ineligible-member')).toBeDisabled();
     expect(memberCheckbox('other-member')).not.toBeChecked();
+    // A member row prints its conversation turns, not its folded turn count.
+    const counted = fixture.members.find((member) => member.id === 'other-member');
+    if (counted?.conversationTurnCount === undefined || counted.conversationTurnCount === counted.turnCount) {
+      throw new Error('the other-member fixture row must state a conversation turn count that differs from its folded turn count');
+    }
+    const countedRow = document.querySelector('[data-thread-id="other-member"]') as HTMLElement;
+    const facts = [...countedRow.querySelectorAll('.helper-thread-facts > span')].map((fact) => fact.textContent);
+    expect(facts).toContain(`${counted.conversationTurnCount} turns`);
+    expect(facts).not.toContain(`${counted.turnCount} turns`);
     await user.click(memberCheckbox('eligible-member'));
 
     const tally = document.querySelector('.gms-tally') as HTMLElement;

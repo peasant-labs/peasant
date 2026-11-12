@@ -17,7 +17,7 @@ const CASES_PATH = process.env.PEASANT_TRANSCRIPT_SEGMENTS_CASES
   ?? resolve(process.cwd(), 'scripts/visual/testdata/transcript-segments.yaml');
 const MANIFEST_PATH = resolve(process.cwd(), 'scripts/visual/testdata/transcript-segments.manifest.yaml');
 
-type SegmentPlan = { index: number; turns: number[] };
+type SegmentPlan = { index: number; turns: number[]; conversationTurns?: { before: number; count: number } };
 type WindowPlan = { requestedAnchor: number; anchorTurn: number; segments: number[] };
 type SegmentCase = {
   name: string;
@@ -39,7 +39,17 @@ type SegmentCase = {
   heldTurn?: number;
   expectError?: boolean;
   clearedTurns?: number[];
+  totalConversationTurns?: number;
+  systemTurns?: number[];
+  toolTurns?: number[];
+  repeatedTurns?: number[];
+  captions?: string[];
+  header?: string;
 };
+
+/** Rows that state conversation turn positions, and the fields only they carry. */
+const POSITION_CASES: readonly string[] = ['positions-mounted', 'legacy-duplicate-full-load'];
+const POSITION_FIELDS = ['totalConversationTurns', 'systemTurns', 'toolTurns', 'repeatedTurns', 'captions', 'header'] as const;
 
 const reads: string[] = [];
 const scanRequests = vi.hoisted(() => vi.fn());
@@ -109,12 +119,11 @@ let channelData: unknown;
 
 function loadCases(): SegmentCase[] {
   const manifest = requireRecord(parseStrictYAML(readFileSync(MANIFEST_PATH, 'utf8'), 'transcript segment manifest'), 'transcript segment manifest');
-  requireExactRequiredFields(manifest, ['expectedCaseCount', 'requiredNames'], 'transcript segment manifest');
+  requireExactRequiredFields(manifest, ['requiredNames'], 'transcript segment manifest');
   const names = manifest.requiredNames;
   if (!Array.isArray(names) || names.some((name) => typeof name !== 'string' || name.length === 0) || new Set(names).size !== names.length) {
     throw new Error('transcript segment manifest requiredNames must be unique nonempty strings');
   }
-  if (manifest.expectedCaseCount !== names.length) throw new Error('transcript segment manifest count does not match requiredNames');
   const root = requireRecord(parseStrictYAML(readFileSync(CASES_PATH, 'utf8'), 'transcript segment cases'), 'transcript segment cases');
   requireExactRequiredFields(root, ['servePreBoundInline', 'requiredNames', 'cases'], 'transcript segment cases');
   if (root.servePreBoundInline !== false && root.servePreBoundInline !== true) {
@@ -129,6 +138,7 @@ function loadCases(): SegmentCase[] {
     if (row.name === 'per-field-bound') fields.push('clippedContent', 'preBoundContent');
     if (row.name === 'load-more-prepends') fields.push('heldTurn');
     if (row.name === 'revision-directory-fails') fields.push('clearedTurns', 'expectError');
+    if (POSITION_CASES.includes(String(row.name))) fields.push(...POSITION_FIELDS);
     requireExactRequiredFields(row, fields, `transcript segment cases[${index}]`);
     if (row.name !== names[index]) throw new Error(`transcript segment cases[${index}] is ${String(row.name)}, want ${names[index]}`);
     return row as SegmentCase;
@@ -140,10 +150,15 @@ function turnWire(index: number, plan: SegmentCase) {
   if (bounded && (typeof plan.clippedContent !== 'string' || typeof plan.preBoundContent !== 'string' || !plan.preBoundContent.startsWith(plan.clippedContent) || plan.preBoundContent.length <= plan.clippedContent.length)) {
     throw new Error('per-field bound case must record a clipped prefix and a longer pre-bound body');
   }
-  const content = bounded ? (servePreBoundInline ? plan.preBoundContent : plan.clippedContent) : plan.name === 'system-only' ? 'system entry is available' : `turn ${index}`;
+  // A repeated turn carries the role and text of the turn before it.
+  const source = plan.repeatedTurns?.includes(index) ? index - 1 : index;
+  const system = plan.name === 'system-only' || plan.systemTurns?.includes(index) === true;
+  const tool = plan.toolTurns?.includes(index) === true;
+  const content = bounded ? (servePreBoundInline ? plan.preBoundContent : plan.clippedContent) : plan.name === 'system-only' ? 'system entry is available' : system ? `system notice ${index}` : `turn ${source}`;
   return {
     index,
-    role: plan.name === 'system-only' ? 'system' : index % 2 === 0 ? 'user' : 'assistant',
+    role: system ? 'system' : tool ? 'tool' : source % 2 === 0 ? 'user' : 'assistant',
+    entryType: tool ? 'tool_result' : 'text',
     depth: 0,
     content,
     timestamp: '2026-07-15T08:00:00Z',
@@ -173,11 +188,13 @@ function directoryBody(plan: SegmentCase) {
     revision,
     totalTurns: plan.segments.reduce((sum, segment) => sum + segment.turns.length, 0),
     totalSegments: plan.totalSegments,
+    ...(plan.totalConversationTurns == null ? {} : { totalConversationTurns: plan.totalConversationTurns }),
     segments: plan.segments.map((segment) => ({
       index: segment.index,
       firstTurn: segment.turns[0],
       lastTurn: segment.turns[segment.turns.length - 1],
       byteLength: segment.turns.length * 32,
+      ...(segment.conversationTurns ? { conversationTurns: segment.conversationTurns } : {}),
     })),
   };
 }
@@ -275,6 +292,31 @@ async function answer(input: RequestInfo | URL): Promise<Response> {
     return Response.json(segmentBody(found, plan.totalSegments, plan));
   }
   return new Response(JSON.stringify({ error: 'not a transcript read' }), { status: 404 });
+}
+
+const integer = (text: string) => Number(text.replaceAll(',', ''));
+
+/**
+ * The header and every boundary caption state positions against one total.
+ * Parsed from the mounted page: a named range ends at or below the header's
+ * total, and its "of N" is that total.
+ */
+function assertPositions(container: HTMLElement, plan: SegmentCase) {
+  const header = container.querySelector('.txn-trace-count')?.textContent ?? '';
+  expect(header, `${plan.name} header`).toBe(plan.header);
+  const total = header.match(/^(?:[\d,]+ of )?([\d,]+) turns?$/);
+  if (!total) throw new Error(`${plan.name}: the header ${JSON.stringify(header)} names no turn total`);
+  const headerTotal = integer(total[1]!);
+  expect(headerTotal, `${plan.name} header total`).toBe(plan.totalConversationTurns);
+  const captions = [...container.querySelectorAll('.txn-segboundary-caption')].map((node) => node.textContent ?? '');
+  expect(captions, `${plan.name} captions`).toEqual(plan.captions);
+  for (const caption of captions) {
+    const range = caption.match(/^turns? ([\d,]+)(?:–([\d,]+))? of ([\d,]+)$/);
+    if (!range) throw new Error(`${plan.name}: the caption ${JSON.stringify(caption)} names no conversation turn range`);
+    const upper = integer(range[2] ?? range[1]!);
+    expect(upper, `${plan.name} caption ${caption} upper bound`).toBeLessThanOrEqual(headerTotal);
+    expect(integer(range[3]!), `${plan.name} caption ${caption} total`).toBe(headerTotal);
+  }
 }
 
 function assertReads(plan: SegmentCase) {
@@ -424,6 +466,9 @@ describe('SessionDetailV2 segmented transcript', () => {
       }
       if (plan.heldTurn != null) {
         expect(view.container.querySelector(`[data-turn="${plan.heldTurn}"]`), `${plan.name} held turn`).not.toBeNull();
+      }
+      if (POSITION_CASES.includes(plan.name)) {
+        await waitFor(() => assertPositions(view.container, plan));
       }
       if (plan.name === 'per-field-bound') {
         const card = view.container.querySelector(`[data-turn="${plan.mountedTurns[0]}"]`);

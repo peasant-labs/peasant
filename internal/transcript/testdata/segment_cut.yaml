@@ -1,69 +1,10 @@
+# The cut rule, its byte measure and its conversation turn spans are the wire
+# contract's (schema.CutTranscriptSegments); their cases live with the contract.
+# This file keeps one case for what peasant owns: CutSegments projects folded
+# turns, tool calls included, and hands them to the contract's cut. The
+# byteLength literals were recorded before the rule was shared and must not
+# change.
 cases:
-  # The next turn would push the segment past the budget, so it is deferred to
-  # the next segment instead of being appended. JSON size is content bytes + 2.
-  - name: cut-defers-crossing-entry
-    budgetBytes: 1048576
-    turns:
-      - {index: 4, role: user, contentBytes: 262144}
-      - {index: 7, role: assistant, contentBytes: 524288}
-      - {index: 11, role: assistant, contentBytes: 524288}
-      - {index: 14, role: user, contentBytes: 131072}
-    expected:
-      segments:
-        - {index: 0, firstTurn: 4, lastTurn: 7, byteLength: 786436}
-        - {index: 1, firstTurn: 11, lastTurn: 14, byteLength: 655364}
-      crossingTurn: 11
-  # A user turn never spans two segments: it is appended whole or deferred
-  # whole. Here the assistant turn alone fills the first segment.
-  - name: cut-user-turn-whole
-    budgetBytes: 1048576
-    turns:
-      - {index: 4, role: assistant, contentBytes: 524288}
-      - {index: 7, role: user, contentBytes: 1048576}
-      - {index: 11, role: assistant, contentBytes: 262144}
-    expected:
-      segments:
-        - {index: 0, firstTurn: 4, lastTurn: 4, byteLength: 524290}
-        - {index: 1, firstTurn: 7, lastTurn: 7, byteLength: 1048578}
-        - {index: 2, firstTurn: 11, lastTurn: 11, byteLength: 262146}
-      crossingTurn: 7
-  # A turn larger than the budget is appended to an empty segment, so the next
-  # iteration always closes it: it ends up alone.
-  - name: cut-oversized-turn-alone
-    budgetBytes: 1048576
-    turns:
-      - {index: 4, role: user, contentBytes: 1024}
-      - {index: 7, role: assistant, contentBytes: 4194304}
-      - {index: 11, role: user, contentBytes: 2048}
-    expected:
-      segments:
-        - {index: 0, firstTurn: 4, lastTurn: 4, byteLength: 1026}
-        - {index: 1, firstTurn: 7, lastTurn: 7, byteLength: 4194306}
-        - {index: 2, firstTurn: 11, lastTurn: 11, byteLength: 2050}
-      crossingTurn: 7
-  # A turn at exactly the budget is allowed and is not an overflow.
-  - name: cut-exact-budget-turn
-    budgetBytes: 1048576
-    turns:
-      - {index: 4, role: user, contentBytes: 1048574}
-      - {index: 7, role: assistant, contentBytes: 2}
-    expected:
-      segments:
-        - {index: 0, firstTurn: 4, lastTurn: 4, byteLength: 1048576}
-        - {index: 1, firstTurn: 7, lastTurn: 7, byteLength: 4}
-      crossingTurn: 7
-  - name: cut-single-turn
-    budgetBytes: 1048576
-    turns:
-      - {index: 4, role: user, contentBytes: 4096}
-    expected:
-      segments:
-        - {index: 0, firstTurn: 4, lastTurn: 4, byteLength: 4098}
-  - name: cut-empty-session
-    budgetBytes: 1048576
-    turns: []
-    expected:
-      segments: []
   # The segment's byteLength is the sum of its turns' pre-bound sizes, including
   # tool-call arguments and results, which are each JSON-encoded with quotes.
   - name: cut-includes-tool-call-bytes
@@ -74,7 +15,7 @@ cases:
       - {index: 11, role: user, contentBytes: 8}
     expected:
       segments:
-        - {index: 0, firstTurn: 4, lastTurn: 4, byteLength: 10}
-        - {index: 1, firstTurn: 7, lastTurn: 7, byteLength: 2097174}
-        - {index: 2, firstTurn: 11, lastTurn: 11, byteLength: 10}
+        - {index: 0, firstTurn: 4, lastTurn: 4, byteLength: 10, conversationTurns: {before: 0, count: 1}}
+        - {index: 1, firstTurn: 7, lastTurn: 7, byteLength: 2097174, conversationTurns: {before: 1, count: 1}}
+        - {index: 2, firstTurn: 11, lastTurn: 11, byteLength: 10, conversationTurns: {before: 2, count: 1}}
       crossingTurn: 7

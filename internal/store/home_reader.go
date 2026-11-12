@@ -148,12 +148,18 @@ func (s *Store) HomePageRows(ctx context.Context, ids []string) ([]HomePageRow, 
 		args[i] = id
 		marks[i] = "?"
 	}
-	query := strings.Replace(sqlPushSessionsBase, "    s.session_origin\n", "    s.session_origin, COALESCE(m.title,'')\n", 1) + " WHERE s.session_id IN (" + strings.Join(marks, ",") + ")"
+	// The title is appended after the push row's last column (24, the
+	// conversation turn count), so scanPushSessionRow keeps its positions.
+	const pushRowTail = "    " + sqlSessionConversationTurnCount + "\nFROM sessions s\n"
+	if !strings.Contains(sqlPushSessionsBase, pushRowTail) {
+		return nil, fmt.Errorf("store: the home page row query cannot append the title because the push row no longer ends with the conversation turn count; no rows were read; update home_reader.go to the push row's new last column")
+	}
+	query := strings.Replace(sqlPushSessionsBase, pushRowTail, "    "+sqlSessionConversationTurnCount+", COALESCE(m.title,'')\nFROM sessions s\n", 1) + " WHERE s.session_id IN (" + strings.Join(marks, ",") + ")"
 	err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args, ResultFunc: func(stmt *sqlite.Stmt) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rows = append(rows, HomePageRow{Sync: scanPushSessionRow(stmt), Title: stmt.ColumnText(24)})
+		rows = append(rows, HomePageRow{Sync: scanPushSessionRow(stmt), Title: stmt.ColumnText(25)})
 		return nil
 	}})
 	if err != nil {

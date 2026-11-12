@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -330,6 +331,10 @@ type openOptions struct {
 	// immutable opens a read-only store with SQLite's immutable=1 so it
 	// needs no -shm file; see WithImmutableReadOnly.
 	immutable bool
+	// turnCountRecountHook is called after each session the upgrade recount
+	// handles. It is nil on every production open; a test sets it to stop
+	// the recount part way.
+	turnCountRecountHook turnCountRecountHook
 }
 
 // WithImmutableReadOnly makes OpenReadOnlyWithOptions open the database with
@@ -576,6 +581,21 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 				return nil, fmt.Errorf("store: apply the conversation turn count backfill: %w", err)
 			}
 			logConversationTurnCountBackfill(report)
+		}
+
+		// V77 Go-driven phase: while the recount marker exists, fold every
+		// stored session once and write both turn counts. The marker, not the
+		// pre-migration version, decides: the recount clears it in its own
+		// transaction, so an open that failed part way is repeated here and an
+		// open with nothing owed pays for one indexed probe.
+		recountLogger := slog.Default()
+		recount, ran, err := recountTurnCounts(pool, o.turnCountRecountHook, recountLogger)
+		if err != nil {
+			_ = pool.Close()
+			return nil, fmt.Errorf("store: apply the turn count recount: %w", err)
+		}
+		if ran {
+			logTurnCountRecount(recountLogger, recount)
 		}
 	} else {
 		// The caller guarantees the schema: the newer-schema check above

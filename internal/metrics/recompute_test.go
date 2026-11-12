@@ -136,10 +136,11 @@ func TestRecomputePreservesTheStoredConversationTurnCount(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	turnCount := 5
+	turnCount, conversationTurnCount := 8, 5
 	if _, err := db.UpsertCapturedStats(ctx, store.CapturedStats{
 		SessionID:             schema.SessionID(sid),
-		ConversationTurnCount: &turnCount,
+		TurnCount:             &turnCount,
+		ConversationTurnCount: &conversationTurnCount,
 		Source:                store.StatsSourceHarness,
 		UpdatedAtMs:           1,
 	}); err != nil {
@@ -159,8 +160,11 @@ func TestRecomputePreservesTheStoredConversationTurnCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.ConversationTurnCount == nil || *stats.ConversationTurnCount != turnCount {
-		t.Fatalf("captured conversation turn count = %v, want %d after recompute", stats.ConversationTurnCount, turnCount)
+	if stats.ConversationTurnCount == nil || *stats.ConversationTurnCount != conversationTurnCount {
+		t.Fatalf("captured conversation turn count = %v, want %d after recompute", stats.ConversationTurnCount, conversationTurnCount)
+	}
+	if stats.TurnCount == nil || *stats.TurnCount != turnCount {
+		t.Fatalf("captured turn count = %v, want %d after recompute", stats.TurnCount, turnCount)
 	}
 	read, err := db.GetMetrics(ctx, sid)
 	if err != nil || read == nil || read.TurnCount == nil || *read.TurnCount != turnCount {
