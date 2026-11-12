@@ -3,6 +3,10 @@ package store
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
@@ -33,13 +37,24 @@ func CurrentSchemaVersion() int {
 }
 
 // SchemaVersionAt reports the PRAGMA user_version of the database file at
-// dbPath WITHOUT opening it for write or applying any migration. A caller that
+// dbPath WITHOUT opening it for write or applying any migration. It opens
+// read-only without leaving -wal/-shm sidecars behind: immutable=1 when no
+// -wal file exists, otherwise a normal read-only open. A caller that
 // wants to REUSE an existing database only when it already matches the schema
 // this build writes compares the result against CurrentSchemaVersion; Open
 // would instead migrate the file as a side effect, which is the opposite of a
 // compatibility check.
 func SchemaVersionAt(dbPath string) (int, error) {
-	conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadOnly)
+	openPath, flags := dbPath, sqlite.OpenReadOnly
+	if _, err := os.Stat(dbPath + "-wal"); err != nil && os.IsNotExist(err) {
+		uriPath := filepath.ToSlash(dbPath)
+		if !strings.HasPrefix(uriPath, "/") {
+			uriPath = "/" + uriPath
+		}
+		openPath = (&url.URL{Scheme: "file", Path: uriPath, RawQuery: "immutable=1"}).String()
+		flags |= sqlite.OpenURI
+	}
+	conn, err := sqlite.OpenConn(openPath, flags)
 	if err != nil {
 		return 0, fmt.Errorf("store: open %s to read schema version: %w", dbPath, err)
 	}

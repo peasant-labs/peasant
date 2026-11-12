@@ -904,6 +904,11 @@ func (s *Store) clearIndexedInputHash(ctx context.Context, sessionID schema.Sess
 // reports whether it consolidated; a missing old index skips the phase.
 // A crash rolls the one transaction back and the old index stays intact,
 // so the re-run repeats Phase 3.
+//
+// Retained for pre-v75 migration paths and tests: v76 supersedes this phase
+// for v75+ stores (its latch detects a post-v75 consolidation and repairs
+// without it), so this is no longer the live consolidation step for current
+// upgrades.
 func (s *Store) migrateConsolidateSearch(ctx context.Context) (bool, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {

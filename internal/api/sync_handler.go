@@ -1482,13 +1482,14 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	// A server-triggered run never pays migration v76's whole-index rebuild:
+	// A server-triggered run never pays the one-time search index repair:
 	// there is no terminal watching it. Refuse on residue with the terminal
-	// command that performs the repair instead of opening.
-	if skip, err := store.NeedsSearchResidueRebuild(string(h.dbPath())); err != nil {
-		return nil, nil, nil, fmt.Errorf("check the analytics store for a pending search rebuild: %w; nothing was imported and nothing already imported was changed", err)
-	} else if skip {
-		return nil, nil, nil, &store.SearchResidueRebuildError{DBPath: string(h.dbPath())}
+	// command that performs the repair instead of opening. This gate is
+	// defensive: a running server already opened the store, so reaching it
+	// means the store changed under the server or the server started before
+	// the repair.
+	if err := store.RefuseStaleSearchRebuild(false, string(h.dbPath())); err != nil {
+		return nil, nil, nil, err
 	}
 	db, err := store.Open(string(h.dbPath()), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
 	if err != nil {

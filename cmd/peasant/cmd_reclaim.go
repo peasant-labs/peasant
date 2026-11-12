@@ -134,6 +134,8 @@ func openReclaimStore(cmd *cobra.Command, dryRun bool, ownedRoot, dbPath string)
 		return nil, func() {}, err
 	}
 	options = append(options, store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()))
+	// No residue gate: an explicit --confirm is the user's own act, so the
+	// repair runs visibly by consent even off-terminal.
 	db, err := store.Open(dbPath, options...)
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("open analytics store: %w", err)

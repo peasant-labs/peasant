@@ -27,7 +27,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // BuildWebCommand constructs the fully wired web cobra command tree.
@@ -76,7 +75,15 @@ func BuildWebCommand() *cobra.Command {
 			// Migrate visibly before forking on a terminal; refuse an
 			// affected store on a non-interactive start instead of forking
 			// a server that could never start.
-			if err := maybePreopenStoreForWebStart(term.IsTerminal(int(os.Stdin.Fd())), dbPath); err != nil {
+			cfgPath := resolveConfigPath(cmd)
+			var preopenOpts []store.OpenOption
+			if cfg, cfgErr := config.LoadForBrowsing(cfgPath, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}); cfgErr == nil {
+				applyDataDirOverride(cmd, cfg)
+				if genOpts, genErr := generationStoreOptions(cfg.Output.BasePath); genErr == nil {
+					preopenOpts = genOpts
+				}
+			}
+			if err := maybePreopenStoreForWebStart(stdinIsTerminal(), dbPath, preopenOpts...); err != nil {
 				return err
 			}
 			// A cancelled start is not a usage error: the readiness probe stops

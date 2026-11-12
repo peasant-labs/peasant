@@ -27,15 +27,17 @@ func refuseStaleSearchIndex(dbPath string) error {
 
 // maybePreopenStoreForWebStart opens and closes the analytics store so a
 // terminal `peasant web start` migrates visibly before forking the detached
-// child (whose stdin is not a terminal). On a non-interactive start it
-// refuses an affected store instead of forking a server that could never
-// start. A failed pre-open only warns here; the child reports an unopenable
-// store the same way it always has.
-func maybePreopenStoreForWebStart(isTTY bool, dbPath string) error {
+// child (whose stdin is not a terminal). It opens with the same generation
+// options the foreground child uses, so the pre-open migrates exactly what
+// the child would. On a non-interactive start it refuses an affected store
+// instead of forking a server that could never start. A failed pre-open only
+// warns here; the child reports an unopenable store the same way it always
+// has.
+func maybePreopenStoreForWebStart(isTTY bool, dbPath string, opts ...store.OpenOption) error {
 	if !isTTY {
 		return store.RefuseStaleSearchRebuild(false, dbPath)
 	}
-	db, err := store.Open(dbPath)
+	db, err := store.Open(dbPath, opts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: pre-open analytics store %s: %v\n", dbPath, err)
 		return nil

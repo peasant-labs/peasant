@@ -39,27 +39,39 @@ import (
 //
 // The repair, forward-only in one transaction (the engine already wraps each
 // migration):
-//  1. Drop the v75 triggers session_entries_ai/ad/au.
-//  2. Re-create them pointed at session_search_fts, reusing the exact
+//  1. Record the decision in a TEMP latch BEFORE touching triggers:
+//     consolidated = the retired index is absent AND the ai trigger already
+//     targets the union index (a 0.16.1 store consolidated after reaching
+//     v75). The latch holds one row; every later statement gates on it, never
+//     on a fresh predicate evaluation, so exactly one branch runs.
+//  2. CREATE the retired index IF NOT EXISTS with the exact v75 definition,
+//     so the residue predicate below always prepares — even on a consolidated
+//     store whose legacy side no longer exists.
+//  3. Set residue = NOT consolidated AND <predicate> into the latch.
+//  4. Drop the v75 triggers session_entries_ai/ad/au.
+//  5. Re-create them pointed at session_search_fts, reusing the exact
 //     migrateSearchTriggerAI/AD/AU text (harmonized_migrate.go) both this
 //     migration and migrateConsolidateSearch share — no second copy.
-//  3. If the residue predicate below holds, rebuild session_search_fts whole
+//  6. If the latch says residue, rebuild session_search_fts whole
 //     (over the union view, bodies included). The rebuild is gated in SQL by
-//     INSERT ... SELECT 'rebuild' WHERE <predicate>: a false predicate
-//     selects zero rows and the rebuild is skipped, so clean stores never
-//     pay it. SQL cannot branch otherwise, and the engine runs
-//     string-only migrations with no Go hook; the in-transaction gate keeps
-//     the decision atomic with the re-pointing, with no durable decision bit
-//     to strand on a crash (a rollback re-runs the gate on retry).
-//  4. If the predicate does not hold, bring the union entries half current
-//     with the cheap re-sync instead: a plain DELETE FROM session_search_fts
-//     WHERE rowid < BodyRowIDBase removes every entries-half posting for a
-//     docid whose live content values the delete can see, then one INSERT
-//     re-indexes exactly the live session_entries rows with current values.
-//     Bodies (rid at or above BodyRowIDBase) are untouched. The re-sync is
-//     likewise gated on NOT <predicate>, so a rebuilt index is not churned.
-//  5. Drop session_entries_fts if it exists.
-//  6. Leave session_search_state.needs_rebuild unchanged: the flag still
+//     INSERT ... SELECT 'rebuild' WHERE (SELECT residue FROM latch): a false
+//     latch selects zero rows and the rebuild is skipped, so clean and
+//     consolidated stores never pay it. SQL cannot branch otherwise, and the
+//     engine runs string-only migrations with no Go hook; the in-transaction
+//     latch keeps the decision atomic with the re-pointing, with no durable
+//     decision bit to strand on a crash (a rollback re-runs the gate on
+//     retry; the TEMP latch vanishes with the connection).
+//  7. If the latch says no residue, bring the union entries half current
+//     with a targeted insert: rows live in session_entries whose rowid is
+//     missing from the union entries-half docsize. When the predicate is
+//     false the union entries half already covers the trigger-current legacy
+//     side, so only window inserts are missing; bodies (rid at or above
+//     BodyRowIDBase) are untouched. Gated on (SELECT NOT residue FROM latch),
+//     so the latch picks exactly one branch — a rebuilt index is never
+//     re-synced, and the re-sync never runs after a rebuild within the same
+//     migration.
+//  8. Drop session_entries_fts if it exists, then drop the TEMP latch.
+//  9. Leave session_search_state.needs_rebuild unchanged: the flag still
 //     owns untrusted body postings, and v76 must neither set nor clear it.
 //
 // The residue predicate compares the union entries-half docsize against the
@@ -82,26 +94,74 @@ const searchResiduePredicate = `EXISTS (
 )`
 
 const migrationV76 = `
+CREATE TEMP TABLE IF NOT EXISTS v76_search_latch(consolidated INTEGER NOT NULL, residue INTEGER NOT NULL);
+DELETE FROM v76_search_latch;
+INSERT INTO v76_search_latch(consolidated, residue)
+  SELECT
+    CASE WHEN NOT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_entries_fts')
+          AND EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'session_entries_ai' AND instr(sql, 'session_search_fts') > 0)
+         THEN 1 ELSE 0 END,
+    0;
+CREATE VIRTUAL TABLE IF NOT EXISTS session_entries_fts USING fts5(
+    content_preview,
+    tool_input,
+    tool_output,
+    session_id UNINDEXED,
+    entry_index UNINDEXED,
+    content='session_entries',
+    content_rowid='rowid',
+    tokenize='unicode61 remove_diacritics 2'
+);
+UPDATE v76_search_latch SET residue = CASE WHEN consolidated THEN 0 WHEN (` + searchResiduePredicate + `) THEN 1 ELSE 0 END;
 DROP TRIGGER IF EXISTS session_entries_ai;
 DROP TRIGGER IF EXISTS session_entries_ad;
 DROP TRIGGER IF EXISTS session_entries_au;
 ` + migrateSearchTriggerAI + `;
 ` + migrateSearchTriggerAD + `;
 ` + migrateSearchTriggerAU + `;
-INSERT INTO session_search_fts(session_search_fts) SELECT 'rebuild' WHERE ` + searchResiduePredicate + `;
-DELETE FROM session_search_fts WHERE rowid < 1125899906842624 AND NOT (` + searchResiduePredicate + `);
+INSERT INTO session_search_fts(session_search_fts) SELECT 'rebuild' WHERE (SELECT residue FROM v76_search_latch);
 INSERT INTO session_search_fts(rowid, content_preview, tool_input, tool_output, session_id, entry_index)
-  SELECT rowid, content_preview, tool_input, tool_output, session_id, entry_index FROM session_entries WHERE NOT (` + searchResiduePredicate + `);
+  SELECT rowid, content_preview, tool_input, tool_output, session_id, entry_index FROM session_entries WHERE rowid NOT IN (SELECT id FROM session_search_fts_docsize WHERE id < 1125899906842624) AND (SELECT NOT residue FROM v76_search_latch);
 DROP TABLE IF EXISTS session_entries_fts;
+DROP TABLE IF EXISTS temp.v76_search_latch;
 `
+
+// searchConsolidatedOnConn reports whether the store is a 0.16.1 store
+// consolidated after reaching v75: the retired index is absent AND the ai
+// trigger already targets the union index. v76 records the same decision in
+// its TEMP latch before touching triggers; the Go check mirrors it so the
+// pre-chain notice and the read-only gate agree with the migration.
+func searchConsolidatedOnConn(conn *sqlite.Conn) (bool, error) {
+	consolidated := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_entries_fts') AND EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'session_entries_ai' AND instr(sql, 'session_search_fts') > 0) THEN 1 ELSE 0 END`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			consolidated = stmt.ColumnInt64(0) != 0
+			return nil
+		},
+	}); err != nil {
+		return false, fmt.Errorf("store: check whether the search index was consolidated after v75: %w", err)
+	}
+	return consolidated, nil
+}
 
 // searchIndexResiduePresent reports whether the union search index carries
 // entries-half postings absent from the retired index: the v75 window's
-// deletes, token-count-changing updates, and reused rowids. Both indexes must
-// exist; a v75 store carries both (v75 creates them unconditionally), so a
-// missing one fails the open with an actionable error instead of silently
-// taking the cheap path on a tampered store.
+// deletes, token-count-changing updates, and reused rowids. A store
+// consolidated after v75 carries no residue by definition: the union index
+// was rebuilt at consolidation and later writes went through union triggers,
+// so it reports false with no error. Otherwise both indexes must exist; a
+// v75 store carries both (v75 creates them unconditionally, and v76 creates
+// the retired side IF NOT EXISTS before evaluating), so a missing one fails
+// the open with an actionable error instead of silently taking the cheap
+// path on a tampered store.
 func searchIndexResiduePresent(conn *sqlite.Conn) (bool, error) {
+	consolidated, err := searchConsolidatedOnConn(conn)
+	if err != nil {
+		return false, err
+	}
+	if consolidated {
+		return false, nil
+	}
 	for _, table := range []string{"session_search_fts", "session_entries_fts"} {
 		if !tableExistsOnConn(conn, table) {
 			return false, fmt.Errorf("store: check the search index for v75 residue with %s missing: this build expects the v75 pair of search indexes; restore the database from backup or re-ingest its transcripts", table)
@@ -122,6 +182,8 @@ func searchIndexResiduePresent(conn *sqlite.Conn) (bool, error) {
 // searchIndexRebuildNoticeWriter carries the one-line v76 rebuild notice. It
 // defaults to standard error so the warning reaches the user's terminal;
 // tests swap it to capture the notice without touching the process streams.
+// The explicit upgrade step replaces this writer: once the upgrade ships,
+// the notice moves there and this global stays only for the transition.
 var searchIndexRebuildNoticeWriter io.Writer = os.Stderr
 
 // searchIndexRebuildNotice is the one line printed before a v76 whole-index

@@ -405,7 +405,13 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 
 				db, err := openRunStore(cmd, dryRun, string(resolvedOutput), cfg.Write)
 				if err != nil {
-					if skipped := pushSkipForSearchResidue(cmd, err); skipped {
+					// The residue gate uses the shared stdin detector (the same
+					// term.IsTerminal(os.Stdin) check deps.isTTY defaults to),
+					// so threading deps.isTTY through openRunStore would not
+					// change the decision: both report the process stdin. The
+					// hook contract keys on --auto-publish-event instead, which
+					// only generated hook files carry.
+					if skipped := pushSkipForSearchResidue(cmd, err, autoPublishEvent); skipped {
 						return nil
 					}
 					return fmt.Errorf("open analytics store: %w", err)
@@ -1531,13 +1537,19 @@ func (r pushRun) scopeSuffix() string {
 }
 
 // pushSkipForSearchResidue maps a residue refusal to the hook contract: a
-// managed hook must never block the push it runs in, so when opening the
-// store would rebuild the whole search index, skip the publish with the
-// actionable message and exit 0 instead of failing the push. Any other
-// error passes through unchanged. It reports whether the caller is done.
-func pushSkipForSearchResidue(cmd *cobra.Command, err error) bool {
+// managed hook run — --auto-publish-event set, the flag generated hook files
+// carry — must never block the push it runs in, so when opening the store
+// would run the one-time search index repair, skip the publish with the
+// actionable message and exit 0 instead of failing the push. Every other
+// caller, including any other non-interactive push, returns the refusal as a
+// non-zero error. Any non-residue error passes through unchanged. It reports
+// whether the caller is done.
+func pushSkipForSearchResidue(cmd *cobra.Command, err error, autoPublishEvent string) bool {
 	var residue *store.SearchResidueRebuildError
 	if !errors.As(err, &residue) {
+		return false
+	}
+	if autoPublishEvent == "" {
 		return false
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), residue.Error())
