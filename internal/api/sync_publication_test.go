@@ -324,7 +324,7 @@ func seedSyncDoorSession(t *testing.T, dbPath, sessionID, basePath string) *stor
 		t.Fatal(err)
 	}
 	storetest.CopyGoldenTo(t, dbPath)
-	db, err := store.Open(dbPath, store.WithSkipMigrations())
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func seedSyncDoorSession(t *testing.T, dbPath, sessionID, basePath string) *stor
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err = store.Open(dbPath, store.WithSkipMigrations())
+	db, err = store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

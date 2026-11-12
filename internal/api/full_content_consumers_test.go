@@ -178,7 +178,7 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
+			db, err := store.Open(hs.dbPath())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -423,7 +423,7 @@ func TestMigrationV71DerivedLookups(t *testing.T) {
 
 	// The migration test runs the real upgrade path (and its pragmas), which
 	// a skip-less Open performs on the seeded predecessor.
-	db, err := Open(dbPath)
+	db, err := openUpgraded(dbPath)
 	if err != nil {
 		t.Fatalf("open the seeded V69 store: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestSaveClaudeEvidenceWritesTeammateSpawns(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v70-maintenance.db")
 	// The maintenance write is this test's subject, so the store opens through
 	// the shipped migration chain and then writes through SaveClaudeEvidence.
-	db, err := Open(dbPath)
+	db, err := openUpgraded(dbPath)
 	if err != nil {
 		t.Fatalf("open the maintenance store: %v", err)
 	}
@@ -613,7 +613,7 @@ func TestMigrationV71FreshSchema(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v70-fresh.db")
 	// The fresh install is this test's subject, so it opens without skipping
 	// migrations and asserts the schema they produce.
-	db, err := Open(dbPath)
+	db, err := openUpgraded(dbPath)
 	if err != nil {
 		t.Fatalf("open a fresh store: %v", err)
 	}
@@ -696,7 +696,7 @@ func TestSaveClaudeEvidenceRollsBackTeammateSpawnsOnFailure(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v70-rollback.db")
 	// The production transaction is this test's subject, so the store opens
 	// through the shipped migration chain and then writes through SaveClaudeEvidence.
-	db, err := Open(dbPath)
+	db, err := openUpgraded(dbPath)
 	if err != nil {
 		t.Fatalf("open the rollback store: %v", err)
 	}

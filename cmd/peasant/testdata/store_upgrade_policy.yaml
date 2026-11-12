@@ -1,0 +1,565 @@
+# Store upgrade policy: what each entry point does with a store that is
+# behind the schema this build needs.
+#
+# policyCases drive the one helper every entry point calls
+# (ensureStoreCurrent) with the upgrade itself replaced by a recorder, so a
+# case states the policy and nothing else. mode is how the entry point is
+# classed: terminal and piped come from the one terminal check, hook from
+# --non-interactive, server is fixed. store names the fixture: quick is a
+# schema-75 store with no stale search results (one quick step), long is a
+# schema-75 store with stale search results (one long step), current is at
+# the head schema, missing has no file. want is the policy outcome: ran,
+# asked (the plan and a prompt were shown; wantRan says whether the answer
+# let the upgrade run), skipped (the nothing-attempted status, which a
+# generated hook turns into exit 0), refused, or none. exit is peasant's
+# process status. A skip and a refusal assert that no byte of the database
+# changed and that the upgrade never started. tightDisk makes the plan report
+# free disk below twice what it asks for. confirm is --confirm on a command
+# that owns the upgrade.
+#
+# One case per row and column of the entry-point table is named
+# <entry>-<terminal|piped|hook|server>-<quick|long>. The named rulings and
+# the cases of the 0.16.2 search-repair gate follow, under their names.
+policyCases:
+  - name: kickstart-terminal-quick
+    entry: kickstart
+    mode: terminal
+    store: quick
+    want: ran
+    exit: 0
+  - name: kickstart-terminal-long
+    entry: kickstart
+    mode: terminal
+    store: long
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: kickstart-piped-quick
+    entry: kickstart
+    mode: piped
+    store: quick
+    want: ran
+    exit: 0
+  - name: kickstart-piped-long
+    entry: kickstart
+    mode: piped
+    store: long
+    want: refused
+    exit: 1
+  - name: harvest-terminal-quick
+    entry: harvest
+    mode: terminal
+    store: quick
+    want: ran
+    exit: 0
+  - name: harvest-terminal-long
+    entry: harvest
+    mode: terminal
+    store: long
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: harvest-piped-quick
+    entry: harvest
+    mode: piped
+    store: quick
+    want: ran
+    exit: 0
+  - name: harvest-piped-long
+    entry: harvest
+    mode: piped
+    store: long
+    want: refused
+    exit: 1
+  - name: ingest-terminal-quick
+    entry: ingest
+    mode: terminal
+    store: quick
+    want: ran
+    exit: 0
+  - name: ingest-terminal-long
+    entry: ingest
+    mode: terminal
+    store: long
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: ingest-piped-quick
+    entry: ingest
+    mode: piped
+    store: quick
+    want: ran
+    exit: 0
+  - name: ingest-piped-long
+    entry: ingest
+    mode: piped
+    store: long
+    want: refused
+    exit: 1
+  - name: village-push-terminal-quick
+    entry: village-push
+    mode: terminal
+    store: quick
+    want: ran
+    exit: 0
+  - name: village-push-terminal-long
+    entry: village-push
+    mode: terminal
+    store: long
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: village-push-piped-quick
+    entry: village-push
+    mode: piped
+    store: quick
+    want: ran
+    exit: 0
+  - name: village-push-piped-long
+    entry: village-push
+    mode: piped
+    store: long
+    want: refused
+    exit: 1
+  - name: opendb-terminal-quick
+    entry: opendb
+    mode: terminal
+    store: quick
+    want: ran
+    exit: 0
+  - name: opendb-terminal-long
+    entry: opendb
+    mode: terminal
+    store: long
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: opendb-piped-quick
+    entry: opendb
+    mode: piped
+    store: quick
+    want: ran
+    exit: 0
+  - name: opendb-piped-long
+    entry: opendb
+    mode: piped
+    store: long
+    want: refused
+    exit: 1
+  - name: tui-terminal-quick
+    entry: tui
+    mode: terminal
+    store: quick
+    want: ran
+    exit: 0
+  - name: tui-terminal-long
+    entry: tui
+    mode: terminal
+    store: long
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: village-push-hook-quick
+    entry: village-push
+    mode: hook
+    store: quick
+    want: ran
+    exit: 0
+  - name: village-push-hook-long
+    entry: village-push
+    mode: hook
+    store: long
+    want: skipped
+    exit: 3
+  - name: web-start-terminal-quick
+    entry: web-start
+    mode: terminal
+    store: quick
+    want: ran
+    exit: 0
+  - name: web-start-terminal-long
+    entry: web-start
+    mode: terminal
+    store: long
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: web-start-piped-quick
+    entry: web-start
+    mode: piped
+    store: quick
+    want: ran
+    exit: 0
+  - name: web-start-piped-long
+    entry: web-start
+    mode: piped
+    store: long
+    want: refused
+    exit: 1
+  - name: web-child-server-quick
+    entry: web-child
+    mode: server
+    store: quick
+    want: refused
+    exit: 1
+  - name: web-child-server-long
+    entry: web-child
+    mode: server
+    store: long
+    want: refused
+    exit: 1
+  - name: web-foreground-server-quick
+    entry: web-foreground
+    mode: server
+    store: quick
+    want: refused
+    exit: 1
+  - name: web-foreground-server-long
+    entry: web-foreground
+    mode: server
+    store: long
+    want: refused
+    exit: 1
+  - name: web-import-server-quick
+    entry: web-import
+    mode: server
+    store: quick
+    want: refused
+    exit: 1
+  - name: web-import-server-long
+    entry: web-import
+    mode: server
+    store: long
+    want: refused
+    exit: 1
+  - name: migrate-terminal-quick
+    entry: migrate
+    mode: terminal
+    store: quick
+    want: ran
+    exit: 0
+  - name: migrate-terminal-long
+    entry: migrate
+    mode: terminal
+    store: long
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: migrate-piped-quick
+    entry: migrate
+    mode: piped
+    store: quick
+    want: ran
+    exit: 0
+  - name: migrate-piped-long
+    entry: migrate
+    mode: piped
+    store: long
+    want: refused
+    exit: 1
+  - name: migrate-piped-long-confirm
+    entry: migrate
+    mode: piped
+    store: long
+    confirm: true
+    want: ran
+    exit: 0
+  - name: migrate-terminal-long-confirm
+    entry: migrate
+    mode: terminal
+    store: long
+    confirm: true
+    want: ran
+    exit: 0
+  - name: server-refuses-to-start-and-names-the-terminal-command
+    entry: web-foreground
+    mode: server
+    store: quick
+    want: refused
+    exit: 1
+  - name: server-long-confirm-still-refuses
+    entry: web-foreground
+    mode: server
+    store: long
+    confirm: true
+    want: refused
+    exit: 1
+  - name: hook-long-step-skips-and-exits-zero
+    entry: village-push
+    mode: hook
+    store: long
+    want: skipped
+    exit: 3
+    hookScriptExitsZero: true
+  - name: piped-long-step-skips-and-exits-one
+    entry: harvest
+    mode: piped
+    store: long
+    want: refused
+    exit: 1
+  - name: terminal-quick-upgrade-runs-without-a-prompt
+    entry: harvest
+    mode: terminal
+    store: quick
+    want: ran
+    exit: 0
+  - name: terminal-long-step-asks-first
+    entry: harvest
+    mode: terminal
+    store: long
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: terminal-long-step-declined-changes-nothing
+    entry: harvest
+    mode: terminal
+    store: long
+    answer: "n"
+    want: asked
+    exit: 1
+  - name: terminal-long-step-empty-answer-declines
+    entry: harvest
+    mode: terminal
+    store: long
+    answer: ""
+    want: asked
+    exit: 1
+  - name: terminal-tight-disk-asks-first
+    entry: harvest
+    mode: terminal
+    store: quick
+    tightDisk: true
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: piped-tight-disk-quick-runs
+    entry: harvest
+    mode: piped
+    store: quick
+    tightDisk: true
+    want: ran
+    exit: 0
+  - name: terminal-affected-proceeds
+    entry: harvest
+    mode: terminal
+    store: long
+    answer: "y"
+    want: asked
+    wantRan: true
+    exit: 0
+  - name: terminal-clean-proceeds
+    entry: harvest
+    mode: terminal
+    store: quick
+    want: ran
+    exit: 0
+  - name: nonterminal-affected-refuses
+    entry: harvest
+    mode: piped
+    store: long
+    want: refused
+    exit: 1
+  - name: nonterminal-clean-proceeds
+    entry: harvest
+    mode: piped
+    store: quick
+    want: ran
+    exit: 0
+  - name: nonterminal-current-proceeds
+    entry: harvest
+    mode: piped
+    store: current
+    want: none
+    exit: 0
+  - name: nonterminal-missing-proceeds
+    entry: harvest
+    mode: piped
+    store: missing
+    want: none
+    exit: 0
+
+# step76Cases tie the search repair's cost to the policy: the same schema-75
+# store is a long plan only when it carries stale search results.
+step76Cases:
+  - name: step-76-is-long-only-when-the-store-has-search-residue
+    longStore: long
+    quickStore: quick
+
+# pushCases run the real `village push` command on a store with a long step.
+# Every caller is refused before any village request and exits with the
+# nothing-attempted status, so a generated hook (with or without an
+# auto-publish rule) prints its "nothing reached peasant online" meaning and
+# exits 0, and a script sees the nothing-attempted code. caller picks the
+# argument list: hook-with-rule and hook-without-rule are rendered by the
+# real hook generator, script is a hand-written non-interactive push.
+pushCases:
+  - name: push-hook-with-rule-nothing-attempted
+    caller: hook-with-rule
+  - name: push-hook-without-rule-nothing-attempted
+    caller: hook-without-rule
+  - name: push-script-nothing-attempted
+    caller: script
+
+# entryCases run the real entry functions with no terminal. store: affected
+# and clean are the minimal schema-75 fixtures (long and quick plans; the
+# quick upgrade cannot finish on the minimal fixture, so a case on it asserts
+# only that the entry point did not refuse); current is a real head store;
+# real-v75 is a real schema-75 store with no stale results, and wantOpened
+# requires the entry point to upgrade it and open it at the head schema.
+# wantRefuse requires the typed refusal with the database file and its
+# sidecars byte-identical. confirm is --confirm for the migrate and reclaim
+# openers. The kickstart mount and the web server never upgrade, so they
+# refuse the clean store as well.
+entryCases:
+  - name: opendb-affected-refuses
+    entry: openDB
+    store: affected
+    wantRefuse: true
+  - name: opendb-clean-proceeds
+    entry: openDB
+    store: clean
+    wantRefuse: false
+  - name: opendb-current-proceeds
+    entry: openDB
+    store: current
+    wantRefuse: false
+    wantOpened: true
+  - name: openrunstore-affected-refuses
+    entry: openRunStore
+    store: affected
+    wantRefuse: true
+  - name: openrunstore-clean-proceeds
+    entry: openRunStore
+    store: clean
+    wantRefuse: false
+  - name: openrunstore-current-proceeds
+    entry: openRunStore
+    store: current
+    wantRefuse: false
+    wantOpened: true
+  - name: verifystore-affected-refuses
+    entry: openVerifyContentStore
+    store: affected
+    wantRefuse: true
+  - name: verifystore-clean-proceeds
+    entry: openVerifyContentStore
+    store: clean
+    wantRefuse: false
+  - name: verifystore-current-proceeds
+    entry: openVerifyContentStore
+    store: current
+    wantRefuse: false
+    wantOpened: true
+  - name: kickstartstore-affected-refuses
+    entry: openKickstartStore
+    store: affected
+    wantRefuse: true
+  - name: kickstartstore-clean-refuses
+    entry: openKickstartStore
+    store: clean
+    wantRefuse: true
+  - name: kickstartstore-current-proceeds
+    entry: openKickstartStore
+    store: current
+    wantRefuse: false
+    wantOpened: true
+  - name: webpreopen-affected-refuses
+    entry: webPreopen
+    store: affected
+    wantRefuse: true
+  - name: webpreopen-clean-proceeds
+    entry: webPreopen
+    store: clean
+    wantRefuse: false
+  - name: webpreopen-current-proceeds
+    entry: webPreopen
+    store: current
+    wantRefuse: false
+    wantOpened: true
+  - name: webpreopen-real-v75-upgrades-in-the-parent
+    entry: webPreopen
+    store: real-v75
+    wantRefuse: false
+    wantOpened: true
+  - name: webforeground-affected-refuses
+    entry: runWebForeground
+    store: affected
+    wantRefuse: true
+  - name: webforeground-clean-refuses
+    entry: runWebForeground
+    store: clean
+    wantRefuse: true
+  - name: ftuerunner-affected-refuses
+    entry: ftueRunner
+    store: affected
+    wantRefuse: true
+  - name: ftuerunner-clean-passes-gate
+    entry: ftueRunner
+    store: clean
+    wantRefuse: false
+  - name: runverify-affected-refuses
+    entry: runVerify
+    store: affected
+    wantRefuse: true
+  - name: runverify-clean-passes-gate
+    entry: runVerify
+    store: clean
+    wantRefuse: false
+  - name: opendb-real-v75-clean-opens-and-migrates
+    entry: openDB
+    store: real-v75
+    wantRefuse: false
+    wantOpened: true
+  - name: migratestore-affected-without-confirm-refuses
+    entry: openMigrateStore
+    store: affected
+    wantRefuse: true
+  - name: migratestore-affected-with-confirm-passes-gate
+    entry: openMigrateStore
+    store: affected
+    confirm: true
+    wantRefuse: false
+  - name: migratestore-clean-without-confirm-passes-gate
+    entry: openMigrateStore
+    store: clean
+    wantRefuse: false
+  - name: migratestore-real-long-with-confirm-upgrades
+    entry: openMigrateStore
+    store: real-v75-long
+    confirm: true
+    wantRefuse: false
+    wantOpened: true
+  - name: reclaimstore-affected-without-confirm-refuses
+    entry: openReclaimStore
+    store: affected
+    wantRefuse: true
+  - name: reclaimstore-affected-with-confirm-passes-gate
+    entry: openReclaimStore
+    store: affected
+    confirm: true
+    wantRefuse: false
+  - name: reclaimstore-clean-without-confirm-passes-gate
+    entry: openReclaimStore
+    store: clean
+    wantRefuse: false
+
+# kickstartCases run the mounted kickstart command.
+kickstartCases:
+  - name: kickstart-upgrades-before-discovery
+  - name: kickstart-mount-opens-read-only
+  - name: kickstart-declined-upgrade-exits-with-nothing-changed
+
+# seamCases pin the clean-ups carried from the review of the 0.16.2 gate.
+seamCases:
+  - name: web-start-parent-and-child-share-open-options
+  - name: terminal-check-is-one-stubbable-function

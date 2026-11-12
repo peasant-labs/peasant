@@ -241,7 +241,7 @@ func startAudienceDoors(t *testing.T, dir, cfgPath string) *audienceDoors {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)), store.WithSkipMigrations())
+	db, err := store.Open(string(defaults.ResolveDBFilePathWith(dir)))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -36,7 +36,6 @@ func openGenerationCapableTestStore(t *testing.T) *store.Store {
 	storetest.CopyGoldenTo(t, destPath)
 	s, err := store.Open(
 		destPath,
-		store.WithSkipMigrations(),
 		store.WithPoolSize(2),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker),

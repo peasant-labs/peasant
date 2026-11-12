@@ -83,9 +83,9 @@ func openCommittedPublicationStore(t *testing.T, path, root string, supported bo
 		if err != nil {
 			t.Fatal(err)
 		}
-		db, err = store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
+		db, err = store.Open(path, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
 	} else {
-		db, err = store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+		db, err = store.Open(path, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 	}
 	if err != nil {
 		t.Fatal(err)

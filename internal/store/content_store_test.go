@@ -165,7 +165,7 @@ func TestFullContentDurabilityAndPaging(t *testing.T) {
 	for _, f := range loadContentFixtures(t).Cases {
 		t.Run(f.Name, func(t *testing.T) {
 			path := storetest.CopyGoldenDB(t)
-			s, err := store.Open(path, store.WithSkipMigrations())
+			s, err := store.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -176,7 +176,7 @@ func TestFullContentDurabilityAndPaging(t *testing.T) {
 			if err := s.Close(); err != nil {
 				t.Fatal(err)
 			}
-			s, err = store.Open(path, store.WithSkipMigrations())
+			s, err = store.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}

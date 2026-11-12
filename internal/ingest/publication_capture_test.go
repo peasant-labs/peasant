@@ -171,7 +171,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			indexer := publicationIndexer(t, harness, filesystem)
 			cfg := ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{harness: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(root)}}}, OutputDir: ingest.ResolvedPath(t.TempDir()), Parallelism: 1}
 			dbPath := storetest.CopyGoldenDB(t)
-			database, err := store.Open(dbPath, store.WithSkipMigrations())
+			database, err := store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -316,7 +316,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
 			}
-			database, err = store.Open(dbPath, store.WithSkipMigrations())
+			database, err = store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -394,7 +394,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				if err := database.Close(); err != nil {
 					t.Fatal(err)
 				}
-				database, err = store.Open(dbPath, store.WithSkipMigrations())
+				database, err = store.Open(dbPath)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -524,7 +524,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
 			}
-			database, err = store.Open(dbPath, store.WithSkipMigrations())
+			database, err = store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}

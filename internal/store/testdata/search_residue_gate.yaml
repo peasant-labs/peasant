@@ -1,4 +1,5 @@
-# NeedsSearchResidueRebuild cases: version and docsize content pin the
+# Search repair cost cases (the upgrade plan's cost for the step that
+# repairs the search triggers): version and docsize content pin the
 # read-only pre-open check against the vendored SQLite. The builder creates
 # only what the helper reads (user_version plus the two FTS docsize tables),
 # so each window is isolated from migration machinery. no-window-writes and
@@ -53,13 +54,3 @@ cases:
   - name: missing-file-fresh-install
     missing: true
     wantResidue: false
-messageMustContain:
-  - "a one-time search index repair would rebuild the whole search index"
-  - "after upgrading to 0.16.1"
-  - "session_entries reuses rowids"
-  - "before opening the local store"
-  - "was not migrated and no files were changed"
-  - "the requested command did not run"
-  - "stored sessions and history are unchanged"
-  - "`peasant harvest` in a terminal"
-  - "`peasant web start` in a terminal"

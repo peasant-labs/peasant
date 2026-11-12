@@ -45,7 +45,7 @@ func TestUnchangedSourceNotReextractedAcrossRefreshFreeSchemaBump(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+	db, err := store.Open(storetest.CopyGoldenDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}

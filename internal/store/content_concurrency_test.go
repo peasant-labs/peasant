@@ -355,7 +355,7 @@ func runConcurrencyChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(filepath.Join(filepath.Dir(root), "generations.db"), WithSkipMigrations(), WithPoolSize(2), WithIndexFormats(V2IndexFormat()), WithGenerationArtifacts(artifacts, locker))
+	s, err := Open(filepath.Join(filepath.Dir(root), "generations.db"), WithPoolSize(2), WithIndexFormats(V2IndexFormat()), WithGenerationArtifacts(artifacts, locker))
 	if err != nil {
 		t.Fatal(err)
 	}

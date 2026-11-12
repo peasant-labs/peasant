@@ -2,8 +2,6 @@ package store
 
 import (
 	"fmt"
-	"io"
-	"os"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
@@ -18,8 +16,8 @@ const searchBodyRowIDBaseSQL = "1125899906842624"
 // searchConsolidatedPredicate is the one definition of "a 0.16.1 store
 // consolidated after reaching v75": the retired index is absent AND the ai
 // trigger already targets the union index. migrationV76 records it in its
-// latch and searchConsolidatedOnConn evaluates it for the pre-open checks,
-// so the migration and the Go checks cannot disagree.
+// latch and searchConsolidatedOnConn evaluates it for the upgrade plan, so
+// the migration and the plan cannot disagree.
 const searchConsolidatedPredicate = `NOT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_entries_fts')
      AND EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'session_entries_ai' AND instr(sql, 'session_search_fts') > 0)`
 
@@ -143,7 +141,7 @@ DROP TABLE IF EXISTS temp.v76_search_latch;
 // searchConsolidatedOnConn reports whether the store is a 0.16.1 store
 // consolidated after reaching v75. It evaluates searchConsolidatedPredicate,
 // the same text v76 records in its TEMP latch before touching triggers, so
-// the pre-open notice and the read-only gate agree with the migration.
+// the upgrade plan's cost for this step agrees with the migration.
 func searchConsolidatedOnConn(conn *sqlite.Conn) (bool, error) {
 	consolidated := false
 	if err := sqlitex.ExecuteTransient(conn, `SELECT CASE WHEN `+searchConsolidatedPredicate+` THEN 1 ELSE 0 END`, &sqlitex.ExecOptions{
@@ -165,9 +163,8 @@ func searchConsolidatedOnConn(conn *sqlite.Conn) (bool, error) {
 // so it reports false with no error. Otherwise both indexes must exist; a
 // v75 store carries both (v75 creates them unconditionally), so a missing
 // one is a tampered store and reports an actionable error instead of a
-// verdict. The read-only gate returns that error to its caller; the pre-open
-// notice only warns, because v76 itself creates the retired side IF NOT
-// EXISTS before it evaluates and so heals the store either way.
+// verdict. The upgrade plan handles the two missing-table cases itself
+// before it asks (searchRepairStep).
 func searchIndexResiduePresent(conn *sqlite.Conn) (bool, error) {
 	consolidated, err := searchConsolidatedOnConn(conn)
 	if err != nil {
@@ -188,49 +185,7 @@ func searchIndexResiduePresent(conn *sqlite.Conn) (bool, error) {
 			return nil
 		},
 	}); err != nil {
-		return false, fmt.Errorf("store: evaluate the v75 search residue predicate: %w; the migration cannot decide between rebuild and re-sync", err)
+		return false, fmt.Errorf("store: evaluate the v75 search residue predicate: %w; the plan cannot say whether the repair rebuilds the index", err)
 	}
 	return present, nil
-}
-
-// searchIndexRebuildNoticeWriter carries the one-line v76 rebuild notice. It
-// defaults to standard error so the warning reaches the user's terminal;
-// tests swap it to capture the notice without touching the process streams.
-// The explicit upgrade step replaces this writer: once the upgrade ships,
-// the notice moves there and this global stays only for the transition.
-var searchIndexRebuildNoticeWriter io.Writer = os.Stderr
-
-// searchIndexRebuildNotice is the one line printed before a v76 whole-index
-// rebuild runs: it names the cause, the cost, and the scope.
-const searchIndexRebuildNotice = "rebuilding the search index once to remove stale results left by 0.16.1; this reads all stored text and can take several minutes"
-
-// searchIndexPrecheckWarning prefixes the one line printed when the pre-open
-// residue check itself fails: the open continues, because v76 decides at
-// its own transactional point and repairs the index either way.
-const searchIndexPrecheckWarning = "warning: could not check the search index for stale results left by 0.16.1 before opening"
-
-// maybePrintSearchIndexRebuildNotice evaluates the residue predicate before
-// the migration chain runs and warns when v76 is about to rebuild. It runs
-// only when the pre-migration version is exactly 75: earlier versions cross
-// v75 and v76 in the same run with no window between, and later versions
-// already ran v76. The in-migration gate reads the decision v76 records in
-// its latch at its own transactional point; this call only warns, once per
-// run. It never fails the open: when the check itself errors (a tampered
-// store missing one of the v75 pair), it prints one warning line naming the
-// error and continues, because the v76 SQL creates the missing side and
-// repairs the index on its own. A failed write of the notice is ignored for
-// the same reason: the notice is advisory.
-func maybePrintSearchIndexRebuildNotice(conn *sqlite.Conn, versionBeforeMigration int64) {
-	if versionBeforeMigration != 75 {
-		return
-	}
-	residue, err := searchIndexResiduePresent(conn)
-	if err != nil {
-		_, _ = fmt.Fprintf(searchIndexRebuildNoticeWriter, "%s (%v); continuing: the one-time repair checks the index itself and rebuilds it when needed\n", searchIndexPrecheckWarning, err)
-		return
-	}
-	if !residue {
-		return
-	}
-	_, _ = fmt.Fprintln(searchIndexRebuildNoticeWriter, searchIndexRebuildNotice)
 }

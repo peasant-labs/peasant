@@ -91,7 +91,7 @@ func TestOpenCodeLegacyJSONUnknownStoreAndReindex(t *testing.T) {
 			if len(evidence.Payload) < 8192 || !bytes.Contains(evidence.Payload, []byte("9007199254740993")) || !bytes.Contains(evidence.Payload, []byte("FULL_UNKNOWN_TAIL")) || !bytes.Contains(evidence.Payload, []byte(secret)) {
 				t.Fatal("opaque payload truncated, rounded, or not raw source bytes")
 			}
-			db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+			db, err := store.Open(storetest.CopyGoldenDB(t))
 			if err != nil {
 				t.Fatal(err)
 			}

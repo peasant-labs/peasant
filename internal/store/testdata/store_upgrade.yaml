@@ -1,0 +1,99 @@
+# Store upgrade cases. Open never changes the schema of a store that holds
+# data; PlanUpgrade reads without changing a file; Upgrade is the only
+# function that applies migrations. Every behind store here is built on the
+# frozen migration chain: `from` is the number of shipped migrations applied
+# before the case starts. A refusal asserts that the database file's SHA-256
+# is unchanged.
+#
+# stopAt names the schema version whose step is interrupted, after its script
+# and its data fill and before its commit; wantVersion is the schema the
+# store is left at. fault names how the step is stopped: `cancel` cancels the
+# upgrade's context, `error` fails inside the step the way a killed process
+# would leave it (an uncommitted transaction).
+cases:
+  - name: fresh-store-is-created-at-head-without-a-plan
+    kind: fresh
+  - name: current-store-has-no-steps
+    kind: current
+  - name: behind-store-plan-lists-every-step-with-title-and-cost
+    kind: plan
+    from: 69
+  - name: open-refuses-a-behind-store-and-changes-no-byte
+    kind: open-refuses
+    from: 69
+  - name: newer-store-is-refused-before-any-step
+    kind: newer
+  - name: cancel-during-a-step-rolls-it-back-and-keeps-finished-steps
+    kind: interrupted
+    from: 69
+    stopAt: 72
+    fault: cancel
+    wantVersion: 71
+  - name: data-fill-commits-with-its-schema-step
+    kind: data-fill
+    from: 73
+    stopAt: 74
+    fault: error
+    wantVersion: 73
+  - name: insufficient-free-disk-refuses-before-the-first-step
+    kind: disk-insufficient
+    from: 69
+  - name: unknown-free-disk-warns-and-continues
+    kind: disk-unknown
+    from: 69
+  - name: wal-is-truncated-after-the-last-step
+    kind: wal-truncated
+    from: 69
+  - name: second-process-waits-on-the-run-lock
+    kind: run-lock
+    from: 75
+  - name: every-migration-has-a-catalog-entry
+    kind: catalog
+  # A schema-75 store whose retired search index is missing: the plan cannot
+  # compare the two indexes, so the upgrade prints one warning and runs; the
+  # repair rebuilds the index.
+  - name: precheck-missing-retired-index-warns-and-continues
+    kind: precheck-retired-missing
+    from: 75
+  # A schema-75 store whose live search index is missing cannot be repaired:
+  # the plan returns the actionable error, with no warning and no raw
+  # "no such table" from SQLite.
+  - name: precheck-missing-live-index-returns-the-actionable-error
+    kind: precheck-live-missing
+    from: 75
+  # The rebuild notice reaches the caller through UpgradeOptions.Notices; no
+  # package variable carries it.
+  - name: notice-writer-is-an-open-option
+    kind: notice-option
+    from: 75
+  - name: events-arrive-in-order-for-every-step
+    kind: events
+    from: 69
+  # Disk need. The plan asks for the database size times the largest disk
+  # factor among the steps planned for this store. wantFactorMin and
+  # wantFactorMax bound RequiredFreeBytes / StoreBytes. residue seeds stale
+  # search results into a schema-75 store, so its repair rebuilds the index.
+  - name: plan-with-the-entry-table-rebuild-asks-for-about-1.7-times-the-database
+    kind: disk-need
+    from: 69
+    wantFactorMin: 1.6
+    wantFactorMax: 1.8
+  - name: plan-of-light-steps-asks-for-the-small-share
+    kind: disk-need
+    from: 75
+    wantFactorMin: 0.0001
+    wantFactorMax: 0.02
+  - name: plan-with-a-search-rebuild-asks-for-its-own-share
+    kind: disk-need
+    from: 75
+    residue: true
+    wantFactorMin: 0.2
+    wantFactorMax: 0.6
+  - name: disk-need-is-the-largest-step-not-the-sum
+    kind: disk-need-largest
+    from: 69
+  - name: too-little-free-disk-for-light-steps-refuses-and-names-needed-and-free-bytes
+    kind: disk-insufficient
+    from: 75
+  - name: every-catalog-entry-has-a-disk-factor
+    kind: catalog

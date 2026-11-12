@@ -98,7 +98,7 @@ func TestIndexFormatReadsRefuseUnknownProjectionWithinScope(t *testing.T) {
 			var db *store.Store
 			if row.VariableLimit > 0 {
 				var err error
-				db, err = store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
+				db, err = store.Open(storetest.CopyGoldenDB(t), store.WithPoolSize(1))
 				if err != nil {
 					t.Fatal(err)
 				}

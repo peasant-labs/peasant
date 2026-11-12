@@ -160,7 +160,7 @@ func TestStoreScopeContract(t *testing.T) {
 func assertZeroStoreScopeRefused(t *testing.T, fixture storeScopeContractFixture) {
 	t.Helper()
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithWALAutocheckpointDisabled(), store.WithPoolSize(2))
+	db, err := store.Open(dbPath, store.WithWALAutocheckpointDisabled(), store.WithPoolSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func assertZeroStoreScopeRefused(t *testing.T, fixture storeScopeContractFixture
 func assertZeroProjectScopeRefused(t *testing.T, fixture storeScopeContractFixture) {
 	t.Helper()
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithWALAutocheckpointDisabled(), store.WithPoolSize(2))
+	db, err := store.Open(dbPath, store.WithWALAutocheckpointDisabled(), store.WithPoolSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}

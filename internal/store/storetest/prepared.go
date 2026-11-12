@@ -28,13 +28,12 @@ func CopyGoldenToIfAbsent(t *testing.T, path string) {
 // OpenPrepared opens the store at path without replaying the migration-state
 // check, preparing the path first when it does not exist.
 //
-// A missing path is created as a copy of the pre-migrated golden database, so
-// a skip-migrations open never lands on an empty, schema-less file. An
-// existing path — one a pipeline run or a previous open already migrated — is
-// reopened as is. The caller's options are passed through unchanged and follow
-// the skip option, so they keep their usual precedence.
+// A missing path is created as a copy of the golden database at the head
+// schema, so the open never builds a store from the baseline. An existing
+// path — one a pipeline run or a previous open already created — is reopened
+// as is. The caller's options are passed through unchanged.
 func OpenPrepared(t *testing.T, path string, options ...store.OpenOption) (*store.Store, error) {
 	t.Helper()
 	CopyGoldenToIfAbsent(t, path)
-	return store.Open(path, append([]store.OpenOption{store.WithSkipMigrations()}, options...)...)
+	return store.Open(path, options...)
 }

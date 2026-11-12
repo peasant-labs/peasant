@@ -104,7 +104,7 @@ VALUES (?, 'claude-code', 'skipped', ?, 0, 'legacy attempt', 11, 12)`, &sqlitex.
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}
-	upgraded, err := Open(path, WithPoolSize(1))
+	upgraded, err := openUpgraded(path, WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

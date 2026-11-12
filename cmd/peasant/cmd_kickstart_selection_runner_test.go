@@ -236,7 +236,7 @@ func TestKickstartLocalIngestPreservesCommittedSelectionAtRunnerBoundary(t *test
 				t.Fatal("production kickstart local ingest returned no result")
 			}
 
-			db, err := store.Open(defaults.ResolveDBFilePathWith(root).String(), store.WithSkipMigrations())
+			db, err := store.Open(defaults.ResolveDBFilePathWith(root).String())
 			if err != nil {
 				t.Fatalf("open selection runner store: %v", err)
 			}

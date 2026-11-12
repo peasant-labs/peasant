@@ -83,7 +83,7 @@ VALUES (?, 'claude-code', 'fixture-model', 'artifact-host', 'artifact-project', 
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := Open(path, WithPoolSize(1))
+	db, err := openUpgraded(path, WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

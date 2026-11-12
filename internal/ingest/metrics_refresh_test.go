@@ -34,7 +34,7 @@ func (s *metricsRefreshStore) SaveMetricsForInput(ctx context.Context, input *in
 }
 
 func TestPersistentHarvestRetriesStoredDownstreamWithoutIndexing(t *testing.T) {
-	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
+	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func (s *metricsRefreshStore) SaveMetrics(ctx context.Context, value *ingest.Ses
 // sessions the run excluded while every rule-level test stayed green.
 func TestStoredMetricRefreshAppliesTheRunSessionFilter(t *testing.T) {
 	t.Parallel()
-	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
+	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestPipelineRetainsNonfatalMetricRefreshDiagnostics(t *testing.T) {
 		seen[row.Name] = true
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
-			db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
+			db, err := store.Open(storetest.CopyGoldenDB(t), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

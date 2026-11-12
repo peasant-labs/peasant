@@ -128,7 +128,7 @@ func TestClaudeEvidenceRejectsRecordedIDsAndRollsBack(t *testing.T) {
 	fixtures := LoadClaudeIdentityEvidenceFixtures(t)
 	for _, c := range fixtures.RejectedWrites {
 		t.Run(c.Name, func(t *testing.T) {
-			s, err := Open(filepath.Join(t.TempDir(), "evidence.db"), WithPoolSize(2))
+			s, err := openUpgraded(filepath.Join(t.TempDir(), "evidence.db"), WithPoolSize(2))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -196,7 +196,7 @@ func TestMigrationV65ClaudeEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Open runs the real upgrade over the populated predecessor.
-	s, err := Open(dbPath, WithPoolSize(2))
+	s, err := openUpgraded(dbPath, WithPoolSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}

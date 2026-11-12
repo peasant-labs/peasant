@@ -568,7 +568,7 @@ func openScopeWorld(t *testing.T, root string, files []scopeFile, excludes []str
 	applyScopeMutation(t, mfs, root, mutation)
 
 	fs := testutil.NewOpRecorderFS(mfs)
-	db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithWALAutocheckpointDisabled())
+	db, err := store.Open(dbPath, store.WithPoolSize(1), store.WithWALAutocheckpointDisabled())
 	if err != nil {
 		t.Fatalf("open the store at %s: %v", dbPath, err)
 	}

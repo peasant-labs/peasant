@@ -59,12 +59,12 @@ func TestContributionHistorySingleSQLiteSnapshot(t *testing.T) {
 			defer cancel()
 			path := filepath.Join(t.TempDir(), "snapshots.db")
 			storetest.CopyGoldenTo(t, path)
-			reader, err := store.Open(path, store.WithPoolSize(1), store.WithSkipMigrations())
+			reader, err := store.Open(path, store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer reader.Close()
-			writer, err := store.Open(path, store.WithPoolSize(1), store.WithSkipMigrations())
+			writer, err := store.Open(path, store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

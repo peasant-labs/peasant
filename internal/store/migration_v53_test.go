@@ -158,7 +158,7 @@ func TestMigrationV53PiPreservesCurrentStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer pool.Put(conn)
-			newDB, err := Open(dbPath, WithPoolSize(1))
+			newDB, err := openUpgraded(dbPath, WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
