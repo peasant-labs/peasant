@@ -793,6 +793,11 @@ jobs:
       # @playwright/test in web/package.json; bump both together.
       image: mcr.microsoft.com/playwright@sha256:bc6ab0d6d44ff4826e4cb8c1e6d801e185bfc42bb0753f8e2a30efc70db054c7
       options: --ipc=host --init
+    # Inside a container `run:` defaults to sh (dash), which rejects
+    # `set -o pipefail`; use bash like the host jobs.
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
