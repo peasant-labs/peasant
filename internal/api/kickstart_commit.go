@@ -385,14 +385,14 @@ func reviewRows(published []schema.LocalKickstartConflict, review onboarding.Rev
 // servedConflictSide is the file value a conflict row showed for key: from the
 // rows a refused save published, or from the review of the session that seen
 // carries. A request that has no such review (it is nil) reads the file now.
-func (st *kickstartSessions) servedConflictSide(sess *kickstartSession, seen *kickstartSeenRows, key onboarding.FieldKey) schema.LocalSettingValue {
+func (st *kickstartSessions) servedConflictSide(sess *kickstartSession, seen *kickstartSeenRows, key onboarding.FieldKey, facts kickstartFacts) schema.LocalSettingValue {
 	if side := seenConflictSide(sess.conflicts, key); side != nil {
 		return side
 	}
 	if seen != nil {
 		return seenConflictSide(seen.rows, key)
 	}
-	if review, ok := st.reviewOf(sess, st.env.village()); ok {
+	if review, ok := st.reviewOf(sess, facts); ok {
 		return seenConflictSide(review.Conflicts, key)
 	}
 	return nil

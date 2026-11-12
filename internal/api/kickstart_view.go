@@ -47,10 +47,10 @@ type kickstartExampleSlot struct {
 // draftView projects a frozen session onto the wire, without the parts that read
 // the file or run the redactor. The setup model decides the stops, their order,
 // visibility, fields, option menus, copy, and values; this function copies those
-// decisions and adds none. The forest is not in the view: the page loads it from
-// the tree route.
-func (st *kickstartSessions) draftView(sess *kickstartSession) (*kickstartViewDraft, error) {
-	facts := st.env.village()
+// decisions and adds none. facts is the sign-in file as the caller read it: the
+// file is read once per request, before the store lock, and never here. The
+// forest is not in the view: the page loads it from the tree route.
+func (st *kickstartSessions) draftView(sess *kickstartSession, facts kickstartFacts) (*kickstartViewDraft, error) {
 	answers := sess.configAnswers()
 	w := sess.writeContext(sess.working, answers, facts)
 	draft := &kickstartViewDraft{sess: sess, facts: facts, w: w, reviewStop: -1}
@@ -150,7 +150,7 @@ func (st *kickstartSessions) completeView(d *kickstartViewDraft) {
 // viewOf builds the whole view of a frozen session, for a read: the lock is not
 // held, so the slow parts are added at once.
 func (st *kickstartSessions) viewOf(frozen *kickstartSession) (schema.LocalKickstartSession, error) {
-	draft, err := st.draftView(frozen)
+	draft, err := st.draftView(frozen, st.env.village())
 	if err != nil {
 		return schema.LocalKickstartSession{}, err
 	}

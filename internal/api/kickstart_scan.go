@@ -163,6 +163,7 @@ func (st *kickstartSessions) runScan(ctx context.Context, sess *kickstartSession
 // Tabs learn of it twice, in order: a scan event that reports done, on which
 // they reload the forest, then a session event that carries the pruned answer.
 func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, result kickstartScanResult) {
+	facts := st.env.village()
 	st.mutateViews(func() ([]schema.LocalKickstartEvent, []*kickstartViewDraft) {
 		if sess.closed || sess.scanGen != gen {
 			return nil, nil
@@ -210,11 +211,11 @@ func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, resu
 		if prunedTree {
 			sess.fieldClock[onboarding.FieldSelection.String()] = revision
 		}
-		if err := st.rebuildLocked(sess); err != nil {
+		if err := st.rebuildLocked(sess, facts); err != nil {
 			sess.restore(before)
 			return st.failScanLocked(sess, fmt.Errorf("rebuild the draft over the new forest: %w", err)), nil
 		}
-		draft, err := st.draftView(sess.frozen())
+		draft, err := st.draftView(sess.frozen(), facts)
 		if err != nil {
 			sess.restore(before)
 			return st.failScanLocked(sess, err), nil
