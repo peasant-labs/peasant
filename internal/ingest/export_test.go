@@ -56,3 +56,8 @@ func (p *Pipeline) RefreshStoredMetadata(ctx context.Context, session Discovered
 	result := p.processRetainedSession(ctx, session, metadataPath, nil)
 	return result.transcriptKept, result.result.Error
 }
+
+// IndexBindWithoutReparseReason is the index-log reason of a session settled
+// by the rule "bind without a re-parse", so the external harvest fixture can
+// count binds apart from parses.
+const IndexBindWithoutReparseReason = indexBindWithoutReparseReason

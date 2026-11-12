@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,31 @@ type pairInstallCase struct {
 	Installed pairInstallFiles  `yaml:"installed"`
 	Candidate pairInstallFiles  `yaml:"candidate"`
 	Expect    pairInstallExpect `yaml:"expect"`
+	Runs      []pairHarvestRun  `yaml:"runs"`
+}
+
+// pairHarvestRun is one harvest of a harvest-mode case; the fixture header
+// documents every field.
+type pairHarvestRun struct {
+	Change                string            `yaml:"change"`
+	Transcript            string            `yaml:"transcript"`
+	MoveCaptureBeforeBind bool              `yaml:"moveCaptureBeforeBind"`
+	Expect                pairHarvestExpect `yaml:"expect"`
+}
+
+type pairHarvestExpect struct {
+	Parses            int   `yaml:"parses"`
+	Binds             int   `yaml:"binds"`
+	RefusedBinds      int   `yaml:"refusedBinds"`
+	Entries           int   `yaml:"entries"`
+	EntriesRewritten  bool  `yaml:"entriesRewritten"`
+	CaptureRevision   int64 `yaml:"captureRevision"`
+	Bound             bool  `yaml:"bound"`
+	IndexTimeAdvanced bool  `yaml:"indexTimeAdvanced"`
+	ProofKept         bool  `yaml:"proofKept"`
+	TranscriptKept    bool  `yaml:"transcriptKept"`
+	MetadataRenames   int   `yaml:"metadataRenames"`
+	Quiet             bool  `yaml:"quiet"`
 }
 
 type pairInstallDocument struct {
@@ -226,7 +252,7 @@ func TestPairInstallIdentity(t *testing.T) {
 			case "retained":
 				runRetainedRefreshCase(t, c)
 			case "harvest":
-				runMetadataOnlyHarvestCase(t)
+				runHarvestCase(t, document, c)
 			default:
 				t.Fatalf("unknown pair install mode %q", c.Mode)
 			}
@@ -392,21 +418,50 @@ func runGatedPairInstallCase(t *testing.T, document pairInstallDocument, c pairI
 	}
 }
 
-// runMetadataOnlyHarvestCase harvests one session, then harvests it again
-// under a newer adapter revision. The source is unchanged, so the second run
-// produces the same transcript bytes beside new metadata. It must keep the
-// transcript file and the index input proof, and write no entry row.
-func runMetadataOnlyHarvestCase(t *testing.T) {
+// captureMovingStore is the real store with one interposed step: before the
+// next bind writes, it advances the session's metadata capture revision, as a
+// concurrent capture between the index capture and the bind would.
+type captureMovingStore struct {
+	*store.Store
+	move func()
+}
+
+func (s *captureMovingStore) BindPublicationIndex(ctx context.Context, bind ingest.PublicationIndexBind) error {
+	if move := s.move; move != nil {
+		s.move = nil
+		move()
+	}
+	return s.Store.BindPublicationIndex(ctx, bind)
+}
+
+// runHarvestCase harvests one session on a real store once per fixture run,
+// applying each run's change first, and checks after every run what was
+// parsed, bound or refused, the index rows, the bound capture revision and the
+// files the run touched.
+func runHarvestCase(t *testing.T, document pairInstallDocument, c pairInstallCase) {
+	if len(c.Runs) == 0 || c.Runs[0].Change != "initial" {
+		t.Fatal("a harvest case starts with its initial run")
+	}
 	fs := testutil.NewCountingFS(testutil.NewMemFS())
 	git := testutil.DefaultGitResolver()
 	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	modTime := time.Now().Add(-2 * time.Hour)
-	setupSourceFile(t, fs.MemFS, sourcePath)
-	fs.ModTimes[sourcePath] = modTime
-	session := makeDiscoveredSession(t, testSessionID, sourcePath, modTime)
+	writeSource := func(name string) {
+		t.Helper()
+		body, ok := document.Transcripts[name]
+		if !ok {
+			t.Fatalf("fixture names unknown transcript %q", name)
+		}
+		if err := fs.MemFS.WriteFile(sourcePath, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		fs.ModTimes[sourcePath] = modTime
+	}
+	writeSource("first")
+	sessions := []ingest.DiscoveredSession{makeDiscoveredSession(t, testSessionID, sourcePath, modTime)}
 	meta := makeMinimalMeta(t, testSessionID)
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
-		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta}),
+		ingest.HarnessClaudeCode: makeStubAdapter(sessions, map[ingest.SessionID]*ingest.UnifiedMetadata{sessions[0].SessionID: meta}),
 	}
 	dbPath := storetest.CopyGoldenDB(t)
 	db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithWALAutocheckpointDisabled())
@@ -414,35 +469,13 @@ func runMetadataOnlyHarvestCase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	run := func(versions map[ingest.Harness]ingest.HarvesterVersions) *ingest.PipelineResult {
-		t.Helper()
-		pipeline, err := newTestPipeline(fs, git, adapters, makePipelineConfig(testOutputDir),
-			ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db),
-			ingest.WithHarvesterVersions(versions),
-			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
-		if err != nil {
-			t.Fatal(err)
-		}
-		result, err := pipeline.Run(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		return result
-	}
-	versions := maps.Clone(ingest.HarvesterVersionRegistry)
-	run(versions)
+	moving := &captureMovingStore{Store: db}
+	sid := string(sessions[0].SessionID)
 	sessionDir := ingest.SessionDir(testOutputDir, string(meta.HostSlug), testSessionID, "")
 	transcriptPath := filepath.Join(sessionDir, testSessionID+"--transcript.jsonl")
 	metadataPath := ingest.SessionMetadataPath(testOutputDir, string(meta.HostSlug), testSessionID, "")
-	before, err := db.ReadIndexState(t.Context(), session.SessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if before == nil || before.IndexedInputHash == nil || before.ArtifactHash == nil {
-		t.Fatalf("the first harvest did not settle the session: %+v", before)
-	}
 
-	// Record every entry row change the second run makes.
+	// Record every index row change.
 	pairInstallSQL(t, db, "CREATE TABLE pair_install_entry_changes(source TEXT NOT NULL)")
 	for _, table := range []string{"session_entries", "session_entry_bodies"} {
 		for _, event := range []string{"INSERT", "UPDATE", "DELETE"} {
@@ -450,49 +483,116 @@ func runMetadataOnlyHarvestCase(t *testing.T) {
 				table, strings.ToLower(event), event, table, table))
 		}
 	}
-	claude := versions[ingest.HarnessClaudeCode]
-	claude.AdapterVersion++
-	versions[ingest.HarnessClaudeCode] = claude
-	fs.ResetCounts()
-	result := run(versions)
-	if result.Summary.Updated != 1 {
-		t.Fatalf("the adapter bump did not refresh the session: %+v", result.Summary)
-	}
-	for _, op := range []testutil.FSOp{testutil.FSOpWriteFile, testutil.FSOpRename, testutil.FSOpRemove, testutil.FSOpRemoveAll} {
-		if got := fs.Count(op, transcriptPath); got != 0 {
-			t.Errorf("%s on the unchanged transcript = %d, want 0 (the installed file is kept)", op, got)
+	count := func(query string, args ...any) int {
+		t.Helper()
+		text, _ := pairInstallSQL(t, db, query, args...)
+		n, err := strconv.Atoi(text)
+		if err != nil {
+			t.Fatalf("%s: %q is not a count", query, text)
 		}
+		return n
 	}
-	if got := fs.CountSuffixUnder(testutil.FSOpWriteFile, testOutputDir, "--transcript.jsonl"); got != 0 {
-		t.Errorf("transcript files written anywhere under the output = %d, want 0", got)
-	}
-	if got := fs.Count(testutil.FSOpRename, metadataPath); got != 1 {
-		t.Errorf("metadata renames = %d, want 1", got)
-	}
-	after, err := db.ReadIndexState(t.Context(), session.SessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after == nil || after.IndexedInputHash == nil || *after.IndexedInputHash != *before.IndexedInputHash {
-		t.Errorf("index input proof after the metadata-only refresh = %v, want %q kept", after.IndexedInputHash, *before.IndexedInputHash)
-	}
-	if after.ArtifactHash == nil || *after.ArtifactHash == *before.ArtifactHash {
-		t.Error("the mirror did not record the new pair identity")
-	}
-	if after.PublicationCaptureRevision > 0 && !after.PublicationBound {
-		t.Errorf("the stored index was left unbound from metadata capture revision %d", after.PublicationCaptureRevision)
-	}
-	if changes, _ := pairInstallSQL(t, db, "SELECT COUNT(*) FROM pair_install_entry_changes"); changes != "0" {
-		t.Errorf("entry rows changed by the metadata-only refresh = %s, want 0", changes)
-	}
-	// The run after it finds nothing to do.
-	fs.ResetCounts()
-	settled := run(versions)
-	if settled.Summary.Updated != 0 || settled.Summary.New != 0 {
-		t.Errorf("the session did not settle after the refresh: %+v", settled.Summary)
-	}
-	if got := fs.Total(testutil.FSOpWriteFile) + fs.Total(testutil.FSOpRename); got != 0 {
-		t.Errorf("file writes and renames in the settled run = %d, want 0", got)
+	versions := maps.Clone(ingest.HarvesterVersionRegistry)
+	var previous *ingest.SessionIndexState
+	for i, step := range c.Runs {
+		label := fmt.Sprintf("run %d (%s)", i+1, step.Change)
+		switch step.Change {
+		case "initial":
+			if i != 0 {
+				t.Fatalf("%s: only the first run is initial", label)
+			}
+		case "metadata":
+			claude := versions[ingest.HarnessClaudeCode]
+			claude.AdapterVersion++
+			versions[ingest.HarnessClaudeCode] = claude
+		case "transcript":
+			modTime = modTime.Add(time.Minute)
+			sessions[0].ModTime = modTime
+			writeSource(step.Transcript)
+		case "none":
+		default:
+			t.Fatalf("%s: unknown change", label)
+		}
+		if step.MoveCaptureBeforeBind {
+			moving.move = func() {
+				pairInstallSQL(t, db, "UPDATE session_publication_metadata SET capture_revision = capture_revision + 1 WHERE session_id = ?", sid)
+				pairInstallSQL(t, db, "UPDATE sessions SET publication_capture_revision = publication_capture_revision + 1 WHERE session_id = ?", sid)
+			}
+		}
+		lastLog := count("SELECT COALESCE(MAX(id), 0) FROM index_log")
+		lastChange := count("SELECT COUNT(*) FROM pair_install_entry_changes")
+		fs.ResetCounts()
+		pipeline, err := newTestPipeline(fs, git, adapters, makePipelineConfig(testOutputDir),
+			ingest.WithStore(moving), ingest.WithMetricsStore(moving), ingest.WithIndexLogger(db),
+			ingest.WithHarvesterVersions(versions),
+			ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pipeline.Run(t.Context()); err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		if moving.move != nil {
+			t.Fatalf("%s: the run never reached a bind, so the capture was not moved before one", label)
+		}
+		want := step.Expect
+		logged := func(where string) int {
+			return count("SELECT COUNT(*) FROM index_log WHERE id > ? AND session_id = ? AND "+where, lastLog, sid)
+		}
+		if got := logged("outcome IN ('indexed','reindexed','fallback')"); got != want.Parses {
+			t.Errorf("%s: parses = %d, want %d", label, got, want.Parses)
+		}
+		if got := logged("outcome = 'skipped' AND reason = '" + ingest.IndexBindWithoutReparseReason + "'"); got != want.Binds {
+			t.Errorf("%s: binds without a re-parse = %d, want %d", label, got, want.Binds)
+		}
+		if got := logged("outcome = 'error'"); got != want.RefusedBinds {
+			t.Errorf("%s: refused index writes = %d, want %d", label, got, want.RefusedBinds)
+		}
+		if got := count("SELECT COUNT(*) FROM session_entries WHERE session_id = ?", sid); got != want.Entries {
+			t.Errorf("%s: index rows = %d, want %d", label, got, want.Entries)
+		}
+		if got := count("SELECT COUNT(*) FROM pair_install_entry_changes") > lastChange; got != want.EntriesRewritten {
+			t.Errorf("%s: index rows changed = %t, want %t", label, got, want.EntriesRewritten)
+		}
+		state, err := db.ReadIndexState(t.Context(), sessions[0].SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state == nil || state.IndexedInputHash == nil || state.IndexedAt == nil || state.ArtifactHash == nil {
+			t.Fatalf("%s: the session is not indexed: %+v", label, state)
+		}
+		if state.PublicationCaptureRevision != want.CaptureRevision || state.PublicationBound != want.Bound {
+			t.Errorf("%s: metadata capture revision %d bound %t, want revision %d bound %t", label, state.PublicationCaptureRevision, state.PublicationBound, want.CaptureRevision, want.Bound)
+		}
+		if previous != nil {
+			if got := *state.IndexedAt != *previous.IndexedAt; got != want.IndexTimeAdvanced {
+				t.Errorf("%s: index time advanced = %t, want %t", label, got, want.IndexTimeAdvanced)
+			}
+			if got := *state.IndexedInputHash == *previous.IndexedInputHash; got != want.ProofKept {
+				t.Errorf("%s: index input proof kept = %t, want %t", label, got, want.ProofKept)
+			}
+		}
+		if want.TranscriptKept {
+			for _, op := range []testutil.FSOp{testutil.FSOpWriteFile, testutil.FSOpRename, testutil.FSOpRemove, testutil.FSOpRemoveAll} {
+				if got := fs.Count(op, transcriptPath); got != 0 {
+					t.Errorf("%s: %s on the unchanged transcript = %d, want 0 (the installed file is kept)", label, op, got)
+				}
+			}
+			if got := fs.CountSuffixUnder(testutil.FSOpWriteFile, testOutputDir, "--transcript.jsonl"); got != 0 {
+				t.Errorf("%s: transcript files written anywhere under the output = %d, want 0", label, got)
+			}
+		} else if got := fs.Count(testutil.FSOpRename, transcriptPath); got != 1 {
+			t.Errorf("%s: renames onto the transcript = %d, want 1", label, got)
+		}
+		if got := fs.Count(testutil.FSOpRename, metadataPath); got != want.MetadataRenames {
+			t.Errorf("%s: metadata renames = %d, want %d", label, got, want.MetadataRenames)
+		}
+		if want.Quiet {
+			if got := fs.Total(testutil.FSOpWriteFile) + fs.Total(testutil.FSOpRename); got != 0 {
+				t.Errorf("%s: file writes and renames = %d, want 0", label, got)
+			}
+		}
+		previous = state
 	}
 }
 
