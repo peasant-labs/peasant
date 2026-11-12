@@ -31,9 +31,11 @@ const (
 	// pipe, or CI. A quick upgrade runs with one line per step; a long step
 	// is refused with a non-zero exit.
 	storeEntryPiped storeEntryMode = "piped"
-	// storeEntryHook is a generated git hook. A quick upgrade runs; a long
-	// step is skipped through the nothing-attempted status, which the hook
-	// script turns into exit 0 so git is never blocked.
+	// storeEntryHook is a generated git hook: the command that declared its
+	// hook flag (declareStoreEntryHookFlag), run with that flag. A quick
+	// upgrade runs; a long step is skipped through the nothing-attempted
+	// status, which the hook script turns into exit 0 so git is never
+	// blocked.
 	storeEntryHook storeEntryMode = "hook"
 	// storeEntryServer is a server process: the forked web child, a
 	// foreground web server, or an import a web request started. It never
@@ -185,13 +187,31 @@ var planStoreUpgrade = store.PlanUpgrade
 // policy test can record that the upgrade started without running one.
 var upgradeStore = store.Upgrade
 
+// storeEntryHookFlagAnnotation names the command annotation that declares
+// the boolean flag a generated git hook passes to the command. Only a
+// command that declares one is ever in hook mode: `village push`, with
+// --non-interactive. Another command with a flag of the same name is not.
+const storeEntryHookFlagAnnotation = "peasant.store-upgrade.hook-flag"
+
+// declareStoreEntryHookFlag marks cmd as the command generated git hooks
+// run, with flag as the boolean flag they pass.
+func declareStoreEntryHookFlag(cmd *cobra.Command, flag string) {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[storeEntryHookFlagAnnotation] = flag
+}
+
 // storeEntryModeFor names the entry mode of a command a person or a script
-// runs: a generated hook passes --non-interactive, a terminal passes the
-// one terminal check, and everything else is piped.
+// runs: the command a generated hook runs, with the flag it declared set, is
+// a hook; a terminal passes the one terminal check; everything else is
+// piped.
 func storeEntryModeFor(cmd *cobra.Command) storeEntryMode {
 	if cmd != nil {
-		if flag := cmd.Flags().Lookup("non-interactive"); flag != nil && flag.Value.String() == "true" {
-			return storeEntryHook
+		if name, declared := cmd.Annotations[storeEntryHookFlagAnnotation]; declared {
+			if flag := cmd.Flags().Lookup(name); flag != nil && flag.Value.String() == "true" {
+				return storeEntryHook
+			}
 		}
 	}
 	if requireTerminal("") == nil {
@@ -274,8 +294,14 @@ func confirmStoreUpgrade(cmd *cobra.Command, stderr io.Writer) (bool, error) {
 	return answer == "y" || answer == "yes", nil
 }
 
+// storeUpgradeTightDiskLine is the line the plan prints when free disk is
+// tight, in every mode the upgrade runs or asks in.
+const storeUpgradeTightDiskLine = "free disk is tight: less than twice what the upgrade asks for"
+
 // writeStoreUpgradePlan prints the plan: every step with its cost, and the
-// sizes when a long step makes them matter.
+// sizes when a long step or tight disk makes them matter. Every mode that
+// runs or asks prints it before the first step, so a pipe and a hook see the
+// tight-disk line too.
 func writeStoreUpgradePlan(w io.Writer, plan store.UpgradePlan) {
 	fmt.Fprintf(w, "the local store at %s needs an upgrade: schema %d to %d, %d step(s)\n", plan.DBPath, plan.From, plan.To, len(plan.Steps))
 	for i, step := range plan.Steps {
@@ -291,7 +317,7 @@ func writeStoreUpgradePlan(w io.Writer, plan store.UpgradePlan) {
 	fmt.Fprintf(w, "store size: %s; free disk: %s; the upgrade asks for %s free\n",
 		formatMigrateBytes(plan.StoreBytes), free, formatMigrateBytes(plan.RequiredFreeBytes))
 	if storeUpgradeDiskTight(plan) {
-		fmt.Fprintln(w, "free disk is tight: less than twice what the upgrade asks for")
+		fmt.Fprintln(w, storeUpgradeTightDiskLine)
 	}
 }
 

@@ -21,8 +21,13 @@ requiredNames:
   - plan-with-a-search-rebuild-asks-for-its-own-share
   - disk-need-is-the-largest-step-not-the-sum
   - too-little-free-disk-for-light-steps-refuses-and-names-needed-and-free-bytes
-  - every-catalog-entry-has-a-disk-factor-and-a-basis
+  - every-cost-class-has-a-disk-need-and-no-override-restates-it
   - entry-text-in-bodies-store-asks-for-the-factor-times-its-small-entry-table-and-search-index
-  - entry-text-in-rows-store-asks-for-the-factor-times-its-large-entry-table-and-search-index
-  - entry-table-estimate-reads-no-more-than-its-sample-bound
+  - entry-text-in-rows-store-asks-for-the-factor-times-its-database
+  - entry-table-estimate-reads-no-more-than-its-row-bound
+  - heavy-tail-in-entry-rows-of-a-bodies-store-is-counted-in-full
+  - entry-rows-rising-with-rowid-in-a-bodies-store-are-counted-in-full
+  - entry-rows-at-the-overflow-size-are-counted-on-the-right-side
+  - heavy-tail-in-a-rows-store-takes-the-whole-database
+  - entry-rows-rising-with-rowid-in-a-rows-store-take-the-whole-database
   - unmeasurable-search-index-falls-back-to-the-whole-database-with-a-notice

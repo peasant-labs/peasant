@@ -18,7 +18,7 @@ import "time"
 // text held in the entry rows (485,289,984-byte database):
 //
 //	PEASANT_SANDBOX_UPGRADE_DIR=/tmp/opencode/<dir> PEASANT_SANDBOX_UPGRADE_TEXT_MB=256 \
-//	  go test ./internal/store -run TestSandboxStoreUpgradeMeasure -v -timeout 0
+//	  go test -tags upgrade_measure ./internal/store -run TestSandboxStoreUpgradeMeasure -v -timeout 0
 //
 //	step 70   57ms      444,992 log bytes (0.0009 of the database)
 //	step 71    1ms       53,560           (0.0001)
@@ -28,28 +28,34 @@ import "time"
 //	step 75  1m43s  654,091,232 high-water (1.348), database grew by 165,154,816 (0.340)
 //	step 76  310ms            0
 //
-// Sandbox measurement of step 75 by layout, 2026-11-12, two synthetic
+// Sandbox measurement of step 75 by layout, 2026-11-12, store code at
+// revision fc8fb98c9 plus the entry table read in full: two synthetic
 // schema-74 stores with about 256 MiB of entry text each (65,500 entries,
-// exponential sizes with a heavy tail), the estimate's sample bound 2,048:
+// exponential sizes with a heavy tail), and a store whose text is in the
+// bodies and whose entry table holds 65,536 rows, the read bound (rows of
+// about 3,800 bytes, every hundredth a hundred times larger):
 //
 //	PEASANT_SANDBOX_UPGRADE_DIR=/tmp/opencode/<dir> PEASANT_SANDBOX_UPGRADE_TEXT_MB=256 \
-//	  go test ./internal/store -run TestSandboxStoreUpgradeDiskBasisMeasure -v -timeout 0
+//	  go test -tags upgrade_measure ./internal/store -run TestSandboxStoreUpgradeDiskBasisMeasure -v -timeout 0
 //
-//	                                   text in the entry rows   text in the bodies
-//	database                                  522,498,048           757,714,944
-//	entry table + indexes (dbstat)            321,654,784             2,744,320
-//	search indexes (dbstat)                   197,386,240           163,635,200
-//	basis estimate                            623,550,266           166,070,158
-//	estimate time (rows read)              7.3 ms (2,050)       12.0 ms (2,050)
-//	dbstat time, entry table + search         259 ms               535 ms
-//	step 75 log high-water                    719,393,232           169,035,392
-//	step 75 database growth                   194,281,472               602,112
-//	used (high-water + growth)                913,674,704           169,637,504
-//	used / dbstat basis                             1.760                 1.020
-//	used / database                                 1.749                 0.224
-//	plan asked for                    966,621,389 (1.06x used)  307,229,793 (1.81x used)
+//	                                text in the entry rows   text in the bodies   bodies, at the bound
+//	database                               522,498,048          757,714,944          988,119,040
+//	entry table + indexes (dbstat)         321,654,784            2,744,320          564,670,464
+//	search indexes (dbstat)                197,386,240          163,635,200          416,141,312
+//	basis the plan uses                    522,498,048          168,244,916          988,119,040
+//	  how                              the whole database    read in full         read in full, capped
+//	estimate time (entry rows read)       20 us (none)         4.8 ms (2,620)       74 ms (65,536)
+//	dbstat time, entry table + search        227 ms                96 ms               377 ms
+//	step 75 log high-water                 719,393,232          169,035,392        1,401,092,552
+//	step 75 database growth                194,281,472              602,112          411,136,000
+//	used (high-water + growth)             913,674,704          169,637,504        1,812,228,552
+//	used / dbstat basis                          1.760                1.020                1.848
+//	used / database                              1.749                0.224                1.834
+//	plan asked for                  966,621,389 (1.06x)  311,253,095 (1.83x)  1,828,020,224 (1.01x)
 //
-// The rows-layout estimate exceeds the database and is capped at it.
+// Every basis the plan measured was at or above dbstat's: 1.011 and 1.017
+// times. The bound store's measured basis, 998,016,761, exceeds its
+// database and is capped at it.
 const (
 	// StoreUpgradeEntryTableRebuildDiskFactor is for a step that copies the
 	// entry table and rebuilds the search indexes. Its basis is the entry
@@ -58,10 +64,12 @@ const (
 	// Measured on step 75: what the step used, the log's high-water mark plus
 	// the database's growth, was 1.760 times dbstat's size of that basis on
 	// the store with its text in the entry rows (1.828 on a 16 MiB store of
-	// the same layout) and 1.020 times on the store with its text in the
-	// bodies. 1.85 covers the largest. A store whose text is in the bodies
-	// asks for 1.85 times its search index and small entry table, not for
-	// 1.85 times its database: the 43 GB store measured on 2026-11-11, with
+	// the same layout), 1.020 times on the store with its text in the
+	// bodies, and 1.848 times on a store whose text is in the bodies and
+	// whose entry table of page-sized rows sits at the read bound. 1.85
+	// covers the largest, with little room on the last. A store whose text
+	// is in the bodies asks for 1.85 times its search index and entry table,
+	// not for 1.85 times its database: the 43 GB store measured on 2026-11-11, with
 	// a 39 MiB entry table and 16.4 GiB of text in the bodies, left a log of
 	// 4.31 GB, about the size of its search index.
 	StoreUpgradeEntryTableRebuildDiskFactor = 1.85
@@ -88,29 +96,25 @@ const (
 	// refused before the first step: 0.001 is one megabyte per gigabyte.
 	StoreUpgradeQuickStepDiskFactor = 0.001
 
-	// StoreUpgradeEstimateSampleRows bounds the rows the free-disk estimate
-	// reads from the entry table: the smallest and the largest rowid, then at
-	// most this many rows at evenly spaced rowids, each measured from its
-	// record header with octet_length, which loads no value and no overflow
-	// page. A table with no more rowids is read in full. Measured: 2,050
-	// rows read and 7 to 12 ms for the whole estimate on 522 MB and 758 MB
-	// stores, where dbstat took 259 and 535 ms to walk the same objects and
-	// walks every page, so its cost grows with the store (a 40 GB entry
-	// table would take tens of seconds). The cost of the sample does not.
-	StoreUpgradeEstimateSampleRows = 2048
+	// StoreUpgradeEstimateMaxEntryRows bounds the rows the free-disk estimate
+	// reads from the entry table of a store whose text is in the bodies. Each
+	// row is measured from its record header with octet_length, which loads
+	// no value and no overflow page, and every row is read, so the estimate
+	// counts a heavy tail in full and cannot come in low. A larger table, or
+	// a store whose text is in the entry rows, takes the whole database as
+	// its basis, which that table dominates. Measured: 74 ms for the whole
+	// basis on a store at the bound with rows of about a page each (the
+	// costliest read: one leaf page per row), 4.8 ms for 2,620 rows; the
+	// 43 GB store of 2026-11-11 keeps 34,010 entry rows. dbstat walks every
+	// page instead, so its cost grows with the text (377 ms at the bound,
+	// tens of seconds for a 40 GB entry table).
+	StoreUpgradeEstimateMaxEntryRows = 65536
 
 	// StoreUpgradeEstimateRowOverheadBytes is what one entry row costs beyond
 	// its leaf share and overflow pages: the record header, the rowid and
 	// its entries in the table's six indexes. Measured 236 to 362 bytes per
 	// row on synthetic stores of 256-, 1,024- and 4,096-byte entries.
 	StoreUpgradeEstimateRowOverheadBytes = 384
-
-	// StoreUpgradeEstimateSampleMargin multiplies a sampled table estimate,
-	// so a sample that misses the heavy tail of entry sizes still errs high.
-	// The sample's error on the 256 MiB store with heavy-tailed entries was
-	// within 10 percent; sampled estimates came out 1.28 to 1.48 times
-	// dbstat's size.
-	StoreUpgradeEstimateSampleMargin = 1.25
 
 	// StoreUpgradeTightDiskMultiple defines "tight": free space is known and
 	// below this multiple of the required bytes. A terminal upgrade asks

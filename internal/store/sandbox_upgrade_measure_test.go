@@ -1,3 +1,11 @@
+//go:build upgrade_measure
+
+// The measurements in this file build synthetic stores of hundreds of
+// megabytes and run for minutes. They prove nothing in CI and never run
+// there: the upgrade_measure build tag keeps them out of every gate, and
+// each refuses a directory outside /tmp/opencode. Run one by hand with
+// -tags upgrade_measure, as each test's comment shows.
+
 package store
 
 import (
@@ -24,7 +32,7 @@ import (
 //
 //	PEASANT_SANDBOX_UPGRADE_DIR=/tmp/opencode/<dir> \
 //	PEASANT_SANDBOX_UPGRADE_TEXT_MB=256 \
-//	go test ./internal/store -run TestSandboxStoreUpgradeMeasure -v -timeout 0
+//	go test -tags upgrade_measure ./internal/store -run TestSandboxStoreUpgradeMeasure -v -timeout 0
 func TestSandboxStoreUpgradeMeasure(t *testing.T) {
 	dir := os.Getenv("PEASANT_SANDBOX_UPGRADE_DIR")
 	if dir == "" {
@@ -130,16 +138,18 @@ VALUES(?, ?, 'claude-code', 'text', 'assistant', 0, ?)`,
 }
 
 // TestSandboxStoreUpgradeDiskBasisMeasure builds one synthetic schema-74
-// store per entry text layout, compares the free-disk estimate of the entry
-// table rebuild with dbstat's page count, times both, then upgrades the
-// store and logs what step 75 really used: the write-ahead log's high-water
-// mark plus the database's growth. It is the measurement behind the entry
-// table rebuild factor and the estimate's bounds. It never runs in the gate
-// and builds its stores under /tmp/opencode.
+// store per entry text layout, plus a store whose text is in the bodies and
+// whose entry table holds as many rows as the estimate reads (its worst
+// case), compares the free-disk estimate of the entry table rebuild with
+// dbstat's page count, times both, then upgrades the store and logs what
+// step 75 really used: the write-ahead log's high-water mark plus the
+// database's growth. It is the measurement behind the entry table rebuild
+// factor and the estimate's bounds. It builds its stores under
+// /tmp/opencode.
 //
 //	PEASANT_SANDBOX_UPGRADE_DIR=/tmp/opencode/<dir> \
 //	PEASANT_SANDBOX_UPGRADE_TEXT_MB=256 \
-//	go test ./internal/store -run TestSandboxStoreUpgradeDiskBasisMeasure -v -timeout 0
+//	go test -tags upgrade_measure ./internal/store -run TestSandboxStoreUpgradeDiskBasisMeasure -v -timeout 0
 func TestSandboxStoreUpgradeDiskBasisMeasure(t *testing.T) {
 	dir := os.Getenv("PEASANT_SANDBOX_UPGRADE_DIR")
 	if dir == "" {
@@ -168,16 +178,24 @@ func TestSandboxStoreUpgradeDiskBasisMeasure(t *testing.T) {
 		}
 		return info.Size()
 	}
-	for _, layout := range allEntryTextLayouts {
-		t.Run(string(layout), func(t *testing.T) {
-			path := filepath.Join(dir, string(layout)+".db")
+	// The bound store: every entry row the estimate may read, each about a
+	// leaf page, every hundredth a hundred times larger.
+	const boundRowsPerSession, boundRowBytes = 64, 3800
+	boundSessions := int(defaults.StoreUpgradeEstimateMaxEntryRows) / boundRowsPerSession
+	specs := []struct {
+		name string
+		spec layoutStoreSpec
+	}{
+		{string(entryTextInRows), layoutStoreSpec{Layout: entryTextInRows, Sessions: sessions, TextEntriesPerSession: entriesPerSession, MeanEntryBytes: meanEntryBytes}},
+		{string(entryTextInBodies), layoutStoreSpec{Layout: entryTextInBodies, Sessions: sessions, TextEntriesPerSession: entriesPerSession, MeanEntryBytes: meanEntryBytes, RowEntriesPerSession: 2, ContentBytesPerSession: entriesPerSession * meanEntryBytes}},
+		{"entry-text-in-bodies-at-the-row-bound", layoutStoreSpec{Layout: entryTextInBodies, Sessions: boundSessions, TextEntriesPerSession: 1, MeanEntryBytes: meanEntryBytes, EntryShape: entrySizeOnePercentHundredfold, RowEntriesPerSession: boundRowsPerSession, RowEntryBytes: boundRowBytes}},
+	}
+	for _, sized := range specs {
+		layout, spec := sized.name, sized.spec
+		t.Run(layout, func(t *testing.T) {
+			path := filepath.Join(dir, layout+".db")
 			for _, stale := range []string{path, path + "-wal", path + "-shm"} {
 				_ = os.Remove(stale)
-			}
-			spec := layoutStoreSpec{Layout: layout, Sessions: sessions, TextEntriesPerSession: entriesPerSession, MeanEntryBytes: meanEntryBytes}
-			if layout == entryTextInBodies {
-				spec.RowEntriesPerSession = 2
-				spec.ContentBytesPerSession = entriesPerSession * meanEntryBytes
 			}
 			totals := buildLayoutStore(t, path, spec)
 			storeBefore := sizeOf(path)
@@ -225,11 +243,14 @@ func TestSandboxStoreUpgradeDiskBasisMeasure(t *testing.T) {
 			})
 			t.Logf("entry table in full: %d rows, %d octets from the record headers in %s; %d text bytes loaded in %s",
 				fullRows, fullOctets, fullTime.Round(time.Millisecond), loaded, loadedTime.Round(time.Millisecond))
-			entries, err := estimateTableBytesOnConn(conn, entryTableName, defaults.StoreUpgradeEstimateSampleRows)
-			if err != nil {
-				t.Fatal(err)
-			}
+			var entries tableBytesEstimate
+			entriesEstimateTime := timed(func() {
+				if entries, err = measureTableBytesOnConn(conn, entryTableName, defaults.StoreUpgradeEstimateMaxEntryRows); err != nil {
+					t.Fatal(err)
+				}
+			})
 			var searchEstimate, basis int64
+			var measured bool
 			for _, index := range entryRebuildSearchIndexes {
 				size, err := fts5IndexBytesOnConn(conn, index)
 				if err != nil {
@@ -238,7 +259,7 @@ func TestSandboxStoreUpgradeDiskBasisMeasure(t *testing.T) {
 				searchEstimate += size
 			}
 			estimateTime := timed(func() {
-				if basis, err = estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex); err != nil {
+				if basis, measured, err = estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex, defaults.StoreUpgradeEstimateMaxEntryRows); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -247,11 +268,14 @@ func TestSandboxStoreUpgradeDiskBasisMeasure(t *testing.T) {
 			}
 			plan := mustPlan(t, path)
 			t.Logf("%s: %d sessions; entry rows %d (text %d), body rows %d (text %d), content %d; database %d bytes",
-				layout, sessions, totals.EntryRows, totals.EntryText, totals.BodyRows, totals.BodyText, totals.ContentBytes, storeBefore)
+				layout, spec.Sessions, totals.EntryRows, totals.EntryText, totals.BodyRows, totals.BodyText, totals.ContentBytes, storeBefore)
 			t.Logf("dbstat: entry table and indexes %d bytes in %s; search indexes %d in %s; bodies %d in %s",
 				entriesTruth, entriesTime.Round(time.Millisecond), searchTruth, searchTime.Round(time.Millisecond), bodiesTruth, bodiesTime.Round(time.Millisecond))
-			t.Logf("estimate: entry table %d bytes (%d rows read, exact %v); search indexes %d bytes; basis %d, measured in %s",
-				entries.StoredBytes, entries.RowsRead, entries.Exact, searchEstimate, basis, estimateTime.Round(time.Microsecond))
+			if !measured {
+				basis = storeBefore
+			}
+			t.Logf("estimate: entry table read in full %d bytes (%d rows read, measured %v) in %s; search indexes %d bytes; basis %d (measured %v, else the database), in %s",
+				entries.StoredBytes, entries.RowsRead, entries.Measured, entriesEstimateTime.Round(time.Microsecond), searchEstimate, basis, measured, estimateTime.Round(time.Microsecond))
 			t.Logf("plan asks for %d bytes free (%.3f of the database, %.3f of the basis estimate, %.3f of the dbstat entry table and search indexes)",
 				plan.RequiredFreeBytes, float64(plan.RequiredFreeBytes)/float64(storeBefore), float64(plan.RequiredFreeBytes)/float64(basis), float64(plan.RequiredFreeBytes)/float64(entriesTruth+searchTruth))
 

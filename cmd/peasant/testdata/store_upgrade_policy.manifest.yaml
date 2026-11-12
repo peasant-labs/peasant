@@ -51,6 +51,7 @@ requiredNames:
   - terminal-long-step-empty-answer-declines
   - terminal-tight-disk-asks-first
   - piped-tight-disk-quick-runs
+  - hook-tight-disk-quick-runs-and-says-so
   - terminal-affected-proceeds
   - terminal-clean-proceeds
   - nonterminal-affected-refuses
@@ -96,3 +97,4 @@ requiredNames:
   - kickstart-declined-upgrade-exits-with-nothing-changed
   - web-start-parent-and-child-share-open-options
   - terminal-check-is-one-stubbable-function
+  - only-the-command-that-declares-the-hook-flag-is-a-hook

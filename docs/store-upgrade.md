@@ -27,6 +27,10 @@ store. The helper classes the entry point and applies this policy.
 | a command at a terminal | names the steps and runs them | shows the plan, the store size and the free disk, and asks first |
 | the same command with no terminal (a pipe, a script, CI) | runs, one line per step on standard error | refuses, changes nothing, exits 1 |
 | a generated git hook (`village push --non-interactive`) | runs | skips with the nothing-attempted status; the hook script exits 0, so git is not blocked |
+
+Hook mode belongs to `village push` alone: that command declares
+`--non-interactive` as the flag generated hooks pass. Another command with a
+flag of that name is a terminal or a piped command like any other.
 | `peasant web start` | the parent upgrades before it starts the server | the same, and asks first at a terminal |
 | a server process (the web server, an import started from the web) | never upgrades; refuses a behind store | the same |
 | `peasant migrate` | the explicit upgrade | the explicit upgrade; `--confirm` skips the prompt |
@@ -35,27 +39,34 @@ A server refuses to start on a behind store. Its message says what the store
 needs and names `peasant migrate --schema-only`, to run in a terminal.
 
 A terminal also asks first when free disk is tight: known, and below twice
-what the plan asks for. Below what the plan asks for, the upgrade refuses
+what the plan asks for. Every mode that runs the upgrade prints the plan
+first, so a pipe and a hook also print the line `free disk is tight: less
+than twice what the upgrade asks for`. Below what the plan asks for, the upgrade refuses
 before any step runs, and the message names the bytes needed and the bytes
 free. Unknown free disk gives a warning before a long step and the upgrade
 continues.
 
 ## Free disk
 
-Each step in the catalog carries a disk factor and a basis: what the factor
-multiplies. The basis is the whole database, or the tables the step rewrites,
-measured on the store. A step's need is its factor times its basis. The plan
-asks for the largest need among the steps planned for that store. Each step
-commits before the next starts, so the log space of one step is reused by the
-next.
+Each step has a disk factor and a basis: what the factor multiplies. The
+basis is the whole database, or the tables the step rewrites, measured on
+the store. The cost class gives both: a quick step, a row-scaled step and a
+text-scaled step that copies no table each multiply the whole database by
+their factor. Only the two steps that copy the entry table (11 and 75) name
+their own factor and basis in the catalog. The search trigger repair (76)
+takes the need of the cost the plan resolves for the store.
+
+A step's need is its factor times its basis. The plan asks for the largest
+need among the steps planned for that store. Each step commits before the
+next starts, so the log space of one step is reused by the next.
 
 | factor | value | steps | basis | evidence |
 |---|---|---|---|---|
-| entry table rebuild | 1.85 | 75 | the entry table with its indexes, and the two search indexes the step rebuilds | measured: the step used 1.760 times the basis with the text in the entry rows, 1.020 times with the text in the bodies |
-| entry table rebuild | 1.85 | 11 | the entry table with its indexes (no search index exists yet) | the same factor |
-| search rebuild | 0.39 | 76 on a store with stale search results (and 35) | the database | derived from the search index build estimate; not measured |
-| row-scaled | 0.01 | 70 to 74 and other row rewrites | the database | measured: at most 0.0018 for one step, 0.0032 for five |
-| quick | 0.001 | everything else | the database | measured: the quick step wrote nothing |
+| entry table rebuild | 1.85 | 75 (override) | the entry table with its indexes, and the two search indexes the step rebuilds, on a store whose text is in the bodies; the whole database on a store whose text is in the entry rows | measured: the step used 1.760 times the entry table and search indexes with the text in the entry rows, 1.020 times with the text in the bodies |
+| entry table rebuild | 1.85 | 11 (override) | the entry table with its indexes; a store that old keeps its text in the entry rows, so the whole database | the same factor |
+| search rebuild | 0.39 | every `scales_with_text` step that copies no table: 35, and 76 on a store with stale search results | the database | derived from the search index build estimate; not measured |
+| row-scaled | 0.01 | every `scales_with_rows` step but 11 | the database | measured on 70 to 74: at most 0.0018 for one step, 0.0032 for five |
+| quick | 0.001 | every `quick` step | the database | measured: the quick step wrote nothing |
 
 The values and the measurements are in `internal/defaults/store_upgrade.go`.
 
@@ -69,55 +80,81 @@ a small entry table, not a copy of the store.
 
 ### How the plan measures a basis
 
-The plan only reads, and its cost does not grow with the store:
+The plan only reads, and what it reads is bounded. A basis it measures can
+never come in low: it reads every row it counts, and where it cannot, it
+takes the whole database.
 
-- **The entry table.** It reads the smallest and the largest rowid, then at
-  most 2,048 rows at evenly spaced rowids. Each row is measured with
-  `octet_length`, which SQLite answers from the record header without loading
-  the value or its overflow pages. A row's size follows SQLite's page layout:
-  its share of a leaf page, its whole overflow pages, and a fixed 384 bytes for
-  the record header and its index entries. The rowid span times the mean
-  sampled row, times a margin of 1.25, is the estimate. A table with no more
-  than 2,048 rowids is read in full.
+- **Where the text is.** The plan first reads one row of
+  `session_entry_bodies`. That table holds rows only once a session's text
+  has moved into the bodies (index format 2). With no bodies, the entry table
+  holds the store's text and dominates the database, so the basis is the
+  whole database and nothing more is read.
+- **The entry table, when the text is in the bodies.** The entry table then
+  holds the rows of sessions that were never converted. Their size has no
+  bound (tool output there has no length limit), so the plan reads every
+  row, at most 65,536, each measured with `octet_length`, which SQLite
+  answers from the record header without loading the value or its overflow
+  pages. A row's size follows SQLite's page layout: its share of a leaf page,
+  its whole overflow pages, and a fixed 384 bytes for the record header and
+  its index entries. A table with more rows stops the read and takes the
+  whole database.
 - **Each search index.** FTS5 keeps two records current in the index's own
-  `_data` table: the structure record lists every segment's leaf pages, and the
-  averages record starts with the document count. Leaves times their pages,
-  plus one small row per document, is the index's size, read from two rows.
+  `_data` table: the structure record lists every segment's leaf pages, and
+  the averages record starts with the document count. Leaves times their
+  pages, plus 64 bytes per leaf for its share of the index's interior pages
+  and its `_idx` row, plus one small row per document, is the index's size,
+  read from two rows.
 
-The estimate errs high: the rowid span counts deleted rows, the margin covers a
-sample that misses the largest entries, and the search index estimate came out
-a few percent above `dbstat`. A basis never exceeds the database size, so the
-plan never asks for more than the factor times the whole database. A store
-whose tables cannot be measured (a search index record that does not decode)
-gets the factor times the whole database and one warning line saying why.
+The estimate errs high: each row's leaf share assumes rows of its own size,
+its record header is counted at three bytes per column, and the search index
+estimate came out about one percent above `dbstat`. It does
+not count deleted rows or the free space they leave, because step 75 copies
+the live rows into a fresh table. A basis never exceeds the database size, so
+the plan never asks for more than the factor times the whole database. A
+store whose tables cannot be measured (a search index record that does not
+decode) gets the factor times the whole database and one warning line saying
+why.
 
 What was considered, in order:
 
-1. **A stored conversion fact.** `sessions.index_format_version` records, per
-   session, whether its entries were converted into the bodies, and
-   `session_search_state` records whether the search index was consolidated.
-   They say which layout a store has, not how large its tables are, so the plan
-   does not use them.
-2. **`dbstat`.** The bundled SQLite has it, and the tests use it as the ground
-   truth. It walks every page of a table, overflow pages included: 259 ms for
-   the entry table and search indexes of a 522 MB store, so tens of seconds for
-   a 40 GB entry table. Not bounded.
-3. **Sampling.** Bounded and read-only; chosen for the entry table. The search
-   indexes are not sampled: FTS5's own records give their size in two rows.
+1. **A stored layout fact.** `sessions.index_format_version` records, per
+   session, whether its text moved into the bodies; a row in
+   `session_entry_bodies` says that at least one did, in one read. The layout
+   says where the text mass is, which decides whether reading the entry
+   table is worth it. It does not bound an entry row: a session that was
+   never converted keeps its text in its entry rows in either layout. So the
+   layout cannot make a sample safe.
+2. **Sampling.** Bounded, but a few rows of hundreds of megabytes can fall
+   between the sampled rows, and then the estimate comes in low. Dropped.
+3. **`dbstat`.** The bundled SQLite has it, and the tests use it as the
+   ground truth. It walks every page of a table, overflow pages included:
+   259 ms for the entry table and search indexes of a 522 MB store, so tens
+   of seconds for a 40 GB entry table. Not bounded.
+4. **Reading every row's header, up to a bound.** Chosen. The cost is one
+   record header per row, never the text, and the bound caps it.
 
 ### Measured
 
-Two synthetic schema-74 stores, about 256 MiB of entry text each (2026-11-12,
+Two synthetic schema-74 stores, about 256 MiB of entry text each, and a
+store whose text is in the bodies and whose entry table holds 65,536 rows of
+about a page each, the read bound (2026-11-12,
 `TestSandboxStoreUpgradeDiskBasisMeasure`):
 
-| | text in the entry rows | text in the bodies |
-|---|---|---|
-| database | 522 MB | 758 MB |
-| entry table and search indexes (`dbstat`) | 519 MB | 166 MB |
-| estimated basis | 624 MB, capped at 522 MB | 166 MB |
-| estimate time, rows read | 7.3 ms, 2,050 | 12.0 ms, 2,050 |
-| step 75: log high-water plus database growth | 914 MB | 170 MB |
-| the plan asked for | 967 MB (1.06 times what was used) | 307 MB (1.81 times) |
+| | text in the entry rows | text in the bodies | bodies, at the bound |
+|---|---|---|---|
+| database | 522 MB | 758 MB | 988 MB |
+| entry table and search indexes (`dbstat`) | 519 MB | 166 MB | 981 MB |
+| basis the plan uses | 522 MB, the whole database | 168 MB, read in full | 998 MB read, capped at 988 MB |
+| estimate time, entry rows read | 20 µs, none | 4.8 ms, 2,620 | 74 ms, 65,536 |
+| `dbstat` time over the same objects | 227 ms | 96 ms | 377 ms |
+| step 75: log high-water plus database growth | 914 MB | 170 MB | 1,812 MB |
+| the plan asked for | 967 MB (1.06 times what was used) | 311 MB (1.83 times) | 1,828 MB (1.01 times) |
+
+Every basis the plan measured was at or above `dbstat`'s. The test fixtures
+add entry rows with a heavy tail (every hundredth row a hundred times the
+mean), rows rising in size with their rowid, and rows at the size where
+SQLite moves a payload to an overflow page, in both layouts, and assert the
+same.
 
 The incident store (43 GB, a 39 MiB entry table, 16.4 GiB of text in the
 bodies) left a log of 4.31 GB in step 75. The old rule asked it for 1.69 times
@@ -151,10 +188,13 @@ was stopped.
 
 ## The step catalog
 
-`internal/store/upgrade_catalog.go` gives every migration a title, a disk
-factor, a disk basis and a cost class: `quick`, `scales_with_rows`, or `scales_with_text`. Every cost except
-`quick` is a long step. A test fails when a migration has no entry or an entry has no disk factor or no disk basis, and
-its message names the file and the fields to add.
+`internal/store/upgrade_catalog.go` gives every migration a title and a cost
+class: `quick`, `scales_with_rows`, or `scales_with_text`, in version order.
+Every cost except `quick` is a long step. The cost class gives the step's
+disk factor and basis; a step that copies a table overrides them with
+`disk:`. A test fails when a migration has no entry, when a cost class gives
+no disk need, or when an override restates the need its cost already gives,
+and its message names the file and the fields to add or remove.
 `testdata/upgrade_step_catalog.manifest.yaml` lists the versions by name. A new
 migration adds both.
 
@@ -182,11 +222,17 @@ time and log growth, and one whenever its own count moves.
 
 ## Measuring
 
+The measurements sit behind the `upgrade_measure` build tag, so no gate
+builds or runs them; they prove nothing in CI. Run one with
+`go test -tags upgrade_measure ./internal/store -run <name> -v -timeout 0`
+and `PEASANT_SANDBOX_UPGRADE_DIR` set to a directory under `/tmp/opencode`.
+
 `TestSandboxStoreUpgradeMeasure` in `internal/store` builds a synthetic
 schema-69 store of a chosen text size under `/tmp/opencode`, upgrades it, and
 logs the duration and log growth of each step.
 `TestSandboxStoreUpgradeDiskBasisMeasure` builds one schema-74 store per entry
-text layout, compares the plan's basis estimate and its time with `dbstat`, and
+text layout, and one whose entry table holds as many rows as the plan reads,
+compares the plan's basis estimate and its time with `dbstat`, and
 logs what step 75 used: the log's high-water mark plus the database's growth.
 Neither runs in the gate. The free-disk factors in
 `internal/defaults/store_upgrade.go` record the last runs.

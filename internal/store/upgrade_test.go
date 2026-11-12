@@ -6,9 +6,11 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -48,10 +50,17 @@ type storeUpgradeCase struct {
 	Sessions       int     `yaml:"sessions,omitempty"`
 	TextEntries    int     `yaml:"textEntries,omitempty"`
 	MeanEntryBytes int     `yaml:"meanEntryBytes,omitempty"`
+	EntryShape     string  `yaml:"entryShape,omitempty"`
 	RowEntries     int     `yaml:"rowEntries,omitempty"`
+	RowEntryBytes  int     `yaml:"rowEntryBytes,omitempty"`
 	ContentBytes   int     `yaml:"contentBytes,omitempty"`
 	WantBasisMin   float64 `yaml:"wantBasisMin,omitempty"`
 	WantBasisMax   float64 `yaml:"wantBasisMax,omitempty"`
+	// MaxEntryRows replaces the entry table's read bound of an estimate
+	// case; zero keeps the production bound. WantMeasured says whether the
+	// estimate measures the tables (true) or takes the whole database.
+	MaxEntryRows int64 `yaml:"maxEntryRows,omitempty"`
+	WantMeasured bool  `yaml:"wantMeasured,omitempty"`
 }
 
 // LoadStoreUpgradeFixtures decodes the store upgrade cases and checks them
@@ -151,6 +160,7 @@ func TestStoreUpgrade(t *testing.T) {
 		"disk-need-largest":        runUpgradeDiskNeedLargestCase,
 		"disk-layout-need":         runUpgradeDiskLayoutNeedCase,
 		"disk-estimate-bound":      runUpgradeDiskEstimateBoundCase,
+		"disk-estimate-never-low":  runUpgradeDiskEstimateNeverLowCase,
 		"disk-basis-fallback":      runUpgradeDiskBasisFallbackCase,
 		"wal-truncated":            runUpgradeWALTruncatedCase,
 		"run-lock":                 runUpgradeRunLockCase,
@@ -656,14 +666,11 @@ func runUpgradeCatalogCase(t *testing.T, _ storeUpgradeCase) {
 			t.Errorf("migration %d has no upgrade step catalog entry: %s", version, missingCatalogEntryFix(version))
 			continue
 		}
-		if entry.diskFactor <= 0 {
-			t.Errorf("the catalog entry for migration %d has no disk factor; set `diskFactor:` on entry %d of upgradeStepCatalog in internal/store/upgrade_catalog.go to one of the named factors in internal/defaults/store_upgrade.go (StoreUpgradeQuickStepDiskFactor, StoreUpgradeRowsStepDiskFactor, StoreUpgradeSearchRebuildDiskFactor, StoreUpgradeEntryTableRebuildDiskFactor)", version, version)
-		}
-		if _, err := newUpgradeDiskBasis(string(entry.diskBasis)); err != nil {
-			t.Errorf("the catalog entry for migration %d has no valid disk basis (%v); set `diskBasis:` on entry %d of upgradeStepCatalog in internal/store/upgrade_catalog.go to upgradeDiskBasisDatabase, or to the basis naming the tables the step rewrites (upgradeDiskBasisEntryTable, upgradeDiskBasisEntryTableAndSearchIndex)", version, err, version)
-		}
-		if entry.cost.Long() && entry.diskFactor > 0 && entry.diskFactor <= defaults.StoreUpgradeQuickStepDiskFactor {
-			t.Errorf("the catalog entry for migration %d is long (%s) but carries the quick disk factor; a long step rewrites rows or text and needs the rows factor or more", version, entry.cost)
+		if entry.disk != (upgradeDiskNeed{}) {
+			checkUpgradeDiskNeed(t, fmt.Sprintf("the disk override of catalog entry %d", version), entry.disk, entry.cost)
+			if entry.disk == upgradeCostDiskNeeds[entry.cost] {
+				t.Errorf("catalog entry %d overrides its disk need with %+v, which its cost %s already implies; remove `disk:` from entry %d of upgradeStepCatalog in internal/store/upgrade_catalog.go: an override is only for a step that copies a table", version, entry.disk, entry.cost, version)
+			}
 		}
 		if entry.title == "" || entry.title != strings.ToLower(entry.title) || strings.HasSuffix(entry.title, ".") {
 			t.Errorf("catalog title for migration %d = %q, want a lowercase reader-facing phrase with no final period", version, entry.title)
@@ -683,10 +690,40 @@ func runUpgradeCatalogCase(t *testing.T, _ storeUpgradeCase) {
 			t.Errorf("upgradeStepCatalog has an entry for version %d, which is not a migration in the chain", version)
 		}
 	}
+	for _, cost := range AllUpgradeCosts {
+		need, ok := upgradeCostDiskNeeds[cost]
+		if !ok {
+			t.Errorf("the cost %s implies no disk need; add it to upgradeCostDiskNeeds in internal/store/upgrade_catalog.go with one of the named factors in internal/defaults/store_upgrade.go", cost)
+			continue
+		}
+		checkUpgradeDiskNeed(t, fmt.Sprintf("the disk need of cost %s", cost), need, cost)
+	}
+	versions := slices.Sorted(maps.Keys(upgradeStepCatalog))
+	for i, version := range versions {
+		if version != i+1 {
+			t.Errorf("upgradeStepCatalog has version %d where version %d belongs; every migration has an entry", version, i+1)
+			break
+		}
+	}
 	for version := range upgradeDataFills {
 		if version < 1 || version > len(dbSchema.Migrations) {
 			t.Errorf("upgradeDataFills registers a fill for version %d, which is not a migration in the chain", version)
 		}
+	}
+}
+
+// checkUpgradeDiskNeed fails a need with no factor, a basis outside the
+// closed set, or the quick factor on a long cost.
+func checkUpgradeDiskNeed(t *testing.T, what string, need upgradeDiskNeed, cost UpgradeCost) {
+	t.Helper()
+	if need.factor <= 0 {
+		t.Errorf("%s has no disk factor; use one of the named factors in internal/defaults/store_upgrade.go (StoreUpgradeQuickStepDiskFactor, StoreUpgradeRowsStepDiskFactor, StoreUpgradeSearchRebuildDiskFactor, StoreUpgradeEntryTableRebuildDiskFactor)", what)
+	}
+	if _, err := newUpgradeDiskBasis(string(need.basis)); err != nil {
+		t.Errorf("%s has no valid disk basis (%v); use upgradeDiskBasisDatabase, or the basis naming the tables the step rewrites (upgradeDiskBasisEntryTable, upgradeDiskBasisEntryTableAndSearchIndex)", what, err)
+	}
+	if cost.Long() && need.factor > 0 && need.factor <= defaults.StoreUpgradeQuickStepDiskFactor {
+		t.Errorf("%s is for a long cost (%s) but carries the quick disk factor; a long step rewrites rows or text and needs the rows factor or more", what, cost)
 	}
 }
 
@@ -966,12 +1003,12 @@ func runUpgradeDiskNeedLargestCase(t *testing.T, c storeUpgradeCase) {
 	defer conn.Close()
 	var largest, sum int64
 	for _, step := range plan.Steps {
-		entry := upgradeStepCatalog[step.Version]
-		size, notice := diskBasisBytes(conn, entry.diskBasis, plan.StoreBytes)
+		disk := upgradeStepCatalog[step.Version].diskNeedFor(step.Cost)
+		size, notice := diskBasisBytes(conn, disk.basis, plan.StoreBytes)
 		if notice != "" {
-			t.Fatalf("basis %s of step %d: %s", entry.diskBasis, step.Version, notice)
+			t.Fatalf("basis %s of step %d: %s", disk.basis, step.Version, notice)
 		}
-		need := int64(math.Ceil(float64(size) * entry.diskFactor))
+		need := int64(math.Ceil(float64(size) * disk.factor))
 		sum += need
 		largest = max(largest, need)
 	}
@@ -990,7 +1027,11 @@ func layoutSpecOf(t *testing.T, c storeUpgradeCase) layoutStoreSpec {
 	if err != nil {
 		t.Fatalf("store_upgrade.yaml case %q: %v", c.Name, err)
 	}
-	return layoutStoreSpec{Layout: layout, Sessions: c.Sessions, TextEntriesPerSession: c.TextEntries, MeanEntryBytes: c.MeanEntryBytes, RowEntriesPerSession: c.RowEntries, ContentBytesPerSession: c.ContentBytes}
+	shape, err := newEntrySizeShape(c.EntryShape)
+	if err != nil {
+		t.Fatalf("store_upgrade.yaml case %q: %v", c.Name, err)
+	}
+	return layoutStoreSpec{Layout: layout, Sessions: c.Sessions, TextEntriesPerSession: c.TextEntries, MeanEntryBytes: c.MeanEntryBytes, EntryShape: shape, RowEntriesPerSession: c.RowEntries, RowEntryBytes: c.RowEntryBytes, ContentBytesPerSession: c.ContentBytes}
 }
 
 // entryRebuildTruthOnConn is dbstat's page count of what schema 75
@@ -1037,7 +1078,7 @@ func runUpgradeDiskLayoutNeedCase(t *testing.T, c storeUpgradeCase) {
 	if plan.From != 74 || plan.StoreBytes <= 0 {
 		t.Fatalf("plan = %+v, want steps from schema 74 and a known database size", plan)
 	}
-	factor := upgradeStepCatalog[75].diskFactor
+	factor := upgradeStepCatalog[75].disk.factor
 	truth := float64(entriesTruth+searchTruth) * factor
 	basisShare := float64(plan.RequiredFreeBytes) / truth
 	dbShare := float64(plan.RequiredFreeBytes) / float64(plan.StoreBytes)
@@ -1051,41 +1092,84 @@ func runUpgradeDiskLayoutNeedCase(t *testing.T, c storeUpgradeCase) {
 	}
 }
 
+// runUpgradeDiskEstimateBoundCase pins the read bound: an entry table with
+// more rows than the bound stops the read one row past it and is not
+// measured, so the plan asks for the factor times the whole database; the
+// same table under a bound above its size is read in full.
 func runUpgradeDiskEstimateBoundCase(t *testing.T, c storeUpgradeCase) {
 	path := filepath.Join(t.TempDir(), c.Layout+".db")
 	totals := buildLayoutStore(t, path, layoutSpecOf(t, c))
-	bound := int64(defaults.StoreUpgradeEstimateSampleRows)
-	if totals.EntryRows <= 2*bound {
-		t.Fatalf("the case's entry table has %d rows; it needs more than twice the sample bound %d", totals.EntryRows, bound)
+	bound := c.MaxEntryRows
+	if bound <= 0 || totals.EntryRows <= bound {
+		t.Fatalf("the case's entry table has %d rows; it needs a bound (maxEntryRows) below that", totals.EntryRows)
 	}
 	conn, err := openReadOnlyNoSidecars(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	est, err := estimateTableBytesOnConn(conn, entryTableName, bound)
+	est, err := measureTableBytesOnConn(conn, entryTableName, bound)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if est.Exact || est.RowsRead > bound+2 {
-		t.Errorf("the estimate of a %d-row table read %d rows (exact %v); want a sample of at most %d rows plus the two rowid bounds", totals.EntryRows, est.RowsRead, est.Exact, bound)
+	if est.Measured || est.StoredBytes != 0 || est.RowsRead != bound+1 {
+		t.Errorf("the measure of a %d-row table under a bound of %d = %+v; want it stopped one row past the bound and not measured", totals.EntryRows, bound, est)
 	}
-	if est.Rows < totals.EntryRows {
-		t.Errorf("the estimate counts %d rows for a table of %d; the rowid span never counts fewer", est.Rows, totals.EntryRows)
+	if _, measured, err := estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex, bound); err != nil || measured {
+		t.Errorf("the basis estimate under a bound of %d: measured %v, err %v; want the whole database", bound, measured, err)
+	}
+	full, err := measureTableBytesOnConn(conn, entryTableName, totals.EntryRows)
+	if err != nil {
+		t.Fatal(err)
 	}
 	truth := dbstatBytesOnConn(t, conn, `tbl_name = 'session_entries'`)
-	share := float64(est.StoredBytes) / float64(truth)
-	if share < c.WantBasisMin || share > c.WantBasisMax {
-		t.Errorf("the sampled estimate is %d bytes, %.3f times dbstat's %d; want between %.2f and %.2f: it errs high, never low", est.StoredBytes, share, truth, c.WantBasisMin, c.WantBasisMax)
+	if !full.Measured || full.RowsRead != totals.EntryRows || full.StoredBytes < truth {
+		t.Errorf("the measure under a bound of %d rows = %+v; want all %d rows read and at least dbstat's %d bytes", totals.EntryRows, full, totals.EntryRows, truth)
 	}
+}
 
-	// The same table read under a bound above its size is read in full.
-	full, err := estimateTableBytesOnConn(conn, entryTableName, totals.EntryRows)
+// runUpgradeDiskEstimateNeverLowCase builds a store whose entry sizes have
+// the case's shape and checks that the basis the plan uses is never below
+// dbstat's page count of what step 75 rewrites, and that the plan asks for
+// at least the factor times that count.
+func runUpgradeDiskEstimateNeverLowCase(t *testing.T, c storeUpgradeCase) {
+	path := filepath.Join(t.TempDir(), c.Layout+".db")
+	totals := buildLayoutStore(t, path, layoutSpecOf(t, c))
+	conn, err := openReadOnlyNoSidecars(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !full.Exact || full.Rows != totals.EntryRows || full.RowsRead != totals.EntryRows+2 {
-		t.Errorf("the estimate under a bound of %d rows = %+v; want an exact read of all %d rows", totals.EntryRows, full, totals.EntryRows)
+	entriesTruth, searchTruth := entryRebuildTruthOnConn(t, conn)
+	truth := entriesTruth + searchTruth
+	started := time.Now()
+	size, measured, err := estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex, defaults.StoreUpgradeEstimateMaxEntryRows)
+	elapsed := time.Since(started)
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%s, %s: %d entry rows (text %d); dbstat %d; estimate %d (measured %v) in %s", c.Layout, c.EntryShape, totals.EntryRows, totals.EntryText, truth, size, measured, elapsed)
+	if measured != c.WantMeasured {
+		t.Fatalf("the estimate measured the tables = %v, want %v: a store whose text is in the entry rows takes the whole database, one whose text is in the bodies is read in full", measured, c.WantMeasured)
+	}
+	if measured && (size < truth || float64(size) > c.WantBasisMax*float64(truth)) {
+		t.Errorf("the estimate is %d bytes, %.3f times dbstat's %d; want at least dbstat and at most %.2f times it", size, float64(size)/float64(truth), truth, c.WantBasisMax)
+	}
+	plan, notices, err := planUpgrade(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notices) != 0 {
+		t.Errorf("the plan of a measurable store raised notices %q", notices)
+	}
+	factor := upgradeStepCatalog[75].disk.factor
+	if floor := int64(math.Ceil(float64(truth) * factor)); plan.RequiredFreeBytes < floor {
+		t.Errorf("the plan asks for %d bytes, below the factor %.2f times dbstat's %d bytes of the entry table and search indexes (%d)", plan.RequiredFreeBytes, factor, truth, floor)
+	}
+	if want := int64(math.Ceil(float64(plan.StoreBytes) * factor)); !measured && plan.RequiredFreeBytes != want {
+		t.Errorf("the plan asks for %d bytes, want %d: the factor times the whole %d-byte database", plan.RequiredFreeBytes, want, plan.StoreBytes)
 	}
 }
 
@@ -1107,7 +1191,7 @@ func runUpgradeDiskBasisFallbackCase(t *testing.T, c storeUpgradeCase) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := int64(math.Ceil(float64(plan.StoreBytes) * upgradeStepCatalog[75].diskFactor))
+	want := int64(math.Ceil(float64(plan.StoreBytes) * upgradeStepCatalog[75].disk.factor))
 	if plan.RequiredFreeBytes != want {
 		t.Errorf("the plan asks for %d bytes, want %d: the factor times the whole %d-byte database", plan.RequiredFreeBytes, want, plan.StoreBytes)
 	}

@@ -41,11 +41,10 @@ func seedClosedStoreAt(t *testing.T, path string) string {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("prepare the data directory for a dry-run fixture: %v", err)
 	}
-	// The fixture is a copy of the pre-migrated golden database, so the version
-	// check the command runs finds it at head and applies no migration script.
-	// The command itself cannot skip migrations — no such option is plumbed
-	// through the CLI — so the saving here is zero pending migrations on a
-	// prepared path, not a skipped step on the production path. The golden is
+	// The fixture is a copy of the pre-migrated golden database, so the store
+	// upgrade check the command runs finds it at head and plans no step. The
+	// saving here is zero pending migrations on a prepared path, not a
+	// skipped step on the production path. The golden is
 	// checkpointed by construction, so the sidecar assertion below keeps
 	// holding exactly as it did for a freshly migrated database.
 	storetest.CopyGoldenTo(t, path)

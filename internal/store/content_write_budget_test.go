@@ -504,8 +504,8 @@ func openWriteBudgetHarmonized(t *testing.T, dbPath string, options ...store.Ope
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker),
 	}
-	// The file opens a golden copy built at the current schema, so Open
-	// does not migrate it. Go spreads a single slice only, hence the append.
+	// The file is an already-migrated golden copy, so the open finds it
+	// current. Go spreads a single slice only, hence the nested append.
 	db, err := store.Open(dbPath, append(base, options...)...)
 	if err != nil {
 		t.Fatal(err)

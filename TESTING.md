@@ -458,7 +458,7 @@ measured, why, and the rules that keep it fast.
 | pool size | 55.1s | `store.Open` opened a fixed **10-connection** pool every call (sqlitex default), each re-parsing the 33-migration schema. Tests need **1** → `store.WithPoolSize` + `PEASANT_DB_POOL_SIZE`, set to `1` in `cmd/peasant`'s `TestMain`. |
 | parallelize | 40.2s | The suite ran **fully serial** — tests isolated via process-global `t.Setenv(XDG_*)`, which forbids `t.Parallel()`. Replaced with per-invocation flag injection (below). |
 | `$HOME` isolation | 30.1s | Tests resolved local default transcript stores instead of isolated fixtures. `TestMain` points `HOME`+`XDG_*` at a throwaway temp dir. |
-| skip-migrate on golden copies | ~30s (store 22.4→20.7s) | `storetest.Open` copies a freshly-migrated golden DB, then re-ran the migration check on every copy → `store.WithSkipMigrations`. |
+| skip-migrate on golden copies | ~30s (store 22.4→20.7s) | `storetest.Open` copies a freshly-migrated golden DB, then re-ran the migration check on every copy → a skip option on the copy. Since removed: `store.Open` no longer migrates a store that holds data, so a golden copy opens current with no option. |
 | deeper DI (creds/sync/state) | **19.6s** | The last serial cohort (push credentials/timing, redact file-writing) was blocked by *production* helpers reading env directly; made them override-aware. |
 
 Other packages for reference (uncached `-race`): `internal/store` ~20–26s,
