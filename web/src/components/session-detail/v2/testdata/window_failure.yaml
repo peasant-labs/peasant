@@ -4,7 +4,7 @@ requiredNames:
 cases:
   - name: viewer window failure
     route: false
-    copy: 'could not load the window around turn 4.'
+    copy: 'could not load that part of the transcript.'
   - name: route window failure
     route: true
     copy: 'the transcript window around turn 4 (span 10) could not load'
