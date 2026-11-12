@@ -9,8 +9,12 @@ const needle = 'servePreBoundInline: false';
 const failedName = 'per-field-bound';
 // The earlier-history limitation case mounts the same bounded turn and reads
 // its truncation notice, so serving the pre-bound body reddens it as well.
-const failedNames = [failedName, 'truncated-turn-limitation'].sort();
-const failurePattern = /per-field bound/;
+// Each case must fail on its own missing truncation notice.
+const failureReasons = {
+  [failedName]: /per-field bound/,
+  'truncated-turn-limitation': /this turn.s text is truncated/,
+};
+const failedNames = Object.keys(failureReasons).sort();
 
 function runFile(env, label, file = testFile) {
   const reportPath = `/tmp/peasant-segment-mutation-${process.pid}-${Math.random().toString(36).slice(2)}.json`;
@@ -63,12 +67,14 @@ try {
   if (JSON.stringify(passed) !== JSON.stringify(expectedPassed)) {
     throw new Error(`servePreBoundInline: every other case must still pass; received [${passed.join(', ')}]`);
   }
-  const failure = mutated.assertions
-    .filter((assertion) => assertion.status === 'failed' && assertion.title === failedName)
-    .map((assertion) => (Array.isArray(assertion.failureMessages) ? assertion.failureMessages.join('\n') : ''))
-    .join('\n');
-  if (!failurePattern.test(failure)) {
-    throw new Error(`servePreBoundInline: the bound case failed for the wrong reason: ${failure}`);
+  for (const [name, reason] of Object.entries(failureReasons)) {
+    const failure = mutated.assertions
+      .filter((assertion) => assertion.status === 'failed' && assertion.title === name)
+      .map((assertion) => (Array.isArray(assertion.failureMessages) ? assertion.failureMessages.join('\n') : ''))
+      .join('\n');
+    if (!reason.test(failure)) {
+      throw new Error(`servePreBoundInline: ${name} failed for the wrong reason; expected ${reason}, received: ${failure}`);
+    }
   }
 } finally {
   rmSync(dir, { recursive: true, force: true });
@@ -119,6 +125,7 @@ const parserMutations = [
     failed: [
       'a fractional count drops every position field and warns once',
       'a null span drops every position field and warns once',
+      'a span missing its count drops every position field and warns once',
       'malformed span drops every position field and warns once',
     ],
     reason: /to strictly equal|toStrictEqual/,
@@ -129,7 +136,9 @@ const parserMutations = [
     replace: 'String(',
     failed: [
       'a fractional count drops every position field and warns once',
+      'a null total drops every position field and warns once',
       'a null span drops every position field and warns once',
+      'a span missing its count drops every position field and warns once',
       'malformed span drops every position field and warns once',
       'malformed total drops every position field and warns once',
       'two malformed fields warn once',
@@ -154,7 +163,9 @@ const parserMutations = [
     replace: 'return { sessionId: value.sessionId, revision, totalTurns, totalSegments, segments: value.segments.map((raw, at) => { const kept = zConversationTurnSpan.safeParse(raw?.conversationTurns); return kept.success ? { ...refs[at], conversationTurns: kept.data } : refs[at]; }) };',
     failed: [
       'a fractional count drops every position field and warns once',
+      'a null total drops every position field and warns once',
       'a null span drops every position field and warns once',
+      'a span missing its count drops every position field and warns once',
       'malformed span drops every position field and warns once',
       'malformed total drops every position field and warns once',
       'two malformed fields warn once',

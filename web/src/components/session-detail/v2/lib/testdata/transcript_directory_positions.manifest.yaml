@@ -10,4 +10,6 @@ requiredNames:
   - malformed total drops every position field and warns once
   - a null span drops every position field and warns once
   - a fractional count drops every position field and warns once
+  - a span missing its count drops every position field and warns once
+  - a null total drops every position field and warns once
   - two malformed fields warn once

@@ -90,6 +90,25 @@ cases:
     warn:
       - segments[2].conversationTurns
       - '{"before":43,"count":1.5}'
+  # One fault each: the span that lacks a key and the null total are the field
+  # the warning reports, with every other field well formed.
+  - name: a span missing its count drops every position field and warns once
+    positions:
+      total: 77
+      spans: [{ before: 0, count: 19 }, { before: 19 }, { before: 43, count: 34 }]
+    want: { total: absent, spans: [absent, absent, absent] }
+    warn:
+      - segments[1].conversationTurns
+      - '{"before":19}'
+      - totalConversationTurns and every segment's conversationTurns were dropped
+  - name: a null total drops every position field and warns once
+    positions:
+      total: null
+      spans: [{ before: 0, count: 19 }, { before: 19, count: 24 }, { before: 43, count: 34 }]
+    want: { total: absent, spans: [absent, absent, absent] }
+    warn:
+      - totalConversationTurns is null
+      - totalConversationTurns and every segment's conversationTurns were dropped
   # Two bad fields are one fault of one directory: the warning names the first
   # it meets, in wire order (the total, then each segment).
   - name: two malformed fields warn once
