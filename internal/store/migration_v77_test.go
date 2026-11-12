@@ -33,6 +33,7 @@ type turnCountRecountSession struct {
 	StoredTurnCount             int    `yaml:"storedTurnCount"`
 	StoredConversationTurnCount int    `yaml:"storedConversationTurnCount"`
 	MissingBodyIndex            *int   `yaml:"missingBodyIndex"`
+	NoStatsRow                  bool   `yaml:"noStatsRow"`
 	Entries                     []struct {
 		Index     int    `yaml:"index"`
 		Role      string `yaml:"role"`
@@ -97,6 +98,9 @@ func loadTurnCountRecountFixture(t *testing.T) turnCountRecountFixture {
 			t.Fatalf("turn count recount fixture has unlisted or repeated session %q", session.Name)
 		}
 		seen[session.Name] = true
+		if session.NoStatsRow && (session.Report != turnCountRecountReportRecounted || session.StoredTurnCount != 0 || session.StoredConversationTurnCount != 0 || session.FromV73 != nil) {
+			t.Fatalf("session %q has no stats row: it must be recounted, state no stored counts and state no fromV73 result", session.Name)
+		}
 		switch session.Report {
 		case turnCountRecountReportRecounted:
 			if session.WantTurnCount == session.WantConversationTurnCount {
@@ -168,6 +172,15 @@ func seedTurnCountRecountStore(t *testing.T, fixture turnCountRecountFixture, ve
 				t.Fatal(err)
 			}
 		}
+		if session.NoStatsRow {
+			if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_captured_stats WHERE session_id = ?`,
+				&sqlitex.ExecOptions{Args: []any{session.SessionID}}); err != nil {
+				t.Fatal(err)
+			}
+			if conn.Changes() != 1 {
+				t.Fatalf("session %q: deleting its stats row removed %d rows, want 1", session.Name, conn.Changes())
+			}
+		}
 		if session.MissingBodyIndex != nil {
 			if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_bodies WHERE session_id = ? AND entry_index = ?`,
 				&sqlitex.ExecOptions{Args: []any{session.SessionID, *session.MissingBodyIndex}}); err != nil {
@@ -185,6 +198,47 @@ func seedTurnCountRecountStore(t *testing.T, fixture turnCountRecountFixture, ve
 }
 
 type storedTurnCounts struct{ turnCount, conversationTurnCount int }
+
+// requireUnrecountedState fails unless every session still holds exactly what
+// was seeded: its stored counts, or no stats row at all.
+func requireUnrecountedState(t *testing.T, fixture turnCountRecountFixture, counts map[string]storedTurnCounts) {
+	t.Helper()
+	for _, session := range fixture.Sessions {
+		got, hasRow := counts[session.SessionID]
+		if session.NoStatsRow {
+			if hasRow {
+				t.Errorf("%s: the failed open left a stats row %+v, want none", session.Name, got)
+			}
+			continue
+		}
+		if want := (storedTurnCounts{session.StoredTurnCount, session.StoredConversationTurnCount}); !hasRow || got != want {
+			t.Errorf("%s: the failed open wrote counts %+v (row present: %t), want the stored %+v", session.Name, got, hasRow, want)
+		}
+	}
+}
+
+// readStatsUpdatedAtMs reads one session's stats update time from the raw file.
+func readStatsUpdatedAtMs(t *testing.T, path, sessionID string) int64 {
+	t.Helper()
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	updatedAtMs, rows := int64(-1), 0
+	if err := sqlitex.ExecuteTransient(conn, `SELECT updated_at_ms FROM session_captured_stats WHERE session_id = ?`,
+		&sqlitex.ExecOptions{Args: []any{sessionID}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			updatedAtMs = stmt.ColumnInt64(0)
+			rows++
+			return nil
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("session %s has %d stats rows, want 1", sessionID, rows)
+	}
+	return updatedAtMs
+}
 
 // readTurnCountRecountState reads the stored counts, the marker and the schema
 // version from the raw file, without Open, so reading never runs the recount.
@@ -254,6 +308,15 @@ func runTurnCountRecountFromV75(t *testing.T, fixture turnCountRecountFixture) {
 		if got := counts[session.SessionID]; got != want {
 			t.Errorf("%s: stored counts = %+v, want %+v", session.Name, got, want)
 		}
+		// A row the recount created carries update time 0; a row it only
+		// updated keeps the seeded time.
+		wantUpdatedAtMs := int64(1)
+		if session.NoStatsRow {
+			wantUpdatedAtMs = 0
+		}
+		if got := readStatsUpdatedAtMs(t, path, session.SessionID); got != wantUpdatedAtMs {
+			t.Errorf("%s: stats update time = %d, want %d", session.Name, got, wantUpdatedAtMs)
+		}
 	}
 
 	// The report is read from the recount itself, on a second store brought to
@@ -305,11 +368,11 @@ func runTurnCountRecountFromV75(t *testing.T, fixture turnCountRecountFixture) {
 	logged := logs.String()
 	for _, fragment := range []string{
 		"recounting turn counts for every stored session",
-		"sessions=6",
+		"sessions=7",
 		"could not be read during the turn count recount",
 		"session_id=" + string(wantUnreadable[0]),
 		"turn count recount complete",
-		"sessions_recounted=3",
+		"sessions_recounted=4",
 		"entry_less=2",
 		"unreadable=1",
 	} {
@@ -409,7 +472,7 @@ func runTurnCountRecountInterruptedFirstOpen(t *testing.T, fixture turnCountReco
 	if handled != failAfter {
 		t.Fatalf("the recount handled %d sessions before stopping, want %d", handled, failAfter)
 	}
-	for _, fragment := range []string{"turn count recount stopped after 2 of 6 sessions", "the recount stays pending", "reopen the store"} {
+	for _, fragment := range []string{"turn count recount stopped after 2 of 7 sessions", "the recount stays pending", "reopen the store"} {
 		if !strings.Contains(err.Error(), fragment) {
 			t.Errorf("interrupted open error lacks %q: %v", fragment, err)
 		}
@@ -421,12 +484,7 @@ func runTurnCountRecountInterruptedFirstOpen(t *testing.T, fixture turnCountReco
 	if !pending {
 		t.Fatal("the failed open cleared the recount marker; the next open would not recount")
 	}
-	for _, session := range fixture.Sessions {
-		want := storedTurnCounts{session.StoredTurnCount, session.StoredConversationTurnCount}
-		if got := counts[session.SessionID]; got != want {
-			t.Errorf("%s: the failed open wrote counts %+v, want the stored %+v", session.Name, got, want)
-		}
-	}
+	requireUnrecountedState(t, fixture, counts)
 
 	if err := openAndCloseForRecount(t, path); err != nil {
 		t.Fatalf("reopen after the interrupted open: %v", err)

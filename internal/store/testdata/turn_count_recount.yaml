@@ -14,6 +14,11 @@
 # into the conversation column of an entry-less session; the recount then keeps
 # both. The V74 backfill refuses a store with an unreadable generation, so that
 # session is seeded only on the V75 store.
+#
+# noStatsRow removes the session's stats row after seeding. The recount then
+# creates the row with the folded counts and update time 0, so any later
+# measurement outranks it. Such a session states no stored counts and is
+# seeded only on the V75 store.
 requiredSessions:
   - unmanaged-session
   - managed-session
@@ -21,6 +26,7 @@ requiredSessions:
   - managed-entry-less
   - stale-counts
   - unreadable-generation
+  - no-stats-row
 requiredRows:
   - from-v75
   - from-v73
@@ -101,6 +107,17 @@ sessions:
     report: unreadable
     wantTurnCount: 12
     wantConversationTurnCount: 11
+  - name: no-stats-row
+    sessionID: 70000000-0000-4000-8000-000000000007
+    activeGeneration: false
+    noStatsRow: true
+    entries:
+      - {index: 0, role: user, entryType: text, depth: 0, content: "list the files"}
+      - {index: 1, role: assistant, entryType: tool_use, depth: 0, content: "ls"}
+      - {index: 2, role: assistant, entryType: text, depth: 0, content: "three files"}
+    report: recounted
+    wantTurnCount: 3
+    wantConversationTurnCount: 2
 interruptedFirstOpen:
   # The per-session hook fails after this many sessions.
   failAfterSessions: 2
