@@ -635,12 +635,24 @@ func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent boo
 		}
 	}
 
-	// Refine entry type based on parsed content.
-	if entry.HasToolUse && entry.Role == RoleAssistant {
-		entry.EntryType = EntryTypeToolUse
+	// hasProse is the record's own words: a non-blank text block or plain
+	// text. A preview filled from a tool result or from thinking is not
+	// prose, so those records stay typed by what they hold.
+	hasProse := strings.TrimSpace(plainText) != ""
+	if !hasProse {
+		for _, block := range contentBlocks {
+			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
+				hasProse = true
+				break
+			}
+		}
 	}
-	if entry.HasThinking && entry.EntryType == EntryTypeText && entry.Role == RoleAssistant {
-		entry.EntryType = EntryTypeThinking
+
+	// Refine entry type based on parsed content.
+	if entry.Role == RoleAssistant {
+		hasToolUse := entry.HasToolUse
+		hasThinking := entry.HasThinking
+		entry.EntryType = assistantEntryType(hasProse, hasToolUse, hasThinking)
 	}
 	if entry.IsError && entry.Role == RoleTool {
 		entry.EntryType = EntryTypeToolResult

@@ -1042,7 +1042,14 @@ func projectionEntry(capture ClassifiedCapture, rb *resolvedBlock) (schema.Sessi
 	}
 	switch block.EntryType {
 	case schema.EntryTypeToolUse:
-		entry.HasToolUse = true
+		// A depth-0 tool_use block with no tool call key and no tool name is
+		// a prose-less managed carrier (opencode, codex): it groups the tool
+		// calls below it but makes none itself, so it carries no countable
+		// tool use. Claude carriers always name their tools, so this guard
+		// never touches them.
+		if block.Depth != 0 || block.ToolCallKey != "" || block.ToolName != "" {
+			entry.HasToolUse = true
+		}
 		entry.ToolInput = nonEmptyString(block.ToolArguments)
 		entry.ContentPreview = nonEmptyString(block.ToolArguments)
 	case schema.EntryTypeToolResult:

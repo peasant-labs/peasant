@@ -62,3 +62,77 @@ segment_cases:
       - {index: 8, role: user, contentBytes: 64}
     shortAfter: 1
     expected: {status: 409, contains: ["declared turns 0-8"]}
+# Conversation turn positions on the directory read. Turns are written as runs:
+# each run adds count turns of one size, spaced four entry indexes apart. The
+# role "alternating" gives user to an even session position and assistant to an
+# odd one; a system run adds rows that are served but hold no position. A turn
+# measures contentBytes + 2. Every expected number is a literal.
+position_cases:
+  # Four segments over 80 turns: 77 user or assistant text turns and 3 system
+  # rows, one system row in each of the first three segments. The budget fits
+  # twenty 50-byte turns, twenty-five 40-byte turns, and eighteen 55-byte turns.
+  - name: positions-eighty-rows-three-system
+    budgetBytes: 1000
+    runs:
+      - {count: 10, role: alternating, contentBytes: 48}
+      - {count: 1, role: system, contentBytes: 48}
+      - {count: 9, role: alternating, contentBytes: 48}
+      - {count: 12, role: alternating, contentBytes: 38}
+      - {count: 1, role: system, contentBytes: 38}
+      - {count: 12, role: alternating, contentBytes: 38}
+      - {count: 9, role: alternating, contentBytes: 53}
+      - {count: 1, role: system, contentBytes: 53}
+      - {count: 25, role: alternating, contentBytes: 53}
+    expected:
+      totalTurns: 80
+      totalSegments: 4
+      totalConversationTurns: 77
+      pages: 1
+      segments:
+        - {index: 0, before: 0, count: 19}
+        - {index: 1, before: 19, count: 24}
+        - {index: 2, before: 43, count: 17}
+        - {index: 3, before: 60, count: 17}
+  # More segments than one directory page holds, cut by the production cut with
+  # a budget of one turn per segment. The system row is segment 6000, so the
+  # second page's first segment has 9,999 conversation turns before it: before
+  # is a session-wide count that a page does not restart.
+  - name: positions-paged-second-page
+    budgetBytes: 10
+    page: 2
+    runs:
+      - {count: 6000, role: alternating, contentBytes: 8}
+      - {count: 1, role: system, contentBytes: 8}
+      - {count: 4049, role: alternating, contentBytes: 8}
+    expected:
+      totalTurns: 10050
+      totalSegments: 10050
+      totalConversationTurns: 10049
+      pages: 2
+      pageSegments: 50
+      segments:
+        - {index: 10000, before: 9999, count: 1}
+        - {index: 10049, before: 10048, count: 1}
+  # The cut returns a second segment that starts one conversation turn late.
+  # The directory still answers, without any position field, and says why once.
+  - name: positions-withheld-on-failed-self-check
+    budgetBytes: 20
+    runs:
+      - {count: 6, role: alternating, contentBytes: 8}
+    corrupt: {segment: 1, addBefore: 1}
+    expected:
+      totalTurns: 6
+      totalSegments: 3
+      pages: 1
+      withheld: {rule: continuity, segment: 1}
+  # The cut returns a negative count on its second segment.
+  - name: positions-withheld-on-negative-count
+    budgetBytes: 20
+    runs:
+      - {count: 6, role: alternating, contentBytes: 8}
+    corrupt: {segment: 1, setCount: -1}
+    expected:
+      totalTurns: 6
+      totalSegments: 3
+      pages: 1
+      withheld: {rule: continuity, segment: 1}

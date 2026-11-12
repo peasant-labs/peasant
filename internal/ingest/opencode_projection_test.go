@@ -1234,7 +1234,7 @@ func managedProjectionWithParts(t *testing.T, sessionID, role string, parts []st
 // duplicate text-part drop makes a-trailing-assistant-text-part-renders-once
 // fail with the report on two turns. Counting "reasoning" as a tool part in
 // inspectOpenCodeSemanticParts makes a-reasoning-part-does-not-make-a-tool-turn
-// fail with a tool_use turn. Dropping the Synthetic read from
+// fail with a tool_use message entry type and turn. Dropping the Synthetic read from
 // inspectOpenCodeSemanticParts makes the synthetic-task-result cases fail with
 // the injected result still standing as a user turn.
 func TestOpenCodeToolTurnRendering(t *testing.T) {
