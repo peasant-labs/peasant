@@ -539,13 +539,17 @@ test('config-holds-only-the-chosen-selection', async () => {
   expect(config.selection.autoIngestNewBranches, 'the answer that was given').toBe(false);
   const projects = config.selection.harnesses['claude-code'].projects;
   expect(projects).toHaveLength(1);
-  expect(projects[0].gitRemote).toBe(ledger.remote);
-  // The chosen branch lives in one checkout, so the selection names that clone
-  // and no other: the other branch's checkout is not in it.
-  expect(projects[0].clonePaths).toEqual([...new Set(chosenSessions.map((entry) => entry.cwd))]);
-  // Only one of the project's branches was chosen, so the selection names that
-  // branch rather than the whole project.
-  expect(projects[0].branches, 'the selection names the chosen branch and no other').toEqual([fixture.chosen.branch]);
+  // The setup draws one rule per checkout. The chosen branch is the only one in
+  // its checkout (the other branch of this project lives in a checkout of its
+  // own), so the whole checkout is chosen and the rule is that checkout's: the
+  // project and its clone path, with no branch list and nothing else. A rule
+  // names branches only where one checkout holds several, which the selection
+  // page's branch case checks. The whole rule is compared, so a branch list, a
+  // second clone or an extra key fails here.
+  expect(projects[0], 'the selection is the chosen branch\'s checkout and nothing more').toEqual({
+    gitRemote: ledger.remote,
+    clonePaths: [...new Set(chosenSessions.map((entry) => entry.cwd))],
+  });
   const text = JSON.stringify(config.selection);
   for (const other of ['marketing-site', 'filler-', 'tax-report', 'stray']) expect(text, `the selection names nothing of ${other}`).not.toContain(other);
   for (const entry of seeded.filter((candidate) => !chosenIds.has(candidate.sessionId))) expect(text).not.toContain(entry.sessionId);
@@ -681,10 +685,12 @@ test('computed-styles-and-themes', async () => {
     expect(entry.tabularOffenders, `${entry.name}: counts without tabular numbers`).toEqual([]);
     expect(railProblems(entry.rail), `${entry.name}: the step rail's labels sit inside the frame`).toEqual([]);
   }
-  // The rail check must have looked at labels: a rail with few steps shows them,
-  // so the screens named in the fixture are the ones that prove it.
+  // The rail check must have looked at labels: a rail the frame draws as numbers
+  // alone has none to judge, so the screens named in the fixture, every one of
+  // them, must have drawn and measured one label per step.
   for (const [name, count] of Object.entries(fixture.railScreens)) {
     const entry = probes.find((candidate) => candidate.name === name);
+    expect(entry, `${name} is a captured screen`).toBeDefined();
     expect(entry.rail.labelled, `${name}: the rail shows its labels`).toBe(true);
     expect(entry.rail.labels.map((label) => label.text), `${name}: the rail measured one label per step`).toHaveLength(count);
   }
