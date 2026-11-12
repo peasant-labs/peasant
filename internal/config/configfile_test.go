@@ -152,12 +152,9 @@ func runConfigFileSwap(t *testing.T, path string, row configFileCase) {
 			t.Fatalf("Swap: %v", swapErr)
 		}
 	case want.SwapChanged:
-		if !errors.Is(swapErr, ErrConfigChanged) {
-			t.Fatalf("Swap error = %v, want ErrConfigChanged", swapErr)
-		}
 		var changed *ConfigChangedError
 		if !errors.As(swapErr, &changed) {
-			t.Fatalf("Swap error %T carries no fresh bytes", swapErr)
+			t.Fatalf("Swap error = %v (%T), want a *ConfigChangedError carrying the fresh bytes", swapErr, swapErr)
 		}
 		if want.FreshNil != (changed.Fresh == nil) {
 			t.Errorf("fresh nil = %t, want %t", changed.Fresh == nil, want.FreshNil)
@@ -169,8 +166,9 @@ func runConfigFileSwap(t *testing.T, path string, row configFileCase) {
 		if swapErr == nil || !strings.Contains(swapErr.Error(), want.SwapError) {
 			t.Fatalf("Swap error = %v, want it to contain %q", swapErr, want.SwapError)
 		}
-		if errors.Is(swapErr, ErrConfigChanged) {
-			t.Fatalf("Swap error = %v, want a refusal that is not ErrConfigChanged", swapErr)
+		var changed *ConfigChangedError
+		if errors.As(swapErr, &changed) {
+			t.Fatalf("Swap error = %v, want a refusal that is not a *ConfigChangedError", swapErr)
 		}
 	default:
 		t.Fatalf("row %s states no swap expectation", row.Name)

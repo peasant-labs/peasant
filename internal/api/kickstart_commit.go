@@ -190,7 +190,7 @@ func webNextSteps(menu []onboarding.NextStep) ([]schema.LocalKickstartNextStep, 
 }
 
 // ingestResponse is the import's state in the commit body.
-func ingestResponse(start IngestStart, err error) schema.LocalKickstartIngest {
+func ingestResponse(start ingestStart, err error) schema.LocalKickstartIngest {
 	switch {
 	case err != nil:
 		return schema.LocalKickstartIngest{State: schema.LocalKickstartIngestFailed, Error: err.Error()}

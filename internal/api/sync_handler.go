@@ -1143,9 +1143,9 @@ func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 // errIngestNoConfig is the refusal to import without a configuration.
 var errIngestNoConfig = errors.New("config not available")
 
-// IngestStart is what claiming the import found: AlreadyRunning is true when an
+// ingestStart is what claiming the import found: AlreadyRunning is true when an
 // import was already running and nothing was claimed.
-type IngestStart struct {
+type ingestStart struct {
 	AlreadyRunning bool
 }
 
@@ -1162,21 +1162,21 @@ type IngestStart struct {
 // level this version cannot apply. preflight false keeps the route's
 // long-standing behavior: such a configuration is reported by the run, in the
 // status route, not by the request that started it.
-func (h *syncHandler) reserveIngest(preflight bool) (IngestStart, func(observe func(schema.LocalKickstartIngest)), error) {
+func (h *syncHandler) reserveIngest(preflight bool) (ingestStart, func(observe func(schema.LocalKickstartIngest)), error) {
 	cfg := h.currentConfig()
 	if cfg == nil {
-		return IngestStart{}, nil, errIngestNoConfig
+		return ingestStart{}, nil, errIngestNoConfig
 	}
 	if preflight {
 		if err := checkIngestable(cfg); err != nil {
-			return IngestStart{}, nil, err
+			return ingestStart{}, nil, err
 		}
 	}
 
 	h.mu.Lock()
 	if h.ingestStatus == "running" || h.sessionIngest {
 		h.mu.Unlock()
-		return IngestStart{AlreadyRunning: true}, nil, nil
+		return ingestStart{AlreadyRunning: true}, nil, nil
 	}
 
 	progState := ingest.NewProgressState()
@@ -1199,7 +1199,7 @@ func (h *syncHandler) reserveIngest(preflight bool) (IngestStart, func(observe f
 			}
 		}()
 	}
-	return IngestStart{}, launch, nil
+	return ingestStart{}, launch, nil
 }
 
 // ingestWire is the finished import as the kickstart topic reports it: idle with
