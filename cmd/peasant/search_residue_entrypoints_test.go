@@ -111,13 +111,7 @@ func seedEntrypointStore(t *testing.T, dir, kind string) string {
 	case "real-v75":
 		storetest.BuildCleanV75Store(t, dbPath)
 	case "current":
-		db, err := store.Open(dbPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := db.Close(); err != nil {
-			t.Fatal(err)
-		}
+		storetest.CopyGoldenTo(t, dbPath)
 	default:
 		t.Fatalf("unknown entrypoint fixture store %q", kind)
 	}

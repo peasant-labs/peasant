@@ -14,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/store/storetest/residuefixture"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -246,13 +247,7 @@ func TestOpenRunStoreRefusesResidue(t *testing.T) {
 			t.Fatal(err)
 		}
 		// A current-schema store opens as usual; the refusal never fires.
-		seed, err := store.Open(resolveDB(dir))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := seed.Close(); err != nil {
-			t.Fatal(err)
-		}
+		storetest.CopyGoldenTo(t, resolveDB(dir))
 		db, err := openAt(t, dir, false)
 		if err != nil {
 			t.Fatalf("clean store refused: %v", err)
@@ -265,13 +260,7 @@ func TestOpenRunStoreRefusesResidue(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, string(defaults.AppName)), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		seed, err := store.Open(resolveDB(dir))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := seed.Close(); err != nil {
-			t.Fatal(err)
-		}
+		storetest.CopyGoldenTo(t, resolveDB(dir))
 		db, err := openAt(t, dir, true)
 		if err != nil {
 			t.Fatalf("terminal open of clean store failed: %v", err)
