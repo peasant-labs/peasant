@@ -90,7 +90,7 @@ func (p *Pipeline) processRetainedSession(ctx context.Context, session Discovere
 	result.OutputPath = sessionDir
 	return workerResult{
 		result: result, meta: &candidate.Metadata, artifact: candidate,
-		transcriptKept: !installed.TranscriptReplaced,
+		transcriptKept:       !installed.TranscriptReplaced,
 		transcriptData:       candidate.Transcript,
 		outputTranscriptPath: filepath.Join(result.OutputPath, string(session.SessionID)+"--transcript."+string(candidate.Metadata.Source.Format)),
 		originalRoot:         session.OriginalRoot, transcriptOrigin: session.TranscriptOrigin,

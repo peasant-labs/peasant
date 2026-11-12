@@ -155,7 +155,7 @@ type workerResult struct {
 	// transcriptKept reports that the install left the installed transcript in
 	// place because its bytes equal the candidate's. The mirror then keeps the
 	// index input proof, which names those bytes.
-	transcriptKept bool
+	transcriptKept        bool
 	commitCaptureComplete bool
 	capturedSource        *captureFileSystem
 	cwdProvenance         CWDProvenanceKind
