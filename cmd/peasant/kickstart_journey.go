@@ -25,7 +25,9 @@ import (
 
 func buildKickstartJourneyRunner(cmd *cobra.Command, configPath string, loaded *config.Config, snapshot []byte, existed bool, ingestRunner ftue.IngestRunnerFunc) ftue.JourneyRunner {
 	return buildKickstartJourneyRunnerWithDeps(cmd, configPath, loaded, snapshot, existed, ingestRunner, kickstartJourneyDeps{
-		loadCredentials:  auth.LoadCredentialsFrom,
+		loadCredentials: auth.LoadCredentialsFrom,
+		// No residue gate: kickstart requires a terminal (cmd_kickstart.go
+		// mounts the wizard only there), so the repair runs visibly.
 		openReceiptStore: func(path string) (kickstartReceiptStore, error) { return store.Open(path) },
 	})
 }
@@ -130,6 +132,8 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 		if err != nil {
 			return nil, retrySessions(ftue.StagePublication, ids), fmt.Errorf("prepare managed readers for kickstart publication at configured output %q: %w; no publication was attempted and imported sessions remain local; repair the configured output path and retry kickstart", cfg.Output.BasePath, err)
 		}
+		// No residue gate: kickstart requires a terminal (cmd_kickstart.go
+		// mounts the wizard only there), so the repair runs visibly.
 		db, err := store.Open(string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd))), options...)
 		if err != nil {
 			return nil, retrySessions(ftue.StagePublication, ids), fmt.Errorf("open authoritative publication store: %w", err)

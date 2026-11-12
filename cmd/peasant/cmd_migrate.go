@@ -72,7 +72,7 @@ func BuildMigrateCommand() *cobra.Command {
 			}
 
 			dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-			db, closeStore, err := openMigrateStore(cmd, dryRun, string(ownedRoot), dbPath)
+			db, closeStore, err := openMigrateStore(cmd, dryRun, confirm, string(ownedRoot), dbPath)
 			if err != nil {
 				return err
 			}
@@ -133,8 +133,10 @@ func BuildMigrateCommand() *cobra.Command {
 
 // openMigrateStore opens the analytics store with the managed-generation
 // artifact store rooted at the configured output base. A dry run opens
-// read-only and creates no file; a real run opens read-write.
-func openMigrateStore(cmd *cobra.Command, dryRun bool, ownedRoot, dbPath string) (*store.Store, func(), error) {
+// read-only and creates no file; a real run opens read-write, refusing a
+// non-interactive run without confirm before the open when the open would
+// rebuild the whole search index.
+func openMigrateStore(cmd *cobra.Command, dryRun, confirm bool, ownedRoot, dbPath string) (*store.Store, func(), error) {
 	if dryRun {
 		options, err := generationStoreOptionsReadOnly(ownedRoot)
 		if err != nil {
@@ -157,6 +159,16 @@ func openMigrateStore(cmd *cobra.Command, dryRun bool, ownedRoot, dbPath string)
 		return nil, func() {}, err
 	}
 	options = append(options, store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()))
+	// The residue gate runs before the open unless --confirm was given: an
+	// explicit --confirm is the user's own act, so the one-time search index
+	// repair runs by consent even off-terminal. Without it, a
+	// non-interactive run would pay the whole-index rebuild unseen and then
+	// refuse at the confirmation prompt anyway, so it refuses here first.
+	if !confirm {
+		if err := refuseStaleSearchIndex(dbPath); err != nil {
+			return nil, func() {}, err
+		}
+	}
 	db, err := store.Open(dbPath, options...)
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("open analytics store: %w", err)

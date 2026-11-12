@@ -71,6 +71,21 @@ func BuildWebCommand() *cobra.Command {
 			if addr, served := api.ServedLoopbackAddr(spawn.port); served {
 				return fmt.Errorf("web start: port %d already answers at %s, so no server was started. %s", spawn.port, addr, api.PortServedHint(spawn.port))
 			}
+			dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+			// Migrate visibly before forking on a terminal; refuse an
+			// affected store on a non-interactive start instead of forking
+			// a server that could never start.
+			cfgPath := resolveConfigPath(cmd)
+			var preopenOpts []store.OpenOption
+			if cfg, cfgErr := config.LoadForBrowsing(cfgPath, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}); cfgErr == nil {
+				applyDataDirOverride(cmd, cfg)
+				if genOpts, genErr := generationStoreOptions(cfg.Output.BasePath); genErr == nil {
+					preopenOpts = genOpts
+				}
+			}
+			if err := maybePreopenStoreForWebStart(stdinIsTerminal(), dbPath, preopenOpts...); err != nil {
+				return err
+			}
 			// A cancelled start is not a usage error: the readiness probe stops
 			// on the signal context, prints what it already knows, and exits
 			// non-zero with the cancellation.
@@ -173,6 +188,13 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	if generationErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot configure managed generation reads: %v\n", generationErr)
 		generationOptions = nil
+	}
+	// A foreground run on a terminal opens as usual so the v76 notice and
+	// rebuild happen visibly. The detached background child has no
+	// terminal: it must not pay the whole-index rebuild where nobody
+	// watches, so it refuses instead of starting.
+	if err := refuseStaleSearchIndex(dbPath); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot create data directory %s: %v\n", dataDir, err)

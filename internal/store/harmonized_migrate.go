@@ -904,6 +904,11 @@ func (s *Store) clearIndexedInputHash(ctx context.Context, sessionID schema.Sess
 // reports whether it consolidated; a missing old index skips the phase.
 // A crash rolls the one transaction back and the old index stays intact,
 // so the re-run repeats Phase 3.
+//
+// After v76 this phase always skips: v76 drops the old index on every
+// store, so Open never hands this phase one to consolidate (only tests that
+// rebuild the retired index reach the consolidating branch). It stays until
+// the explicit upgrade removes it.
 func (s *Store) migrateConsolidateSearch(ctx context.Context) (bool, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {

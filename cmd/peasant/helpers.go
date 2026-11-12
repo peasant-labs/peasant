@@ -96,6 +96,11 @@ func openDB(cmd *cobra.Command) (*store.Store, func(), error) {
 	if ok, path := dataDirWritable(dataDir, dbPath); !ok {
 		return nil, func() {}, errDataDirNotWritable(path)
 	}
+	// A non-interactive caller never runs migration v76's whole-index
+	// rebuild invisibly: refuse on residue instead of opening.
+	if err := refuseStaleSearchIndex(dbPath); err != nil {
+		return nil, func() {}, err
+	}
 	db, err := store.Open(dbPath,
 		append(contentIndexFormats(), store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()))...)
 	if err != nil {

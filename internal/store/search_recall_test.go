@@ -370,11 +370,11 @@ func recallPiCarrierExcluded(t *testing.T, c searchRecallCase) {
 	sid := recallSID(c.Name)
 	seedGenerationSession(t, s, string(sid))
 	// A legacy carrier row: the writer refuses new carrier content, so the
-	// row is inserted directly. The legacy postings exist; the production
+	// row is inserted directly. The union postings exist; the production
 	// query must exclude them.
 	recallExec(t, s, `INSERT INTO session_entries(session_id, entry_index, provider, entry_type, role, content_preview, depth, part_type) VALUES (?, 0, 'claude-code', 'text', 'user', ?, 0, 'pi.carrier')`, string(sid), "carrier text "+c.Query)
-	if got := recallRawCount(t, s, "session_entries_fts", c.Query); c.WantRawMatchCount != nil && got != *c.WantRawMatchCount {
-		t.Fatalf("%s: raw legacy MATCH = %d, want %d", c.Name, got, *c.WantRawMatchCount)
+	if got := recallRawCount(t, s, "session_search_fts", c.Query); c.WantRawMatchCount != nil && got != *c.WantRawMatchCount {
+		t.Fatalf("%s: raw union MATCH = %d, want %d", c.Name, got, *c.WantRawMatchCount)
 	}
 	assertRecallHits(t, c, recallProduction(t, s, c.Query))
 }

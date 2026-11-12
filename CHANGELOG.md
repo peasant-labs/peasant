@@ -73,6 +73,31 @@ Release, which holds the signed artifacts and checksums.
   nothing, so a database maintained only through `harvest index` never gained
   the catalog.
 
+### Fixed
+- Search finds entries again after the 0.16.1 upgrade. The 0.16.1 store
+  upgrade pointed the transcript-entry search triggers at a retired index, so
+  entries written afterwards were missing from search, and an entry deleted
+  afterwards could leave its words behind, where they could match an unrelated
+  entry that later reused its row. Opening the store repairs this once: a store
+  without leftover words only adds the missing entries, which takes moments; a
+  store with leftover words rebuilds the whole search index once, which reads
+  all stored text and can take several minutes.
+- Only a command run in a terminal performs that one-time rebuild, and it
+  prints a line before it starts. A git hook, a script, a CI job or the
+  background web server that finds a store needing it skips its work and names
+  the command to run: `peasant harvest` or `peasant web start` in a terminal.
+  `village push` reports the run as nothing attempted, so a git hook never
+  blocks the push; other commands exit non-zero. `peasant migrate` and
+  `peasant reclaim` refuse it without a terminal unless `--confirm` is given,
+  which runs the rebuild as the user's explicit choice.
+
+### Database
+- Migration 76 repairs the search index left by migration 75. Upgrading from
+  0.16.1: the first command you run in a terminal may rebuild the search index
+  once, which needs free disk space for a new index. A store that never ran
+  0.16.1, including one upgraded straight from 0.15.x, only takes the quick
+  path.
+
 ## [0.14.0] - 2026-11-04
 
 ### Added

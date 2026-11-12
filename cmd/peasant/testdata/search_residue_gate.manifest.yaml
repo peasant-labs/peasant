@@ -1,0 +1,12 @@
+# Required-name manifest for search_residue_gate: deletion protection by
+# NAME, never by count.
+requiredNames:
+  - terminal-affected-proceeds
+  - terminal-clean-proceeds
+  - nonterminal-affected-refuses
+  - nonterminal-clean-proceeds
+  - nonterminal-current-proceeds
+  - nonterminal-missing-proceeds
+  - push-hook-with-rule-nothing-attempted
+  - push-hook-without-rule-nothing-attempted
+  - push-script-nothing-attempted
