@@ -5,6 +5,7 @@ package sqlitemigration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -1005,4 +1006,99 @@ func (rec *eventRecorder) readyFunc() SignalFunc {
 	return func() {
 		rec.ready++
 	}
+}
+
+func TestMigrateWithAfterScript(t *testing.T) {
+	schema := Schema{
+		AppID: 0xedbeef,
+		Migrations: []string{
+			`create table foo ( id integer primary key, note text );`,
+			`create table bar ( id integer primary key );`,
+		},
+	}
+	userVersionOf := func(t *testing.T, conn *sqlite.Conn) int64 {
+		t.Helper()
+		version, err := sqlitex.ResultInt64(conn.Prep("PRAGMA user_version;"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return version
+	}
+
+	t.Run("WritesCommitWithTheMigration", func(t *testing.T) {
+		conn, err := sqlite.OpenConn(filepath.Join(t.TempDir(), "after-script.db"), sqlite.OpenReadWrite, sqlite.OpenCreate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		var seen []int32
+		err = MigrateWithAfterScript(context.Background(), conn, schema, func(conn *sqlite.Conn, version int32) error {
+			seen = append(seen, version)
+			if conn.AutocommitEnabled() {
+				t.Errorf("version %d: callback ran outside the migration transaction", version)
+			}
+			if version == 1 {
+				return sqlitex.ExecuteTransient(conn, `insert into foo (note) values ('filled');`, nil)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(seen) != 2 || seen[0] != 1 || seen[1] != 2 {
+			t.Errorf("callback versions = %v, want [1 2]", seen)
+		}
+		rows, err := sqlitex.ResultInt64(conn.Prep("select count(*) from foo;"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rows != 1 {
+			t.Errorf("rows written by the callback = %d, want 1", rows)
+		}
+	})
+
+	t.Run("ErrorRollsBackTheMigrationAndKeepsEarlierOnes", func(t *testing.T) {
+		conn, err := sqlite.OpenConn(filepath.Join(t.TempDir(), "after-script-error.db"), sqlite.OpenReadWrite, sqlite.OpenCreate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		boom := errors.New("boom")
+		err = MigrateWithAfterScript(context.Background(), conn, schema, func(conn *sqlite.Conn, version int32) error {
+			if version == 2 {
+				return boom
+			}
+			return nil
+		})
+		if !errors.Is(err, boom) {
+			t.Fatalf("error = %v, want it to wrap the callback error", err)
+		}
+		if !conn.AutocommitEnabled() {
+			t.Error("the failed migration left a transaction open")
+		}
+		if got := userVersionOf(t, conn); got != 1 {
+			t.Errorf("user_version = %d, want 1: the first migration stays, the second rolls back", got)
+		}
+		exists, err := sqlitex.ResultInt64(conn.Prep("select count(*) from sqlite_master where name = 'bar';"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if exists != 0 {
+			t.Error("table bar exists after its migration was rolled back")
+		}
+	})
+
+	t.Run("NilCallbackMatchesMigrate", func(t *testing.T) {
+		conn, err := sqlite.OpenConn(filepath.Join(t.TempDir(), "after-script-nil.db"), sqlite.OpenReadWrite, sqlite.OpenCreate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if err := MigrateWithAfterScript(context.Background(), conn, schema, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := userVersionOf(t, conn); got != 2 {
+			t.Errorf("user_version = %d, want 2", got)
+		}
+	})
 }
