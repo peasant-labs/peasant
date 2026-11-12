@@ -758,8 +758,10 @@ jobs:
       # The mounted Home check runs in a separate job inside the Playwright
       # image, which has no Go. Build the binary here (it embeds web/out) and
       # hand it over with the exported web/out the check compares it against.
+      # CGO_ENABLED=0 matches the released binary (.goreleaser.yml) and keeps it
+      # static, so it starts in the image whatever glibc the runner host has.
       - name: Build the binary for the mounted Home gate
-        run: go build -o peasant ./cmd/peasant
+        run: CGO_ENABLED=0 go build -o peasant ./cmd/peasant
 
       - name: Upload the binary and exported dashboard
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
