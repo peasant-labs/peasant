@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -58,6 +59,9 @@ type segmentDirectory struct {
 	refs        []schema.TranscriptSegmentRef
 	entryCounts []int
 	turns       []segmentTurnMeta
+	// totalConversationTurns is nil when the cut failed the self-check; every
+	// ref's span is nil with it.
+	totalConversationTurns *int
 }
 
 type segmentDirectoryEntry struct {
@@ -83,6 +87,10 @@ type segmentProducer struct {
 	reader   SegmentReader
 	budget   int
 	capacity int
+	// cut is transcript.CutSegments in production. It is a field because a cut
+	// with wrong position data cannot be produced through the store.
+	cut    func([]ingest.Turn, int) ([]schema.TranscriptSegmentRef, int)
+	logger *slog.Logger
 
 	mu        sync.Mutex
 	dirs      []*segmentDirectoryEntry // LRU: oldest first, newest last
@@ -95,6 +103,8 @@ func newSegmentProducer(reader SegmentReader) *segmentProducer {
 		reader:    reader,
 		budget:    defaults.TranscriptSegmentBudgetBytes,
 		capacity:  defaults.TranscriptSegmentDirectoryCapacity,
+		cut:       transcript.CutSegments,
+		logger:    slog.Default(),
 		dirBuilds: make(map[segmentCacheKey]*segmentBuild),
 	}
 }
@@ -182,7 +192,20 @@ func (p *segmentProducer) buildDirectory(ctx context.Context, id ingest.SessionI
 	if err != nil {
 		return segmentDirectory{}, err
 	}
-	refs, totalTurns := transcript.CutSegments(turns, p.budget)
+	refs, totalTurns := p.cut(turns, p.budget)
+	// A position fault never costs the directory: the position fields are
+	// withheld together and the read still answers.
+	canonical := ingest.ConversationTurnCount(turns)
+	total := &canonical
+	if fault := transcript.CheckConversationTurns(refs, canonical); fault != nil {
+		p.logger.Error("transcript segments: conversation turn positions withheld",
+			"session", string(id), "revision", revision,
+			"rule", string(fault.Rule), "segment", fault.Segment, "error", fault.Error())
+		for i := range refs {
+			refs[i].ConversationTurns = nil
+		}
+		total = nil
+	}
 	meta := make([]segmentTurnMeta, len(turns))
 	for i := range turns {
 		meta[i] = segmentTurnMeta{index: turns[i].Index, role: turns[i].Role}
@@ -193,6 +216,8 @@ func (p *segmentProducer) buildDirectory(ctx context.Context, id ingest.SessionI
 		refs:        refs,
 		entryCounts: transcript.SegmentEntryCounts(entries, refs),
 		turns:       meta,
+
+		totalConversationTurns: total,
 	}, nil
 }
 
@@ -480,6 +505,8 @@ func transcriptDirectoryPayload(id ingest.SessionID, directory segmentDirectory,
 		TotalTurns:    directory.totalTurns,
 		TotalSegments: len(directory.refs),
 		Segments:      directory.refs,
+		// The whole-session total goes on every page of refs.
+		TotalConversationTurns: directory.totalConversationTurns,
 	}
 	if len(directory.refs) <= schema.MaxTranscriptDirectoryRefs {
 		return payload

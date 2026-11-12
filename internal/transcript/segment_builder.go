@@ -1,8 +1,8 @@
 package transcript
 
 import (
-	"fmt"
 	"encoding/json"
+	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
