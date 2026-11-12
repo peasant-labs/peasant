@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { EarlierHistoryState } from '@peasant-labs/schema';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -46,7 +47,6 @@ let revision = '7';
 let servePreBoundInline = false;
 let failNextDirectory = false;
 let failSegment: number | null = null;
-let windowRejected = false;
 let releaseFailure: (() => void) | null = null;
 let observedSegments: TranscriptSegmentState | null = null;
 let activeCase: SegmentCase | null = null;
@@ -94,14 +94,14 @@ vi.mock('./lib/useTranscriptSegments', async (importOriginal) => {
 });
 vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@peasant-labs/fairtrade/ui')>();
-  return { ...actual, TranscriptViewer: (props: React.ComponentProps<typeof actual.TranscriptViewer>) => <>
-    {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => {
-      void Promise.resolve(props.onLoadWindow?.(windowFailureFixture.anchor, windowFailureFixture.span)).catch(() => { windowRejected = true; });
-    }}>request window</button>}
+  return { ...actual, TranscriptViewer: (props: React.ComponentProps<typeof actual.TranscriptViewer>) => {
+    const [jump, setJump] = useState(false);
+    return <>
+    {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => setJump(true)}>jump to unloaded turn</button>}
     {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => { void props.onLoadSegment?.(2); }}>request unrelated segment</button>}
     {activeCase?.name === 'window-cover-failure' && <button type="button" onClick={() => { void props.onLoadWindow?.(windowFailureFixture.unrelatedAnchor, windowFailureFixture.span); }}>request unrelated window</button>}
-    <actual.TranscriptViewer {...props} />
-  </> };
+    <actual.TranscriptViewer {...props} initialPosition={jump ? { kind: 'turn', turnIndex: windowFailureFixture.anchor } : props.initialPosition} />
+  </> } };
 });
 
 let currentSearch = new URLSearchParams();
@@ -439,13 +439,18 @@ describe('SessionDetailV2 segmented transcript', () => {
   }
 });
 
-type WindowFailureFixture = { name: string; anchor: number; span: number; failedSegment: number; heldTurn: number; unrelatedTurn: number; unrelatedAnchor: number; copy: string };
+type WindowFailureFixture = { requiredNames: string[]; cases: { name: string; route: boolean; copy: string }[]; coldRoute: { name: string; failedSegment: number }; anchor: number; span: number; failedSegment: number; heldTurn: number; unrelatedTurn: number; unrelatedAnchor: number };
 const windowFailureFixture = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/window_failure.yaml'), 'utf8'), 'window failure') as WindowFailureFixture;
+const windowFailureManifest = parseStrictYAML(readFileSync(resolve(process.cwd(), 'src/components/session-detail/v2/testdata/window_failure.manifest.yaml'), 'utf8'), 'window failure manifest') as { requiredNames: string[] };
 
 describe('failed covering window on the mounted transcript', () => {
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); reads.length = 0; activeCase = null; failSegment = null; releaseFailure = null; windowRejected = false; observedSegments = null; });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); reads.length = 0; activeCase = null; failSegment = null; releaseFailure = null; observedSegments = null; });
 
-  it(windowFailureFixture.name, async () => {
+  it('keeps the required failure scenarios', () => {
+    expect(windowFailureFixture.cases.map((row) => row.name)).toEqual(windowFailureFixture.requiredNames);
+    expect(windowFailureFixture.requiredNames).toEqual(windowFailureManifest.requiredNames);
+  });
+  for (const scenario of windowFailureFixture.cases) it(scenario.name, async () => {
     const base = loadCases().find((row) => row.name === 'mount-segment-zero');
     if (!base) throw new Error('missing initial segment fixture');
     activeCase = { ...base, name: 'window-cover-failure', window: { requestedAnchor: windowFailureFixture.anchor, anchorTurn: windowFailureFixture.anchor, segments: [0, windowFailureFixture.failedSegment] } };
@@ -455,12 +460,15 @@ describe('failed covering window on the mounted transcript', () => {
     const view = render(<TestDetail turn={null} />);
     await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).not.toBeNull());
     failSegment = windowFailureFixture.failedSegment;
-    fireEvent.click(view.getByRole('button', { name: 'request window' }));
+    if (scenario.route) {
+      view.rerender(<TestDetail turn={windowFailureFixture.anchor} />);
+    } else {
+      fireEvent.click(view.getByRole('button', { name: 'jump to unloaded turn' }));
+    }
     await waitFor(() => expect(releaseFailure).not.toBeNull());
-    await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).toBeNull());
     await act(async () => { releaseFailure?.(); });
-    await waitFor(() => expect(view.getAllByRole('alert').filter((node) => node.textContent?.includes(windowFailureFixture.copy))).toHaveLength(1));
-    expect(windowRejected).toBe(true);
+    await waitFor(() => expect(view.getAllByRole('alert')).toHaveLength(1));
+    expect(view.getByRole('alert')).toHaveTextContent(scenario.copy);
     const fault = observedSegments?.windowFaults[0];
     expect(fault).toBeInstanceOf(WebFault);
     expect(fault?.operation).toBe(FaultOperation.TranscriptWindowRead);
@@ -476,18 +484,38 @@ describe('failed covering window on the mounted transcript', () => {
     // Segment 2 is not part of the failed window.
     fireEvent.click(view.getByRole('button', { name: 'request unrelated segment' }));
     await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.unrelatedTurn}"]`)).not.toBeNull());
-    expect(view.getAllByRole('alert').filter((node) => node.textContent?.includes(windowFailureFixture.copy))).toHaveLength(1);
+    expect(observedSegments?.windowFaults[0]).toBe(fault);
+    expect(view.getAllByRole('alert')).toHaveLength(1);
     fireEvent.click(view.getByRole('button', { name: 'request unrelated window' }));
     await waitFor(() => expect(reads.filter((read) => read === 'window')).toHaveLength(2));
     expect(observedSegments?.window?.requestedAnchor).toBe(windowFailureFixture.unrelatedAnchor);
     expect(observedSegments?.windowFaults[0]).toBe(fault);
-    expect(view.getAllByRole('alert').filter((node) => node.textContent?.includes(windowFailureFixture.copy))).toHaveLength(1);
+    expect(view.getAllByRole('alert')).toHaveLength(1);
     fireEvent.click(view.getByRole('button', { name: 'try again' }));
-    await waitFor(() => expect(view.queryByText(windowFailureFixture.copy, { exact: false })).toBeNull());
+    await waitFor(() => expect(view.queryAllByRole('alert')).toHaveLength(0));
     expect(observedSegments?.windowFaults).toHaveLength(0);
     expect(reads.filter((read) => read === 'window')).toHaveLength(3);
     expect(view.container.querySelector(`[data-turn="${windowFailureFixture.heldTurn}"]`)).not.toBeNull();
     expect(view.container.querySelector(`[data-turn="${windowFailureFixture.anchor}"]`)).not.toBeNull();
+  });
+
+  it(windowFailureFixture.coldRoute.name, async () => {
+    const base = loadCases().find((row) => row.name === 'mount-segment-zero');
+    if (!base) throw new Error('missing initial segment fixture');
+    activeCase = { ...base, name: 'window-cover-failure', window: { requestedAnchor: windowFailureFixture.anchor, anchorTurn: windowFailureFixture.anchor, segments: [0, windowFailureFixture.failedSegment] } };
+    revision = base.revision;
+    channelData = detail(activeCase);
+    failSegment = windowFailureFixture.coldRoute.failedSegment;
+    vi.stubGlobal('fetch', vi.fn(answer));
+    const view = render(<TestDetail turn={windowFailureFixture.anchor} />);
+    await waitFor(() => expect(releaseFailure).not.toBeNull());
+    await act(async () => { releaseFailure?.(); });
+    await waitFor(() => expect(view.getAllByRole('alert')).toHaveLength(1));
+    expect(observedSegments?.windowFaults).toHaveLength(1);
+    fireEvent.click(view.getByRole('button', { name: 'try again' }));
+    await waitFor(() => expect(view.queryAllByRole('alert')).toHaveLength(0));
+    expect(observedSegments?.windowFaults).toHaveLength(0);
+    await waitFor(() => expect(view.container.querySelector(`[data-turn="${windowFailureFixture.anchor}"]`)).not.toBeNull());
   });
 });
 

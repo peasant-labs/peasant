@@ -347,12 +347,16 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     }
     if (requestedTurn == null) return { kind: 'top' };
     if (!requestedTurnExists) return { kind: 'top', requestKey: `missing-turn:${requestedTurn}` };
+    // The route owns its failed request. Do not have the viewer independently
+    // request the same target and display a second failure.
+    if (segmentMode && (segmentRead.window?.requestedAnchor !== requestedTurn
+      || !segmentRead.window.segments.every((index) => segmentRead.segments.some((segment) => segment.index === index)))) return null;
     if (!requestedTurnVisible) return null;
     const landed = segmentRead.window && segmentRead.window.requestedAnchor !== segmentRead.window.anchorTurn
       ? segmentRead.window.anchorTurn
       : requestedTurn;
     return { kind: 'turn', turnIndex: landed };
-  }, [sourcePosition, filteringScope, requestedTurn, requestedTurnExists, requestedTurnVisible, segmentRead.window]);
+  }, [sourcePosition, filteringScope, requestedTurn, requestedTurnExists, requestedTurnVisible, segmentRead.window, segmentRead.segments, segmentMode]);
 
   const revealRequestedTurn = useCallback(() => {
     if (filteringScope) router.replace(`${pathname}${clearScopeQuery(searchParams)}`);
@@ -568,6 +572,19 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // An empty frame used to mean "recorded but not indexed". That is only true
   // when the directory itself has no segments. A session with turns and an
   // empty frame is the normal segmented read, so it must mount the viewer.
+  const hostWindowFailures = segmentRead.hostWindowFaults.map((fault) => fault.evidence instanceof TranscriptWindowEvidence && (
+    <div role="alert" key={`${fault.evidence.anchor}:${fault.evidence.span}`}>
+      <FeedbackPanel variant="empty" title="transcript window unavailable">
+        {fault.message}{' '}
+        <button type="button" onClick={() => {
+          const evidence = fault.evidence;
+          if (evidence instanceof TranscriptWindowEvidence) void segmentRead.retryHostWindow(evidence.anchor, evidence.span).catch(() => {});
+        }}>{fault.remedy.label}</button>
+      </FeedbackPanel>
+    </div>
+  ));
+  const coveringRouteWindow = requestedTurn != null && segmentRead.window?.requestedAnchor === requestedTurn
+    && (segmentRead.loading || segmentRead.hostWindowFaults.some((fault) => fault.evidence instanceof TranscriptWindowEvidence && fault.evidence.anchor === requestedTurn));
   const directoryEmpty = segmentRead.directory != null && segmentRead.directory.totalSegments === 0;
   if (!frameHasTurns && detail.turnCount > 0 && directoryEmpty && !segmentRead.loading) {
     return (
@@ -595,6 +612,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     );
   }
   if (!frameHasTurns && detail.turnCount > 0 && cookedSegments.length === 0) {
+    if (segmentRead.hostWindowFaults.length > 0) return <div className="asb-page">{hostWindowFailures}</div>;
     return <SessionDetailSkeleton />;
   }
 
@@ -644,18 +662,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           </FeedbackPanel>
         </div>
       )}
-      {segmentRead.windowFaults.map((fault) => fault.evidence instanceof TranscriptWindowEvidence && (
-        <div role="alert" key={`${fault.evidence.anchor}:${fault.evidence.span}`}>
-          <FeedbackPanel variant="empty" title="transcript window unavailable">
-            {fault.message}
-            {' '}
-            <button type="button" onClick={() => {
-              const evidence = fault.evidence;
-              if (evidence instanceof TranscriptWindowEvidence) void segmentRead.loadWindow(evidence.anchor, evidence.span).catch(() => {});
-            }}>{fault.remedy.label}</button>
-          </FeedbackPanel>
-        </div>
-      ))}
+      {hostWindowFailures}
       {requestedTurn != null && !requestedTurnExists && (
         <div role="alert">
           <FeedbackPanel variant="empty" title="linked turn is no longer available">
@@ -749,7 +756,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
             callbacks={viewerCallbacks}
             directory={segmentMode ? segmentRead.directory ?? undefined : undefined}
             segments={segmentMode ? cookedSegments : undefined}
-            window={segmentMode ? segmentRead.window ?? undefined : undefined}
+            // A route-owned window is covered by the host. Exposing its
+            // incomplete descriptor makes the viewer start a second read.
+            window={segmentMode && !coveringRouteWindow ? segmentRead.window ?? undefined : undefined}
             onLoadSegment={segmentMode ? segmentRead.loadSegment : undefined}
             onLoadWindow={segmentMode ? segmentRead.loadWindow : undefined}
             // Fairtrade owns the single per-turn truncation notice.
