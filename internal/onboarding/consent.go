@@ -1,7 +1,6 @@
 package onboarding
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -31,7 +30,7 @@ func BuildConsentSummary(m Model, w WriteContext) (ConsentSummary, error) {
 	values := make([]string, 0, 8)
 	if consentFieldShown(m, FieldSelection, w) {
 		if cfg.Selection.Mode == config.SelectionModeSelected {
-			values = append(values, "selection: only the buffered projects, branches, and sessions")
+			values = append(values, selectionSummaryLine(cfg.Selection))
 		} else {
 			values = append(values, "selection: all discovered sessions")
 		}
@@ -74,7 +73,7 @@ func BuildConsentSummary(m Model, w WriteContext) (ConsentSummary, error) {
 	}
 	retention := m.RetentionDays(w)
 	if retention > 0 {
-		values = append(values, fmt.Sprintf("claude code source retention: %d days", retention))
+		values = append(values, retentionSummaryLine(retention))
 	}
 
 	effects := []string{"save the visible choices to peasant configuration"}

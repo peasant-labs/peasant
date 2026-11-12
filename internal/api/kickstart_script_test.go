@@ -92,6 +92,9 @@ type kickstartSpec struct {
 	Recordings []string `yaml:"recordings"`
 	// HoldIngest holds each import until a releaseIngest step.
 	HoldIngest bool `yaml:"holdIngest"`
+	// RetentionDays is the cleanup period Claude Code already has, which the
+	// retention stop shows and the review explains. Empty keeps 90.
+	RetentionDays int `yaml:"retentionDays"`
 	// RetentionFails makes the write of Claude Code's retention period fail with
 	// this text, after the configuration was saved.
 	RetentionFails string `yaml:"retentionFails"`
@@ -315,6 +318,7 @@ type kickstartWorld struct {
 	gate        chan struct{}
 	unreadable  map[string]string
 	lockWait    time.Duration
+	retention   int
 	scanPush    time.Duration
 	storedError atomic.Pointer[string]
 	configPath  string
@@ -351,6 +355,10 @@ func newKickstartWorld(t *testing.T, c kickstartCase, sets kickstartListingSets)
 		w.scanPush = pushEvery
 	}
 	w.unreadable = c.World.Unreadable
+	w.retention = 90
+	if c.World.RetentionDays > 0 {
+		w.retention = c.World.RetentionDays
+	}
 	if c.World.LockWait != "" {
 		wait, err := time.ParseDuration(c.World.LockWait)
 		if err != nil {
@@ -422,7 +430,7 @@ func (w *kickstartWorld) tune(env *kickstartEnv) {
 	}
 	env.paths = identityPaths{}
 	env.repositories = nil
-	env.retentionSeed = func() int { return 90 }
+	env.retentionSeed = func() int { return w.retention }
 	env.village = func() kickstartFacts {
 		if w.connected.Load() {
 			return kickstartFacts{villageConnected: true, villageURL: "https://village.example.test", villageUserID: "user-1"}

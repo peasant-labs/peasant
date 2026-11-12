@@ -104,7 +104,7 @@ cases:
       # Every write names the revision and the selected ids, never a field value.
       - expectBodyKeys: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", only: [revision, selectedIds]}
       - click: continue
-      - expectText: [your choices, "selection: 1 session"]
+      - expectText: [your choices, "selection: 1 session you chose"]
       - click: save and import
       - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-selection/commit", count: 1}
       - expectText: [your selection is saved, /home/ada/.config/peasant/config.yaml, nothing was published and no hook was installed]

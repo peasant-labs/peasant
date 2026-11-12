@@ -399,7 +399,7 @@ cases:
               label: review your changes
               value: null
           summary:
-            values: ["selection: 1 session"]
+            values: ["selection: 1 session you chose"]
             effects: [nothing is published when setup finishes.]
         - key: ingest
           kind: ingest
